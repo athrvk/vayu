@@ -16,7 +16,9 @@
  * that identity exists for - **has the contract moved, and where**. Three
  * buckets: operations no request claims (`added`), requests whose operation the
  * document no longer declares (`removed`), and requests whose operation is still
- * declared but no longer produces what the collection holds (`changed`).
+ * declared but no longer produces what the collection holds (`changed`). An
+ * operation nobody claims because a person deleted its request is `declined`
+ * instead of `added` (#3031).
  *
  * **Nothing here writes.** The comparison is a pure function of two documents
  * and the requests, so every judgement it makes - which operation is which, what
@@ -176,6 +178,14 @@ struct ChangedRequest {
 struct SpecDiff {
     /// Drafts no request claims. These become requests at apply time, not here.
     std::vector<size_t> added;
+    /**
+     * Drafts no request claims that a person declined by deleting the request
+     * for them (#3031): an operation is here or in `added`, never both. A draft
+     * a live request claims is in neither, whatever was declined, because a
+     * request carrying the identity is a stronger statement than a record of
+     * one that was deleted.
+     */
+    std::vector<size_t> declined;
     /// Requests whose recorded operation the new document no longer declares.
     std::vector<size_t> removed;
     std::vector<ChangedRequest> changed;
@@ -220,6 +230,14 @@ struct SafeSpecApply {
     /// Parallel to `SpecDiff::added` - true where a safe apply creates the operation.
     std::vector<bool> create;
     /**
+     * Parallel to `SpecDiff::declined`, and **false throughout** (#3031).
+     *
+     * Somebody deleted the request for each of these, so re-creating one is a
+     * decision only that person can take back - by restoring the request, or
+     * by ticking the operation. A member for the reason `remove` is one.
+     */
+    std::vector<bool> recreate;
+    /**
      * Parallel to `SpecDiff::removed`, and **false throughout**.
      *
      * Deleting is opt-in: a request whose operation the document no longer
@@ -244,7 +262,7 @@ struct SafeSpecApply {
  * - **A request the comparison could not make three-way is left alone whole.**
  *   With `previous_unknown` there is no bound value to compare against, so every
  *   field is potentially somebody's edit and none of them can be told apart.
- * - **Nothing is deleted.**
+ * - **Nothing is deleted**, and nothing somebody deleted is re-created.
  *
  * A changed request with nothing safe to write and no moved identity is not
  * applied: an update that writes nothing is a row in a transaction for no
@@ -261,9 +279,30 @@ struct SafeSpecApply {
  *        when it could not be read at all - which turns every field comparison
  *        two-way and sets `previous_unknown` on each changed request.
  * @param requests every request beneath the bound collection.
+ * @param declined the identities deletes declined under the bound collection
+ *        (#3031). Each is followed into @p fetched by the rule a request's own
+ *        identity is, so a declined operation the document renamed is still
+ *        the declined one.
  */
 [[nodiscard]] SpecDiff diff_spec (const std::vector<SpecRequestDraft>& fetched,
 const std::vector<SpecRequestDraft>* bound,
-const std::vector<ComparableRequest>& requests);
+const std::vector<ComparableRequest>& requests,
+const std::vector<DeclaredOperation>& declined);
+
+/**
+ * @brief Which of @p declined a sync that creates @p created takes back
+ *        (#3031), as indices into @p declined.
+ *
+ * Ticking a declined operation is the person changing their mind, so the
+ * record goes with the create that answers it. Both sides are followed into
+ * @p fetched - the document being stored - by the rule `diff_spec` follows
+ * them with, and a record is taken back when it names the same operation a
+ * created identity does: the record the diff listed an entry under is the one
+ * ticking that entry clears, renames included.
+ */
+[[nodiscard]] std::vector<size_t> declines_taken_back (
+const std::vector<SpecRequestDraft>& fetched,
+const std::vector<DeclaredOperation>& declined,
+const std::vector<DeclaredOperation>& created);
 
 } // namespace vayu::core

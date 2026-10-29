@@ -1257,13 +1257,25 @@ struct SpecComparison {
  * collection exists, that it binds something, and that the document reads - so
  * the only failure left here is a binding naming a document the store no longer
  * holds, returned as the `409` both routes give it. Defined in spec_diff.cpp.
+ *
+ * @param root_id the bound collection, whose declined operations (#3031) the
+ *        comparison lists apart from the ones the document adds.
  */
 RouteResult compare_bound_spec (vayu::db::Database& db,
 const std::vector<vayu::db::Collection>& collections,
 const std::unordered_set<std::string>& subtree,
+const std::string& root_id,
 const std::string& spec_id,
 const nlohmann::ordered_json& fetched_document,
 SpecComparison& out);
+
+/**
+ * The identities @p records name, in their order - what `core::diff_spec` and
+ * `core::declines_taken_back` read a `spec_declined_operations` row as
+ * (#3031). Defined in spec_diff.cpp.
+ */
+std::vector<vayu::core::DeclaredOperation> declined_identities (
+const std::vector<vayu::db::DeclinedOperation>& records);
 
 /**
  * What a design-mode response should be checked against (issue #628).

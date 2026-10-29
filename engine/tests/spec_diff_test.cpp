@@ -31,6 +31,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -163,7 +164,7 @@ class SpecDiffTest : public ::testing::Test {
     [[nodiscard]] SpecDiff diff_against (const std::string& fetched_text,
     const std::vector<ComparableRequest>& requests) const {
         fetched_ = drafts_of (fetched_text);
-        return vayu::core::diff_spec (fetched_, &bound_, requests);
+        return vayu::core::diff_spec (fetched_, &bound_, requests, {});
     }
 
     /** The operation the changed request at @p index was followed to. */
@@ -217,7 +218,7 @@ class DuplicateOperationIdTest : public ::testing::Test {
     [[nodiscard]] SpecDiff diff_dup (const std::string& fetched_text,
     const std::vector<ComparableRequest>& requests) const {
         fetched_ = drafts_of (fetched_text);
-        return vayu::core::diff_spec (fetched_, &entries_, requests);
+        return vayu::core::diff_spec (fetched_, &entries_, requests, {});
     }
 
     std::vector<SpecRequestDraft> entries_;
@@ -389,8 +390,8 @@ TEST_F (SpecDiffTest, TreatsARenamedPathParameterAsTheSameEndpoint) {
     const std::vector<SpecRequestDraft> fetched =
     drafts_of (document (R"({"/pets/{id}":{"get":{"summary":"Get a pet"}}})"));
 
-    const SpecDiff diff =
-    vayu::core::diff_spec (fetched, &bound, { request_from ("req_0", bound[0]) });
+    const SpecDiff diff = vayu::core::diff_spec (
+    fetched, &bound, { request_from ("req_0", bound[0]) }, {});
 
     EXPECT_TRUE (diff.removed.empty ());
     EXPECT_TRUE (diff.added.empty ());
@@ -482,7 +483,7 @@ TEST_F (SpecDiffTest, MakesNoClaimAboutWhoEditedWhatWhenTheBoundDocumentCannotBe
     const std::vector<SpecRequestDraft> fetched = drafts_of (document (
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
 
-    const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
+    const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited }, {});
 
     ASSERT_EQ (diff.changed.size (), 1u);
     EXPECT_TRUE (diff.changed[0].previous_unknown);
@@ -526,8 +527,8 @@ TEST_F (SpecDiffTest, DoesNotCompareTheResponsesADocumentDocuments) {
     ASSERT_EQ (fetched[0].draft.examples.size (), 1u);
     EXPECT_EQ (fetched[0].draft.examples[0].name, "200 - Every pet");
 
-    const SpecDiff diff = vayu::core::diff_spec (
-    fetched, &bound_, { request_from ("req_0", draft_of (bound_, "listPets")) });
+    const SpecDiff diff = vayu::core::diff_spec (fetched, &bound_,
+    { request_from ("req_0", draft_of (bound_, "listPets")) }, {});
 
     EXPECT_TRUE (diff.changed.empty ());
     EXPECT_EQ (diff.unchanged, 1u);
@@ -564,7 +565,7 @@ TEST_F (SpecDiffTest, TruncatesADisplayedValueWithoutTruncatingTheComparedOne) {
     const std::vector<SpecRequestDraft> a = drafts_of (next);
     const std::vector<SpecRequestDraft> b = drafts_of (longer);
     auto request                          = request_from ("req_0", a[0]);
-    const SpecDiff two = vayu::core::diff_spec (b, &a, { request });
+    const SpecDiff two = vayu::core::diff_spec (b, &a, { request }, {});
     ASSERT_EQ (two.changed.size (), 1u);
     EXPECT_NE (field_named (two.changed[0], SpecField::Description), nullptr);
 }
@@ -622,7 +623,8 @@ TEST_F (StubParameterTest, ReportsTheFlipAsTheUsersAgainstADocumentThatDidNotMov
     // byte-identical, so there is nothing else they could be. Remove the `[off]`
     // marker from the row rendering and `params` drops out of this list, which is
     // the whole failure: the field then reads as matching the document.
-    const SpecDiff diff = vayu::core::diff_spec (stub_, &stub_, { verbose_enabled () });
+    const SpecDiff diff =
+    vayu::core::diff_spec (stub_, &stub_, { verbose_enabled () }, {});
 
     ASSERT_EQ (diff.changed.size (), 1u);
     EXPECT_EQ (field_names (diff.changed[0]),
@@ -646,7 +648,8 @@ TEST_F (StubParameterTest, StillCallsTheFlipTheUsersWhenTheDocumentMovesTheParam
     R"({"name":"verbose","in":"query"},)"
     R"({"name":"limit","in":"query","required":true,"example":"10"}]}}})"));
 
-    const SpecDiff diff = vayu::core::diff_spec (moved, &stub_, { verbose_enabled () });
+    const SpecDiff diff =
+    vayu::core::diff_spec (moved, &stub_, { verbose_enabled () }, {});
 
     ASSERT_EQ (diff.changed.size (), 1u);
     const auto* params = field_named (diff.changed[0], SpecField::Params);
@@ -816,7 +819,7 @@ TEST_F (SpecDiffTest, SafeApplyLeavesARequestWholeWhenTheBoundDocumentCouldNotBe
     const std::vector<SpecRequestDraft> fetched = drafts_of (document (
     R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"}}})"));
 
-    const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited });
+    const SpecDiff diff = vayu::core::diff_spec (fetched, nullptr, { edited }, {});
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
     ASSERT_EQ (diff.changed.size (), 1u);
@@ -866,8 +869,100 @@ TEST_F (SpecDiffTest, SafeApplyAnswersOneEntryPerBucketEntrySoNoReaderHasToAlign
     const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
 
     EXPECT_EQ (safe.create.size (), diff.added.size ());
+    EXPECT_EQ (safe.recreate.size (), diff.declined.size ());
     EXPECT_EQ (safe.remove.size (), diff.removed.size ());
     EXPECT_EQ (safe.update.size (), diff.changed.size ());
+}
+
+// ---------------------------------------------------------------------------
+// Declined operations (#3031): an operation a person deleted the request for
+// ---------------------------------------------------------------------------
+
+/// The collection without its `getPet` request, and the record its delete left.
+std::vector<ComparableRequest> without_get_pet (const std::vector<ComparableRequest>& all) {
+    std::vector<ComparableRequest> kept;
+    std::copy_if (all.begin (), all.end (), std::back_inserter (kept),
+    [] (const ComparableRequest& request) {
+        return !request.operation || request.operation->operation_id != "getPet";
+    });
+    return kept;
+}
+
+const vayu::core::DeclaredOperation& get_pet_record () {
+    static const vayu::core::DeclaredOperation record{ "getPet", "GET",
+        "/pets/{petId}", {} };
+    return record;
+}
+
+// The repro: nothing about `getPet` moved, its request is gone, and without the
+// record it reads as an operation the document added - which a safe apply
+// creates. Mutation check: send every unclaimed draft to `added` and both
+// assertions on `declined` fail.
+TEST_F (SpecDiffTest, AnOperationWhoseRequestWasDeletedIsDeclinedNotAdded) {
+    const std::vector<SpecRequestDraft> fetched = drafts_of (bound_document ());
+    const SpecDiff diff = vayu::core::diff_spec (fetched, &bound_,
+    without_get_pet (bound_collection ()), { get_pet_record () });
+    const vayu::core::SafeSpecApply safe = vayu::core::safe_spec_apply (diff);
+
+    EXPECT_TRUE (diff.added.empty ());
+    ASSERT_EQ (diff.declined.size (), 1u);
+    EXPECT_EQ (fetched[diff.declined[0]].operation.operation_id, "getPet");
+    ASSERT_EQ (safe.recreate.size (), 1u);
+    EXPECT_FALSE (safe.recreate[0])
+    << "a safe apply never re-creates what somebody deleted";
+}
+
+TEST_F (SpecDiffTest, ADeclinedOperationTheDocumentMovedIsStillTheDeclinedOne) {
+    // The path moved under a stable `operationId`: the record follows the id,
+    // as a request carrying the same identity would.
+    const std::string next =
+    document (R"({"/pets":{"get":{"operationId":"listPets","summary":"List pets"},)" +
+    create_pet_operation () +
+    R"(},"/animals/{petId}":{"get":{"operationId":"getPet","summary":"Get a pet"}},)"
+    R"("/owners":{"get":{"operationId":"listOwners","summary":"List owners"}}})");
+
+    const SpecDiff diff = diff_against (next, without_get_pet (bound_collection ()));
+    // `diff_against` sends no records; this case needs them.
+    const SpecDiff declined = vayu::core::diff_spec (fetched_, &bound_,
+    without_get_pet (bound_collection ()), { get_pet_record () });
+
+    ASSERT_EQ (diff.added.size (), 2u) << "without the record both read as new";
+    ASSERT_EQ (declined.declined.size (), 1u);
+    EXPECT_EQ (fetched_[declined.declined[0]].operation.path, "/animals/{petId}");
+    ASSERT_EQ (declined.added.size (), 1u)
+    << "what the document really added stays added";
+    EXPECT_EQ (fetched_[declined.added[0]].operation.operation_id, "listOwners");
+}
+
+TEST_F (SpecDiffTest, ALiveRequestForADeclinedOperationOutranksTheRecord) {
+    // Restored, or re-created by hand: the request claims the operation, and a
+    // record of an earlier delete says nothing about it any more.
+    const std::vector<SpecRequestDraft> fetched = drafts_of (bound_document ());
+    const SpecDiff diff                         = vayu::core::diff_spec (
+    fetched, &bound_, bound_collection (), { get_pet_record () });
+
+    EXPECT_TRUE (diff.declined.empty ());
+    EXPECT_TRUE (diff.added.empty ());
+    EXPECT_EQ (diff.unchanged, bound_collection ().size ());
+}
+
+TEST_F (SpecDiffTest, CreatingADeclinedOperationTakesItsRecordBackAndNoOther) {
+    const std::vector<SpecRequestDraft> fetched = drafts_of (bound_document ());
+    const std::vector<vayu::core::DeclaredOperation> records{ get_pet_record (),
+        { "", "POST", "/pets", {} } };
+
+    // The created identity is the document's, as the diff reported it; the
+    // record still matches through the same lookup.
+    EXPECT_EQ (vayu::core::declines_taken_back (
+               fetched, records, { draft_of (fetched, "getPet").operation }),
+    std::vector<size_t>{ 0 });
+    EXPECT_EQ (vayu::core::declines_taken_back (
+               fetched, records, { draft_of (fetched, "createPet").operation }),
+    std::vector<size_t>{ 1 })
+    << "a record without an operationId is matched by method and path";
+    EXPECT_TRUE (vayu::core::declines_taken_back (
+    fetched, records, { draft_of (fetched, "listPets").operation })
+    .empty ());
 }
 
 } // namespace

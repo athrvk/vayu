@@ -280,6 +280,27 @@ class DraftIndex {
 };
 
 /**
+ * Which of @p fetched one of @p identities names, by `DraftIndex::lookup`, as
+ * a mark per draft.
+ *
+ * For identities that are not a live request's - a declined record, or a
+ * request a sync is about to create (#3031) - so no request's repeated
+ * `operationId` makes one of theirs ambiguous: the lookup is the one a request
+ * with an id nobody else claims gets.
+ */
+std::vector<bool> drafts_named (const DraftIndex& index,
+const std::vector<DeclaredOperation>& identities,
+const std::vector<SpecRequestDraft>& fetched) {
+    std::vector<bool> named (fetched.size (), false);
+    for (const DeclaredOperation& identity : identities) {
+        if (const auto found = index.lookup (identity, {}, fetched)) {
+            named[found->first] = true;
+        }
+    }
+    return named;
+}
+
+/**
  * The `operationId`s more than one request in this collection records - the
  * shape a document that declared one id twice left behind (issue #715).
  *
@@ -355,7 +376,8 @@ std::string_view spec_field_name (SpecField field) {
 
 SpecDiff diff_spec (const std::vector<SpecRequestDraft>& fetched,
 const std::vector<SpecRequestDraft>* bound,
-const std::vector<ComparableRequest>& requests) {
+const std::vector<ComparableRequest>& requests,
+const std::vector<DeclaredOperation>& declined) {
     const DraftIndex fetched_index (fetched);
     const std::optional<DraftIndex> bound_index =
     bound == nullptr ? std::nullopt : std::optional<DraftIndex> (*bound);
@@ -407,12 +429,33 @@ const std::vector<ComparableRequest>& requests) {
         diff.changed.push_back (std::move (changed));
     }
 
+    const std::vector<bool> declined_drafts =
+    drafts_named (fetched_index, declined, fetched);
     for (size_t i = 0; i < fetched.size (); ++i) {
-        if (!claimed[i]) {
-            diff.added.push_back (i);
+        if (claimed[i]) {
+            continue;
         }
+        (declined_drafts[i] ? diff.declined : diff.added).push_back (i);
     }
     return diff;
+}
+
+std::vector<size_t> declines_taken_back (const std::vector<SpecRequestDraft>& fetched,
+const std::vector<DeclaredOperation>& declined,
+const std::vector<DeclaredOperation>& created) {
+    std::vector<size_t> taken_back;
+    if (declined.empty () || created.empty ()) {
+        return taken_back;
+    }
+    const DraftIndex index (fetched);
+    const std::vector<bool> created_drafts = drafts_named (index, created, fetched);
+    for (size_t i = 0; i < declined.size (); ++i) {
+        const auto found = index.lookup (declined[i], {}, fetched);
+        if (found && created_drafts[found->first]) {
+            taken_back.push_back (i);
+        }
+    }
+    return taken_back;
 }
 
 SafeSpecApply safe_spec_apply (const SpecDiff& diff) {
@@ -420,6 +463,7 @@ SafeSpecApply safe_spec_apply (const SpecDiff& diff) {
     // Everything the document adds: an operation no request claims is one the
     // contract gained, and creating it takes nothing away from anybody.
     safe.create.assign (diff.added.size (), true);
+    safe.recreate.assign (diff.declined.size (), false);
     safe.remove.assign (diff.removed.size (), false);
 
     safe.update.reserve (diff.changed.size ());

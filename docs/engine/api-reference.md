@@ -3086,6 +3086,14 @@ own edits into the document's - by accident, with a stale copy.
       }
     }
   ],
+  "declined": [
+    {
+      "operation": { "operationId": "getPet", "method": "GET", "path": "/pets/{petId}" },
+      "folder": "pets",
+      "safe": false,
+      "draft": { "name": "Get a pet", "...": "as in added" }
+    }
+  ],
   "removed": [
     {
       "requestId": "req_7b21...",
@@ -3136,18 +3144,29 @@ come off the document it stores, so this is what an apply would write, shown.
 comparison, but stated, because a sync that silently ignores half a collection is
 one nobody can read.
 
+**`declined` is an operation nobody claims because a person deleted its
+request** (issue #3031). Its entries are shaped like `added` ones, because
+ticking one is the same create, and an operation is in one bucket or the other,
+never both. The record a delete left (see
+[`DELETE /requests/:id`](#delete-requestsid)) is followed into the new document
+by the rule a request's own identity is, below, so an operation the document
+renamed is still the declined one. A live request claiming the operation - one
+restored from the trash, or created again by hand - outranks the record, and
+the operation is in neither bucket.
+
 **`safe` is what an apply with no ticks would do to that entry** (issue #871),
 and `safeFields` is which of a changed request's fields it would write - empty
 for a pure rename, which is a real selection rather than an absence. It is
 `core::safe_spec_apply`: **every operation the document adds, every field it
-moved that nobody here had edited, no deletions, and a request whose bound
-document could not be read left alone whole.** Reported rather than left to the
+moved that nobody here had edited, no deletions, nothing a person declined, and
+a request whose bound document could not be read left alone whole.** Reported rather than left to the
 caller because the rules are the ones whose silent failure costs somebody their
 work, and because the same function decides what
 [`POST /specs/sync`](#post-specssync)'s `policy` applies - so the app's
 pre-ticked boxes and a caller that ticks nothing are one answer rather than two
-that agree today. `safe` on a removal is always `false` and is carried anyway,
-so that a reader marking the bucket reads the rule instead of writing it.
+that agree today. `safe` on a removal and on a declined operation is always
+`false` and is carried anyway, so that a reader marking the bucket reads the
+rule instead of writing it.
 
 **How it compares.** An operation is followed by its `operationId` first and by
 method + path shape second (the same flattening `POST /specs/match` binds with),
@@ -3590,7 +3609,7 @@ behind it. A sync updates and deletes rows that already exist.
   "collections": [                                     // Optional - tag folders to create
     {"tempId": "t_col", "name": "pets", "parentId": "col_9a1f..."}
   ],
-  "create": [                                          // Optional - operations the document added
+  "create": [                                          // Optional - operations the document added, or declined ones ticked
     {"tempId": "t_req", "collectionTempId": "t_col", "name": "Get a pet",
      "method": "GET", "url": "https://api.example.com/pets/{{petId}}",
      "specOperation": {"operationId": "getPet", "method": "GET", "path": "/pets/{petId}"}}
@@ -3610,7 +3629,7 @@ behind it. A sync updates and deletes rows that already exist.
   "specHash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   "syncedAt": 1730000000000,
   "created": 1, "updated": 1, "deleted": 1,
-  "skipped": {"requests": 2, "fields": 3, "deletions": 1}  // Only for a `policy` call - see below
+  "skipped": {"requests": 2, "fields": 3, "deletions": 1, "declined": 1}  // Only for a `policy` call - see below
 }
 ```
 
@@ -3618,8 +3637,9 @@ behind it. A sync updates and deletes rows that already exist.
 only one - is `core::safe_spec_apply`, the same answer
 [`POST /specs/diff`](#post-specsdiff) reports per entry as `safe` /
 `safeFields`: **every operation the document adds, every field it moved that
-nobody here had edited, no deletions, and a request whose bound document could
-not be read left alone whole.** The engine works out the rows, mints the tag
+nobody here had edited, no deletions, none of the operations a person declined
+by deleting their request (issue #3031), and a request whose bound document
+could not be read left alone whole.** The engine works out the rows, mints the tag
 folders an added operation needs (matching an existing direct child by name,
 creating one at most once per call), and writes them through everything below -
 the same validation, the same id minting, the same transaction. It exists
@@ -3636,8 +3656,8 @@ a user changes a tick.
 
 `skipped` comes back **only** for a `policy` call and counts what it refused:
 `requests` left untouched entirely, `fields` the document moved that were not
-written (whether their request was skipped whole or applied around them), and
-`deletions` not made. An explicit payload gets no such key - nothing was
+written (whether their request was skipped whole or applied around them),
+`deletions` not made, and `declined` operations not re-created. An explicit payload gets no such key - nothing was
 declined, because the caller chose the rows. It is reported for the reason the
 diff bounds its buckets rather than dropping entries: a call that answered only
 with what it wrote would read as "applied the drift", and the part it did not
@@ -3683,6 +3703,13 @@ Five rules the payload cannot opt out of:
   description and moves when the document rewords it.
 - **A request cannot be moved here.** `collectionId` inside an `update` item is a
   `400`; use `PUT /requests/:id`.
+- **Creating a declined operation takes the decline back** (issue #3031). A
+  `create` item whose `specOperation` names the operation a
+  [`declined`](#post-specsdiff) entry stands for - followed into the document
+  being stored by the diff's own identity rule - forgets that record in the same
+  transaction, so ticking the entry is the user changing their mind and a later
+  delete of the new request records afresh. The deletes in `delete` record
+  nothing: the document dropped those operations, nobody declined them.
 
 **Errors:** `404` when the collection does not exist. `400` when it is bound to
 no spec, when `policy` is not `"safe"` or arrives beside a row section, when a

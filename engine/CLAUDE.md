@@ -749,7 +749,16 @@ logged as a warning: it means a client skipped composition.
     and the rows come off the same read the indexes come off. A list where the
     boolean belongs, or `examples` on a `create` item, is a `400`.
     `Database::spec_sync_apply` is its transaction, a sibling of `import_apply`
-    and `apply_reorder`.
+    and `apply_reorder`. **A person's delete of a stamped request declines its
+    operation** (#3031, `spec_declined_operations`): `DELETE /requests/:id` and
+    a tag folder's `DELETE /collections/:id` record it under the nearest bound
+    ancestor, which the route resolves (`core::nearest_spec_binding`) and
+    passes to `Database::delete_request` / `delete_collection`, so `Database`
+    reads no binding. The diff lists it under `declined`, never `added`;
+    `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
+    it. A restore, a sync that creates the operation, an unbind and a bind to
+    other bytes forget the record; a purge of the request keeps it, and the
+    sync's own hard deletes write none.
   - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped

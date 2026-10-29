@@ -58,6 +58,8 @@ const std::string& id,
 const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+std::pair<int, nlohmann::json>
+delete_request_response (vayu::db::Database& db, const std::string& id);
 } // namespace vayu::http::routes
 
 namespace {
@@ -406,6 +408,41 @@ TEST_F (SpecDiffRouteTest, MarksAFieldSomebodyEditedAsNotSafeToWrite) {
     EXPECT_TRUE (body["changed"][0]["fields"][0]["userTouched"].get<bool> ());
     EXPECT_FALSE (body["changed"][0]["safe"].get<bool> ());
     EXPECT_TRUE (body["changed"][0]["safeFields"].empty ());
+}
+
+// ---------------------------------------------------------------------------
+// Declined operations (#3031)
+// ---------------------------------------------------------------------------
+
+// The bucket is read through the route's own delete, so what is pinned is the
+// whole path: the delete records under the binding *above* the tag folder the
+// request sat in, and the diff reads the records of the collection it was asked
+// about. The entry is shaped like an added one, because ticking it is the same
+// create.
+TEST_F (SpecDiffRouteTest, ListsAnOperationWhoseRequestWasDeletedAsDeclinedAndUnsafe) {
+    create_listed_request (root_);
+    ASSERT_EQ (diff ()["declined"], json::array ())
+    << "present and empty when nothing was declined";
+    const std::string tag =
+    create_collection (json{ { "name", "owners" }, { "parentId", root_ } });
+    auto [created, owners] = routes::create_request_response (*db_,
+    json{ { "collectionId", tag }, { "name", "List owners" },
+    { "method", "GET" }, { "url", "{{baseUrl}}/owners" },
+    { "specOperation",
+    json{ { "operationId", "listOwners" }, { "method", "GET" }, { "path", "/owners" } } } });
+    ASSERT_EQ (created, 200) << owners.dump ();
+    ASSERT_EQ (
+    routes::delete_request_response (*db_, owners["id"].get<std::string> ()).first, 200);
+
+    const json body = diff ();
+
+    EXPECT_TRUE (body["added"].empty ());
+    ASSERT_EQ (body["declined"].size (), 1u);
+    const json& declined = body["declined"][0];
+    EXPECT_EQ (declined["operation"]["operationId"], "listOwners");
+    EXPECT_EQ (declined["folder"], "owners");
+    EXPECT_EQ (declined["draft"]["url"], "{{baseUrl}}/owners");
+    EXPECT_FALSE (declined["safe"].get<bool> ());
 }
 
 } // namespace
