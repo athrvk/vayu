@@ -78,14 +78,21 @@ vi.mock("./RunItem", () => ({
 
 const DAY_MS = 86_400_000;
 
-/** Newest first, one per minute from now: every one of them is "Today". */
+/**
+ * Newest first, one per second back from local noon: every one of them is
+ * "Today" whatever time the suite runs. Counting back from the clock, a
+ * minute apart, put the older rows on "Yesterday" in the first hours after
+ * midnight.
+ */
 function runsToday(count: number, from = 0): FixtureRun[] {
-	const now = Date.now();
+	const noon = new Date();
+	noon.setHours(12, 0, 0, 0);
+	const now = noon.getTime();
 	return Array.from({ length: count }, (_, i) => ({
 		id: `r${from + i}`,
 		type: "load" as const,
 		status: "completed" as const,
-		startTime: now - (from + i) * 60_000,
+		startTime: now - (from + i) * 1_000,
 		baseline: false as const,
 		summary: { url: `http://r${from + i}.test/` },
 	}));
