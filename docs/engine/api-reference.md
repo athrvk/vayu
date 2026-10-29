@@ -9373,7 +9373,9 @@ plus `iteration`, `stepIndex`, `stepName`, `requestId` and `outcome`, and -
 for a run with `data` - `dataRowIndex`, the row that iteration bound. The step
 whose error ended its iteration short of the plan's end also carries
 `stepsNotRun`, defined under Outcomes below; it is absent, never `0`, on every
-other row. Bodies are
+other row. A step whose extractors found nothing carries `extractorMisses`
+(#3053), how many of them did, on the same absent-at-`0` terms (the rule is in
+[Elements](elements.md#kinds)). Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -9644,14 +9646,14 @@ knob.
   "steps": [
     { "index": 0, "name": "Log in", "requestId": "req_a", "method": "POST",
       "executed": 480, "errors": 6, "httpErrors": 0, "noResponse": 6,
-      "unresolvedTokens": 0,
+      "unresolvedTokens": 0, "extractorMisses": 3,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
-        { "id": "el_1", "kind": "extract.json", "passed": 474, "failed": 0, "skipped": 0, "deferred": 0 }
+        { "id": "el_1", "kind": "extract.json", "passed": 471, "failed": 0, "skipped": 3, "deferred": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
       "executed": 462, "errors": 30, "httpErrors": 30, "noResponse": 0,
-      "unresolvedTokens": 0,
+      "unresolvedTokens": 3,
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
       "elements": [
@@ -9668,7 +9670,9 @@ login to no response and were abandoned there, and the other 474 completed.
 `Get me` was reached 474 times; its `control.if` skipped 12 of them and 462
 ran, 30 of those answered a status its `assert.status` rejected. So
 `stepsExecuted` is 480 + 474 = 954, which is the 942 steps that ran plus the
-12 skipped, and the four outcomes are 906 + 30 + 6 + 12 = 954.
+12 skipped, and the four outcomes are 906 + 30 + 6 + 12 = 954. Three of the
+474 logins answered without a token: the extractor's miss unset `{{token}}`,
+so `Get me` sent it unresolved three times.
 
 **`iterations` is the iterations started**, not the iterations asked for, and
 three counts account for them: `iterationsCompleted` (the iteration reached its
@@ -9800,6 +9804,11 @@ whose `script.pre` did not run inline this run and absent otherwise - a step
 whose `script.pre` did run inline reports its real outcome in `elements`
 instead, never both. Neither `unresolvedTokens` nor `preRequestScript` ever
 fails the run by itself; both also feed the top-level `warnings` array below.
+`extractorMisses` (#3053) counts the step's extractions that found nothing and
+so unset their variable, across every virtual user and iteration; it is absent
+at 0. A miss is filed under its element's `skipped` too, and a miss a `default`
+answered is neither: the rule is in
+[`elements.md`](elements.md#kinds).
 
 **Response:**
 ```json
@@ -10683,7 +10692,7 @@ id: 3
 data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
        "requestId":"req_abc123",
-       "tests":{"passed":2,"failed":0},
+       "tests":{"passed":2,"failed":0},"extractorMisses":1,
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
                      "matchedContentType":"application/json",
                      "failures":[],"failuresTotal":0}}
@@ -10701,7 +10710,9 @@ the metrics stream above.
 and after a reload. `stepsNotRun` follows the same rule: present only on the
 step whose error ended its iteration short of the plan's end, with how many
 plan positions that cost (see Outcomes under [Scenario runs](#scenario-runs)),
-and absent rather than `0` everywhere else. `validation` is the step's schema verdict (issue #681) in
+and absent rather than `0` everywhere else. `extractorMisses` is the stored
+row's count of extractions that found nothing (#3053), on the same terms.
+`validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its
 stored trace carries, so a watched run and a read-back one agree. `tests` is how

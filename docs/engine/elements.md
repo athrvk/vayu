@@ -165,6 +165,13 @@ numbered names past its own count, so a shorter list never inherits a longer one
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
+Every miss is counted per step as `extractorMisses` (#3053, `is_extractor_miss`), `required` or
+not: an `extract.*` outcome of `missing`, plus an optional `extract.json`'s `skipped` over a body it
+could not read, because that unsets the variable too. A miss a `default` answered reports `ok` and is
+not counted, nor is a disabled extractor or a `metric.record` reporting `missing`. A collection run
+writes the count on the step's stored trace and its `step` frame, a load run on
+`scenario.steps[i]`; both omit the key at 0. A single-request load run's `summary.elements` has no
+such count.
 
 Every pattern a user writes - `extract.regex`'s `pattern`, `assert.jsonpath`'s `regex`,
 `assert.contains`'s `text` in `matches` mode and `control.if`'s `matches /re/` - is compiled once by
@@ -435,6 +442,8 @@ the step's own verdict is read from the folded result below, unchanged.
 `origin.scope` (`collection` | `folder` | `request`, #2522) is the level the element was declared at;
 `compile_elements` reads it into `CompiledElement::scope` (falling back to `origin.kind`), and
 `ElementPipeline::run` sets `ElementContext::element_scope` from it before each `apply`.
+A sequential run step's trace also carries `extractorMisses` beside the array, the count of its
+extractor misses ([Kinds](#kinds)), absent at 0; a design send's does not.
 
 Every level's `script.pre` / `script.post` runs, and each **folds** its result into the step's
 `pre_script_result` / `post_script_result` rather than assigning over it (#2522): tests and console
@@ -514,7 +523,8 @@ completion path is a lookup, never a lock or an allocation. A single-request run
 replay: the load path's `skip_reason` hook answers it with `ElementSkip::deferred` set, which the
 pipeline copies onto the outcome. `skipped` is every other `skipped` or `missing` outcome,
 including the two that never run at all: a disabled element and an un-inlined `script.pre`
-(no pre-request replay exists).
+(no pre-request replay exists). An extractor's miss is one of those `skipped`, and is counted again,
+per step, in `scenario.steps[i].extractorMisses` (above).
 
 **A controller's skip, under load too (issue #1515).** `control.if` / `control.once` /
 `control.throughput` write the same `ScriptControl::Skip` a script's own `skipRequest()` would -

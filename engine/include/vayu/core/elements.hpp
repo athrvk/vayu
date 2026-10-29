@@ -700,6 +700,19 @@ struct ElementOutcome {
 };
 
 /**
+ * Whether @p outcome is an extraction that left its variable unset (#3053): an
+ * `extract.*` reporting `"missing"`, or an optional `extract.json` `"skipped"`
+ * over a body it could not read (`BODY_UNREADABLE_MESSAGE`), which unsets the
+ * same way. A miss a `default` answered reports `"ok"` and is not one, and
+ * `required` plays no part: it decides whether the step fails, not whether
+ * the value went. A disabled extractor's skip unset nothing and is not one.
+ */
+[[nodiscard]] bool is_extractor_miss (const ElementOutcome& outcome);
+
+/// How many of @p outcomes are extractor misses (`is_extractor_miss`).
+[[nodiscard]] size_t count_extractor_misses (const std::vector<ElementOutcome>& outcomes);
+
+/**
  * Why `ElementPipeline::run`'s `skip_reason` hook keeps an otherwise-runnable
  * element from running: reported as a `"skipped"` outcome carrying
  * @c message. @c deferred says the element still runs, later and elsewhere,

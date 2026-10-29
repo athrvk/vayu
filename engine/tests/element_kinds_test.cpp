@@ -1065,4 +1065,39 @@ TEST_F (ElementKindsTest, AnUnresolvableContainerKeepsTheBareSentence) {
     "'expected' is not a setting this element has. Settings: in");
 }
 
+// ---------------------------------------------------------------------------
+// What a step's `extractorMisses` counts (#3053)
+// ---------------------------------------------------------------------------
+// Every extraction that left its variable unset, `required` or not, and
+// nothing else: a body that is not JSON is a miss for `extract.json` (its
+// `skipped`) and for `extract.regex`, not for a `default`-answered regex, a
+// disabled extractor or a `metric.record` reporting the same `missing`.
+// Mutation check: drop the `skipped` branch of `is_extractor_miss` and the
+// count is 1; drop its `extract.` prefix check and it is 3.
+TEST_F (ElementKindsTest, OnlyAnExtractionThatLeftItsVariableUnsetIsAMiss) {
+    response            = ok_json_response (200, "plain text, no digits");
+    const auto elements = vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "json" }, { "kind", "extract.json" },
+      { "config", { { "path", "$.n" }, { "variable", "a" } } } },
+    nlohmann::json{ { "id", "regex" }, { "kind", "extract.regex" },
+    { "config", { { "pattern", "[0-9]+" }, { "variable", "b" }, { "required", true } } } },
+    nlohmann::json{ { "id", "rescued" }, { "kind", "extract.regex" },
+    { "config", { { "pattern", "[0-9]+" }, { "variable", "c" }, { "default", "0" } } } },
+    nlohmann::json{ { "id", "off" }, { "kind", "extract.regex" }, { "enabled", false },
+    { "config", { { "pattern", "[0-9]+" }, { "variable", "d" } } } },
+    metric_trend_at ("$.n") }));
+
+    ElementContext ctx = make_context ();
+    ctx.record_metric = [] (const std::string&, vayu::core::CustomMetricType, double) {};
+    std::vector<ElementOutcome> outcomes;
+    ElementPipeline::run (Phase::StepAfter, ctx, elements, outcomes);
+    ASSERT_EQ (outcomes.size (), 5u);
+    EXPECT_EQ (outcomes[0].status, "skipped");
+    EXPECT_EQ (outcomes[1].status, "missing");
+    EXPECT_EQ (outcomes[2].status, "ok");
+    EXPECT_EQ (outcomes[3].status, "skipped");
+    EXPECT_EQ (outcomes[4].status, "missing");
+    EXPECT_EQ (vayu::core::count_extractor_misses (outcomes), 2u);
+}
+
 } // namespace

@@ -430,6 +430,12 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
         data["tests"] = { { "passed", record.tests->passed },
             { "failed", record.tests->failed } };
     }
+    // One number, as on the stored row (#3053), so a miss shows while the run
+    // is watched; the outcomes behind it stay on the row.
+    if (const size_t misses = vayu::core::count_extractor_misses (record.elements);
+    misses > 0) {
+        data["extractorMisses"] = misses;
+    }
     return build_sse_frame ("step", data.dump (), offset);
 }
 
@@ -922,6 +928,12 @@ ScenarioStepStore& store) {
             elements.push_back (outcome.to_json ());
         }
         record.trace["elements"] = std::move (elements);
+    }
+    // Extractions that found nothing and unset their variable (#3053), so a
+    // stale-value suspect does not need the list read through. Absent at 0.
+    if (const size_t misses = vayu::core::count_extractor_misses (record.elements);
+    misses > 0) {
+        record.trace["extractorMisses"] = misses;
     }
 
     ++summary.steps_executed;

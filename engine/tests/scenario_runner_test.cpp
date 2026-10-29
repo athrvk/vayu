@@ -27,6 +27,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <httplib.h>
@@ -1408,6 +1410,25 @@ class ScenarioRunnerExtractorMissTest : public ScenarioRunnerTest {
         return out;
     }
 
+    /// Each stored step's `extractorMisses` in run order, then each `step`
+    /// frame's: -1 where the key is absent, so a written 0 shows.
+    std::pair<std::vector<int64_t>, std::vector<int64_t>> misses_stored_and_live () {
+        const auto misses_in = [] (const json& node) {
+            return node.contains ("extractorMisses") ?
+            node["extractorMisses"].get<int64_t> () :
+            -1;
+        };
+        std::pair<std::vector<int64_t>, std::vector<int64_t>> out;
+        for (const auto& row : db_->get_results (last_run_)) {
+            out.first.push_back (misses_in (json::parse (row.trace_data)));
+        }
+        for (const auto& frame : step_frames (context_for (last_run_))) {
+            out.second.push_back (
+            misses_in (json::parse (frame.substr (frame.find ("data: ") + 6))));
+        }
+        return out;
+    }
+
     static json extract_token (const std::string& scope = "collection") {
         return { { "id", "el_token" }, { "kind", "extract.json" }, { "enabled", true },
             { "config",
@@ -1480,6 +1501,24 @@ TEST_F (ScenarioRunnerExtractorMissTest, ADefaultStillStandsInForAMiss) {
 
     EXPECT_EQ (authorizations (step_one_after (extractor, { "token", "ok" })),
     (std::vector<std::string>{ "Bearer secret-abc", "Bearer anon" }));
+    const std::vector<int64_t> none{ -1, -1, -1, -1 };
+    EXPECT_EQ (misses_stored_and_live (), std::make_pair (none, none))
+    << "a miss the default answered is not counted";
+}
+
+// The miss is counted on the step that missed, in the iteration it missed in,
+// on the stored row and the live frame alike; a hit and a step with no
+// extractor carry no key. Mutation check: drop the `extractorMisses` write in
+// `store_step_record` (scenario_runner.cpp) and the stored half fails; in
+// `build_step_payload` and the live half does.
+TEST_F (ScenarioRunnerExtractorMissTest, AMissIsCountedOnItsOwnStepLiveAndStored) {
+    seed_collection ("col_1");
+
+    step_one_after (extract_token (), { "token", "ok" });
+
+    const std::vector<int64_t> second_iteration_step_zero{ -1, -1, 1, -1 };
+    EXPECT_EQ (misses_stored_and_live (),
+    std::make_pair (second_iteration_step_zero, second_iteration_step_zero));
 }
 
 TEST_F (ScenarioRunnerExtractorMissTest, AnAbsentResponseHeaderUnsetsTheVariable) {
@@ -1502,6 +1541,9 @@ TEST_F (ScenarioRunnerExtractorMissTest, AnUnreadableBodyUnsetsTheVariable) {
     const auto rows = db_->get_results (last_run_);
     ASSERT_EQ (rows.size (), 4u);
     EXPECT_EQ (json::parse (rows[2].trace_data)["elements"][0]["outcome"], "skipped");
+    // Counted as a miss all the same: the value went.
+    const std::vector<int64_t> counted{ -1, -1, 1, -1 };
+    EXPECT_EQ (misses_stored_and_live (), std::make_pair (counted, counted));
 }
 
 // `matchNo: -1` writes `ids_1` .. `ids_N` and `ids_matchNr`: a shorter list

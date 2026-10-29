@@ -2556,6 +2556,32 @@ TEST_F (ScenarioLoadTest, AMissSendsTheUnresolvedNameNotTheLastIterationsValue) 
     const auto summary =
     vayu::core::build_scenario_load_summary (*state, execution.plan);
     EXPECT_EQ (summary["steps"][1]["unresolvedTokens"], 1);
+    // The one miss, on the step that missed (#3053); the step with no
+    // extractor carries no key. Mutation check: drop the `is_extractor_miss`
+    // count in `StepElementTallies::record` (scenario_load.cpp) and this fails.
+    EXPECT_EQ (summary["steps"][0].value ("extractorMisses", 0), 1);
+    EXPECT_FALSE (summary["steps"][1].contains ("extractorMisses"));
+}
+
+// Every iteration hits, or misses into a `default`: neither is a miss, and
+// the key is absent rather than `0`.
+TEST_F (ScenarioLoadTest, AHitOrADefaultAnsweredMissCountsNoExtractorMiss) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/login") });
+    auto rescued = vayu::tests::extract_json_element_json ("el_id", "$.absent", "id");
+    rescued["config"]["default"]     = "none";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_token", "$.token", "token"), rescued });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    ASSERT_EQ (summary["steps"][0]["executed"], 2);
+    EXPECT_FALSE (summary["steps"][0].contains ("extractorMisses"))
+    << summary["steps"][0];
 }
 
 // A `control.once` login that misses: the stored `token=old` is hidden from

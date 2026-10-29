@@ -73,8 +73,9 @@ json healthy_summary () {
         { "assertions", { { "passed", 18 }, { "failed", 2 } } },
         { "steps",
         json::array ({ { { "index", 0 }, { "name", "login" }, { "requestId", "req_1" },
-        { "method", "POST" }, { "executed", 10 }, { "errors", 0 }, { "httpErrors", 0 },
-        { "noResponse", 0 }, { "unresolvedTokens", 0 }, { "preRequestScript", "skipped" },
+        { "method", "POST" }, { "executed", 10 }, { "errors", 0 },
+        { "httpErrors", 0 }, { "noResponse", 0 }, { "unresolvedTokens", 0 },
+        { "extractorMisses", 1 }, { "preRequestScript", "skipped" },
         { "latency", { { "min", 1 }, { "p50", 2 }, { "p95", 3 }, { "p99", 4 }, { "max", 5 } } },
         { "elements",
         json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "passed", 10 },
@@ -291,6 +292,11 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // fails; drop it from the schema and the validation does.
     EXPECT_EQ (document["report"]["scenario"].value ("assertions", json ()),
     (json{ { "passed", 18 }, { "failed", 2 } }));
+    // A step's extractor misses (#3053). Mutation check: drop
+    // "extractorMisses" from STEP_KEYS and this fails; from the schema and the
+    // validation does.
+    EXPECT_EQ (
+    document["report"]["scenario"]["steps"].at (0).value ("extractorMisses", -1), 1);
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 

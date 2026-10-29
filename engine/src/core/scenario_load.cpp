@@ -307,7 +307,8 @@ std::vector<std::string> shared_throughput_element_ids (const ScenarioPlan& plan
     return shared_element_ids (plan, "timer.throughput", /*per_user_default=*/false);
 }
 
-StepElementTallies::StepElementTallies (const ScenarioPlan& plan) {
+StepElementTallies::StepElementTallies (const ScenarioPlan& plan)
+: misses_by_step_ (plan.steps.size ()) {
     counts_by_step_.reserve (plan.steps.size ());
     index_of_id_by_step_.reserve (plan.steps.size ());
     for (const auto& step : plan.steps) {
@@ -334,6 +335,16 @@ void StepElementTallies::record (size_t step, const ElementOutcome& outcome) {
         return;
     }
     counts_by_step_[step][found->second].record (outcome);
+    if (is_extractor_miss (outcome)) {
+        misses_by_step_[step].fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+size_t StepElementTallies::extractor_misses (size_t step) const {
+    if (step >= misses_by_step_.size ()) {
+        return 0;
+    }
+    return misses_by_step_[step].load (std::memory_order_relaxed);
 }
 
 nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step) const {
@@ -384,6 +395,10 @@ ScriptsOverrideMode scripts_mode) {
         }
         if (!element_outcomes.empty ()) {
             entry["elements"] = std::move (element_outcomes);
+        }
+        // Absent at 0, like `elements`: the sequential trace's rule (#3053).
+        if (const size_t misses = elements.extractor_misses (i); misses > 0) {
+            entry["extractorMisses"] = misses;
         }
         array.push_back (std::move (entry));
     }
