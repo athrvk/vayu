@@ -758,7 +758,8 @@ contract:
 A status answers to the **most specific** pattern that covers it. An operation
 declaring both `200` and `2XX` that only ever answered 200 reports `2XX` as not
 seen: those are two distinct promises, and the run produced one of them. A
-`default` catches whatever the exact and range patterns did not.
+`default` catches whatever the exact and range patterns did not. An `x-`
+extension key under `responses` is not a status and is never listed as declared.
 
 A **transport error** - a request that never got a response - counts as a request
 sent and as no response seen. The operation still counts as covered (something

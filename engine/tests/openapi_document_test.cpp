@@ -745,6 +745,32 @@ TEST (DeriveSpecIndexes, TheTwoIndexesAgreeEvenWhereAStatusDeclaresNoSchema) {
     }
 }
 
+TEST (DeriveSpecIndexes, AnExtensionKeyUnderResponsesIsNotAStatusInEitherIndex) {
+    // #3084: the Responses Object allows `x-` extensions beside the statuses, and
+    // coverage showed `x-ext` as a declared status that no run could ever see.
+    // `default` stays, so the rule is not "digits only". The extension carries
+    // schemaful content so a reader that kept it would emit a row for it.
+    const std::string extension =
+    R"("x-ext":{"content":{"application/json":{"schema":{"type":"object"}}},)"
+    R"("schema":{"type":"object"}})";
+    for (const std::string& document :
+    { R"({"openapi":"3.0.0","paths":{"/pets":{"get":{"responses":{"200":{"description":"ok"},)" +
+    extension + R"(,"default":{"description":"e"}}}}}})",
+    R"({"swagger":"2.0","paths":{"/pets":{"get":{"responses":{"200":{"description":"ok"},)" +
+    extension + R"(,"default":{"description":"e"}}}}}})" }) {
+        const auto indexes = derive_spec_indexes (document, INDEX_CAP);
+        ASSERT_TRUE (indexes.ok ()) << indexes.error;
+        const json operations = json::parse (indexes.operations);
+        const json schemas    = json::parse (indexes.response_schemas);
+        ASSERT_EQ (schemas["operations"].size (), 1u) << document;
+        const std::vector<std::string> expected{ "200", "default" };
+        EXPECT_EQ (operations[0]["responses"].get<std::vector<std::string>> (), expected)
+        << "operation index: " << document;
+        EXPECT_EQ (distinct_statuses (schemas["operations"][0]["responses"]), expected)
+        << "schema index: " << document;
+    }
+}
+
 // ─── What a 2.0 document declares ───────────────────────────────────────────
 
 TEST (ResponseSchemas, PairsEachSwaggerResponseWithTheOperationsProducedMediaTypes) {

@@ -53,6 +53,7 @@ namespace limits = vayu::core::constants::spec_document;
 // live in `openapi_walk.hpp` so `openapi_drafts.cpp` reads the *same* operations
 // this file indexes (issue #865).
 using walk::find_object;
+using walk::is_declared_status_key;
 using walk::resolve_single_hop;
 using walk::walk_operations;
 using walk::WalkedOperation;
@@ -840,10 +841,11 @@ const nlohmann::ordered_json& response) {
  * An OpenAPI 3.x operation's declared responses.
  *
  * Every status the `responses` map names is in the result, the same set
- * `declared_responses_of` hands coverage. A status with at least one schemaful
- * media type contributes those rows alone; any other - no `content`, only
- * schema-less media types, a response that is a `$ref` nothing resolves -
- * contributes a status-only row.
+ * `declared_responses_of` hands coverage; an `x-` extension key is not a status
+ * and is left out of both (`is_declared_status_key`, #3084). A status with at
+ * least one schemaful media type contributes those rows alone; any other - no
+ * `content`, only schema-less media types, a response that is a `$ref` nothing
+ * resolves - contributes a status-only row.
  */
 nlohmann::ordered_json response_schemas_v3 (const nlohmann::ordered_json& document,
 const nlohmann::ordered_json& operation) {
@@ -853,7 +855,7 @@ const nlohmann::ordered_json& operation) {
         return declared;
     }
     for (auto entry = responses->begin (); entry != responses->end (); ++entry) {
-        if (entry.key ().empty ()) {
+        if (!is_declared_status_key (entry.key ())) {
             continue;
         }
         const size_t before = declared.size ();
@@ -921,7 +923,7 @@ const nlohmann::ordered_json& operation) {
     }
     const std::vector<std::string> media_types = produced_media_types (document, operation);
     for (auto entry = responses->begin (); entry != responses->end (); ++entry) {
-        if (entry.key ().empty ()) {
+        if (!is_declared_status_key (entry.key ())) {
             continue;
         }
         const nlohmann::ordered_json* schema =
