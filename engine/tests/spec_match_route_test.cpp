@@ -176,8 +176,10 @@ TEST_F (SpecMatchRouteTest, DoesNotReachRequestsOutsideTheSubtree) {
     EXPECT_EQ (body["unmatchedOperations"].size (), 1u);
 }
 
-const json LIST_PETS = json::array (
-{ json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", "listPets" } } });
+json list_pets () {
+    return json::array (
+    { json{ { "method", "GET" }, { "path", "/pets" }, { "operationId", "listPets" } } });
+}
 
 /// Issue #3034. Mutation check: replace `spec_contract_subtree_ids`' body with
 /// the unbounded `collection_subtree_ids` walk and the folder's request, and the
@@ -197,7 +199,7 @@ TEST_F (SpecMatchRouteTest, StopsAtAFolderBoundToADifferentDocument) {
     create_collection (json{ { "name", "nested" }, { "parentId", other } });
     create_request (nested, "GET", "{{baseUrl}}/pets");
 
-    const auto body = match (LIST_PETS);
+    const auto body = match (list_pets ());
 
     ASSERT_EQ (body["matched"].size (), 1u);
     EXPECT_EQ (body["matched"][0]["requestId"], own);
@@ -211,7 +213,7 @@ TEST_F (SpecMatchRouteTest, KeepsAFolderBoundToTheSameDocument) {
     bind (tag, "spec_pets");
     const std::string own = create_request (tag, "GET", "{{baseUrl}}/pets");
 
-    const auto body = match (LIST_PETS);
+    const auto body = match (list_pets ());
 
     ASSERT_EQ (body["matched"].size (), 1u);
     EXPECT_EQ (body["matched"][0]["requestId"], own);
@@ -228,7 +230,7 @@ TEST_F (SpecMatchRouteTest, AnUnboundRootStopsAtEveryBoundFolder) {
     bind (other, "spec_orders");
     create_request (other, "GET", "{{baseUrl}}/pets");
 
-    const auto body = match (LIST_PETS);
+    const auto body = match (list_pets ());
 
     ASSERT_EQ (body["matched"].size (), 1u);
     EXPECT_EQ (body["matched"][0]["requestId"], own);
