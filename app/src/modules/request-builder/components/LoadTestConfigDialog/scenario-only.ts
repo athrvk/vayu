@@ -13,7 +13,8 @@
  * whitelist in `load_strategy.cpp` (`REQUEST_ELEMENTS_SUPPORTED_KINDS`), so the
  * names are repeated here. `scenario-only.conformance.test.ts` pins them to the
  * engine's catalogue fixture, so a new `control.*` or `metric.*` kind is a red
- * test rather than a refusal at Start.
+ * test rather than a refusal at Start, and pins the accepted names against the
+ * whitelist in `load_strategy.cpp` itself.
  */
 
 import { pickByCount } from "@/modules/dashboard/utils/format";
