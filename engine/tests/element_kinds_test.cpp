@@ -1200,6 +1200,34 @@ TEST_F (ElementKindsTest, AnExtractorMissNamesWhatFoundNothing) {
     EXPECT_FALSE (outcomes[2].message.has_value ());
 }
 
+// A trace row says when its element is required, so a reader can tell the miss
+// that failed the step from one that did not. Mutation check: drop the `required` write in
+// `ElementOutcome::to_json` (pipeline.cpp), or the `config_requires` call in
+// `compile_elements`, and the required miss's node has no `required`.
+TEST_F (ElementKindsTest, ARequiredExtractorSaysSoOnItsOutcome) {
+    response             = ok_json_response (200, R"({"present": 1})");
+    const auto extractor = [] (const char* id, nlohmann::json required) {
+        nlohmann::json entry = { { "id", id }, { "kind", "extract.json" },
+            { "config", { { "path", "$.nope" }, { "variable", id } } } };
+        if (!required.is_null ()) {
+            entry["config"]["required"] = std::move (required);
+        }
+        return entry;
+    };
+    const auto outcomes = run_after (
+    vayu::core::compile_elements (nlohmann::json::array ({ extractor ("needed", true),
+    extractor ("optional", nullptr), extractor ("declined", false) })));
+
+    ASSERT_EQ (outcomes.size (), 3u);
+    EXPECT_TRUE (outcomes[0].required);
+    EXPECT_EQ (outcomes[0].to_json ().value ("required", false), true);
+    for (size_t i = 1; i < outcomes.size (); ++i) {
+        EXPECT_FALSE (outcomes[i].required) << outcomes[i].id;
+        EXPECT_FALSE (outcomes[i].to_json ().contains ("required"))
+        << outcomes[i].id;
+    }
+}
+
 // The label a user gave an element rides on its outcome and its trace node;
 // one with no label (absent or `null`) writes no `name` key.
 TEST_F (ElementKindsTest, AnElementsNameRidesOnItsOutcome) {

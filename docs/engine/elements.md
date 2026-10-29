@@ -433,11 +433,13 @@ load path cannot support yet) no longer applies to either.
 A design send's and a sequential run step's stored trace gains an `elements` array beside the
 existing `scripts` node - one entry per compiled element that ran at `step.before` or `step.after`
 (`step.between` too, for the sequential run), each
-`{ id, kind, name?, origin, outcome, message?, waitedMs? }`, `name` being the element's own label
-when it has one. `outcome` is one of `ok` | `failed` | `missing` |
+`{ id, kind, name?, origin, required?, outcome, message?, waitedMs? }`, `name` being the element's
+own label when it has one. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
 An extractor's `missing` carries what found nothing as its message (`no match for '$.token'`,
-`no 'X-Request-Id' response header`), required or not (#3051).
+`no 'X-Request-Id' response header`), required or not (#3051). `required` is present, as `true`,
+only for an element whose `config.required` is boolean `true`: on an extractor's `missing` it is
+what says the miss failed the step.
 An `assert.*` whose own config leaves it nothing to judge (no operand, a JSONPath or pattern that
 does not compile: all refused when written, so only a row stored before that check reaches this)
 reports `error` with the reason and also records a failed assertion under the same reason, so the

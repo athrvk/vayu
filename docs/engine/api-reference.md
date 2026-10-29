@@ -7693,8 +7693,10 @@ the same `pm.test()` channel a `script.post` element's assertions do, so the
 response body's `testResults` and `consoleLogs` (see below) do not
 distinguish a declarative assertion from one a script wrote by hand. The
 response body and the stored trace both carry an `elements` array beside
-`scripts` - one entry per element that ran, each `{id, kind, name?, origin, outcome,
-message?, waitedMs?}` (`name` the element's own label, when it has one) with `outcome` one of `ok` | `failed` |
+`scripts` - one entry per element that ran, each `{id, kind, name?, origin, required?,
+outcome, message?, waitedMs?}` (`name` the element's own label, when it has one;
+`required` present, as `true`, only for an element whose `config.required` is,
+which makes an extractor's `missing` a failed send) with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
 its `apply` ever running; a script element reports `error` with the thrown
 message when its script threw and `failed` with the first failed `pm.test` as

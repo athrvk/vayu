@@ -686,6 +686,9 @@ struct ElementOutcome {
     /// `CompiledElement::name`; serialised only when non-empty.
     std::string name;
     nlohmann::json origin;
+    /// `CompiledElement::required`; serialised only as `required: true`, so a
+    /// reader can tell a miss that failed the step from one that did not.
+    bool required = false;
     std::string status; ///< "ok" | "failed" | "missing" | "skipped" | "error"
     std::optional<std::string> message;
     std::optional<int64_t> waited_ms;
@@ -752,8 +755,8 @@ struct ElementOutcomeCounts {
     /// missing, error, skipped, deferred}` for @p element to @p rows, or
     /// nothing when no outcome was recorded: an element that never ran is
     /// omitted from the report, not a row of zeros. `required` is written
-    /// only as `true`, when the element's config says so, because it turns
-    /// a `missing` into a failed step.
+    /// only as `true` (`CompiledElement::required`), because it turns a
+    /// `missing` into a failed step.
     void append_report_row (nlohmann::json& rows, const CompiledElement& element) const;
 };
 
@@ -786,6 +789,9 @@ struct CompiledElement {
     /// none (absent or `null`).
     std::string name;
     nlohmann::json origin;
+    /// Whether `config.required` is boolean `true`, which turns an
+    /// extractor's miss into a failed step; anything else is not required.
+    bool required = false;
     /// `"collection"`, `"folder"` or `"request"` (#2522): `origin.scope`, or
     /// for an origin stamped without one, `origin.kind`; empty when neither
     /// names a level. Read once here so the pipeline does not parse `origin`

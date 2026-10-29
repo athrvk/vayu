@@ -170,7 +170,10 @@ nlohmann::json ElementOutcome::to_json () const {
     if (!name.empty ()) {
         node["name"] = name;
     }
-    node["origin"]  = origin;
+    node["origin"] = origin;
+    if (required) {
+        node["required"] = true;
+    }
     node["outcome"] = status;
     if (message) {
         node["message"] = *message;
@@ -213,19 +216,6 @@ void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
     bucket->fetch_add (1, std::memory_order_relaxed);
 }
 
-namespace {
-
-/// Whether @p config sets `required` to `true`; anything else is not required.
-bool config_requires (const nlohmann::json& config) {
-    if (!config.is_object ()) {
-        return false;
-    }
-    const auto found = config.find ("required");
-    return found != config.end () && found->is_boolean () && found->get<bool> ();
-}
-
-} // namespace
-
 void ElementOutcomeCounts::append_report_row (nlohmann::json& rows,
 const CompiledElement& element) const {
     const size_t passed_count   = passed.load (std::memory_order_relaxed);
@@ -246,7 +236,7 @@ const CompiledElement& element) const {
     if (element.origin.is_object () && !element.origin.empty ()) {
         row["origin"] = element.origin;
     }
-    if (config_requires (element.config)) {
+    if (element.required) {
         row["required"] = true;
     }
     row["passed"]   = passed_count;
@@ -301,6 +291,15 @@ std::string scope_of_origin (const nlohmann::json& origin) {
     return {};
 }
 
+/// Whether @p config sets `required` to `true`; anything else is not required.
+bool config_requires (const nlohmann::json& config) {
+    if (!config.is_object ()) {
+        return false;
+    }
+    const auto found = config.find ("required");
+    return found != config.end () && found->is_boolean () && found->get<bool> ();
+}
+
 } // namespace
 
 std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
@@ -319,10 +318,11 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
         name != entry.end () && name->is_string ()) {
             out.name = name->get<std::string> ();
         }
-        out.origin  = entry.value ("origin", nlohmann::json::object ());
-        out.scope   = scope_of_origin (out.origin);
-        out.config  = entry.value ("config", nlohmann::json::object ());
-        out.enabled = !entry.contains ("enabled") ||
+        out.origin   = entry.value ("origin", nlohmann::json::object ());
+        out.scope    = scope_of_origin (out.origin);
+        out.config   = entry.value ("config", nlohmann::json::object ());
+        out.required = config_requires (out.config);
+        out.enabled  = !entry.contains ("enabled") ||
         entry["enabled"].is_null () || entry.value ("enabled", true);
 
         if (const auto* kind = registry.find (out.kind); kind != nullptr &&
@@ -475,6 +475,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         compiled.kind,
         compiled.name,
         compiled.origin,
+        compiled.required,
         ctx.outcome_status,
         ctx.outcome_message,
         ctx.outcome_waited_ms,
