@@ -119,6 +119,30 @@ class TimerThinkElement final : public Element {
     nlohmann::json config_;
 };
 
+/// A config naming no wait would wait nothing; a lone bound would draw from a
+/// one-point range (#3055). `ms` beside bounds, or `gaussian` beside anything,
+/// is not refused: the draw order in `resolve_own_wait_ms` decides which wins.
+std::optional<std::string> timer_think_problem (const nlohmann::json& config) {
+    if (config.contains ("ms") || config.contains ("gaussian")) {
+        return std::nullopt;
+    }
+    const bool has_min = config.contains ("minMs");
+    const bool has_max = config.contains ("maxMs");
+    if (has_min && has_max) {
+        return std::nullopt;
+    }
+    if (has_min) {
+        return "'maxMs' is required beside 'minMs' - a random wait needs both "
+               "bounds";
+    }
+    if (has_max) {
+        return "'minMs' is required beside 'maxMs' - a random wait needs both "
+               "bounds";
+    }
+    return "'ms' is required - give a fixed wait, both 'minMs' and 'maxMs' for "
+           "a random one, or a 'gaussian' wait";
+}
+
 } // namespace
 
 ElementKind make_timer_think_kind () {
@@ -135,7 +159,8 @@ ElementKind make_timer_think_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<TimerThinkElement> (config);
     };
-    kind.config_schema = {
+    kind.validate_config = timer_think_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "ms",

@@ -99,6 +99,14 @@ describe("missingOperand", () => {
 		["assert.status", {}],
 		["assert.status", { in: [] }],
 		["assert.jsonpath", { path: "$.id" }],
+		["control.throughput", {}],
+		["control.throughput", { perUser: false }],
+		["timer.think", {}],
+		["timer.think", { minMs: 100 }],
+		["timer.think", { maxMs: 100 }],
+		// A cleared field leaves `text: ""`; `contains` is the default mode.
+		["assert.contains", { text: "" }],
+		["assert.contains", { text: "", mode: "contains" }],
 	])("names what a %s with %j still needs", (kind, config) => {
 		expect(missingOperand({ kind, config })).toEqual(expect.any(String));
 	});
@@ -113,6 +121,17 @@ describe("missingOperand", () => {
 		["assert.jsonpath", { path: "$.id", expected: null }],
 		["assert.jsonpath", { path: "$.id", regex: "^a" }],
 		["assert.jsonpath", { path: "$.id", exists: false }],
+		["control.throughput", { percent: 50 }],
+		["control.throughput", { everyN: 2, perUser: false }],
+		["timer.think", { ms: 0 }],
+		["timer.think", { minMs: 100, maxMs: 300 }],
+		["timer.think", { gaussian: { meanMs: 200, deviationMs: 20 } }],
+		["assert.contains", { text: "ok" }],
+		// `equals` and `matches` read an empty text as a value; an absent one is
+		// `missingRequiredKeys`' to report, not this rule's.
+		["assert.contains", { text: "", mode: "equals" }],
+		["assert.contains", { text: "", mode: "matches" }],
+		["assert.contains", {}],
 	])("is satisfied by a %s with %j", (kind, config) => {
 		expect(missingOperand({ kind, config })).toBeNull();
 	});

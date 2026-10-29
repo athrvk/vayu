@@ -324,6 +324,22 @@ class ControlThroughputElement final : public Element {
     nlohmann::json config_;
 };
 
+/// `apply` takes `everyN` before `percent`, so a config naming both would have
+/// `percent` silently ignored, and one naming neither never skips (#3055).
+std::optional<std::string> control_throughput_problem (const nlohmann::json& config) {
+    const bool has_percent = config.contains ("percent");
+    const bool has_every_n = config.contains ("everyN");
+    if (has_percent && has_every_n) {
+        return "'percent' cannot be combined with 'everyN' - set one: a share "
+               "of occurrences, or every Nth one";
+    }
+    if (!has_percent && !has_every_n) {
+        return "'percent' or 'everyN' is required - without one this "
+               "controller runs every occurrence";
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 ElementKind make_control_if_kind () {
@@ -431,6 +447,7 @@ ElementKind make_control_throughput_kind () {
     // `SharedThroughputCounters` find this occurrence generically, without
     // the scan naming this kind (#1512's extensibility contract, rule 1).
     kind.supports_shared_state = true;
+    kind.validate_config       = control_throughput_problem;
     kind.config_schema         = {
         { "type", "object" },
         { "properties",

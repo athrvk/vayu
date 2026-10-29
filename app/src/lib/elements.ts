@@ -70,17 +70,27 @@ export function missingRequiredKeys(
 }
 
 /**
- * A kind whose schema marks nothing `required` but whose engine-side
- * `validate_config` refuses a config with none of several operands (#3043).
+ * A kind whose engine-side `validate_config` refuses a config the schema
+ * accepts, because it names no operand the kind could act on (#3043, #3055).
  * JSON Schema cannot say "one of", so the catalogue does not carry the rule;
  * this table restates it, and `element-kinds.conformance.test.tsx` holds every
  * name here to a property the live catalogue declares. That guard cannot see
- * the C++ rule itself: a change to `assert_status_problem` or
- * `assert_jsonpath_problem` needs a hand edit here.
+ * the C++ rule itself: a change to `assert_status_problem`,
+ * `assert_jsonpath_problem`, `control_throughput_problem`, `timer_think_problem`
+ * or `assert_contains_problem` needs a hand edit here. A rule gates on the
+ * operand being missing; a mix the engine also refuses (`percent` beside
+ * `everyN`, `exists` beside `expected`) is one the mode picker never writes, and
+ * reaches the row through the engine's own refusal (`parseElementRefusal`).
  */
 interface OperandRule {
-	/** The config keys the engine accepts as the operand; checked against the catalogue. */
+	/** The config keys the rule reads; checked against the catalogue. */
 	properties: readonly string[];
+	/**
+	 * Set when the schema already `required`s the properties and the rule
+	 * judges their value instead (`assert.contains`' `text`, which a cleared
+	 * field leaves as `""`).
+	 */
+	judgesValue?: true;
 	/** What the row's "Needs ..." chip asks for. */
 	needs: string;
 	isMet: (config: Record<string, unknown>) => boolean;
@@ -106,6 +116,33 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 		properties: JSONPATH_OPERANDS,
 		needs: "a value, pattern or existence check",
 		isMet: (config) => JSONPATH_OPERANDS.some((key) => hasKey(config, key)),
+	},
+	// `control_throughput_problem`: exactly one of the two; the mode picker
+	// writes one at a time, so only "neither" can occur from the form.
+	"control.throughput": {
+		properties: ["percent", "everyN"],
+		needs: "a percent or an every-Nth count",
+		isMet: (config) => hasKey(config, "percent") || hasKey(config, "everyN"),
+	},
+	// `timer_think_problem`: `ms`, a `gaussian` object, or both bounds of the
+	// random range. A lone bound is refused, so the row says so mid-edit.
+	"timer.think": {
+		properties: ["ms", "minMs", "maxMs", "gaussian"],
+		needs: "a fixed wait, both range bounds or a gaussian",
+		isMet: (config) =>
+			hasKey(config, "ms") ||
+			hasKey(config, "gaussian") ||
+			(hasKey(config, "minMs") && hasKey(config, "maxMs")),
+	},
+	// `assert_contains_problem`: `contains` (the default mode) with an empty
+	// `text`. `equals` and `matches` read an empty text as a value, and an
+	// absent `text` is `missingRequiredKeys`' to report.
+	"assert.contains": {
+		properties: ["text", "mode"],
+		judgesValue: true,
+		needs: "text to look for",
+		isMet: (config) =>
+			(config.mode !== undefined && config.mode !== "contains") || config.text !== "",
 	},
 };
 

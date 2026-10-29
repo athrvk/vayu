@@ -402,11 +402,21 @@ std::optional<std::string> assert_jsonpath_problem (const nlohmann::json& config
     return user_regex_problem (config, "regex", "regex");
 }
 
+/// `matches` reads `text` as a pattern (an empty one is a valid match-anything
+/// pattern, so it stays accepted); `equals` against "" asks for an empty
+/// subject, which is a judgement. Only `contains` finds "" in every subject,
+/// so its verdict never depends on the response (#3055).
 std::optional<std::string> assert_contains_problem (const nlohmann::json& config) {
-    if (string_member (config, "mode") != "matches") {
-        return std::nullopt;
+    const std::string mode = string_member (config, "mode");
+    if (mode == "matches") {
+        return user_regex_problem (config, "text", "text");
     }
-    return user_regex_problem (config, "text", "text");
+    if ((mode.empty () || mode == "contains") && string_member (config, "text").empty ()) {
+        return "'text' cannot be empty in 'contains' mode - every response "
+               "contains the empty text, so the assertion never tells one "
+               "response from another";
+    }
+    return std::nullopt;
 }
 
 } // namespace

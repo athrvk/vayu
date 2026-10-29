@@ -2299,15 +2299,22 @@ payload already known to fail; `useSaveManager` reads that type to stay
 have changed by the next attempt.
 
 **A kind that needs one of several operands is held back the same way**
-(#3043): `assert.status` needs a non-empty `in` or a `range`, `assert.jsonpath`
-one of `expected`, `regex` or `exists` (the engine also refuses `exists` beside
-either of the others, #3049; the mode picker writes one key at a time, so the
-app never sends that mix). The engine refuses an assertion with
-none, and JSON Schema cannot say "one of", so `OPERAND_RULES`
-(`lib/elements.ts`) restates the two rules and `missingOperand` feeds the same
-"Needs ..." chip ("Needs accepted codes or a range") and the same
-`hasIncompleteElement` gate; `element-kinds.conformance.test.tsx` holds every
-key in the table to a property the engine's catalogue declares.
+(#3043, #3055): `assert.status` needs a non-empty `in` or a `range`,
+`assert.jsonpath` one of `expected`, `regex` or `exists` (the engine also
+refuses `exists` beside either of the others, #3049), `control.throughput` a
+`percent` or an `everyN` (the engine refuses both), `timer.think` an `ms`, a
+`gaussian` or both `minMs` and `maxMs`, and `assert.contains` a non-empty `text`
+unless its `mode` is `equals` or `matches` (a cleared field leaves `text: ""`,
+which the engine refuses in the default `contains` mode). The mode picker writes
+one key at a time, so the app never sends a mix the engine refuses; if one
+arrives anyway it is named on the row by the engine's own 400 (below). The
+engine refuses an element with none, and JSON Schema cannot say "one of", so
+`OPERAND_RULES` (`lib/elements.ts`) restates the rules and `missingOperand`
+feeds the same "Needs ..." chip ("Needs accepted codes or a range") and the
+same `hasIncompleteElement` gate; `element-kinds.conformance.test.tsx` holds
+every key in the table to a property the engine's catalogue declares. The rule
+for a kind whose `text` is already `required` sets `judgesValue`, since
+`missingRequiredKeys` owns its absence.
 
 **An element the engine still refuses is named on its row** (#3043): the engine's
 `'<Kind label>' (item N): <problem>` 400 (`parseElementRefusal`) is matched
