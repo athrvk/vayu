@@ -18,6 +18,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import ElementOutcomes from "./ElementOutcomes";
 import type { ElementOutcome } from "@/types";
+import { REQUIRED_MISS_HINT } from "@/components/shared";
 
 afterEach(cleanup);
 
@@ -95,6 +96,39 @@ describe("ElementOutcomes", () => {
 		expect(screen.getByText("script.post")).toBeTruthy();
 		expect(screen.getByText("failed")).toBeTruthy();
 		expect(screen.getByText(message)).toBeTruthy();
+	});
+
+	// A required extractor's miss failed the step, so it must not read as the
+	// amber "missing" an optional miss is (issue #3051). Mutation check: drop
+	// the `required` test in ElementOutcomes and the required row reads amber.
+	it.each([
+		{ required: true, word: "missing (required)", tint: "text-status-error-text" },
+		{ required: undefined, word: "missing", tint: "text-status-warning-text" },
+	] as const)("paints a miss with required $required as $word", ({ required, word, tint }) => {
+		const { container } = render(
+			<ElementOutcomes
+				outcomes={[
+					row({
+						kind: "extract.json",
+						name: "Session token",
+						outcome: "missing",
+						required,
+						message: "no match for '$.token'",
+					}),
+				]}
+			/>
+		);
+		const status = screen.getByText(word);
+		expect(screen.getByText("Session token")).toHaveClass(tint);
+		const card = container.querySelector("[title=\"no match for '$.token'\"]");
+		expect(card?.className).toContain(required ? "bg-status-error/10" : "bg-status-warning/10");
+		if (required) {
+			expect(status).toHaveClass(tint);
+			expect(status).toHaveAttribute("title", REQUIRED_MISS_HINT);
+		} else {
+			expect(status).toHaveClass("text-muted-foreground");
+			expect(status).not.toHaveAttribute("title");
+		}
 	});
 
 	// Two assertions of one kind were told apart only by a message the row cut

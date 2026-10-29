@@ -888,6 +888,8 @@ export interface ElementOutcome {
 	/** The element's own label; absent when it has none (issue #3051). */
 	name?: string;
 	origin?: ElementOrigin;
+	/** Present only for an element whose config requires it: a `missing` then fails the step. */
+	required?: true;
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;

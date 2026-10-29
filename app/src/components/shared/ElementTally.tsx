@@ -35,7 +35,8 @@ import { elementOriginLabel } from "./element-origin";
 import { TEST_VALIDATION_TITLE } from "./run-assertions";
 import type { RunScenarioStepElementTally } from "@/types/domain";
 
-const REQUIRED_MISS_HINT = "A required extractor found nothing, which fails the step.";
+/** Why a required extractor's miss reads as a failure; the trace's outcome row says it too. */
+export const REQUIRED_MISS_HINT = "A required extractor found nothing, which fails the step.";
 
 export interface ElementTallyProps {
 	element: RunScenarioStepElementTally;
