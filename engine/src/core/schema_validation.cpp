@@ -22,10 +22,12 @@
 #include "vayu/utils/logger.hpp"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <map>
 #include <optional>
 #include <set>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -194,13 +196,17 @@ std::string pointer_of_context (const std::vector<std::string>& context) {
 }
 
 /**
- * The prefix valijson gives its *structural* errors - the ones that say a
+ * The prefixes valijson gives its *structural* errors - the ones that say a
  * parent failed because a child did, once per level, alongside the leaf error
- * that actually names the problem.
+ * that actually names the problem. Counting them would report one bad array
+ * item, `allOf` branch or additional property as two problems (#3033).
+ * `anyOf`, `oneOf` and `if`/`then`/`else` summaries are not listed: they are
+ * the only line naming the combinator that refused the value.
  *
  * Dropping them is cosmetic and deliberately allowed to break: if an upstream
- * release rewords this, a verdict gains its wrapper lines back and reads
- * noisier. Checked against `error.description` directly, never
+ * release rewords one, a verdict gains its wrapper lines back and reads
+ * noisier. `StructuralWrapperTest` pins each against the vcpkg-pinned valijson.
+ * Checked against `error.description` directly, never
  * `SchemaFailure::message` (built below by `humanize_schema_error`, which can
  * read differently from the raw description it started from): a structural
  * error's own wrapper text matches no keyword that function recognizes, so it
@@ -208,8 +214,20 @@ std::string pointer_of_context (const std::vector<std::string>& context) {
  * string is what keeps that true by construction rather than by happening not
  * to collide today.
  */
-constexpr const char* STRUCTURAL_ERROR_PREFIX =
-"Failed to validate against schema associated with";
+constexpr auto STRUCTURAL_ERROR_PREFIXES = std::to_array<std::string_view> ({
+"Failed to validate against schema associated with", // properties, patternProperties
+"Failed to validate against additional properties schema.", // additionalProperties
+"Failed to validate against dependent schema.",             // dependencies
+"Failed to validate against child schema #",                // allOf
+"Failed to validate item #", // items, additionalItems, tuple items
+});
+
+bool is_structural_error (std::string_view description) {
+    return std::ranges::any_of (
+    STRUCTURAL_ERROR_PREFIXES, [description] (std::string_view prefix) {
+        return description.starts_with (prefix);
+    });
+}
 
 } // namespace
 
@@ -821,7 +839,7 @@ const nlohmann::json& body) {
         humanized.substr (0, limits::MAX_FAILURE_MESSAGE_BYTES) + "..." :
         humanized;
 
-        if (error.description.rfind (STRUCTURAL_ERROR_PREFIX, 0) == 0) {
+        if (is_structural_error (error.description)) {
             structural.push_back (std::move (failure));
             continue;
         }
