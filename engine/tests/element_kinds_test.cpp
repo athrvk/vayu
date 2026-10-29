@@ -1191,20 +1191,21 @@ const std::string& property) {
         if (entry["kind"] != kind) {
             continue;
         }
+        // contains () + at (), not find () against end (): GCC 13 at -O3
+        // reports a null dereference inside nlohmann's const iterator.
         const auto& properties = entry["configSchema"]["properties"];
-        const auto schema      = properties.find (property);
-        if (schema == properties.end ()) {
+        if (!properties.contains (property)) {
             break;
         }
-        const auto found = schema->find ("default");
-        return found == schema->end () ? nullptr : &*found;
+        const auto& schema = properties.at (property);
+        return schema.contains ("default") ? &schema.at ("default") : nullptr;
     }
     return nullptr;
 }
 
 std::string default_text (const std::string& kind, const std::string& property) {
     const nlohmann::json catalogue = vayu::core::elements_catalogue ();
-    const auto* found              = catalogue_default (catalogue, kind, property);
+    const auto* found = catalogue_default (catalogue, kind, property);
     const auto* text =
     found == nullptr ? nullptr : found->get_ptr<const std::string*> ();
     if (text == nullptr) {
@@ -1216,7 +1217,7 @@ std::string default_text (const std::string& kind, const std::string& property) 
 
 bool default_flag (const std::string& kind, const std::string& property) {
     const nlohmann::json catalogue = vayu::core::elements_catalogue ();
-    const auto* found              = catalogue_default (catalogue, kind, property);
+    const auto* found = catalogue_default (catalogue, kind, property);
     if (found == nullptr || !found->is_boolean ()) {
         ADD_FAILURE () << kind << "." << property << " has no boolean default";
         return false;
@@ -1228,7 +1229,7 @@ bool default_flag (const std::string& kind, const std::string& property) {
 // comparisons apart: only `lte` (and the explicit default's own answer)
 // fails the first and passes the other two.
 TEST_F (ElementKindsTest, AssertSizeWithNoOpComparesAsTheCatalogueDefaultSays) {
-    response = ok_json_response (200, std::string (10, 'x'));
+    response             = ok_json_response (200, std::string (10, 'x'));
     const std::string op = default_text ("assert.size", "op");
     for (const int64_t bound : { 5, 10, 20 }) {
         const auto absent = one_element (nlohmann::json{ { "id", "e1" },
@@ -1257,15 +1258,15 @@ TEST_F (ElementKindsTest, AnExtractorWithNoScopeWritesTheCatalogueDefaultScope) 
         { "config", { { "leftBoundary", "\"n\": \"" }, { "rightBoundary", "\"" } } } },
     };
     for (nlohmann::json entry : configs) {
-        const std::string kind = entry["kind"].get<std::string> ();
-        entry["id"]            = "e1";
+        const std::string kind      = entry["kind"].get<std::string> ();
+        entry["id"]                 = "e1";
         entry["config"]["variable"] = "n";
         variables.clear ();
         const auto outcomes = run_after (one_element (entry));
         ASSERT_EQ (outcomes.size (), 1u) << kind;
         EXPECT_EQ (outcomes[0].status, "ok") << kind;
-        EXPECT_EQ (variables, (std::map<std::string, std::string>{
-                              { default_text (kind, "scope") + ":n", "7" } }))
+        EXPECT_EQ (variables,
+        (std::map<std::string, std::string>{ { default_text (kind, "scope") + ":n", "7" } }))
         << kind;
     }
 }
@@ -1280,10 +1281,10 @@ TEST_F (ElementKindsTest, AnExtractorWithNoRequiredFlagFollowsTheCatalogueDefaul
         { "config", { { "leftBoundary", "<" }, { "rightBoundary", ">" } } } },
     };
     for (nlohmann::json entry : configs) {
-        const std::string kind = entry["kind"].get<std::string> ();
-        entry["id"]            = "e1";
+        const std::string kind      = entry["kind"].get<std::string> ();
+        entry["id"]                 = "e1";
         entry["config"]["variable"] = "n";
-        const auto run = run_after_recording (one_element (entry));
+        const auto run              = run_after_recording (one_element (entry));
         // A required miss appends a failed test; an optional one appends none.
         EXPECT_EQ (run.tests.size (), default_flag (kind, "required") ? 1u : 0u) << kind;
     }
@@ -1292,12 +1293,13 @@ TEST_F (ElementKindsTest, AnExtractorWithNoRequiredFlagFollowsTheCatalogueDefaul
 TEST_F (ElementKindsTest, AnExtractRegexWithNoFieldSearchesTheCatalogueDefaultField) {
     response                = ok_json_response (200, "body-7");
     response.headers["X-N"] = "header-9";
-    const auto elements     = one_element (nlohmann::json{ { "id", "e1" },
-    { "kind", "extract.regex" },
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "extract.regex" },
     { "config", { { "pattern", "(body|header)-[0-9]" }, { "variable", "n" } } } });
 
     const std::string field = default_text ("extract.regex", "field");
-    ASSERT_EQ (field, "body") << "the body is the only field this response matches in";
+    ASSERT_EQ (field, "body")
+    << "the body is the only field this response matches in";
     EXPECT_EQ (run_after (elements)[0].status, "ok");
     EXPECT_EQ (variables.at ("collection:n"), "body-7");
 }
@@ -1318,8 +1320,9 @@ TEST_F (ElementKindsTest, AnAssertContainsWithNoFieldModeOrNegateFollowsTheCatal
 
 TEST_F (ElementKindsTest, AnAssertJsonPathWithNoNegateFollowsTheCatalogueDefault) {
     response = ok_json_response (200, R"({"n": 7})");
-    const auto elements = one_element (nlohmann::json{ { "id", "e1" },
-    { "kind", "assert.jsonpath" }, { "config", { { "path", "$.n" }, { "expected", 7 } } } });
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.n" }, { "expected", 7 } } } });
 
     EXPECT_FALSE (default_flag ("assert.jsonpath", "negate"));
     EXPECT_EQ (run_after (elements)[0].status, "ok");
@@ -1363,15 +1366,13 @@ nlohmann::json timer_at_scope_entry (const char* kind, nlohmann::json config) {
 vayu::core::ScenarioPlan plan_of_one (const nlohmann::json& element) {
     vayu::core::ScenarioPlan plan;
     plan.steps.emplace_back ();
-    plan.steps.back ().elements =
-    std::make_shared<const std::vector<CompiledElement>> (
+    plan.steps.back ().elements = std::make_shared<const std::vector<CompiledElement>> (
     vayu::core::compile_elements (nlohmann::json::array ({ element })));
     return plan;
 }
 
 TEST (ElementDefaultsTest, TimerPacingWithNoPerUserKeyFollowsTheCatalogueDefault) {
-    const auto element =
-    timer_at_scope_entry ("timer.pacing", { { "everyMs", 100 } });
+    const auto element = timer_at_scope_entry ("timer.pacing", { { "everyMs", 100 } });
     EXPECT_EQ (kept_per_user (element), default_flag ("timer.pacing", "perUser"));
     EXPECT_EQ (vayu::core::shared_pacing_element_ids (plan_of_one (element)).empty (),
     default_flag ("timer.pacing", "perUser"))
@@ -1401,9 +1402,9 @@ TEST (ElementDefaultsTest, ControlThroughputWithNoPerUserKeyFollowsTheCatalogueD
     // The kind's own reader: handed a shared slot (as an explicit
     // `perUser: false` would have earned it), an element with no key still
     // counts on the virtual user's own state exactly when the default says so.
-    nlohmann::json shared_config = bare;
+    nlohmann::json shared_config       = bare;
     shared_config["config"]["perUser"] = false;
-    auto shared_plan = plan_of_one (shared_config);
+    auto shared_plan                   = plan_of_one (shared_config);
     vayu::core::SharedThroughputCounters counters (shared_plan);
     ASSERT_NE (counters.find ("e1"), nullptr);
 
@@ -1424,7 +1425,8 @@ TEST (ElementDefaultsTest, ControlThroughputWithNoPerUserKeyFollowsTheCatalogueD
     };
     ctx.controller_state        = &controller_state;
     ctx.shared_controller_state = &counters;
-    const auto elements = vayu::core::compile_elements (nlohmann::json::array ({ bare }));
+    const auto elements =
+    vayu::core::compile_elements (nlohmann::json::array ({ bare }));
     std::vector<ElementOutcome> outcomes;
     ElementPipeline::run (Phase::StepBefore, ctx, elements, outcomes);
 

@@ -159,8 +159,8 @@ ElementKind make_timer_pacing_kind () {
           "How often this node starts, start to start, in "
           "milliseconds." } } },
         { "perUser",
-        { { "type", "boolean" }, { "default", element_defaults::TIMER_PACING_PER_USER }, { "title", "Per user" },
-        { "x-vayu-group", "advanced" },
+        { { "type", "boolean" }, { "default", element_defaults::TIMER_PACING_PER_USER },
+        { "title", "Per user" }, { "x-vayu-group", "advanced" },
         { "description",
         "Paces each virtual user independently instead of sharing "
         "one cadence across all of them." } } } } },

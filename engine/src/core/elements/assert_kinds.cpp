@@ -238,7 +238,7 @@ class AssertContainsElement final : public Element {
             return;
         }
         const std::string field = config_.value ("field", element_defaults::RESPONSE_FIELD);
-        const std::string text  = config_.value ("text", "");
+        const std::string text = config_.value ("text", "");
         const std::string mode =
         config_.value ("mode", element_defaults::ASSERT_CONTAINS_MODE);
         std::string storage;
