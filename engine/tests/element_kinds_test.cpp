@@ -376,6 +376,75 @@ TEST_F (ElementKindsTest, AssertJsonPathRegexReportsAnInvalidPattern) {
     EXPECT_EQ (run.tests[0].error_message, message_of (run.outcomes[0]));
 }
 
+// `exists` is the boolean it says it is (#3049): false asserts the path is
+// absent, and `negate` then asks for the opposite of whichever it states.
+// Mutation check: read `exists` by presence again (drop `want_present`) and the
+// `exists: false` rows report the wrong verdict.
+TEST_F (ElementKindsTest, AssertJsonPathExistsIsABooleanAndNegateFlipsIt) {
+    response = ok_json_response (200, R"({"here": 1})");
+    struct Case {
+        bool exists;
+        bool negate;
+        const char* path;
+        bool passes;
+        const char* failure;
+    };
+    const std::vector<Case> cases = {
+        { true, false, "$.here", true, "" },
+        { true, false, "$.nope", false, "expected '$.nope' to exist" },
+        { false, false, "$.nope", true, "" },
+        { false, false, "$.here", false, "expected '$.here' to not exist" },
+        { true, true, "$.here", false, "expected '$.here' to not exist" },
+        { true, true, "$.nope", true, "" },
+        { false, true, "$.here", true, "" },
+        { false, true, "$.nope", false, "expected '$.nope' to exist" },
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE (std::string ("exists ") + (c.exists ? "true" : "false") +
+        (c.negate ? ", negated, " : ", ") + c.path);
+        const auto run = run_after_recording (
+        one_element (nlohmann::json{ { "id", "a1" }, { "kind", "assert.jsonpath" },
+        { "config", { { "path", c.path }, { "exists", c.exists }, { "negate", c.negate } } } }));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, c.passes ? "ok" : "failed");
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_EQ (run.tests[0].passed, c.passes);
+        EXPECT_EQ (run.tests[0].error_message, c.failure);
+    }
+}
+
+// Mutation check: put the `!negate` guard around the suffix back to the old
+// unconditional "to equal ... got" wording, or drop `not_prefix` from either
+// message, and the failures stop saying "not".
+TEST_F (ElementKindsTest, ANegatedAssertJsonPathValueFailureSaysNot) {
+    response = ok_json_response (200, R"({"id": "order-42"})");
+    const std::vector<std::pair<nlohmann::json, std::string>> cases = {
+        { { { "expected", "order-42" } }, "expected '$.id' to not equal \"order-42\"" },
+        { { { "regex", "^order-" } }, "expected '$.id' to not match /^order-/" },
+    };
+    for (const auto& [operand, failure] : cases) {
+        SCOPED_TRACE (operand.dump ());
+        nlohmann::json config = operand;
+        config["path"]        = "$.id";
+        config["negate"]      = true;
+        const auto run = run_after_recording (one_element (nlohmann::json{
+        { "id", "a1" }, { "kind", "assert.jsonpath" }, { "config", config } }));
+        ASSERT_EQ (run.outcomes.size (), 1u);
+        EXPECT_EQ (run.outcomes[0].status, "failed");
+        ASSERT_EQ (run.tests.size (), 1u);
+        EXPECT_EQ (run.tests[0].error_message, failure);
+    }
+}
+
+TEST_F (ElementKindsTest, AUnnegatedAssertJsonPathValueFailureKeepsTheGotText) {
+    response       = ok_json_response (200, R"({"id": "order-42"})");
+    const auto run = run_after_recording (
+    one_element (nlohmann::json{ { "id", "a1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.id" }, { "expected", "x" } } } }));
+    ASSERT_EQ (run.tests.size (), 1u);
+    EXPECT_EQ (run.tests[0].error_message, "expected '$.id' to equal \"x\", got order-42");
+}
+
 // ---------------------------------------------------------------------------
 // The shared JSONPath subset: member names beyond [A-Za-z0-9_], and the
 // bracket spelling of a member (#1903)
@@ -838,10 +907,13 @@ TEST_F (ElementKindsTest, AssertJsonPathFailsWithTheBodyReasonWhenTheBodyCannotB
 }
 
 // An unreadable body satisfies no claim about its content, "does not exist"
-// included, so `negate` must not turn the failure into a pass.
-TEST_F (ElementKindsTest, AssertJsonPathNegateDoesNotPassAnUnreadableBody) {
+// included (#3049), so neither `exists: false` nor `negate` may turn the
+// failure into a pass.
+TEST_F (ElementKindsTest, AssertJsonPathNeverPassesAnUnreadableBody) {
     const std::vector<nlohmann::json> claims = {
         { { "path", "$.n" }, { "exists", true }, { "negate", true } },
+        { { "path", "$.n" }, { "exists", false } },
+        { { "path", "$.n" }, { "exists", false }, { "negate", true } },
         { { "path", "$.n" }, { "expected", 7 }, { "negate", true } },
         { { "path", "$.n" }, { "regex", "^7$" }, { "negate", true } },
     };

@@ -184,8 +184,12 @@ with the same reason in the message. After an empty match the search resumes one
 `-1` over a pattern that can match nothing still ends.
 
 `assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
-at least one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
-either way, see below). `expected` (and a `metric.record` condition's `value`) is compared as JSON, so the number
+one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
+either way, see below). `exists` is a boolean: `true` passes when the path has at least one match and
+`false` when it has none, and `negate` flips whichever it states, so `{"exists": false, "negate": true}`
+means the path must be there (#3049). `exists` is refused beside `expected` or `regex`, since it asserts
+presence and they assert the value; a negated `expected` or `regex` failure reads "to not equal" /
+"to not match". `expected` (and a `metric.record` condition's `value`) is compared as JSON, so the number
 `7` and the string `"7"` are different values; the app's field for either reads what is typed as JSON
 (`7`, `true`, `null`, `{"a":1}`), stores the text as a string when it is not JSON, and takes a quoted
 value (`"7"`) to force a string (#3046). `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in

@@ -99,7 +99,9 @@ export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
 		isMet: (config) =>
 			(Array.isArray(config.in) && config.in.length > 0) || hasKey(config, "range"),
 	},
-	// `assert_jsonpath_problem`: any of the three keys present, whatever its value.
+	// `assert_jsonpath_problem`: any of the three keys present, whatever its value
+	// (the form writes one at a time; the engine also refuses `exists` beside
+	// `expected` or `regex`, #3049).
 	"assert.jsonpath": {
 		properties: JSONPATH_OPERANDS,
 		needs: "a value, pattern or existence check",

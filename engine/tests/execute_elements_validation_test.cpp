@@ -200,6 +200,7 @@ TEST_F (ExecuteElementsValidation, AnAssertionOrExtractorThatCannotRunIsRefused)
         { "assert.jsonpath", { { "path", "$.id" } } },
         { "assert.contains", { { "text", "[" }, { "mode", "matches" } } },
         { "assert.jsonpath", { { "path", "$.id" }, { "regex", "[" } } },
+        { "assert.jsonpath", { { "path", "$.id" }, { "exists", false }, { "expected", 1 } } },
         { "extract.regex", { { "pattern", "(" }, { "variable", "v" } } },
     };
     for (const auto& [kind, config] : cannot_run) {

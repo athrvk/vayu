@@ -91,7 +91,8 @@ const ASSERT_JSONPATH: ElementConfigSchema = {
 		exists: {
 			type: "boolean",
 			title: "Must exist",
-			description: "Passes when at least one match is found.",
+			description:
+				"true passes when at least one match is found, false when none is. Use it alone: it cannot be combined with 'expected' or 'regex'.",
 		},
 		negate: { type: "boolean", title: "Negate" },
 	},
@@ -252,7 +253,7 @@ describe("ModeElementForm - the mode on screen is the one the engine resolves", 
 			absentLabels: ["Wait"],
 		},
 		{
-			title: "prefers exists over expected and regex, as AssertJsonPathElement::apply does",
+			title: "prefers exists over expected and regex, as AssertJsonPathElement::apply does for a row stored before the engine refused the mix",
 			kind: "assert.jsonpath",
 			schema: ASSERT_JSONPATH,
 			config: { path: "$.id", exists: true, expected: "7", regex: "\\d" },
@@ -481,9 +482,14 @@ describe("ModeElementForm - the fields are the schema's own", () => {
 			/>
 		);
 
-		expect(screen.getByText("Passes when at least one match is found.")).toBeInTheDocument();
-		// No toggle: the engine reads `exists`' presence, so a switch would
-		// offer an "off" that asserts existence exactly the same way.
+		expect(
+			screen.getByText(
+				"true passes when at least one match is found, false when none is. Use it alone: it cannot be combined with 'expected' or 'regex'."
+			)
+		).toBeInTheDocument();
+		// No toggle: `negate` is the off switch for "must exist" (the engine
+		// reads `exists: false` as "must be absent", which is that same
+		// verdict), so a second control would say the same thing twice.
 		expect(screen.queryByLabelText("Must exist")).not.toBeInTheDocument();
 	});
 
