@@ -214,6 +214,14 @@ already there:
 - **Ambiguity is refused.** If two requests reduce to the same path, or one
   request could be two operations, none of them is matched.
 
+A spec split across files is bundled first, the way an import and Sync bundle
+it: the document is described, matched and stored with the files its relative
+`$ref`s name inlined, so the next Sync compares like with like. A reference that
+could not be followed (a file picked without a path has nothing to be relative
+to, and a path outside the picked folder is refused) is counted and named beside
+the summary, and a bundle past the document size limit is refused before any
+bind is offered.
+
 The result is stated before anything is written - how many matched, how many
 requests carry no operation, how many operations have no request - and only the
 matches are stamped. **Nothing is created or deleted**: acting on the difference
