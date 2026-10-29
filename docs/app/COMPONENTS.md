@@ -2310,6 +2310,18 @@ schema-carrying rather than a label list - `extract.json`'s path field is
 deliberately generic-form only, proving the point rather than special-casing
 it.
 
+**A property with no `type` takes a JSON field, not a text one** (#3046).
+`assert.jsonpath`'s `expected` and a `metric.record` condition's `value` can
+hold any JSON value, and the engine compares them strictly, so the string "7"
+never equals a number. `JsonValueField` reads typed text with `JSON.parse`
+(`7`, `true`, `null`, `"a"`, `{...}`), stores the raw text as a string when it
+is not JSON, and a hint under the field says which it became ("Stored as
+number"). A stored string whose text would itself parse as JSON is shown
+quoted (`"7"`), so it round-trips instead of turning into a number on the next
+edit. The text lives in a draft, as the comma-separated list's does, so
+`{"a` or `-` is not rewritten under the cursor, and loading a value writes
+nothing. A property that declares `string` stays a plain text field.
+
 **Two short fields standing next to each other share a line** (`grid-cols-2`,
 the pairing `AuthFields` and `OAuth2Form` already use). `assert.status`'s
 `range` is one idea - "200 to 299" - and saying it as a label, a hint sentence

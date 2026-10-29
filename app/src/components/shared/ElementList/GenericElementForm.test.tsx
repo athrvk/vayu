@@ -443,3 +443,145 @@ describe("GenericElementForm - a comma-separated list field (#3042)", () => {
 	// does not parse - and the first case reds on "200," showing "200", the
 	// hint cases on the missing alert.
 });
+
+describe("GenericElementForm - an untyped property holds any JSON value (#3046)", () => {
+	const untyped = schema({
+		expected: { title: "Expected value", description: "The value the match must equal." },
+		plain: { type: "string", title: "Plain" },
+	});
+
+	/** The parent a real card is: it echoes each change back as the next `config`. */
+	function Harness({ initial, onChange }: { initial?: unknown; onChange: (v: unknown) => void }) {
+		const [config, setConfig] = useState<Record<string, unknown>>(
+			initial === undefined ? {} : { expected: initial }
+		);
+		return (
+			<GenericElementForm
+				schema={untyped}
+				config={config}
+				onChange={(next) => {
+					onChange(next.expected);
+					setConfig(next);
+				}}
+			/>
+		);
+	}
+
+	function lastStored(onChange: ReturnType<typeof vi.fn>): unknown {
+		return onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
+	}
+
+	it.each([
+		{ typed: "7", stored: 7, kind: "number" },
+		{ typed: "-1.5", stored: -1.5, kind: "number" },
+		{ typed: "true", stored: true, kind: "boolean" },
+		{ typed: "null", stored: null, kind: "null" },
+		{ typed: "abc", stored: "abc", kind: "text" },
+		{ typed: '"7"', stored: "7", kind: "text" },
+		{ typed: '{"a":1}', stored: { a: 1 }, kind: "object" },
+		{ typed: "[1,2]", stored: [1, 2], kind: "list" },
+		{ typed: '{"a', stored: '{"a', kind: "text" },
+		{ typed: "1e400", stored: "1e400", kind: "text" },
+	])("stores $typed as $kind and says so", ({ typed, stored, kind }) => {
+		const onChange = vi.fn();
+		render(<Harness onChange={onChange} />);
+
+		fireEvent.change(screen.getByLabelText("Expected value"), { target: { value: typed } });
+
+		expect(lastStored(onChange)).toStrictEqual(stored);
+		expect(screen.getByLabelText("Expected value")).toHaveValue(typed);
+		expect(screen.getByText(`Stored as ${kind}`)).toBeInTheDocument();
+	});
+
+	it("stores an emptied field as the empty string, with no hint", () => {
+		const onChange = vi.fn();
+		render(<Harness initial={7} onChange={onChange} />);
+
+		fireEvent.change(screen.getByLabelText("Expected value"), { target: { value: "" } });
+
+		expect(lastStored(onChange)).toBe("");
+		expect(screen.queryByText(/^Stored as/)).not.toBeInTheDocument();
+	});
+
+	it("keeps unfinished JSON as typed while it is saved as text on the way", () => {
+		const onChange = vi.fn();
+		render(<Harness onChange={onChange} />);
+		const input = screen.getByLabelText("Expected value") as HTMLInputElement;
+
+		const shown: string[] = [];
+		for (const char of '{"a":1}') {
+			fireEvent.change(input, { target: { value: input.value + char } });
+			shown.push(input.value);
+		}
+
+		expect(shown[shown.length - 1]).toBe('{"a":1}');
+		expect(shown).toEqual(["{", '{"', '{"a', '{"a"', '{"a":', '{"a":1', '{"a":1}']);
+		expect(lastStored(onChange)).toStrictEqual({ a: 1 });
+	});
+
+	it.each([
+		{ title: "a number", loaded: 7, shown: "7" },
+		{ title: "an object", loaded: { a: 1 }, shown: '{"a":1}' },
+		{ title: "a list", loaded: [1, 2], shown: "[1,2]" },
+		{ title: "null", loaded: null, shown: "null" },
+		{ title: "a string that reads as a number, quoted", loaded: "7", shown: '"7"' },
+		{
+			title: "a string with quotes of its own, quoted again",
+			loaded: '"a"',
+			shown: '"\\"a\\""',
+		},
+		{ title: "plain text, as it is", loaded: "abc", shown: "abc" },
+	])("shows $title as $shown, and an unrelated rerender writes nothing", ({ loaded, shown }) => {
+		const onChange = vi.fn();
+		const view = render(
+			<GenericElementForm
+				schema={untyped}
+				config={{ expected: loaded }}
+				onChange={onChange}
+			/>
+		);
+		expect(screen.getByLabelText("Expected value")).toHaveValue(shown);
+
+		view.rerender(
+			<GenericElementForm
+				schema={untyped}
+				config={{ expected: loaded, other: 1 }}
+				onChange={onChange}
+			/>
+		);
+
+		expect(screen.getByLabelText("Expected value")).toHaveValue(shown);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("replaces the text when the value changes from outside, but not for its own write coming back", () => {
+		const view = render(
+			<GenericElementForm schema={untyped} config={{ expected: 7 }} onChange={vi.fn()} />
+		);
+		fireEvent.change(screen.getByLabelText("Expected value"), { target: { value: "7.0" } });
+
+		view.rerender(
+			<GenericElementForm schema={untyped} config={{ expected: 7 }} onChange={vi.fn()} />
+		);
+		expect(screen.getByLabelText("Expected value")).toHaveValue("7.0");
+
+		view.rerender(
+			<GenericElementForm schema={untyped} config={{ expected: "x" }} onChange={vi.fn()} />
+		);
+		expect(screen.getByLabelText("Expected value")).toHaveValue("x");
+	});
+
+	it("leaves a property that declares string as a plain text field", () => {
+		const onChange = vi.fn();
+		render(<GenericElementForm schema={untyped} config={{}} onChange={onChange} />);
+
+		fireEvent.change(screen.getByLabelText("Plain"), { target: { value: "7" } });
+
+		expect(onChange).toHaveBeenCalledWith({ plain: "7" });
+		expect(screen.queryByText(/^Stored as/)).not.toBeInTheDocument();
+	});
+
+	// Mutation check: restore the string input for an untyped property
+	// (`value={asString(value)}` and `onChange(e.target.value)`) and the "7"
+	// case reds on the stored "7", the object and list cases on the empty field.
+});

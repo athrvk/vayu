@@ -172,7 +172,10 @@ with the same reason in the message. After an empty match the search resumes one
 
 `assert.status` takes an `in` list or a `range`; `assert.jsonpath` takes a path with
 one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
-either way, see below); `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
+either way, see below). `expected` (and a `metric.record` condition's `value`) is compared as JSON, so the number
+`7` and the string `"7"` are different values; the app's field for either reads what is typed as JSON
+(`7`, `true`, `null`, `{"a":1}`), stores the text as a string when it is not JSON, and takes a quoted
+value (`"7"`) to force a string (#3046). `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
 `contains` | `equals` | `matches` (an RE2 search, above) mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
 an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
