@@ -32,6 +32,7 @@ import { useCallback, useMemo } from "react";
 import { Button, DisabledHint, LabelSwap } from "@/components/ui";
 import { ExternalChangeCallout, ScriptReferencesRow } from "@/components/shared";
 import { ElementList } from "@/components/shared/ElementList";
+import { useElementRefusals } from "@/components/shared/ElementList/useElementRefusals";
 import { useOpenElementRows } from "@/components/shared/ElementList/useOpenElementRows";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 import {
@@ -115,6 +116,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 	const openRows = useOpenElementRows(collection.id);
 	const kindsList = kinds ?? [];
 	const incomplete = hasIncompleteElement(elements, kindsList);
+	const { errors: elementErrors, refuse: refuseElement } = useElementRefusals(elements);
 
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
@@ -126,8 +128,15 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		// `kindsList`, a fresh `[]` reference on every render while the query is
 		// still loading) so this callback's identity does not churn with it.
 		if (hasIncompleteElement(elements, kinds ?? [])) throw new SaveBlockedError();
-		await updateCollection.mutateAsync({ id: collection.id, elements });
-	}, [isDirty, updateCollection, collection.id, elements, kinds]);
+		try {
+			await updateCollection.mutateAsync({ id: collection.id, elements });
+		} catch (error) {
+			// The engine names the element it refused (#3043); the failure still
+			// reaches the `SaveFailed` callout below and the caller's own report.
+			refuseElement(error, elements);
+			throw error;
+		}
+	}, [isDirty, updateCollection, collection.id, elements, kinds, refuseElement]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-elements`,
@@ -161,6 +170,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 					elements={elements}
 					onChange={setElements}
 					kinds={kindsList}
+					errors={elementErrors}
 					{...openRows}
 					referenceOwner={{ type: "collection", collection }}
 					renderAboveForm={(element) => {

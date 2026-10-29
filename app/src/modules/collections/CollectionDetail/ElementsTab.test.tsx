@@ -31,6 +31,7 @@ import { useLayoutStore, useTabSelectionStore } from "@/stores";
 import { useEditorVariableTokensContext } from "@/components/shared/EditorVariableTokens/context";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
 import type { VariableOrigin } from "@/types/domain";
+import { ApiError } from "@/services/http-client";
 import ElementsTab from "./ElementsTab";
 
 /**
@@ -400,6 +401,44 @@ describe("ElementsTab - a save that fails", () => {
 		renderTab(makeCollection([extractElement("e1")]));
 
 		expect(screen.getByText(/database is locked/i)).toBeInTheDocument();
+	});
+});
+
+describe("ElementsTab - the engine refuses one element on save (#3043)", () => {
+	/** Dirties the draft by toggling the one row's switch, then presses Save elements. */
+	async function saveRefusedWith(message: string) {
+		mutation.mutateAsync.mockRejectedValueOnce(new ApiError(400, "INVALID_REQUEST", message));
+		renderTab(makeCollection([extractElement("e1"), extractElement("e2")]));
+		const second = within(document.querySelectorAll<HTMLElement>("[data-element-row]")[1]);
+		fireEvent.click(second.getByRole("switch"));
+		fireEvent.click(screen.getByRole("button", { name: /save elements/i }));
+		await waitFor(() => expect(mutation.mutateAsync).toHaveBeenCalled());
+	}
+
+	it("shows the problem under the element the engine named, and no other", async () => {
+		await saveRefusedWith("'Extract JSON' (item 2): 'path' is not a valid JSONPath");
+
+		const rows = document.querySelectorAll<HTMLElement>("[data-element-row]");
+		expect(await within(rows[1]).findByRole("alert")).toHaveTextContent(
+			"'path' is not a valid JSONPath"
+		);
+		expect(within(rows[0]).queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("takes the problem off the row once that element is edited", async () => {
+		await saveRefusedWith("'Extract JSON' (item 2): 'path' is not a valid JSONPath");
+		const rows = document.querySelectorAll<HTMLElement>("[data-element-row]");
+		await within(rows[1]).findByRole("alert");
+
+		fireEvent.click(within(rows[1]).getByRole("switch"));
+
+		expect(within(rows[1]).queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("puts nothing on a row when the message names no element", async () => {
+		await saveRefusedWith("Request name is required");
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 	});
 });
 

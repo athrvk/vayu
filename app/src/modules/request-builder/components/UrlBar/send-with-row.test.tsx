@@ -76,6 +76,7 @@ function ctx(
 		setDisabledDefaultHeaders: vi.fn(),
 		restoreStoredName: vi.fn(),
 		fieldConflicts: {},
+		elementErrors: {},
 		takeExternalField: vi.fn(),
 		getBodyDrafts: () => emptyDrafts(null),
 		setBodyDrafts: vi.fn(),

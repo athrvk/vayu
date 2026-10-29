@@ -31,6 +31,7 @@ import { describe, it, expect, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { render, fireEvent } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
+import { hasIncompleteElement, OPERAND_RULES } from "@/lib/elements";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
@@ -165,6 +166,50 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 						`${kind}'s "${mode.id}" is rendered as a nested object but declares no children`
 					).toBeGreaterThan(0);
 				}
+			}
+		}
+	});
+
+	it("names, for every kind with an operand rule, properties the live catalogue declares", () => {
+		// `OPERAND_RULES` restates the engine's `validate_config` "one of"
+		// checks (#3043), which the schema cannot carry. A renamed or dropped
+		// property would otherwise leave a rule judging a key nothing writes.
+		// Mutation check: rename any key in `OPERAND_RULES` and this reds.
+		const rules = Object.entries(OPERAND_RULES);
+		expect(rules.length).toBeGreaterThan(0);
+		for (const [kind, rule] of rules) {
+			const entry = fixture.find((k) => k.kind === kind);
+			expect(entry, `the catalogue no longer serves "${kind}"`).toBeTruthy();
+			const declared = Object.keys(entry!.configSchema.properties ?? {});
+			for (const property of rule.properties) {
+				expect(declared, `${kind} declares no "${property}"`).toContain(property);
+			}
+			// The rule only applies where the schema leaves the operand optional:
+			// a `required` operand is `missingRequiredKeys`' to report.
+			for (const property of rule.properties) {
+				expect(
+					entry!.configSchema.required ?? [],
+					`${kind} requires "${property}" itself`
+				).not.toContain(property);
+			}
+		}
+	});
+
+	it("flags a fresh element of each rule's kind as incomplete, and a satisfied one as not", () => {
+		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {
+			// Every `required` key filled, so only the operand can be what is missing.
+			const required = fixture.find((k) => k.kind === kind)!.configSchema.required ?? [];
+			const base = Object.fromEntries(required.map((key) => [key, "x"]));
+			const incomplete = (config: Record<string, unknown>) =>
+				hasIncompleteElement([{ id: "el_1", kind, enabled: true, config }], fixture);
+
+			expect(incomplete(base), `${kind} with no operand`).toBe(true);
+			for (const property of rule.properties) {
+				const operand = property === "in" ? [200] : true;
+				expect(
+					incomplete({ ...base, [property]: operand }),
+					`${kind} with only "${property}"`
+				).toBe(false);
 			}
 		}
 	});

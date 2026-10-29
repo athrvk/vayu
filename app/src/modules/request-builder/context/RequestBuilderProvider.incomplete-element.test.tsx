@@ -113,6 +113,15 @@ function ElementsProbe() {
 			>
 				fill in the field
 			</button>
+			<button
+				onClick={() =>
+					updateField("elements", [
+						{ id: "el_2", kind: "assert.status", enabled: true, config: {} },
+					])
+				}
+			>
+				add status assertion with no codes
+			</button>
 			<button onClick={() => updateField("name", "renamed")}>edit something else</button>
 		</>
 	);
@@ -147,6 +156,13 @@ describe("a save the elements list makes known-incomplete", () => {
 
 	it("skips the network call rather than sending the incomplete element", async () => {
 		click("add incomplete element");
+		await save();
+
+		expect(onSave).not.toHaveBeenCalled();
+	});
+
+	it("skips a status assertion with no codes or range too, though the catalogue requires nothing of it (#3043)", async () => {
+		click("add status assertion with no codes");
 		await save();
 
 		expect(onSave).not.toHaveBeenCalled();

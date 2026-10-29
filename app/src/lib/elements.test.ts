@@ -7,8 +7,14 @@
 
 import { describe, it, expect } from "vitest";
 
-import { hasIncompleteElement, isBlankScriptElement, missingRequiredKeys } from "./elements";
-import type { ElementKindSchema } from "@/types";
+import {
+	hasIncompleteElement,
+	isBlankScriptElement,
+	missingOperand,
+	missingRequiredKeys,
+	parseElementRefusal,
+} from "./elements";
+import type { ElementDef, ElementKindSchema } from "@/types";
 
 /** A minimal catalogue entry - only what `missingRequiredKeys` reads. */
 function kindFixture(kind: string, required: string[]): ElementKindSchema {
@@ -88,8 +94,46 @@ describe("missingRequiredKeys", () => {
 	});
 });
 
+describe("missingOperand", () => {
+	it.each([
+		["assert.status", {}],
+		["assert.status", { in: [] }],
+		["assert.jsonpath", { path: "$.id" }],
+	])("names what a %s with %j still needs", (kind, config) => {
+		expect(missingOperand({ kind, config })).toEqual(expect.any(String));
+	});
+
+	it.each([
+		["assert.status", { in: [200] }],
+		["assert.status", { range: { min: 200, max: 299 } }],
+		["assert.status", { in: [], range: { min: 200, max: 299 } }],
+		["assert.jsonpath", { path: "$.id", expected: 1 }],
+		// The engine tests presence, so an empty string and a null both count.
+		["assert.jsonpath", { path: "$.id", expected: "" }],
+		["assert.jsonpath", { path: "$.id", expected: null }],
+		["assert.jsonpath", { path: "$.id", regex: "^a" }],
+		["assert.jsonpath", { path: "$.id", exists: false }],
+	])("is satisfied by a %s with %j", (kind, config) => {
+		expect(missingOperand({ kind, config })).toBeNull();
+	});
+
+	it("has no opinion on a kind without an operand rule", () => {
+		expect(missingOperand({ kind: "assert.duration", config: {} })).toBeNull();
+	});
+});
+
 describe("hasIncompleteElement", () => {
 	const kinds = [kindFixture("extract.json", ["variable"]), kindFixture("timer.pacing", [])];
+
+	it("is true for a status assertion with no accepted codes or range, though the catalogue requires nothing of it", () => {
+		const elements = [{ id: "1", kind: "assert.status", enabled: true, config: {} }];
+		expect(hasIncompleteElement(elements, [kindFixture("assert.status", [])])).toBe(true);
+	});
+
+	it("is false once that assertion lists a code", () => {
+		const elements = [{ id: "1", kind: "assert.status", enabled: true, config: { in: [200] } }];
+		expect(hasIncompleteElement(elements, [kindFixture("assert.status", [])])).toBe(false);
+	});
 
 	it("is true when any element in the list is missing a required key", () => {
 		const elements = [
@@ -109,5 +153,35 @@ describe("hasIncompleteElement", () => {
 
 	it("is false for an empty list", () => {
 		expect(hasIncompleteElement([], kinds)).toBe(false);
+	});
+});
+
+describe("parseElementRefusal", () => {
+	const sent: ElementDef[] = [
+		{ id: "a", kind: "assert.status", enabled: true, config: { in: [200] } },
+		{ id: "b", kind: "extract.regex", enabled: true, config: { pattern: "(" } },
+	];
+
+	it("finds the element by the 1-based item index and drops the label prefix", () => {
+		const found = parseElementRefusal(
+			"'Extract with a regular expression' (item 2): 'pattern' is not a valid regular expression",
+			sent
+		);
+		expect(found?.element).toBe(sent[1]);
+		expect(found?.problem).toBe("'pattern' is not a valid regular expression");
+	});
+
+	it("keeps a multi-line problem whole", () => {
+		const found = parseElementRefusal("'Assert text' (item 1): first\nsecond", sent);
+		expect(found?.problem).toBe("first\nsecond");
+	});
+
+	it.each([
+		["a message about no element", "Request name is required"],
+		["an engine that names the item without a kind label", "Item 2 is missing an id"],
+		["an index past the array", "'Assert text' (item 3): nope"],
+		["item zero", "'Assert text' (item 0): nope"],
+	])("answers null for %s", (_name, message) => {
+		expect(parseElementRefusal(message, sent)).toBeNull();
 	});
 });
