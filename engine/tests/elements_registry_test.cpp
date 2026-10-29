@@ -360,6 +360,12 @@ void expect_every_property_annotated (const std::string& kind_name, const json& 
         const auto* text = found->get_ptr<const std::string*> ();
         return text != nullptr && !text->empty ();
     };
+    const auto string_of = [] (const json& schema, const char* key) {
+        const auto found = schema.find (key);
+        const auto* text =
+        found == schema.end () ? nullptr : found->get_ptr<const std::string*> ();
+        return text == nullptr ? std::string{} : *text;
+    };
     for (const auto& [name, schema] : properties.items ()) {
         EXPECT_TRUE (has_text (schema, "title")) << kind_name << "." << name << " has no title";
         EXPECT_TRUE (has_text (schema, "description"))
@@ -369,12 +375,12 @@ void expect_every_property_annotated (const std::string& kind_name, const json& 
             << kind_name << "." << name << " has an unknown x-vayu-group";
         }
         if (schema.contains ("x-vayu-unit")) {
-            const std::string unit = schema.value ("x-vayu-unit", std::string{});
+            const std::string unit = string_of (schema, "x-vayu-unit");
             EXPECT_TRUE (unit == "ms" || unit == "%" || unit == "B")
             << kind_name << "." << name << " has an unknown x-vayu-unit '"
             << unit << "'";
         }
-        if (schema.value ("type", std::string{}) == "object" && schema.contains ("properties")) {
+        if (string_of (schema, "type") == "object" && schema.contains ("properties")) {
             std::string nested_name = kind_name;
             nested_name += ".";
             nested_name += name;
