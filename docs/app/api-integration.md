@@ -1661,8 +1661,10 @@ await apiService.executeRequest({
 
 `elements` (issue #1512) is the resolved, ordered list of typed behaviours to
 run - the collection chain's (root→leaf), then the request's own, minus
-whatever the request's own `inherit.disable` entries name, each stamped with
-its `origin`. A script is one of these now (`kind: "script.pre"` /
+whatever an `inherit.disable` entry at any level names (a folder's can name a
+root element, a collection's the request's own; `POST /compose` gathers the
+targets the same way, and the entries themselves are never forwarded), each
+stamped with its `origin`. A script is one of these now (`kind: "script.pre"` /
 `"script.post"`, `config.script` the text) - it replaces the old
 `preRequestScripts` / `postRequestScripts` `ScriptPart[]` fields, which the
 engine now refuses outright (400 naming `elements`). The renderer builds the

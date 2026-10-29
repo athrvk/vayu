@@ -332,6 +332,30 @@ describe("a disabled element is left out of requestElements (#3050)", () => {
 		expect(startedPayload().requestElements).toBeUndefined();
 	});
 
+	it("sends no inherit.disable entry a collection level holds, and not the element it names (#3070)", async () => {
+		const loop: ElementDef = { id: "el_loop", kind: "control.loop", enabled: true, config: {} };
+		ancestors = [
+			collectionWith("col_root", "Root", [loop]),
+			collectionWith(
+				"col_1",
+				"Folder",
+				[
+					{
+						id: "el_suppress",
+						kind: "inherit.disable",
+						enabled: true,
+						config: { elementId: "el_loop" },
+					},
+				],
+				"col_root"
+			),
+		];
+
+		await startLoadRun(LOAD_CONFIG);
+
+		expect(sentIds()).toEqual(["el_pre"]);
+	});
+
 	it("still sends an enabled element of the same kind, for the dialog to have blocked", async () => {
 		await startLoadRun(LOAD_CONFIG, { ...REQUEST, elements: [pacing()] });
 
@@ -381,6 +405,22 @@ describe("the dialog's scenarioOnlyElements (#3050)", () => {
 		};
 
 		expect(await openDialog([suppress])).toEqual([]);
+	});
+
+	it("leaves out a root control.loop that a folder's inherit.disable names (#3070)", async () => {
+		const loop: ElementDef = { id: "el_loop", kind: "control.loop", enabled: true, config: {} };
+		const suppress: ElementDef = {
+			id: "el_suppress",
+			kind: "inherit.disable",
+			enabled: true,
+			config: { elementId: "el_loop" },
+		};
+		ancestors = [
+			collectionWith("col_root", "Root", [loop]),
+			collectionWith("col_1", "Folder", [suppress], "col_root"),
+		];
+
+		expect(await openDialog([])).toEqual([]);
 	});
 });
 
