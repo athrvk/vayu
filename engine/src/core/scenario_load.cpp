@@ -505,11 +505,14 @@ struct StepBeforeResult {
     bool script_threw     = false;
 };
 
-/// `run_step_after`'s answer, on `StepBeforeResult`'s terms.
+/// `run_step_after`'s answer, on `StepBeforeResult`'s terms. Its outcomes are
+/// tallied by `finish_step`, once `settle_transactions` has written any
+/// transaction close onto them (#3054).
 struct StepAfterResult {
     int64_t elapsed_ms    = 0;
     bool assertion_failed = false;
     bool script_threw     = false;
+    std::vector<vayu::core::ElementOutcome> outcomes;
 };
 
 /**
@@ -656,7 +659,8 @@ const nlohmann::json* data_row) {
  *        only ever holds a `const Response&` off `Result::value()`, and
  *        copying a response to avoid it would pay for the body twice.
  * @return elapsed milliseconds, on the same terms @ref run_step_before returns
- *         them, whether an assertion failed and whether a script threw.
+ *         them, whether an assertion failed, whether a script threw, and the
+ *         outcomes, not yet tallied.
  */
 StepAfterResult run_step_after (const std::shared_ptr<RunContext>& context,
 ScenarioLoadState& state,
@@ -731,33 +735,17 @@ const nlohmann::json* data_row) {
     outcomes, [&context] (const vayu::core::CompiledElement& element) {
         return RunContext::load_pipeline_skip_reason (element, context->scripts_override);
     });
-    for (const auto& outcome : outcomes) {
-        state.element_tallies.record (step_index, outcome);
-    }
-    // A `control.transaction` closing occurrence (issue #1515) is the only
-    // outcome carrying `duration_us`, the same rule `scenario_runner.cpp`
-    // records by.
-    for (const auto& outcome : outcomes) {
-        if (outcome.duration_us && outcome.message) {
-            state.transactions.record (
-            *outcome.message, *outcome.duration_us, outcome.status == "failed");
-        }
-    }
     // Every `assert.*` outcome and required `extract.*` miss lands here, beside
     // an inline `script.post`'s `pm.test` calls; a deferred one adds nothing.
     const bool assertion_failed = tally_inline_tests (state, post_result.tests);
     const bool threw            = script_threw (post_result);
 
-    if (!start) {
-        return StepAfterResult{ 0, assertion_failed, threw };
-    }
-    return StepAfterResult{
-        std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::steady_clock::now () - *start)
-        .count (),
-        assertion_failed,
-        threw,
-    };
+    const int64_t elapsed_ms = start ?
+    std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - *start)
+    .count () :
+    0;
+    return StepAfterResult{ elapsed_ms, assertion_failed, threw, std::move (outcomes) };
 }
 
 } // namespace
@@ -838,7 +826,7 @@ class ScenarioLoadDriver {
                 // breakdown is what attributes the failure to a step.
                 context_->requests_sent++;
                 finish_step (context_, state_, execution_.plan, vu, step_index,
-                StepSignals{ .no_response = true }, nullptr);
+                StepSignals{ .no_response = true }, nullptr, {});
                 handle_result (context_, db_,
                 vayu::Result<vayu::Response> (vayu::Error{
                 vayu::ErrorCode::DataBindingFailed, step.name + ": " + bound.error }),
@@ -871,7 +859,7 @@ class ScenarioLoadDriver {
             finish_step (context_, state_, execution_.plan, vu, step_index,
             StepSignals{ .script_threw = before_result.script_threw,
             .assertion_failed          = before_result.assertion_failed },
-            nullptr);
+            nullptr, {});
             return true;
         }
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
@@ -936,12 +924,15 @@ class ScenarioLoadDriver {
             // that counted only successes would report the send as if it never
             // happened.
             state->coverage.record (step_index, response.status_code);
+            const bool assertion_failed = assertion_failed_before || after.assertion_failed;
             finish_step (context, state, plan, vu, step_index,
             StepSignals{ .no_response = errored,
             .sent                     = true,
-            .script_threw = script_threw_before || after.script_threw,
-            .assertion_failed = assertion_failed_before || after.assertion_failed },
-            session_after (errored, step_ptr->request, response, *vu), next_target_before);
+            .script_threw     = script_threw_before || after.script_threw,
+            .assertion_failed = assertion_failed,
+            .transaction_error = transaction_member_errored (&response, assertion_failed) },
+            session_after (errored, step_ptr->request, response, *vu),
+            std::move (after.outcomes), next_target_before);
             handle_result (context, db, result,
             ResultAnnotations{ row, step_index, iteration, vu_index, script_ms });
         });
@@ -1179,6 +1170,10 @@ class ScenarioLoadDriver {
         bool sent             = false;
         bool script_threw     = false;
         bool assertion_failed = false;
+        /// The answer counts against a `control.transaction` the step is a
+        /// member of (`transaction_member_errored`); an execution with no
+        /// response always does.
+        bool transaction_error = false;
     };
 
     /**
@@ -1269,7 +1264,7 @@ class ScenarioLoadDriver {
         } else {
             state->coverage.record (step_index, 0);
             finish_step (context, state, plan, vu, step_index,
-            StepSignals{ .no_response = true, .sent = true }, nullptr);
+            StepSignals{ .no_response = true, .sent = true }, nullptr, {});
         }
         handle_result (context, db, result, annotations);
     }
@@ -1291,9 +1286,10 @@ class ScenarioLoadDriver {
      * in `httpErrors`).
      *
      * @p next_cookies is null for an outcome that carries none - an error, or a
-     * step that was never sent. @p next_target_from_before is
-     * `control.switch`'s own dispatch (issue #1569, `run_step_before`'s
-     * return), which `read_flow_control` weighs.
+     * step that was never sent. @p after_outcomes are the step's `step.after`
+     * outcomes, empty for a step that never reached that phase.
+     * @p next_target_from_before is `control.switch`'s own dispatch (issue
+     * #1569, `run_step_before`'s return), which `read_flow_control` weighs.
      */
     static void finish_step (const std::shared_ptr<RunContext>& context,
     const std::shared_ptr<ScenarioLoadState>& state,
@@ -1302,6 +1298,7 @@ class ScenarioLoadDriver {
     size_t step_index,
     const StepSignals& signals,
     const std::vector<std::string>* next_cookies,
+    std::vector<vayu::core::ElementOutcome> after_outcomes,
     std::optional<std::string> next_target_from_before = std::nullopt) {
         state->steps_executed.fetch_add (1, std::memory_order_relaxed);
         ++vu->steps_this_iteration;
@@ -1324,6 +1321,10 @@ class ScenarioLoadDriver {
             outcome = StepOutcome::Errored;
         }
         count_outcome (*state, step_index, outcome, signals);
+        // Before `end_iteration` advances `vu->iteration`, which keys the
+        // pass being closed.
+        settle_step_transactions (*state, plan.steps[step_index], step_index,
+        *vu, signals, next, std::move (after_outcomes));
 
         if (next.end_iteration) {
             end_iteration (*state, *vu, next.abandoned);
@@ -1365,6 +1366,41 @@ class ScenarioLoadDriver {
         /// a jump the run could not honour (#2974).
         bool abandoned = false;
     };
+
+    /**
+     * `control.transaction` (#3054): every transaction the step is a member
+     * of, settled on the sequential run's terms (`settle_transactions`), then
+     * the step's `step.after` outcomes tallied with any close written onto
+     * them, and each pass that closed here recorded. A close is the one
+     * outcome carrying `duration_us`, with its declared name in `message`.
+     */
+    static void settle_step_transactions (ScenarioLoadState& state,
+    const ScenarioStep& step,
+    size_t step_index,
+    VirtualUser& vu,
+    const StepSignals& signals,
+    const NextStep& next,
+    std::vector<vayu::core::ElementOutcome> outcomes) {
+        if (step.elements) {
+            settle_transactions (*step.elements, state.element_spans,
+            TransactionMember{
+            .step_index = step_index,
+            .iteration  = vu.iteration,
+            .attempted  = signals.sent || signals.no_response,
+            .errored    = signals.no_response || signals.transaction_error,
+            .next_position =
+            next.end_iteration ? std::nullopt : std::optional (next.position),
+            },
+            vu.controller_state, outcomes);
+        }
+        for (const auto& outcome : outcomes) {
+            state.element_tallies.record (step_index, outcome);
+            if (outcome.duration_us && outcome.message) {
+                state.transactions.record (*outcome.message,
+                *outcome.duration_us, outcome.status == "failed");
+            }
+        }
+    }
 
     /// Appends @p step_index to @p vu's trail of recent steps, keeping the
     /// newest `CYCLE_TRAIL_LENGTH`.

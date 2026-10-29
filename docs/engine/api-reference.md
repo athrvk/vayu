@@ -9418,10 +9418,19 @@ kind table and every config shape.
 sums every member's own response latency, at microsecond precision, into a
 named total per pass, and the run's summary gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90,
-p95, p99, max } }`, omitted for a transaction the run never closed.
+p95, p99, max } }`, omitted for a transaction the run never closed. A pass
+closes when the iteration leaves the folder (#3054): after the folder's last
+member whether it was sent, skipped by a controller or failed before an
+answer, or after any member from which the iteration jumps out of the folder
+or ends. So `count` is one per iteration that attempted a member, and a pass
+whose every member was skipped, or that a Stop interrupted, is not counted.
+`errors` counts the passes in which a member was an error by the report's
+own definition: no response, a status outside 2xx/3xx, or a failed
+assertion.
 `includeTimers: true` (issue #1569) also folds a between-member `timer.*`
 wait into that sum - excluded by default, and always excluded for a wait
 after the folder's own last member, which is outside the transaction's span.
+[elements.md](elements.md#controllers) has the full close rule.
 The same shape reports on a scenario load run's summary, top-level rather
 than under `scenario` - see below.
 
@@ -9693,7 +9702,10 @@ it - a `control.transaction` spans a folder, not one step:
 One entry per declared `control.transaction` name that closed at least once
 this run, allocated up front from a scan of the plan - never discovered
 mid-run - so recording into it, like every other controller here, takes no
-lock.
+lock. `count` and `errors` follow the collection run's rule (#3054): a pass
+closes when the virtual user's iteration leaves the folder, including an
+abandoned iteration, and errs when a member got no response, answered
+outside 2xx/3xx or failed an inline assertion.
 
 `unresolvedTokens` (issue #1503) counts, per step, how many of its executions
 sent a `{{token}}` composition the residual-token pass still could not answer

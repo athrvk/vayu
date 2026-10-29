@@ -1025,6 +1025,43 @@ StepRecord& record) {
 }
 
 /**
+ * `control.transaction` (#3054): every transaction @p step is a member of,
+ * settled once the step's outcome and the iteration's next position are known
+ * (`settle_transactions`, the load path's rule too), and each pass that closed
+ * here recorded. A close is the one outcome carrying `duration_us`, with its
+ * declared name in `message`.
+ */
+void settle_step_transactions (const StepContext& ctx,
+const ScenarioStep& step,
+const vayu::http::routes::ExchangeOutcome& exchange,
+const std::string& data_bind_error,
+std::optional<size_t> next_position,
+StepRecord& record,
+TransactionHistograms& transactions) {
+    if (!step.elements) {
+        return;
+    }
+    const bool bound            = data_bind_error.empty ();
+    const bool assertion_failed = record.tests && record.tests->failed > 0;
+    vayu::core::settle_transactions (*step.elements, ctx.element_spans,
+    vayu::core::TransactionMember{
+    .step_index = step.index,
+    .iteration  = ctx.iteration,
+    .attempted  = exchange.sent || !bound,
+    .errored    = vayu::core::transaction_member_errored (
+    bound ? &exchange.response : nullptr, assertion_failed),
+    .next_position = next_position,
+    },
+    ctx.controller_state, record.elements);
+    for (const auto& outcome : record.elements) {
+        if (outcome.duration_us && outcome.message) {
+            transactions.record (
+            *outcome.message, *outcome.duration_us, outcome.status == "failed");
+        }
+    }
+}
+
+/**
  * One iteration: a walk over the plan rather than a pass through it.
  *
  * A script may send it backwards, forwards or out early, so the position is a
@@ -1075,16 +1112,6 @@ TransactionHistograms& transactions) {
         StepRecord record =
         record_step (step_ctx, step, exchange, data_bind_error, summary);
 
-        // A `control.transaction` closing occurrence (issue #1515) carries
-        // its transaction's whole elapsed time in `duration_us` and its
-        // declared name in `message`; nothing else sets `duration_us`.
-        for (const auto& outcome : record.elements) {
-            if (outcome.duration_us && outcome.message) {
-                transactions.record (*outcome.message, *outcome.duration_us,
-                outcome.status == "failed");
-            }
-        }
-
         // `step.between` (issue #1514): `timer.think` and anything else
         // phased here run after this step's own outcome is decided - so a
         // wait never counts against the step's own latency - and before flow
@@ -1112,6 +1139,8 @@ TransactionHistograms& transactions) {
         if (ended_by_error) {
             record.steps_not_run = count_steps_not_run (attempted, position);
         }
+        settle_step_transactions (step_ctx, step, exchange, data_bind_error,
+        end_iteration ? std::nullopt : std::optional (next_position), record, transactions);
 
         store_step_record (step_ctx, step, exchange, record, coverage, summary, store);
 
