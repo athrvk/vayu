@@ -27,6 +27,14 @@ function fallback(kind: ElementKindSchema | undefined): string {
 	return kind?.description ?? "";
 }
 
+/**
+ * What the engine runs for an absent key, as the catalogue declares it (#3045).
+ * `undefined` when the catalogue has none, or no kind was passed.
+ */
+function catalogueDefault(kind: ElementKindSchema | undefined, key: string): unknown {
+	return kind?.configSchema.properties?.[key]?.default;
+}
+
 function summarizeAssertStatus(config: Record<string, unknown>, kind?: ElementKindSchema): string {
 	const inCodes = config.in;
 	if (Array.isArray(inCodes) && inCodes.length > 0) return `in [${inCodes.join(", ")}]`;
@@ -56,8 +64,8 @@ function summarizeExtractJson(config: Record<string, unknown>, kind?: ElementKin
 	const path = typeof config.path === "string" ? config.path : "";
 	const variable = typeof config.variable === "string" ? config.variable : "";
 	if (!path || !variable) return fallback(kind);
-	const scope =
-		typeof config.scope === "string" && config.scope.length > 0 ? config.scope : "env";
+	const stored = typeof config.scope === "string" && config.scope.length > 0 ? config.scope : "";
+	const scope = stored || (catalogueDefault(kind, "scope") ?? "env");
 	return `${path} → ${variable} (${scope})`;
 }
 
@@ -73,7 +81,8 @@ function summarizeTimerThink(config: Record<string, unknown>, kind?: ElementKind
 
 function summarizeTimerPacing(config: Record<string, unknown>, kind?: ElementKindSchema): string {
 	if (typeof config.everyMs !== "number") return fallback(kind);
-	return `every ${config.everyMs} ms${config.perUser ? " · per user" : ""}`;
+	const perUser = config.perUser ?? catalogueDefault(kind, "perUser");
+	return `every ${config.everyMs} ms${perUser ? " · per user" : ""}`;
 }
 
 function summarizeControlIf(config: Record<string, unknown>, kind?: ElementKindSchema): string {

@@ -104,7 +104,7 @@ const CONTROL_THROUGHPUT: ElementConfigSchema = {
 	properties: {
 		percent: { type: "number", title: "Percent", "x-vayu-unit": "%" },
 		everyN: { type: "integer", title: "Every Nth" },
-		perUser: { type: "boolean", title: "Per user", "x-vayu-group": "advanced" },
+		perUser: { type: "boolean", title: "Per user", default: true, "x-vayu-group": "advanced" },
 	},
 };
 
@@ -523,6 +523,40 @@ describe("ModeElementForm - the fields are the schema's own", () => {
 		expect(screen.queryByText("Per user")).not.toBeInTheDocument();
 		fireEvent.click(screen.getByText("Advanced"));
 		expect(screen.getByText("Per user")).toBeInTheDocument();
+	});
+
+	it("shows the trailing perUser toggle on by default, and a first click stores false", () => {
+		// The catalogue's `default` rides the schema through `subsetSchema` into
+		// the trailing generic form (#3045).
+		const onChange = vi.fn();
+		render(
+			<ModeElementForm
+				kind="control.throughput"
+				schema={CONTROL_THROUGHPUT}
+				config={{ percent: 25 }}
+				onChange={onChange}
+			/>
+		);
+		fireEvent.click(screen.getByText("Advanced"));
+
+		const toggle = screen.getByRole("switch", { name: "Per user" });
+		expect(toggle).toBeChecked();
+		fireEvent.click(toggle);
+
+		expect(onChange).toHaveBeenCalledWith({ percent: 25, perUser: false });
+	});
+
+	it("keeps a stored perUser false unchecked", () => {
+		render(
+			<ModeElementForm
+				kind="control.throughput"
+				schema={CONTROL_THROUGHPUT}
+				config={{ percent: 25, perUser: false }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByRole("switch", { name: "Per user" })).not.toBeChecked();
 	});
 
 	it("edits the active mode's field without disturbing the rest of the config", () => {

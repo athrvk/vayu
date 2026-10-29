@@ -562,7 +562,7 @@ function PropertyRow({
 			<ToggleRow
 				label={label}
 				description={hint}
-				checked={value === true}
+				checked={(value ?? property.default) === true}
 				onChange={onChange}
 				compact
 			/>
@@ -594,7 +594,7 @@ function PropertyRow({
 			<SelectSettingRow
 				label={label}
 				description={hint}
-				value={asString(value) || property.enum[0]}
+				value={asString(value) || asString(property.default) || property.enum[0]}
 				onChange={onChange}
 				options={property.enum.map((option) => ({ value: option, label: option }))}
 				compact
