@@ -52,7 +52,7 @@ class TransactionHistograms {
     /// One closed occurrence: @p latency_us is the sum, in microseconds,
     /// `control.transaction`'s own accumulator produced (its close's
     /// `ElementOutcome::duration_us`), @p errored whether any member of that
-    /// pass carried a response error.
+    /// pass counted as an error (`transaction_member_errored`, #3054).
     void record (const std::string& name, int64_t latency_us, bool errored);
 
     /// `scenario.transactions[]`: `{ name, count, errors, latency }` per

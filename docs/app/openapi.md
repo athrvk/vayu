@@ -214,6 +214,14 @@ already there:
 - **Ambiguity is refused.** If two requests reduce to the same path, or one
   request could be two operations, none of them is matched.
 
+A spec split across files is bundled first, the way an import and Sync bundle
+it: the document is described, matched and stored with the files its relative
+`$ref`s name inlined, so the next Sync compares like with like. A reference that
+could not be followed (a file picked without a path has nothing to be relative
+to, and a path outside the picked folder is refused) is counted and named beside
+the summary, and a bundle past the document size limit is refused before any
+bind is offered.
+
 The result is stated before anything is written - how many matched, how many
 requests carry no operation, how many operations have no request - and only the
 matches are stamped. **Nothing is created or deleted**: acting on the difference
@@ -711,6 +719,7 @@ contract:
 | Declared responses seen | Status patterns the document declares that the run actually produced |
 | Undeclared statuses | Statuses the run saw that the document declares nothing for |
 | Never called | Operations with no request at all - listed first, because they are the finding |
+| Got no response | Operations whose every request was a transport error - counted as covered, but the chip is not green |
 
 A status answers to the **most specific** pattern that covers it. An operation
 declaring both `200` and `2XX` that only ever answered 200 reports `2XX` as not
@@ -721,6 +730,12 @@ A **transport error** - a request that never got a response - counts as a reques
 sent and as no response seen. The operation still counts as covered (something
 was tried), no declared response is hit, and the row says how many failed. Status
 `0` never appears as a status the server sent, because no server sent it.
+
+The operations chip is green only when nothing is uncovered, no undeclared status
+was seen, and **no operation got no response**. An operation got no response when
+every request sent for it was a transport error, and a run where all of them did
+reads `6 / 6 operations` in the warning tone with `6 operations got no response.`
+under it, since a connection refused on every send proves nothing about the contract.
 
 Requests whose operation the document does not declare are counted too, as
 `requests went to operations this document does not declare`. That is a

@@ -696,13 +696,29 @@ TEST (ScopeOverlayTest, ThreeScopesResolveInCompositionsPrecedenceOrder) {
     EXPECT_EQ (vars["name"], "from-env");
 }
 
-TEST (ScopeOverlayTest, ClearRemovesEveryWrittenName) {
+// The iteration boundary's reset (#3044): the run-local scope goes, the three
+// saved scopes stay. Mutation check: clear every scope in `clear_local` and
+// the saved names read back missing.
+TEST (ScopeOverlayTest, ClearLocalDropsTheLocalScopeAndKeepsTheSavedOnes) {
     ScopeOverlay overlay;
-    overlay.set ("env", "a", "1");
-    overlay.set ("collection", "b", "2");
-    overlay.set ("globals", "c", "3");
-    overlay.clear ();
-    EXPECT_TRUE (overlay.empty ());
+    ScriptVariableScopes written;
+    written.environment["a"] = value_of ("1");
+    written.collection["b"]  = value_of ("2");
+    written.globals["c"]     = value_of ("3");
+    written.local["d"]       = value_of ("4");
+    overlay.replace_from (written);
+    ASSERT_TRUE (overlay.local_values ().contains ("d"));
+
+    overlay.clear_local ();
+
+    EXPECT_TRUE (overlay.local_values ().empty ());
+    auto vars = flatten_variable_scopes ({});
+    overlay.apply_onto (vars);
+    EXPECT_EQ (vars["a"], "1");
+    EXPECT_EQ (vars["b"], "2");
+    EXPECT_EQ (vars["c"], "3");
+    EXPECT_FALSE (vars.contains ("d"))
+    << "the run-local value outlived the reset";
 }
 
 // `materialize` is the one place this issue pays a real copy - only reached

@@ -675,7 +675,7 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) 
     EXPECT_EQ (vars["n"], "1");
     EXPECT_FALSE (base.local.contains ("n")) << "a VU's write reached the base";
 
-    overlay.clear ();
+    overlay.clear_local ();
     scopes_ = overlay.materialize (base);
     run ("pm.expect(pm.variables.get('n')).to.equal('from-env');");
 }

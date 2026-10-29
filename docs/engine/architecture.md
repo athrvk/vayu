@@ -1051,9 +1051,10 @@ through `requestElements` - the mechanism is the same shape, a per-submission
 target has no persistent virtual-user object to hold state on between
 submissions. `control.*`, `timer.pacing` and `timer.throughput` stay a
 scenario-only concern: `validate_request_elements_run_override` refuses them
-outright rather than accepting a kind that would silently no-op or misfire -
-a lone request has no sequence for a jump, skip or transaction to act on, and
-no per-VU or shared pacing state for the kind to read.
+outright (when enabled; a disabled entry is skipped by the pipeline) rather
+than accepting a kind that would silently no-op or misfire - a lone request
+has no sequence for a jump, skip or transaction to act on, and no per-VU or
+shared pacing state for the kind to read.
 
 Two things were deliberately left open: whether a **stored scenario entity**
 ever lands (the seam exists; the demand does not), and a **retry policy** for
@@ -1377,7 +1378,11 @@ row exists - and the executor is the only thing that differs.
   "Not on the load path" bullet, which this strengthens rather than contradicts.
   Each VU's list is seeded onto its own transfer and read back from it
   (`Request::track_cookies`), and emptied at every iteration boundary: a new
-  iteration is a new user, not the same one logging in twice.
+  iteration is a new user, not the same one logging in twice. The variables a
+  VU saved are not (#3044): its `ScopeOverlay` keeps every environment,
+  collection and globals write for the VU's life, so a `control.once` login's
+  token reaches each later iteration, and only the run-local scope is emptied
+  beside the cookies.
 - **Closed-loop only.** `constant_rps` with a `scenario` is a `400`, as is a
   non-zero `rps`/`targetRps` on any mode - an open-loop arrival rate over a
   multi-step sequence is an arrival-rate executor, a named non-goal. The
