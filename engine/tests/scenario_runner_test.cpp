@@ -2088,6 +2088,42 @@ TEST_F (ScenarioRunnerTest, ACycleTripsTheStepBudgetAndTheRunStillFinishes) {
     EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
 }
 
+// A `control.loop` is cut by the same bound, and its message must not blame a
+// script: nothing here calls `setNextRequest`. Mutation check: restore the old
+// "setNextRequest is cycling through" sentence and the control.loop assertion
+// fails.
+TEST_F (ScenarioRunnerTest, ALoopThatOutgrowsTheStepBudgetIsNamedInTheCutOff) {
+    const json loop = { { "id", "el_loop" }, { "kind", "control.loop" },
+        { "enabled", true }, { "config", { { "count", 500 } } } };
+    seed_collection_with_elements ("col_1", "", json::array ({ loop }));
+    seed_request ("req_a", 0, "/ok", "", "", "", "Ping");
+    seed_request ("req_b", 1, "/login", "", "", "", "Pong");
+    set_config ("maxStepsPerIteration", "6");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto rows = db_->get_results (run_id);
+    ASSERT_EQ (rows.size (), 6u);
+    EXPECT_NE (rows[5].error.find ("maxStepsPerIteration"), std::string::npos)
+    << rows[5].error;
+    EXPECT_NE (rows[5].error.find ("control.loop"), std::string::npos)
+    << rows[5].error;
+    EXPECT_NE (rows[5].error.find ("Ping -> Pong"), std::string::npos)
+    << rows[5].error;
+}
+
+TEST (ScenarioStepBudget, TheCutOffMessageNamesEveryJumpSourceAndTheRecentSteps) {
+    const std::deque<std::string> recent{ "Ping", "Pong" };
+    const auto message = vayu::core::describe_steps_cap_exceeded (100, recent);
+
+    EXPECT_NE (message.find ("(100)"), std::string::npos) << message;
+    for (const char* source : { "setNextRequest", "control.switch", "control.loop" }) {
+        EXPECT_NE (message.find (source), std::string::npos) << source << " in " << message;
+    }
+    EXPECT_NE (message.find ("Ping -> Pong"), std::string::npos) << message;
+}
+
 // ============================================================================
 // Flow-control resolution (pure)
 // ============================================================================

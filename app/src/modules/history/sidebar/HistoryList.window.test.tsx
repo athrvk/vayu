@@ -78,9 +78,13 @@ vi.mock("./RunItem", () => ({
 
 const DAY_MS = 86_400_000;
 
-/** Newest first, one per minute from now: every one of them is "Today". */
+/**
+ * Newest first, one per minute back from 23:59 local: every one of them is
+ * "Today" whatever the clock says, where counting back from `Date.now()` spills
+ * into "Yesterday" for a run started in the first hours after midnight.
+ */
 function runsToday(count: number, from = 0): FixtureRun[] {
-	const now = Date.now();
+	const now = new Date().setHours(23, 59, 0, 0);
 	return Array.from({ length: count }, (_, i) => ({
 		id: `r${from + i}`,
 		type: "load" as const,

@@ -194,9 +194,9 @@ function expandRow(title: string) {
  * removing it, so the check reads `isConnected` on the captured node itself
  * rather than asking the accessibility tree whether the role is still there.
  */
-async function chooseRowAction(title: string, action: string) {
+async function chooseRowAction(title: string, action: string, kindLabel = title) {
 	const trigger = within(rowFor(title)).getByRole("button", {
-		name: `More actions for ${title}`,
+		name: `More actions for ${kindLabel}`,
 	});
 	fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
 	fireEvent.click(trigger, { detail: 1 });
@@ -613,6 +613,21 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 		expect(next[1].id).not.toBe("e1");
 		expect(next[1].name).toBe("Extract JSON copy");
 		expect(next[1].config).toEqual({ path: "$.token" });
+	});
+
+	// Mutation check: put `${name} copy` back in `duplicateAt` and the second
+	// duplicate reads "Extract JSON copy copy".
+	it("numbers the copies of a copy instead of stacking the suffix", async () => {
+		render(<StatefulList initial={[extractElement("e1", "$.token")]} />);
+
+		await chooseRowAction("Extract JSON", "Duplicate");
+		await chooseRowAction("Extract JSON copy", "Duplicate", "Extract JSON");
+		await chooseRowAction("Extract JSON copy 2", "Duplicate", "Extract JSON");
+
+		for (const title of ["Extract JSON copy", "Extract JSON copy 2", "Extract JSON copy 3"]) {
+			expect(screen.getByText(title)).toBeInTheDocument();
+		}
+		expect(screen.queryByText(/copy copy/)).not.toBeInTheDocument();
 	});
 
 	/*
