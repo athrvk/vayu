@@ -2784,6 +2784,8 @@ held to the same `maxSpecDocumentBytes` cap as the document, and one over it is 
 `400` naming the count and the cap. A status that declares no schema is a
 status-only row (`{"status": "204", "contentType": ""}`, no `schema`), so a
 response under it reports `checked: false` instead of being judged by `default`.
+An `x-` extension key under `responses` is not a status and is indexed in
+neither list (#3084).
 A document where no operation declares a status stores "no index", read back as
 `null`, and every response of it reports `checked: false` with the reason
 `no_index`.
@@ -11527,7 +11529,7 @@ the index existed all report no block rather than a contract covered zero of.
 | Field | Meaning |
 |---|---|
 | `operationsTotal` / `operationsCovered` | Declared operations, and how many got at least one request |
-| `declaredResponsesTotal` / `declaredResponsesHit` / `declaredResponseCoveragePct` | Declared status patterns, and how many the run produced |
+| `declaredResponsesTotal` / `declaredResponsesHit` / `declaredResponseCoveragePct` | Declared status patterns (an `x-` extension key under `responses` is not one), and how many the run produced |
 | `undeclaredStatusesSeen` | Distinct (operation, status) pairs the document declares nothing for |
 | `operations[]` | Per operation: `sent`, `statusesSeen`, `declaredHit`, `declaredMissed`, `undeclaredSeen`, and `transportErrors` / `otherStatusResponses` / `statusesTruncated` when non-zero |
 | `operations[].statusesTruncated` | Distinct statuses the operation answered with that appear in **neither** list - the two are capped at 50 each and `undeclaredSeen` repeats codes from `statusesSeen`, so this is not the entries the two dropped between them |

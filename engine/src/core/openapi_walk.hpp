@@ -241,9 +241,19 @@ const nlohmann::ordered_json& item) {
     return resolved != nullptr && resolved->is_object () ? resolved : nullptr;
 }
 
+/// Whether a key of an operation's `responses` map names a status. Every key
+/// does except an empty one and a specification extension (`x-` prefix, the
+/// Responses Object's one non-status member). This is deliberately not a digit
+/// test: `default`, `2XX` and a hand-written pattern are statuses the walk keeps
+/// verbatim (#3084). Every reader of `responses` asks it, so the indexes agree.
+inline bool is_declared_status_key (const std::string& key) {
+    return !key.empty () && !key.starts_with ("x-");
+}
+
 /// The status patterns an operation's `responses` map declares, verbatim and in
 /// document order. A `$ref`-ed response object still writes its status *key*
-/// here, so nothing needs resolving to read them.
+/// here, so nothing needs resolving to read them. A specification extension is
+/// not a status (`is_declared_status_key`).
 inline std::vector<std::string> declared_responses_of (const nlohmann::ordered_json& operation) {
     std::vector<std::string> patterns;
     const nlohmann::ordered_json* responses = find_object (operation, "responses");
@@ -251,7 +261,7 @@ inline std::vector<std::string> declared_responses_of (const nlohmann::ordered_j
         return patterns;
     }
     for (auto entry = responses->begin (); entry != responses->end (); ++entry) {
-        if (!entry.key ().empty ()) {
+        if (is_declared_status_key (entry.key ())) {
             patterns.push_back (entry.key ());
         }
     }
