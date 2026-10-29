@@ -435,6 +435,8 @@ existing `scripts` node - one entry per compiled element that ran at `step.befor
 (`step.between` too, for the sequential run), each
 `{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+An extractor's `missing` carries what found nothing as its message (`no match for '$.token'`,
+`no 'X-Request-Id' response header`), required or not (#3051).
 An `assert.*` whose own config leaves it nothing to judge (no operand, a JSONPath or pattern that
 does not compile: all refused when written, so only a row stored before that check reaches this)
 reports `error` with the reason and also records a failed assertion under the same reason, so the

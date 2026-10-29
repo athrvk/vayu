@@ -1172,4 +1172,32 @@ TEST_F (ElementKindsTest, OnlyAnExtractionThatLeftItsVariableUnsetIsAMiss) {
     EXPECT_EQ (vayu::core::count_extractor_misses (outcomes), 2u);
 }
 
+// ---------------------------------------------------------------------------
+// How a miss and an outcome row read (#3051)
+// ---------------------------------------------------------------------------
+
+// A miss says what found nothing, required or not; a `default`-answered one is
+// a hit and says nothing. Mutation check: drop the `outcome_message` write in
+// `write_miss` (extract_kinds.cpp) and the optional miss carries no message.
+TEST_F (ElementKindsTest, AnExtractorMissNamesWhatFoundNothing) {
+    response = ok_json_response (200, R"({"present": 1})");
+    auto required = nlohmann::json{ { "id", "needed" }, { "kind", "extract.json" },
+        { "config", { { "path", "$.nope" }, { "variable", "a" }, { "required", true } } } };
+    const auto outcomes = run_after (vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "optional" }, { "kind", "extract.json" },
+      { "config", { { "path", "$.nope" }, { "variable", "a" } } } },
+    required,
+    nlohmann::json{ { "id", "rescued" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.nope" }, { "variable", "a" }, { "default", "x" } } } } })));
+
+    ASSERT_EQ (outcomes.size (), 3u);
+    EXPECT_EQ (outcomes[0].status, "missing");
+    EXPECT_EQ (message_of (outcomes[0]), "no match for '$.nope'");
+    EXPECT_EQ (outcomes[0].to_json ().value ("message", ""), "no match for '$.nope'");
+    EXPECT_EQ (outcomes[1].status, "missing");
+    EXPECT_EQ (message_of (outcomes[1]), "no match for '$.nope'");
+    EXPECT_EQ (outcomes[2].status, "ok");
+    EXPECT_FALSE (outcomes[2].message.has_value ());
+}
+
 } // namespace

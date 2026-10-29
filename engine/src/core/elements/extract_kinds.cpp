@@ -66,7 +66,8 @@ void unset_match_list (ElementContext& ctx, const std::string& scope, const std:
 
 /// No match. Whatever an earlier response extracted is unset rather than left
 /// in use (#3053); `default`, which names `<variable>` alone, is written in
-/// its place when the config gives one.
+/// its place when the config gives one. A miss carries @p miss_reason as its
+/// outcome message whether or not it is required (#3051).
 void write_miss (ElementContext& ctx,
 const std::string& scope,
 const std::string& variable,
@@ -83,7 +84,8 @@ const std::string& miss_reason) {
         return;
     }
     unset (ctx, scope, variable);
-    ctx.outcome_status = "missing";
+    ctx.outcome_status  = "missing";
+    ctx.outcome_message = miss_reason;
     if (required) {
         mark_required_miss (ctx, variable, miss_reason);
     }
