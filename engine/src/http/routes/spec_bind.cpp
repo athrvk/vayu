@@ -43,7 +43,9 @@
  *
  * Unbinding stays `PUT /collections/:id` with `openapi: null`: it writes one
  * row, deliberately leaves the stamps alone so that unbind-then-rebind is
- * lossless, and has no document to read.
+ * lossless, and has no document to read. Both it and a bind to different bytes
+ * forget the operations deletes declined under the old document (#3031),
+ * which were decisions about that document.
  */
 
 #include "vayu/core/openapi_document.hpp"
@@ -251,6 +253,11 @@ const std::string& content) {
         { "specId", batch.spec.id }, { "specHash", batch.spec.hash }, { "syncedAt", now }
     }.dump ();
     batch.binding.updated_at = now;
+    if (binding_leaves_document (root->openapi, batch.binding.openapi)) {
+        for (const auto& record : db.get_declined_operations (collection_id)) {
+            batch.cleared_declines.push_back (record.id);
+        }
+    }
 
     db.spec_sync_apply (batch);
 

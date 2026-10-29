@@ -1985,6 +1985,36 @@ struct SpecDocument {
     std::string response_schemas;
 };
 
+/**
+ * @brief An operation of a bound document that a person declined by deleting
+ * the request for it (`spec_declined_operations`, schema version 10, #3031).
+ *
+ * A row of its own rather than a flag on the request: a purge removes the
+ * request row, and the decision has to outlive it. `POST /specs/diff` lists the
+ * operation as `declined` instead of `added`, and a `policy: "safe"` sync never
+ * re-creates it. Restoring the request, or a sync that creates the operation
+ * on purpose, forgets the row; purging the request does not.
+ *
+ * The identity is the one `requests.spec_operation` records, so the diff
+ * follows it into a re-fetched document by the rule it follows a request's.
+ */
+struct DeclinedOperation {
+    int64_t id = 0;
+    /// The bound collection the decision was made under: the nearest ancestor
+    /// of the deleted request that binds a document.
+    std::string collection_id;
+    /// `""` for an operation that declares no `operationId`, never NULL, so the
+    /// table's UNIQUE key treats two such rows for one endpoint as one.
+    std::string operation_id;
+    std::string method;
+    std::string path;
+    /// The deleted request whose delete recorded this; restoring it forgets the
+    /// row. A later delete of another request for the same operation takes it
+    /// over.
+    std::string request_id;
+    int64_t created_at = 0;
+};
+
 struct Environment {
     std::string id;
     std::string name;

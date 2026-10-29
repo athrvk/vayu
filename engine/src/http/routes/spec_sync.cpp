@@ -175,6 +175,22 @@ std::string bound_spec_id (const std::string& openapi) {
     }
 }
 
+bool binding_leaves_document (const std::string& before, const std::string& after) {
+    if (bound_spec_id (after).empty ()) {
+        return true;
+    }
+    const auto hash_of = [] (const std::string& openapi) {
+        const auto parsed =
+        nlohmann::json::parse (openapi, nullptr, /*allow_exceptions=*/false);
+        const auto hash = parsed.find ("specHash"); // end () for a non-object
+        return hash != parsed.end () && hash->is_string () ?
+        hash->get<std::string> () :
+        std::string ();
+    };
+    const std::string kept = hash_of (after);
+    return kept.empty () || kept != hash_of (before);
+}
+
 namespace {
 
 /**

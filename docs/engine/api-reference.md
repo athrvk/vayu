@@ -1642,7 +1642,9 @@ explicit `null` on update both resolve to - so **unbinding is
 object (`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is
 a binding and is validated further: `specId` must be a non-empty string that
 resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
-`specHash` a string, `syncedAt` a number.
+`specHash` a string, `syncedAt` a number. A write that unbinds, or binds bytes
+with another `specHash`, forgets the operations deletes declined under the old
+document (issue #3031; see [`DELETE /requests/:id`](#delete-requestsid)).
 
 `specHash` records which *version* of the document the collection was last synced
 to; a scenario run of a bound collection stamps both values into its snapshot and
@@ -1696,6 +1698,14 @@ The walk terminates even if the stored `parent_id` tree contains a cycle (see
 Restore it with [`POST /trash/:id/restore`](#post-trashidrestore); destroy it
 for good with [`DELETE /trash/:id`](#delete-trashid), which is also what the
 startup sweep does once `trashRetentionDays` has passed.
+
+**Beneath a bound collection, the delete declines operations** (issue #3031),
+as [`DELETE /requests/:id`](#delete-requestsid) does for one request: each
+request it stamps that records an operation is recorded under the nearest bound
+ancestor, in the same transaction. Deleting a tag folder is the user declining
+everything in it. Deleting the bound collection itself records nothing - that
+is the whole contract going, not a choice about any operation of it - and a
+purge of a bound collection takes its records with it.
 
 **Response:**
 ```json
@@ -2139,6 +2149,19 @@ every read of them is by request id and runs the owner check first, so they are
 as unreachable as the request is, and a restore gets them back with it. A purge
 takes them.
 
+**Deleting the request for an operation declines the operation** (issue
+#3031). When the request records an operation (`specOperation`) and a
+collection above it binds a document, the same transaction records that
+operation under the nearest bound ancestor in `spec_declined_operations`.
+[`POST /specs/diff`](#post-specsdiff) then lists the operation as `declined`
+rather than `added`, and a `policy: "safe"` [sync](#post-specssync) never
+re-creates it, so a sync of the unchanged document cannot bring the request
+back. Restoring the request from the trash forgets the record, and so does a
+sync that creates the operation on purpose; purging the request, by hand or by
+`trashRetentionDays`, does not - the decision outlives the row it was made on.
+Unbinding the collection, or binding it to a document with other bytes, forgets
+every record under it. A sync's own deletes record nothing.
+
 **Response:**
 ```json
 {
@@ -2337,7 +2360,9 @@ back, with everything the same delete took. Takes no body. An environment comes
 back exactly as it was deleted except that it is inactive (see [Trash](#trash)),
 and its answer carries `variables` like its list entry. An example comes back
 exactly as it was deleted, `order` included, and so does a client certificate,
-passphrase included.
+passphrase included. A restored request, alone or with its collection, takes
+back the operation its delete declined (issue #3031), so the next sync sees it
+claimed again.
 
 **Response:** the entry that was restored, plus what happened to it:
 ```json
@@ -2378,6 +2403,10 @@ is reachable by no read and restorable by nothing. It takes deleted rows only
 (issue #1883): a live collection under the purged one, which no trash entry ever
 listed, is moved to the tree root (`parentId` cleared) with everything under it
 left as it was.
+
+A purged request's declined operation (issue #3031) stays declined: purging is
+emptying the trash, not changing one's mind. A purged *bound* collection takes
+the declined operations recorded under it, which nothing could read any more.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
 `collections` / `requests` are the deleted row's own cohort, so they are a floor
@@ -3212,6 +3241,12 @@ operation of the new document shares the id rather than going unread.
 a request under another collection keeps its own stamp even when it would have
 matched.
 
+**A bind to other bytes forgets the declined operations** (issue #3031). The
+operations deletes declined under the collection (see
+[`DELETE /requests/:id`](#delete-requestsid)) were decisions about the document
+it was bound to, so a bind whose document hashes differently from the bound one
+forgets them in the same transaction; a bind to the same bytes keeps them.
+
 **Errors:** `400` for a malformed body, an engine-owned field, a document over
 the cap, or one that cannot be read as JSON or YAML - and in that last case
 nothing is written, so the collection stays bound to whatever it was bound to.
@@ -3219,7 +3254,8 @@ nothing is written, so the collection stays bound to whatever it was bound to.
 
 Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null`, which
 writes one row, leaves every stamp in place - so unbind-then-rebind of the same
-document is lossless - and has no document to read.
+document is lossless - and has no document to read. It does forget the declined
+operations, in the same transaction, as a bind to other bytes does.
 
 ### POST /specs/export
 

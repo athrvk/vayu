@@ -251,7 +251,9 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
     // and `policy: "safe"` refuses deletions outright. Stamping them would fill
     // the trash with operations a document dropped, where restoring one puts
     // back a request the current document cannot explain. A caller that wants
-    // them recoverable omits them here and calls `DELETE /requests/:id`.
+    // them recoverable omits them here and calls `DELETE /requests/:id`. For
+    // the same reason they record no declined operation (#3031): the document
+    // dropped the operation, nobody declined it.
     for (const auto& id : batch.deleted) {
         impl_->storage.remove_all<RequestExample> (
         where (c (&RequestExample::request_id) == id));
@@ -259,6 +261,10 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
     }
     for (const auto& id : batch.deleted_examples) {
         impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
+    }
+    for (const auto id : batch.cleared_declines) {
+        impl_->storage.remove_all<DeclinedOperation> (
+        where (c (&DeclinedOperation::id) == id));
     }
 
     impl_->storage.replace (batch.spec);

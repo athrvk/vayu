@@ -1192,6 +1192,15 @@ const std::unordered_set<std::string>& subtree);
 std::string bound_spec_id (const std::string& openapi);
 
 /**
+ * Whether a collection whose binding went from @p before to @p after has left
+ * the document its declined operations (#3031) were decided against: it binds
+ * nothing now, or bytes with a different `specHash`. Rebinding the same bytes
+ * keeps them. Shared by `POST /specs/bind` and `PUT /collections/:id`, the two
+ * writes that move a binding without syncing. Defined in spec_sync.cpp.
+ */
+bool binding_leaves_document (const std::string& before, const std::string& after);
+
+/**
  * The identity as `requests.spec_operation` stores it, and as every spec route
  * answers with it.
  *

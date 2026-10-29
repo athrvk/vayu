@@ -71,9 +71,11 @@ namespace vayu::db {
  *     `request_examples.deleted_at`, the example trash (#2971), and
  *     `client_certificates.deleted_at`, the certificate trash (#2973), all
  *     folded into the same unreleased version; the partial index
- *     `idx_requests_deleted_at` (#3006) joins it too.
+ *     `idx_requests_deleted_at` (#3006) joins it too;
+ * 10 - `spec_declined_operations`, the operations a person declined by
+ *     deleting their request (#3031).
  */
-inline constexpr int SCHEMA_VERSION = 9;
+inline constexpr int SCHEMA_VERSION = 10;
 
 /**
  * @brief A TEXT column's bytes as the `const char*` every caller wants.
@@ -315,6 +317,10 @@ struct SpecSyncBatch {
     /// The imported example rows @ref examples replaces. Ids, because the row
     /// they name is stored and only its identity matters here.
     std::vector<std::string> deleted_examples;
+    /// `spec_declined_operations` rows this write forgets (#3031): those a
+    /// created request takes back, or all of the collection's when a bind
+    /// moves it to a different document.
+    std::vector<int64_t> cleared_declines;
 };
 
 /**
@@ -421,7 +427,20 @@ class Database {
     /// Stamps the collection and its whole subtree as deleted rather than
     /// removing them (issue #988). `GET /trash` lists it, restore puts it back
     /// and purge is what finally destroys it.
-    void delete_collection (const std::string& id);
+    ///
+    /// @param declined_under the bound collection above @p id, when there is
+    ///        one: each request this delete stamps that records an operation
+    ///        is recorded as declined under it, in the same transaction
+    ///        (#3031). The route resolves it, and leaves it empty when the
+    ///        deleted collection is itself the bound one - deleting a whole
+    ///        bound tree is not a decision about any one operation.
+    void delete_collection (const std::string& id,
+    const std::optional<std::string>& declined_under = std::nullopt);
+    /// Writes @p collection as `create_collection` does and, in the same transaction,
+    /// forgets every operation declined under it (#3031): what a write that
+    /// moves its binding off the document those deletes were decided against
+    /// runs.
+    void rebind_collection (const Collection& collection); // db_collections.cpp
 
     void save_request (const Request& r);
     /// Live only - see `get_collection` (issue #988).
@@ -463,7 +482,17 @@ class Database {
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
     /// takes them with it.
-    void delete_request (const std::string& id);
+    ///
+    /// @param declined_under the bound collection the request answers to
+    ///        (`core::nearest_spec_binding`, resolved by the route): when the
+    ///        request records an operation, the operation is recorded as
+    ///        declined under it in the same transaction (#3031). Empty records
+    ///        nothing.
+    void delete_request (const std::string& id,
+    const std::optional<std::string>& declined_under = std::nullopt);
+    /// The operations deletes declined under the bound collection
+    /// @p collection_id (#3031), in the order they were recorded.
+    std::vector<DeclinedOperation> get_declined_operations (const std::string& collection_id);
 
     // Trash - what soft delete left behind (issue #988)
 
@@ -1433,6 +1462,24 @@ class Database {
      *        back under. The caller must already hold the DB mutex.
      */
     bool request_is_absent_locked (const std::string& request_id); // db_requests.cpp
+
+    /**
+     * @brief Record that deleting @p request declined the operation it
+     *        records, under the bound collection @p collection_id (#3031).
+     *
+     * Nothing for a request whose `spec_operation` names no whole identity.
+     * One row per operation under one binding: a second delete for it takes
+     * the row over. Shared by `delete_request` and `delete_collection`; the
+     * caller holds the DB mutex and is inside the delete's own transaction.
+     */
+    void record_declined_operation_locked (const std::string& collection_id,
+    const Request& request,
+    int64_t now); // db_requests.cpp
+
+    /// Forgets the record @p request_id's delete wrote, the half of a restore
+    /// that puts the operation back in the sync's hands (#3031). Same scope
+    /// rule as `record_declined_operation_locked`.
+    void forget_declined_by_locked (const std::string& request_id); // db_requests.cpp
 
     /**
      * @brief The five shapes of `restore_deleted`, split by what a row can

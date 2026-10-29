@@ -13,6 +13,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/list_page.hpp"
@@ -908,6 +909,36 @@ const nlohmann::json& json) {
     return update_request_response (db, id, json, std::nullopt, nullptr);
 }
 
+/**
+ * Testable core of DELETE /requests/:id, returning {http_status, json_body}.
+ *
+ * A request that records an operation of a bound document is that operation
+ * declined (#3031): the delete records it under the binding that answers for
+ * the request, `core::nearest_spec_binding`'s walk, so a later sync lists it
+ * apart from what the document adds and a safe one leaves it out. The lookup,
+ * the walk and the delete are one lock scope, or a binding moved in between
+ * would be recorded against.
+ */
+std::pair<int, nlohmann::json>
+delete_request_response (vayu::db::Database& db, const std::string& id) {
+    std::pair<int, nlohmann::json> result;
+    db.with_lock ([&] {
+        const auto request = db.get_request (id);
+        if (!request) {
+            result = { 404, error_body (404, "Request not found") };
+            return;
+        }
+        std::optional<std::string> declined_under;
+        if (const auto bound = vayu::core::nearest_spec_binding (db, request->collection_id)) {
+            declined_under = bound->collection_id;
+        }
+        db.delete_request (id, declined_under);
+        result = { 200,
+            nlohmann::json{ { "message", "Request deleted successfully" }, { "id", id } } };
+    });
+    return result;
+}
+
 namespace {
 
 /// `POST /requests`, registered below.
@@ -1072,7 +1103,8 @@ void register_request_routes (RouteContext& ctx) {
 
     /**
      * DELETE /requests/:id
-     * Deletes a request from the database.
+     * Moves a request to the trash; an operation of a bound document it
+     * records is recorded as declined (#3031).
      * Path params: id - The request ID to delete.
      * Returns: Success message or 404 if not found.
      */
@@ -1080,22 +1112,16 @@ void register_request_routes (RouteContext& ctx) {
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         std::string request_id = req.matches[1];
         try {
-            auto request = ctx.db.get_request (request_id);
-            if (!request) {
+            auto [status, body] = delete_request_response (ctx.db, request_id);
+            if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "DELETE /requests/:id - Request not found: " + request_id);
-                send_error (res, 404, "Request not found");
-                return;
+            } else {
+                vayu::utils::log_info ("http", "Successfully deleted request",
+                { { "id", request_id } });
             }
-
-            ctx.db.delete_request (request_id);
-            vayu::utils::log_info ("http", "Successfully deleted request",
-            { { "id", request_id }, { "name", request->name } });
-
-            nlohmann::json response;
-            response["message"] = "Request deleted successfully";
-            response["id"]      = request_id;
-            res.set_content (response.dump (), "application/json");
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {
             vayu::utils::log_error (
             "http", "DELETE /requests/:id - Error: " + std::string (e.what ()));

@@ -300,7 +300,7 @@ so `Database::Database`'s constructor - `engine/src/db/database.cpp` - can call 
 `sync_schema ()`, including the constructor's own validation probe) opens `path` with a raw
 `sqlite3` connection, independent of `sqlite_orm`:
 
-1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `9`, see [Schema versions](#schema-versions)) throws
+1. **Read `PRAGMA user_version`.** Newer than this engine's `SCHEMA_VERSION` (currently `10`, see [Schema versions](#schema-versions)) throws
    `std::runtime_error` naming both versions - not inside the constructor's probe/recovery
    try-catch, so the exception reaches the daemon's own startup failure path, naming both versions,
    rather than surfacing from the probe as a generic refusal to examine the file. Equal to `SCHEMA_VERSION`
@@ -450,6 +450,7 @@ version over a newer workspace; restore a Workspace backup first if you must.
 | `7` | No mapping change. A collection's sub-folders and requests share one `order` space (#2535); every request moves past its collection's sub-folders so the display is unchanged. An engine at `6` would number the two kinds apart again on its next create or reorder | [the sibling-order migration](#the-sibling-order-migration-schema-version-7) |
 | `8` | [`collections.spec_file` and `data_file`](#collections) added (#2765): the files a collection's Spec and Data tabs are bound to, so a backup carries them | none: `sync_schema ()` adds both defaulted columns, the migration only stamps |
 | `9` | [`requests.timeout_ms`](#requests) added (#2937): a request's own timeout, NULL for the `defaultTimeout` setting; [`environments.deleted_at`](#environments) added (#2970): the environment trash; [`request_examples.deleted_at`](#request_examples) added (#2971): the example trash; [`client_certificates.deleted_at`](#client_certificates) added (#2973): the certificate trash; [`idx_requests_deleted_at`](#indexes) added (#3006): a partial index on the stamped requests | none: `sync_schema ()` adds the nullable columns and creates the index, the migration only stamps |
+| `10` | [`spec_declined_operations`](#spec_declined_operations) added (#3031): the operations a person declined by deleting the request for them, so a sync does not re-create them. An engine at `9` does not know the table, so it would re-create every declined operation on its next sync | none: `sync_schema ()` creates the table, the migration only stamps |
 
 The #1765 columns joined version `2` rather than bumping to `3` because no
 released build has ever stamped `2`: the version shipped only on the unreleased
@@ -519,6 +520,11 @@ included, and `sync_schema ()` creates it on every start whatever the stamp, so
 a database an earlier build of this branch stamped `9` still gets it. If a
 release shipped `9` without it, it needs its own bump and its own row here. The release that carries `9` names #3006 beside #2971, #2970 and
 #2937 under Changed.
+
+Version `10` is a bump of its own: `0.46.0` released `9`. **Merge gate:** the
+`git grep` against the last tag must show `9`; a change that joins `10` later
+must check the tag the same way. The release that carries `10` says so under
+Changed, naming #3031.
 
 ---
 
@@ -1263,6 +1269,60 @@ with the count and the cap rather than truncated.
 
 The table itself was new when it landed, so `sync_schema()` created it outright;
 `operations` and `response_schemas` are its migrated columns.
+
+---
+
+### `spec_declined_operations`
+
+The operations a person declined by deleting the request for them (schema
+version 10, #3031), so that a sync of the document does not re-create them.
+[`POST /specs/diff`](api-reference.md#post-specsdiff) lists such an operation
+under `declined` instead of `added`, and a `policy: "safe"` sync never creates
+it.
+
+| Column          | Type       | Notes                                                       |
+|-----------------|------------|-------------------------------------------------------------|
+| `id`            | INTEGER PK | Autoincrement; never leaves the engine                      |
+| `collection_id` | TEXT       | The bound collection the decision was made under            |
+| `operation_id`  | TEXT       | The operation's `operationId`, `""` when it declares none   |
+| `method`        | TEXT       | The identity's method, as `requests.spec_operation` records it |
+| `path`          | TEXT       | The identity's path template                                |
+| `request_id`    | TEXT       | The deleted request whose delete wrote the row              |
+| `created_at`    | INTEGER    | Unix ms; the delete's own stamp                             |
+
+`UNIQUE (collection_id, method, path, operation_id)`: one row per operation
+under one binding, and a second request's delete for the same operation takes
+the row over (`request_id` moves to it). `operation_id` is `""` rather than NULL
+for that reason - SQLite treats two NULLs as distinct, so a NULL would let one
+endpoint hold two rows. The constraint's own index serves every read, which is
+by `collection_id`.
+
+**A row of its own rather than a flag on the request**, because the decision
+has to outlive the request row: a purge removes it. Who writes and forgets a row,
+each in the transaction of the write named:
+
+- **Written** by a person's delete: `DELETE /requests/:id` of a request whose
+  `spec_operation` names a whole identity (method and path), and
+  `DELETE /collections/:id` for each such request its own delete stamps. The
+  collection is the nearest ancestor that binds a document
+  (`core::nearest_spec_binding`, resolved by the route and passed in, so
+  `Database` reads no binding itself). Deleting the bound collection itself
+  writes nothing. A sync's own (hard) deletes write nothing.
+- **Forgotten** when the request comes back from the trash (by `request_id`,
+  alone or with its collection's cohort); when a `POST /specs/sync` creates a
+  request for the same operation (`core::declines_taken_back`, the diff's own
+  identity rule run against the document being stored); when
+  `PUT /collections/:id` unbinds the collection, or it or `POST /specs/bind`
+  binds it to a document with another `specHash`; and when the bound collection
+  itself is purged.
+- **Kept** when the deleted request is purged, by hand or by
+  `trashRetentionDays`: emptying the trash is not changing one's mind.
+
+The identity is read the way the diff reads a request's
+(`core::parse_spec_identity`), and the diff follows a row into a re-fetched
+document by the rule it follows a request with (`operationId` first, method and
+path shape second), so a declined operation the document renamed is still the
+declined one. A live request claiming the operation outranks the row.
 
 ---
 
