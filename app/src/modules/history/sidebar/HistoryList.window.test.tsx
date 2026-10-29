@@ -95,6 +95,10 @@ function runsToday(count: number, from = 0): FixtureRun[] {
 let reachEnd: (() => void) | null = null;
 
 beforeEach(() => {
+	// The fixtures run backwards a minute at a time (GROWING_WINDOW_STEP + 20 rows
+	// is about 3.7 hours), so a run in the small hours would reach "Yesterday".
+	// Only Date is faked: timers and waitFor stay real.
+	vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 5, 15, 12, 0, 0) });
 	reachEnd = null;
 	queryState.hasNextPage = false;
 	useHistoryStore.getState().resetFilters();
@@ -118,6 +122,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 
