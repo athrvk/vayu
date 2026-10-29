@@ -2508,6 +2508,116 @@ TEST_F (ScenarioLoadTest, TwoVirtualUsersKeepTheirOwnSavedTokenAcrossIterations)
     EXPECT_EQ (distinct.size (), 2u) << "the two users sent the same token";
 }
 
+// ----------------------------------------------------------------------------
+// An extractor's miss unsets the variable (#3053): the VU's own earlier value
+// goes, and the run's stored value is hidden for that VU alone.
+// ----------------------------------------------------------------------------
+
+namespace {
+
+/// `col_test`, the collection `plan_over` names, storing `token=old`: the
+/// shared base value an overlay cannot erase, only hide.
+void store_old_token (vayu::db::Database& db) {
+    vayu::db::Collection collection;
+    collection.id         = "col_test";
+    collection.name       = "Collection";
+    collection.variables  = R"({"token":{"value":"old","enabled":true}})";
+    collection.created_at = 1;
+    collection.updated_at = 1;
+    db.create_collection (collection);
+}
+
+} // namespace
+
+// Each row picks the endpoint step 0 extracts from: `/login` answers a token,
+// `/s0` answers `{}`. Mutation check: drop the `unset` in `write_miss`
+// (extract_kinds.cpp) and the second iteration sends `Bearer tok-1` again.
+TEST_F (ScenarioLoadTest, AMissSendsTheUnresolvedNameNotTheLastIterationsValue) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/{{data.from}}"), server.url ("/echo") });
+    execution.plan.steps[1].request.headers["Authorization"] =
+    "Bearer {{token}}";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+    with_data (execution,
+    { json{ { "from", "login" } }, json{ { "from", "s0" } }, json{ { "from", "login" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 3u);
+    EXPECT_EQ (echoes[0].authorization, "Bearer tok-1");
+    EXPECT_EQ (echoes[1].authorization, "Bearer {{token}}")
+    << "iteration 2's miss left iteration 1's token in use";
+    EXPECT_EQ (echoes[2].authorization, "Bearer tok-2")
+    << "a later hit sets it again";
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][1]["unresolvedTokens"], 1);
+}
+
+// A `control.once` login that misses: the stored `token=old` is hidden from
+// iteration 1 on, through the inline script after the extractor
+// (`materialize`, then `replace_from`) and every later iteration's
+// `clear_local`. Mutation check: clear the tombstones in `clear_local` and
+// iterations 2 and 3 send `Bearer old`.
+TEST_F (ScenarioLoadTest, AMissHidesTheStoredValueForEveryLaterIteration) {
+    store_old_token (*db_);
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_once" }, { "kind", "control.once" },
+      { "enabled", true }, { "config", json::object () } },
+    vayu::tests::extract_json_element_json ("el_token", "$.absent", "token"),
+    vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.collectionVariables.set('seen', 'yes');", /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    run (config, execution, /*pool_size=*/1);
+
+    ASSERT_EQ (server.hits_for ("/login").size (), 1u);
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 3u);
+    for (size_t i = 0; i < echoes.size (); ++i) {
+        EXPECT_EQ (echoes[i].authorization, "Bearer {{token}}")
+        << "iteration " << i + 1 << " sent the stored value the miss unset";
+    }
+}
+
+// Two VUs over one stored `token=old`: the `s0` row's VU runs the extractor
+// and misses, the `s1` row's VU skips step 0 (`control.if`) and extracts
+// nothing. The `/login` rendezvous holds the second until the first has
+// missed, so a tombstone that reached the shared base would show. Each step 2
+// names its row's VU.
+TEST_F (ScenarioLoadTest, AMissHidesTheStoredValueForThatVirtualUserAlone) {
+    store_old_token (*db_);
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_over ({ server.url ("/{{data.from}}"),
+    server.url ("/login"), server.url ("/row/{{data.from}}") });
+    execution.plan.steps[2].request.headers["Authorization"] =
+    "Bearer {{token}}";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_if" }, { "kind", "control.if" }, { "enabled", true },
+      { "config", { { "condition", "{{data.from}} == s0" } } } },
+    vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+    with_data (execution, { json{ { "from", "s0" } }, json{ { "from", "s1" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    const auto missed  = server.hits_for ("/row/s0");
+    const auto skipped = server.hits_for ("/row/s1");
+    ASSERT_EQ (missed.size (), 1u);
+    ASSERT_EQ (skipped.size (), 1u);
+    EXPECT_EQ (missed[0].authorization, "Bearer {{token}}");
+    EXPECT_EQ (skipped[0].authorization, "Bearer old")
+    << "one virtual user's unset reached another's view of the stored value";
+}
+
 // Without the `inline` mark, a `script.post` element stays exactly where it
 // always was - deferred to the post-run replay - and the run's wire traffic
 // is byte-for-byte what it was before issue #1495: `{{token}}` reaches the

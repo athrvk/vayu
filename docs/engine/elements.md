@@ -154,7 +154,14 @@ convention: `1`-based picks a match, `0` picks one at random, `-1` writes every 
 were found (document order for `extract.json`, leftmost first for the two text extractors).
 `extract.header` has no `matchNo`: it reads the header's one value, and a header the response repeats
 is already folded into one comma-joined value by the transport, so two `Set-Cookie` lines extract as
-`a=1, b=2` with no way to pick one. A miss without a `default`
+`a=1, b=2` with no way to pick one. A miss writes `default` when the config gives one. Without
+one it unsets the variable in its `scope` (#3053), so a later `{{name}}` stays unresolved (and is
+counted as unresolved on a load run) rather than sending what an earlier iteration or a stored row
+held: the name is removed from the stored environment, collection or globals row too when the run
+persists, and an ancestor collection's value of the same name answers again, because an extractor
+writes the leaf collection only. With `matchNo: -1` a miss also unsets `<variable>_matchNr` and
+every `<variable>_<k>`, whatever the `default` (it names `<variable>` alone), and a hit unsets the
+numbered names past its own count, so a shorter list never inherits a longer one's tail. A miss
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
@@ -248,7 +255,8 @@ like any other required miss, even when it has a `default` (that stands in for a
 match, not for a body that was never read). A load run counts both as failed assertions (the
 per-step tally still files the extractor's `missing` under `skipped`, below) and keeps no message
 per failure. An `extract.json` without `required` reports `skipped`
-with the same reason and writes nothing. `metric.record`'s `jsonpath` source reads the same shared
+with the same reason and writes nothing; required or not, it unsets what an earlier response left,
+as a miss does. `metric.record`'s `jsonpath` source reads the same shared
 parse, so it reports `missing` there. The text-reading
 kinds (`extract.regex`, `assert.contains`, `extract.boundary`) are not bounded by it: they read the
 body in place, and RE2's linear-time search is what keeps a large one safe.
@@ -473,7 +481,13 @@ merged on top - proportional to what the VU actually wrote, not to the run's who
 set. An inline script needs the full, mutable scopes `pm.environment.set` writes through, so
 it runs against a `materialize`d copy (base scopes plus the VU's prior overlay) and whatever
 comes out replaces the VU's overlay wholesale - equivalent to a diff, since the copy already
-started as "base plus every override this VU has made so far."
+started as "base plus every override this VU has made so far." An extractor's miss cannot erase
+a shared base value, so the overlay keeps a tombstone for it (#3053): that scope's base value of
+the name reads as absent for this VU alone - in the residual pass, a controller's template and a
+`materialize`d copy - until the VU sets the name again. It lasts as long as the VU's saved
+writes, through the iteration boundary and an inline script's replace. A script's own
+`pm.environment.unset` of a base name writes no tombstone, so under load the base value still
+answers after it.
 
 **One `ScriptEngine` per thread, not a shared pool.** Every load run's worker threads - the
 strategy thread and each event-loop worker - are spawned fresh for that run and joined before

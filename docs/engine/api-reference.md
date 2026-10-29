@@ -8236,7 +8236,8 @@ ran), and from rows stored before this key existed.
 After the post-request elements run, the engine writes back the three variable
 scopes (the run's environment, globals, and the executed request's collection) -
 but only for a scope whose variables a script or an `extract.*` element actually
-changed. A run that sets no variable writes nothing at all, so it does not move
+changed, a name removed included (an unset, or an extractor's miss with no
+`default`, #3053). A run that sets no variable writes nothing at all, so it does not move
 a collection's or environment's `updatedAt`. Each variable round-trips whole,
 `createdAt` included; see [VariableValue shape](db-schema.md#variablevalue-shape)
 for why that field must survive and who may stamp it.
@@ -9567,8 +9568,10 @@ knob.
   `pm.environment.set`) is visible only to that same user's later steps, never
   to another user's concurrent one. Those saved names outlive the iteration
   that wrote them (#3044): a `control.once` login's extracted token still
-  answers every later iteration of that user. What resets at each iteration
-  boundary is the user's cookies and its run-local scope
+  answers every later iteration of that user. An extractor's miss with no
+  `default` unsets its name the same way (#3053): for that user alone, a value
+  the run's stored scopes hold included, until the user sets it again. What
+  resets at each iteration boundary is the user's cookies and its run-local scope
   (`pm.variables.set`); a bound data row's columns are the new row's.
   `pm.execution` still throws - a *script*
   cannot redirect the sequence under load. A **controller** element can
