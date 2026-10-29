@@ -329,9 +329,15 @@ size_t resolve_max_steps_per_iteration (int configured, size_t plan_steps) {
 
 std::string describe_steps_cap_exceeded (size_t max_steps_per_iteration,
 const std::deque<std::string>& recent_steps) {
+    // A jump reaches the runner as a bare target, whether a script's
+    // `setNextRequest`, a `control.switch` or a `control.loop` made it, so the
+    // message names every source rather than guess at one.
     return "Iteration exceeded maxStepsPerIteration (" +
     std::to_string (max_steps_per_iteration) +
-    ") - setNextRequest is cycling through: " + describe_recent_steps (recent_steps);
+    ") - a jump keeps sending it back, either setNextRequest or control.switch "
+    "cycling, or a control.loop whose count times its folder's members passes "
+    "the limit (raise maxStepsPerIteration for that); most recent steps: " +
+    describe_recent_steps (recent_steps);
 }
 
 const char* to_string (StepOutcome outcome) {
