@@ -1066,6 +1066,9 @@ it is on - and the report records it beside the tally, so the **Schema
 validation** block on a run started this way says the contract was a gate. A
 failure count means a different thing with the gate than without, and that line
 is where a reader coming back to an old run finds out which they are looking at.
+The gate moves the step's outcome and the run's failed-step count, never the
+HTTP counters: a step failed only by the contract stays a `200` in the status
+codes and adds nothing to `failedRequests` or the error rate.
 
 From MCP, `run_collection` takes the same switch on the same terms (issue #766):
 `failOnSchemaError: true` runs the collection in design mode with the contract
