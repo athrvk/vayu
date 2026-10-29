@@ -619,8 +619,8 @@ logged as a warning: it means a client skipped composition.
   joined with a blank line in compile order, not only the first one - the
   same join `read_script` always did before this run shape had elements).
   Only the phase-0 kinds #1514 gave the design send run here at all -
-  `validate_request_elements_run_override` refuses an enabled `control.*` kind,
-  `timer.pacing` and `timer.throughput` by name (naming the element's label
+  `validate_request_elements_run_override` refuses any other enabled kind
+  (`control.*`, `metric.*`, `timer.pacing`, `timer.throughput`) by name (naming the element's label
   and `origin`, never its index in the merged list; a disabled entry passes,
   #3050), because none of the state
   they need (`controller_state`, `pacing_state`, a plan-wide throughput

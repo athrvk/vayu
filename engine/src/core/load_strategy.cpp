@@ -496,6 +496,7 @@ namespace {
  */
 constexpr std::array<std::string_view, 10> REQUEST_ELEMENTS_SUPPORTED_KINDS{
     "extract.json",
+    "extract.header",
     "extract.regex",
     "extract.boundary",
     "assert.status",

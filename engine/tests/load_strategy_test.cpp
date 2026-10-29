@@ -2863,6 +2863,18 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsEveryPhaseZeroExtractAndA
     EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
 }
 
+// `extract.header` reads only the response headers and writes a variable, both
+// bound on this path (#3070). Mutation check: drop "extract.header" from
+// `REQUEST_ELEMENTS_SUPPORTED_KINDS` and this reddens on the scenario-only
+// refusal.
+TEST (RequestElementsRunOverrideValidationTest, AcceptsAnExtractHeaderElement) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_header" }, { "kind", "extract.header" },
+    { "config", { { "header", "X-Request-Id" }, { "variable", "requestId" } } } } }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
 // The same `stamp_default_element_ids` default `lifecycleElements` gets:
 // `Registry::validate` refuses an id-less entry outright, and a caller that
 // names no id must get one rather than a 400 asking it to invent one.
@@ -3075,6 +3087,32 @@ TEST_F (LoadStrategyTest, AnUnreadableBodyFailsAJsonAssertionOnEverySubmission) 
     const auto extractor = element_entry (summary, "el_extract");
     ASSERT_FALSE (extractor.is_null ()) << summary.dump ();
     EXPECT_EQ (extractor["failed"], 0u) << "an optional extractor never fails";
+}
+
+// `extract.header` runs on every submission of a single-request run (#3070):
+// a header the response carries is found whatever its case, and one it lacks
+// tallies `skipped` (the "missing" outcome). The whitelist itself is held by
+// `AcceptsAnExtractHeaderElement`; this drives the run past it.
+TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmission) {
+    const size_t ITERATIONS = 3;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-elements-extract-header",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ nlohmann::json{ { "id", "el_found" }, { "kind", "extract.header" },
+                             { "config", { { "header", "content-type" }, { "variable", "contentType" } } } },
+    nlohmann::json{ { "id", "el_missing" }, { "kind", "extract.header" },
+    { "config", { { "header", "X-Absent" }, { "variable", "absent" } } } } })));
+
+    const auto found = element_entry (summary, "el_found");
+    ASSERT_FALSE (found.is_null ()) << summary.dump ();
+    EXPECT_EQ (found["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (found["failed"], 0u) << summary.dump ();
+
+    const auto missing = element_entry (summary, "el_missing");
+    ASSERT_FALSE (missing.is_null ()) << summary.dump ();
+    EXPECT_EQ (missing["skipped"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (missing["passed"], 0u) << summary.dump ();
 }
 
 // An inline `script.pre` mutates the request the submission actually sends,
