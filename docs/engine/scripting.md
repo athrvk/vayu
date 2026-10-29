@@ -1849,7 +1849,7 @@ How long it lives is the run that owns it:
 |---|---|
 | A single Send or `POST /execute` (buffered or streaming) | that send: the pre-request script, the send and the test script |
 | A collection run | the whole run - every step of every iteration, `script.setup` and `script.teardown` included - and is discarded when the run ends |
-| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary with the user's other writes |
+| A scenario load run | one virtual user's iteration: each user holds its own, empty at the start and cleared at its iteration boundary; the user's environment, collection and globals writes are not local and carry on (#3044) |
 | A single-request load run with `requestElements` | one submission, starting empty |
 | A load run's deferred `tests` replay | the replay pass: one scope, empty at the start and shared by every replayed sample of every step, as the replay's other writes are; never stored |
 
@@ -4024,8 +4024,10 @@ throws under load (`in_scenario` is `false`): an inline script can write
 state and mutate the request, the same way `script.pre` always could, but it
 cannot redirect the sequence - that stays the deferred replay's own script
 and, eventually, a `control.*` element's job, neither of which runs inline.
-The overlay is cleared at the same iteration boundary `pm.cookies`' per-VU
-jar is, for the same reason: a new iteration is a new user.
+What the overlay holds for the environment, collection and globals scopes
+lives as long as the VU (#3044), so a `control.once` login's token reaches
+every later iteration; only its run-local scope is emptied at the iteration
+boundary, where `pm.cookies`' per-VU jar is.
 
 **A single-request load run's `requestElements` dispatch the same way, per
 submission rather than per VU (issue #1594) - there is no persistent VU

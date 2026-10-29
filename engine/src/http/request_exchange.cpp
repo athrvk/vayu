@@ -889,10 +889,7 @@ void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes) {
     local_       = scopes.local;
 }
 
-void ScopeOverlay::clear () {
-    environment_.clear ();
-    collection_.clear ();
-    globals_.clear ();
+void ScopeOverlay::clear_local () {
     local_.clear ();
 }
 

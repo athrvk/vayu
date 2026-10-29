@@ -29,6 +29,10 @@ std::string transaction_sum_key (const std::string& element_id, size_t iteration
     return element_id + "#" + std::to_string (iteration) + "#sum";
 }
 
+std::string transaction_error_key (const std::string& element_id, size_t iteration) {
+    return element_id + "#" + std::to_string (iteration) + "#err";
+}
+
 SharedThroughputCounters::SharedThroughputCounters (const ScenarioPlan& plan) {
     const auto& registry = Registry::instance ();
     for (const auto& step : plan.steps) {
@@ -73,9 +77,14 @@ std::unordered_map<std::string, int64_t>& controller_state) {
         }
         const auto span = spans.find (compiled.id);
         if (span == spans.end () || span->second.last == step_index) {
-            continue; // Unspanned, or this occurrence already closed it.
+            continue; // Unspanned, or a wait after the folder's last member.
         }
-        controller_state[transaction_sum_key (compiled.id, iteration)] += wait_ms * 1000;
+        const auto sum =
+        controller_state.find (transaction_sum_key (compiled.id, iteration));
+        if (sum == controller_state.end ()) {
+            continue; // No member of this pass has run yet.
+        }
+        sum->second += wait_ms * 1000;
     }
 }
 

@@ -13,7 +13,7 @@
 
 import { useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
-import type { LoadTestConfig, OAuth2Config } from "@/types";
+import type { LoadTestConfig, OAuth2Config, ResolvedElement } from "@/types";
 import { requestReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { appSetting } from "@/modules/settings/main/app-settings";
 import { getAppPanel } from "@/modules/settings/main/app-panels";
@@ -127,6 +127,18 @@ export interface LoadTestConfigDialogProps {
 	 * sidebar's copy does. Read only when `referenceOwner` is a request.
 	 */
 	collectionPath?: readonly string[];
+	/**
+	 * The enabled elements in the run's resolved chain that only a scenario can
+	 * run (`scenarioOnlyElements`, #3050), each with the origin that names where
+	 * to remove it. Any of them blocks Start. Memoise it.
+	 */
+	scenarioOnlyElements?: readonly ResolvedElement[];
+	/**
+	 * Closes this dialog and opens the collection-run flow for the request's
+	 * collection - the way out of `scenarioOnlyElements`. Absent when the
+	 * collection could not be resolved.
+	 */
+	onRunCollection?: () => void;
 	/** The request's HTTP method, for the target line. */
 	method?: string;
 	/**
@@ -138,11 +150,35 @@ export interface LoadTestConfigDialogProps {
 }
 
 const NO_NAMES: readonly string[] = [];
+const NO_ELEMENTS: readonly ResolvedElement[] = [];
 
 /** Both names are the Settings screen's own, so a rename there reaches this footer. */
 const ALLOWLIST = appSetting("mcp-allowlist");
 const ALLOWLIST_LABEL = ALLOWLIST.label;
 const AGENT_PANEL_LABEL = getAppPanel(ALLOWLIST.panel)?.label;
+
+/** Why Start is disabled, or false when it is not. */
+function startDisabledReason({
+	isStarting,
+	blockingError,
+	elementsError,
+	oauthGated,
+}: {
+	isStarting: boolean;
+	blockingError: string | null;
+	elementsError: string | null;
+	oauthGated: boolean;
+}): string | false {
+	if (isStarting) return "Starting the run…";
+	if (blockingError === null)
+		return oauthGated && "The OAuth 2.0 token check above hasn't passed.";
+	// No field fixes it: the notice names the elements and the way out.
+	if (blockingError === elementsError) {
+		return "Disable or remove the elements named above, or run the collection instead.";
+	}
+
+	return "Fix the highlighted setting above.";
+}
 
 export default function LoadTestConfigDialog({
 	onClose,
@@ -157,6 +193,8 @@ export default function LoadTestConfigDialog({
 	request,
 	referenceOwner,
 	collectionPath = [],
+	scenarioOnlyElements = NO_ELEMENTS,
+	onRunCollection,
 	method,
 	url,
 }: LoadTestConfigDialogProps) {
@@ -220,6 +258,7 @@ export default function LoadTestConfigDialog({
 		customBudgets,
 		monitor,
 		maxSeries: monitorSettings.maxSeries,
+		scenarioOnly: scenarioOnlyElements,
 	});
 	// A file the parser refused leaves no rows behind, so starting the run would
 	// send the request with its `{{data.*}}` tokens written as they stand - the
@@ -270,6 +309,7 @@ export default function LoadTestConfigDialog({
 		carriedBudgets: carriedSummary
 			? { summary: carriedSummary, onClear: clearCarriedBudgets }
 			: null,
+		onRunCollection,
 	});
 
 	/**
@@ -500,13 +540,12 @@ export default function LoadTestConfigDialog({
 					    broken. `blockingError` is already on screen beside the field
 					    it belongs to, so the reason here only has to point at it. */}
 					<DisabledHint
-						reason={
-							isStarting
-								? "Starting the run…"
-								: blockingError !== null
-									? "Fix the highlighted setting above."
-									: oauthGated && "The OAuth 2.0 token check above hasn't passed."
-						}
+						reason={startDisabledReason({
+							isStarting,
+							blockingError,
+							elementsError: errors.scenarioOnlyError,
+							oauthGated,
+						})}
 					>
 						<Button
 							onClick={handleStart}
