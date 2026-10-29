@@ -887,7 +887,7 @@ export interface ElementOutcome {
 	kind: string;
 	/** The element's own label; absent when it has none (issue #3051). */
 	name?: string;
-	origin?: { kind: "collection" | "request"; id: string; name?: string };
+	origin?: ElementOrigin;
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;
