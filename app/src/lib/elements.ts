@@ -137,6 +137,114 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Whether `path` is inside the JSONPath subset the engine evaluates. Restates
+ * `parse_json_path` (`engine/src/core/elements/json_path.cpp`) step for step:
+ * `$`, then any run of `.name` / `..name` (a non-empty name running to the next
+ * `.` or `[`), `['name']` / `["name"]` (a non-empty name running to the next
+ * matching quote, which must be followed by `]`), `[n]` (a whole base-10
+ * integer, `-` allowed, no `+` or space) and `[*]`. A filter or any other
+ * character is refused. A change to the C++ needs a hand edit here: no test
+ * can read it, only `JSON_PATH_FIELDS` is held to the live catalogue.
+ */
+export function isSupportedJsonPath(path: string): boolean {
+	if (!path.startsWith("$")) return false;
+	let i = 1;
+	while (i < path.length) {
+		const next =
+			path[i] === "."
+				? memberStepEnd(path, i)
+				: path[i] === "["
+					? bracketStepEnd(path, i)
+					: -1;
+		if (next < 0) return false;
+		i = next;
+	}
+	return true;
+}
+
+/** Where a `.name` / `..name` step starting at `path[i]` ends, or -1 for an empty name. */
+function memberStepEnd(path: string, i: number): number {
+	const nameStart = path[i + 1] === "." ? i + 2 : i + 1;
+	let end = nameStart;
+	while (end < path.length && path[end] !== "." && path[end] !== "[") end++;
+	return end === nameStart ? -1 : end;
+}
+
+/** Where a `[...]` step starting at `path[i]` ends, or -1 when it is not one the engine reads. */
+function bracketStepEnd(path: string, i: number): number {
+	const quote = path[i + 1];
+	if (quote === "'" || quote === '"') {
+		const nameEnd = path.indexOf(quote, i + 2);
+		const closed = nameEnd > i + 2 && path[nameEnd + 1] === "]";
+		return closed ? nameEnd + 2 : -1;
+	}
+	const close = path.indexOf("]", i);
+	if (close < 0) return -1;
+	const inner = path.slice(i + 1, close);
+	return inner === "*" || /^-?\d+$/.test(inner) ? close + 1 : -1;
+}
+
+interface JsonPathField {
+	kind: string;
+	/** Config key path to the string, `["source", "condition", "jsonpath"]`. */
+	path: readonly string[];
+	/**
+	 * The engine reads the path only while a sibling holds a value
+	 * (`metric.record`'s condition path, when its `field` is `jsonpath`); a
+	 * stale one beside another field is not refused.
+	 */
+	onlySiblingEquals?: { key: string; value: string };
+}
+
+const JSON_PATH_MESSAGE = "Start with $, then use .name, ['name'], [n] or [*]";
+
+/**
+ * Every config string the engine reads as a JSONPath and refuses when it is
+ * malformed (`json_path_problem`, called from `assert_jsonpath_problem`,
+ * `extract_json_problem` and `validate_metric_paths`). The schema says only
+ * `type: string` for these, so this table restates the C++ rule beside
+ * `OPERAND_RULES`; `element-kinds.conformance.test.tsx` holds every entry to a
+ * property the live catalogue declares, but a path the C++ starts to check
+ * needs a hand edit here.
+ */
+export const JSON_PATH_FIELDS: readonly JsonPathField[] = [
+	{ kind: "assert.jsonpath", path: ["path"] },
+	{ kind: "extract.json", path: ["path"] },
+	{ kind: "metric.record", path: ["source", "jsonpath"] },
+	{
+		kind: "metric.record",
+		path: ["source", "condition", "jsonpath"],
+		onlySiblingEquals: { key: "field", value: "jsonpath" },
+	},
+];
+
+function valueAt(config: Record<string, unknown>, path: readonly string[]) {
+	return path.reduce<unknown>(
+		(node, key) => (isPlainObject(node) ? node[key] : undefined),
+		config
+	);
+}
+
+function collectJsonPathErrors(
+	kind: string,
+	config: Record<string, unknown>,
+	errors: Record<string, string>
+): void {
+	for (const field of JSON_PATH_FIELDS) {
+		if (field.kind !== kind) continue;
+		const value = valueAt(config, field.path);
+		// Absent or mistyped is the schema's to report, as in `json_path_problem`.
+		if (typeof value !== "string" || isSupportedJsonPath(value)) continue;
+		const { onlySiblingEquals } = field;
+		if (onlySiblingEquals) {
+			const sibling = valueAt(config, [...field.path.slice(0, -1), onlySiblingEquals.key]);
+			if (sibling !== onlySiblingEquals.value) continue;
+		}
+		errors[field.path.join(".")] = JSON_PATH_MESSAGE;
+	}
+}
+
+/**
  * Walks one schema level. `nested` levels also report a missing `required` key:
  * at the top level that is `missingRequiredKeys`' chip, but a nested object
  * (`assert.status.range` with only `min`) has no chip to carry it.
@@ -178,7 +286,9 @@ function collectConfigErrors(
  * nested `required` (`element-kinds.conformance.test.tsx` fails when the
  * catalogue gains another). `type` and `enum` are not judged - the form's
  * controls write those. An absent property is skipped, and so is a top-level
- * `required` key that is absent (`missingRequiredKeys`' to report).
+ * `required` key that is absent (`missingRequiredKeys`' to report). A JSONPath
+ * the engine cannot read (`JSON_PATH_FIELDS`) is reported too, though no schema
+ * keyword says so.
  */
 export function validateElementConfig(
 	element: Pick<ElementDef, "kind" | "config">,
@@ -186,7 +296,9 @@ export function validateElementConfig(
 ): Record<string, string> {
 	const errors: Record<string, string> = {};
 	const entry = kinds.find((k) => k.kind === element.kind);
-	if (entry) collectConfigErrors(entry.configSchema, element.config, [], element.kind, errors);
+	if (!entry) return errors;
+	collectConfigErrors(entry.configSchema, element.config, [], element.kind, errors);
+	collectJsonPathErrors(element.kind, element.config, errors);
 	return errors;
 }
 

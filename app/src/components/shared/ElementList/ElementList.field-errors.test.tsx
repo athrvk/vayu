@@ -48,11 +48,50 @@ function kind(name: string, configSchema: ElementConfigSchema): ElementKindSchem
 	};
 }
 
+const JSON_PATH_MESSAGE = "Start with $, then use .name, ['name'], [n] or [*]";
+
 const KINDS: ElementKindSchema[] = [
 	kind("extract.json", {
 		type: "object",
-		properties: { variable: { type: "string", title: "Variable name", minLength: 1 } },
+		properties: {
+			path: { type: "string", title: "JSONPath" },
+			variable: { type: "string", title: "Variable name", minLength: 1 },
+		},
 		required: ["variable"],
+	}),
+	kind("assert.jsonpath", {
+		type: "object",
+		properties: {
+			path: { type: "string", title: "JSONPath" },
+			exists: { type: "boolean", title: "Must exist" },
+		},
+		required: ["path"],
+	}),
+	kind("metric.record", {
+		type: "object",
+		properties: {
+			name: { type: "string", title: "Metric name", minLength: 1 },
+			source: {
+				type: "object",
+				title: "Source",
+				properties: {
+					jsonpath: { type: "string", title: "JSONPath" },
+					condition: {
+						type: "object",
+						title: "Condition",
+						properties: {
+							field: {
+								type: "string",
+								title: "Field",
+								enum: ["status", "jsonpath"],
+							},
+							jsonpath: { type: "string", title: "JSONPath" },
+						},
+					},
+				},
+			},
+		},
+		required: ["name", "source"],
 	}),
 	kind("timer.pacing", {
 		type: "object",
@@ -184,6 +223,38 @@ const CASES: Case[] = [
 		invalid: { range: { min: 200 } },
 		message: "Can't be empty",
 		valid: { range: { min: 200, max: 299 } },
+	},
+	{
+		name: "a malformed extractor JSONPath",
+		kind: "extract.json",
+		field: { role: "textbox", name: "JSONPath" },
+		invalid: { variable: "token", path: "data.id" },
+		message: JSON_PATH_MESSAGE,
+		valid: { variable: "token", path: "$.data.id" },
+	},
+	{
+		name: "a malformed assertion JSONPath",
+		kind: "assert.jsonpath",
+		field: { role: "textbox", name: "JSONPath" },
+		invalid: { path: "$.items[?(@.a==1)]", exists: true },
+		message: JSON_PATH_MESSAGE,
+		valid: { path: "$.items[*].id", exists: true },
+	},
+	{
+		name: "a malformed metric source JSONPath",
+		kind: "metric.record",
+		field: { role: "textbox", name: "JSONPath" },
+		invalid: { name: "m", source: { jsonpath: "$." } },
+		message: JSON_PATH_MESSAGE,
+		valid: { name: "m", source: { jsonpath: "$.total" } },
+	},
+	{
+		name: "a malformed metric condition JSONPath",
+		kind: "metric.record",
+		field: { role: "textbox", name: "JSONPath" },
+		invalid: { name: "m", source: { condition: { field: "jsonpath", jsonpath: "total" } } },
+		message: JSON_PATH_MESSAGE,
+		valid: { name: "m", source: { condition: { field: "jsonpath", jsonpath: "$.total" } } },
 	},
 ];
 

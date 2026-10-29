@@ -2314,6 +2314,19 @@ stays `missingRequiredKeys`' chip, so no field is reported twice; a nested one
 it. A `pattern` that fails shows the hint in `PATTERN_HINTS` where there is one
 (`control.if`'s "Use {{var}} == value") and "Doesn't match the expected format"
 otherwise; a pattern JavaScript cannot compile is no constraint.
+A **malformed JSONPath** is the one rule no keyword carries (the schema says only
+`type: string`): `JSON_PATH_FIELDS` lists every config string the engine reads
+as one - `assert.jsonpath` and `extract.json`'s `path`, `metric.record`'s
+`source.jsonpath`, and its `source.condition.jsonpath` only while that
+condition's `field` is `jsonpath` - and `isSupportedJsonPath` refuses what
+`parse_json_path` (`engine/src/core/elements/json_path.cpp`) refuses: no leading
+`$`, an empty `.name`, a filter, an unterminated or empty `['name']`, a `[n]`
+that is not a whole integer. The message is "Start with $, then use .name,
+['name'], [n] or [*]". Like `OPERAND_RULES` this **restates the C++**: the
+conformance test holds each entry to a property the live catalogue declares,
+but a change to `parse_json_path` or to where `json_path_problem` is called
+needs a hand edit in `lib/elements.ts`. Only a string is judged; an absent or
+mistyped value is the schema's.
 `hasIncompleteElement` is also true when the validator finds anything, so the
 save gate and the messages agree. `element-kinds.conformance.test.tsx` fails
 when the catalogue gains a keyword the validator does not judge.

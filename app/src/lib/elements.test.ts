@@ -14,6 +14,8 @@ import {
 	missingOperand,
 	missingRequiredKeys,
 	parseElementRefusal,
+	isSupportedJsonPath,
+	JSON_PATH_FIELDS,
 	validateElementConfig,
 } from "./elements";
 import type { ElementConfigSchema, ElementDef, ElementKindSchema } from "@/types";
@@ -112,6 +114,10 @@ const constrained = (
 ): ElementKindSchema => kindFixture(kind, [], { type: "object", ...configSchema });
 
 const CONSTRAINED_KINDS: ElementKindSchema[] = [
+	constrained("assert.jsonpath", {
+		required: ["path"],
+		properties: { path: { type: "string" }, exists: { type: "boolean" } },
+	}),
 	constrained("extract.json", {
 		required: ["path", "variable"],
 		properties: { path: { type: "string" }, variable: { type: "string", minLength: 1 } },
@@ -123,10 +129,15 @@ const CONSTRAINED_KINDS: ElementKindSchema[] = [
 			source: {
 				type: "object",
 				properties: {
+					jsonpath: { type: "string" },
 					condition: {
 						type: "object",
 						required: ["field", "operator", "value"],
-						properties: { field: { type: "string" }, value: null },
+						properties: {
+							field: { type: "string" },
+							jsonpath: { type: "string" },
+							value: null,
+						},
 					},
 				},
 			},
@@ -500,5 +511,147 @@ describe("parseElementRefusal", () => {
 		["item zero", "'Assert text' (item 0): nope"],
 	])("answers null for %s", (_name, message) => {
 		expect(parseElementRefusal(message, sent)).toBeNull();
+	});
+});
+
+/**
+ * `parse_json_path` (`engine/src/core/elements/json_path.cpp`) restated; the
+ * accepted and refused lists include the cases `elements_registry_test.cpp`
+ * pins on the C++ side, so the two stay a hand-compared pair.
+ */
+const SUPPORTED_PATHS = [
+	"$",
+	"$.a.b",
+	"$..id",
+	"$..user-id",
+	"$.data.user-id",
+	"$['a.b']",
+	'$["x"]',
+	'$["a b"]',
+	"$['a]b']",
+	"$['a'].b[0][*]..c",
+	"$.items[0]",
+	"$.items[-1]",
+	"$.items[*].id",
+	"$.a b",
+	"$[007]",
+];
+
+const UNSUPPORTED_PATHS = [
+	["no leading $", "foo"],
+	["a bare dotted name", "a.b"],
+	["an empty path", ""],
+	["a trailing dot", "$."],
+	["an empty name after a dot", "$.a."],
+	["an empty recursive name", "$.."],
+	["a filter", "$[?(@.a==1)]"],
+	["a filter without a comparison", "$[?(@.a)]"],
+	["text after a quoted name", "$['a']x"],
+	["an empty quoted name", "$['']"],
+	["an unterminated quoted name", "$['a"],
+	["a quoted name with no closing bracket", "$['a'"],
+	["a bare word in brackets", "$[abc]"],
+	["an empty bracket", "$[]"],
+	["a signed positive index", "$[+1]"],
+	["a padded index", "$[ 1]"],
+	["a fractional index", "$[1.5]"],
+	["an unclosed bracket", "$.a["],
+	["a slice", "$[0:2]"],
+	["a character where a step belongs", "$a"],
+] as const;
+
+describe("isSupportedJsonPath", () => {
+	it.each(SUPPORTED_PATHS)("accepts %s", (path) => {
+		expect(isSupportedJsonPath(path)).toBe(true);
+	});
+
+	it.each(UNSUPPORTED_PATHS)("refuses %s: %j", (_name, path) => {
+		expect(isSupportedJsonPath(path)).toBe(false);
+	});
+});
+
+describe("validateElementConfig - a JSONPath the engine cannot read", () => {
+	const MESSAGE = "Start with $, then use .name, ['name'], [n] or [*]";
+
+	/** Each kind's JSONPath field, as a config that carries only that field. */
+	const SITES: [string, string, (path: string) => Record<string, unknown>][] = [
+		["assert.jsonpath", "path", (path) => ({ path, exists: true })],
+		["extract.json", "path", (path) => ({ path, variable: "token" })],
+		["metric.record", "source.jsonpath", (path) => ({ name: "m", source: { jsonpath: path } })],
+		[
+			"metric.record",
+			"source.condition.jsonpath",
+			(path) => ({
+				name: "m",
+				source: {
+					condition: { field: "jsonpath", operator: "eq", value: 1, jsonpath: path },
+				},
+			}),
+		],
+	];
+
+	describe.each(SITES)("%s at %s", (kind, key, configFor) => {
+		it.each(UNSUPPORTED_PATHS)("flags %s", (_name, path) => {
+			expect(validate(kind, configFor(path))).toEqual({ [key]: MESSAGE });
+		});
+
+		it.each(SUPPORTED_PATHS)("accepts %s", (path) => {
+			expect(validate(kind, configFor(path))).toEqual({});
+		});
+
+		it("leaves an absent or mistyped path to the schema", () => {
+			expect(validate(kind, configFor(undefined as unknown as string))).toEqual({});
+			expect(validate(kind, configFor(7 as unknown as string))).toEqual({});
+		});
+	});
+
+	it("reads a metric condition's path only while its field is jsonpath", () => {
+		const condition = (field: string) => ({
+			source: { condition: { field, operator: "eq", value: 1, jsonpath: "foo" } },
+		});
+		expect(validate("metric.record", condition("status"))).toEqual({});
+		expect(validate("metric.record", condition("header"))).toEqual({});
+		expect(validate("metric.record", condition("jsonpath"))).toEqual({
+			"source.condition.jsonpath": MESSAGE,
+		});
+	});
+
+	it("reads a metric source's path whatever else the source holds", () => {
+		// `validate_metric_paths` checks `source.jsonpath` unconditionally.
+		expect(validate("metric.record", { source: { jsonpath: "foo", status: true } })).toEqual({
+			"source.jsonpath": MESSAGE,
+		});
+	});
+
+	it("reports both metric paths at once", () => {
+		expect(
+			validate("metric.record", {
+				source: {
+					jsonpath: "foo",
+					condition: { field: "jsonpath", operator: "eq", value: 1, jsonpath: "bar" },
+				},
+			})
+		).toEqual({ "source.jsonpath": MESSAGE, "source.condition.jsonpath": MESSAGE });
+	});
+
+	it("ignores a kind the table does not name", () => {
+		expect(validate("extract.regex", { path: "foo" })).toEqual({});
+	});
+
+	it("makes hasIncompleteElement true, so the save gate holds the list back", () => {
+		const incomplete = (config: Record<string, unknown>) =>
+			hasIncompleteElement(
+				[{ id: "e1", kind: "extract.json", enabled: true, config }],
+				CONSTRAINED_KINDS
+			);
+		expect(incomplete({ path: "foo", variable: "t" })).toBe(true);
+		expect(incomplete({ path: "$.a", variable: "t" })).toBe(false);
+	});
+
+	it("names every site the tests above drive", () => {
+		// A table entry with no case here would be restated and never checked.
+		expect(JSON_PATH_FIELDS.map((f) => `${f.kind} ${f.path.join(".")}`).sort()).toEqual(
+			SITES.map(([kind, key]) => `${kind} ${key}`).sort()
+		);
 	});
 });

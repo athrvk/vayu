@@ -33,6 +33,7 @@ import { render, fireEvent } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import {
 	hasIncompleteElement,
+	JSON_PATH_FIELDS,
 	OPERAND_RULES,
 	PATTERN_HINTS,
 	validateElementConfig,
@@ -261,6 +262,53 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		}
 	});
 
+	it("names, for every JSONPath field, a string property the live catalogue declares", () => {
+		// `JSON_PATH_FIELDS` restates which config strings the engine reads as a
+		// JSONPath (`json_path_problem`), which the schema cannot say. A renamed
+		// or dropped property would leave the table judging a key nothing writes.
+		// Mutation check: rename a path in `JSON_PATH_FIELDS` and this reds.
+		const sites = schemaSites(fixture);
+		expect(JSON_PATH_FIELDS.length).toBeGreaterThan(0);
+		for (const { kind, path, onlySiblingEquals } of JSON_PATH_FIELDS) {
+			const label = `${kind}.${path.join(".")}`;
+			const site = sites.find((s) => s.kind === kind && s.path.join(".") === path.join("."));
+			expect(site, `${label} is not a property the catalogue declares`).toBeDefined();
+			expect(site!.property.type, `${label} is no longer a string`).toBe("string");
+			if (!onlySiblingEquals) continue;
+			const sibling = [...path.slice(0, -1), onlySiblingEquals.key].join(".");
+			const guard = sites.find((s) => s.kind === kind && s.path.join(".") === sibling);
+			expect(
+				guard,
+				`${kind}.${sibling} is not a property the catalogue declares`
+			).toBeDefined();
+			expect(
+				guard!.property.enum,
+				`${kind}.${sibling} no longer allows ${onlySiblingEquals.value}`
+			).toContain(onlySiblingEquals.value);
+		}
+	});
+
+	it("flags a malformed JSONPath on every field the table names, against the live schema", () => {
+		for (const { kind, path, onlySiblingEquals } of JSON_PATH_FIELDS) {
+			const config = configAt([...path], "foo");
+			if (onlySiblingEquals) {
+				Object.assign(
+					path
+						.slice(0, -1)
+						.reduce<Record<string, unknown>>(
+							(node, key) => node[key] as Record<string, unknown>,
+							config
+						),
+					{ [onlySiblingEquals.key]: onlySiblingEquals.value }
+				);
+			}
+			expect(
+				Object.keys(validateElementConfig({ kind, config }, fixture)),
+				`${kind}.${path.join(".")}`
+			).toContain(path.join("."));
+		}
+	});
+
 	it("flags a fresh element of each rule's kind as incomplete, and a satisfied one as not", () => {
 		// A kind whose operand is not "any one listed key" names its own shapes:
 		// `timer_think_problem` wants both bounds of a range, and
@@ -281,8 +329,9 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 		};
 		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {
 			// Every `required` key filled, so only the operand can be what is missing.
+			// `$` is the one string that is also a readable JSONPath (`assert.jsonpath`'s `path`).
 			const required = fixture.find((k) => k.kind === kind)!.configSchema.required ?? [];
-			const base = Object.fromEntries(required.map((key) => [key, "x"]));
+			const base = Object.fromEntries(required.map((key) => [key, "$"]));
 			const incomplete = (config: Record<string, unknown>) =>
 				hasIncompleteElement([{ id: "el_1", kind, enabled: true, config }], fixture);
 
