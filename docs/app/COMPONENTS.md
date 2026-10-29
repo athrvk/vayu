@@ -1862,7 +1862,10 @@ looks exactly as it did before coverage existed.
 
 The uncovered chip is **warning-toned, not destructive**. An operation nobody
 called is a gap in the run, not a failure of the system under test, and painting
-it destructive would put it in the same vocabulary as a failed budget. The card
+it destructive would put it in the same vocabulary as a failed budget. The same
+goes for an operation whose every send failed to connect: the engine counts it as
+covered, so the chip turns warning-toned and the summary says how many operations
+got no response. The card
 also states that its numbers are counted on every send rather than drawn from the
 stored sample - it sits among figures that *are* sampled, and a reader has no
 other way to tell them apart.
