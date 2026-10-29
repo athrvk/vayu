@@ -22,6 +22,7 @@
  * two.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <format>
@@ -148,12 +149,12 @@ class ExtractJsonElement final : public Element {
     : config_ (std::move (config)) {
         path_     = detail::parse_json_path (config_.value ("path", ""));
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -249,11 +250,11 @@ class ExtractRegexElement final : public Element {
     : config_ (std::move (config)),
       pattern_ (compile_user_regex (config_.value ("pattern", ""))) {
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
-        field_    = config_.value ("field", "body");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
+        field_    = config_.value ("field", element_defaults::RESPONSE_FIELD);
         template_ = config_.value ("template", "$0$");
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -302,8 +303,8 @@ class ExtractHeaderElement final : public Element {
     : config_ (std::move (config)) {
         header_   = config_.value ("header", "");
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
-        required_ = config_.value ("required", false);
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -355,9 +356,9 @@ class ExtractBoundaryElement final : public Element {
         left_     = config_.value ("leftBoundary", "");
         right_    = config_.value ("rightBoundary", "");
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -407,8 +408,8 @@ class ExtractBoundaryElement final : public Element {
 };
 
 nlohmann::json variable_scope_schema () {
-    return { { "type", "string" },
-        { "enum", { "env", "collection", "globals" } }, { "title", "Store in" },
+    return { { "type", "string" }, { "enum", { "env", "collection", "globals" } },
+        { "default", element_defaults::EXTRACT_SCOPE }, { "title", "Store in" },
         { "description", "Which variable scope to write the result into." } };
 }
 
@@ -507,7 +508,7 @@ ElementKind make_extract_json_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "path", "variable" }) },
         { "additionalProperties", false },
@@ -545,7 +546,8 @@ ElementKind make_extract_regex_kind () {
         "A $1$-style template of the match's capture groups; $0$ is "
         "the whole match." } } },
         { "field",
-        { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } }, { "title", "Field" },
+        { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } },
+        { "default", element_defaults::RESPONSE_FIELD }, { "title", "Field" },
         { "description",
         "Which part of the response to search: body, headers, url "
         "or status." } } },
@@ -562,7 +564,7 @@ ElementKind make_extract_regex_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "pattern", "variable" }) },
         { "additionalProperties", false },
@@ -598,7 +600,7 @@ ElementKind make_extract_header_kind () {
         { { "type", "string" }, { "title", "Fallback value" },
         { "description", "Written to the variable when there is no match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "header", "variable" }) },
         { "additionalProperties", false },
@@ -644,7 +646,7 @@ ElementKind make_extract_boundary_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "variable" }) },
         { "additionalProperties", false },

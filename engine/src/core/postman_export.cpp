@@ -22,6 +22,7 @@
 #include "js_json.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/path_template.hpp"
@@ -1119,7 +1120,8 @@ std::optional<json> element_event (const json& element, EventOwner owner, Walk& 
     if (is_blank_script_text (script)) {
         return std::nullopt;
     }
-    if (!text_of (element, "name").empty () || flag_of (config, "inline", false)) {
+    if (!text_of (element, "name").empty () ||
+    flag_of (config, "inline", element_defaults::SCRIPT_INLINE)) {
         walk.lose (Loss::ScriptSettings);
     }
     return std::make_optional (

@@ -21,6 +21,7 @@
  * once *ever* for the user they belong to, not once per iteration.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <expected>
@@ -243,7 +244,8 @@ class ControlThroughputElement final : public Element {
         // send `ctx.shared_controller_state` is always null (the single
         // implicit user already makes `controller_state` below the
         // "shared" instance), so `perUser` changes nothing there.
-        if (!config_.value ("perUser", true) && ctx.shared_controller_state != nullptr) {
+        if (!config_.value ("perUser", element_defaults::CONTROL_THROUGHPUT_PER_USER) &&
+        ctx.shared_controller_state != nullptr) {
             if (auto* shared = ctx.shared_controller_state->find (ctx.element_id);
             shared != nullptr) {
                 apply_shared (ctx, *shared);
@@ -461,7 +463,8 @@ ElementKind make_control_throughput_kind () {
         { { "type", "integer" }, { "minimum", 1 }, { "title", "Every Nth" },
         { "description", "Runs only every Nth occurrence." } } },
         { "perUser",
-        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { { "type", "boolean" }, { "default", element_defaults::CONTROL_THROUGHPUT_PER_USER }, { "title", "Per user" },
+        { "x-vayu-group", "advanced" },
         { "description",
         "Counts occurrences per virtual user instead of sharing "
         "one counter across all of them." } } } } },

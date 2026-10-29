@@ -31,6 +31,7 @@
       "additionalProperties": false,
       "properties": {
         "inline": {
+          "default": false,
           "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
           "title": "Run inline",
           "type": "boolean",
@@ -63,6 +64,7 @@
       "additionalProperties": false,
       "properties": {
         "inline": {
+          "default": false,
           "description": "Runs on the load path's own producer/completion hooks instead of the deferred post-run replay.",
           "title": "Run inline",
           "type": "boolean",
@@ -163,11 +165,13 @@
           "type": "string"
         },
         "required": {
+          "default": false,
           "description": "Fails the step's assertions when no match is found.",
           "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "default": "collection",
           "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
@@ -211,6 +215,7 @@
           "type": "string"
         },
         "field": {
+          "default": "body",
           "description": "Which part of the response to search: body, headers, url or status.",
           "enum": [
             "body",
@@ -234,11 +239,13 @@
           "type": "string"
         },
         "required": {
+          "default": false,
           "description": "Fails the step's assertions when no match is found.",
           "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "default": "collection",
           "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
@@ -293,11 +300,13 @@
           "type": "string"
         },
         "required": {
+          "default": false,
           "description": "Fails the step's assertions when no match is found.",
           "title": "Required",
           "type": "boolean"
         },
         "scope": {
+          "default": "collection",
           "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
@@ -352,6 +361,7 @@
           "x-vayu-group": "advanced"
         },
         "required": {
+          "default": false,
           "description": "Fails the step's assertions when no match is found.",
           "title": "Required",
           "type": "boolean"
@@ -362,6 +372,7 @@
           "type": "string"
         },
         "scope": {
+          "default": "collection",
           "description": "Which variable scope to write the result into.",
           "enum": [
             "env",
@@ -456,6 +467,7 @@
           "title": "Expected value"
         },
         "negate": {
+          "default": false,
           "description": "Flips the assertion's pass/fail verdict. A response body that cannot be read as JSON fails it either way.",
           "title": "Negate",
           "type": "boolean"
@@ -492,6 +504,7 @@
       "additionalProperties": false,
       "properties": {
         "field": {
+          "default": "body",
           "description": "Which part of the response to check: body, headers, url or status.",
           "enum": [
             "body",
@@ -503,6 +516,7 @@
           "type": "string"
         },
         "mode": {
+          "default": "contains",
           "description": "How to compare: contains, equals or matches (a regular expression in RE2 syntax).",
           "enum": [
             "contains",
@@ -513,6 +527,7 @@
           "type": "string"
         },
         "negate": {
+          "default": false,
           "description": "Flips the assertion's pass/fail verdict.",
           "title": "Negate",
           "type": "boolean"
@@ -579,6 +594,7 @@
           "x-vayu-unit": "B"
         },
         "op": {
+          "default": "lte",
           "description": "How the body size must compare to the bound: less than, less than or equal, greater than, greater than or equal, or equal.",
           "enum": [
             "lt",
@@ -684,6 +700,7 @@
           "x-vayu-unit": "ms"
         },
         "perUser": {
+          "default": true,
           "description": "Paces each virtual user independently instead of sharing one cadence across all of them.",
           "title": "Per user",
           "type": "boolean",
@@ -711,6 +728,7 @@
       "additionalProperties": false,
       "properties": {
         "perUser": {
+          "default": false,
           "description": "Applies the target rate to each virtual user independently instead of sharing one budget across all of them.",
           "title": "Per user",
           "type": "boolean",
@@ -831,6 +849,7 @@
           "type": "integer"
         },
         "perUser": {
+          "default": true,
           "description": "Counts occurrences per virtual user instead of sharing one counter across all of them.",
           "title": "Per user",
           "type": "boolean",

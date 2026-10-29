@@ -41,6 +41,7 @@
  *   never has to know which case it is.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include "pacing_math.hpp"
@@ -71,7 +72,7 @@ class TimerThroughputElement final : public Element {
       scope_entry_ (config_.value ("_scopeEntry", false)),
       target_per_minute_ (config_.value ("targetPerMinute", 0.0)),
       every_ms_ (every_ms_for (target_per_minute_)),
-      per_user_ (config_.value ("perUser", false)) {
+      per_user_ (config_.value ("perUser", element_defaults::TIMER_THROUGHPUT_PER_USER)) {
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -168,7 +169,8 @@ ElementKind make_timer_throughput_kind () {
           { { "type", "number" }, { "exclusiveMinimum", 0 }, { "title", "Target rate" },
           { "description", "The number of times this node should start per minute." } } },
         { "perUser",
-        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { { "type", "boolean" }, { "default", element_defaults::TIMER_THROUGHPUT_PER_USER }, { "title", "Per user" },
+        { "x-vayu-group", "advanced" },
         { "description",
         "Applies the target rate to each virtual user independently "
         "instead of sharing one budget across all of them." } } } } },
