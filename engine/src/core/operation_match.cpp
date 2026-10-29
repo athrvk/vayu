@@ -150,11 +150,56 @@ std::string normalize_path_shape (std::string_view path) {
 }
 
 /**
- * Whether a concrete path could be this template with its placeholders filled:
- * the same number of segments, and every non-placeholder segment equal.
+ * Whether @p segment is @p pattern, one path segment of a flattened template,
+ * with each `{}` filled.
  *
- * A placeholder matches one segment and never a `/`, which is what the OpenAPI
- * path-templating rules say - so `/pets/42/toys` is not `/pets/{petId}`.
+ * A segment of only `{}` takes anything. One mixing literal text with
+ * placeholders (`{}.json`, `{}:cancel`, `meta-{}`, #3085) takes a segment that
+ * starts with the text before the first `{}`, ends with the text after the
+ * last, and holds the text between them in order. A placeholder inside such a
+ * segment is never empty, so `meta-` does not fill `meta-{}`.
+ */
+bool segment_fills_template (std::string_view segment, std::string_view pattern) {
+    constexpr std::string_view PLACEHOLDER = "{}";
+    if (pattern == PLACEHOLDER) {
+        return true;
+    }
+    const size_t first = pattern.find (PLACEHOLDER);
+    if (first == NPOS) {
+        return segment == pattern;
+    }
+    size_t placeholder          = first;
+    const size_t last           = pattern.rfind (PLACEHOLDER);
+    const std::string_view head = pattern.substr (0, first);
+    const std::string_view tail = pattern.substr (last + PLACEHOLDER.size ());
+    if (segment.size () < head.size () + tail.size () ||
+    !segment.starts_with (head) || !segment.ends_with (tail)) {
+        return false;
+    }
+    // The leftmost fit of each literal between two placeholders leaves the most
+    // room for the rest, so one greedy pass decides.
+    size_t cursor = head.size ();
+    while (placeholder != last) {
+        const size_t literal_begin = placeholder + PLACEHOLDER.size ();
+        const size_t next          = pattern.find (PLACEHOLDER, literal_begin);
+        const std::string_view literal =
+        pattern.substr (literal_begin, next - literal_begin);
+        const size_t found = segment.find (literal, cursor + 1);
+        if (found == NPOS) {
+            return false;
+        }
+        cursor      = found + literal.size ();
+        placeholder = next;
+    }
+    return cursor < segment.size () - tail.size ();
+}
+
+/**
+ * Whether a concrete path could be this template with its placeholders filled:
+ * the same number of segments, and every segment filling its template segment.
+ *
+ * A placeholder matches within one segment and never a `/`, which is what the
+ * OpenAPI path-templating rules say - so `/pets/42/toys` is not `/pets/{petId}`.
  */
 bool fills_template (std::string_view path_shape, std::string_view template_shape) {
     size_t path_cursor     = 0;
@@ -167,7 +212,7 @@ bool fills_template (std::string_view path_shape, std::string_view template_shap
         path_cursor, path_end == NPOS ? NPOS : path_end - path_cursor);
         const std::string_view template_segment = template_shape.substr (
         template_cursor, template_end == NPOS ? NPOS : template_end - template_cursor);
-        if (template_segment != "{}" && template_segment != path_segment) {
+        if (!segment_fills_template (path_segment, template_segment)) {
             return false;
         }
         // Both must run out together: a differing segment count is a different
@@ -419,8 +464,9 @@ std::vector<std::string> base_path_shapes (const std::vector<std::string>& base_
  *
  * Whole segments only: `/v1` is a prefix of `/v1/pets` and not of `/v10/pets`.
  * A placeholder segment of the base (`{}`, from a templated `/{version}`)
- * stands for any one non-empty segment. A request that is exactly the base
- * path is the root operation, `/`.
+ * stands for any one non-empty segment, and one mixing text with a placeholder
+ * (`api-{}`) fills the way a template segment does. A request that is exactly
+ * the base path is the root operation, `/`.
  */
 std::optional<std::string> strip_base_path (std::string_view shape, std::string_view base) {
     // Both start with `/`; each round compares the segment after a cursor.
@@ -438,8 +484,9 @@ std::optional<std::string> strip_base_path (std::string_view shape, std::string_
         base.substr (base_cursor + 1, base_end - base_cursor - 1);
         const std::string_view shape_segment =
         shape.substr (shape_cursor + 1, shape_end - shape_cursor - 1);
-        const bool same = base_segment == "{}" ? !shape_segment.empty () :
-                                                 base_segment == shape_segment;
+        const bool same = base_segment == "{}" ?
+        !shape_segment.empty () :
+        segment_fills_template (shape_segment, base_segment);
         if (!same) {
             return std::nullopt;
         }

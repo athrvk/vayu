@@ -2958,12 +2958,17 @@ match that turned on the parameter's spelling would report a rename as removed
 and added. A second pass then offers each remaining request to the templates it
 could be an instance of, because a hand-built collection writes the id in
 (`/pets/42`) - a literal path in the document wins first, which is OpenAPI's own
-precedence. A third pass reads `basePaths` (issue #3030): a request written as a
-literal URL carries the server's base path (`https://h/v1/pets`) where the
+precedence. A segment mixing literal text with a placeholder (`{id}.json`,
+`{name}:cancel`, `meta-{ver}`, issue #3085) is filled the same way: the text
+around the placeholders must appear in order and each placeholder takes at
+least one character, never a `/`. A third pass reads `basePaths` (issue #3030):
+a request written as a literal URL carries the server's base path
+(`https://h/v1/pets`) where the
 document writes `/pets`, so whatever the first two passes left open is compared
 again, both ways, with each base path taken off the front of the request's path.
 A base path is taken off whole segments only (`/v1` is not a prefix of
-`/v10/pets`), a templated one (`/{version}`) stands for any one segment, and a
+`/v10/pets`), a templated one (`/{version}`) stands for any one segment (a
+segment mixing text with a placeholder, `/api-{version}`, fills as above), and a
 request that is exactly the base path is the root operation `/`. The first two
 passes win, so a document declaring `/v1/pets` in full claims that request
 before any base path is stripped. **Ambiguity is refused in both directions**,

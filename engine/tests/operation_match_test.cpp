@@ -331,6 +331,94 @@ TEST (MatchOperations, NeverLetsAPlaceholderSwallowAPathSeparator) {
     EXPECT_TRUE (match_operations (requests, operations).matched.empty ());
 }
 
+/// Issue #3085: a segment mixing literal text with a placeholder is filled the
+/// way a bare one is. Mutation check: compare a template segment only against
+/// `{}` and equality and all three pair nothing.
+TEST (MatchOperations, MatchesASegmentMixingLiteralTextWithAPlaceholder) {
+    const std::vector<MatchableRequest> requests{ request ("suffix", "GET", "{{baseUrl}}/users/42.json"),
+        request ("prefix", "POST", "{{baseUrl}}/v1/operations/abc:cancel"),
+        request ("both", "GET", "{{baseUrl}}/files/7/meta-3") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/users/{id}.json", "user"),
+        op ("POST", "/v1/operations/{name}:cancel", "cancel"),
+        op ("GET", "/files/{id}/meta-{ver}", "meta") };
+
+    const auto result = match_operations (requests, operations);
+
+    EXPECT_EQ (matched_ids (result, requests),
+    (std::vector<std::string>{ "suffix", "prefix", "both" }));
+    EXPECT_EQ (matched_operations (result, operations),
+    (std::vector<std::string>{ "user", "cancel", "meta" }));
+}
+
+/// The literal pieces of a mixed segment must all be present, in order, around
+/// a placeholder that is not empty. Each request below breaks one of those.
+TEST (MatchOperations, LeavesASegmentWhoseLiteralPiecesDoNotFitUnmatched) {
+    const std::vector<MatchableRequest> requests{ request ("wrong-suffix", "GET",
+                                                  "{{baseUrl}}/users/42.xml"),
+        request ("no-placeholder", "GET", "{{baseUrl}}/docs/.json"),
+        request ("missing-tail", "GET", "{{baseUrl}}/files/7/meta"),
+        request ("empty-tail", "GET", "{{baseUrl}}/files/7/meta-"),
+        request ("wrong-prefix", "GET", "{{baseUrl}}/blobs/b1-a1"),
+        request ("empty-placeholder", "GET", "{{baseUrl}}/blobs/ab") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/users/{id}.json", "user"),
+        op ("GET", "/docs/{id}.json", "doc"), op ("GET", "/files/{id}/meta-{ver}", "meta"),
+        op ("GET", "/blobs/a{x}b{y}", "blob") };
+
+    const auto result = match_operations (requests, operations);
+
+    EXPECT_TRUE (result.matched.empty ());
+    EXPECT_EQ (unmatched_request_ids (result, requests),
+    (std::vector<std::string>{ "wrong-suffix", "no-placeholder", "missing-tail",
+    "empty-tail", "wrong-prefix", "empty-placeholder" }));
+}
+
+/// Text between two placeholders is found in order, leftmost first, and each
+/// placeholder keeps at least one character.
+TEST (MatchOperations, FindsTheMiddleLiteralOfAMixedSegmentInOrder) {
+    const std::vector<MatchableOperation> operations{ op (
+    "GET", "/blobs/a-{}-b-{}.bin", "blob") };
+
+    const auto matches = [&] (const std::string& segment) {
+        const std::vector<MatchableRequest> requests{ request (
+        "r1", "GET", "{{baseUrl}}/blobs/" + segment) };
+        return !match_operations (requests, operations).matched.empty ();
+    };
+
+    EXPECT_TRUE (matches ("a-1-b-2.bin"));
+    EXPECT_TRUE (matches ("a-1-b-b-2.bin"))
+    << "the first fit leaves room for the rest";
+    EXPECT_FALSE (matches ("a-1-c-2.bin")) << "the middle text is absent";
+    EXPECT_FALSE (matches ("a--b-2.bin")) << "the first placeholder is empty";
+    EXPECT_FALSE (matches ("a-1-b-.bin")) << "the last placeholder is empty";
+    EXPECT_FALSE (matches ("b-1-a-2.bin")) << "the prefix is wrong";
+}
+
+/// A literal path in the document still claims a request before a mixed
+/// template that could also have been filled by it.
+TEST (MatchOperations, PrefersTheLiteralPathOverTheMixedTemplateThatCouldAlsoFillIt) {
+    const std::vector<MatchableRequest> requests{ request (
+    "r1", "GET", "{{baseUrl}}/users/me.json") };
+    const std::vector<MatchableOperation> operations{
+        op ("GET", "/users/{id}.json", "user"), op ("GET", "/users/me.json", "me")
+    };
+
+    const auto result = match_operations (requests, operations);
+
+    EXPECT_EQ (matched_operations (result, operations), (std::vector<std::string>{ "me" }));
+    EXPECT_EQ (unmatched_operation_ids (result, operations),
+    (std::vector<std::string>{ "user" }));
+}
+
+/// A mixed placeholder never spans a `/`: the extra segment is a different
+/// endpoint however the text around it lines up.
+TEST (MatchOperations, NeverLetsAMixedSegmentSwallowAPathSeparator) {
+    const std::vector<MatchableRequest> requests{ request (
+    "r1", "GET", "{{baseUrl}}/users/4/2.json") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/users/{id}.json", "user") };
+
+    EXPECT_TRUE (match_operations (requests, operations).matched.empty ());
+}
+
 TEST (MatchOperations, LeavesARequestThatStatesNoPathUnmatched) {
     // `{{baseUrl}}` alone is in no bucket, so it can neither claim the root
     // operation nor make the operation beside it look ambiguous.
@@ -378,6 +466,19 @@ TEST (MatchOperations, ReadsATemplatedOrSlashTerminatedBasePath) {
     EXPECT_EQ (matched_operations (
                match_operations (requests, operations, { "/v2/" }), operations),
     (std::vector<std::string>{ "listPets" }));
+}
+
+/// A server whose base path mixes text with a variable (`/api-{version}`) is
+/// taken off by the rule that fills a template segment. Mutation check: compare
+/// the base segment for equality and `r1` stays unmatched.
+TEST (MatchOperations, StripsABasePathWhoseSegmentMixesTextWithAPlaceholder) {
+    const std::vector<MatchableRequest> requests{ request ("r1", "GET", "https://h/api-v2/pets"),
+        request ("r2", "GET", "https://h/other-v2/pets") };
+    const std::vector<MatchableOperation> operations{ op ("GET", "/pets", "listPets") };
+
+    const auto result = match_operations (requests, operations, { "/api-{version}" });
+
+    EXPECT_EQ (matched_ids (result, requests), (std::vector<std::string>{ "r1" }));
 }
 
 /// The first two passes win: a document declaring the full path claims the
