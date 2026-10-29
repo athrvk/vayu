@@ -337,7 +337,8 @@ std::vector<vayu::http::CookieWrite>* writes);
  * collection and globals entries live as long as the VU (#3044), so a token
  * a `control.once` login extracted still answers every later iteration.
  *
- * An unset in one of those three (`unset`, an extractor's miss, #3053) cannot
+ * An unset in one of those three (`unset`, an extractor's miss, #3053; a
+ * script's `pm.*.unset` or `clear`, through `replace_from`, #3088) cannot
  * erase the shared base, so it is kept as a tombstone: the base value of that
  * name in that scope reads as absent for this VU until it sets the name
  * again, in every iteration, through `apply_onto`, `materialize` and
@@ -365,10 +366,11 @@ class ScopeOverlay {
      * plus every override this VU has ever made" - storing it back is the
      * same operation a diff-then-merge would perform, without needing
      * `Variable`'s equality to find what changed. A tombstoned name the
-     * copy holds was set by the script, so its tombstone goes; one it lacks
-     * stays hidden.
+     * copy holds was set by the script, so its tombstone goes; a name of
+     * @p base's scope the copy lacks was unset, by the script or before it,
+     * and is tombstoned. @p base is the one `materialize` was given.
      */
-    void replace_from (const ScriptVariableScopes& scopes);
+    void replace_from (const ScriptVariableScopes& scopes, const ScriptVariableScopes& base);
 
     [[nodiscard]] bool empty () const {
         return environment_.empty () && collection_.empty () &&

@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -254,9 +255,13 @@ class ScenarioLoadTest : public ::testing::Test {
     ///        reuses a handle at all, so it could not observe a session leaking
     ///        through one - the pool would be doing the isolating, not the code
     ///        under test.
+    ///
+    /// @param environment_id The stored environment the run loads, as
+    ///        `POST /runs`' `environmentId` names one.
     std::shared_ptr<vayu::core::ScenarioLoadState> run (const json& config,
     const vayu::core::ScenarioExecution& execution,
-    size_t pool_size = 500) {
+    size_t pool_size                                 = 500,
+    const std::optional<std::string>& environment_id = std::nullopt) {
         auto context =
         std::make_shared<vayu::core::RunContext> ("test-scenario-load", config);
         // Set the way `execute_load_test` does, so the deferred validation pass
@@ -271,7 +276,7 @@ class ScenarioLoadTest : public ::testing::Test {
         context->event_loop->start ();
 
         auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-        *db_, std::nullopt, context->scenario->request.collection_id);
+        *db_, environment_id, context->scenario->request.collection_id);
         auto state = vayu::core::execute_scenario_load (
         context, *db_, *context->scenario, std::move (base_scopes));
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
@@ -2641,6 +2646,90 @@ TEST_F (ScenarioLoadTest, AMissHidesTheStoredValueForThatVirtualUserAlone) {
     ASSERT_EQ (skipped.size (), 1u);
     EXPECT_EQ (missed[0].authorization, "Bearer {{token}}");
     EXPECT_EQ (skipped[0].authorization, "Bearer old")
+    << "one virtual user's unset reached another's view of the stored value";
+}
+
+// ----------------------------------------------------------------------------
+// A script's own `pm.environment.unset` of a stored name (#3088) is kept the
+// way an extractor's miss is: hidden for that VU until it sets the name again.
+// ----------------------------------------------------------------------------
+
+namespace {
+
+constexpr const char* TOKEN_ENVIRONMENT_ID = "env_test";
+
+/// An environment storing `tok=stored`, the shared base value a script's
+/// unset can only hide.
+void store_environment_token (vayu::db::Database& db) {
+    vayu::db::Environment environment;
+    environment.id         = TOKEN_ENVIRONMENT_ID;
+    environment.name       = "Environment";
+    environment.variables  = R"({"tok":{"value":"stored","enabled":true}})";
+    environment.created_at = 1;
+    environment.updated_at = 1;
+    db.save_environment (environment);
+}
+
+json inline_post_script (const std::string& id, const std::string& source) {
+    return vayu::tests::script_element_json (id, "script.post", source, /*inline_script=*/true);
+}
+
+} // namespace
+
+// Step 0 unsets, step 1 sends `{{tok}}` and then sets it, step 2 sends it
+// again. Mutation check: skip the base-name loop in
+// `ScopeOverlay::replace_from` and step 1 sends `Bearer stored`.
+TEST_F (ScenarioLoadTest, AScriptsUnsetOfAStoredNameSticksUntilAScriptSetsItAgain) {
+    store_environment_token (*db_);
+    ScenarioMockServer server;
+    auto execution = plan_over (
+    { server.url ("/s0"), server.url ("/echo"), server.url ("/row/after-set") });
+    execution.plan.steps[1].request.headers["Authorization"] = "Bearer {{tok}}";
+    execution.plan.steps[2].request.headers["Authorization"] = "Bearer {{tok}}";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { inline_post_script ("el_unset", "pm.environment.unset('tok');") });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { inline_post_script ("el_set", "pm.environment.set('tok', 'again');") });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    run (config, execution, /*pool_size=*/1, TOKEN_ENVIRONMENT_ID);
+
+    const auto unset = server.hits_for ("/echo");
+    const auto reset = server.hits_for ("/row/after-set");
+    ASSERT_EQ (unset.size (), 1u);
+    ASSERT_EQ (reset.size (), 1u);
+    EXPECT_EQ (unset[0].authorization, "Bearer {{tok}}")
+    << "the stored value answered after the script unset it";
+    EXPECT_EQ (reset[0].authorization, "Bearer again");
+}
+
+// Two VUs over one stored `tok`: the `s0` row's VU runs step 0's unsetting
+// script, the `s1` row's VU skips step 0 (`control.if`). The `/login`
+// rendezvous holds the second until the first has unset, so a tombstone that
+// reached the shared base would show. Each step 2 names its row's VU.
+TEST_F (ScenarioLoadTest, AScriptsUnsetOfAStoredNameHidesItForThatVirtualUserAlone) {
+    store_environment_token (*db_);
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_over ({ server.url ("/{{data.from}}"),
+    server.url ("/login"), server.url ("/row/{{data.from}}") });
+    execution.plan.steps[2].request.headers["Authorization"] = "Bearer {{tok}}";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { { { "id", "el_if" }, { "kind", "control.if" }, { "enabled", true },
+      { "config", { { "condition", "{{data.from}} == s0" } } } },
+    inline_post_script ("el_unset", "pm.environment.unset('tok');") });
+    with_data (execution, { json{ { "from", "s0" } }, json{ { "from", "s1" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2, TOKEN_ENVIRONMENT_ID);
+
+    const auto unsetting = server.hits_for ("/row/s0");
+    const auto skipping  = server.hits_for ("/row/s1");
+    ASSERT_EQ (unsetting.size (), 1u);
+    ASSERT_EQ (skipping.size (), 1u);
+    EXPECT_EQ (unsetting[0].authorization, "Bearer {{tok}}");
+    EXPECT_EQ (skipping[0].authorization, "Bearer stored")
     << "one virtual user's unset reached another's view of the stored value";
 }
 

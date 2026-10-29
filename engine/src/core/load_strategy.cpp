@@ -740,7 +740,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Pre-request");
-            overlay.replace_from (scopes);
+            overlay.replace_from (scopes, context->lifecycle_scopes);
             return result;
         },
         .run_post_script    = nullptr,
@@ -824,7 +824,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Post-request");
-            overlay.replace_from (scopes);
+            overlay.replace_from (scopes, context->lifecycle_scopes);
             return result;
         },
         .pre_script_result  = unused_pre_result,

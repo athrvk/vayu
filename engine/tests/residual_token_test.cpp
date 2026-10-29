@@ -708,7 +708,7 @@ TEST (ScopeOverlayTest, ClearLocalDropsTheLocalScopeAndKeepsTheSavedOnes) {
     written.collection["b"]  = value_of ("2");
     written.globals["c"]     = value_of ("3");
     written.local["d"]       = value_of ("4");
-    overlay.replace_from (written);
+    overlay.replace_from (written, {});
     ASSERT_TRUE (overlay.local_values ().contains ("d"));
 
     overlay.clear_local ();
@@ -755,7 +755,7 @@ TEST (ScopeOverlayTest, ReplaceFromAdoptsWhateverTheMaterializedCopyEndedAs) {
     ScriptVariableScopes mutated;
     mutated.environment["keep"] = value_of ("first-write"); // unchanged by the script
     mutated.environment["new_name"] = value_of ("second-write"); // the script's own write
-    overlay.replace_from (mutated);
+    overlay.replace_from (mutated, {});
 
     auto vars = flatten_variable_scopes ({});
     overlay.apply_onto (vars, {});
@@ -798,8 +798,8 @@ TEST (ScopeOverlayTest, AnUnsetNameHidesItsOwnScopesBaseValueAndNoOtherScopes) {
 
 // The tombstone lasts as long as the VU's saved writes: through the
 // iteration boundary and through an inline script's `replace_from`, until the
-// name is set again. Mutation check: clear the tombstones in `replace_from`
-// and the second read is "stored".
+// name is set again. Mutation check: empty `target.unset` at the end of
+// `replace_from`'s `adopt` and the second read is "stored".
 TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAgain) {
     const auto base = environment_with ("token", "stored");
     ScopeOverlay overlay;
@@ -811,14 +811,14 @@ TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAg
     overlay.apply_onto (vars, base);
     EXPECT_FALSE (vars.contains ("token")) << vars["token"];
 
-    overlay.replace_from (overlay.materialize (base));
+    overlay.replace_from (overlay.materialize (base), base);
     vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_FALSE (vars.contains ("token")) << vars["token"];
 
     auto scripted                 = overlay.materialize (base);
     scripted.environment["token"] = value_of ("from-script");
-    overlay.replace_from (scripted);
+    overlay.replace_from (scripted, base);
     vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "from-script");
@@ -828,6 +828,76 @@ TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAg
     vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "next");
+}
+
+namespace {
+
+/// An inline script the way the load path runs one: against the VU's
+/// `materialize`d copy, which then replaces its overlay.
+void run_inline_script (ScopeOverlay& overlay,
+const ScriptVariableScopes& base,
+const std::string& source) {
+    auto scopes = overlay.materialize (base);
+    vayu::runtime::ScriptContext ctx;
+    vayu::http::routes::bind_variable_scopes (ctx, scopes);
+    vayu::runtime::ScriptEngine engine;
+    const auto result = engine.execute (source, ctx);
+    ASSERT_TRUE (result.success) << result.error_message;
+    overlay.replace_from (scopes, base);
+}
+
+/// What a later step's `Authorization: Bearer {{tok}}` sends for this VU,
+/// after the load path's residual pass.
+std::string bearer_after_residual_pass (const ScopeOverlay& overlay,
+const ScriptVariableScopes& base) {
+    vayu::Request request;
+    request.headers["Authorization"] = "Bearer {{tok}}";
+    auto vars                        = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    [[maybe_unused]] const auto unresolved =
+    vayu::http::routes::resolve_load_residuals (request, vars, std::nullopt);
+    return request.headers["Authorization"];
+}
+
+} // namespace
+
+// A script's own unset of a name the shared base holds (#3088), in each of
+// the three saved scopes: the copy it ran against lost the name, and
+// `replace_from` keeps that as a tombstone rather than as "not overridden".
+// Another VU over the same base still sends the stored value, a later script
+// that leaves the name alone keeps it hidden, and a set brings it back.
+// Mutation check: skip the base-name loop in `replace_from` and the unsetting
+// VU sends `Bearer stored`.
+TEST (ScopeOverlayTest, AScriptsUnsetOfABaseNameSticksForThatVuUntilASetBringsItBack) {
+    struct SavedScope {
+        std::string api;
+        vayu::Environment ScriptVariableScopes::* scope;
+    };
+    for (const auto& [api, scope] :
+    { SavedScope{ "environment", &ScriptVariableScopes::environment },
+    SavedScope{ "collectionVariables", &ScriptVariableScopes::collection },
+    SavedScope{ "globals", &ScriptVariableScopes::globals } }) {
+        SCOPED_TRACE (api);
+        ScriptVariableScopes base;
+        (base.*scope)["tok"] = value_of ("stored");
+        ScopeOverlay unsetting;
+        const ScopeOverlay other;
+
+        run_inline_script (unsetting, base, "pm." + api + ".unset('tok');");
+        EXPECT_EQ (bearer_after_residual_pass (unsetting, base), "Bearer {{tok}}");
+        EXPECT_EQ (bearer_after_residual_pass (other, base), "Bearer stored")
+        << "one VU's unset reached another's view of the stored value";
+
+        unsetting.clear_local ();
+        run_inline_script (unsetting, base, "pm." + api + ".set('other', 'x');");
+        EXPECT_EQ (bearer_after_residual_pass (unsetting, base), "Bearer {{tok}}")
+        << "a later script that never named the variable uncovered it";
+
+        run_inline_script (unsetting, base, "pm." + api + ".set('tok', 'again');");
+        EXPECT_EQ (bearer_after_residual_pass (unsetting, base), "Bearer again");
+        EXPECT_EQ ((base.*scope).at ("tok").value, "stored")
+        << "the base is shared";
+    }
 }
 
 // --- the exchange, on the wire -----------------------------------------------
