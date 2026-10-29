@@ -65,8 +65,8 @@ function summarizeExtractJson(config: Record<string, unknown>, kind?: ElementKin
 	const variable = typeof config.variable === "string" ? config.variable : "";
 	if (!path || !variable) return fallback(kind);
 	const stored = typeof config.scope === "string" && config.scope.length > 0 ? config.scope : "";
-	const scope = stored || (catalogueDefault(kind, "scope") ?? "env");
-	return `${path} → ${variable} (${scope})`;
+	const scope = stored || catalogueDefault(kind, "scope");
+	return scope ? `${path} → ${variable} (${scope})` : `${path} → ${variable}`;
 }
 
 function summarizeTimerThink(config: Record<string, unknown>, kind?: ElementKindSchema): string {

@@ -146,13 +146,13 @@ describe("summarizeElement - extract.json", () => {
 		).toBe("$.token → token (env)");
 	});
 
-	it("falls back to env only when the catalogue declares no default", () => {
+	it("names no scope when the catalogue declares no default", () => {
 		expect(summarizeElement(element("extract.json", { path: "$.t", variable: "t" }), k)).toBe(
-			"$.t → t (env)"
+			"$.t → t"
 		);
 		expect(
 			summarizeElement(element("extract.json", { path: "$.t", variable: "t" }), undefined)
-		).toBe("$.t → t (env)");
+		).toBe("$.t → t");
 	});
 
 	it("falls back to the kind's description without a variable", () => {
