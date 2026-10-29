@@ -57,11 +57,21 @@ function formatPct(value: number): string {
 	return `${Number.isInteger(value) ? value : value.toFixed(1)}%`;
 }
 
+/**
+ * Every send of the operation failed to connect. `sent` counts transport
+ * failures (the engine's documented choice), so `covered` alone cannot tell a
+ * reached operation from one nothing answered.
+ */
+function gotNoResponse(operation: RunCoverageOperation): boolean {
+	return operation.sent > 0 && (operation.transportErrors ?? 0) >= operation.sent;
+}
+
 export function ContractCoverage({ coverage, inheritedBinding, className }: ContractCoverageProps) {
 	if (!coverage || coverage.operations.length === 0) return null;
 
 	const uncovered = coverage.operationsTotal - coverage.operationsCovered;
-	const complete = uncovered === 0 && coverage.undeclaredStatusesSeen === 0;
+	const unanswered = coverage.operations.filter(gotNoResponse).length;
+	const complete = uncovered === 0 && coverage.undeclaredStatusesSeen === 0 && unanswered === 0;
 
 	return (
 		<Card className={className}>
@@ -78,7 +88,10 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 				 * Neutral rather than red when something is uncovered: an
 				 * unexercised operation is a gap in the run, not a failure of the
 				 * system under test, and painting it destructive would put it in
-				 * the same vocabulary as a failed budget.
+				 * the same vocabulary as a failed budget. An operation whose every
+				 * send failed to connect is the same kind of gap: it counts as
+				 * covered because something was tried, but nothing was learned
+				 * from it, so the chip is not green either.
 				 */}
 				<Badge
 					variant="chip"
@@ -98,6 +111,8 @@ export function ContractCoverage({ coverage, inheritedBinding, className }: Cont
 					responses seen ({formatPct(coverage.declaredResponseCoveragePct)}).
 					{coverage.undeclaredStatusesSeen > 0 &&
 						` ${coverage.undeclaredStatusesSeen} ${pluralize(coverage.undeclaredStatusesSeen, "undeclared status", "undeclared statuses")} observed.`}
+					{unanswered > 0 &&
+						` ${unanswered} ${pluralize(unanswered, "operation")} got no response.`}
 					{coverage.undeclaredOperationRequests !== undefined &&
 						` ${coverage.undeclaredOperationRequests} ${pluralize(coverage.undeclaredOperationRequests, "request")} went to operations this document does not declare.`}
 				</p>

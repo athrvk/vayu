@@ -14,7 +14,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { elementsParts, hasReplayedPostScript, scriptTextFor } from "./elements-parts";
+import {
+	elementsParts,
+	hasReplayedPostScript,
+	scriptTextFor,
+	withoutDisabled,
+} from "./elements-parts";
 import type { Collection, ElementDef } from "@/types";
 
 /** Minimal `Collection` fixture - only `id`, `name` and `elements` matter here. */
@@ -220,5 +225,32 @@ describe("hasReplayedPostScript", () => {
 			config: { elementId: "inherited" },
 		});
 		expect(hasReplayedPostScript(elementsParts(chain, "req", [disable]))).toBe(false);
+	});
+});
+
+describe("withoutDisabled (#3050)", () => {
+	it("drops a switched-off element, wherever it came from, and keeps the rest in order", () => {
+		const chain = [
+			collection("root", "Root", [
+				element({ id: "r1", kind: "timer.pacing", enabled: false }),
+				element({ id: "r2", kind: "extract.json" }),
+			]),
+		];
+		const parts = elementsParts(chain, "req_1", [
+			element({ id: "q1", kind: "control.loop", enabled: false }),
+			element({ id: "q2", kind: "assert.status" }),
+		]);
+
+		expect(withoutDisabled(parts)?.map((el) => el.id)).toEqual(["r2", "q2"]);
+	});
+
+	it("answers undefined when nothing is left, as elementsParts does for an empty chain", () => {
+		const parts = elementsParts([], "req_1", [
+			element({ id: "q1", kind: "timer.pacing", enabled: false }),
+		]);
+
+		expect(parts).toHaveLength(1);
+		expect(withoutDisabled(parts)).toBeUndefined();
+		expect(withoutDisabled(undefined)).toBeUndefined();
 	});
 });

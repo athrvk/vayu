@@ -356,18 +356,35 @@ sets `ScriptControl::Next` back to the folder's first member - an ordinary loop-
 same way `control.switch`'s jump is. `control.transaction` sums every member's own response
 latency into a per-iteration accumulator (same keying) at microsecond precision, each member rounded
 to the nearest microsecond (#2387; whole milliseconds per member reported three 0.9 ms members as
-0 ms). At the folder's last member it reports the closed sum as its `ElementOutcome::duration_us`
-with the transaction's `name` in `message` - the two fields the runner (`scenario_runner.cpp` /
-`scenario_load.cpp`) reads to record the value into `TransactionHistograms`, one HdrHistogram per
-declared name allocated up front from a plan scan, so recording it takes no lock either. Only the
-close carries `duration_us`, and no timer sets it, which is what tells a close from an accumulating
-pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum rounded to
-whole milliseconds; `duration_us` itself is not serialised. `includeTimers: true` (issue #1569) also
-folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
+0 ms). The element only accumulates; the close is the runners' (#3054). Once a step's outcome and the
+iteration's next position are known, both run modes call `settle_transactions` (`core/elements`),
+which closes the pass **when the iteration leaves the folder**: after the folder's last member however
+that member ended - sent, skipped by a controller, or failed before `step.after` (a row that would not
+bind, a load transfer with no response) - and after any member from which the iteration jumps outside
+the folder or ends (a `control.switch` target past it, a `null` jump, an errored step under
+`stopOnError`, an abandoned load iteration). A pass in which no member was attempted, every one
+skipped, records nothing; a pass a Stop or the end of a load run interrupts is not recorded either. A
+jump back inside the folder keeps the pass open, except from its last member: `control.loop`'s
+repeat starts a new pass each time round. The close writes the sum onto that step's own
+`control.transaction` outcome (appended for a step that never reached `step.after`) as
+`ElementOutcome::duration_us`, with the transaction's `name` in `message` - the two fields the runner
+(`scenario_runner.cpp` / `scenario_load.cpp`) reads to record the value into `TransactionHistograms`,
+one HdrHistogram per declared name allocated up front from a plan scan, so recording it takes no lock
+either. Only the close carries `duration_us`, and no timer sets it, which is what tells a close from an
+accumulating pass. The close also sets `waited_ms` (`waitedMs` in the step trace's JSON) to the sum
+rounded to whole milliseconds; `duration_us` itself is not serialised. A pass is `"failed"`, and
+counts in `errors`, when an attempted member is an error by the run report's own definition
+(`transaction_member_errored`): no response (a transport failure, or a request that could not be
+built), a status outside 2xx/3xx (`vayu::is_success_status`, so a 404 counts), or a failed assertion
+(an `assert.*` element or a `pm.test`). A script that threw is none of these. A design send has no
+pass to fold into: its one response is the whole transaction, judged on the response alone because
+its assertions may run after the element. `includeTimers: true` (issue #1569)
+also folds a between-member `timer.*` wait (whole milliseconds, added as microseconds) into the same
 running sum - the runner's own `step.between` dispatch does this fold generically
-(`fold_between_wait_into_open_transactions`, shared by both run modes, found through the
-registry's `category` field rather than a `kind ==` comparison), skipped for the folder's last member,
-whose sum has already closed and reported by the time any wait after it could run. The report gains
+(`fold_between_wait_into_open_transactions`, shared by both run modes, found through the registry's
+`category` field rather than a `kind ==` comparison) - but only into an open pass, one a member has
+already run in, and never for a wait after the folder's last member, which is outside the
+transaction's span. The report gains
 `scenario.transactions[] = { name, count, errors, latency: { min, p50, p90, p95, p99, max } }`, omitted
 for a transaction the run never closed.
 
@@ -439,8 +456,11 @@ both sides).
 (`extract.*`'s target variable, an inline `script.*`'s `pm.environment.set`) cannot land in
 the run's shared scopes the way a design send's or the sequential run's does - two VUs
 writing the same name would be reading and overwriting each other's state. Each `VirtualUser`
-instead carries a small `ScopeOverlay`: a handful of names this VU has written, cleared at
-every iteration boundary exactly `cookies` is. The run's shared scopes are flattened once at
+instead carries a small `ScopeOverlay`: a handful of names this VU has written. What it saves
+to the environment, collection or globals scope lives as long as the VU (#3044), so a
+`control.once` login's extracted token still answers every later iteration's `{{token}}`; only
+the run-local scope (`pm.variables.set`) is emptied at the iteration boundary, beside
+`cookies`. The run's shared scopes are flattened once at
 setup (`flatten_variable_scopes`); the residual-token pass (`resolve_residual_tokens`, see
 [`architecture.md`](architecture.md)) reads a copy of that flattened map with the VU's overlay
 merged on top - proportional to what the VU actually wrote, not to the run's whole variable
@@ -562,8 +582,9 @@ strategy's own polling loop. What issue #1573 wires for this run shape stays
 separate: `lifecycleElements` (previous paragraph) is a run's own boundary,
 not a step's. `validate_request_elements_run_override` refuses a `control.*`
 kind, `timer.pacing` and `timer.throughput` outright (a `400` naming the
-index and the kind) rather than accepting one that would silently no-op or
-misbehave - a lone request has no sequence for a jump, a per-VU controller
+element's label and where it was declared, #3050; a disabled entry is not
+refused, the pipeline skips it) rather than accepting one that would
+silently no-op or misbehave - a lone request has no sequence for a jump, a per-VU controller
 state, or a shared pacing clock for `apply` to read, and admitting the kind
 without running it correctly would report `"ok"` for behaviour that never
 happened. The controller and pacing family stays a scenario-only concern;

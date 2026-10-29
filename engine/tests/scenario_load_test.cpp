@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -2370,6 +2371,141 @@ TEST_F (ScenarioLoadTest, APlannedStepSendsTheTokenAnEarlierInlineTestScriptSet)
     for (size_t i = 0; i < echoes.size (); ++i) {
         EXPECT_EQ (echoes[i].authorization, "Bearer tok-" + std::to_string (i + 1));
     }
+}
+
+// ============================================================================
+// What an iteration boundary resets (#3044): the session and the run-local
+// scope, never the variables a virtual user saved
+// ============================================================================
+
+namespace {
+
+/// `/login` fired once per virtual user, its `$.token` saved as `token`.
+std::shared_ptr<const std::vector<vayu::core::CompiledElement>> login_once_elements () {
+    return vayu::tests::compiled_elements (
+    { json{ { "id", "el_once" }, { "kind", "control.once" },
+      { "enabled", true }, { "config", json::object () } },
+    vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+}
+
+} // namespace
+
+// The issue's repro: a `control.once` login extracts the token in iteration 1
+// and every later iteration's step 1 still sends it, while the login's cookie
+// is gone from iteration 2 on. Mutation check: clear the whole overlay in
+// `end_iteration` and iterations 2 and 3 send the literal `Bearer {{token}}`.
+TEST_F (ScenarioLoadTest, AControlOnceLoginsTokenReachesEveryLaterIteration) {
+    ScenarioMockServer server;
+    auto execution = plan_login_then_bearer (server, server.url ("/echo"));
+    execution.plan.steps[0].elements = login_once_elements ();
+
+    const json config = { { "mode", "iterations" }, { "iterations", 3 },
+        { "concurrency", 1 } };
+    run (config, execution, /*pool_size=*/1);
+
+    ASSERT_EQ (server.hits_for ("/login").size (), 1u)
+    << "control.once let the login run again";
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 3u);
+    for (size_t i = 0; i < echoes.size (); ++i) {
+        EXPECT_EQ (echoes[i].authorization, "Bearer tok-1")
+        << "iteration " << i + 1 << " lost the token the login saved";
+    }
+    EXPECT_EQ (echoes[0].cookie, "sid=1");
+    EXPECT_EQ (echoes[1].cookie, "")
+    << "the login's session outlived its iteration";
+    EXPECT_EQ (echoes[2].cookie, "");
+}
+
+// A `pm.variables.set` value is the run-local scope, which starts every
+// iteration empty: step 1 reads this iteration's value, and the next
+// iteration's step 0 finds none. Mutation check: make `clear_local` a no-op
+// and the second `/echo` sends `Bearer local-0`.
+TEST_F (ScenarioLoadTest, ALocalValueLastsOneIteration) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/s0") });
+    for (auto& step : execution.plan.steps) {
+        step.request.headers["Authorization"] = "Bearer {{seen}}";
+    }
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.variables.set('seen', 'local-' + pm.info.iteration);", /*inline_script=*/true) });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    const auto after  = server.hits_for ("/s0");
+    ASSERT_EQ (echoes.size (), 2u);
+    ASSERT_EQ (after.size (), 2u);
+    EXPECT_EQ (after[0].authorization, "Bearer local-0");
+    EXPECT_EQ (after[1].authorization, "Bearer local-1");
+    EXPECT_EQ (echoes[0].authorization, "Bearer {{seen}}");
+    EXPECT_EQ (echoes[1].authorization, "Bearer {{seen}}")
+    << "iteration 1's run-local value reached iteration 2";
+}
+
+// A bare data column is bound from the iteration's own row before any saved
+// variable is read, so a name the VU saved in iteration 1 cannot answer for
+// iteration 2's row.
+TEST_F (ScenarioLoadTest, ASavedVariableDoesNotShadowTheNextRowsColumn) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/row/{{id}}"), server.url ("/login") });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_id", "$.token", "id") });
+    execution.data_rows = { json{ { "id", "0" } }, json{ { "id", "1" } } };
+    const auto columns  = vayu::core::bound_columns_of (execution.data_rows);
+    for (auto& step : execution.plan.steps) {
+        step.data_template = vayu::core::tokenize_bindable_fields (step.request, columns);
+    }
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    std::vector<std::string> rows;
+    for (const auto& hit : server.hits ()) {
+        if (hit.path.rfind ("/row/", 0) == 0) {
+            rows.push_back (hit.path);
+        }
+    }
+    EXPECT_EQ (rows, (std::vector<std::string>{ "/row/0", "/row/1" }))
+    << "iteration 1's saved `id` answered for iteration 2's row";
+}
+
+// Two virtual users each keep their own login's token across iterations,
+// never the other's. Step 1 sends to `/row/{{$vu}}`, so each echo names the
+// user that sent it.
+TEST_F (ScenarioLoadTest, TwoVirtualUsersKeepTheirOwnSavedTokenAcrossIterations) {
+    ScenarioMockServer server (/*login_rendezvous=*/2);
+    auto execution = plan_login_then_bearer (server, server.url ("/row/{{$vu}}"));
+    execution.plan.steps[0].elements = login_once_elements ();
+    split_steps (execution);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 6 },
+        { "concurrency", 2 } };
+    run (config, execution, /*pool_size=*/2);
+
+    ASSERT_EQ (server.hits_for ("/login").size (), 2u);
+    std::map<std::string, std::set<std::string>> tokens_by_vu;
+    size_t echoes = 0;
+    for (const auto& hit : server.hits ()) {
+        if (hit.path.rfind ("/row/", 0) == 0) {
+            tokens_by_vu[hit.path].insert (hit.authorization);
+            ++echoes;
+        }
+    }
+    EXPECT_EQ (echoes, 6u);
+    ASSERT_EQ (tokens_by_vu.size (), 2u) << "both users must have sent step 1";
+    std::set<std::string> distinct;
+    for (const auto& [vu, tokens] : tokens_by_vu) {
+        ASSERT_EQ (tokens.size (), 1u) << vu << " sent more than one token across its iterations";
+        EXPECT_EQ (tokens.begin ()->rfind ("Bearer tok-", 0), 0u)
+        << vu << " sent " << *tokens.begin ();
+        distinct.insert (*tokens.begin ());
+    }
+    EXPECT_EQ (distinct.size (), 2u) << "the two users sent the same token";
 }
 
 // Without the `inline` mark, a `script.post` element stays exactly where it

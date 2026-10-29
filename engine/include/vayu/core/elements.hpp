@@ -212,8 +212,14 @@ struct ElementSpan {
 /// `scenario_load.cpp`'s own `step.between` dispatch) can fold a
 /// between-member `timer.*` wait into an *open* transaction's sum when its
 /// config asks to (`includeTimers`, issue #1569), without either side
-/// hardcoding the other's key format twice.
+/// hardcoding the other's key format twice. Present only while the pass is
+/// open: `settle_transactions` erases it when the pass closes.
 [[nodiscard]] std::string transaction_sum_key (const std::string& element_id, size_t iteration);
+
+/// The flag beside `transaction_sum_key`, keyed the same way: present once a
+/// member of the open pass counted as an error (#3054).
+[[nodiscard]] std::string
+transaction_error_key (const std::string& element_id, size_t iteration);
 
 /**
  * One shared counter pair per element whose registry kind declares
@@ -319,7 +325,7 @@ struct ElementContext {
     /// This element's own `id`, set by `ElementPipeline::run` before every
     /// `apply` call - never by a kind itself (issue #1515). A controller
     /// that needs to recognise its own occurrence (`control.once`'s
-    /// fire-once flag, `control.transaction`'s span lookup) reads this
+    /// fire-once flag, `control.transaction`'s running sum) reads this
     /// rather than being handed its id as a constructor argument, so
     /// `Element::apply` keeps one signature for every kind.
     // NOLINTNEXTLINE(readability-redundant-member-init)
@@ -850,10 +856,10 @@ void stamp_default_element_ids (nlohmann::json& elements);
  * `kind ==` comparison outside `core/elements`" way it finds a transaction,
  * through the registry's `category`) is written once.
  *
- * "Open" means this step is not that transaction's own last member: the
- * last member's `apply` already closed and reported the sum by the time its
- * own `step.between` could run, so a wait after it belongs to whatever
- * comes next, never back into a transaction that already finished.
+ * "Open" means a member of this iteration's pass has already run (its sum
+ * exists) and this step is not the folder's last member: a wait after the
+ * last member belongs to whatever comes next, never back into the
+ * transaction that `settle_transactions` closes there.
  *
  * @p wait_ms is whole milliseconds, as every timer reports its wait; it is
  * added to the sum as microseconds, the sum's unit (#2387).
@@ -864,6 +870,57 @@ size_t step_index,
 size_t iteration,
 int64_t wait_ms,
 std::unordered_map<std::string, int64_t>& controller_state);
+
+/**
+ * One finished execution of a plan step, as the transactions it is a member
+ * of see it (#3054). Built by both runners once the step's outcome and the
+ * iteration's next position are known.
+ */
+struct TransactionMember {
+    size_t step_index = 0;
+    size_t iteration  = 0;
+    /// The step was sent, or failed trying (a transport failure, a row that
+    /// would not bind). False only for a controller's or script's skip, which
+    /// adds nothing to the pass.
+    bool attempted = false;
+    /// The attempt counts against the transaction.
+    bool errored = false;
+    /// Where the iteration goes next; `nullopt` when it ends after this step.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::optional<size_t> next_position{};
+};
+
+/**
+ * Whether an attempted member counts against its `control.transaction`
+ * (#3054), by the run report's own definition of an error: no response
+ * (@p response null) or a transport failure, a status outside 2xx/3xx
+ * (`vayu::is_success_status`), or a failed assertion (an `assert.*` element
+ * or a `pm.test`, @p assertion_failed). Both runners and the design send
+ * judge a member here.
+ */
+[[nodiscard]] bool transaction_member_errored (const vayu::Response* response,
+bool assertion_failed);
+
+/**
+ * Settles every `control.transaction` on a step after its execution (#3054):
+ * records an attempted member's error, and closes the pass when the iteration
+ * leaves the folder - after the folder's last member however that member
+ * ended (sent, skipped or failed), or after any member from which the
+ * iteration jumps outside the folder or ends. Shared by both run modes, so a
+ * pass closes at the same place whichever ran it.
+ *
+ * A pass closes only when a member was attempted (its sum exists): one whose
+ * every member was skipped records nothing. The close is written onto the
+ * step's own `control.transaction` outcome in @p outcomes, or appended there
+ * for a step that never reached `step.after`: status `"failed"` when a member
+ * errored, the name in `message`, the sum in `duration_us` (the runners record
+ * it) and rounded in `waited_ms` (the trace shows it).
+ */
+void settle_transactions (const std::vector<CompiledElement>& elements,
+const std::unordered_map<std::string, ElementSpan>& spans,
+const TransactionMember& member,
+std::unordered_map<std::string, int64_t>& controller_state,
+std::vector<ElementOutcome>& outcomes);
 
 /**
  * Applies the run's `elements.timers` override (issue #1498) to one

@@ -17,23 +17,21 @@
  * member entirely), to a running sum kept in
  * `ElementContext::controller_state` under `transaction_sum_key`, which folds
  * in this element's `id` and the current `iteration` so a later iteration -
- * or, under a run that never reaches this folder's last member, an abandoned
- * one - never adds onto a stale total. Only the folder's *last* member
- * (`step_position == element_spans->at(element_id).last`) closes the sum:
- * that occurrence alone sets `ElementOutcome::duration_us` to the whole
- * transaction and `message` to its declared `name`, which is what
- * `scenario_runner.cpp` / `scenario_load.cpp` read to record it into the
- * run's `TransactionHistograms`. The close also sets `waited_ms` to the sum
- * rounded to whole milliseconds, for the step trace's `waitedMs`; no runner
- * reads it as a transaction, because timers report their waits there too.
+ * or an abandoned one - never adds onto a stale total.
+ *
+ * The element never closes the sum itself in a run: a skipped member never
+ * reaches `step.after`, and a member's failed assertion is decided by kinds
+ * that may run after this one. Both runners call `settle_transactions` once a
+ * step's outcome and the iteration's next position are known (#3054), and
+ * that close is what they record into `TransactionHistograms`. A design send
+ * has no accumulator, so there this one response is the whole transaction.
  *
  * `includeTimers` (issue #1569) folds a between-member `timer.*` wait into
  * the same sum key: the fold is the caller's
  * (`fold_between_wait_into_open_transactions`, called from both run modes'
  * `step.between` dispatch), found through the registry's `category` rather
  * than a `kind ==` comparison outside `core/elements` (#1512's
- * extensibility contract, rule 1), and skipped for the folder's *last*
- * member, whose sum has already closed by the time any wait after it runs.
+ * extensibility contract, rule 1).
  */
 
 #include "vayu/core/elements.hpp"
@@ -51,13 +49,17 @@ int64_t member_duration_us (const vayu::Response& response) {
     return std::llround (std::max (0.0, response.timing.total_ms) * 1000.0);
 }
 
+/// A close's `waited_ms`: rounded, not floored, so the trace's `waitedMs`
+/// agrees with the recorded duration. `duration_us` is never negative.
+int64_t whole_ms (int64_t duration_us) {
+    return (duration_us + 500) / 1000;
+}
+
 void report_close (ElementContext& ctx, const std::string& name, int64_t duration_us, bool errored) {
     ctx.outcome_status      = errored ? "failed" : "ok";
     ctx.outcome_duration_us = duration_us;
-    // Rounded, not floored: the trace's `waitedMs` should agree with the
-    // recorded duration. `duration_us` is never negative.
-    ctx.outcome_waited_ms = (duration_us + 500) / 1000;
-    ctx.outcome_message   = name;
+    ctx.outcome_waited_ms   = whole_ms (duration_us);
+    ctx.outcome_message     = name;
 }
 
 class ControlTransactionElement final : public Element {
@@ -76,48 +78,109 @@ class ControlTransactionElement final : public Element {
             ctx.outcome_message = "no response";
             return;
         }
-        const std::string name = config_.value ("name", "");
-        const size_t position  = ctx.step_position.value_or (0);
-        size_t last            = position;
-        if (ctx.element_spans != nullptr) {
-            if (const auto found = ctx.element_spans->find (ctx.element_id);
-            found != ctx.element_spans->end ()) {
-                last = found->second.last;
-            }
-        }
-
         if (ctx.controller_state == nullptr) {
             // No accumulator to fold into (a design send) - this one
-            // response is the whole transaction.
-            report_close (ctx, name, member_duration_us (*ctx.response),
-            ctx.response->has_error ());
+            // response is the whole transaction. Its assertions may run
+            // after this element, so only the response is judged here.
+            report_close (ctx, config_.value ("name", ""),
+            member_duration_us (*ctx.response),
+            transaction_member_errored (ctx.response, false));
             return;
         }
-
-        const std::string sum_key = transaction_sum_key (ctx.element_id, ctx.iteration);
-        const std::string error_key =
-        ctx.element_id + "#" + std::to_string (ctx.iteration) + "#err";
-        auto& sum = (*ctx.controller_state)[sum_key];
-        sum += member_duration_us (*ctx.response);
-        if (ctx.response->has_error ()) {
-            (*ctx.controller_state)[error_key] = 1;
-        }
-
-        if (position != last) {
-            ctx.outcome_status = "ok"; // accumulating - not this pass's close.
-            return;
-        }
-
-        report_close (ctx, name, sum, (*ctx.controller_state)[error_key] != 0);
-        ctx.controller_state->erase (sum_key);
-        ctx.controller_state->erase (error_key);
+        (*ctx.controller_state)[transaction_sum_key (ctx.element_id, ctx.iteration)] +=
+        member_duration_us (*ctx.response);
     }
 
     private:
     nlohmann::json config_;
 };
 
+bool is_transaction (const Registry& registry, const CompiledElement& compiled) {
+    if (!compiled.enabled || !compiled.element) {
+        return false;
+    }
+    const auto* kind = registry.find (compiled.kind);
+    return kind != nullptr && kind->category == "transaction";
+}
+
+/// Whether the iteration leaves @p span after @p member: the folder's last
+/// member always ends a pass, even when `control.loop` walks it again.
+bool leaves_span (const ElementSpan& span, const TransactionMember& member) {
+    if (member.step_index == span.last || !member.next_position) {
+        return true;
+    }
+    return *member.next_position < span.first || *member.next_position > span.last;
+}
+
+/// The close, written onto this step's own outcome for @p compiled when its
+/// `step.after` ran, or appended when it did not.
+void write_close (const CompiledElement& compiled,
+int64_t duration_us,
+bool errored,
+std::vector<ElementOutcome>& outcomes) {
+    auto own = std::find_if (
+    outcomes.begin (), outcomes.end (), [&] (const ElementOutcome& outcome) {
+        return outcome.id == compiled.id && outcome.kind == compiled.kind;
+    });
+    if (own == outcomes.end ()) {
+        ElementOutcome appended;
+        appended.id     = compiled.id;
+        appended.kind   = compiled.kind;
+        appended.origin = compiled.origin;
+        outcomes.push_back (std::move (appended));
+        own = std::prev (outcomes.end ());
+    }
+    ElementOutcome& close = *own;
+    close.status          = errored ? "failed" : "ok";
+    close.message         = compiled.config.value ("name", "");
+    close.duration_us     = duration_us;
+    close.waited_ms       = whole_ms (duration_us);
+}
+
 } // namespace
+
+bool transaction_member_errored (const vayu::Response* response, bool assertion_failed) {
+    return response == nullptr || response->has_error () ||
+    !vayu::is_success_status (response->status_code) || assertion_failed;
+}
+
+void settle_transactions (const std::vector<CompiledElement>& elements,
+const std::unordered_map<std::string, ElementSpan>& spans,
+const TransactionMember& member,
+std::unordered_map<std::string, int64_t>& controller_state,
+std::vector<ElementOutcome>& outcomes) {
+    const auto& registry = Registry::instance ();
+    for (const auto& compiled : elements) {
+        if (!is_transaction (registry, compiled)) {
+            continue;
+        }
+        const auto span = spans.find (compiled.id);
+        if (span == spans.end ()) {
+            continue;
+        }
+        const std::string sum_key = transaction_sum_key (compiled.id, member.iteration);
+        const std::string error_key = transaction_error_key (compiled.id, member.iteration);
+        if (member.attempted) {
+            // A member that failed before `step.after` added no time, but
+            // it still opens the pass it belongs to.
+            controller_state.try_emplace (sum_key, 0);
+            if (member.errored) {
+                controller_state[error_key] = 1;
+            }
+        }
+        if (!leaves_span (span->second, member)) {
+            continue;
+        }
+        const auto sum = controller_state.find (sum_key);
+        if (sum == controller_state.end ()) {
+            continue; // No member of this pass was attempted.
+        }
+        const int64_t duration_us = sum->second;
+        controller_state.erase (sum);
+        const bool errored = controller_state.erase (error_key) > 0;
+        write_close (compiled, duration_us, errored, outcomes);
+    }
+}
 
 ElementKind make_control_transaction_kind () {
     ElementKind kind;

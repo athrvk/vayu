@@ -43,6 +43,21 @@ export function hasReplayedPostScript(parts: ElementDef[] | undefined): boolean 
 	);
 }
 
+/**
+ * `parts` without its switched-off elements, `undefined` when none are left -
+ * `elementsParts`' own empty answer. For a load run's `requestElements` only
+ * (#3050): the pipeline skips a disabled element, so sending one buys nothing,
+ * and a disabled kind a single-request run has no home for would only burden
+ * the run. Send and code generation keep the disabled elements, as the
+ * Elements tab does.
+ */
+export function withoutDisabled(
+	parts: ResolvedElement[] | undefined
+): ResolvedElement[] | undefined {
+	const enabled = (parts ?? []).filter((el) => el.enabled);
+	return enabled.length > 0 ? enabled : undefined;
+}
+
 function disabledAncestorIds(requestElements: ElementDef[]): Set<string> {
 	const ids = new Set<string>();
 	for (const el of requestElements) {

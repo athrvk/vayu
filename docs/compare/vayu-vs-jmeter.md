@@ -139,7 +139,8 @@ are things Vayu plans to catch up on:
   user, and `control.transaction` can fold a between-member `timer.*` wait
   into its own reported latency (`includeTimers`). Correlation across a
   scenario's steps - a login's token reaching the next step's header, per
-  virtual user - does work under load now too: mark the extracting element
+  virtual user, kept across that user's iterations while its cookies reset -
+  does work under load now too: mark the extracting element
   or script `inline` (or set the run's `elements.scripts` override), or let
   it stay in the post-run replay by default.
 - **It has to be JVM-native** for your infrastructure, monitoring, or compliance
