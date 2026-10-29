@@ -352,8 +352,7 @@ void expect_every_property_annotated (const std::string& kind_name, const json& 
         return text != nullptr && !text->empty ();
     };
     for (const auto& [name, schema] : properties.items ()) {
-        EXPECT_TRUE (has_text (schema, "title"))
-        << kind_name << "." << name << " has no title";
+        EXPECT_TRUE (has_text (schema, "title")) << kind_name << "." << name << " has no title";
         EXPECT_TRUE (has_text (schema, "description"))
         << kind_name << "." << name << " has no description";
         if (schema.contains ("x-vayu-group")) {
