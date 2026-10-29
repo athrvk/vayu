@@ -11687,7 +11687,13 @@ change any step's outcome: it is its own verdict channel, and a response the
 document does not describe is not a failed assertion. Set, a step that passed
 everything else and whose response did not match is classified `failed`, with the
 first problem in its `results.error`; a step already failing keeps the error that
-named it.
+named it. A step failed only by this gate moves `scenario.failed` (and the run
+list's `resultSummary.failed`), the step's trace outcome and `results.error`,
+and `schemaValidation`; it does not move `summary.failedRequests`,
+`httpErrorRequests`, `successfulRequests`, `errorRate`, `statusCodes` (its
+`200` stays a `200`), the `maxErrorRatePct` input or `summary.assertions`. Those
+are HTTP-only, the same rule a failed assertion follows
+(see `assertions` under [Scenario load runs](#scenario-load-runs)).
 
 
 **Response:**
