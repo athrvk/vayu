@@ -185,7 +185,9 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 				expect(declared, `${kind} declares no "${property}"`).toContain(property);
 			}
 			// The rule only applies where the schema leaves the operand optional:
-			// a `required` operand is `missingRequiredKeys`' to report.
+			// a `required` operand is `missingRequiredKeys`' to report, unless the
+			// rule says it judges that operand's value instead.
+			if (rule.judgesValue) continue;
 			for (const property of rule.properties) {
 				expect(
 					entry!.configSchema.required ?? [],
@@ -196,6 +198,23 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 	});
 
 	it("flags a fresh element of each rule's kind as incomplete, and a satisfied one as not", () => {
+		// A kind whose operand is not "any one listed key" names its own shapes:
+		// `timer_think_problem` wants both bounds of a range, and
+		// `assert_contains_problem` judges a required `text`'s value.
+		const SHAPES: Record<string, { unmet: Record<string, unknown>; met: object[] }> = {
+			"timer.think": {
+				unmet: { minMs: 100 },
+				met: [
+					{ ms: 0 },
+					{ gaussian: { meanMs: 1, deviationMs: 1 } },
+					{ minMs: 1, maxMs: 2 },
+				],
+			},
+			"assert.contains": {
+				unmet: { text: "" },
+				met: [{ text: "x" }, { text: "", mode: "equals" }],
+			},
+		};
 		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {
 			// Every `required` key filled, so only the operand can be what is missing.
 			const required = fixture.find((k) => k.kind === kind)!.configSchema.required ?? [];
@@ -203,6 +222,20 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			const incomplete = (config: Record<string, unknown>) =>
 				hasIncompleteElement([{ id: "el_1", kind, enabled: true, config }], fixture);
 
+			const shape = SHAPES[kind];
+			if (shape) {
+				expect(
+					incomplete({ ...base, ...shape.unmet }),
+					`${kind} with ${JSON.stringify(shape.unmet)}`
+				).toBe(true);
+				for (const met of shape.met) {
+					expect(
+						incomplete({ ...base, ...met }),
+						`${kind} with ${JSON.stringify(met)}`
+					).toBe(false);
+				}
+				continue;
+			}
 			expect(incomplete(base), `${kind} with no operand`).toBe(true);
 			for (const property of rule.properties) {
 				const operand = property === "in" ? [200] : true;
