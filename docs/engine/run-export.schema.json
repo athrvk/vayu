@@ -724,16 +724,17 @@
         "error": {"type": "number"},
         "skipped": {"type": "number"},
         "deferred": {"type": "number"},
-        "origin": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "kind": {"type": "string"},
-            "scope": {"type": "string"},
-            "id": {"type": "string"},
-            "name": {"type": "string"}
-          }
-        }
+        "origin": {"$ref": "#/definitions/elementOrigin"}
+      }
+    },
+    "elementOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string"},
+        "scope": {"type": "string"},
+        "id": {"type": "string"},
+        "name": {"type": "string"}
       }
     },
     "assertionPopulation": {
@@ -753,6 +754,7 @@
           "id": {"type": "string"},
           "kind": {"type": "string"},
           "name": {"type": "string"},
+          "origin": {"$ref": "#/definitions/elementOrigin"},
           "outcome": {"type": "string"},
           "waitedMs": {"type": "number"}
         }

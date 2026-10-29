@@ -273,20 +273,24 @@ ordered stream_section (const json& stream) {
     return out;
 }
 
-/// Each element tally row: its scalars, then the level it came from.
-ordered element_tallies (const json& rows) {
+/// Each of @p rows, one per element: its @p keys, then the level it came from.
+ordered element_rows (const json& rows, Keys keys) {
     ordered out = ordered::array ();
     if (!rows.is_array ()) {
         return out;
     }
     for (const json& row : rows) {
-        ordered tally = pick (row, ELEMENT_TALLY_KEYS);
+        ordered picked = pick (row, keys);
         if (const json& origin = member (row, "origin"); origin.is_object ()) {
-            tally["origin"] = pick (origin, ELEMENT_ORIGIN_KEYS);
+            picked["origin"] = pick (origin, ELEMENT_ORIGIN_KEYS);
         }
-        out.push_back (std::move (tally));
+        out.push_back (std::move (picked));
     }
     return out;
+}
+
+ordered element_tallies (const json& rows) {
+    return element_rows (rows, ELEMENT_TALLY_KEYS);
 }
 
 ordered scenario_step (const json& step) {
@@ -365,7 +369,7 @@ ordered lifecycle_section (const json& lifecycle) {
     ordered out = ordered::object ();
     for (const char* phase : { "setup", "teardown" }) {
         if (const json& outcomes = member (lifecycle, phase); outcomes.is_array ()) {
-            out[phase] = pick_each (outcomes, LIFECYCLE_OUTCOME_KEYS);
+            out[phase] = element_rows (outcomes, LIFECYCLE_OUTCOME_KEYS);
         }
     }
     return out;

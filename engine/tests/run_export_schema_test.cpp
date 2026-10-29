@@ -127,7 +127,10 @@ json healthy_summary () {
         { "lifecycle",
         { { "setup",
         json::array ({ { { "id", "el_s" }, { "kind", "script.setup" }, { "name", "Seed data" },
-        { "origin", json::object () }, { "outcome", "ok" }, { "waitedMs", 1.0 } } }) } } },
+        { "origin",
+        { { "kind", "collection" }, { "scope", "collection" },
+        { "id", "col_1" }, { "name", "Shop" }, { "unlisted", "dropped" } } },
+        { "outcome", "ok" }, { "waitedMs", 1.0 } } }) } } },
         { "elements",
         json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "name", "Is 200" },
         { "origin", { { "kind", "collection" }, { "id", "col_1" } } },
@@ -321,6 +324,12 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_EQ (request_tally.value ("origin", json ()),
     (json{ { "kind", "collection" }, { "id", "col_1" } }));
     EXPECT_EQ (document["report"]["lifecycle"]["setup"].at (0).value ("name", ""), "Seed data");
+    // A lifecycle outcome names its level too, member by member, so a member
+    // the origin gains is not carried unread. Mutation check: pick lifecycle
+    // outcomes with `pick_each` again (run_export.cpp) and `origin` is gone.
+    EXPECT_EQ (document["report"]["lifecycle"]["setup"].at (0).value ("origin", json ()),
+    (json{ { "kind", "collection" }, { "scope", "collection" },
+    { "id", "col_1" }, { "name", "Shop" } }));
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 
