@@ -81,6 +81,12 @@ describe("summarizeElement - assert.jsonpath", () => {
 		).toBe("$.id exists");
 	});
 
+	it("shows an absence check when exists is false", () => {
+		expect(
+			summarizeElement(element("assert.jsonpath", { path: "$.id", exists: false }), k)
+		).toBe("$.id does not exist");
+	});
+
 	it("falls back to the kind's description without a path", () => {
 		expect(summarizeElement(element("assert.jsonpath", {}), k)).toBe(k.description);
 	});

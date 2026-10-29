@@ -2291,7 +2291,9 @@ have changed by the next attempt.
 
 **A kind that needs one of several operands is held back the same way**
 (#3043): `assert.status` needs a non-empty `in` or a `range`, `assert.jsonpath`
-one of `expected`, `regex` or `exists`. The engine refuses an assertion with
+one of `expected`, `regex` or `exists` (the engine also refuses `exists` beside
+either of the others, #3049; the mode picker writes one key at a time, so the
+app never sends that mix). The engine refuses an assertion with
 none, and JSON Schema cannot say "one of", so `OPERAND_RULES`
 (`lib/elements.ts`) restates the two rules and `missingOperand` feeds the same
 "Needs ..." chip ("Needs accepted codes or a range") and the same
@@ -2428,7 +2430,9 @@ the drag started from and writes nothing.
 (`ModeElementForm.tsx`, with the table in `element-modes.ts`). `assert.status`
 accepts an `in` list **or** a `range`; `timer.think` waits `ms` **or**
 `minMs`/`maxMs` **or** a `gaussian`; `assert.jsonpath` checks `exists` **or**
-`expected` **or** `regex`; `control.throughput` limits by `everyN` **or**
+`expected` **or** `regex` (the **Exists** mode writes `exists: true` and has no toggle -
+`negate` turns it into "must be absent", while a stored `exists: false` summarizes as
+"<path> does not exist", #3049); `control.throughput` limits by `everyN` **or**
 `percent`; `metric.record`'s `source` reads exactly one of its six keys. The
 engine resolves each by an if/else-if chain or a fixed-priority loop and never
 combines two - but JSON Schema declares them as independent optional siblings,

@@ -59,9 +59,12 @@ export interface ElementMode {
 	 * - `fields`: render this mode's own properties as rows.
 	 * - `nested`: `id` is an `object` property; render its children directly,
 	 *   without the generic form's fieldset - the picker already names it.
-	 * - `marker`: the engine reads the key's *presence*, never its value, so
-	 *   there is nothing to render and a toggle would offer an "off" that
-	 *   turns nothing off. Choosing the mode writes `true`.
+	 * - `marker`: the app only ever writes `true`, so there is nothing to
+	 *   render. A `metric.record` source is read by presence, never value, and a
+	 *   toggle would offer an "off" that turns nothing off. `assert.jsonpath`'s
+	 *   `exists` does read its value (`false` asserts absence, #3049), but its
+	 *   `negate` is the off switch and a second one would say the same twice.
+	 *   Choosing the mode writes `true`.
 	 */
 	render: "fields" | "nested" | "marker";
 }
@@ -121,8 +124,10 @@ export const ELEMENT_MODES: Record<string, ElementModeSpec> = {
 	},
 
 	// `AssertJsonPathElement::apply` (assert_kinds.cpp): `exists`, then
-	// `expected`, then `regex`. `path` is the subject of all three and
-	// `negate` flips any of their verdicts, so neither is a mode.
+	// `expected`, then `regex`; `assert_jsonpath_problem` now refuses `exists`
+	// beside either, so the order only decides a row stored before that did.
+	// `path` is the subject of all three and `negate` flips any of their
+	// verdicts (with `exists`, "must be absent"), so neither is a mode.
 	"assert.jsonpath": {
 		leadNames: ["path"],
 		trailNames: ["negate"],

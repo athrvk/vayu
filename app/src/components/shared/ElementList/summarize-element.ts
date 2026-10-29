@@ -47,7 +47,8 @@ function summarizeAssertJsonpath(
 	if (typeof config.regex === "string" && config.regex.length > 0) {
 		return `${path} matches ${config.regex}`;
 	}
-	if (config.exists) return `${path} exists`;
+	if (config.exists === true) return `${path} exists`;
+	if (config.exists === false) return `${path} does not exist`;
 	return path;
 }
 

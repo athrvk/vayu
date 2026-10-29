@@ -176,8 +176,8 @@ function ModeFields({
 	config: Record<string, unknown>;
 	onChange: (config: Record<string, unknown>) => void;
 }) {
-	// A marker mode has nothing to render: the engine reads the key's
-	// presence, never its value, so the picker *is* the field. Its schema
+	// A marker mode has nothing to render: the app only writes `true` (see
+	// `ElementMode.render`), so the picker *is* the field. Its schema
 	// description still carries the one sentence explaining the strategy,
 	// which the picker's own hint renders above.
 	if (mode.render === "marker") return null;
