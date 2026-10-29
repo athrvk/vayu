@@ -23,6 +23,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -34,7 +35,7 @@ namespace vayu::core {
  * response schema describes a body, where "a setting this element has" and
  * "a number" for an integer both misname the problem (#3037).
  */
-enum class SchemaErrorContext {
+enum class SchemaErrorContext : std::uint8_t {
     ElementSettings,
     ResponseBody,
 };
