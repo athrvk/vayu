@@ -324,7 +324,8 @@ int status) {
         if (destination.size () >= limits::MAX_FAILURES) {
             continue;
         }
-        destination.push_back (FailureExample{ step, status, failure.path, failure.message });
+        destination.push_back (
+        FailureExample{ step, status, failure.path, failure.message });
     }
 }
 

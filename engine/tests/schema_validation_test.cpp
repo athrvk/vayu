@@ -1274,7 +1274,8 @@ TEST (SampledValidationTest, FailureExamplesAreCappedAndTheTotalStaysHonest) {
         totals.record (checked_verdict (false), "step0", 500);
     }
 
-    EXPECT_EQ (payload_failure_steps (totals).size (), constants::schema_validation::MAX_FAILURES);
+    EXPECT_EQ (payload_failure_steps (totals).size (),
+    constants::schema_validation::MAX_FAILURES);
     // Bounded list, unbounded count - so "10 shown of 30" stays readable.
     EXPECT_EQ (totals.failures_total, constants::schema_validation::MAX_FAILURES * 3);
     EXPECT_EQ (build_sampled_validation_payload (totals)["failuresTotal"].get<size_t> (),
@@ -1287,7 +1288,8 @@ TEST (SampledValidationTest, AnUnnamedStepStillFillsTheCap) {
         totals.record (checked_verdict (false), "", 500);
     }
 
-    EXPECT_EQ (payload_failure_steps (totals).size (), constants::schema_validation::MAX_FAILURES);
+    EXPECT_EQ (payload_failure_steps (totals).size (),
+    constants::schema_validation::MAX_FAILURES);
     EXPECT_EQ (totals.failures_total, 30u);
 }
 
@@ -1307,7 +1309,8 @@ TEST (SampledValidationTest, FailureExamplesCoverDistinctStepsBeforeRepeatingOne
     const auto steps = payload_failure_steps (totals);
     EXPECT_EQ (steps.size (), constants::schema_validation::MAX_FAILURES);
     const std::set<std::string> distinct (steps.begin (), steps.end ());
-    EXPECT_EQ (distinct.size (), 6u) << "a failing step was crowded out of the examples";
+    EXPECT_EQ (distinct.size (), 6u)
+    << "a failing step was crowded out of the examples";
     // Distinct steps lead, in the order they first failed; repeats follow.
     for (size_t i = 0; i < 6; ++i) {
         EXPECT_EQ (steps.at (i), "step" + std::to_string (i));
