@@ -35,7 +35,6 @@ export function ExtractorMisses({ count, className }: ExtractorMissesProps) {
 	return (
 		<span
 			className={cn("flex items-center gap-1.5 text-xs text-status-warning-text", className)}
-			title="An extractor found nothing and unset its variable, so a later step sends that name unresolved."
 		>
 			<AlertTriangle aria-hidden="true" className="size-icon-sm" />
 			<span className="tabular-nums">

@@ -496,7 +496,7 @@ the name reads as absent for this VU alone - in the residual pass, a controller'
 `materialize`d copy - until the VU sets the name again. It lasts as long as the VU's saved
 writes, through the iteration boundary and an inline script's replace. A script's own
 `pm.environment.unset` of a base name writes no tombstone, so under load the base value still
-answers after it.
+answers after it (#3088).
 
 **One `ScriptEngine` per thread, not a shared pool.** Every load run's worker threads - the
 strategy thread and each event-loop worker - are spawned fresh for that run and joined before
