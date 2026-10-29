@@ -11568,7 +11568,7 @@ of responses a load run stored**, or **every step a collection run executed**.
 | `unevaluated` | Checked responses whose schema carried a keyword the draft-07 validator could not evaluate (a nested `propertyNames` included, #2729) |
 | `uncheckedReasons` | Reason code -> count, accounting for every one of `sampled - checked` |
 | `unevaluatedKeywords[]` | `{keyword, count}`, so what went unread is named and not only counted |
-| `failures[]` | Bounded examples: `{step?, status, path, message}` |
+| `failures[]` | Bounded examples, at most 10: `{step?, status, path, message}`. They cover distinct failing steps (the first failure of each, in the order the steps first failed) before repeating one, so a late failing step is not hidden by an early one (#3038) |
 | `failuresTotal` | Every failure found, the cap included - so "3 shown of 90" stays readable |
 | `exact` | `true` when `sampled` is the whole population rather than a reservoir - written by a collection run, absent for a load run |
 | `failOnSchemaError` | Whether a schema failure was allowed to fail its step. Collection runs only |

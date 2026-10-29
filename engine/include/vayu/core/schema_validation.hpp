@@ -342,6 +342,12 @@ struct SampledValidationTotals {
      * across the whole run - the same cap one response's verdict is held to,
      * because a run-wide list is read for the same reason and a forty-step plan
      * must not multiply it by forty.
+     *
+     * The examples cover distinct failing steps before repeating one (#3038):
+     * `failure_examples` holds at most one example per step, the first that
+     * step produced, and a further failure from a step already represented
+     * waits in `repeat_examples`. A flat first-come cap would let the first
+     * failing step's samples fill the list and hide every later step.
      */
     struct FailureExample {
         /// The plan step whose response failed, by name. Empty for a
@@ -352,7 +358,13 @@ struct SampledValidationTotals {
         std::string path;
         std::string message;
     };
+    /// The first example of each failing step, in the order steps first failed.
     std::vector<FailureExample> failure_examples;
+    /// Further examples from steps already in `failure_examples`, in arrival
+    /// order. `build_sampled_validation_payload` appends them after the first-
+    /// per-step examples until the overall cap; a single-step run (or an
+    /// unnamed one) therefore still shows up to `MAX_FAILURES` examples.
+    std::vector<FailureExample> repeat_examples;
     /// Failures found across every sampled response, including the ones past
     /// the cap - so `failure_examples.size()` can be read as "3 shown of 90".
     size_t failures_total = 0;
