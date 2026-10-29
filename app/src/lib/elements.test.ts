@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+	errorsWithin,
 	hasIncompleteElement,
 	isBlankScriptElement,
 	missingOperand,
@@ -351,6 +352,33 @@ describe("validateElementConfig", () => {
 
 	it("has no opinion on a kind the catalogue no longer registers", () => {
 		expect(validate("extract.gone", { variable: "" })).toEqual({});
+	});
+});
+
+describe("errorsWithin", () => {
+	const errors = {
+		name: "Can't be empty",
+		"range.max": "Can't be empty",
+		"range.limits.low": "Must be at least 1",
+		rangeFinder: "Must be at most 3",
+	};
+
+	it("keeps what is under the key, with the key stripped", () => {
+		expect(errorsWithin(errors, "range")).toEqual({
+			max: "Can't be empty",
+			"limits.low": "Must be at least 1",
+		});
+	});
+
+	it("slices a nested level again with the stripped paths", () => {
+		expect(errorsWithin(errorsWithin(errors, "range"), "limits")).toEqual({
+			low: "Must be at least 1",
+		});
+	});
+
+	it("leaves out a field that only shares the key's spelling", () => {
+		expect(errorsWithin(errors, "rangeFinder")).toEqual({});
+		expect(errorsWithin(errors, "name")).toEqual({});
 	});
 });
 

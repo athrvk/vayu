@@ -57,13 +57,25 @@ import {
 	Label,
 } from "@/components/ui";
 import { FieldError } from "@/components/shared/FieldError";
+import { errorsWithin } from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
+
+/** Messages by field name within one form level; a nested object's form gets its own slice. */
+type FieldErrors = Readonly<Record<string, string>>;
+
+const NO_ERRORS: FieldErrors = {};
 
 export interface GenericElementFormProps {
 	schema: ElementConfigSchema;
 	config: Record<string, unknown>;
 	onChange: (config: Record<string, unknown>) => void;
+	/**
+	 * What `validateElementConfig` says is wrong with this level's fields, keyed
+	 * by the field's name here (`max`, not `range.max`) - the caller slices a
+	 * nested level with `errorsWithin`. Each message shows under its own field.
+	 */
+	errors?: FieldErrors;
 }
 
 function asString(value: unknown): string {
@@ -189,11 +201,13 @@ function PropertyRows({
 	names,
 	properties,
 	config,
+	errors,
 	onChange,
 }: {
 	names: string[];
 	properties: Record<string, ElementConfigProperty | null | undefined>;
 	config: Record<string, unknown>;
+	errors: FieldErrors;
 	/** The whole level's next value; the caller decides where it is written. */
 	onChange: (config: Record<string, unknown>) => void;
 }) {
@@ -206,6 +220,7 @@ function PropertyRows({
 						name={name}
 						property={properties[name]}
 						value={config[name]}
+						errors={errors}
 						onChange={(value) => onChange(setField(config, name, value))}
 					/>
 				));
@@ -482,15 +497,18 @@ function JsonValueField({
 	label,
 	hint,
 	value,
+	error,
 	onChange,
 }: {
 	label: string;
 	hint: string | undefined;
 	value: unknown;
+	error: string | undefined;
 	onChange: (value: unknown) => void;
 }) {
 	const inputId = useId();
 	const kindId = useId();
+	const errorId = useId();
 	const storedText = jsonValueText(value);
 	const [draft, setDraft] = useState(storedText);
 	const [seenText, setSeenText] = useState(storedText);
@@ -512,12 +530,15 @@ function JsonValueField({
 				size="sm"
 				id={inputId}
 				value={draft}
-				aria-describedby={kind ? kindId : undefined}
+				className={error ? "border-destructive" : undefined}
+				aria-invalid={error ? true : undefined}
+				aria-describedby={describedBy(error && errorId, kind && kindId)}
 				onChange={(e) => {
 					setDraft(e.target.value);
 					onChange(parseJsonValue(e.target.value));
 				}}
 			/>
+			<FieldError id={errorId}>{error}</FieldError>
 			{kind && (
 				<p id={kindId} className="text-xs text-muted-foreground">
 					Stored as {kind}
@@ -527,11 +548,17 @@ function JsonValueField({
 	);
 }
 
+/** An `aria-describedby` value from the ids that are present, in reading order. */
+function describedBy(...ids: Array<string | false | undefined>): string | undefined {
+	return ids.filter(Boolean).join(" ") || undefined;
+}
+
 /** One property row, dispatched by the schema's declared type. */
 function PropertyRow({
 	name,
 	property,
 	value,
+	errors,
 	onChange,
 }: {
 	name: string;
@@ -546,16 +573,20 @@ function PropertyRow({
 	 */
 	property: ElementConfigProperty | null | undefined;
 	value: unknown;
+	/** This level's messages; the row reads its own by `name`, and hands a nested object its slice. */
+	errors: FieldErrors;
 	onChange: (value: unknown) => void;
 }) {
 	property ??= {};
+	const error = errors[name];
 	const label = property.title ?? name;
 	const hint = property.description;
 	const unit = property["x-vayu-unit"];
-	// Only the two hand-rolled `Label` + `Input` pairs below need this - the
+	// Only the hand-rolled `Label` + `Input` pair below needs these - the
 	// settings-row primitives (`ToggleRow`, `NumberSettingRow`,
-	// `SelectSettingRow`) already associate their own label internally.
+	// `SelectSettingRow`) already associate their own label and message.
 	const inputId = useId();
+	const errorId = useId();
 
 	if (property.type === "boolean") {
 		return (
@@ -581,6 +612,7 @@ function PropertyRow({
 				max={property.maximum !== undefined ? String(property.maximum) : undefined}
 				commit="change"
 				compact
+				error={error}
 				onCommit={(next) => {
 					const num = property.type === "integer" ? parseInt(next, 10) : parseFloat(next);
 					if (!isNaN(num)) onChange(num);
@@ -597,6 +629,7 @@ function PropertyRow({
 				value={asString(value) || property.enum[0]}
 				onChange={onChange}
 				options={property.enum.map((option) => ({ value: option, label: option }))}
+				error={error}
 				compact
 			/>
 		);
@@ -623,6 +656,7 @@ function PropertyRow({
 					names={Object.keys(property.properties)}
 					properties={property.properties}
 					config={(value as Record<string, unknown> | undefined) ?? {}}
+					errors={errorsWithin(errors, name)}
 					onChange={onChange}
 				/>
 			</fieldset>
@@ -634,7 +668,15 @@ function PropertyRow({
 	}
 
 	if (property.type === undefined) {
-		return <JsonValueField label={label} hint={hint} value={value} onChange={onChange} />;
+		return (
+			<JsonValueField
+				label={label}
+				hint={hint}
+				value={value}
+				error={error}
+				onChange={onChange}
+			/>
+		);
 	}
 
 	// A string property, and any declared type the branches above leave over.
@@ -648,13 +690,22 @@ function PropertyRow({
 				size="sm"
 				id={inputId}
 				value={asString(value)}
+				className={error ? "border-destructive" : undefined}
+				aria-invalid={error ? true : undefined}
+				aria-describedby={describedBy(error && errorId)}
 				onChange={(e) => onChange(e.target.value)}
 			/>
+			<FieldError id={errorId}>{error}</FieldError>
 		</div>
 	);
 }
 
-export function GenericElementForm({ schema, config, onChange }: GenericElementFormProps) {
+export function GenericElementForm({
+	schema,
+	config,
+	errors = NO_ERRORS,
+	onChange,
+}: GenericElementFormProps) {
 	const properties = schema.properties ?? {};
 	const names = Object.keys(properties);
 	if (names.length === 0) {
@@ -679,6 +730,7 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 				names={mainNames}
 				properties={properties}
 				config={config}
+				errors={errors}
 				onChange={onChange}
 			/>
 			{advancedNames.length > 0 && (
@@ -697,6 +749,7 @@ export function GenericElementForm({ schema, config, onChange }: GenericElementF
 							names={advancedNames}
 							properties={properties}
 							config={config}
+							errors={errors}
 							onChange={onChange}
 						/>
 					</CollapsibleContent>

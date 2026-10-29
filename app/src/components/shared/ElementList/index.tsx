@@ -63,7 +63,12 @@ import {
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { FieldError } from "@/components/shared/FieldError";
 import { generateId } from "@/lib/id";
-import { isBlankScriptElement, missingOperand, missingRequiredKeys } from "@/lib/elements";
+import {
+	isBlankScriptElement,
+	missingOperand,
+	missingRequiredKeys,
+	validateElementConfig,
+} from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -260,6 +265,10 @@ function ElementRow({
 		<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
 	);
 	const summary = summarizeElement(element, schema);
+	// The same judgement `hasIncompleteElement` gates the save on (#3048), shown
+	// on the field that fails it. A present-but-invalid value only: an absent
+	// key is the "Needs ..." chip's.
+	const fieldErrors = validateElementConfig(element, kinds);
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
 	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
@@ -516,12 +525,14 @@ function ElementRow({
 							// build no longer serves - a bespoke form still
 							// renders there, as it always has.
 							schema={schema?.configSchema}
+							errors={fieldErrors}
 							onChange={(config) => onUpdate({ ...element, config })}
 						/>
 					) : schema ? (
 						<GenericElementForm
 							schema={schema.configSchema}
 							config={element.config}
+							errors={fieldErrors}
 							onChange={(config) => onUpdate({ ...element, config })}
 						/>
 					) : (

@@ -116,6 +116,40 @@ describe("SelectSettingRow", () => {
 			"The HTTP protocol to negotiate."
 		);
 	});
+
+	it("marks the trigger invalid and points it at the message and the description", () => {
+		render(
+			<SelectSettingRow
+				label="Protocol"
+				value="auto"
+				onChange={vi.fn()}
+				options={OPTIONS}
+				description="The HTTP protocol to negotiate."
+				error="Can't be empty"
+			/>
+		);
+
+		const trigger = screen.getByRole("combobox", { name: "Protocol" });
+		expect(trigger).toHaveAttribute("aria-invalid", "true");
+		expect(trigger.className).toContain("border-destructive");
+		const [errorId, descriptionId] = (trigger.getAttribute("aria-describedby") ?? "").split(
+			" "
+		);
+		expect(document.getElementById(errorId)?.textContent).toBe("Can't be empty");
+		expect(document.getElementById(descriptionId)?.textContent).toBe(
+			"The HTTP protocol to negotiate."
+		);
+	});
+
+	it("carries no invalid state without a message", () => {
+		render(
+			<SelectSettingRow label="Protocol" value="auto" onChange={vi.fn()} options={OPTIONS} />
+		);
+
+		const trigger = screen.getByRole("combobox", { name: "Protocol" });
+		expect(trigger).not.toHaveAttribute("aria-invalid");
+		expect(trigger.className).not.toContain("border-destructive");
+	});
 });
 
 describe("SelectSettingRow - the compact variant", () => {

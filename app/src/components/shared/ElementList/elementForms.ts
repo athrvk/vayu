@@ -37,6 +37,12 @@ export interface ElementFormProps extends ScriptElementFormProps {
 	 * engine build no longer serves.
 	 */
 	schema?: ElementConfigSchema;
+	/**
+	 * What `validateElementConfig` says is wrong with each config field, by dot
+	 * path. A form that renders config fields shows each message on its field;
+	 * the script forms have no constrained field and ignore it.
+	 */
+	errors?: Readonly<Record<string, string>>;
 }
 
 export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormProps>> = {

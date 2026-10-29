@@ -34,6 +34,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ElementConfigSchema } from "@/types";
 import { ModeElementForm } from "./ModeElementForm";
+import { expectShowsError, expectShowsNoError } from "./field-error.testkit";
 import { ELEMENT_MODES, detectMode, switchMode } from "./element-modes";
 
 const ASSERT_STATUS: ElementConfigSchema = {
@@ -555,6 +556,105 @@ describe("ModeElementForm - the fields are the schema's own", () => {
 
 		expect(screen.getByLabelText("Path")).toBeInTheDocument();
 	});
+});
+
+describe("ModeElementForm - a message under the field it is about (#3048)", () => {
+	// `errors` is the whole element's, by dot path from the top of `config`.
+	it("shows a flat mode field's message", () => {
+		render(
+			<ModeElementForm
+				kind="control.throughput"
+				schema={CONTROL_THROUGHPUT}
+				config={{ percent: 150 }}
+				errors={{ percent: "Must be at most 100" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsError(
+			screen.getByRole("spinbutton", { name: "Percent" }),
+			"Must be at most 100"
+		);
+	});
+
+	it("shows a nested mode's message on its sub-field, not the sibling", () => {
+		render(
+			<ModeElementForm
+				kind="assert.status"
+				schema={ASSERT_STATUS}
+				config={{ range: { min: 200 } }}
+				errors={{ "range.max": "Can't be empty" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsError(screen.getByRole("spinbutton", { name: "Maximum" }), "Can't be empty");
+		expectShowsNoError(screen.getByRole("spinbutton", { name: "Minimum" }));
+	});
+
+	it("shows a message on a lead field above the picker", () => {
+		render(
+			<ModeElementForm
+				kind="metric.record"
+				schema={METRIC_RECORD}
+				config={{ name: "", type: "trend", source: { jsonpath: "$.a" } }}
+				errors={{ name: "Can't be empty" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsError(screen.getByRole("textbox", { name: "Metric name" }), "Can't be empty");
+	});
+
+	it("shows a message on a field under the kind's source level", () => {
+		render(
+			<ModeElementForm
+				kind="metric.record"
+				schema={METRIC_RECORD}
+				config={{ name: "m", type: "rate", source: { condition: { field: "status" } } }}
+				errors={{ "source.condition.operator": "Can't be empty" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsError(screen.getByRole("combobox", { name: "Operator" }), "Can't be empty");
+		expectShowsNoError(screen.getByRole("combobox", { name: "Field" }));
+		expect(screen.getAllByRole("alert")).toHaveLength(1);
+	});
+
+	it("shows a message on a lead field of a kind whose modes are top-level keys", () => {
+		render(
+			<ModeElementForm
+				kind="assert.jsonpath"
+				schema={ASSERT_JSONPATH}
+				config={{ path: "", expected: 1 }}
+				errors={{ path: "Can't be empty" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsError(screen.getByRole("textbox", { name: "JSONPath" }), "Can't be empty");
+	});
+
+	it("shows nothing when the element has no message", () => {
+		render(
+			<ModeElementForm
+				kind="control.throughput"
+				schema={CONTROL_THROUGHPUT}
+				config={{ percent: 50 }}
+				errors={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsNoError(screen.getByRole("spinbutton", { name: "Percent" }));
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	// Mutation checks: stop passing `errors` into `ModeFields` and the flat and
+	// nested cases red; pass `errors` unsliced where the `source` level is read
+	// and the condition case reds (`source.condition.operator` is never found
+	// at the top of the level); drop the lead `errors` and those two red.
 });
 
 describe("element-modes - the table itself", () => {

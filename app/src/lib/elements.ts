@@ -191,6 +191,23 @@ export function validateElementConfig(
 }
 
 /**
+ * The slice of a {@link validateElementConfig} result that belongs to the
+ * nested object at `key`, with `key.` stripped - what a form hands the form of
+ * that object so every level looks up its own fields by their own names.
+ */
+export function errorsWithin(
+	errors: Readonly<Record<string, string>>,
+	key: string
+): Record<string, string> {
+	const prefix = `${key}.`;
+	return Object.fromEntries(
+		Object.entries(errors)
+			.filter(([path]) => path.startsWith(prefix))
+			.map(([path, message]) => [path.slice(prefix.length), message])
+	);
+}
+
+/**
  * A kind whose engine-side `validate_config` refuses a config the schema
  * accepts, because it names no operand the kind could act on (#3043, #3055).
  * JSON Schema cannot say "one of", so the catalogue does not carry the rule;

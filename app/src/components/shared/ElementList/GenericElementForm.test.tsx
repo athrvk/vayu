@@ -25,6 +25,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ElementConfigSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
+import { expectShowsError, expectShowsNoError } from "./field-error.testkit";
 
 function schema(
 	properties: ElementConfigSchema["properties"],
@@ -794,4 +795,136 @@ describe("GenericElementForm - an object with no declared properties is a key/va
 	// duplicate-key case reds; write on every edit instead of only when the
 	// record changes and the blank-row case reds; replace the rows on every
 	// outside change and the key-cleared and duplicate cases red.
+});
+
+describe("GenericElementForm - a message under the field it is about (#3048)", () => {
+	const CATALOGUE = schema({
+		variable: { type: "string", title: "Variable name", description: "Where the value goes." },
+		count: { type: "integer", title: "Repeat count" },
+		scope: { type: "string", enum: ["env", "globals"], title: "Store in" },
+		expected: { title: "Expected value" },
+		range: {
+			type: "object",
+			title: "Accepted range",
+			properties: {
+				min: { type: "integer", title: "Minimum" },
+				max: { type: "integer", title: "Maximum" },
+			},
+		},
+	});
+
+	function renderWith(errors: Record<string, string> | undefined) {
+		render(
+			<GenericElementForm schema={CATALOGUE} config={{}} errors={errors} onChange={vi.fn()} />
+		);
+	}
+
+	it("shows a text field's message, links it to the field and marks the field invalid", () => {
+		renderWith({ variable: "Can't be empty" });
+
+		expectShowsError(screen.getByRole("textbox", { name: "Variable name" }), "Can't be empty");
+	});
+
+	it("keeps the text field's hint beside its message", () => {
+		renderWith({ variable: "Can't be empty" });
+
+		expect(screen.getByText("Where the value goes.")).toBeInTheDocument();
+	});
+
+	it("shows a number field's message", () => {
+		renderWith({ count: "Must be at least 1" });
+
+		expectShowsError(
+			screen.getByRole("spinbutton", { name: "Repeat count" }),
+			"Must be at least 1"
+		);
+	});
+
+	it("shows a dropdown's message", () => {
+		renderWith({ scope: "Can't be empty" });
+
+		expectShowsError(screen.getByRole("combobox", { name: "Store in" }), "Can't be empty");
+	});
+
+	it("shows an untyped field's message", () => {
+		renderWith({ expected: "Can't be empty" });
+
+		expectShowsError(screen.getByRole("textbox", { name: "Expected value" }), "Can't be empty");
+	});
+
+	it("shows a nested field's message on that sub-field alone", () => {
+		renderWith({ "range.max": "Can't be empty" });
+
+		expectShowsError(screen.getByRole("spinbutton", { name: "Maximum" }), "Can't be empty");
+		expectShowsNoError(screen.getByRole("spinbutton", { name: "Minimum" }));
+		expect(screen.getAllByRole("alert")).toHaveLength(1);
+	});
+
+	it("shows nothing for fields without a message", () => {
+		renderWith({});
+
+		for (const control of screen.getAllByRole("textbox")) expectShowsNoError(control);
+		for (const control of screen.getAllByRole("spinbutton")) expectShowsNoError(control);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("shows nothing without an errors prop", () => {
+		renderWith(undefined);
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("clears the message when the errors no longer carry it", () => {
+		const { rerender } = render(
+			<GenericElementForm
+				schema={CATALOGUE}
+				config={{ variable: "" }}
+				errors={{ variable: "Can't be empty" }}
+				onChange={vi.fn()}
+			/>
+		);
+		expect(screen.getByRole("alert")).toHaveTextContent("Can't be empty");
+
+		rerender(
+			<GenericElementForm
+				schema={CATALOGUE}
+				config={{ variable: "x" }}
+				errors={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expectShowsNoError(screen.getByRole("textbox", { name: "Variable name" }));
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+
+	it("names the message and the hint both for a number field that carries both", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					count: {
+						type: "integer",
+						title: "Repeat count",
+						description: "How many times.",
+					},
+				})}
+				config={{}}
+				errors={{ count: "Must be at least 1" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		const ids = (screen.getByRole("spinbutton").getAttribute("aria-describedby") ?? "").split(
+			" "
+		);
+		expect(ids.map((id) => document.getElementById(id)?.textContent)).toEqual([
+			"Must be at least 1",
+			"How many times.",
+		]);
+	});
+
+	// Mutation checks: stop passing `errors` into `PropertyRows` and every case
+	// above but the no-message ones reds; drop `aria-invalid` from the text input
+	// and its case reds on the attribute alone; slice the nested level with the
+	// wrong key (`errorsWithin(errors, "min")`) and the nested case reds.
 });

@@ -40,6 +40,7 @@
 import { useState } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui";
 import { SelectSettingRow } from "@/modules/settings/main/panels/SettingControls";
+import { errorsWithin } from "@/lib/elements";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import {
@@ -66,9 +67,15 @@ export interface ModeElementFormProps {
 	 */
 	schema?: ElementConfigSchema;
 	config: Record<string, unknown>;
+	/**
+	 * `validateElementConfig`'s messages for the whole element, by dot path from
+	 * the top of `config`. Each field of the forms below shows its own.
+	 */
+	errors?: Readonly<Record<string, string>>;
 	onChange: (config: Record<string, unknown>) => void;
 }
 
+const NO_ERRORS: Readonly<Record<string, string>> = {};
 const EMPTY_SCHEMA: ElementConfigSchema = { type: "object", properties: {} };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -168,12 +175,15 @@ function ModeFields({
 	properties,
 	required,
 	config,
+	errors,
 	onChange,
 }: {
 	mode: ElementMode;
 	properties: Record<string, ElementConfigProperty | null | undefined>;
 	required: string[] | undefined;
 	config: Record<string, unknown>;
+	/** The messages for `config`'s own level, by dot path from it. */
+	errors: Readonly<Record<string, string>>;
 	onChange: (config: Record<string, unknown>) => void;
 }) {
 	// A marker mode has nothing to render: the app only writes `true` (see
@@ -189,6 +199,7 @@ function ModeFields({
 			<GenericElementForm
 				schema={nested}
 				config={asRecord(config[mode.id])}
+				errors={errorsWithin(errors, mode.id)}
 				onChange={(next) => onChange({ ...config, [mode.id]: next })}
 			/>
 		);
@@ -196,10 +207,18 @@ function ModeFields({
 
 	const subset = subsetSchema(properties, required, [mode.id, ...(mode.also ?? [])]);
 	if (Object.keys(subset.properties ?? {}).length === 0) return null;
-	return <GenericElementForm schema={subset} config={config} onChange={onChange} />;
+	return (
+		<GenericElementForm schema={subset} config={config} errors={errors} onChange={onChange} />
+	);
 }
 
-export function ModeElementForm({ kind, schema, config, onChange }: ModeElementFormProps) {
+export function ModeElementForm({
+	kind,
+	schema,
+	config,
+	errors = NO_ERRORS,
+	onChange,
+}: ModeElementFormProps) {
 	// Only consulted while the chosen mode has written nothing yet - see the
 	// module comment. `null` until the picker is used at all.
 	const [picked, setPicked] = useState<string | null>(null);
@@ -212,6 +231,7 @@ export function ModeElementForm({ kind, schema, config, onChange }: ModeElementF
 			<GenericElementForm
 				schema={schema ?? EMPTY_SCHEMA}
 				config={config}
+				errors={errors}
 				onChange={onChange}
 			/>
 		);
@@ -222,6 +242,7 @@ export function ModeElementForm({ kind, schema, config, onChange }: ModeElementF
 	const levelProperties = spec.path ? (levelProperty?.properties ?? {}) : properties;
 	const levelRequired = spec.path ? levelProperty?.required : schema?.required;
 	const levelConfig = spec.path ? asRecord(config[spec.path]) : config;
+	const levelErrors = spec.path ? errorsWithin(errors, spec.path) : errors;
 	const writeLevel = (next: Record<string, unknown>) =>
 		spec.path ? onChange({ ...config, [spec.path]: next }) : onChange(next);
 
@@ -247,7 +268,12 @@ export function ModeElementForm({ kind, schema, config, onChange }: ModeElementF
 	return (
 		<div className="space-y-2">
 			{Object.keys(lead.properties ?? {}).length > 0 && (
-				<GenericElementForm schema={lead} config={config} onChange={onChange} />
+				<GenericElementForm
+					schema={lead}
+					config={config}
+					errors={errors}
+					onChange={onChange}
+				/>
 			)}
 			<ModePicker
 				spec={spec}
@@ -260,10 +286,16 @@ export function ModeElementForm({ kind, schema, config, onChange }: ModeElementF
 				properties={levelProperties}
 				required={levelRequired}
 				config={levelConfig}
+				errors={levelErrors}
 				onChange={writeLevel}
 			/>
 			{Object.keys(trail.properties ?? {}).length > 0 && (
-				<GenericElementForm schema={trail} config={config} onChange={onChange} />
+				<GenericElementForm
+					schema={trail}
+					config={config}
+					errors={errors}
+					onChange={onChange}
+				/>
 			)}
 		</div>
 	);
