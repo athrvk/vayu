@@ -73,7 +73,8 @@ std::unordered_map<std::string, int64_t>& controller_state) {
     for (const auto& compiled : elements) {
         const auto* kind = registry.find (compiled.kind);
         if (kind == nullptr || kind->category != "transaction" ||
-        !compiled.config.value ("includeTimers", false)) {
+        !compiled.config.value (
+        "includeTimers", element_defaults::CONTROL_TRANSACTION_INCLUDE_TIMERS)) {
             continue;
         }
         const auto span = spans.find (compiled.id);

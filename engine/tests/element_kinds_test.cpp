@@ -1434,4 +1434,25 @@ TEST (ElementDefaultsTest, ControlThroughputWithNoPerUserKeyFollowsTheCatalogueD
     EXPECT_EQ (counters.find ("e1")->count.load (), per_user ? 0 : 1);
 }
 
+// A wait after the folder's first of two members: the fold lands in the open
+// pass's sum exactly when the catalogue default says the timers are included.
+TEST (ElementDefaultsTest, ControlTransactionWithNoIncludeTimersKeyFoldsAsTheCatalogueDefaultSays) {
+    const nlohmann::json bare{ { "id", "e1" }, { "kind", "control.transaction" },
+        { "config", { { "name", "checkout" } } } };
+    const auto elements =
+    vayu::core::compile_elements (nlohmann::json::array ({ bare }));
+    const std::unordered_map<std::string, vayu::core::ElementSpan> spans{
+        { "e1", vayu::core::ElementSpan{ .first = 0, .last = 1, .first_step_name = {} } }
+    };
+    const std::string sum_key = vayu::core::transaction_sum_key ("e1", 0);
+    std::unordered_map<std::string, int64_t> controller_state{ { sum_key, 0 } };
+
+    vayu::core::fold_between_wait_into_open_transactions (
+    elements, spans, 0, 0, 60, controller_state);
+
+    constexpr int64_t WAIT_US = 60 * 1000;
+    EXPECT_EQ (controller_state.at (sum_key),
+    default_flag ("control.transaction", "includeTimers") ? WAIT_US : 0);
+}
+
 } // namespace

@@ -909,6 +909,7 @@
       "additionalProperties": false,
       "properties": {
         "includeTimers": {
+          "default": false,
           "description": "Folds a between-member timer wait into the transaction's summed time.",
           "title": "Include timers",
           "type": "boolean"

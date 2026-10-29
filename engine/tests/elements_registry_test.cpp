@@ -586,6 +586,7 @@ TEST_F (ElementsRegistryTest, TheCatalogueDeclaresTheDefaultEachKindRuns) {
         { "timer.pacing", "perUser", true },
         { "timer.throughput", "perUser", false },
         { "control.throughput", "perUser", true },
+        { "control.transaction", "includeTimers", false },
         { "script.pre", "inline", false },
         { "script.post", "inline", false },
     };

@@ -52,6 +52,10 @@ constexpr bool TIMER_THROUGHPUT_PER_USER = false;
 /// `control.throughput` `perUser`, and the scan that slots its shared counters.
 constexpr bool CONTROL_THROUGHPUT_PER_USER = true;
 
+/// `control.transaction` `includeTimers`: a between-member timer wait stays
+/// out of the transaction's summed time unless asked for.
+constexpr bool CONTROL_TRANSACTION_INCLUDE_TIMERS = false;
+
 /// `script.pre` / `script.post` `inline`.
 constexpr bool SCRIPT_INLINE = false;
 

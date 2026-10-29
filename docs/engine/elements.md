@@ -93,11 +93,12 @@ carries `"%"`, `assert.size.bytes` carries `"B"`. A new kind's schema ships `tit
 `ElementsRegistryTest.EveryPropertyOfEveryKindCarriesATitleAndDescription`
 (`engine/tests/elements_registry_test.cpp`) fails the build on one that does not.
 
-A property whose absence the engine reads as a value also carries the standard `default` keyword
-(issue #3045): `assert.size.op` is `lte`, every `extract.*` `scope` is `collection`,
+An enum or boolean property whose absence the engine reads as a value also carries the standard
+`default` keyword (issue #3045; a numeric or free-text fallback such as `matchNo` or `template` does
+not yet): `assert.size.op` is `lte`, every `extract.*` `scope` is `collection`,
 `timer.pacing.perUser` and `control.throughput.perUser` are `true`, `timer.throughput.perUser` is
 `false`, and a boolean flag that is simply off (`negate`, an extractor's `required`, a script's
-`inline`) says `false`. The value is not retyped in the schema: it is a named constant in
+`inline`, `control.transaction`'s `includeTimers`) says `false`. The value is not retyped in the schema: it is a named constant in
 `engine/include/vayu/core/element_defaults.hpp` that the kind reads (`config.value (key, DEFAULT)`)
 and the schema serves, so what a form shows for an unset key is what the engine runs. An absent
 key means the default, and a client renders it that way without ever writing the key: the stored
