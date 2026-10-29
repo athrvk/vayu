@@ -71,6 +71,7 @@ import { elementReference, type ElementOwner } from "@/lib/agent-reference";
 import { useLayoutStore } from "@/stores";
 import type { ElementDef, ElementKindSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
+import { nextCopyName } from "./duplicate-name";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { categoryLabel, categoryOrder, effectiveCategory, kindIcon } from "./element-categories";
 import { summarizeElement } from "./summarize-element";
@@ -602,10 +603,11 @@ export function ElementList({
 
 	function duplicateAt(index: number) {
 		const original = elements[index];
+		const shownName = (element: ElementDef) => element.name ?? kindLabel(element.kind, kinds);
 		const copy: ElementDef = {
 			...original,
 			id: `el_${generateId()}`,
-			name: `${original.name ?? kindLabel(original.kind, kinds)} copy`,
+			name: nextCopyName(shownName(original), elements.map(shownName)),
 		};
 		setJustAddedId(copy.id);
 		onOpenChange?.(copy.id, true);

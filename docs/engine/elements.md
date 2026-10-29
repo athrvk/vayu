@@ -147,11 +147,14 @@ every non-overlapping match, leftmost first (`$N$` past the pattern's last group
 `extract.boundary` (issue #1518, JMeter's Boundary Extractor) takes everything between the first
 occurrence of `leftBoundary` and the next occurrence of `rightBoundary` on the response body - no
 `field` selector, unlike `extract.regex`'s four, because JMeter's own Boundary Extractor has none
-either. All four - plus `extract.header` - share `variable`, `scope` (`env` | `collection` |
-`globals`), `default` and the JMeter `matchNo` convention: `1`-based picks a match, `0` picks one at
-random, `-1` writes every match as `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr`
-count, numbered in the order the matches were found (document order for `extract.json`, leftmost
-first for the two text extractors). A miss without a `default`
+either. All four extractors share `variable`, `scope` (`env` | `collection` | `globals`), `default`
+and `required`. `extract.json`, `extract.regex` and `extract.boundary` also share the JMeter `matchNo`
+convention: `1`-based picks a match, `0` picks one at random, `-1` writes every match as
+`<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr` count, numbered in the order the matches
+were found (document order for `extract.json`, leftmost first for the two text extractors).
+`extract.header` has no `matchNo`: it reads the header's one value, and a header the response repeats
+is already folded into one comma-joined value by the transport, so two `Set-Cookie` lines extract as
+`a=1, b=2` with no way to pick one. A miss without a `default`
 reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
@@ -182,7 +185,10 @@ with the same reason in the message. After an empty match the search resumes one
 
 `assert.status` takes a non-empty `in` list or a `range`; `assert.jsonpath` takes a path with
 at least one of `expected`, `regex` (searched in the first match's text) or `exists`, plus `negate` (a body that cannot be read fails it
-either way, see below); `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
+either way, see below). `expected` (and a `metric.record` condition's `value`) is compared as JSON, so the number
+`7` and the string `"7"` are different values; the app's field for either reads what is typed as JSON
+(`7`, `true`, `null`, `{"a":1}`), stores the text as a string when it is not JSON, and takes a quoted
+value (`"7"`) to force a string (#3046). `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
 `contains` | `equals` | `matches` (an RE2 search, above) mode;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
 an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:

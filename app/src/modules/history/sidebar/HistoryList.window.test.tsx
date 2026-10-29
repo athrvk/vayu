@@ -79,20 +79,17 @@ vi.mock("./RunItem", () => ({
 const DAY_MS = 86_400_000;
 
 /**
- * Newest first, one per second back from local noon: every one of them is
- * "Today" whatever time the suite runs. Counting back from the clock, a
- * minute apart, put the older rows on "Yesterday" in the first hours after
- * midnight.
+ * Newest first, one per minute back from 23:59 local: every one of them is
+ * "Today" whatever the clock says, where counting back from `Date.now()` spills
+ * into "Yesterday" for a run started in the first hours after midnight.
  */
 function runsToday(count: number, from = 0): FixtureRun[] {
-	const noon = new Date();
-	noon.setHours(12, 0, 0, 0);
-	const now = noon.getTime();
+	const now = new Date().setHours(23, 59, 0, 0);
 	return Array.from({ length: count }, (_, i) => ({
 		id: `r${from + i}`,
 		type: "load" as const,
 		status: "completed" as const,
-		startTime: now - (from + i) * 1_000,
+		startTime: now - (from + i) * 60_000,
 		baseline: false as const,
 		summary: { url: `http://r${from + i}.test/` },
 	}));
@@ -102,6 +99,10 @@ function runsToday(count: number, from = 0): FixtureRun[] {
 let reachEnd: (() => void) | null = null;
 
 beforeEach(() => {
+	// The fixtures run backwards a minute at a time (GROWING_WINDOW_STEP + 20 rows
+	// is about 3.7 hours), so a run in the small hours would reach "Yesterday".
+	// Only Date is faked: timers and waitFor stay real.
+	vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 5, 15, 12, 0, 0) });
 	reachEnd = null;
 	queryState.hasNextPage = false;
 	useHistoryStore.getState().resetFilters();
@@ -125,6 +126,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });
 
