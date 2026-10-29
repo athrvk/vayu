@@ -195,6 +195,21 @@ std::string pointer_of_context (const std::vector<std::string>& context) {
     return pointer;
 }
 
+/// One property name as a pointer token (RFC 6901: `~` and `/` are escaped).
+std::string json_pointer_token (const std::string& name) {
+    std::string token;
+    for (const char c : name) {
+        if (c == '~') {
+            token += "~0";
+        } else if (c == '/') {
+            token += "~1";
+        } else {
+            token += c;
+        }
+    }
+    return token;
+}
+
 /**
  * The prefixes valijson gives its *structural* errors - the ones that say a
  * parent failed because a child did, once per level, alongside the leaf error
@@ -843,8 +858,11 @@ const nlohmann::json& body) {
     while (results.popError (error)) {
         SchemaFailure failure;
         failure.path = pointer_of_context (error.context);
-        const std::string humanized =
-        vayu::core::humanize_schema_error (root, error.description, error.jsonPointer);
+        if (const auto extra = vayu::core::unexpected_property_name (error.description)) {
+            failure.path += "/" + json_pointer_token (*extra);
+        }
+        const std::string humanized = vayu::core::humanize_schema_error (root,
+        error.description, error.jsonPointer, vayu::core::SchemaErrorContext::ResponseBody);
         failure.message = humanized.size () > limits::MAX_FAILURE_MESSAGE_BYTES ?
         humanized.substr (0, limits::MAX_FAILURE_MESSAGE_BYTES) + "..." :
         humanized;

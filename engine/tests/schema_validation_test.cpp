@@ -20,6 +20,7 @@
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/openapi_document.hpp"
+#include "vayu/core/schema_error_text.hpp"
 #include "vayu/core/schema_validation.hpp"
 
 #include <gtest/gtest.h>
@@ -1591,4 +1592,136 @@ TEST (StructuralWrapperTest, EveryValijsonWrapperIsDroppedAndItsLeafIsKept) {
         verdict.failures.front ().message.find ("Failed to validate"), std::string::npos)
         << c.keyword << ": " << verdict.failures.front ().message;
     }
+}
+
+// ─── A response failure is worded for a body (#3037) ────────────────────────
+//
+// The wording was written for an element's settings form; a response contract
+// has no "setting" and no "element" to name.
+
+namespace {
+
+/// The one failure `body` draws against `schema`, so a case that grows a second
+/// reads as a failure of its own instead of picking the first by luck.
+SchemaFailure only_failure (const char* schema, const char* body) {
+    const auto verdict = validate_body_against_schema (
+    json::parse (schema), json::object (), json::parse (body));
+    EXPECT_EQ (verdict.failures.size (), 1u) << schema << " vs " << body;
+    return verdict.failures.empty () ? SchemaFailure{} : verdict.failures.front ();
+}
+
+} // namespace
+
+TEST (ResponseFailureWordingTest, AnUnexpectedPropertyIsNamedAtItsOwnPath) {
+    const auto failure = only_failure (R"({
+        "type": "object",
+        "properties": {"o": {"type": "object", "properties": {"a": {"type": "string"}},
+                              "additionalProperties": false}}
+    })",
+    R"({"o": {"a": "x", "z": 1}})");
+
+    EXPECT_EQ (failure.path, "/o/z");
+    EXPECT_EQ (failure.message, "unexpected property 'z'");
+}
+
+TEST (ResponseFailureWordingTest, AnUnexpectedPropertyAtTheRootIsAtTheRootsChild) {
+    const auto failure = only_failure (
+    R"({"type": "object", "properties": {"a": {}}, "additionalProperties": false})",
+    R"({"a": 1, "z": 1})");
+
+    EXPECT_EQ (failure.path, "/z");
+    EXPECT_EQ (failure.message, "unexpected property 'z'");
+}
+
+TEST (ResponseFailureWordingTest, AnUnexpectedPropertyPathEscapesItsName) {
+    const auto failure = only_failure (
+    R"({"type": "object", "additionalProperties": false})", R"({"a/b~c": 1})");
+
+    EXPECT_EQ (failure.path, "/a~1b~0c");
+}
+
+TEST (ResponseFailureWordingTest, ABadEnumAtTheRootNamesTheBodyAndNotAValue) {
+    const auto failure = only_failure (R"({"enum": ["a", "b"]})", R"("c")");
+
+    EXPECT_EQ (failure.path, "");
+    EXPECT_EQ (failure.message, "The response body must be one of [a, b]");
+}
+
+TEST (ResponseFailureWordingTest, ABadEnumBelowTheRootNamesItsFieldAndPath) {
+    const auto failure = only_failure (
+    R"({"type": "object", "properties": {"status": {"enum": ["a", "b"]}}})", R"({"status": "c"})");
+
+    EXPECT_EQ (failure.path, "/status");
+    EXPECT_EQ (failure.message, "'status' must be one of [a, b]");
+}
+
+TEST (ResponseFailureWordingTest, ANonIntegerIsNotAskedToBeAMerelyNumber) {
+    const auto failure = only_failure (
+    R"({"type": "object", "properties": {"a": {"type": "integer"}}})", R"({"a": 1.5})");
+
+    EXPECT_EQ (failure.path, "/a");
+    EXPECT_EQ (failure.message, "'a' must be an integer");
+}
+
+TEST (ResponseFailureWordingTest, ANumberTypeStillReadsAsANumber) {
+    const auto failure = only_failure (
+    R"({"type": "object", "properties": {"a": {"type": "number"}}})", R"({"a": "x"})");
+
+    EXPECT_EQ (failure.message, "'a' must be a number");
+}
+
+TEST (ResponseFailureWordingTest, ANullTypeIsNotAnObject) {
+    const auto failure = only_failure (
+    R"({"type": "object", "properties": {"a": {"type": "null"}}})", R"({"a": 1})");
+
+    EXPECT_EQ (failure.path, "/a");
+    EXPECT_EQ (failure.message, "'a' must be null");
+}
+
+TEST (ResponseFailureWordingTest, NoBodyFailureNamesASettingOrAnElement) {
+    struct Case {
+        const char* schema;
+        const char* body;
+    };
+    const std::vector<Case> cases{
+        { R"({"properties": {"a": {}}, "additionalProperties": false})", R"({"z": 1})" },
+        { R"({"enum": ["a"]})", R"("b")" },
+        { R"({"properties": {"a": {"type": "integer"}}})", R"({"a": 1.5})" },
+        { R"({"properties": {"a": {"type": "null"}}})", R"({"a": 1})" },
+        { R"({"required": ["a"]})", R"({})" },
+        { R"({"properties": {"a": {"minimum": 3}}})", R"({"a": 1})" },
+        { R"({"properties": {"a": {"pattern": "^x$"}}})", R"({"a": "y"})" },
+        { R"({"properties": {"a": {"maxLength": 1}}})", R"({"a": "yy"})" },
+    };
+    for (const auto& c : cases) {
+        const auto failure = only_failure (c.schema, c.body);
+        EXPECT_EQ (failure.message.find ("setting"), std::string::npos)
+        << failure.message;
+        EXPECT_EQ (failure.message.find ("element"), std::string::npos)
+        << failure.message;
+    }
+}
+
+TEST (UnexpectedPropertyNameTest, NamesOnlyTheAdditionalPropertiesFailure) {
+    EXPECT_EQ (
+    unexpected_property_name ("Object contains a property that could not be "
+                              "validated using 'properties' or "
+                              "'additionalProperties' constraints: 'z'."),
+    "z");
+    EXPECT_FALSE (
+    unexpected_property_name ("Value type not permitted by 'type' constraint.").has_value ());
+}
+
+// The element-config side keeps its own words through the default argument.
+TEST (SchemaErrorContextTest, TheDefaultContextIsTheSettingsVocabulary) {
+    const json schema = { { "type", "object" },
+        { "properties", { { "in", { { "type", "array" } } } } } };
+    const std::string description =
+    "Object contains a property that could not be "
+    "validated using 'properties' or "
+    "'additionalProperties' constraints: 'z'.";
+    EXPECT_EQ (humanize_schema_error (schema, description, ""),
+    "'z' is not a setting this element has. Settings: in");
+    EXPECT_EQ (humanize_schema_error (schema, description, "", SchemaErrorContext::ResponseBody),
+    "unexpected property 'z'");
 }

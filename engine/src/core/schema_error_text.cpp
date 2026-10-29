@@ -61,8 +61,18 @@ std::string scalar_text (const nlohmann::json& value) {
     return value.is_string () ? value.get<std::string> () : value.dump ();
 }
 
-/** A JSON Schema `"type"` value as an English noun phrase. */
-std::string type_word (const std::string& type) {
+/** A JSON Schema `"type"` value as an English noun phrase. A settings form
+ *  has no use for the distinction between an integer and any other number, or
+ *  for `null`; a response contract does, and "an object" is wrong for both. */
+std::string type_word (const std::string& type, SchemaErrorContext context) {
+    if (context == SchemaErrorContext::ResponseBody) {
+        if (type == "integer") {
+            return "an integer";
+        }
+        if (type == "null") {
+            return "null";
+        }
+    }
     if (type == "integer" || type == "number") {
         return "a number";
     }
@@ -100,6 +110,24 @@ const std::string& pointer) {
     return std::format ("'{}' is required", node_title (field_node, missing));
 }
 
+/** The name a field is shown under: its declared title, else its own key, and
+ *  at the document root (which has no key) the word the context calls it. The
+ *  result is a whole subject, quotes included where it is a name. */
+std::string subject_text (const nlohmann::json* node,
+const std::string& pointer,
+SchemaErrorContext context) {
+    const std::string title = node_title (node, std::string ());
+    if (!title.empty ()) {
+        return std::format ("'{}'", title);
+    }
+    if (pointer.empty ()) {
+        return context == SchemaErrorContext::ResponseBody ?
+        "The response body" :
+        "'value'";
+    }
+    return std::format ("'{}'", pointer.substr (pointer.rfind ('/') + 1));
+}
+
 /** The declared keys of @p container's `properties`, in the schema's own
  *  order, comma separated; empty when it declares none or is unresolvable. */
 std::string declared_setting_names (const nlohmann::json* container) {
@@ -123,40 +151,41 @@ std::string declared_setting_names (const nlohmann::json* container) {
  *  so its declared `properties` are what the caller should have used. */
 std::optional<std::string> additional_property_rejection (const nlohmann::json& schema,
 const std::string& d,
-const std::string& pointer) {
-    if (d.rfind ("Object contains a property that could not be validated using", 0) != 0) {
+const std::string& pointer,
+SchemaErrorContext context) {
+    const auto extra = unexpected_property_name (d);
+    if (!extra) {
         return std::nullopt;
     }
-    const auto last = d.rfind ('\'');
-    const auto first =
-    last == std::string::npos ? std::string::npos : d.rfind ('\'', last - 1);
-    const std::string extra = first == std::string::npos ?
-    std::string () :
-    d.substr (first + 1, last - first - 1);
+    if (context == SchemaErrorContext::ResponseBody) {
+        return std::format ("unexpected property '{}'", *extra);
+    }
     const std::string valid = declared_setting_names (schema_node_at (schema, pointer));
     if (valid.empty ()) {
-        return std::format ("'{}' is not a setting this element has", extra);
+        return std::format ("'{}' is not a setting this element has", *extra);
     }
-    return std::format ("'{}' is not a setting this element has. Settings: {}", extra, valid);
+    return std::format (
+    "'{}' is not a setting this element has. Settings: {}", *extra, valid);
 }
 
 /** "Value type not permitted by 'type' constraint." - the schema's own
  *  declared `"type"` at @p node says what was actually expected. */
 std::optional<std::string> type_mismatch_rejection (const nlohmann::json* node,
-const std::string& title,
-const std::string& d) {
+const std::string& subject,
+const std::string& d,
+SchemaErrorContext context) {
     if (d != "Value type not permitted by 'type' constraint." || node == nullptr ||
     !node->contains ("type") || !(*node)["type"].is_string ()) {
         return std::nullopt;
     }
-    return std::format (
-    "'{}' must be {}", title, type_word ((*node)["type"].get<std::string> ()));
+    return std::format ("{} must be {}", subject,
+    type_word ((*node)["type"].get<std::string> (), context));
 }
 
 /** "Failed to match against any enum values." - the schema's own declared
  *  `"enum"` at @p node lists what was actually accepted. */
 std::optional<std::string> enum_value_rejection (const nlohmann::json* node,
-const std::string& title,
+const std::string& subject,
 const std::string& d) {
     if (d != "Failed to match against any enum values." || node == nullptr ||
     !node->contains ("enum") || !(*node)["enum"].is_array ()) {
@@ -169,24 +198,24 @@ const std::string& d) {
         }
         allowed += scalar_text (option);
     }
-    return std::format ("'{}' must be one of [{}]", title, allowed);
+    return std::format ("{} must be one of [{}]", subject, allowed);
 }
 
 /** "Failed to match regex specified by 'pattern' constraint." - a raw regex
  *  is not itself English, so this names the field and, where the schema
  *  gives one, its own `"description"` of the expected shape. */
 std::optional<std::string> pattern_rejection (const nlohmann::json* node,
-const std::string& title,
+const std::string& subject,
 const std::string& d) {
     if (d != "Failed to match regex specified by 'pattern' constraint.") {
         return std::nullopt;
     }
     if (node != nullptr && node->contains ("description") &&
     (*node)["description"].is_string ()) {
-        return std::format ("'{}' is not in the expected format - {}", title,
+        return std::format ("{} is not in the expected format - {}", subject,
         (*node)["description"].get<std::string> ());
     }
-    return std::format ("'{}' is not in the expected format", title);
+    return std::format ("{} is not in the expected format", subject);
 }
 
 /** @p text as a `double`, or nothing unless the whole of it is one - the
@@ -213,7 +242,8 @@ std::optional<double> parse_double_whole (std::string_view text) {
 /** `minimum`/`maximum` (inclusive or exclusive): valijson's own message
  *  already ends in exactly the bound, with no trailing text, so the number
  *  is the whole of what follows the matched prefix. */
-std::optional<std::string> bound_rejection (const std::string& title, const std::string& d) {
+std::optional<std::string>
+bound_rejection (const std::string& subject, const std::string& d) {
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 4> BOUND_PREFIXES{
         { { "Expected number greater than or equal to ", "must be at least " },
         { "Expected number greater than ", "must be more than " },
@@ -225,7 +255,7 @@ std::optional<std::string> bound_rejection (const std::string& title, const std:
             continue;
         }
         if (auto n = parse_double_whole (std::string_view (d).substr (prefix.size ()))) {
-            return std::format ("'{}' {}{}", title, verb, *n);
+            return std::format ("{} {}{}", subject, verb, *n);
         }
     }
     return std::nullopt;
@@ -234,7 +264,7 @@ std::optional<std::string> bound_rejection (const std::string& title, const std:
 /** `minLength`/`maxLength`: valijson's own message wraps the number in a
  *  fixed trailing phrase, unlike the numeric bounds above. */
 std::optional<std::string>
-length_rejection (const std::string& title, const std::string& d) {
+length_rejection (const std::string& subject, const std::string& d) {
     static constexpr std::string_view LEN_SUFFIX = " characters in length.";
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 2> LEN_PREFIXES{
         { { "String should be no fewer than ", "must be at least " },
@@ -248,7 +278,7 @@ length_rejection (const std::string& title, const std::string& d) {
         const std::string number =
         d.substr (prefix.size (), d.size () - prefix.size () - LEN_SUFFIX.size ());
         if (auto n = vayu::utils::parse_number<int> (number)) {
-            return std::format ("'{}' {}{} characters", title, verb, *n);
+            return std::format ("{} {}{} characters", subject, verb, *n);
         }
     }
     return std::nullopt;
@@ -260,39 +290,56 @@ length_rejection (const std::string& title, const std::string& d) {
  *  the order a schema most often fails them; the first match wins. */
 std::optional<std::string> scalar_constraint_rejection (const nlohmann::json& schema,
 const std::string& d,
-const std::string& pointer) {
+const std::string& pointer,
+SchemaErrorContext context) {
     const nlohmann::json* node = schema_node_at (schema, pointer);
-    const std::string field_name =
-    pointer.empty () ? "value" : pointer.substr (pointer.rfind ('/') + 1);
-    const std::string title = node_title (node, field_name);
+    const std::string subject  = subject_text (node, pointer, context);
 
-    if (auto r = type_mismatch_rejection (node, title, d)) {
+    if (auto r = type_mismatch_rejection (node, subject, d, context)) {
         return r;
     }
-    if (auto r = enum_value_rejection (node, title, d)) {
+    if (auto r = enum_value_rejection (node, subject, d)) {
         return r;
     }
-    if (auto r = pattern_rejection (node, title, d)) {
+    if (auto r = pattern_rejection (node, subject, d)) {
         return r;
     }
-    if (auto r = bound_rejection (title, d)) {
+    if (auto r = bound_rejection (subject, d)) {
         return r;
     }
-    return length_rejection (title, d);
+    return length_rejection (subject, d);
 }
 
 } // namespace
 
+std::optional<std::string> unexpected_property_name (const std::string& error_description) {
+    if (error_description.rfind (
+        "Object contains a property that could not be validated using", 0) != 0) {
+        return std::nullopt;
+    }
+    const auto last  = error_description.rfind ('\'');
+    const auto first = last == std::string::npos ?
+    std::string::npos :
+    error_description.rfind ('\'', last - 1);
+    if (first == std::string::npos) {
+        return std::string ();
+    }
+    return error_description.substr (first + 1, last - first - 1);
+}
+
 std::string humanize_schema_error (const nlohmann::json& schema,
 const std::string& error_description,
-const std::string& error_json_pointer) {
+const std::string& error_json_pointer,
+SchemaErrorContext context) {
     if (auto r = required_property_rejection (schema, error_description, error_json_pointer)) {
         return *r;
     }
-    if (auto r = additional_property_rejection (schema, error_description, error_json_pointer)) {
+    if (auto r = additional_property_rejection (
+        schema, error_description, error_json_pointer, context)) {
         return *r;
     }
-    if (auto r = scalar_constraint_rejection (schema, error_description, error_json_pointer)) {
+    if (auto r = scalar_constraint_rejection (
+        schema, error_description, error_json_pointer, context)) {
         return *r;
     }
     return error_description; // A constraint outside the set above: valijson's own wording.
