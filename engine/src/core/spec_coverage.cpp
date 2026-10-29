@@ -197,6 +197,34 @@ const std::string& stored) {
     return declared;
 }
 
+std::optional<DeclaredOperation> parse_spec_identity (
+const std::optional<std::string>& stored) {
+    if (!stored || stored->empty ()) {
+        return std::nullopt;
+    }
+    const auto parsed =
+    nlohmann::json::parse (*stored, nullptr, /*allow_exceptions=*/false);
+    if (!parsed.is_object ()) {
+        return std::nullopt;
+    }
+    // A member that is absent or not a string reads as "", which the
+    // whole-identity check below then refuses for `method` and `path`.
+    const auto text_of = [&parsed] (const char* key) {
+        const auto found = parsed.find (key);
+        return found != parsed.end () && found->is_string () ?
+        found->get<std::string> () :
+        std::string ();
+    };
+    DeclaredOperation identity;
+    identity.operation_id = text_of ("operationId");
+    identity.method       = text_of ("method");
+    identity.path         = text_of ("path");
+    if (identity.method.empty () || identity.path.empty ()) {
+        return std::nullopt;
+    }
+    return identity;
+}
+
 OperationIndex::OperationIndex (const std::vector<DeclaredOperation>& declared) {
     for (size_t i = 0; i < declared.size (); ++i) {
         // First writer wins in both maps. A document that declares one

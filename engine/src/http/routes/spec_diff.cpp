@@ -153,33 +153,6 @@ vayu::core::DraftBody read_body (const std::string& blob) {
     return body;
 }
 
-/**
- * `requests.spec_operation`, or absent for a request that answers to none.
- *
- * Half an identity identifies nothing - the comparison follows a stamp by its
- * method and path when it has no id - so a row missing either is a request with
- * no operation rather than one with a partial match, the same reading
- * `POST /specs/export` gives the column.
- */
-std::optional<vayu::core::DeclaredOperation> read_identity (
-const std::optional<std::string>& blob) {
-    if (!blob || blob->empty ()) {
-        return std::nullopt;
-    }
-    const auto parsed = nlohmann::json::parse (*blob, nullptr, /*allow_exceptions=*/false);
-    if (!parsed.is_object ()) {
-        return std::nullopt;
-    }
-    vayu::core::DeclaredOperation identity;
-    identity.operation_id = text_of (parsed, "operationId");
-    identity.method       = text_of (parsed, "method");
-    identity.path         = text_of (parsed, "path");
-    if (identity.method.empty () || identity.path.empty ()) {
-        return std::nullopt;
-    }
-    return identity;
-}
-
 /** One draft row, in the shape `requests.params` / `.headers` stores. */
 nlohmann::json row_json (const vayu::core::DraftField& row) {
     nlohmann::json out{ { "key", row.key }, { "value", row.value },
@@ -316,7 +289,7 @@ SpecComparison& out) {
         entry.params      = read_rows (row.params);
         entry.headers     = read_rows (row.headers);
         entry.body        = read_body (row.body);
-        entry.operation   = read_identity (row.spec_operation);
+        entry.operation = vayu::core::parse_spec_identity (row.spec_operation);
         out.requests.push_back (std::move (entry));
     }
 
