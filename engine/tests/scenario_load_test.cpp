@@ -2567,8 +2567,8 @@ TEST_F (ScenarioLoadTest, AMissSendsTheUnresolvedNameNotTheLastIterationsValue) 
 // the status-0 response like the sequential run: the variable is unset and the
 // miss counted. The refused port is one a server bound and released, so no
 // port is fixed. Mutation check: drop the `run_step_after` call in the
-// completion callback's response branch (scenario_load.cpp) and iteration 2
-// sends `Bearer tok-1`.
+// completion callback's response branch (scenario_load.cpp) and the miss count
+// reads 0.
 TEST_F (ScenarioLoadTest, ATransportFailedExtractingStepUnsetsItsVariableAndCountsAMiss) {
     int dead_port = 0;
     {
