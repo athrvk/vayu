@@ -288,7 +288,9 @@ the tree, variables, auth and scripts.
     rather than recording requests, so Vayu generates **stubs**: one collection
     per tag, a `{{baseUrl}}` variable from the server definition, parameters with
     empty values, and a request body sampled from the schema. Auth schemes map
-    across, seeded with `{{variables}}` for you to fill in.
+    across: an OAuth 2.0 scheme is seeded with `{{clientId}}` and
+    `{{clientSecret}}` for you to fill in, while bearer, basic and API-key
+    schemes arrive with their credentials empty.
 
 [How import works, format by format](app/import-collections/README.md){ .md-button }
 

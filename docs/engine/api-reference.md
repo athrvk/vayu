@@ -3009,7 +3009,7 @@ at. Describing a document that *is* stored is
 **Response:**
 ```json
 {
-  "format": "OpenAPI 3.0",
+  "format": "OpenAPI 3.1",
   "title": "Pets API",
   "operations": [
     { "operationId": "listPets", "method": "GET", "path": "/pets" },
@@ -3019,7 +3019,8 @@ at. Describing a document that *is* stored is
 }
 ```
 
-`format` is `"OpenAPI 3.0"` or `"OpenAPI 2.0 (Swagger)"`. `title` is the
+`format` is `"OpenAPI 3.1"` (an `openapi` starting `3.1`), `"OpenAPI 3.0"` (any
+other `3.`) or `"OpenAPI 2.0 (Swagger)"`. `title` is the
 document's `info.title` and `""` when it states none - never a substitute name,
 because the caller asked what the document calls itself. `operations` are in
 document order, in the shape a request's `spec_operation` records, `operationId`
@@ -4029,7 +4030,8 @@ is claimed by the same one it always was:
 | `_postman_variable_scope: "globals"` + `values[]` | `Postman Globals` |
 | `_type: "export"` + `__export_format: 4` | `Insomnia Export v4` |
 | `type: collection.insomnia.rest/5.x` or `environment.insomnia.rest/5.x` | `Insomnia Export v5` |
-| `openapi` starting `3.` | `OpenAPI 3.0` |
+| `openapi` starting `3.1` | `OpenAPI 3.1` |
+| `openapi` starting `3.` (any other 3.x) | `OpenAPI 3.0` |
 | `swagger` being `2.0` (string or number) | `OpenAPI 2.0 (Swagger)` |
 | the raw text contains `<jmeterTestPlan` | `JMeter <version> Test Plan` |
 
@@ -4137,13 +4139,57 @@ here. Every other format sends no such key. See
 `docs/app/import-collections/postman.md`.
 
 `meta.skipped` is what the document declared and Vayu cannot represent, counted
-per kind - `websocket`, `grpc`, `api_spec`, `unit_test`, `file_body`,
-`malformed_item`, `unsupported_method`, `malformed_spec`, `example_no_status`,
-`default_response`, `external_ref`, `duplicate_operation_id`, `cookie_param`,
-`unmapped_body`, `unresolved_base_url`, `no_server_url`, `unsupported_auth`,
-`oauth2_dropped_field`, `oauth2_state_regenerated`, `oauth2_unmapped_param`,
-`url_without_raw`, `variable_metadata`, `elements_invalid`, `mock_example_missing`,
-`vayu_extension_invalid`. Not every kind is a
+per kind. The fixed kinds, in the order they are reported (`ORDER` in
+`ImportTally::items()`, `engine/src/core/openapi_drafts.cpp`):
+
+| `kind` | Counted when |
+|--------|--------------|
+| `websocket`, `grpc` | An Insomnia resource that is a WebSocket or gRPC request, which has no Vayu request shape |
+| `api_spec` | An Insomnia design document (`api_spec` resource) |
+| `unit_test` | An Insomnia unit test or unit test suite |
+| `file_body` | A whole-file body (Postman `file`, Insomnia binary, an OpenAPI `application/octet-stream` or `format: binary` body), imported as a `binary` body whose file is still to choose |
+| `malformed_item` | A Postman `item[]` or `event[]` entry that is not an object |
+| `unsupported_method` | A Postman custom HTTP verb (imported as `GET`), or an OpenAPI `trace` operation (dropped; `HttpMethod` has no `TRACE`) |
+| `malformed_spec` | An OpenAPI path item, `parameters` list or response whose shape the specification does not allow, stepped over so the rest of the file still imports |
+| `example_no_status` | An OpenAPI response key that is neither `default` nor a status from 100 to 599 (a `2XX` wildcard, junk) |
+| `default_response` | An OpenAPI response keyed `default` - conformant, and counted as information rather than as a loss |
+| `external_ref` | A `$ref` into another file that a bundling pass could not reach (the request's `unresolvedRefs`) |
+| `duplicate_operation_id` | An OpenAPI `operationId` that an earlier operation already declared; the first keeps the id |
+| `webhook_operations` | An operation under a 3.1 top-level `webhooks` entry: it describes a call the API makes to the user, not a request Vayu can send |
+| `deprecated_operation` | An OpenAPI operation declared `deprecated: true`; the request model has no such flag, so it imports like a current one |
+| `cookie_param` | An OpenAPI parameter declared `in: "cookie"`, which has no row to land in |
+| `unmapped_body` | An OpenAPI `requestBody` declaring only media types with no Vayu body mode and no binary schema, one per operation |
+| `unresolved_base_url` | `servers[0].url` still holds a `{variable}` with no default, or is relative and the document has no source URL; it is kept as written |
+| `no_server_url` | The OpenAPI document names no server URL, so no `{{baseUrl}}` variable is created |
+| `servers_dropped` | An OpenAPI 3.x document with more than one `servers` entry: only `servers[0]` becomes `{{baseUrl}}`, and the count is the entries past the first |
+| `unsupported_auth` | A Postman auth block whose type the schema does not define, or whose `type` is not a string (imported as no auth) |
+| `security_unmapped_or` | An OpenAPI operation whose `security` lists more than one alternative requirement; it stays `inherit` |
+| `security_unmapped_and` | An OpenAPI operation whose `security` requirement names more than one scheme at once; it stays `inherit` |
+| `security_unmapped_scheme` | An OpenAPI operation whose `security` names a scheme the document never declares; it stays `inherit` |
+| `security_unmapped_mutualtls` | An operation's `security` names a `mutualTLS` scheme, which has no Vayu auth mode; it stays `inherit` |
+| `security_unmapped_openidconnect` | An operation's `security` names an `openIdConnect` scheme, which has no Vayu auth mode; it stays `inherit` |
+| `security_unmapped_type` | An operation's `security` names a scheme of any other type with no Vayu mode (an `http` scheme other than bearer or basic, or no readable `type`); it stays `inherit` |
+| `security_unmapped_apikey_cookie` | An operation's `security` names an `apiKey` scheme with `in: "cookie"`; Vayu's API-key mode has only header and query placements, so it stays `inherit` |
+| `oauth2_dropped_field` | A Postman OAuth 2.0 block carrying a pre-fetched `accessToken` beside an explicit grant configuration; the token is not imported |
+| `oauth2_state_regenerated` | A Postman OAuth 2.0 block with a fixed `state`; Vayu generates its own per authorization attempt |
+| `oauth2_unmapped_param` | A Postman OAuth 2.0 extra request parameter that was not carried, its key under `names` |
+| `url_without_raw` | A Postman URL object with no `raw` form, assembled from its `host`, `port` and `path` - a mapping, not a loss |
+| `variable_metadata` | A Postman variable `type` with no Vayu counterpart (`"any"`, a custom string), or an environment or globals variable's `description` |
+| `disabled_body` | A Postman request body whose own `disabled` is `true`; it imports as no body rather than sending what the user switched off |
+| `certificate` | A Postman request's own `certificate` that did not become a registry candidate (no `cert.src` / `key.src`, an unreadable file, a `{{var}}` host, or a conflict for the same `(host, port)`), plus the candidates left unticked in the preview |
+| `proxy_config` | A Postman request's own `proxy` override; there is no per-request proxy to import it into, so this count is permanent |
+| `protocol_behavior` | A Postman request's `protocolProfileBehavior` setting that Vayu stores for the export but does not apply, or `host` / `content-length` in its `disabledSystemHeaders` |
+| `protocol_behavior_folder` | The same, declared on a folder or the collection: counted once per declaring node, its name under `names` |
+| `body_on_get` | A Postman GET or HEAD with a non-empty body whose resolved `disableBodyPruning` is not `true`: Postman does not send it, Vayu does |
+| `script_unsupported` | A Postman enabled event with a `script.src`, or script text under a `listen` other than `prerequest` / `test`, which has no element to become |
+
+Three kinds are counted but are not in that order, so they come after it, in
+first-encountered order: `elements_invalid` (an `elements` array, from a
+document a Vayu export wrote, that fails the element registry's validation and
+is not applied), `mock_example_missing` (a stored mock setting that names an
+example the document does not carry) and `vayu_extension_invalid`
+(a piece of an `x-vayu-*` extension that fails its check; the standard reading
+stays in place). Not every kind is a
 loss: `default_response` and `url_without_raw` count a mapping
 the import made rather than something it dropped (see
 `docs/app/import-collections/postman.md`), and so does `file_body`: a

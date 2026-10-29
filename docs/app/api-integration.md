@@ -525,10 +525,10 @@ apiService.exportRunReport(payload): Promise<RunReportExportResponse> // POST /e
 
 `describeSpec` is the read that replaced the last parse this app did of a spec
 document (issue #869). It sends the picked bytes and gets back what they are -
-the dialect (`"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"`), `info.title`, and the
-identities the document declares, and the `basePaths` its server URLs name - and
-the Spec tab paints its card from that and hands the identities and the base paths
-to `matchSpecOperations`. It parsed the file itself until
+the dialect (`"OpenAPI 3.1"`, `"OpenAPI 3.0"`, `"OpenAPI 2.0 (Swagger)"`),
+`info.title`, and the identities the document declares, and the `basePaths` its
+server URLs name - and the Spec tab paints its card from that and hands the
+identities and the base paths to `matchSpecOperations`. It parsed the file itself until
 then, with `services/openapi/spec-operations.ts`, while the bind derived the same
 identities engine-side from the same bytes: two readers of one document, which
 could preview one pairing and commit another. A document that is not a contract,
