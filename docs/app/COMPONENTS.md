@@ -2322,6 +2322,19 @@ edit. The text lives in a draft, as the comma-separated list's does, so
 `{"a` or `-` is not rewritten under the cursor, and loading a value writes
 nothing. A property that declares `string` stays a plain text field.
 
+**An `object` that declares no `properties` takes a key/value editor, not a
+text box** (#3047). `control.switch`'s `cases` maps a variable's value to a
+folder member's name, and the text box it used to fall through to saved a
+string, which the engine refuses with a 400. `StringMapField` is a row per
+entry (a key input, a value input, a remove button) plus an "Add entry"
+button; the stored value is a plain object of string to string, and an
+existing object renders its rows. The rows live in a draft, as the list's text
+does: only rows with a non-empty key are written (so a blank or half-typed row
+saves nothing), and when two rows share a key the later one wins. Rows have
+ids of their own, so renaming a key does not move the row. The editor is never
+paired onto a `grid-cols-2` line. It is deliberately not `KeyValueEditor`,
+which carries the request builder's file, variable and enable-toggle features.
+
 **Two short fields standing next to each other share a line** (`grid-cols-2`,
 the pairing `AuthFields` and `OAuth2Form` already use). `assert.status`'s
 `range` is one idea - "200 to 299" - and saying it as a label, a hint sentence

@@ -24,6 +24,11 @@
  * property with no `type` can hold any JSON value, so it takes
  * {@link JsonValueField} instead of a text field (#3046).
  *
+ * An `object` that declares no `properties` - `control.switch`'s `cases`, a map
+ * from a value to a step name - takes {@link StringMapField}, a key/value row
+ * editor (#3047); a text box would save a string where the engine wants an
+ * object.
+ *
  * One level of `object` nesting is supported (`assert.status.range`'s
  * `{min, max}`) - see {@link ElementConfigProperty}. Anything deeper, or a
  * form richer than {@link groupRows}' one-or-two fields per line, ships a
@@ -36,13 +41,21 @@
  */
 
 import { useId, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Plus, Trash2 } from "lucide-react";
 import {
 	NumberSettingRow,
 	SelectSettingRow,
 	ToggleRow,
 } from "@/modules/settings/main/panels/SettingControls";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label } from "@/components/ui";
+import {
+	Button,
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+	ICON_MOTION,
+	Input,
+	Label,
+} from "@/components/ui";
 import { FieldError } from "@/components/shared/FieldError";
 import { cn } from "@/lib/utils";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
@@ -313,6 +326,144 @@ function ArrayField({
 	);
 }
 
+/** One row of a {@link StringMapField}; `id` is stable across edits so renaming a key keeps the row where it is. */
+interface MapRow {
+	id: number;
+	key: string;
+	value: string;
+}
+
+interface MapDraft {
+	rows: MapRow[];
+	nextId: number;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+	return value as Record<string, unknown>;
+}
+
+function draftFromRecord(record: Record<string, unknown>, firstId: number): MapDraft {
+	const rows = Object.entries(record).map(([key, value], index) => ({
+		id: firstId + index,
+		key,
+		value: asString(value),
+	}));
+	return { rows, nextId: firstId + rows.length };
+}
+
+/**
+ * What a draft writes: only rows with a non-empty key, since an object cannot
+ * spell a blank key. When two rows share a key the later row wins, which is
+ * what `Object.fromEntries` does (and, unlike `record[key] = value`, it keeps
+ * a key spelled `__proto__` as data).
+ */
+function recordFromRows(rows: MapRow[]): Record<string, string> {
+	return Object.fromEntries(
+		rows.filter((row) => row.key !== "").map((row) => [row.key, row.value])
+	);
+}
+
+/**
+ * A key/value editor for an `object` property that declares no `properties`
+ * (#3047). Both sides are strings - `control.switch`'s `cases` maps a
+ * variable's value to a folder member's name - and the stored value is a plain
+ * object of string to string.
+ *
+ * The rows live in a draft of their own for the reason {@link ArrayField}'s
+ * text does: a blank row, a half-typed key or a duplicate key cannot be spelled
+ * in the stored object. Only the rows {@link recordFromRows} keeps are written,
+ * and only when that changes the stored object, so adding a blank row saves
+ * nothing. `value` changing from outside replaces the rows unless the draft
+ * already writes that object - this field's own write coming back.
+ */
+function StringMapField({
+	label,
+	hint,
+	value,
+	onChange,
+}: {
+	label: string;
+	hint: string | undefined;
+	value: unknown;
+	onChange: (value: unknown) => void;
+}) {
+	const labelId = useId();
+	const stored = asRecord(value);
+	const storedText = JSON.stringify(stored);
+	const [draft, setDraft] = useState(() => draftFromRecord(stored, 0));
+	const [seenText, setSeenText] = useState(storedText);
+
+	if (storedText !== seenText) {
+		setSeenText(storedText);
+		if (JSON.stringify(recordFromRows(draft.rows)) !== storedText) {
+			setDraft(draftFromRecord(stored, draft.nextId));
+		}
+	}
+
+	const update = (next: MapDraft) => {
+		setDraft(next);
+		const record = recordFromRows(next.rows);
+		if (JSON.stringify(record) !== storedText) onChange(record);
+	};
+	const editRow = (id: number, patch: Partial<Pick<MapRow, "key" | "value">>) =>
+		update({
+			...draft,
+			rows: draft.rows.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+		});
+
+	return (
+		<div role="group" aria-labelledby={labelId} className="space-y-1">
+			<span id={labelId} className="block text-xs font-medium">
+				{label}
+			</span>
+			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+			{draft.rows.map((row, index) => (
+				<div key={row.id} className="flex items-center gap-1">
+					<Input
+						size="sm"
+						value={row.key}
+						placeholder="Key"
+						aria-label={`Key ${index + 1}`}
+						onChange={(e) => editRow(row.id, { key: e.target.value })}
+					/>
+					<Input
+						size="sm"
+						value={row.value}
+						placeholder="Value"
+						aria-label={`Value ${index + 1}`}
+						onChange={(e) => editRow(row.id, { value: e.target.value })}
+					/>
+					<Button
+						size="icon"
+						variant="rowActionDestructive"
+						className="shrink-0"
+						aria-label={`Remove entry ${index + 1}`}
+						onClick={() =>
+							update({ ...draft, rows: draft.rows.filter((r) => r.id !== row.id) })
+						}
+					>
+						<Trash2 className="size-icon-sm" data-icon-motion={ICON_MOTION.lid} />
+					</Button>
+				</div>
+			))}
+			<Button
+				variant="outline"
+				size="sm"
+				onClick={() =>
+					setDraft({
+						rows: [...draft.rows, { id: draft.nextId, key: "", value: "" }],
+						nextId: draft.nextId + 1,
+					})
+				}
+			>
+				<Plus className="size-icon-sm" />
+				Add entry
+			</Button>
+		</div>
+	);
+}
+
 /**
  * A field for a property whose schema declares no type, so it can legally hold
  * any JSON value - `assert.jsonpath`'s `expected` and a `metric.record`
@@ -476,6 +627,10 @@ function PropertyRow({
 				/>
 			</fieldset>
 		);
+	}
+
+	if (property.type === "object") {
+		return <StringMapField label={label} hint={hint} value={value} onChange={onChange} />;
 	}
 
 	if (property.type === undefined) {
