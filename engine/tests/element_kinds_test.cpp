@@ -1450,7 +1450,7 @@ TEST (ElementDefaultsTest, ControlTransactionWithNoIncludeTimersKeyFoldsAsTheCat
     vayu::core::fold_between_wait_into_open_transactions (
     elements, spans, 0, 0, 60, controller_state);
 
-    constexpr int64_t WAIT_US = 60 * 1000;
+    constexpr int64_t WAIT_US = 60'000;
     EXPECT_EQ (controller_state.at (sum_key),
     default_flag ("control.transaction", "includeTimers") ? WAIT_US : 0);
 }
