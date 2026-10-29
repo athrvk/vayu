@@ -228,7 +228,7 @@ export default function ScenarioStepsTab({
 									</TableRow>
 								))}
 								{/* The step's extractor misses (issue #3053), after its element
-								    rows: each is one of an extractor row's `skipped`, summed here
+								    rows: each is one of an extractor row's `missing`, summed here
 								    because each also left a later step sending that name
 								    unresolved. */}
 								{!!step.extractorMisses && (
