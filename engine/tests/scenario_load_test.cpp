@@ -3050,6 +3050,42 @@ TEST_F (ScenarioLoadTest, AMissAndAnErrorAreTalliedAsThemselvesOnANamedRow) {
     EXPECT_EQ (errored["failed"], 0) << errored.dump ();
 }
 
+// Ids are unique within a level, not across one: a collection's element and
+// the request's own can share one. Each keeps its own row, counts and label,
+// told apart by its origin. Mutation check: key `StepElementTallies::record`
+// (scenario_load.cpp) by id alone and the two rows fold into one of 4 misses.
+TEST_F (ScenarioLoadTest, ElementsSharingAnIdAcrossLevelsKeepTheirOwnRows) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/login") });
+    auto inherited = vayu::tests::extract_json_element_json ("el_1", "$.nope", "a");
+    inherited["name"]   = "From the collection";
+    inherited["origin"] = { { "kind", "collection" }, { "scope", "collection" },
+        { "id", "col_1" } };
+    auto own = vayu::tests::extract_json_element_json ("el_1", "$.nope", "b");
+    own["name"] = "The request's own";
+    own["origin"] = { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } };
+    own["config"]["required"] = true;
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ inherited, own });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    const auto& elements = summary["steps"][0]["elements"];
+    ASSERT_EQ (elements.size (), 2u) << summary.dump ();
+    EXPECT_EQ (elements[0]["name"], "From the collection");
+    EXPECT_EQ (elements[0]["origin"]["id"], "col_1");
+    EXPECT_FALSE (elements[0].contains ("required"));
+    EXPECT_EQ (elements[0]["missing"], 2) << elements[0].dump ();
+    EXPECT_EQ (elements[1]["name"], "The request's own");
+    EXPECT_EQ (elements[1]["origin"]["id"], "req_1");
+    EXPECT_EQ (elements[1]["required"], true);
+    EXPECT_EQ (elements[1]["missing"], 2) << elements[1].dump ();
+}
+
 // A deferral is its own count (#2144): an un-inlined `script.post` is left to
 // the post-run replay, so it runs - later - and must not read as a script
 // that was never run. The two skips that are not deferrals stay `skipped`:

@@ -9828,8 +9828,9 @@ assertions" and "no failures" are different answers.
 `elements` (issue #1495) is the step's per-element tally,
 `{ id, kind, name?, origin?, required?, passed, failed, missing, error,
 skipped, deferred }` one entry per compiled element that ran at least once
-this run - **absent** for a step with no elements or none that ever ran, the
-same convention `tests` follows. Each count is one outcome word of the
+this run (an id a collection's element and the request's own share is two
+entries, each with its own counts and `origin`) - **absent** for a step with
+no elements or none that ever ran, the same convention `tests` follows. Each count is one outcome word of the
 sequential trace (#3051): `passed` is `ok`, and `failed`, `missing` (an
 extractor that found nothing, or a `metric.record` with nothing to read) and
 `error` (an element that could not run its check, a script that threw) are

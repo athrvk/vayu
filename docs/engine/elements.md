@@ -531,6 +531,9 @@ histograms and the `slow_threshold_ms` decision.
 passed, failed, missing, error, skipped, deferred }` beside the existing `tests` node, one row per
 element that ran at least once this run - `StepElementTallies`, sized once from the plan's
 compiled elements so recording on the completion path is a lookup, never a lock or an allocation.
+Ids are unique within one level's list, not across the chain (a duplicated collection keeps its
+elements' ids), so a step's composed list can hold one id twice; each still gets its own row,
+counts and label, told apart by its `origin.id`.
 A single-request run's `summary.elements` is `RequestElementTallies`, classifying by the same rule
 (`ElementOutcomeCounts`). Each count is one outcome word (#3051): `ok` is `passed`, and `failed`,
 `missing` and `error` count under their own names, so a miss never reads as a skip nor an error as
