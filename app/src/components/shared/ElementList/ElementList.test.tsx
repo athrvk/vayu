@@ -869,6 +869,69 @@ describe("ElementList - a required field the config is missing (issue #1635)", (
 	});
 });
 
+describe("ElementList - an operand the kind needs one of (#3043)", () => {
+	it("says what a fresh status assertion needs, though its schema requires nothing", () => {
+		renderList([assertElement("a1")]);
+
+		expect(screen.getByText("Needs accepted codes or a range")).toBeInTheDocument();
+	});
+
+	it("keeps the required field first when an assertion lacks both", () => {
+		render(
+			<ElementList
+				elements={[{ id: "j1", kind: "assert.jsonpath", enabled: true, config: {} }]}
+				onChange={vi.fn()}
+				kinds={[
+					kindSchema({
+						kind: "assert.jsonpath",
+						label: "Assert JSON value",
+						configSchema: {
+							type: "object",
+							required: ["path"],
+							properties: { path: { type: "string", title: "JSONPath" } },
+						},
+					}),
+				]}
+			/>
+		);
+
+		expect(
+			screen.getByText("Needs JSONPath, a value, pattern or existence check")
+		).toBeInTheDocument();
+	});
+
+	it("clears once the assertion lists a code", () => {
+		renderList([{ ...assertElement("a1"), config: { in: [200] } }]);
+
+		expect(screen.queryByText(/^Needs /)).not.toBeInTheDocument();
+	});
+});
+
+describe("ElementList - the engine's refusal of an element (#3043)", () => {
+	it("shows the refusal under the refused row only, collapsed or not", () => {
+		render(
+			<ElementList
+				elements={[extractElement("e1", "$.a"), extractElement("e2", "$.b")]}
+				onChange={vi.fn()}
+				kinds={KINDS}
+				errors={{ e2: "'pattern' is not a valid regular expression" }}
+			/>
+		);
+
+		const rows = document.querySelectorAll("[data-element-row]");
+		expect(within(rows[0] as HTMLElement).queryByRole("alert")).not.toBeInTheDocument();
+		expect(within(rows[1] as HTMLElement).getByRole("alert")).toHaveTextContent(
+			"'pattern' is not a valid regular expression"
+		);
+	});
+
+	it("shows nothing without an errors prop", () => {
+		renderList([extractElement("e1", "$.a")]);
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+	});
+});
+
 describe("ElementList - empty state", () => {
 	it("shows quick-add chips instead of the list when there are no elements", () => {
 		renderList([]);

@@ -2096,7 +2096,12 @@ keys present (even `null` is accepted as a no-op, but a real value is not) is a
 **`elements`** (issue #1513, run by issue #1514's pipeline) takes the array
 rule: absent keeps the stored list; `null` resets it to `[]`; a present value
 must be an array the element registry accepts (see [Elements](elements.md)) or
-the write is a `400` naming the index, the kind and the field. The only script
+the write is a `400` naming the index, the kind and the field. That includes a
+kind's own rules beyond its schema: a JSONPath outside the supported subset, a
+pattern RE2 does not compile (`'pattern' is not a valid regular expression -
+<reason>`, likewise `'regex'` and `'text'`, #3043), an `assert.status` with
+neither a non-empty `in` nor a `range`, and an `assert.jsonpath` with none of
+`expected`, `regex` or `exists`. The only script
 source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 
@@ -7549,6 +7554,7 @@ what each script result's `scope` (below) is read from, falling back to
 
 **`elements` is validated like a stored request's** (#3052): a list the element
 registry refuses (an unrecognized kind, a setting the kind does not declare, a
+pattern that does not compile, an assertion with nothing to compare against, a
 repeated id, a `script.setup` on the request, a value that is not an array) is a
 `400` carrying the message [`POST /requests`](#post-requests) answers for the
 same list, before any run row exists and with nothing sent. An entry without an
@@ -7575,7 +7581,10 @@ message?, waitedMs?}` with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
 its `apply` ever running; a script element reports `error` with the thrown
 message when its script threw and `failed` with the first failed `pm.test` as
-its message when only assertions did not hold) - see [Elements](elements.md#the-step-trace).
+its message when only assertions did not hold; an `assert.*` that reports
+`error` because its own config cannot be judged, a row stored before #3043,
+also adds a failed entry to `testResults` under the same message, so the send
+fails) - see [Elements](elements.md#the-step-trace).
 
 **The pre-request script can change what is sent.** Its `pm.request` edits -
 method, url, headers, body - are applied to the request before it goes out, and

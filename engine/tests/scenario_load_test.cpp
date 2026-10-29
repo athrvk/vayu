@@ -2947,6 +2947,29 @@ TEST_F (ScenarioLoadTest, AFailingAssertContainsReachesTheReportsScenarioAsserti
     EXPECT_EQ (scenario.at ("failed").get<size_t> (), ITERATIONS) << scenario.dump ();
 }
 
+// #3043: an assertion that cannot run fails its step under load and is in the
+// exact population, beside the element tally that already booked it failed.
+// Mutation check: put the bare `outcome_status = "error"` back in
+// `AssertJsonPathElement::apply` and `assertions` is absent, the steps passed.
+TEST_F (ScenarioLoadTest, AnAssertionThatCannotRunFailsItsStepAndIsCounted) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/echo"), server.url ("/echo") });
+    execution.plan.steps[1].elements = vayu::tests::compiled_elements (
+    { json{ { "id", "el_jsonpath" }, { "kind", "assert.jsonpath" },
+    { "enabled", true }, { "config", { { "path", "$.method" } } } } });
+
+    constexpr size_t ITERATIONS = 3;
+    const json report           = run_to_report (
+    json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 1 } },
+    execution);
+    const json& scenario = report.at ("scenario");
+    EXPECT_EQ (scenario.value ("assertions", json ()),
+    (json{ { "passed", 0 }, { "failed", ITERATIONS } }))
+    << scenario.dump ();
+    EXPECT_EQ (scenario.at ("passed").get<size_t> (), ITERATIONS) << scenario.dump ();
+    EXPECT_EQ (scenario.at ("failed").get<size_t> (), ITERATIONS) << scenario.dump ();
+}
+
 // An inline script's `pm.test` is in the exact population; an un-inlined one is
 // the deferred replay's, reported under `testValidation` and kept out of it.
 // Mutation check: add `validation.run` to the figure in `collect_summary_inputs`

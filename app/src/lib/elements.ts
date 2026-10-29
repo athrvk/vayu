@@ -70,13 +70,86 @@ export function missingRequiredKeys(
 }
 
 /**
+ * A kind whose schema marks nothing `required` but whose engine-side
+ * `validate_config` refuses a config with none of several operands (#3043).
+ * JSON Schema cannot say "one of", so the catalogue does not carry the rule;
+ * this table restates it, and `element-kinds.conformance.test.tsx` holds every
+ * name here to a property the live catalogue declares. That guard cannot see
+ * the C++ rule itself: a change to `assert_status_problem` or
+ * `assert_jsonpath_problem` needs a hand edit here.
+ */
+interface OperandRule {
+	/** The config keys the engine accepts as the operand; checked against the catalogue. */
+	properties: readonly string[];
+	/** What the row's "Needs ..." chip asks for. */
+	needs: string;
+	isMet: (config: Record<string, unknown>) => boolean;
+}
+
+const hasKey = (config: Record<string, unknown>, key: string) => config[key] !== undefined;
+
+const JSONPATH_OPERANDS = ["expected", "regex", "exists"] as const;
+
+export const OPERAND_RULES: Readonly<Record<string, OperandRule>> = {
+	// `assert_status_problem`: a non-empty `in` array, or a `range` key. An
+	// emptied `in` list is `[]`, which the engine refuses like an absent one.
+	"assert.status": {
+		properties: ["in", "range"],
+		needs: "accepted codes or a range",
+		isMet: (config) =>
+			(Array.isArray(config.in) && config.in.length > 0) || hasKey(config, "range"),
+	},
+	// `assert_jsonpath_problem`: any of the three keys present, whatever its value.
+	"assert.jsonpath": {
+		properties: JSONPATH_OPERANDS,
+		needs: "a value, pattern or existence check",
+		isMet: (config) => JSONPATH_OPERANDS.some((key) => hasKey(config, key)),
+	},
+};
+
+/**
+ * What an element still needs for want of its kind's "one of" operand
+ * (`OPERAND_RULES`), or `null` when it has one or its kind has no such rule.
+ * Kept apart from `missingRequiredKeys` because it names no config key: the
+ * fix is to fill any one of several.
+ */
+export function missingOperand(element: Pick<ElementDef, "kind" | "config">): string | null {
+	const rule = OPERAND_RULES[element.kind];
+	if (!rule || rule.isMet(element.config)) return null;
+	return rule.needs;
+}
+
+/**
  * Whether any element in the list is missing a required config key outright
- * (issue #1635) - the shape that 400s the *entire* `elements` array on save,
- * not only that one element's own edit, because the array is sent whole
- * whenever it is touched (`buildUpdatePayload`).
+ * (issue #1635) or its kind's "one of" operand (#3043) - the shapes that 400
+ * the *entire* `elements` array on save, not only that one element's own edit,
+ * because the array is sent whole whenever it is touched (`buildUpdatePayload`).
  */
 export function hasIncompleteElement(elements: ElementDef[], kinds: ElementKindSchema[]): boolean {
-	return elements.some((el) => missingRequiredKeys(el, kinds).length > 0);
+	return elements.some(
+		(el) => missingRequiredKeys(el, kinds).length > 0 || missingOperand(el) !== null
+	);
+}
+
+/** The engine's refusal of one element: `'<Kind label>' (item N): <problem>`. */
+const ELEMENT_REFUSAL = /^'[^']*' \(item (\d+)\): ([\s\S]+)$/;
+
+/**
+ * The element an engine 400 names, and the problem it states (#3043).
+ *
+ * `N` is the 1-based index into the `elements` array that was sent, so the
+ * caller passes that same array. Anything that does not read this way - an
+ * older engine's wording, a message about a different field, an index past the
+ * array - answers `null`, and the caller keeps its generic save failure.
+ */
+export function parseElementRefusal(
+	message: string,
+	sent: readonly ElementDef[]
+): { element: ElementDef; problem: string } | null {
+	const match = ELEMENT_REFUSAL.exec(message);
+	if (!match) return null;
+	const element = sent[Number(match[1]) - 1];
+	return element ? { element, problem: match[2] } : null;
 }
 
 /**

@@ -41,6 +41,19 @@ const std::string& failure_message) {
     }
 }
 
+/// An assertion whose own config leaves it nothing to judge (#3043), a row
+/// stored before validation refused it: the outcome stays `error`, and the
+/// failed test beside it is what fails the step and enters every assertion
+/// count, all of which read the `tests` list alone.
+void record_unrunnable_assertion (ElementContext& ctx,
+const std::string& name,
+const std::string& reason) {
+    ctx.post_script_result.tests.push_back (
+    vayu::TestResult{ name, false, reason, ctx.element_scope });
+    ctx.outcome_status  = "error";
+    ctx.outcome_message = reason;
+}
+
 // ---------------------------------------------------------------------------
 // assert.status - `in` (a set of codes) or `range` ({min, max}).
 // ---------------------------------------------------------------------------
@@ -64,7 +77,10 @@ class AssertStatusElement final : public Element {
         const int code = ctx.response->status_code;
         bool passed    = false;
         std::string expected_desc;
-        if (config_.contains ("in") && config_["in"].is_array ()) {
+        // An empty `in` is no operand (validate refuses it): a stored row that
+        // pairs one with a `range` is judged by the range, not by "one of []".
+        if (config_.contains ("in") && config_["in"].is_array () &&
+        !config_["in"].empty ()) {
             for (const auto& value : config_["in"]) {
                 if (value.is_number_integer () && value.get<int> () == code) {
                     passed = true;
@@ -79,9 +95,8 @@ class AssertStatusElement final : public Element {
             expected_desc =
             "in [" + std::to_string (min) + ", " + std::to_string (max) + "]";
         } else {
-            ctx.outcome_status = "error";
-            ctx.outcome_message =
-            "assert.status needs an 'in' list or a 'range'";
+            record_unrunnable_assertion (
+            ctx, "Status code", "assert.status needs an 'in' list or a 'range'");
             return;
         }
         record_assertion (ctx, "Status code is " + expected_desc, passed,
@@ -105,7 +120,8 @@ using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 
 /// A string member, or "" when it is absent or not a string: read in a
 /// constructor, where an exception would escape `compile_elements` instead of
-/// becoming the element's own "error" outcome.
+/// becoming the element's own "error" outcome, and in a validate hook, which
+/// must answer a refusal rather than throw one.
 std::string string_member (const nlohmann::json& config, const char* key) {
     const auto found = config.find (key);
     return found != config.end () && found->is_string () ? found->get<std::string> () : "";
@@ -126,13 +142,12 @@ class AssertJsonPathElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
+        const std::string path_text = config_.value ("path", "");
+        const std::string name      = "JSONPath '" + path_text + "'";
         if (!path_) {
-            ctx.outcome_status  = "error";
-            ctx.outcome_message = "invalid JSONPath";
+            record_unrunnable_assertion (ctx, name, "invalid JSONPath");
             return;
         }
-        const std::string path_text        = config_.value ("path", "");
-        const std::string name             = "JSONPath '" + path_text + "'";
         const nlohmann::ordered_json* body = ensure_parsed_body (ctx);
         if (body == nullptr) {
             // Recorded before `negate` is read: a body nothing can be read
@@ -162,8 +177,7 @@ class AssertJsonPathElement final : public Element {
             ", got " + detail::json_value_to_string (*matches.front ()));
         } else if (const auto& regex = regex_) {
             if (!*regex) {
-                ctx.outcome_status  = "error";
-                ctx.outcome_message = regex->error ();
+                record_unrunnable_assertion (ctx, name, regex->error ());
                 return;
             }
             passed = !matches.empty () &&
@@ -171,9 +185,8 @@ class AssertJsonPathElement final : public Element {
             failure = "expected '" + path_text + "' to match /" +
             config_.value ("regex", "") + "/";
         } else {
-            ctx.outcome_status = "error";
-            ctx.outcome_message =
-            "assert.jsonpath needs one of 'expected', 'regex' or 'exists'";
+            record_unrunnable_assertion (ctx, name,
+            "assert.jsonpath needs one of 'expected', 'regex' or 'exists'");
             return;
         }
 
@@ -226,8 +239,8 @@ class AssertContainsElement final : public Element {
             verb   = "equal";
         } else if (const auto& pattern = pattern_) {
             if (!*pattern) {
-                ctx.outcome_status  = "error";
-                ctx.outcome_message = pattern->error ();
+                record_unrunnable_assertion (
+                ctx, field + " matches '" + text + "'", pattern->error ());
                 return;
             }
             passed = (*pattern)->search (subject);
@@ -330,6 +343,42 @@ class AssertSizeElement final : public Element {
     nlohmann::json config_;
 };
 
+// ---------------------------------------------------------------------------
+// The validate-time rules the schemas cannot state (#3043): an assertion that
+// would only ever report `error` is refused when it is written.
+// ---------------------------------------------------------------------------
+
+/// An empty `in` is no operand: no status is one of nothing.
+std::optional<std::string> assert_status_problem (const nlohmann::json& config) {
+    const auto codes = config.find ("in");
+    if ((codes != config.end () && codes->is_array () && !codes->empty ()) ||
+    config.contains ("range")) {
+        return std::nullopt;
+    }
+    return "'in' or 'range' is required - list at least one accepted status "
+           "code, or give a range";
+}
+
+/// `regex` is checked whenever it is written, even beside an `expected` that
+/// would win at run time: a pattern that cannot compile is never kept.
+std::optional<std::string> assert_jsonpath_problem (const nlohmann::json& config) {
+    if (auto problem = detail::json_path_problem (config, "path", "path")) {
+        return problem;
+    }
+    if (!config.contains ("expected") && !config.contains ("regex") &&
+    !config.contains ("exists")) {
+        return "one of 'expected', 'regex' or 'exists' is required";
+    }
+    return user_regex_problem (config, "regex", "regex");
+}
+
+std::optional<std::string> assert_contains_problem (const nlohmann::json& config) {
+    if (string_member (config, "mode") != "matches") {
+        return std::nullopt;
+    }
+    return user_regex_problem (config, "text", "text");
+}
+
 } // namespace
 
 ElementKind make_assert_status_kind () {
@@ -345,7 +394,8 @@ ElementKind make_assert_status_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<AssertStatusElement> (config);
     };
-    kind.config_schema = {
+    kind.validate_config = assert_status_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "in",
@@ -378,10 +428,8 @@ ElementKind make_assert_jsonpath_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<AssertJsonPathElement> (config);
     };
-    kind.validate_config = [] (const nlohmann::json& config) {
-        return detail::json_path_problem (config, "path", "path");
-    };
-    kind.config_schema = {
+    kind.validate_config = assert_jsonpath_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "path",
@@ -420,7 +468,8 @@ ElementKind make_assert_contains_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<AssertContainsElement> (config);
     };
-    kind.config_schema = {
+    kind.validate_config = assert_contains_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "field",

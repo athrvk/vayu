@@ -2284,6 +2284,27 @@ payload already known to fail; `useSaveManager` reads that type to stay
 "pending" rather than backing off a retry against a payload that will not
 have changed by the next attempt.
 
+**A kind that needs one of several operands is held back the same way**
+(#3043): `assert.status` needs a non-empty `in` or a `range`, `assert.jsonpath`
+one of `expected`, `regex` or `exists`. The engine refuses an assertion with
+none, and JSON Schema cannot say "one of", so `OPERAND_RULES`
+(`lib/elements.ts`) restates the two rules and `missingOperand` feeds the same
+"Needs ..." chip ("Needs accepted codes or a range") and the same
+`hasIncompleteElement` gate; `element-kinds.conformance.test.tsx` holds every
+key in the table to a property the engine's catalogue declares.
+
+**An element the engine still refuses is named on its row** (#3043): the engine's
+`'<Kind label>' (item N): <problem>` 400 (`parseElementRefusal`) is matched
+back to the element at position N of the array that was sent, and
+`useElementRefusals` hands `ElementList` an `errors` map by element id, drawn
+as a `FieldError` under that row's header, open or collapsed. The refusal is
+kept against the element object, so it ends the moment that element is edited.
+`RequestBuilderProvider.handleSave` (as `elementErrors` on the context) and
+`ElementsTab.persist` record it and rethrow, so the save's toast, Dock status
+and callout are unchanged; a message that does not read this way (an older
+engine) leaves only those. The regular-expression cases land here, since RE2
+exists only in the engine.
+
 **Delete asks nothing for a blank element** (every configured value empty or
 absent) and confirms through `DeleteConfirmDialog` for one with real
 configuration. A primitive under `components/shared/` takes no feature-module
@@ -2473,7 +2494,9 @@ required, non-blankable string fields (`extract.json`'s `variable`,
 `control.transaction`'s `name`, both `minLength: 1`) that an empty string
 would not satisfy either, and a kind-specific fake placeholder would be worse
 than the failure it dodges - tracked as a follow-up rather than guessed at
-here (issue #1635).
+here (issue #1635). A fresh `assert.status` or `assert.jsonpath` is the same
+case without a `required` key, and the same answer: it seeds `{}` and the row
+says what it needs (above) until the user gives it an operand.
 
 ## Shared Response Viewer (`components/shared/response-viewer/`)
 

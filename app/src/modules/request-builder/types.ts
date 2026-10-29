@@ -24,6 +24,7 @@ import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
+import type { ElementErrors } from "@/components/shared/ElementList/useElementRefusals";
 import type {
 	BodyMode,
 	ConsoleLogEntry,
@@ -584,6 +585,12 @@ export interface RequestBuilderContextValue {
 	 * `InheritedElementsNotice` walks the chain itself.
 	 */
 	inheritedElements?: ResolvedElement[];
+
+	/**
+	 * What the engine refused about one of this request's own elements on the
+	 * last save, by element id (#3043); empty once the element is edited.
+	 */
+	elementErrors: ElementErrors;
 
 	/**
 	 * The whole glued script a pre-script-parts run recorded. Set only by the

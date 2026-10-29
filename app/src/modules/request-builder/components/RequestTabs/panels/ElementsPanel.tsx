@@ -34,6 +34,7 @@ export default function ElementsPanel() {
 		request,
 		updateField,
 		inheritedElements,
+		elementErrors,
 		legacyPreScript,
 		legacyPostScript,
 		getAllVariables,
@@ -69,6 +70,7 @@ export default function ElementsPanel() {
 				elements={request.elements}
 				onChange={(elements) => updateField("elements", elements)}
 				kinds={addableKinds}
+				errors={elementErrors}
 				{...openRows}
 				referenceOwner={
 					savedRequest ? { type: "request", request: savedRequest } : undefined

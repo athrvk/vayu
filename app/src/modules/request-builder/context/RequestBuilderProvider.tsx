@@ -26,6 +26,7 @@ import { resolveDataContract } from "@/lib/data-contract";
 import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
 import { mergeExternalWrite } from "@/lib/field-merge";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
+import { useElementRefusals } from "@/components/shared/ElementList/useElementRefusals";
 import { useDataFileLimits } from "@/hooks/useDataFileLimits";
 import {
 	useCollectionAncestors,
@@ -201,6 +202,7 @@ export default function RequestBuilderProvider({
 	// `useElementKindsQuery` itself, so this costs nothing beyond the fetch
 	// `ElementsPanel` already makes.
 	const { data: elementKinds } = useElementKindsQuery();
+	const { errors: elementErrors, refuse: refuseElement } = useElementRefusals(request.elements);
 
 	// The id of the request currently on screen. This single provider is reused
 	// across request tabs (no per-tab key), so an execute that is still in flight
@@ -910,7 +912,14 @@ export default function RequestBuilderProvider({
 		) {
 			throw new SaveBlockedError();
 		}
-		await onSave(request, changedFields);
+		try {
+			await onSave(request, changedFields);
+		} catch (error) {
+			// The engine names the element it refused (#3043); the failure itself
+			// still propagates to `useSaveManager` for its toast and Dock status.
+			if (changedFields.has("elements")) refuseElement(error, request.elements);
+			throw error;
+		}
 		// An edit landed, or a foreign write arrived, while this save was in
 		// flight: either way `changeTokenRef` moved and the payload that went
 		// out is not the whole story any more, so the request is still dirty
@@ -935,7 +944,7 @@ export default function RequestBuilderProvider({
 			setBaseline((prev) => ({ ...prev, ...(savedPatch as Partial<RequestState>) }));
 		}
 		setHasUnsavedChanges(false);
-	}, [request, changeToken, touchedFields, onSave, elementKinds]);
+	}, [request, changeToken, touchedFields, onSave, elementKinds, refuseElement]);
 
 	const {
 		forceSave,
@@ -1267,6 +1276,7 @@ export default function RequestBuilderProvider({
 			response,
 			setResponse,
 			inheritedElements,
+			elementErrors,
 			legacyPreScript,
 			legacyPostScript,
 			activeTab,
@@ -1311,6 +1321,7 @@ export default function RequestBuilderProvider({
 			response,
 			setResponse,
 			inheritedElements,
+			elementErrors,
 			legacyPreScript,
 			legacyPostScript,
 			activeTab,

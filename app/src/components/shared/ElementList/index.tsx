@@ -61,8 +61,9 @@ import {
 	Switch,
 } from "@/components/ui";
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
+import { FieldError } from "@/components/shared/FieldError";
 import { generateId } from "@/lib/id";
-import { isBlankScriptElement, missingRequiredKeys } from "@/lib/elements";
+import { isBlankScriptElement, missingOperand, missingRequiredKeys } from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -74,6 +75,7 @@ import { nextCopyName } from "./duplicate-name";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { categoryLabel, categoryOrder, effectiveCategory, kindIcon } from "./element-categories";
 import { summarizeElement } from "./summarize-element";
+import type { ElementErrors } from "./useElementRefusals";
 
 /** The picker's "Recently used" group heading - the cap lives in `layout-store`. */
 const RECENTLY_USED_HEADING = "Recently used";
@@ -130,6 +132,12 @@ export interface ElementListProps {
 	 * host answers by updating that set.
 	 */
 	onOpenChange?: (elementId: string, open: boolean) => void;
+	/**
+	 * What the engine refused about an element when the host saved it (#3043),
+	 * by element id (`useElementRefusals`). Shown under that row's header, open
+	 * or collapsed; the host drops the entry when the element is edited.
+	 */
+	errors?: ElementErrors;
 }
 
 function kindLabel(kind: string, kinds: ElementKindSchema[]): string {
@@ -222,9 +230,12 @@ function ElementRow({
 	onDuplicate,
 	renderAboveForm,
 	referenceOwner,
+	error,
 }: {
 	element: ElementDef;
 	kinds: ElementKindSchema[];
+	/** The engine's refusal of this element, when its last save drew one. */
+	error?: string;
 	isFirst: boolean;
 	isLast: boolean;
 	/** Seeds this row's initial collapse state only - added or duplicated this session opens expanded. */
@@ -253,10 +264,13 @@ function ElementRow({
 	// requires until the user fills the form below, and saving in that state
 	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
 	// save back for exactly this, so the row has to say which field is why.
-	const missingKeys = missingRequiredKeys(element, kinds);
-	const missingLabels = missingKeys.map(
+	const missingLabels = missingRequiredKeys(element, kinds).map(
 		(key) => schema?.configSchema.properties?.[key]?.title ?? key
 	);
+	// A kind that needs one of several operands (#3043) names no single key, so
+	// it joins the chip as the phrase itself.
+	const operandNeed = missingOperand(element);
+	if (operandNeed) missingLabels.push(operandNeed);
 
 	const [localOpen, setLocalOpen] = useState(isNew);
 	const open = controlledOpen ?? localOpen;
@@ -485,6 +499,9 @@ function ElementRow({
 						}}
 					/>
 				</div>
+				{/* Outside the collapsible body: a refused element in a list of
+				    collapsed cards has to be findable without opening each. */}
+				<FieldError className="px-2 pb-2">{error}</FieldError>
 				<CollapsibleContent className="space-y-2 border-t border-rule px-2 py-2">
 					{renderAboveForm?.(element)}
 					{Bespoke ? (
@@ -537,6 +554,7 @@ export function ElementList({
 	referenceOwner,
 	openIds,
 	onOpenChange,
+	errors,
 }: ElementListProps) {
 	const groups = groupedByCategory(kinds);
 	const [pickerOpen, setPickerOpen] = useState(false);
@@ -639,6 +657,7 @@ export function ElementList({
 						onDuplicate={() => duplicateAt(index)}
 						renderAboveForm={renderAboveForm}
 						referenceOwner={referenceOwner}
+						error={errors?.[element.id]}
 					/>
 				))
 			)}
