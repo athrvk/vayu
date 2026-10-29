@@ -87,10 +87,16 @@ std::optional<std::string> user_regex_problem (const nlohmann::json& holder,
 std::string_view key,
 std::string_view label) {
     const auto it = holder.find (key);
-    if (it == holder.end () || !it->is_string ()) {
+    if (it == holder.end ()) {
         return std::nullopt;
     }
-    const re2::RE2 compiled (it->get_ref<const std::string&> (), user_regex_options ());
+    // get_ptr, not is_string + get_ref: GCC 15 at -O3 cannot prove the
+    // checked type and fails -Werror=null-dereference inside get_ref.
+    const auto* text = it->get_ptr<const std::string*> ();
+    if (text == nullptr) {
+        return std::nullopt;
+    }
+    const re2::RE2 compiled (*text, user_regex_options ());
     if (compiled.ok ()) {
         return std::nullopt;
     }
