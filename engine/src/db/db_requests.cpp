@@ -232,7 +232,7 @@ const std::optional<std::string>& declined_under) {
             request.deleted_at = stamp;
             impl_->storage.update (request);
             if (declined_under) {
-                record_declined_operation_locked (*declined_under, request, stamp);
+                record_declined_operation_locked (*declined_under, request);
             }
         }
         return true; // Commit
@@ -240,8 +240,7 @@ const std::optional<std::string>& declined_under) {
 }
 
 void Database::record_declined_operation_locked (const std::string& collection_id,
-const Request& request,
-int64_t now) {
+const Request& request) {
     const auto identity = vayu::core::parse_spec_identity (request.spec_operation);
     if (!identity) {
         return;
@@ -259,7 +258,6 @@ int64_t now) {
     record.method        = identity->method;
     record.path          = identity->path;
     record.request_id    = request.id;
-    record.created_at    = now;
     impl_->storage.insert (record);
 }
 

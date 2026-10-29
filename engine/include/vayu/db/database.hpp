@@ -1473,8 +1473,7 @@ class Database {
      * caller holds the DB mutex and is inside the delete's own transaction.
      */
     void record_declined_operation_locked (const std::string& collection_id,
-    const Request& request,
-    int64_t now); // db_requests.cpp
+    const Request& request); // db_requests.cpp
 
     /// Forgets the record @p request_id's delete wrote, the half of a restore
     /// that puts the operation back in the sync's hands (#3031). Same scope

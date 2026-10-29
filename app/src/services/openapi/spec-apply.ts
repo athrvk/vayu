@@ -173,9 +173,10 @@ export interface BuildSyncPayloadInput {
 /**
  * The `POST /specs/sync` body for one selection.
  *
- * Added operations, and the declined ones a user ticked, land where an import would have put them - the sub-collection
- * named after the operation's first tag, else the one its path names (issue
- * #710), created here when the bound collection does not have one yet, and the
+ * Added operations, and the declined ones a user ticked, land where an import
+ * would have put them - the sub-collection named after the operation's first
+ * tag, else the one its path names (issue #710), created here when the bound
+ * collection does not have one yet, and the
  * bound collection itself for an operation that gets neither. Matching an
  * existing folder by name rather than creating one per
  * sync is what keeps a collection that has been synced five times shaped like

@@ -1288,7 +1288,6 @@ it.
 | `method`        | TEXT       | The identity's method, as `requests.spec_operation` records it |
 | `path`          | TEXT       | The identity's path template                                |
 | `request_id`    | TEXT       | The deleted request whose delete wrote the row              |
-| `created_at`    | INTEGER    | Unix ms; the delete's own stamp                             |
 
 `UNIQUE (collection_id, method, path, operation_id)`: one row per operation
 under one binding, and a second request's delete for the same operation takes

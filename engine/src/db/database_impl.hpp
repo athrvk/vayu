@@ -383,7 +383,6 @@ inline auto make_vayu_storage (const std::string& path) {
     make_column ("method", &DeclinedOperation::method),
     make_column ("path", &DeclinedOperation::path),
     make_column ("request_id", &DeclinedOperation::request_id),
-    make_column ("created_at", &DeclinedOperation::created_at),
     unique (&DeclinedOperation::collection_id, &DeclinedOperation::method,
     &DeclinedOperation::path, &DeclinedOperation::operation_id)),
 

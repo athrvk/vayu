@@ -2012,7 +2012,6 @@ struct DeclinedOperation {
     /// row. A later delete of another request for the same operation takes it
     /// over.
     std::string request_id;
-    int64_t created_at = 0;
 };
 
 struct Environment {

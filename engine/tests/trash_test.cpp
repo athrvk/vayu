@@ -1632,10 +1632,6 @@ TEST_F (TrashTest, DeletingAStampedRequestRecordsItsOperationUnderTheBinding) {
     EXPECT_EQ (records[0].method, "GET");
     EXPECT_EQ (records[0].path, "/pets");
     EXPECT_EQ (records[0].request_id, "req_pets");
-    const auto trashed = entry_for ("req_pets");
-    ASSERT_HAS_VALUE (trashed);
-    EXPECT_EQ (records[0].created_at, trashed->deleted_at)
-    << "the record and the stamp are one transaction's";
 }
 
 TEST_F (TrashTest, ADeleteWithNoBindingRecordsNothing) {

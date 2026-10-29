@@ -274,7 +274,7 @@ const std::optional<std::string>& declined_under) {
                 // Only the rows this delete stamps: one an earlier delete took
                 // recorded its own decision then, or none.
                 if (declined_under) {
-                    record_declined_operation_locked (*declined_under, request, stamp);
+                    record_declined_operation_locked (*declined_under, request);
                 }
             }
             for (auto& collection : impl_->storage.get_all<Collection> (where (
