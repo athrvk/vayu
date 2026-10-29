@@ -77,6 +77,9 @@ function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
  */
 function parseJsonValue(text: string): unknown {
 	const parsed = parseJson(text);
+	// `1e400` parses to Infinity, which serializes as null: keep the text instead.
+	if (parsed.ok && typeof parsed.value === "number" && !Number.isFinite(parsed.value))
+		return text;
 	return parsed.ok ? parsed.value : text;
 }
 

@@ -802,7 +802,7 @@ export interface ElementConfigProperty {
  * property be written that way rather than as `{}` - `assert.jsonpath`'s
  * `expected` does this, since it legally holds any JSON value. Read through
  * `GenericElementForm`'s `PropertyRow`, which treats `null` the same as `{}`:
- * a property that declares nothing still renders, as a plain text field,
+ * a property that declares nothing still renders, as a JSON value field,
  * rather than the type checker's non-null promise crashing the one place that
  * reads it.
  */

@@ -481,6 +481,7 @@ describe("GenericElementForm - an untyped property holds any JSON value (#3046)"
 		{ typed: '{"a":1}', stored: { a: 1 }, kind: "object" },
 		{ typed: "[1,2]", stored: [1, 2], kind: "list" },
 		{ typed: '{"a', stored: '{"a', kind: "text" },
+		{ typed: "1e400", stored: "1e400", kind: "text" },
 	])("stores $typed as $kind and says so", ({ typed, stored, kind }) => {
 		const onChange = vi.fn();
 		render(<Harness onChange={onChange} />);
