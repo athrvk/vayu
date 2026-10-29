@@ -171,11 +171,10 @@ could not read, because that unsets the variable too. A miss a `default` answere
 not counted, nor is a disabled extractor or a `metric.record` reporting `missing`. A collection run
 writes the count on the step's stored trace and its `step` frame, a load run on
 `scenario.steps[i]`; both omit the key at 0. A passing step's stored row can be dropped past the
-step-store cap, so the stored count covers the rows kept; the frame carries every step. On a load
-run a step whose request failed in transport runs no extractor, so it neither unsets nor counts
-(#3089); a collection run runs them against the error response. A single-request load run's
-`summary.elements` has no
-such count.
+step-store cap, so the stored count covers the rows kept; the frame carries every step. A step whose
+request failed in transport (a refused port, a reset, a timeout) runs its extractors against the
+status-0 response on both run kinds, so it unsets and counts like any other miss (#3089). A
+single-request load run's `summary.elements` has no such count.
 
 Every pattern a user writes - `extract.regex`'s `pattern`, `assert.jsonpath`'s `regex`,
 `assert.contains`'s `text` in `matches` mode and `control.if`'s `matches /re/` - is compiled once by
