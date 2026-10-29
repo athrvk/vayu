@@ -62,6 +62,36 @@ export function withoutDisabled(
 }
 
 /**
+ * Kinds the engine accepts only on a collection (`collectionOnly` in
+ * `GET /elements/kinds`): the run-boundary scripts. A single-request run never
+ * takes a collection's lifecycle scripts, and `requestElements` is validated as
+ * a request's own, which refuses them. A constant rather than a read of the
+ * catalogue because the catalogue is a query that may not have landed when
+ * Start is pressed, and a miss there would send the refused kinds;
+ * `scenario-only.conformance.test.ts` holds this set to the catalogue fixture.
+ */
+export const COLLECTION_ONLY_KINDS: ReadonlySet<string> = new Set([
+	"script.setup",
+	"script.teardown",
+]);
+
+/**
+ * `parts` without the collection-only elements inherited from a collection,
+ * `undefined` when none are left. For a load run's `requestElements` only
+ * (#3070), after `withoutDisabled`. Send and code generation compose the
+ * chain through `POST /compose`, which validates a collection-origin entry as a
+ * collection's own, so they keep these.
+ */
+export function withoutInheritedCollectionOnly(
+	parts: ResolvedElement[] | undefined
+): ResolvedElement[] | undefined {
+	const kept = (parts ?? []).filter(
+		(el) => !(el.origin?.kind === "collection" && COLLECTION_ONLY_KINDS.has(el.kind))
+	);
+	return kept.length > 0 ? kept : undefined;
+}
+
+/**
  * Every `inherit.disable` target across the chain and the request's own list.
  * Gathered before any level is emitted and in no order, as `POST /compose`
  * does (`disabled_element_ids`): a folder's disable can name a root element,

@@ -356,6 +356,31 @@ describe("a disabled element is left out of requestElements (#3050)", () => {
 		expect(sentIds()).toEqual(["el_pre"]);
 	});
 
+	it("drops a collection's setup and teardown scripts and keeps its other elements (#3070)", async () => {
+		const assertStatus: ElementDef = {
+			id: "el_assert",
+			kind: "assert.status",
+			enabled: true,
+			config: { range: "2xx" },
+		};
+		ancestors = [
+			collectionWith("col_1", "Checkout", [
+				{ id: "el_setup", kind: "script.setup", enabled: true, config: { script: "1" } },
+				{
+					id: "el_teardown",
+					kind: "script.teardown",
+					enabled: true,
+					config: { script: "2" },
+				},
+				assertStatus,
+			]),
+		];
+
+		await startLoadRun(LOAD_CONFIG);
+
+		expect(sentIds()).toEqual(["el_assert", "el_pre"]);
+	});
+
 	it("still sends an enabled element of the same kind, for the dialog to have blocked", async () => {
 		await startLoadRun(LOAD_CONFIG, { ...REQUEST, elements: [pacing()] });
 

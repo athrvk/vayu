@@ -20,6 +20,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { ElementKindSchema } from "@/types";
+import { COLLECTION_ONLY_KINDS } from "../../utils/elements-parts";
 import { isScenarioOnlyKind } from "./scenario-only";
 
 const [FIXTURE_PATH] = ENGINE_READING_GUARDS.scenarioOnlyKinds.paths.map(fromRepoRoot);
@@ -56,6 +57,13 @@ describe.runIf(existsSync(FIXTURE_PATH))(
 				.map((k) => k.kind);
 
 			expect(unflagged).toEqual([]);
+		});
+
+		it("holds COLLECTION_ONLY_KINDS to the catalogue's collectionOnly kinds (#3070)", () => {
+			const catalogue = fixture.filter((k) => k.collectionOnly).map((k) => k.kind);
+
+			expect(catalogue.length).toBeGreaterThan(0);
+			expect([...COLLECTION_ONLY_KINDS].sort()).toEqual(catalogue.sort());
 		});
 	}
 );

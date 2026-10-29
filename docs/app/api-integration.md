@@ -1068,6 +1068,11 @@ path either. A disabled element is left out of `requestElements` (`withoutDisabl
 scenario-only kind there. An *enabled* `timer.pacing`, `timer.throughput`,
 `control.*` or `metric.record`, the request's own or inherited, never reaches the
 payload - the dialog blocks Start and offers the collection run instead.
+A collection's own `script.setup` / `script.teardown` (the `collectionOnly`
+kinds) is left out too (`withoutInheritedCollectionOnly`, issue #3070): a
+single-request run never takes a collection's lifecycle scripts, and the engine
+validates `requestElements` as a request's own. Send and code generation, which
+compose through `POST /compose`, keep them.
 `LoadTestConfigDialog` offers no Timers twin, but not because
 the engine ignores the override there - `elements.timers` applies to a single
 target's own `timer.think` exactly the way it does to a scenario step's - the

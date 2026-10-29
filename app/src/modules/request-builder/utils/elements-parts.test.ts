@@ -19,6 +19,7 @@ import {
 	hasReplayedPostScript,
 	scriptTextFor,
 	withoutDisabled,
+	withoutInheritedCollectionOnly,
 } from "./elements-parts";
 import type { Collection, ElementDef } from "@/types";
 
@@ -150,7 +151,9 @@ describe("elementsParts", () => {
 				element({ id: "q2", kind: "assert.status" }),
 			];
 
-			expect(elementsParts(chain, "req_1", requestElements)?.map((p) => p.id)).toEqual(["q2"]);
+			expect(elementsParts(chain, "req_1", requestElements)?.map((p) => p.id)).toEqual([
+				"q2",
+			]);
 		});
 
 		it("answers undefined when a chain level holds only a disable entry", () => {
@@ -313,5 +316,49 @@ describe("withoutDisabled (#3050)", () => {
 		expect(parts).toHaveLength(1);
 		expect(withoutDisabled(parts)).toBeUndefined();
 		expect(withoutDisabled(undefined)).toBeUndefined();
+	});
+});
+
+describe("withoutInheritedCollectionOnly (#3070)", () => {
+	const chain = [
+		collection("root", "Root", [
+			element({ id: "setup", kind: "script.setup" }),
+			element({ id: "teardown", kind: "script.teardown" }),
+			element({ id: "assert", kind: "assert.status" }),
+		]),
+	];
+
+	it("drops a collection's setup and teardown scripts and keeps its other elements", () => {
+		const parts = elementsParts(chain, "req_1", [element({ id: "q1", kind: "script.pre" })]);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["assert", "q1"]);
+	});
+
+	it("drops them from a folder too, which is a collection level", () => {
+		const parts = elementsParts(
+			[collection("root", "Root", []), collection("folder", "Folder", chain[0].elements)],
+			"req_1",
+			[]
+		);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["assert"]);
+	});
+
+	it("leaves one the request itself carries, for the engine to refuse by name", () => {
+		const parts = elementsParts([], "req_1", [element({ id: "own", kind: "script.setup" })]);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["own"]);
+	});
+
+	it("answers undefined when nothing is left, and for undefined", () => {
+		const parts = elementsParts(
+			[collection("root", "Root", [chain[0].elements[0]])],
+			"req_1",
+			[]
+		);
+
+		expect(parts).toHaveLength(1);
+		expect(withoutInheritedCollectionOnly(parts)).toBeUndefined();
+		expect(withoutInheritedCollectionOnly(undefined)).toBeUndefined();
 	});
 });
