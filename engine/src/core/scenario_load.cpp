@@ -587,6 +587,10 @@ const nlohmann::json* data_row) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        .unset_variable =
+        [&] (std::string_view scope, const std::string& name) {
+            return vu.scope_overlay.unset (scope, name, state.base_scopes);
+        },
         .should_stop = nullptr,
         // This iteration's bound row, under its `data.*` namespace, beside
         // the scopes (issue #1515), this VU's local scope above the row
@@ -595,7 +599,7 @@ const nlohmann::json* data_row) {
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
-            vu.scope_overlay.apply_onto (vars);
+            vu.scope_overlay.apply_onto (vars, state.base_scopes);
             return vayu::http::resolve_template_with_optional_row (
             text, vars, data_row, vu.scope_overlay.local_values ());
         },
@@ -708,11 +712,15 @@ const nlohmann::json* data_row) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        .unset_variable =
+        [&] (std::string_view scope, const std::string& name) {
+            return vu.scope_overlay.unset (scope, name, state.base_scopes);
+        },
         .should_stop = nullptr,
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = state.base_vars;
-            vu.scope_overlay.apply_onto (vars);
+            vu.scope_overlay.apply_onto (vars, state.base_scopes);
             return vayu::http::resolve_template_with_optional_row (
             text, vars, data_row, vu.scope_overlay.local_values ());
         },
@@ -865,7 +873,7 @@ class ScenarioLoadDriver {
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
         {
             vayu::http::VariableValues vars = state_->base_vars;
-            vu->scope_overlay.apply_onto (vars);
+            vu->scope_overlay.apply_onto (vars, state_->base_scopes);
             const auto unresolved = vayu::http::routes::resolve_load_residuals (
             request, vars, std::move (late_auth));
             if (!unresolved.empty ()) {

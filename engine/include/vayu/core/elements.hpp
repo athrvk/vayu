@@ -306,6 +306,12 @@ struct ElementContext {
     /// callback is the caller's: it knows which `ScriptVariableScopes` a
     /// design send or a sequential step's iteration is writing into.
     std::function<void (std::string_view scope, const std::string& name, const std::string& value)> set_variable;
+    /// `extract.*`'s miss without a `default` (#3053): removes @p name from
+    /// the scope `set_variable` writes and answers whether that scope held
+    /// it. Every caller whose `set_variable` writes binds this beside it;
+    /// unset where `set_variable` is a no-op.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::function<bool (std::string_view scope, const std::string& name)> unset_variable{};
 
     /// Polled by `timer.think`'s wait; returns true to abort it early (a
     /// design send has none - a single exchange has nothing to stop mid-wait -
