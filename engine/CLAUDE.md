@@ -620,15 +620,15 @@ logged as a warning: it means a client skipped composition.
   same join `read_script` always did before this run shape had elements).
   Only the phase-0 kinds #1514 gave the design send run here at all -
   `validate_request_elements_run_override` refuses any other enabled kind
-  (`control.*`, `metric.*`, `timer.pacing`, `timer.throughput`) by name (naming the element's label
-  and `origin`, never its index in the merged list; a disabled entry passes,
-  #3050), because none of the state
-  they need (`controller_state`, `pacing_state`, a plan-wide throughput
-  scan) exists on this path; admitting one would report `"ok"` for behaviour
-  that never ran rather than failing loudly. There is no persistent virtual
-  user on this path, so the `ScopeOverlay` lives on
-  the submission rather than a VU - built fresh from the run's flattened base
-  scopes (`RunContext::step_base_vars`) and discarded once that submission
+  (`control.*`, `metric.*`, `timer.pacing`, `timer.throughput`) by name
+  (naming the element's label and `origin`, never its index in the merged
+  list; a disabled entry passes, #3050), because none of the state they need
+  (`controller_state`, `pacing_state`, a plan-wide throughput scan) exists on
+  this path; admitting one would report `"ok"` for behaviour that never ran
+  rather than failing loudly. There is no persistent virtual user on this
+  path, so the `ScopeOverlay` lives on the submission rather than a VU - built
+  fresh from the run's flattened base scopes (`RunContext::step_base_vars`)
+  and discarded once that submission
   settles - and `timer.think`'s wait is a run-level concurrency reservation
   (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
   per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its

@@ -411,11 +411,13 @@ export const ENGINE_READING_GUARDS = {
 	},
 	/*
 	 * The same fixture, read for the load dialog's list of scenario-only kinds
-	 * (#3050), a renderer copy of the engine's single-request whitelist.
+	 * (#3050), a renderer copy of the engine's single-request whitelist. The
+	 * whitelist itself (#3070) is the other input, so the test holds its own
+	 * written-out copy of it to the source: fixture first, source second.
 	 */
 	scenarioOnlyKinds: {
 		reader: "app/src/modules/request-builder/components/LoadTestConfigDialog/scenario-only.conformance.test.ts",
-		paths: ["engine/tests/fixtures/element-kinds.json"],
+		paths: ["engine/tests/fixtures/element-kinds.json", "engine/src/core/load_strategy.cpp"],
 	},
 	/*
 	 * One fixture, two readers: `log.ts`'s port of the engine's redaction, and
