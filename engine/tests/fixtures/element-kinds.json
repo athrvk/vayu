@@ -447,7 +447,7 @@
       "additionalProperties": false,
       "properties": {
         "exists": {
-          "description": "Passes when at least one match is found.",
+          "description": "true passes when at least one match is found, false when none is. Use it alone: it cannot be combined with 'expected' or 'regex'.",
           "title": "Must exist",
           "type": "boolean"
         },
@@ -476,7 +476,7 @@
       ],
       "type": "object"
     },
-    "description": "Fails the step unless a JSONPath match exists, equals a value or matches a regular expression.",
+    "description": "Fails the step unless a JSONPath match exists (or is absent), equals a value or matches a regular expression.",
     "hotPathClass": "declarative",
     "kind": "assert.jsonpath",
     "label": "Assert JSON value",

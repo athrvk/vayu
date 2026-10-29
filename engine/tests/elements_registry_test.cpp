@@ -270,6 +270,13 @@ TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCannotRunIsRefusedNaming
         "'text'" + pattern_refusal + "missing ]" },
         { entry_of ("assert.jsonpath", { { "path", "$.a" }, { "regex", "[" } }),
         "'regex'" + pattern_refusal + "missing ]" },
+        // `exists` states presence, `expected` / `regex` the value (#3049).
+        { entry_of ("assert.jsonpath",
+          { { "path", "$.a" }, { "exists", false }, { "expected", 1 } }),
+        "'exists' cannot be combined with 'expected'" },
+        { entry_of ("assert.jsonpath",
+          { { "path", "$.a" }, { "exists", true }, { "regex", "^a" } }),
+        "'exists' cannot be combined with 'regex'" },
         // Checked even where `expected` would win at run time.
         { entry_of ("assert.jsonpath",
           { { "path", "$.a" }, { "expected", 1 }, { "regex", "[" } }),
@@ -293,6 +300,8 @@ TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCanRunIsAccepted) {
         entry_of ("assert.status", { { "in", json::array ({ 200 }) } }),
         entry_of ("assert.status", { { "range", { { "min", 200 }, { "max", 299 } } } }),
         entry_of ("assert.jsonpath", { { "path", "$.a" }, { "exists", true } }),
+        entry_of ("assert.jsonpath",
+        { { "path", "$.a" }, { "exists", false }, { "negate", true } }),
         entry_of ("assert.jsonpath", { { "path", "$.a" }, { "expected", nullptr } }),
         entry_of ("assert.jsonpath", { { "path", "$.a" }, { "regex", "^[0-9]+$" } }),
         // An empty pattern compiles and matches anywhere.

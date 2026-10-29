@@ -2110,8 +2110,9 @@ the write is a `400` naming the index, the kind and the field. That includes a
 kind's own rules beyond its schema: a JSONPath outside the supported subset, a
 pattern RE2 does not compile (`'pattern' is not a valid regular expression -
 <reason>`, likewise `'regex'` and `'text'`, #3043), an `assert.status` with
-neither a non-empty `in` nor a `range`, and an `assert.jsonpath` with none of
-`expected`, `regex` or `exists`. The only script
+neither a non-empty `in` nor a `range`, an `assert.jsonpath` with none of
+`expected`, `regex` or `exists`, and one that sets `exists` beside `expected` or
+`regex` (#3049). The only script
 source - `GET /requests/:id` and every full list response carry it and no longer
 carry `preRequestScript` / `postRequestScript` at all.
 

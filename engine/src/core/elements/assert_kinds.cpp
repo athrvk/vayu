@@ -21,6 +21,7 @@
 #include "vayu/core/elements.hpp"
 
 #include <expected>
+#include <format>
 
 #include "json_path.hpp"
 #include "user_regex.hpp"
@@ -114,8 +115,9 @@ using OptionalUserRegex = std::optional<std::expected<UserRegex, std::string>>;
 // ---------------------------------------------------------------------------
 // assert.jsonpath - the same subset `extract.json` reads: one of `expected`
 // (exact match against the first hit), `regex` (the first hit as text) or
-// `exists` (at least one hit); `negate` flips the verdict, except that a body
-// that cannot be read always fails.
+// `exists` (true: at least one hit, false: none); `negate` flips the verdict
+// (so `exists: false` with `negate` wants a hit), except that a body that
+// cannot be read always fails.
 // ---------------------------------------------------------------------------
 
 /// A string member, or "" when it is absent or not a string: read in a
@@ -159,22 +161,30 @@ class AssertJsonPathElement final : public Element {
         const auto matches = detail::evaluate_json_path (*body, *path_);
         const bool negate  = config_.value ("negate", false);
 
+        if (config_.contains ("exists")) {
+            // `exists` already says which way it asserts, so `negate` folds
+            // into the wanted answer rather than flipping the verdict after.
+            const bool want_present = config_["exists"].get<bool> () != negate;
+            record_assertion (ctx, name, want_present == !matches.empty (),
+            "expected '" + path_text + "' to " + (want_present ? "" : "not ") + "exist");
+            return;
+        }
+
+        const std::string not_prefix = negate ? "not " : "";
         bool passed;
         std::string failure;
-        if (config_.contains ("exists")) {
-            passed = !matches.empty ();
-            failure = "expected '" + path_text + "' to " + (negate ? "not " : "") + "exist";
-        } else if (config_.contains ("expected")) {
+        if (config_.contains ("expected")) {
             // Converted first: `ordered_json` object equality is
             // order-sensitive, and `expected` is not compared by key order.
-            const bool found = !matches.empty () &&
+            passed = !matches.empty () &&
             nlohmann::json (*matches.front ()) == config_["expected"];
-            passed  = found;
-            failure = "expected '" + path_text + "' to equal " +
-            config_["expected"].dump () +
-            (matches.empty () ?
-            " (no match)" :
-            ", got " + detail::json_value_to_string (*matches.front ()));
+            failure = "expected '" + path_text + "' to " + not_prefix + "equal " +
+            config_["expected"].dump ();
+            if (!negate) {
+                failure += matches.empty () ?
+                " (no match)" :
+                ", got " + detail::json_value_to_string (*matches.front ());
+            }
         } else if (const auto& regex = regex_) {
             if (!*regex) {
                 record_unrunnable_assertion (ctx, name, regex->error ());
@@ -182,7 +192,7 @@ class AssertJsonPathElement final : public Element {
             }
             passed = !matches.empty () &&
             (*regex)->search (detail::json_value_to_string (*matches.front ()));
-            failure = "expected '" + path_text + "' to match /" +
+            failure = "expected '" + path_text + "' to " + not_prefix + "match /" +
             config_.value ("regex", "") + "/";
         } else {
             record_unrunnable_assertion (ctx, name,
@@ -359,6 +369,22 @@ std::optional<std::string> assert_status_problem (const nlohmann::json& config) 
            "code, or give a range";
 }
 
+/// `exists` asserts presence or absence and `expected` / `regex` assert the
+/// value, so a config naming both would have one of them silently ignored.
+std::optional<std::string> exists_with_value_problem (const nlohmann::json& config) {
+    if (!config.contains ("exists")) {
+        return std::nullopt;
+    }
+    for (const char* value_field : { "expected", "regex" }) {
+        if (config.contains (value_field)) {
+            return std::format ("'exists' cannot be combined with '{}' - 'exists' "
+                                "asserts presence or absence, '{}' asserts the value",
+            value_field, value_field);
+        }
+    }
+    return std::nullopt;
+}
+
 /// `regex` is checked whenever it is written, even beside an `expected` that
 /// would win at run time: a pattern that cannot compile is never kept.
 std::optional<std::string> assert_jsonpath_problem (const nlohmann::json& config) {
@@ -368,6 +394,9 @@ std::optional<std::string> assert_jsonpath_problem (const nlohmann::json& config
     if (!config.contains ("expected") && !config.contains ("regex") &&
     !config.contains ("exists")) {
         return "one of 'expected', 'regex' or 'exists' is required";
+    }
+    if (auto problem = exists_with_value_problem (config)) {
+        return problem;
     }
     return user_regex_problem (config, "regex", "regex");
 }
@@ -421,8 +450,8 @@ ElementKind make_assert_jsonpath_kind () {
     kind.phases  = { Phase::StepAfter };
     kind.label   = "Assert JSON value";
     kind.description =
-    "Fails the step unless a JSONPath match exists, equals a value or "
-    "matches a regular expression.";
+    "Fails the step unless a JSONPath match exists (or is absent), equals a "
+    "value or matches a regular expression.";
     kind.category = "assert";
     kind.hot_path = HotPathClass::Declarative;
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
@@ -443,7 +472,10 @@ ElementKind make_assert_jsonpath_kind () {
         "syntax: no backreferences or lookaround." } } },
         { "exists",
         { { "type", "boolean" }, { "title", "Must exist" },
-        { "description", "Passes when at least one match is found." } } },
+        { "description",
+        "true passes when at least one match is found, false when "
+        "none is. Use it alone: it cannot be combined with 'expected' "
+        "or 'regex'." } } },
         { "negate",
         { { "type", "boolean" }, { "title", "Negate" },
         { "description",
