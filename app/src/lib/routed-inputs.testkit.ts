@@ -410,6 +410,14 @@ export const ENGINE_READING_GUARDS = {
 		paths: ["engine/tests/fixtures/element-kinds.json"],
 	},
 	/*
+	 * The same fixture, read for the load dialog's list of scenario-only kinds
+	 * (#3050), a renderer copy of the engine's single-request whitelist.
+	 */
+	scenarioOnlyKinds: {
+		reader: "app/src/modules/request-builder/components/LoadTestConfigDialog/scenario-only.conformance.test.ts",
+		paths: ["engine/tests/fixtures/element-kinds.json"],
+	},
+	/*
 	 * One fixture, two readers: `log.ts`'s port of the engine's redaction, and
 	 * the snippet generator's header-name list (#1806), whose names the engine
 	 * test asserts are secret field names.

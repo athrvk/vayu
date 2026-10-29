@@ -508,6 +508,71 @@ constexpr std::array<std::string_view, 10> REQUEST_ELEMENTS_SUPPORTED_KINDS{
     // not a literal comparison, per the extensibility contract's rule 1.
 };
 
+/// A string member of an optional JSON object, or empty when the member is
+/// absent or not a string - `origin` is client-stamped and is not trusted to
+/// carry either.
+std::string string_member (const nlohmann::json& object, const char* key) {
+    const auto found = object.find (key);
+    if (found == object.end () || !found->is_string ()) {
+        return {};
+    }
+    return found->get<std::string> ();
+}
+
+/// Where a refused element was declared, from the `origin` composition
+/// stamps (`emit_level`, `request_composer.cpp`): a collection by name, the
+/// request itself, or - for an entry written straight into the payload, which
+/// carries no origin - its id. A folder reads as "collection": the message
+/// reaches the user, who has no folder (`docs/ux-writing.md`).
+std::string element_whereabouts (const nlohmann::json& entry) {
+    const auto origin = entry.find ("origin");
+    if (origin != entry.end () && origin->is_object ()) {
+        std::string scope = string_member (*origin, "scope");
+        if (scope.empty ()) {
+            scope = string_member (*origin, "kind");
+        }
+        const std::string name = string_member (*origin, "name");
+        if (scope == "request") {
+            return "set on this request";
+        }
+        if (!scope.empty () && !name.empty ()) {
+            return std::format ("from the collection '{}'", name);
+        }
+        if (!scope.empty ()) {
+            return "from a collection";
+        }
+    }
+    return std::format ("element '{}'", entry.value ("id", ""));
+}
+
+/// The refusal for one entry whose kind has no home on a single-request run,
+/// or nullopt when it is supported or switched off. A disabled element is
+/// skipped by the pipeline before its `apply` runs (`compile_elements`), so
+/// it cannot misbehave and a composed chain carrying one is not a reason to
+/// refuse the run (#3050). The entry is named by its label and origin, not
+/// its position: a composed list interleaves inherited elements with the
+/// request's own, so an index points at nothing the user can see.
+std::optional<std::string> refuse_scenario_only_element (const nlohmann::json& entry) {
+    if (!entry.value ("enabled", true)) {
+        return std::nullopt;
+    }
+    const std::string kind_name = entry.value ("kind", "");
+    const auto* kind = vayu::core::Registry::instance ().find (kind_name);
+    const bool is_script =
+    kind != nullptr && kind->hot_path == vayu::core::HotPathClass::Script;
+    const bool is_supported = is_script ||
+    std::find (REQUEST_ELEMENTS_SUPPORTED_KINDS.begin (),
+    REQUEST_ELEMENTS_SUPPORTED_KINDS.end (),
+    kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
+    if (is_supported) {
+        return std::nullopt;
+    }
+    return std::format (
+    "'{}' ({}) can only be used in a scenario, not a single-request load "
+    "test. Remove it, or run this as a scenario instead",
+    kind != nullptr ? kind->label : kind_name, element_whereabouts (entry));
+}
+
 } // namespace
 
 std::optional<std::string> validate_request_elements_run_override (
@@ -531,26 +596,15 @@ const nlohmann::json& config) {
     // 400 asking it to invent one itself.
     nlohmann::json stamped = *elements;
     vayu::core::stamp_default_element_ids (stamped);
+    // Every entry, a disabled one included, so a bad config still fails here
+    // rather than the moment the entry is switched on.
     if (auto reason = vayu::core::Registry::instance ().validate (
         stamped, vayu::core::ElementOwner::Request)) {
         return reason;
     }
-    for (size_t i = 0; i < stamped.size (); ++i) {
-        const auto& entry           = stamped[i];
-        const std::string kind_name = entry.value ("kind", "");
-        const auto* kind = vayu::core::Registry::instance ().find (kind_name);
-        const bool is_script =
-        kind != nullptr && kind->hot_path == vayu::core::HotPathClass::Script;
-        const bool is_supported = is_script ||
-        std::find (REQUEST_ELEMENTS_SUPPORTED_KINDS.begin (),
-        REQUEST_ELEMENTS_SUPPORTED_KINDS.end (),
-        kind_name) != REQUEST_ELEMENTS_SUPPORTED_KINDS.end ();
-        if (!is_supported) {
-            return std::format (
-            "Step {}: '{}' can only be used in a scenario, not a "
-            "single-request load test. Remove it, or run this as a "
-            "scenario instead",
-            i + 1, kind != nullptr ? kind->label : kind_name);
+    for (const auto& entry : stamped) {
+        if (auto refusal = refuse_scenario_only_element (entry)) {
+            return refusal;
         }
     }
     return std::nullopt;
