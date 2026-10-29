@@ -2169,6 +2169,11 @@ callers pass their own `id` so the two dialogs' budget fields never collide if e
 optional `action` slot draws a control beside the input; `LoadTestConfigDialog` puts each budget's "Copy for
 agent" button there (#2047), and the collection runner leaves it empty.
 
+A numeric `value` makes it a number field (#3079): the typed text is held in the field while it is focused and
+`onChange` hears only non-empty text, so clearing it to type a new value never writes `Number("")` (0) back and
+gives `050`; on blur an empty field returns to `value`. A string `value` (the budget fields, where "" means no
+budget) is passed through untouched.
+
 ## Shared External Change Callout (`components/shared/ExternalChangeCallout.tsx`)
 
 "Changed elsewhere: `<what>`", with a "Take theirs" action, for a field a dirty

@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Input, Label } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,12 @@ import { cn } from "@/lib/utils";
  * reuses it for the same pass/fail budget fields `LoadTestConfigDialog`
  * introduced it for, and a hand-rolled copy would not receive this one's
  * fixes.
+ *
+ * A numeric `value` makes the field a number field: the typed text is held here
+ * while the field is focused and `onChange` hears only non-empty text, so
+ * clearing the field to type a new value never writes `Number("")` (0) back into
+ * it. On blur an empty field returns to `value`. A string `value` is
+ * passed through untouched, because the budget fields treat "" as "no budget".
  */
 export function NumberField({
 	id,
@@ -49,6 +55,16 @@ export function NumberField({
 	action?: ReactNode;
 }) {
 	const hintId = hint ? `${id}-hint` : undefined;
+	const numeric = typeof value === "number";
+	const [draft, setDraft] = useState<string | null>(null);
+	const handleChange = (raw: string) => {
+		if (!numeric) {
+			onChange(raw);
+			return;
+		}
+		setDraft(raw);
+		if (raw !== "") onChange(raw);
+	};
 	return (
 		<div className="space-y-1.5">
 			<Label htmlFor={id} className="text-xs">
@@ -63,8 +79,9 @@ export function NumberField({
 						id={id}
 						type="number"
 						inputMode="numeric"
-						value={value}
-						onChange={(e) => onChange(e.target.value)}
+						value={draft ?? value}
+						onChange={(e) => handleChange(e.target.value)}
+						onBlur={() => setDraft(null)}
 						min={min}
 						max={max}
 						placeholder={placeholder}
