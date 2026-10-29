@@ -5062,7 +5062,9 @@ The sections, in order:
    short being started less completed less abandoned, as the app derives it),
    then a table with a row per step in plan order: executed, errors,
    `Assertions` (`2,080 passed, 18 failed`, summed from the step's `assert.*`
-   and `script.*` element tallies; `deferred to a post-run replay` for a script
+   and `script.*` element tallies, an `error` counted as failed, with each
+   miss of a `required` extractor added to the failed count because it failed
+   the step; `deferred to a post-run replay` for a script
    the engine only replays afterwards; `-` for a step that asserts nothing) and
    its p50, p95 and p99. Step names are free text and escaped as every name is.
 9. `## Transactions`, only when the run declared any: name, count, errors and
