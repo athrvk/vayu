@@ -1200,4 +1200,91 @@ TEST_F (ElementKindsTest, AnExtractorMissNamesWhatFoundNothing) {
     EXPECT_FALSE (outcomes[2].message.has_value ());
 }
 
+// The label a user gave an element rides on its outcome and its trace node;
+// one with no label (absent or `null`) writes no `name` key.
+TEST_F (ElementKindsTest, AnElementsNameRidesOnItsOutcome) {
+    response = ok_json_response (200, R"({"n": 1})");
+    const auto outcomes = run_after (vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "named" }, { "kind", "extract.json" }, { "name", "Session id" },
+      { "config", { { "path", "$.n" }, { "variable", "a" } } } },
+    nlohmann::json{ { "id", "unnamed" }, { "kind", "extract.json" }, { "name", nullptr },
+    { "config", { { "path", "$.n" }, { "variable", "b" } } } } })));
+
+    ASSERT_EQ (outcomes.size (), 2u);
+    EXPECT_EQ (outcomes[0].name, "Session id");
+    EXPECT_EQ (outcomes[0].to_json ().value ("name", ""), "Session id");
+    EXPECT_TRUE (outcomes[1].name.empty ());
+    EXPECT_FALSE (outcomes[1].to_json ().contains ("name"));
+}
+
+// Every outcome word lands in its own bucket: a miss is not a skip and an
+// error is not a failure. Mutation check: fold `"missing"` back into `skipped`
+// in `ElementOutcomeCounts::record` (pipeline.cpp) and `missing` reads 0.
+TEST_F (ElementKindsTest, EachOutcomeWordIsTalliedUnderItsOwnName) {
+    vayu::core::ElementOutcomeCounts counts;
+    const auto outcome = [] (const std::string& status, bool deferred = false) {
+        ElementOutcome out;
+        out.id       = "el_1";
+        out.kind     = "extract.json";
+        out.status   = status;
+        out.deferred = deferred;
+        return out;
+    };
+    for (const char* status :
+    { "ok", "ok", "failed", "missing", "missing", "missing", "error" }) {
+        counts.record (outcome (status));
+    }
+    counts.record (outcome ("skipped"));
+    counts.record (outcome ("skipped", /*deferred=*/true));
+
+    const auto elements = vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "el_1" }, { "kind", "extract.json" }, { "name", "Token" },
+    { "origin", { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } } },
+    { "config", { { "path", "$.t" }, { "variable", "t" }, { "required", true } } } } }));
+    nlohmann::json rows = nlohmann::json::array ();
+    counts.append_report_row (rows, elements.at (0));
+
+    ASSERT_EQ (rows.size (), 1u);
+    const auto& row = rows[0];
+    EXPECT_EQ (row["id"], "el_1");
+    EXPECT_EQ (row["kind"], "extract.json");
+    EXPECT_EQ (row["name"], "Token");
+    EXPECT_EQ (row["origin"]["id"], "req_1");
+    EXPECT_EQ (row["required"], true);
+    EXPECT_EQ (row["passed"], 2);
+    EXPECT_EQ (row["failed"], 1);
+    EXPECT_EQ (row["missing"], 3);
+    EXPECT_EQ (row["error"], 1);
+    EXPECT_EQ (row["skipped"], 1);
+    EXPECT_EQ (row["deferred"], 1);
+}
+
+// A row omits what the element does not have: no label, no origin, and an
+// optional element says nothing about `required`. One that never recorded an
+// outcome writes no row; one that only missed still does.
+TEST_F (ElementKindsTest, AnOutcomeRowOmitsWhatItsElementDoesNotHave) {
+    const auto elements = vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "el_1" }, { "kind", "extract.json" },
+    { "config", { { "path", "$.t" }, { "variable", "t" } } } } }));
+    nlohmann::json rows = nlohmann::json::array ();
+
+    vayu::core::ElementOutcomeCounts silent;
+    silent.append_report_row (rows, elements.at (0));
+    EXPECT_TRUE (rows.empty ()) << rows.dump ();
+
+    vayu::core::ElementOutcomeCounts missed;
+    ElementOutcome miss;
+    miss.id     = "el_1";
+    miss.kind   = "extract.json";
+    miss.status = "missing";
+    missed.record (miss);
+    missed.append_report_row (rows, elements.at (0));
+
+    ASSERT_EQ (rows.size (), 1u) << "a row of only misses is a row";
+    EXPECT_FALSE (rows[0].contains ("name"));
+    EXPECT_FALSE (rows[0].contains ("origin"));
+    EXPECT_FALSE (rows[0].contains ("required"));
+    EXPECT_EQ (rows[0]["missing"], 1);
+}
+
 } // namespace

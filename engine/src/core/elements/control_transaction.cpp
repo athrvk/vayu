@@ -126,6 +126,7 @@ std::vector<ElementOutcome>& outcomes) {
         ElementOutcome appended;
         appended.id     = compiled.id;
         appended.kind   = compiled.kind;
+        appended.name   = compiled.name;
         appended.origin = compiled.origin;
         outcomes.push_back (std::move (appended));
         own = std::prev (outcomes.end ());

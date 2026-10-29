@@ -356,7 +356,7 @@ nlohmann::json StepElementTallies::build (const ScenarioPlan& plan, size_t step)
     const auto& counts   = counts_by_step_[step];
     const size_t count   = std::min (elements.size (), counts.size ());
     for (size_t i = 0; i < count; ++i) {
-        counts[i].append_report_row (array, elements[i].id, elements[i].kind);
+        counts[i].append_report_row (array, elements[i]);
     }
     return array;
 }

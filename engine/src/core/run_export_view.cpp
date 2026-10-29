@@ -1446,7 +1446,9 @@ AssertionTally assertions_of (const ordered& step) {
         }
         tally.counted = true;
         tally.passed += number_at (element, { "passed" }).value_or (0);
-        tally.failed += number_at (element, { "failed" }).value_or (0);
+        // An assertion or script that threw failed it too (#3051).
+        tally.failed += number_at (element, { "failed" }).value_or (0) +
+        number_at (element, { "error" }).value_or (0);
         tally.deferred += number_at (element, { "deferred" }).value_or (0);
     }
     return tally;

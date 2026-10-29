@@ -683,6 +683,8 @@ class Registry {
 struct ElementOutcome {
     std::string id;
     std::string kind;
+    /// `CompiledElement::name`; serialised only when non-empty.
+    std::string name;
     nlohmann::json origin;
     std::string status; ///< "ok" | "failed" | "missing" | "skipped" | "error"
     std::optional<std::string> message;
@@ -723,6 +725,8 @@ struct ElementSkip {
     bool deferred = false;
 };
 
+struct CompiledElement;
+
 /**
  * One element's outcomes summed across a load run: the counters
  * `StepElementTallies` (per plan step) and `RequestElementTallies` (a
@@ -733,19 +737,24 @@ struct ElementSkip {
 struct ElementOutcomeCounts {
     std::atomic<size_t> passed{ 0 };
     std::atomic<size_t> failed{ 0 };
+    std::atomic<size_t> missing{ 0 };
+    std::atomic<size_t> error{ 0 };
     std::atomic<size_t> skipped{ 0 };
     std::atomic<size_t> deferred{ 0 };
 
-    /// `"ok"` is passed; `"failed"` and `"error"` are failed; a deferral is
-    /// deferred; every other skip (`"skipped"`, `"missing"`) is skipped.
+    /// One bucket per outcome word (#3051): `"ok"` is passed, `"failed"`,
+    /// `"missing"` and `"error"` count under their own names, and a
+    /// `"skipped"` is deferred when the element still runs later (#2144),
+    /// skipped otherwise.
     void record (const ElementOutcome& outcome);
 
-    /// Appends `{id, kind, passed, failed, skipped, deferred}` to @p rows,
-    /// or nothing when no outcome was recorded: an element that never ran
-    /// is omitted from the report, not a row of zeros.
-    void append_report_row (nlohmann::json& rows,
-    const std::string& id,
-    const std::string& kind) const;
+    /// Appends `{id, kind, name?, origin?, required?, passed, failed,
+    /// missing, error, skipped, deferred}` for @p element to @p rows, or
+    /// nothing when no outcome was recorded: an element that never ran is
+    /// omitted from the report, not a row of zeros. `required` is written
+    /// only as `true`, when the element's config says so, because it turns
+    /// a `missing` into a failed step.
+    void append_report_row (nlohmann::json& rows, const CompiledElement& element) const;
 };
 
 /**
@@ -773,6 +782,9 @@ const std::vector<ElementOutcome>& run_end);
 struct CompiledElement {
     std::string id;
     std::string kind;
+    /// The entry's own `name`, the label a user gave it; empty when it has
+    /// none (absent or `null`).
+    std::string name;
     nlohmann::json origin;
     /// `"collection"`, `"folder"` or `"request"` (#2522): `origin.scope`, or
     /// for an origin stamped without one, `origin.kind`; empty when neither

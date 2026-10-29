@@ -3004,6 +3004,52 @@ TEST_F (ScenarioLoadTest, PerStepElementTalliesAreAttachedToTheBreakdown) {
     << "a step with no elements at all must carry no such key";
 }
 
+// A miss and an error are tallied as themselves (#3051), not folded into
+// `skipped` and `failed`, and each row names its element: its label, the level
+// it came from, and that it is required, which is what turns a miss into a
+// failed step. Mutation check: fold `"missing"` back into `skipped` in
+// `ElementOutcomeCounts::record` (pipeline.cpp) and `missing` reads 0.
+TEST_F (ScenarioLoadTest, AMissAndAnErrorAreTalliedAsThemselvesOnANamedRow) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/login") });
+    auto required =
+    vayu::tests::extract_json_element_json ("el_needed", "$.nope", "needed");
+    required["name"]   = "Session id";
+    required["origin"] = { { "kind", "request" }, { "scope", "request" },
+        { "id", "req_login" } };
+    required["config"]["required"] = true;
+    // Not a JSONPath (no leading `$`): compiled directly, past the validation
+    // that would refuse it, so it errors on every response.
+    auto broken = vayu::tests::extract_json_element_json ("el_broken", "token", "broken");
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ required, broken });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    const auto& elements = summary["steps"][0]["elements"];
+    ASSERT_EQ (elements.size (), 2u) << summary.dump ();
+    const auto& needed = elements[0];
+    EXPECT_EQ (needed["id"], "el_needed");
+    EXPECT_EQ (needed["name"], "Session id");
+    EXPECT_EQ (needed["origin"]["id"], "req_login");
+    EXPECT_EQ (needed["required"], true);
+    EXPECT_EQ (needed["missing"], 2) << needed.dump ();
+    EXPECT_EQ (needed["skipped"], 0) << needed.dump ();
+    EXPECT_EQ (needed["failed"], 0) << needed.dump ();
+
+    const auto& errored = elements[1];
+    EXPECT_EQ (errored["id"], "el_broken");
+    EXPECT_FALSE (errored.contains ("name"));
+    EXPECT_FALSE (errored.contains ("origin"));
+    EXPECT_FALSE (errored.contains ("required"));
+    EXPECT_EQ (errored["error"], 2) << errored.dump ();
+    EXPECT_EQ (errored["failed"], 0) << errored.dump ();
+}
+
 // A deferral is its own count (#2144): an un-inlined `script.post` is left to
 // the post-run replay, so it runs - later - and must not read as a script
 // that was never run. The two skips that are not deferrals stay `skipped`:

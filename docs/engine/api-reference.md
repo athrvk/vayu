@@ -7693,8 +7693,8 @@ the same `pm.test()` channel a `script.post` element's assertions do, so the
 response body's `testResults` and `consoleLogs` (see below) do not
 distinguish a declarative assertion from one a script wrote by hand. The
 response body and the stored trace both carry an `elements` array beside
-`scripts` - one entry per element that ran, each `{id, kind, origin, outcome,
-message?, waitedMs?}` with `outcome` one of `ok` | `failed` |
+`scripts` - one entry per element that ran, each `{id, kind, name?, origin, outcome,
+message?, waitedMs?}` (`name` the element's own label, when it has one) with `outcome` one of `ok` | `failed` |
 `missing` | `skipped` | `error` (a disabled element reports `skipped` without
 its `apply` ever running; a script element reports `error` with the thrown
 message when its script threw and `failed` with the first failed `pm.test` as
@@ -9703,7 +9703,9 @@ knob.
       "unresolvedTokens": 0, "extractorMisses": 3,
       "latency": { "min": 1.2, "p50": 4.0, "p95": 9.1, "p99": 12.4, "max": 30.2 },
       "elements": [
-        { "id": "el_1", "kind": "extract.json", "passed": 471, "failed": 0, "skipped": 3, "deferred": 0 }
+        { "id": "el_1", "kind": "extract.json", "name": "Session token",
+          "origin": { "kind": "request", "scope": "request", "id": "req_a", "name": "Log in" },
+          "passed": 471, "failed": 0, "missing": 3, "error": 0, "skipped": 0, "deferred": 0 }
       ] },
     { "index": 1, "name": "Get me", "requestId": "req_b", "method": "GET",
       "executed": 462, "errors": 30, "httpErrors": 30, "noResponse": 0,
@@ -9711,8 +9713,8 @@ knob.
       "preRequestScript": "skipped",
       "latency": { "min": 0.9, "p50": 3.1, "p95": 7.8, "p99": 10.0, "max": 22.5 },
       "elements": [
-        { "id": "el_2", "kind": "control.if", "passed": 462, "failed": 0, "skipped": 12, "deferred": 0 },
-        { "id": "el_3", "kind": "assert.status", "passed": 432, "failed": 30, "skipped": 0, "deferred": 0 }
+        { "id": "el_2", "kind": "control.if", "passed": 462, "failed": 0, "missing": 0, "error": 0, "skipped": 12, "deferred": 0 },
+        { "id": "el_3", "kind": "assert.status", "passed": 432, "failed": 30, "missing": 0, "error": 0, "skipped": 0, "deferred": 0 }
       ],
       "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
   ]
@@ -9820,13 +9822,22 @@ this run - and is **absent** for a step whose script ran inline instead
 assertions" and "no failures" are different answers.
 
 `elements` (issue #1495) is the step's per-element tally,
-`{ id, kind, passed, failed, skipped, deferred }` one entry per compiled
-element that ran at least once this run - **absent** for a step with no
-elements or none that ever ran, the same convention `tests` follows.
-`deferred` (issue #2144) counts a `script.post` element left to the replay
-above: it does run, later, and its assertions are the step's `tests`.
-`skipped` counts what never runs - a disabled element, and an un-inlined
-`script.pre`, which has no replay to go to.
+`{ id, kind, name?, origin?, required?, passed, failed, missing, error,
+skipped, deferred }` one entry per compiled element that ran at least once
+this run - **absent** for a step with no elements or none that ever ran, the
+same convention `tests` follows. Each count is one outcome word of the
+sequential trace (#3051): `passed` is `ok`, and `failed`, `missing` (an
+extractor that found nothing, or a `metric.record` with nothing to read) and
+`error` (an element that could not run its check, a script that threw) are
+counted apart. `name` is the element's own label and `origin` the level it was
+composed from, each present only when the element carries one; `required` is
+present, as `true`, only for an extractor whose config sets it, and it is what
+makes that element's `missing` a failed step. `deferred` (issue #2144) counts a
+`script.post` element left to the replay above: it does run, later, and its
+assertions are the step's `tests`. `skipped` counts every other `skipped`
+outcome: a disabled element, an un-inlined `script.pre` (no replay to go to), a
+controller's skip, and an optional `extract.json` over a body it could not
+read.
 
 **`transactions`** (issue #1515), a sibling of `steps` rather than a member of
 it - a `control.transaction` spans a folder, not one step:
@@ -9860,7 +9871,8 @@ instead, never both. Neither `unresolvedTokens` nor `preRequestScript` ever
 fails the run by itself; both also feed the top-level `warnings` array below.
 `extractorMisses` (#3053) counts the step's extractions that found nothing and
 so unset their variable, across every virtual user and iteration; it is absent
-at 0. A miss is filed under its element's `skipped` too, and a miss a `default`
+at 0. A miss is filed under its element's `missing` too (or `skipped`, for an
+optional `extract.json` that could not read the body), and a miss a `default`
 answered is neither: the rule is in
 [`elements.md`](elements.md#kinds).
 
@@ -11837,9 +11849,12 @@ are HTTP-only, the same rule a failed assertion follows
     "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
   },
   "elements": [
-    { "id": "el_1", "kind": "assert.status", "passed": 9, "failed": 1, "skipped": 0, "deferred": 0 },
-    { "id": "el_2", "kind": "extract.json", "passed": 10, "failed": 0, "skipped": 0, "deferred": 0 },
-    { "id": "el_3", "kind": "script.post", "passed": 0, "failed": 0, "skipped": 0, "deferred": 10 }
+    { "id": "el_1", "kind": "assert.status", "name": "Is 200",
+      "passed": 9, "failed": 1, "missing": 0, "error": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_2", "kind": "extract.json", "required": true,
+      "passed": 8, "failed": 0, "missing": 2, "error": 0, "skipped": 0, "deferred": 0 },
+    { "id": "el_3", "kind": "script.post",
+      "passed": 0, "failed": 0, "missing": 0, "error": 0, "skipped": 0, "deferred": 10 }
   ],
   "results": [ { "id": 41, "...": "request/response outcomes, failures first" } ],
   "resultsStored": 4812,
@@ -11951,11 +11966,13 @@ past the cap), and the section is absent when none of its traces was slow.
 
 **`elements`** (issues #1594, #1641) is a single-request run's own `requestElements`
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
-submission as `{id, kind, passed, failed, skipped, deferred}`. `deferred` (issue #2144)
+submission in the row shape a scenario step's `elements` uses (`{id, kind, name?, origin?,
+required?, passed, failed, missing, error, skipped, deferred}`, one count per outcome word,
+#3051; see [Scenario load runs](#scenario-load-runs)). `deferred` (issue #2144)
 counts the submissions an un-inlined `script.post` was left to the completion replay on:
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
-script that never ran. `skipped` is what never runs: a disabled element, or an un-inlined
-`script.pre`. Absent, not `[]`, for a run that declared no
+script that never ran. `skipped` is every other skip: a disabled element, an un-inlined
+`script.pre`, or an optional `extract.json` over a body it could not read. Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
@@ -12043,7 +12060,7 @@ scenario step report the same warning for the same mistake.
 **`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
-`id`, `kind`, `outcome`, `message?`, `waitedMs?`); absent entirely,
+`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
 other than `"ok"` already means the run never sent anything - `status` is

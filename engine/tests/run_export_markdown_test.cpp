@@ -888,6 +888,16 @@ TEST (RunExportMarkdownTest, AStepsAssertionsAreSummedFromItsAssertAndScriptElem
     std::string::npos);
 }
 
+// An assertion that threw is counted apart from one that failed (#3051), and
+// the step's cell still reads it as a failure. Mutation check: drop the
+// `error` term in `assertions_of` (run_export_view.cpp) and this reads 0.
+TEST (RunExportMarkdownTest, AnAssertionThatErroredReadsAsFailedInItsStep) {
+    ordered_json document = read_document ("scenario-sequence");
+    document["report"]["scenario"]["steps"][0]["elements"][0]["error"] = 3;
+    EXPECT_NE (line_starting (render_run_export_markdown (document), "| Log in").find ("2,105 passed, 3 failed"),
+    std::string::npos);
+}
+
 TEST (RunExportMarkdownTest, ACollectionRunNamesItsStepsOnlyWhenTheDocumentListsThem) {
     EXPECT_NE (render_run_export_markdown (read_document ("scenario-sequence")).find ("| Target         | Collection run, 3 steps per iteration"),
     std::string::npos);

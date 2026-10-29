@@ -383,20 +383,19 @@ class StepHistograms {
 const ScenarioPlan& plan);
 
 /**
- * @brief Per-step, per-element pass/fail/skip/defer tallies for a load run's
- *        report (issue #1495) - `scenario.steps[i].elements[] = { id, kind,
- *        passed, failed, skipped, deferred }`, the load-path sibling of the
- *        sequential run's per-step `elements` trace.
+ * @brief Per-step, per-element outcome tallies for a load run's report
+ *        (issue #1495) - `scenario.steps[i].elements[]`, one
+ *        `ElementOutcomeCounts::append_report_row` row per element, the
+ *        load-path sibling of the sequential run's per-step `elements` trace.
  *
  * Sized once at construction from the plan's already-compiled `elements` per
  * step, so recording is a lookup by element id into a fixed-size atomic array
  * - no lock and no allocation on the completion path. The buckets are
- * `ElementOutcomeCounts::record`'s, shared with `RequestElementTallies`:
- * `failed` folds in `"error"`, `skipped` folds in `"missing"` (an extractor's
- * miss, or a `metric.record` with nothing to read), and a `script.*` element
- * left to the post-run replay is `deferred`, not `skipped` (#2144), because it
- * does run, later. Beside them, one count per step of the outcomes
- * `is_extractor_miss` names (#3053).
+ * `ElementOutcomeCounts::record`'s, shared with `RequestElementTallies`: one
+ * per outcome word (#3051), with a `script.*` element left to the post-run
+ * replay counted as `deferred`, not `skipped` (#2144), because it does run,
+ * later. Beside them, one count per step of the outcomes `is_extractor_miss`
+ * names (#3053).
  */
 class StepElementTallies {
     public:
