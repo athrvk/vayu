@@ -341,10 +341,20 @@ TEST_F (ElementsRegistryTest, AMetricConditionPathIsOnlyReadWhenItsFieldIsJsonpa
  * nested field to the same rule as a top-level one.
  */
 void expect_every_property_annotated (const std::string& kind_name, const json& properties) {
+    // get_ptr, not value (): GCC 13 at -O3 reports a null dereference inside
+    // value ()'s string conversion once this file grows past an inlining limit.
+    const auto has_text = [] (const json& schema, const char* key) {
+        const auto found = schema.find (key);
+        if (found == schema.end ()) {
+            return false;
+        }
+        const auto* text = found->get_ptr<const std::string*> ();
+        return text != nullptr && !text->empty ();
+    };
     for (const auto& [name, schema] : properties.items ()) {
-        EXPECT_FALSE (schema.value ("title", std::string{}).empty ())
+        EXPECT_TRUE (has_text (schema, "title"))
         << kind_name << "." << name << " has no title";
-        EXPECT_FALSE (schema.value ("description", std::string{}).empty ())
+        EXPECT_TRUE (has_text (schema, "description"))
         << kind_name << "." << name << " has no description";
         if (schema.contains ("x-vayu-group")) {
             EXPECT_EQ (schema["x-vayu-group"], "advanced")
