@@ -20,7 +20,9 @@
  * optional one; one marked `x-vayu-group: "advanced"` renders under a
  * disclosure instead, open on mount only when the element already has a
  * value for one - closed for a fresh element, so the common fields are what
- * a user sees first. `x-vayu-unit` becomes the numeric field's suffix.
+ * a user sees first. `x-vayu-unit` becomes the numeric field's suffix. A
+ * property with no `type` can hold any JSON value, so it takes
+ * {@link JsonValueField} instead of a text field (#3046).
  *
  * One level of `object` nesting is supported (`assert.status.range`'s
  * `{min, max}`) - see {@link ElementConfigProperty}. Anything deeper, or a
@@ -56,6 +58,47 @@ function asString(value: unknown): string {
 	if (typeof value === "string") return value;
 	if (typeof value === "number" || typeof value === "boolean") return String(value);
 	return "";
+}
+
+/** `JSON.parse` as a result, since the parsed value may itself be `null` or `false`. */
+function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
+	try {
+		return { ok: true, value: JSON.parse(text) };
+	} catch {
+		return { ok: false };
+	}
+}
+
+/**
+ * What an untyped property stores for typed text: the JSON value it spells
+ * (`7`, `true`, `null`, `"a"`, `{...}`), or the raw text as a string when it
+ * is not JSON. Empty text is the empty string, as the plain field always
+ * stored it.
+ */
+function parseJsonValue(text: string): unknown {
+	const parsed = parseJson(text);
+	return parsed.ok ? parsed.value : text;
+}
+
+/**
+ * The text that {@link parseJsonValue} turns back into `value`. A string whose
+ * raw text is itself JSON (`7`, `true`, `"a"`) is shown quoted, so the stored
+ * string round-trips instead of being reinterpreted as a number on the next
+ * edit.
+ */
+function jsonValueText(value: unknown): string {
+	if (value === undefined) return "";
+	if (typeof value !== "string") return JSON.stringify(value);
+	return parseJson(value).ok ? JSON.stringify(value) : value;
+}
+
+/** What {@link parseJsonValue} stored, in the words the hint uses; empty text stores nothing worth naming. */
+function jsonKindName(value: unknown): string | undefined {
+	if (value === "") return undefined;
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "list";
+	if (typeof value === "string") return "text";
+	return typeof value;
 }
 
 function setField(
@@ -267,6 +310,69 @@ function ArrayField({
 	);
 }
 
+/**
+ * A field for a property whose schema declares no type, so it can legally hold
+ * any JSON value - `assert.jsonpath`'s `expected` and a `metric.record`
+ * condition's `value`. A plain text field stored `7` as the string "7", which
+ * the engine's strict JSON compare never matches against a number (#3046).
+ * Typed text is read as JSON and falls back to a string; the hint under the
+ * field says which it became. Quote a value (`"7"`) to force a string.
+ *
+ * The text lives in a draft for the reason {@link ArrayField}'s does: the
+ * stored value cannot spell an unfinished `{"a` or `-`. `value` changing from
+ * outside replaces the draft unless the draft already reads as that value.
+ * Nothing is written until the user types, so loading an element never
+ * rewrites it.
+ */
+function JsonValueField({
+	label,
+	hint,
+	value,
+	onChange,
+}: {
+	label: string;
+	hint: string | undefined;
+	value: unknown;
+	onChange: (value: unknown) => void;
+}) {
+	const inputId = useId();
+	const kindId = useId();
+	const storedText = jsonValueText(value);
+	const [draft, setDraft] = useState(storedText);
+	const [seenText, setSeenText] = useState(storedText);
+
+	if (storedText !== seenText) {
+		setSeenText(storedText);
+		if (jsonValueText(parseJsonValue(draft)) !== storedText) setDraft(storedText);
+	}
+
+	const kind = jsonKindName(parseJsonValue(draft));
+
+	return (
+		<div className="space-y-1">
+			<Label htmlFor={inputId} className="text-xs font-medium">
+				{label}
+			</Label>
+			{hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+			<Input
+				size="sm"
+				id={inputId}
+				value={draft}
+				aria-describedby={kind ? kindId : undefined}
+				onChange={(e) => {
+					setDraft(e.target.value);
+					onChange(parseJsonValue(e.target.value));
+				}}
+			/>
+			{kind && (
+				<p id={kindId} className="text-xs text-muted-foreground">
+					Stored as {kind}
+				</p>
+			)}
+		</div>
+	);
+}
+
 /** One property row, dispatched by the schema's declared type. */
 function PropertyRow({
 	name,
@@ -369,9 +475,11 @@ function PropertyRow({
 		);
 	}
 
-	// Default: a plain string field, which also covers a kind whose schema
-	// declares no type at all - an unknown property is still editable as text
-	// rather than silently unrenderable.
+	if (property.type === undefined) {
+		return <JsonValueField label={label} hint={hint} value={value} onChange={onChange} />;
+	}
+
+	// A string property, and any declared type the branches above leave over.
 	return (
 		<div className="space-y-1">
 			<Label htmlFor={inputId} className="text-xs font-medium">
