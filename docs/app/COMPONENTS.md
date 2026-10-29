@@ -2285,8 +2285,8 @@ than a settings page read one row at a time. The collapsed header (`h-8`,
 matching every other drawer row) is untouched; only what opens beneath it got
 denser.
 **A missing required field names itself, in place of the summary** (issue
-#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the same presence-only
-check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
+#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the presence-only
+top-level check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
 `<title>`" with a warning dot instead of `summarizeElement`'s preview -
 whether the card is open or collapsed, since a list of collapsed cards is
 exactly where a user needs to spot which one is blocking the save without
@@ -2297,6 +2297,22 @@ one incomplete member - and throw `SaveBlockedError` instead of sending a
 payload already known to fail; `useSaveManager` reads that type to stay
 "pending" rather than backing off a retry against a payload that will not
 have changed by the next attempt.
+
+**A value the schema refuses is held back by the same gate** (#3048):
+`validateElementConfig` (`lib/elements.ts`) walks the kind's `configSchema` and
+returns one short message per failing field, keyed by dot path (`range.max`),
+for every field at once where the engine names only the first. It judges the
+keywords the catalogue uses - `minLength`, `maxLength`, `minimum`,
+`exclusiveMinimum`, `maximum`, `pattern` and a nested `required` - and not `type`
+or `enum`, which the form's controls write. A missing top-level `required` key
+stays `missingRequiredKeys`' chip, so no field is reported twice; a nested one
+(`assert.status`'s `range` without `max`) has no chip, so the validator names
+it. A `pattern` that fails shows the hint in `PATTERN_HINTS` where there is one
+(`control.if`'s "Use {{var}} == value") and "Doesn't match the expected format"
+otherwise; a pattern JavaScript cannot compile is no constraint.
+`hasIncompleteElement` is also true when the validator finds anything, so the
+save gate and the messages agree. `element-kinds.conformance.test.tsx` fails
+when the catalogue gains a keyword the validator does not judge.
 
 **A kind that needs one of several operands is held back the same way**
 (#3043, #3055): `assert.status` needs a non-empty `in` or a `range`,

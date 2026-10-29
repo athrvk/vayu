@@ -31,12 +31,17 @@ import { describe, it, expect, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { render, fireEvent } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
-import { hasIncompleteElement, OPERAND_RULES } from "@/lib/elements";
+import {
+	hasIncompleteElement,
+	OPERAND_RULES,
+	PATTERN_HINTS,
+	validateElementConfig,
+} from "@/lib/elements";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
 import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
-import type { ElementDef, ElementKindSchema } from "@/types";
+import type { ElementConfigProperty, ElementDef, ElementKindSchema } from "@/types";
 
 // `script.pre` / `script.post` render the bespoke `ScriptElementForm`, whose
 // `CodeEditor` (Monaco) does not run under jsdom, and whose snippets list
@@ -61,6 +66,65 @@ const [FIXTURE_PATH] = ENGINE_READING_GUARDS.elementKinds.paths.map(fromRepoRoot
  * file's own module comment and the orchestrating task's known gap.
  */
 const fixtureExists = existsSync(FIXTURE_PATH);
+
+/** Keywords the catalogue uses that describe shape or presentation, not a value constraint. */
+const NON_CONSTRAINT_KEYWORDS = new Set([
+	"type",
+	"enum",
+	"items",
+	"properties",
+	"required",
+	"additionalProperties",
+	"title",
+	"description",
+	"x-vayu-group",
+	"x-vayu-unit",
+]);
+
+/** A schema keyword `validateElementConfig` judges, each with a value that breaks it. */
+const VALIDATED_KEYWORDS: Record<string, (property: ElementConfigProperty) => unknown> = {
+	minLength: (p) => "x".repeat((p.minLength ?? 1) - 1),
+	maxLength: (p) => "x".repeat((p.maxLength ?? 0) + 1),
+	minimum: (p) => (p.minimum ?? 0) - 1,
+	exclusiveMinimum: (p) => p.exclusiveMinimum,
+	maximum: (p) => (p.maximum ?? 0) + 1,
+	// `PATTERN_REFUSED` is the first of these the property's pattern refuses.
+	pattern: (p) => PATTERN_REFUSED.find((v) => !new RegExp(p.pattern ?? "").test(v)),
+};
+const PATTERN_REFUSED = ["", "?!?", "status == 200"];
+
+interface SchemaSite {
+	kind: string;
+	/** Config key path to the property, `["range", "max"]`. */
+	path: string[];
+	property: ElementConfigProperty;
+}
+
+/** Every property of every kind, nested ones included, with where it sits. */
+function schemaSites(catalogue: ElementKindSchema[]): SchemaSite[] {
+	const walk = (
+		kind: string,
+		path: string[],
+		properties: Record<string, ElementConfigProperty | null> | undefined
+	): SchemaSite[] =>
+		Object.entries(properties ?? {}).flatMap(([name, property]) =>
+			property
+				? [
+						{ kind, path: [...path, name], property },
+						...walk(kind, [...path, name], property.properties),
+					]
+				: []
+		);
+	return catalogue.flatMap((k) => walk(k.kind, [], k.configSchema.properties));
+}
+
+/** `{ range: { max: 1 } }` for `["range", "max"]` and `1`. */
+function configAt(path: string[], value: unknown): Record<string, unknown> {
+	return path.reduceRight<unknown>((inner, key) => ({ [key]: inner }), value) as Record<
+		string,
+		unknown
+	>;
+}
 
 describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () => {
 	const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as ElementKindSchema[];
@@ -244,6 +308,77 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 					`${kind} with only "${property}"`
 				).toBe(false);
 			}
+		}
+	});
+
+	it("validates every value-constraint keyword the live catalogue uses", () => {
+		// `validateElementConfig` covers a fixed set of JSON Schema keywords. A
+		// catalogue that gains another (`format`, `multipleOf`, ...) would leave
+		// the field unflagged and the engine's 400 as the only feedback, which is
+		// what #3048 fixes. Mutation check: drop a branch from `stringProblem` or
+		// `numberProblem` and this reds naming the kind, the path and the keyword.
+		const sites = schemaSites(fixture);
+		const used = new Set<string>();
+		for (const { kind, path, property } of sites) {
+			for (const keyword of Object.keys(property)) {
+				if (NON_CONSTRAINT_KEYWORDS.has(keyword)) continue;
+				const label = `${kind}.${path.join(".")} (${keyword})`;
+				const breaking = VALIDATED_KEYWORDS[keyword];
+				expect(breaking, `${label}: no validator handles this keyword`).toBeDefined();
+				used.add(keyword);
+
+				const value = breaking(property);
+				expect(value, `${label}: no breaking value found`).toBeDefined();
+				const errors = validateElementConfig(
+					{ kind, config: configAt(path, value) },
+					fixture
+				);
+				expect(Object.keys(errors), label).toContain(path.join("."));
+			}
+		}
+		// The scan itself: every keyword the validator claims is exercised by the
+		// live catalogue, so a vanished keyword or a broken walk cannot pass empty.
+		expect([...used].sort()).toEqual(Object.keys(VALIDATED_KEYWORDS).sort());
+	});
+
+	it("reports a missing nested required key wherever the live catalogue declares one", () => {
+		const nested = schemaSites(fixture).filter((s) => (s.property.required ?? []).length > 0);
+		expect(nested.length, "no nested required left to guard").toBeGreaterThan(0);
+		for (const { kind, path, property } of nested) {
+			for (const key of property.required ?? []) {
+				// Every sibling filled, the one under test absent.
+				const siblings = Object.fromEntries(
+					(property.required ?? []).filter((k) => k !== key).map((k) => [k, 1])
+				);
+				const errors = validateElementConfig(
+					{ kind, config: configAt(path, siblings) },
+					fixture
+				);
+				expect(Object.keys(errors), `${kind}.${path.join(".")} without "${key}"`).toContain(
+					[...path, key].join(".")
+				);
+			}
+		}
+	});
+
+	it("words a failed pattern for every key the hint table names, and each names a live pattern", () => {
+		const patterns = new Map(
+			schemaSites(fixture)
+				.filter((s) => s.property.pattern !== undefined)
+				.map((s) => [`${s.kind}.${s.path.join(".")}`, s])
+		);
+		expect(patterns.size, "no pattern left to guard").toBeGreaterThan(0);
+		for (const [key, hint] of Object.entries(PATTERN_HINTS)) {
+			const site = patterns.get(key);
+			expect(site, `${key} is not a pattern the catalogue declares`).toBeDefined();
+			const errors = validateElementConfig(
+				{
+					kind: site!.kind,
+					config: configAt(site!.path, VALIDATED_KEYWORDS.pattern(site!.property)),
+				},
+				fixture
+			);
+			expect(errors[site!.path.join(".")]).toBe(hint);
 		}
 	});
 

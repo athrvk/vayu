@@ -13,11 +13,16 @@ import {
 	missingOperand,
 	missingRequiredKeys,
 	parseElementRefusal,
+	validateElementConfig,
 } from "./elements";
-import type { ElementDef, ElementKindSchema } from "@/types";
+import type { ElementConfigSchema, ElementDef, ElementKindSchema } from "@/types";
 
 /** A minimal catalogue entry - only what `missingRequiredKeys` reads. */
-function kindFixture(kind: string, required: string[]): ElementKindSchema {
+function kindFixture(
+	kind: string,
+	required: string[],
+	configSchema: ElementConfigSchema = { type: "object", required }
+): ElementKindSchema {
 	return {
 		kind,
 		version: 1,
@@ -26,7 +31,7 @@ function kindFixture(kind: string, required: string[]): ElementKindSchema {
 		category: "test",
 		hotPathClass: "declarative",
 		collectionOnly: false,
-		configSchema: { type: "object", required },
+		configSchema,
 		phases: [],
 	};
 }
@@ -91,6 +96,261 @@ describe("missingRequiredKeys", () => {
 
 	it("is empty for a kind the catalogue no longer registers", () => {
 		expect(missingRequiredKeys({ kind: "extract.gone", config: {} }, kinds)).toEqual([]);
+	});
+});
+
+/**
+ * The slice of each live schema (`engine/tests/fixtures/element-kinds.json`)
+ * that carries a value constraint, transcribed so these cases do not need the
+ * generated fixture. `element-kinds.conformance.test.tsx` is what holds the
+ * validator to the real catalogue.
+ */
+const constrained = (
+	kind: string,
+	configSchema: Omit<ElementConfigSchema, "type">
+): ElementKindSchema => kindFixture(kind, [], { type: "object", ...configSchema });
+
+const CONSTRAINED_KINDS: ElementKindSchema[] = [
+	constrained("extract.json", {
+		required: ["path", "variable"],
+		properties: { path: { type: "string" }, variable: { type: "string", minLength: 1 } },
+	}),
+	constrained("metric.record", {
+		required: ["name", "type", "source"],
+		properties: {
+			name: { type: "string", minLength: 1, maxLength: 100 },
+			source: {
+				type: "object",
+				properties: {
+					condition: {
+						type: "object",
+						required: ["field", "operator", "value"],
+						properties: { field: { type: "string" }, value: null },
+					},
+				},
+			},
+		},
+	}),
+	constrained("timer.pacing", {
+		required: ["everyMs"],
+		properties: { everyMs: { type: "integer", minimum: 1 } },
+	}),
+	constrained("timer.throughput", {
+		required: ["targetPerMinute"],
+		properties: { targetPerMinute: { type: "number", exclusiveMinimum: 0 } },
+	}),
+	constrained("control.throughput", {
+		properties: {
+			percent: { type: "number", minimum: 0, maximum: 100 },
+			everyN: { type: "integer", minimum: 1 },
+		},
+	}),
+	constrained("control.loop", {
+		required: ["count"],
+		properties: { count: { type: "integer", minimum: 1 } },
+	}),
+	constrained("control.if", {
+		required: ["condition"],
+		properties: {
+			condition: {
+				type: "string",
+				pattern:
+					"^\\s*\\{\\{[^}]+\\}\\}\\s*(==|!=|matches)\\s*\\S.*$|^\\s*\\{\\{[^}]+\\}\\}\\s*exists\\s*$",
+			},
+		},
+	}),
+	constrained("extract.regex", {
+		properties: { pattern: { type: "string", pattern: "(" } },
+	}),
+	constrained("assert.status", {
+		properties: {
+			range: {
+				type: "object",
+				required: ["min", "max"],
+				properties: { min: { type: "integer" }, max: { type: "integer" } },
+			},
+		},
+	}),
+	constrained("timer.think", {
+		properties: {
+			ms: { type: "integer", minimum: 0 },
+			gaussian: {
+				type: "object",
+				required: ["meanMs", "deviationMs"],
+				properties: {
+					meanMs: { type: "number", minimum: 0 },
+					deviationMs: { type: "number", minimum: 0 },
+				},
+			},
+		},
+	}),
+];
+
+const validate = (kind: string, config: Record<string, unknown>) =>
+	validateElementConfig({ kind, config }, CONSTRAINED_KINDS);
+
+describe("validateElementConfig", () => {
+	it.each([
+		[
+			"a cleared required text field",
+			"extract.json",
+			{ path: "$.a", variable: "" },
+			"variable",
+			"Can't be empty",
+		],
+		[
+			"a metric name over its length",
+			"metric.record",
+			{ name: "x".repeat(101) },
+			"name",
+			"Must be at most 100 characters",
+		],
+		["a cleared metric name", "metric.record", { name: "" }, "name", "Can't be empty"],
+		["a cadence of 0", "timer.pacing", { everyMs: 0 }, "everyMs", "Must be at least 1"],
+		[
+			"a percent of 150",
+			"control.throughput",
+			{ percent: 150 },
+			"percent",
+			"Must be at most 100",
+		],
+		[
+			"a negative percent",
+			"control.throughput",
+			{ percent: -1 },
+			"percent",
+			"Must be at least 0",
+		],
+		["a repeat count of 0", "control.loop", { count: 0 }, "count", "Must be at least 1"],
+		[
+			"a target rate of 0",
+			"timer.throughput",
+			{ targetPerMinute: 0 },
+			"targetPerMinute",
+			"Must be greater than 0",
+		],
+		[
+			"a malformed condition",
+			"control.if",
+			{ condition: "status == 200" },
+			"condition",
+			"Use {{var}} == value",
+		],
+		[
+			"a cleared condition",
+			"control.if",
+			{ condition: "" },
+			"condition",
+			"Use {{var}} == value",
+		],
+		[
+			"a status range with only min",
+			"assert.status",
+			{ range: { min: 200 } },
+			"range.max",
+			"Can't be empty",
+		],
+		[
+			"a status range with only max",
+			"assert.status",
+			{ range: { max: 299 } },
+			"range.min",
+			"Can't be empty",
+		],
+		[
+			"a gaussian with only a mean",
+			"timer.think",
+			{ gaussian: { meanMs: 5 } },
+			"gaussian.deviationMs",
+			"Can't be empty",
+		],
+		[
+			"a negative gaussian mean",
+			"timer.think",
+			{ gaussian: { meanMs: -1, deviationMs: 1 } },
+			"gaussian.meanMs",
+			"Must be at least 0",
+		],
+		[
+			"a nested object two levels down",
+			"metric.record",
+			{ source: { condition: { field: "status" } } },
+			"source.condition.operator",
+			"Can't be empty",
+		],
+	])("flags %s on %s", (_name, kind, config, path, message) => {
+		expect(validate(kind, config)).toMatchObject({ [path]: message });
+	});
+
+	it("reports every failing field at once, not only the first", () => {
+		expect(
+			validate("timer.think", { ms: -5, gaussian: { meanMs: -1, deviationMs: -2 } })
+		).toEqual({
+			ms: "Must be at least 0",
+			"gaussian.meanMs": "Must be at least 0",
+			"gaussian.deviationMs": "Must be at least 0",
+		});
+	});
+
+	it.each([
+		["extract.json", { path: "$.a", variable: "token" }],
+		[
+			"metric.record",
+			{
+				name: "x".repeat(100),
+				source: { condition: { field: "f", operator: "eq", value: 1 } },
+			},
+		],
+		["timer.pacing", { everyMs: 1 }],
+		["timer.throughput", { targetPerMinute: 0.5 }],
+		["control.throughput", { percent: 0 }],
+		["control.throughput", { percent: 100 }],
+		["control.loop", { count: 1 }],
+		["control.if", { condition: "{{env}} == prod" }],
+		["control.if", { condition: "{{token}} exists" }],
+		["assert.status", { range: { min: 200, max: 299 } }],
+		["timer.think", { ms: 0, gaussian: { meanMs: 0, deviationMs: 0 } }],
+	])("accepts a valid %s config %j", (kind, config) => {
+		expect(validate(kind, config)).toEqual({});
+	});
+
+	it("skips an absent optional property and a missing top-level required key", () => {
+		// The latter is `missingRequiredKeys`' chip, never a second report.
+		expect(validate("control.throughput", {})).toEqual({});
+		expect(validate("timer.pacing", {})).toEqual({});
+		expect(validate("assert.status", {})).toEqual({});
+	});
+
+	it("does not judge a value of a type the form never writes into that field", () => {
+		expect(validate("control.throughput", { percent: true })).toEqual({});
+		expect(validate("control.throughput", { percent: Number.NaN })).toEqual({});
+		expect(validate("assert.status", { range: "oops" })).toEqual({});
+	});
+
+	it("treats a pattern that does not compile as no constraint", () => {
+		expect(validate("extract.regex", { pattern: "anything" })).toEqual({});
+	});
+
+	it("falls back to a generic hint for a pattern with no written one", () => {
+		const kinds = [
+			constrained("x.y", { properties: { code: { type: "string", pattern: "^[0-9]+$" } } }),
+		];
+		expect(validateElementConfig({ kind: "x.y", config: { code: "ab" } }, kinds)).toEqual({
+			code: "Doesn't match the expected format",
+		});
+	});
+
+	it("words a minLength above 1 as a count, since it is not a matter of empty", () => {
+		const kinds = [
+			constrained("x.y", { properties: { code: { type: "string", minLength: 3 } } }),
+		];
+		expect(validateElementConfig({ kind: "x.y", config: { code: "ab" } }, kinds)).toEqual({
+			code: "Must be at least 3 characters",
+		});
+	});
+
+	it("has no opinion on a kind the catalogue no longer registers", () => {
+		expect(validate("extract.gone", { variable: "" })).toEqual({});
 	});
 });
 
@@ -172,6 +432,16 @@ describe("hasIncompleteElement", () => {
 
 	it("is false for an empty list", () => {
 		expect(hasIncompleteElement([], kinds)).toBe(false);
+	});
+
+	it("is true for an element whose value its schema refuses, though every key is present", () => {
+		const elements = [{ id: "1", kind: "control.loop", enabled: true, config: { count: 0 } }];
+		expect(hasIncompleteElement(elements, CONSTRAINED_KINDS)).toBe(true);
+	});
+
+	it("is false once that value is valid", () => {
+		const elements = [{ id: "1", kind: "control.loop", enabled: true, config: { count: 3 } }];
+		expect(hasIncompleteElement(elements, CONSTRAINED_KINDS)).toBe(false);
 	});
 });
 
