@@ -2587,7 +2587,7 @@ TEST_F (ScenarioLoadTest, AHitOrADefaultAnsweredMissCountsNoExtractorMiss) {
 // A `control.once` login that misses: the stored `token=old` is hidden from
 // iteration 1 on, through the inline script after the extractor
 // (`materialize`, then `replace_from`) and every later iteration's
-// `clear_local`. Mutation check: clear the tombstones in `clear_local` and
+// `clear_local`. Mutation check: drop the tombstone in `apply_onto` and
 // iterations 2 and 3 send `Bearer old`.
 TEST_F (ScenarioLoadTest, AMissHidesTheStoredValueForEveryLaterIteration) {
     store_old_token (*db_);

@@ -161,8 +161,8 @@ held: the name is removed from the stored environment, collection or globals row
 persists, and an ancestor collection's value of the same name answers again, because an extractor
 writes the leaf collection only. With `matchNo: -1` a miss also unsets `<variable>_matchNr` and
 every `<variable>_<k>`, whatever the `default` (it names `<variable>` alone), and a hit unsets the
-numbered names past its own count, so a shorter list never inherits a longer one's tail. A miss
-reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
+numbered names past its own count, so a shorter list never inherits a longer one's tail. A miss with
+no `default` reports `"missing"`, and only when `required: true` also fails the step - through the same `tests`
 list a `pm.test` assertion writes to, which is why the SSE frame's `tests` tally and
 `describe_failed_tests` count a declarative assertion exactly as they count a scripted one.
 Every miss is counted per step as `extractorMisses` (#3053, `is_extractor_miss`), `required` or
@@ -170,7 +170,11 @@ not: an `extract.*` outcome of `missing`, plus an optional `extract.json`'s `ski
 could not read, because that unsets the variable too. A miss a `default` answered reports `ok` and is
 not counted, nor is a disabled extractor or a `metric.record` reporting `missing`. A collection run
 writes the count on the step's stored trace and its `step` frame, a load run on
-`scenario.steps[i]`; both omit the key at 0. A single-request load run's `summary.elements` has no
+`scenario.steps[i]`; both omit the key at 0. A passing step's stored row can be dropped past the
+step-store cap, so the stored count covers the rows kept; the frame carries every step. On a load
+run a step whose request failed in transport runs no extractor, so it neither unsets nor counts
+(#3089); a collection run runs them against the error response. A single-request load run's
+`summary.elements` has no
 such count.
 
 Every pattern a user writes - `extract.regex`'s `pattern`, `assert.jsonpath`'s `regex`,
