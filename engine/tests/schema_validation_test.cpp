@@ -1649,8 +1649,7 @@ TEST (ResponseFailureWordingTest, ABadEnumAtTheRootNamesTheBodyAndNotAValue) {
 
 TEST (ResponseFailureWordingTest, ABadEnumBelowTheRootNamesItsFieldAndPath) {
     const auto failure = only_failure (
-    R"({"type": "object", "properties": {"status": {"enum": ["a", "b"]}}})",
-    R"({"status": "c"})");
+    R"({"type": "object", "properties": {"status": {"enum": ["a", "b"]}}})", R"({"status": "c"})");
 
     EXPECT_EQ (failure.path, "/status");
     EXPECT_EQ (failure.message, "'status' must be one of [a, b]");
@@ -1696,30 +1695,33 @@ TEST (ResponseFailureWordingTest, NoBodyFailureNamesASettingOrAnElement) {
     };
     for (const auto& c : cases) {
         const auto failure = only_failure (c.schema, c.body);
-        EXPECT_EQ (failure.message.find ("setting"), std::string::npos) << failure.message;
-        EXPECT_EQ (failure.message.find ("element"), std::string::npos) << failure.message;
+        EXPECT_EQ (failure.message.find ("setting"), std::string::npos)
+        << failure.message;
+        EXPECT_EQ (failure.message.find ("element"), std::string::npos)
+        << failure.message;
     }
 }
 
 TEST (UnexpectedPropertyNameTest, NamesOnlyTheAdditionalPropertiesFailure) {
-    EXPECT_EQ (unexpected_property_name ("Object contains a property that could not be "
-                                         "validated using 'properties' or "
-                                         "'additionalProperties' constraints: 'z'."),
+    EXPECT_EQ (
+    unexpected_property_name ("Object contains a property that could not be "
+                              "validated using 'properties' or "
+                              "'additionalProperties' constraints: 'z'."),
     "z");
-    EXPECT_FALSE (unexpected_property_name ("Value type not permitted by 'type' constraint.")
-                  .has_value ());
+    EXPECT_FALSE (
+    unexpected_property_name ("Value type not permitted by 'type' constraint.").has_value ());
 }
 
 // The element-config side keeps its own words through the default argument.
 TEST (SchemaErrorContextTest, TheDefaultContextIsTheSettingsVocabulary) {
     const json schema = { { "type", "object" },
         { "properties", { { "in", { { "type", "array" } } } } } };
-    const std::string description = "Object contains a property that could not be "
-                                    "validated using 'properties' or "
-                                    "'additionalProperties' constraints: 'z'.";
+    const std::string description =
+    "Object contains a property that could not be "
+    "validated using 'properties' or "
+    "'additionalProperties' constraints: 'z'.";
     EXPECT_EQ (humanize_schema_error (schema, description, ""),
     "'z' is not a setting this element has. Settings: in");
-    EXPECT_EQ (humanize_schema_error (
-               schema, description, "", SchemaErrorContext::ResponseBody),
+    EXPECT_EQ (humanize_schema_error (schema, description, "", SchemaErrorContext::ResponseBody),
     "unexpected property 'z'");
 }

@@ -164,7 +164,8 @@ SchemaErrorContext context) {
     if (valid.empty ()) {
         return std::format ("'{}' is not a setting this element has", *extra);
     }
-    return std::format ("'{}' is not a setting this element has. Settings: {}", *extra, valid);
+    return std::format (
+    "'{}' is not a setting this element has. Settings: {}", *extra, valid);
 }
 
 /** "Value type not permitted by 'type' constraint." - the schema's own
@@ -241,7 +242,8 @@ std::optional<double> parse_double_whole (std::string_view text) {
 /** `minimum`/`maximum` (inclusive or exclusive): valijson's own message
  *  already ends in exactly the bound, with no trailing text, so the number
  *  is the whole of what follows the matched prefix. */
-std::optional<std::string> bound_rejection (const std::string& subject, const std::string& d) {
+std::optional<std::string>
+bound_rejection (const std::string& subject, const std::string& d) {
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 4> BOUND_PREFIXES{
         { { "Expected number greater than or equal to ", "must be at least " },
         { "Expected number greater than ", "must be more than " },
