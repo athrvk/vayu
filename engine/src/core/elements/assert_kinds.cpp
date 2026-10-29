@@ -178,8 +178,8 @@ class AssertJsonPathElement final : public Element {
             // order-sensitive, and `expected` is not compared by key order.
             passed = !matches.empty () &&
             nlohmann::json (*matches.front ()) == config_["expected"];
-            failure = "expected '" + path_text + "' to " + not_prefix + "equal " +
-            config_["expected"].dump ();
+            failure = "expected '" + path_text + "' to " + not_prefix +
+            "equal " + config_["expected"].dump ();
             if (!negate) {
                 failure += matches.empty () ?
                 " (no match)" :
@@ -192,8 +192,8 @@ class AssertJsonPathElement final : public Element {
             }
             passed = !matches.empty () &&
             (*regex)->search (detail::json_value_to_string (*matches.front ()));
-            failure = "expected '" + path_text + "' to " + not_prefix + "match /" +
-            config_.value ("regex", "") + "/";
+            failure = "expected '" + path_text + "' to " + not_prefix +
+            "match /" + config_.value ("regex", "") + "/";
         } else {
             record_unrunnable_assertion (ctx, name,
             "assert.jsonpath needs one of 'expected', 'regex' or 'exists'");
@@ -377,8 +377,9 @@ std::optional<std::string> exists_with_value_problem (const nlohmann::json& conf
     }
     for (const char* value_field : { "expected", "regex" }) {
         if (config.contains (value_field)) {
-            return std::format ("'exists' cannot be combined with '{}' - 'exists' "
-                                "asserts presence or absence, '{}' asserts the value",
+            return std::format (
+            "'exists' cannot be combined with '{}' - 'exists' "
+            "asserts presence or absence, '{}' asserts the value",
             value_field, value_field);
         }
     }

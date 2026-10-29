@@ -402,10 +402,9 @@ TEST_F (ElementKindsTest, AssertJsonPathExistsIsABooleanAndNegateFlipsIt) {
     for (const auto& c : cases) {
         SCOPED_TRACE (std::string ("exists ") + (c.exists ? "true" : "false") +
         (c.negate ? ", negated, " : ", ") + c.path);
-        const auto run = run_after_recording (one_element (nlohmann::json{
-        { "id", "a1" }, { "kind", "assert.jsonpath" },
-        { "config",
-        { { "path", c.path }, { "exists", c.exists }, { "negate", c.negate } } } }));
+        const auto run = run_after_recording (
+        one_element (nlohmann::json{ { "id", "a1" }, { "kind", "assert.jsonpath" },
+        { "config", { { "path", c.path }, { "exists", c.exists }, { "negate", c.negate } } } }));
         ASSERT_EQ (run.outcomes.size (), 1u);
         EXPECT_EQ (run.outcomes[0].status, c.passes ? "ok" : "failed");
         ASSERT_EQ (run.tests.size (), 1u);
@@ -428,7 +427,7 @@ TEST_F (ElementKindsTest, ANegatedAssertJsonPathValueFailureSaysNot) {
         nlohmann::json config = operand;
         config["path"]        = "$.id";
         config["negate"]      = true;
-        const auto run        = run_after_recording (one_element (nlohmann::json{
+        const auto run = run_after_recording (one_element (nlohmann::json{
         { "id", "a1" }, { "kind", "assert.jsonpath" }, { "config", config } }));
         ASSERT_EQ (run.outcomes.size (), 1u);
         EXPECT_EQ (run.outcomes[0].status, "failed");
@@ -438,13 +437,12 @@ TEST_F (ElementKindsTest, ANegatedAssertJsonPathValueFailureSaysNot) {
 }
 
 TEST_F (ElementKindsTest, AUnnegatedAssertJsonPathValueFailureKeepsTheGotText) {
-    response = ok_json_response (200, R"({"id": "order-42"})");
-    const auto run = run_after_recording (one_element (nlohmann::json{
-    { "id", "a1" }, { "kind", "assert.jsonpath" },
+    response       = ok_json_response (200, R"({"id": "order-42"})");
+    const auto run = run_after_recording (
+    one_element (nlohmann::json{ { "id", "a1" }, { "kind", "assert.jsonpath" },
     { "config", { { "path", "$.id" }, { "expected", "x" } } } }));
     ASSERT_EQ (run.tests.size (), 1u);
-    EXPECT_EQ (run.tests[0].error_message,
-    "expected '$.id' to equal \"x\", got order-42");
+    EXPECT_EQ (run.tests[0].error_message, "expected '$.id' to equal \"x\", got order-42");
 }
 
 // ---------------------------------------------------------------------------
