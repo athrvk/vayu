@@ -4027,7 +4027,9 @@ and, eventually, a `control.*` element's job, neither of which runs inline.
 What the overlay holds for the environment, collection and globals scopes
 lives as long as the VU (#3044), so a `control.once` login's token reaches
 every later iteration; only its run-local scope is emptied at the iteration
-boundary, where `pm.cookies`' per-VU jar is.
+boundary, where `pm.cookies`' per-VU jar is. An inline script's `unset()` or
+`clear()` of a name the run loaded hides that stored value from the same VU
+alone, until a later write sets the name again (#3088).
 
 **A single-request load run's `requestElements` dispatch the same way, per
 submission rather than per VU (issue #1594) - there is no persistent VU

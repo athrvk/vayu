@@ -593,7 +593,7 @@ const nlohmann::json* data_row) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Pre-request");
-            vu.scope_overlay.replace_from (scopes);
+            vu.scope_overlay.replace_from (scopes, state.base_scopes);
             return result;
         },
         .run_post_script    = nullptr,
@@ -719,7 +719,7 @@ const nlohmann::json* data_row) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Post-request");
-            vu.scope_overlay.replace_from (scopes);
+            vu.scope_overlay.replace_from (scopes, state.base_scopes);
             return result;
         },
         .pre_script_result  = unused_pre_result,

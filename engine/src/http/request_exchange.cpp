@@ -929,15 +929,24 @@ const ScriptVariableScopes& base) {
     return wrote_it || (base_has && !was_hidden);
 }
 
-void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes) {
-    const auto adopt = [] (Layer& target, const vayu::Environment& scope) {
+void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes,
+const ScriptVariableScopes& base) {
+    const auto adopt = [] (Layer& target, const vayu::Environment& scope,
+                       const vayu::Environment& shared) {
         target.written = scope;
         std::erase_if (target.unset,
         [&scope] (const std::string& name) { return scope.contains (name); });
+        // `materialize` left every base name the overlay did not hide in the
+        // copy, so one missing now is a name the script unset (#3088).
+        for (const auto& [name, variable] : shared) {
+            if (!scope.contains (name)) {
+                target.unset.insert (name);
+            }
+        }
     };
-    adopt (environment_, scopes.environment);
-    adopt (collection_, scopes.collection);
-    adopt (globals_, scopes.globals);
+    adopt (environment_, scopes.environment, base.environment);
+    adopt (collection_, scopes.collection, base.collection);
+    adopt (globals_, scopes.globals, base.globals);
     local_ = scopes.local;
 }
 

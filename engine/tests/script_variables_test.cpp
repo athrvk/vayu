@@ -608,11 +608,11 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheTypedValueToTheNextStep) 
 
     scopes_ = overlay.materialize (base);
     run ("pm.environment.set('n', 0); pm.environment.set('list', [1]);");
-    overlay.replace_from (scopes_);
+    overlay.replace_from (scopes_, base);
 
     scopes_ = overlay.materialize (base);
     run ("pm.environment.set('n', pm.environment.get('n') + 1);");
-    overlay.replace_from (scopes_);
+    overlay.replace_from (scopes_, base);
     overlay.set ("env", "list", "extracted");
 
     scopes_ = overlay.materialize (base);
@@ -664,11 +664,11 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) 
 
     scopes_ = overlay.materialize (base);
     run ("pm.variables.set('n', 0);");
-    overlay.replace_from (scopes_);
+    overlay.replace_from (scopes_, base);
 
     scopes_ = overlay.materialize (base);
     run ("pm.variables.set('n', pm.variables.get('n') + 1);");
-    overlay.replace_from (scopes_);
+    overlay.replace_from (scopes_, base);
 
     auto vars = vayu::http::routes::flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
