@@ -2563,6 +2563,43 @@ TEST_F (ScenarioLoadTest, AMissSendsTheUnresolvedNameNotTheLastIterationsValue) 
     EXPECT_FALSE (summary["steps"][1].contains ("extractorMisses"));
 }
 
+// A step whose request fails in transport (#3089) runs its extractors against
+// the status-0 response like the sequential run: the variable is unset and the
+// miss counted. The refused port is one a server bound and released, so no
+// port is fixed. Mutation check: drop the `run_step_after` call in the
+// completion callback's response branch (scenario_load.cpp) and iteration 2
+// sends `Bearer tok-1`.
+TEST_F (ScenarioLoadTest, ATransportFailedExtractingStepUnsetsItsVariableAndCountsAMiss) {
+    int dead_port = 0;
+    {
+        httplib::Server released;
+        dead_port = released.bind_to_any_port ("127.0.0.1");
+    }
+    ASSERT_GT (dead_port, 0);
+
+    ScenarioMockServer server;
+    auto execution = plan_over ({ "{{data.from}}", server.url ("/echo") });
+    execution.plan.steps[1].request.headers["Authorization"] =
+    "Bearer {{token}}";
+    execution.plan.steps[0].elements = vayu::tests::compiled_elements (
+    { vayu::tests::extract_json_element_json ("el_token", "$.token", "token") });
+    with_data (execution,
+    { json{ { "from", server.url ("/login") } },
+    json{ { "from", "http://127.0.0.1:" + std::to_string (dead_port) + "/login" } } });
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_GE (echoes.size (), 1u);
+    EXPECT_EQ (echoes[0].authorization, "Bearer tok-1");
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][0].value ("extractorMisses", 0), 1)
+    << summary["steps"][0];
+}
+
 // Every iteration hits, or misses into a `default`: neither is a miss, and
 // the key is absent rather than `0`.
 TEST_F (ScenarioLoadTest, AHitOrADefaultAnsweredMissCountsNoExtractorMiss) {
