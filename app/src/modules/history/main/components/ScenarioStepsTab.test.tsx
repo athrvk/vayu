@@ -450,6 +450,54 @@ describe("the per-step element tallies", () => {
 	});
 });
 
+/**
+ * A step's extractor misses (`scenario.steps[i].extractorMisses`, issue #3053):
+ * one row after the step's element rows, only when the engine counted one.
+ * Mutation check: drop the misses row from `ScenarioStepsTab.tsx` and the
+ * first case fails; render it whatever the count and the second does.
+ */
+describe("the per-step extractor misses", () => {
+	it("counts them in a row of their own under the step that missed", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					{
+						...STEPS[0],
+						extractorMisses: 1234,
+						elements: [
+							{
+								id: "el_1",
+								kind: "extract.json",
+								passed: 40,
+								failed: 0,
+								skipped: 1234,
+							},
+						],
+					},
+					STEPS[1],
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		const rows = screen.getAllByRole("row").slice(1); // drop the header row
+		expect(rows).toHaveLength(4);
+		expect(within(rows[2]).getByText("1,234 extractor misses")).toBeTruthy();
+	});
+
+	it("adds no row for a step without them, or a report from before the count", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[{ ...STEPS[0], extractorMisses: 0 }, STEPS[1]]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+		expect(screen.queryByText(/extractor miss/)).toBeNull();
+	});
+});
+
 describe("the run summary line", () => {
 	it("groups thousands in the virtual-user and iteration counts", () => {
 		// Mutation check: put a raw `{virtualUsers}` / `{iterationsCompleted}` /

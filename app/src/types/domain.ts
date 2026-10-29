@@ -1333,6 +1333,12 @@ export interface ScenarioStepEvent {
 	 */
 	stepsNotRun?: number;
 	/**
+	 * This step's extractions that found nothing and unset their variable
+	 * (issue #3053). Absent, never `0`, when none did - on the same terms as
+	 * the stored row's.
+	 */
+	extractorMisses?: number;
+	/**
 	 * The stored request this step ran (issue #831), the same id
 	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
 	 * step's request exists while the run streams, which is when a step that has
@@ -1724,6 +1730,12 @@ export interface RunResultTrace {
 	 * end.
 	 */
 	stepsNotRun?: number;
+	/**
+	 * This step's extractions that found nothing and unset their variable
+	 * (issue #3053). Absent, never `0`, on a step where none did, and on a row
+	 * stored before the engine counted them.
+	 */
+	extractorMisses?: number;
 }
 
 /**
@@ -2840,6 +2852,12 @@ export interface RunScenarioStepStat {
 	 * this field at all; 0 is an honest "none of them".
 	 */
 	unresolvedTokens?: number;
+	/**
+	 * Executions of this step whose extractors found nothing and unset their
+	 * variable (issue #3053), one per extractor that missed. Absent, never `0`,
+	 * when none did, and on a report stored before the engine counted them.
+	 */
+	extractorMisses?: number;
 	/**
 	 * `"skipped"` when this step carries a pre-request script: load mode
 	 * never executes one (see {@link RunReport.scenario}'s sibling note),

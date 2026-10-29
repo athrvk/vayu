@@ -174,6 +174,10 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		...(typeof e.stepsNotRun === "number" && e.stepsNotRun > 0
 			? { stepsNotRun: e.stepsNotRun }
 			: {}),
+		// Extractor misses (issue #3053), on the same never-`0` terms.
+		...(typeof e.extractorMisses === "number" && e.extractorMisses > 0
+			? { extractorMisses: e.extractorMisses }
+			: {}),
 		// The request this step ran (issue #831), so a live row offers the same
 		// way back to it that a stored one does. Left absent unless the frame
 		// carries a non-empty id: the step card keys the action off its
