@@ -392,9 +392,11 @@ const ScenarioPlan& plan);
  * step, so recording is a lookup by element id into a fixed-size atomic array
  * - no lock and no allocation on the completion path. The buckets are
  * `ElementOutcomeCounts::record`'s, shared with `RequestElementTallies`:
- * `failed` folds in `"error"`, `skipped` folds in `"missing"` (no kind reports
- * it yet), and a `script.*` element left to the post-run replay is `deferred`,
- * not `skipped` (#2144), because it does run, later.
+ * `failed` folds in `"error"`, `skipped` folds in `"missing"` (an extractor's
+ * miss, or a `metric.record` with nothing to read), and a `script.*` element
+ * left to the post-run replay is `deferred`, not `skipped` (#2144), because it
+ * does run, later. Beside them, one count per step of the outcomes
+ * `is_extractor_miss` names (#3053).
  */
 class StepElementTallies {
     public:
@@ -410,8 +412,14 @@ class StepElementTallies {
     /// nothing happened" convention `unresolvedTokens` and `tests` follow.
     [[nodiscard]] nlohmann::json build (const ScenarioPlan& plan, size_t step) const;
 
+    /// This step's extractor misses across every virtual user and iteration;
+    /// 0 for a step index the plan does not have.
+    [[nodiscard]] size_t extractor_misses (size_t step) const;
+
     private:
     std::vector<std::vector<ElementOutcomeCounts>> counts_by_step_;
+    /// Sized once, like the counts beside it, so recording never reallocates.
+    std::vector<std::atomic<size_t>> misses_by_step_;
     std::vector<std::unordered_map<std::string, size_t>> index_of_id_by_step_;
 };
 

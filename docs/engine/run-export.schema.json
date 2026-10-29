@@ -325,6 +325,7 @@
                   "httpErrors": {"type": "number"},
                   "noResponse": {"type": "number"},
                   "unresolvedTokens": {"type": "number"},
+                  "extractorMisses": {"type": "number"},
                   "preRequestScript": {"type": "string"},
                   "latency": {
                     "type": "object",

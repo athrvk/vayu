@@ -1835,7 +1835,8 @@ that `setNextRequest(null)`, a jump or a stop ended adds nothing.
 written before the issue, and a scenario load run's, carries neither. The step
 row that ended an iteration short of the plan's end carries the same
 per-iteration count as `stepsNotRun` on its `trace_data`, absent on every other
-row.
+row, and a step row whose extractors found nothing carries `extractorMisses`
+(#3053) on the same absent-at-0 terms.
 
 A scenario load run's `scenario` object (`build_scenario_load_summary` in
 `core/scenario_load.cpp`, then `collect_summary_inputs` in `core/run_manager.cpp`)

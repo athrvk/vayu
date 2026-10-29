@@ -656,8 +656,9 @@ TEST (ScopeOverlayTest, AnUnwrittenOverlayChangesNothing) {
     ScopeOverlay overlay;
     EXPECT_TRUE (overlay.empty ());
 
-    auto vars = flatten_variable_scopes (environment_with ("token", "base"));
-    overlay.apply_onto (vars);
+    const auto base = environment_with ("token", "base");
+    auto vars       = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "base");
 }
 
@@ -666,8 +667,9 @@ TEST (ScopeOverlayTest, AWrittenNameShadowsTheRunsOwnValueForThisVuAlone) {
     overlay.set ("env", "token", "vu-own");
     EXPECT_FALSE (overlay.empty ());
 
-    auto vars = flatten_variable_scopes (environment_with ("token", "base"));
-    overlay.apply_onto (vars);
+    const auto base = environment_with ("token", "base");
+    auto vars       = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "vu-own");
 
     // The base map itself is untouched - a second VU merging the same base
@@ -687,12 +689,12 @@ TEST (ScopeOverlayTest, ThreeScopesResolveInCompositionsPrecedenceOrder) {
     overlay.set ("globals", "name", "from-globals");
     overlay.set ("collection", "name", "from-collection");
     auto vars = flatten_variable_scopes ({});
-    overlay.apply_onto (vars);
+    overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["name"], "from-collection");
 
     overlay.set ("env", "name", "from-env");
     vars = flatten_variable_scopes ({});
-    overlay.apply_onto (vars);
+    overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["name"], "from-env");
 }
 
@@ -713,7 +715,7 @@ TEST (ScopeOverlayTest, ClearLocalDropsTheLocalScopeAndKeepsTheSavedOnes) {
 
     EXPECT_TRUE (overlay.local_values ().empty ());
     auto vars = flatten_variable_scopes ({});
-    overlay.apply_onto (vars);
+    overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["a"], "1");
     EXPECT_EQ (vars["b"], "2");
     EXPECT_EQ (vars["c"], "3");
@@ -756,9 +758,76 @@ TEST (ScopeOverlayTest, ReplaceFromAdoptsWhateverTheMaterializedCopyEndedAs) {
     overlay.replace_from (mutated);
 
     auto vars = flatten_variable_scopes ({});
-    overlay.apply_onto (vars);
+    overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["keep"], "first-write");
     EXPECT_EQ (vars["new_name"], "second-write");
+}
+
+// An extractor's miss (#3053) unsets the name, which an overlay cannot erase
+// from the shared base: the tombstone hides the base value of that scope for
+// this VU, and only that scope's, the way `unset_scope_variable` erases one
+// scope of a sequential run. Mutation check: skip the tombstone loop in
+// `apply_onto` and `token` reads back "stored".
+TEST (ScopeOverlayTest, AnUnsetNameHidesItsOwnScopesBaseValueAndNoOtherScopes) {
+    ScriptVariableScopes base;
+    base.collection["token"] = value_of ("stored");
+    base.collection["shown"] = value_of ("leaf");
+    base.globals["shown"]    = value_of ("global");
+    base.collection_ancestors.push_back ({ { "shown", value_of ("ancestor") } });
+
+    ScopeOverlay overlay;
+    EXPECT_TRUE (overlay.unset ("collection", "token", base));
+    EXPECT_TRUE (overlay.unset ("collection", "shown", base));
+    EXPECT_FALSE (overlay.unset ("collection", "token", base))
+    << "a name already unset is no longer held";
+    EXPECT_FALSE (overlay.unset ("env", "token", base))
+    << "the env scope never held it";
+
+    auto vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_FALSE (vars.contains ("token")) << vars["token"];
+    EXPECT_EQ (vars["shown"], "ancestor")
+    << "the leaf's unset must uncover the ancestor collection, as a "
+       "sequential run's does";
+
+    const auto materialized = overlay.materialize (base);
+    EXPECT_FALSE (materialized.collection.contains ("token"));
+    EXPECT_EQ (base.collection.at ("token").value, "stored")
+    << "the base is shared";
+}
+
+// The tombstone lasts as long as the VU's saved writes: through the
+// iteration boundary and through an inline script's `replace_from`, until the
+// name is set again. Mutation check: clear the tombstones in `replace_from`
+// and the second read is "stored".
+TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAgain) {
+    const auto base = environment_with ("token", "stored");
+    ScopeOverlay overlay;
+    overlay.set ("env", "token", "extracted");
+    EXPECT_TRUE (overlay.unset ("env", "token", base));
+
+    overlay.clear_local ();
+    auto vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_FALSE (vars.contains ("token")) << vars["token"];
+
+    overlay.replace_from (overlay.materialize (base));
+    vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_FALSE (vars.contains ("token")) << vars["token"];
+
+    auto scripted                 = overlay.materialize (base);
+    scripted.environment["token"] = value_of ("from-script");
+    overlay.replace_from (scripted);
+    vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_EQ (vars["token"], "from-script");
+
+    EXPECT_TRUE (overlay.unset ("env", "token", base));
+    overlay.set ("env", "token", "next");
+    vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_EQ (vars["token"], "next");
 }
 
 // --- the exchange, on the wire -----------------------------------------------

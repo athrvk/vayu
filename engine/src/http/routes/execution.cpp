@@ -2137,6 +2137,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
             [&] (std::string_view scope, const std::string& name, const std::string& value) {
                 set_scope_variable (scopes, scope, name, value);
             },
+            .unset_variable =
+            [&] (std::string_view scope, const std::string& name) {
+                return unset_scope_variable (scopes, scope, name);
+            },
             .should_stop = nullptr, // A single exchange has nothing to interrupt.
             .record_metric = nullptr, // A streaming send has no run to record into.
         };
@@ -2265,6 +2269,10 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
                         [&] (std::string_view scope, const std::string& name,
                         const std::string& value) {
                             set_scope_variable (scopes, scope, name, value);
+                        },
+                        .unset_variable =
+                        [&] (std::string_view scope, const std::string& name) {
+                            return unset_scope_variable (scopes, scope, name);
                         },
                         .should_stop = nullptr,
                         .record_metric = nullptr, // A streaming send has no run to record into.

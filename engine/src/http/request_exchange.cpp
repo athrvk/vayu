@@ -45,21 +45,34 @@ int64_t exchange_now_ms () {
     .count ();
 }
 
+/// The scope an extractor's `scope` value names: `"env"`, `"globals"`, and
+/// the leaf collection for anything else. @p Scopes is const or not.
+template <typename Scopes>
+auto& scope_named (Scopes& scopes, std::string_view scope) {
+    if (scope == "env") {
+        return scopes.environment;
+    }
+    if (scope == "globals") {
+        return scopes.globals;
+    }
+    return scopes.collection;
+}
+
 } // namespace
 
 void set_scope_variable (ScriptVariableScopes& scopes,
 std::string_view scope,
 const std::string& name,
 const std::string& value) {
-    vayu::Environment* target = &scopes.collection;
-    if (scope == "env") {
-        target = &scopes.environment;
-    } else if (scope == "globals") {
-        target = &scopes.globals;
-    }
     vayu::Variable variable;
-    variable.value  = value;
-    (*target)[name] = variable;
+    variable.value                    = value;
+    scope_named (scopes, scope)[name] = variable;
+}
+
+bool unset_scope_variable (ScriptVariableScopes& scopes,
+std::string_view scope,
+const std::string& name) {
+    return scope_named (scopes, scope).erase (name) > 0;
 }
 
 size_t design_response_body_bound (vayu::db::Database& db) {
@@ -870,44 +883,121 @@ std::optional<vayu::http::Auth> late_auth) {
     return unresolved_token_names (request);
 }
 
-void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
-    vayu::Environment* target = &collection_;
-    if (scope == "env") {
-        target = &environment_;
-    } else if (scope == "globals") {
-        target = &globals_;
+namespace {
+
+std::optional<std::string>
+enabled_value (const vayu::Environment& scope, const std::string& name) {
+    const auto found = scope.find (name);
+    if (found == scope.end () || !found->second.enabled) {
+        return std::nullopt;
     }
+    return found->second.value;
+}
+
+} // namespace
+
+ScopeOverlay::Layer& ScopeOverlay::layer (std::string_view scope) {
+    if (scope == "env") {
+        return environment_;
+    }
+    if (scope == "globals") {
+        return globals_;
+    }
+    return collection_;
+}
+
+void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
+    Layer& target = layer (scope);
+    target.unset.erase (name);
     vayu::Variable variable;
-    variable.value  = value;
-    (*target)[name] = variable;
+    variable.value       = value;
+    target.written[name] = variable;
+}
+
+bool ScopeOverlay::unset (std::string_view scope,
+const std::string& name,
+const ScriptVariableScopes& base) {
+    Layer& target         = layer (scope);
+    const bool wrote_it   = target.written.erase (name) > 0;
+    const bool base_has   = scope_named (base, scope).contains (name);
+    const bool was_hidden = target.unset.contains (name);
+    // A tombstone exists only to hide a base value, so a name the base lacks
+    // gets none.
+    if (base_has) {
+        target.unset.insert (name);
+    }
+    return wrote_it || (base_has && !was_hidden);
 }
 
 void ScopeOverlay::replace_from (const ScriptVariableScopes& scopes) {
-    environment_ = scopes.environment;
-    collection_  = scopes.collection;
-    globals_     = scopes.globals;
-    local_       = scopes.local;
+    const auto adopt = [] (Layer& target, const vayu::Environment& scope) {
+        target.written = scope;
+        std::erase_if (target.unset,
+        [&scope] (const std::string& name) { return scope.contains (name); });
+    };
+    adopt (environment_, scopes.environment);
+    adopt (collection_, scopes.collection);
+    adopt (globals_, scopes.globals);
+    local_ = scopes.local;
 }
 
 void ScopeOverlay::clear_local () {
     local_.clear ();
 }
 
-void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars) const {
+void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars,
+const ScriptVariableScopes& base) const {
     // Lowest precedence first, so local - highest, matching
     // `values_from_scopes`'s own order - is applied last and wins.
-    for (const auto& [name, variable] : globals_) {
-        vars[name] = variable.value;
-    }
-    for (const auto& [name, variable] : collection_) {
-        vars[name] = variable.value;
-    }
-    for (const auto& [name, variable] : environment_) {
-        vars[name] = variable.value;
+    for (const Layer* saved : { &globals_, &collection_, &environment_ }) {
+        for (const auto& [name, variable] : saved->written) {
+            vars[name] = variable.value;
+        }
     }
     for (const auto& [name, variable] : local_) {
         vars[name] = variable.value;
     }
+    for (const Layer* hiding : { &globals_, &collection_, &environment_ }) {
+        for (const auto& name : hiding->unset) {
+            if (auto value = visible_value (name, base)) {
+                vars[name] = std::move (*value);
+            } else {
+                vars.erase (name);
+            }
+        }
+    }
+}
+
+std::optional<std::string> ScopeOverlay::visible_value (const std::string& name,
+const ScriptVariableScopes& base) const {
+    // One saved scope's answer: this VU's write (none when it is disabled,
+    // as `materialize` would leave it), else the base's unless the VU unset it.
+    const auto from = [&name] (const Layer& saved, const vayu::Environment& shared) {
+        if (const auto own = saved.written.find (name); own != saved.written.end ()) {
+            return own->second.enabled ? std::optional (own->second.value) : std::nullopt;
+        }
+        return saved.unset.contains (name) ? std::nullopt : enabled_value (shared, name);
+    };
+    // Highest precedence first: `values_from_scopes`'s order, reversed.
+    if (auto value = enabled_value (local_, name)) {
+        return value;
+    }
+    if (auto value = enabled_value (base.local, name)) {
+        return value;
+    }
+    if (auto value = from (environment_, base.environment)) {
+        return value;
+    }
+    if (auto value = from (collection_, base.collection)) {
+        return value;
+    }
+    for (auto ancestor = base.collection_ancestors.rbegin ();
+    ancestor != base.collection_ancestors.rend (); ++ancestor) {
+        if (auto value = enabled_value (*ancestor, name)) {
+            return value;
+        }
+    }
+    return from (globals_, base.globals);
 }
 
 vayu::http::VariableValues ScopeOverlay::local_values () const {
@@ -915,21 +1005,23 @@ vayu::http::VariableValues ScopeOverlay::local_values () const {
 }
 
 ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base) const {
+    const auto overlay = [] (vayu::Environment& scope, const Layer& saved) {
+        for (const auto& name : saved.unset) {
+            scope.erase (name);
+        }
+        for (const auto& [name, variable] : saved.written) {
+            scope[name] = variable;
+        }
+    };
     ScriptVariableScopes scopes;
     scopes.collection_ancestors = base.collection_ancestors; // read-only, never overlaid
     scopes.environment = base.environment;
     scopes.collection  = base.collection;
     scopes.globals     = base.globals;
     scopes.local       = base.local;
-    for (const auto& [name, variable] : environment_) {
-        scopes.environment[name] = variable;
-    }
-    for (const auto& [name, variable] : collection_) {
-        scopes.collection[name] = variable;
-    }
-    for (const auto& [name, variable] : globals_) {
-        scopes.globals[name] = variable;
-    }
+    overlay (scopes.environment, environment_);
+    overlay (scopes.collection, collection_);
+    overlay (scopes.globals, globals_);
     for (const auto& [name, variable] : local_) {
         scopes.local[name] = variable;
     }
@@ -1065,6 +1157,10 @@ ExchangeInputs inputs) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name, const std::string& value) {
             set_scope_variable (scopes, scope, name, value);
+        },
+        .unset_variable =
+        [&] (std::string_view scope, const std::string& name) {
+            return unset_scope_variable (scopes, scope, name);
         },
         .should_stop = inputs.should_stop,
         // `values_from_scopes` is what `resolve_residual_tokens` above

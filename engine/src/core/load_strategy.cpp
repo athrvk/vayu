@@ -749,11 +749,15 @@ vayu::http::routes::ScopeOverlay& overlay) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { overlay.set (scope, name, value); },
+        .unset_variable =
+        [&] (std::string_view scope, const std::string& name) {
+            return overlay.unset (scope, name, context->lifecycle_scopes);
+        },
         .should_stop = nullptr,
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = context->step_base_vars;
-            overlay.apply_onto (vars);
+            overlay.apply_onto (vars, context->lifecycle_scopes);
             return vayu::http::resolve_template (text, vars);
         },
         .blocking_allowed = false, // An event-loop worker must never block here.
@@ -828,11 +832,15 @@ vayu::http::routes::ScopeOverlay& overlay) {
         .set_variable =
         [&] (std::string_view scope, const std::string& name,
         const std::string& value) { overlay.set (scope, name, value); },
+        .unset_variable =
+        [&] (std::string_view scope, const std::string& name) {
+            return overlay.unset (scope, name, context->lifecycle_scopes);
+        },
         .should_stop = nullptr,
         .resolve_template =
         [&] (const std::string& text) {
             vayu::http::VariableValues vars = context->step_base_vars;
-            overlay.apply_onto (vars);
+            overlay.apply_onto (vars, context->lifecycle_scopes);
             return vayu::http::resolve_template (text, vars);
         },
         .blocking_allowed = false,
@@ -1058,7 +1066,7 @@ SubmissionRequest& live) {
     // has one to drop.
     if (has_step_elements) {
         vayu::http::VariableValues vars = context->step_base_vars;
-        overlay->apply_onto (vars);
+        overlay->apply_onto (vars, context->lifecycle_scopes);
         const auto unresolved = vayu::http::routes::resolve_load_residuals (
         request, vars, std::move (late_auth));
         if (!unresolved.empty ()) {

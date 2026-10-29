@@ -70,6 +70,12 @@ export interface ScenarioStepRow {
 	 */
 	stepsNotRun?: number;
 	/**
+	 * This step's extractions that found nothing and unset their variable
+	 * (issue #3053). Both sources carry it, on the terms {@link stepsNotRun}
+	 * is carried on.
+	 */
+	extractorMisses?: number;
+	/**
 	 * The stored request this step executed, so a step that failed has a way
 	 * back to the request that sent it (issue #730).
 	 *
@@ -430,6 +436,9 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 		dataRowIndex: trace.dataRowIndex,
 		...(typeof trace.stepsNotRun === "number" && trace.stepsNotRun > 0
 			? { stepsNotRun: trace.stepsNotRun }
+			: {}),
+		...(typeof trace.extractorMisses === "number" && trace.extractorMisses > 0
+			? { extractorMisses: trace.extractorMisses }
 			: {}),
 		// The one thing the trace carried that nothing read (issue #730). A row
 		// written before the runner stamped it has none, and the card offers no

@@ -1382,7 +1382,9 @@ row exists - and the executor is the only thing that differs.
   VU saved are not (#3044): its `ScopeOverlay` keeps every environment,
   collection and globals write for the VU's life, so a `control.once` login's
   token reaches each later iteration, and only the run-local scope is emptied
-  beside the cookies.
+  beside the cookies. An extractor's miss unsets a name there just as long,
+  as a tombstone that hides the run's stored value of it from that VU alone
+  (#3053).
 - **Closed-loop only.** `constant_rps` with a `scenario` is a `400`, as is a
   non-zero `rps`/`targetRps` on any mode - an open-loop arrival rate over a
   multi-step sequence is an arrival-rate executor, a named non-goal. The

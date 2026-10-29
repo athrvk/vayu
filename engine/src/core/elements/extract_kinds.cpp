@@ -15,10 +15,11 @@
  * 1-based ("the first match" is 1, not 0, JMeter's own convention), `0` picks
  * one at random, `-1` writes every match as `<variable>_1` .. `<variable>_N`
  * plus a `<variable>_matchNr` count. A miss writes `default` when the config
- * gives one, else reports `"missing"`, and - only when `required` is set -
- * also appends a failed assertion to the step's test tally, the same channel
- * `assert_kinds.cpp` uses, so a required extractor participating in a step's
- * pass/fail is one mechanism rather than two.
+ * gives one, else unsets the variable (#3053) and reports `"missing"`, and -
+ * only when `required` is set - also appends a failed assertion to the step's
+ * test tally, the same channel `assert_kinds.cpp` uses, so a required
+ * extractor participating in a step's pass/fail is one mechanism rather than
+ * two.
  */
 
 #include "vayu/core/elements.hpp"
@@ -38,6 +39,56 @@ void mark_required_miss (ElementContext& ctx, const std::string& variable, const
     vayu::TestResult{ "extract " + variable, false, why, ctx.element_scope });
 }
 
+/// Whether the scope held @p name before this removed it. A context that
+/// binds no unset writes nothing either, so it holds nothing to remove.
+bool unset (ElementContext& ctx, const std::string& scope, const std::string& name) {
+    return ctx.unset_variable && ctx.unset_variable (scope, name);
+}
+
+/// `matchNo` -1's numbered names from `<variable>_<first>` up. They are
+/// written without a gap, so the first index the scope does not hold is past
+/// the last one an earlier response left.
+void unset_numbered_from (ElementContext& ctx,
+const std::string& scope,
+const std::string& variable,
+size_t first) {
+    size_t index = first;
+    while (unset (ctx, scope, variable + "_" + std::to_string (index))) {
+        ++index;
+    }
+}
+
+/// Everything `matchNo` -1 writes: the count and the numbered names.
+void unset_match_list (ElementContext& ctx, const std::string& scope, const std::string& variable) {
+    unset (ctx, scope, variable + "_matchNr");
+    unset_numbered_from (ctx, scope, variable, 1);
+}
+
+/// No match. Whatever an earlier response extracted is unset rather than left
+/// in use (#3053); `default`, which names `<variable>` alone, is written in
+/// its place when the config gives one.
+void write_miss (ElementContext& ctx,
+const std::string& scope,
+const std::string& variable,
+long match_no,
+const std::optional<std::string>& fallback,
+bool required,
+const std::string& miss_reason) {
+    if (match_no == -1) {
+        unset_match_list (ctx, scope, variable);
+    }
+    if (fallback) {
+        ctx.set_variable (scope, variable, *fallback);
+        ctx.outcome_status = "ok";
+        return;
+    }
+    unset (ctx, scope, variable);
+    ctx.outcome_status = "missing";
+    if (required) {
+        mark_required_miss (ctx, variable, miss_reason);
+    }
+}
+
 /// Writes @p matches under @p variable per the shared `matchNo` convention
 /// above. `to_text` turns one match into the string a variable holds.
 template <typename Match, typename ToText>
@@ -50,24 +101,14 @@ const std::optional<std::string>& fallback,
 bool required,
 const std::string& miss_reason,
 ToText to_text) {
-    if (match_no == -1) {
-        if (matches.empty ()) {
-            if (fallback) {
-                ctx.set_variable (scope, variable, *fallback);
-                ctx.outcome_status = "ok";
-                return;
-            }
-            ctx.outcome_status = "missing";
-            if (required) {
-                mark_required_miss (ctx, variable, miss_reason);
-            }
-            return;
-        }
+    if (match_no == -1 && !matches.empty ()) {
         for (size_t i = 0; i < matches.size (); ++i) {
             ctx.set_variable (scope, variable + "_" + std::to_string (i + 1),
             to_text (matches[i]));
         }
         ctx.set_variable (scope, variable + "_matchNr", std::to_string (matches.size ()));
+        // An earlier response's longer list must not outlive this one.
+        unset_numbered_from (ctx, scope, variable, matches.size () + 1);
         ctx.outcome_status = "ok";
         return;
     }
@@ -84,15 +125,7 @@ ToText to_text) {
     }
 
     if (picked == nullptr) {
-        if (fallback) {
-            ctx.set_variable (scope, variable, *fallback);
-            ctx.outcome_status = "ok";
-            return;
-        }
-        ctx.outcome_status = "missing";
-        if (required) {
-            mark_required_miss (ctx, variable, miss_reason);
-        }
+        write_miss (ctx, scope, variable, match_no, fallback, required, miss_reason);
         return;
     }
 
@@ -148,7 +181,12 @@ class ExtractJsonElement final : public Element {
     /// A required extractor that cannot read the body is a miss the step fails
     /// on, whatever its `default` (which stands in for "no match", not for "no
     /// body to match in"); an optional one is `skipped` and writes nothing.
+    /// Either way an earlier response's value is unset (#3053).
     void report_unreadable_body (ElementContext& ctx) const {
+        if (match_no_ == -1) {
+            unset_match_list (ctx, scope_, variable_);
+        }
+        unset (ctx, scope_, variable_);
         const std::string reason (constants::elements::BODY_UNREADABLE_MESSAGE);
         ctx.outcome_message = reason;
         if (!required_) {
@@ -281,15 +319,8 @@ class ExtractHeaderElement final : public Element {
         }
         const auto it = ctx.response->headers.find (header_);
         if (it == ctx.response->headers.end ()) {
-            if (fallback_) {
-                ctx.set_variable (scope_, variable_, *fallback_);
-                ctx.outcome_status = "ok";
-                return;
-            }
-            ctx.outcome_status = "missing";
-            if (required_) {
-                mark_required_miss (ctx, variable_, "no '" + header_ + "' response header");
-            }
+            write_miss (ctx, scope_, variable_, /*match_no=*/1, fallback_,
+            required_, "no '" + header_ + "' response header");
             return;
         }
         ctx.set_variable (scope_, variable_, it->second);

@@ -376,6 +376,8 @@ describe("parseStepEvent", () => {
 		// The engine sends it only on the step whose error ended its iteration
 		// (issue #2526), so a 0 or a negative is no claim to render.
 		{ field: "stepsNotRun", value: 3, malformed: ["3", 0, -1] },
+		// Absent at 0 from the engine (issue #3053), so 0 is no claim either.
+		{ field: "extractorMisses", value: 2, malformed: ["2", 0, -1] },
 	])(
 		"carries $field when present, and omits the key when absent or malformed",
 		({ field, value, malformed }) => {

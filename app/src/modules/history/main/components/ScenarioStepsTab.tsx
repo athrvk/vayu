@@ -42,6 +42,7 @@ import {
 	ElementTally,
 	ErrorsCell,
 	ExecutedCell,
+	ExtractorMisses,
 	ScenarioFacts,
 	StepLabelCell,
 	deferredResponsesOf,
@@ -226,6 +227,17 @@ export default function ScenarioStepsTab({
 										</TableCell>
 									</TableRow>
 								))}
+								{/* The step's extractor misses (issue #3053), after its element
+								    rows: each is one of an extractor row's `skipped`, summed here
+								    because each also left a later step sending that name
+								    unresolved. */}
+								{!!step.extractorMisses && (
+									<TableRow className="bg-muted/20">
+										<TableCell colSpan={8} className="py-1.5 pl-9">
+											<ExtractorMisses count={step.extractorMisses} />
+										</TableCell>
+									</TableRow>
+								)}
 							</Fragment>
 						))}
 					</TableBody>

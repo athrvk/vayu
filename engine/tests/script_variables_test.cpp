@@ -671,7 +671,7 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheLocalScopeToTheNextStep) 
     overlay.replace_from (scopes_);
 
     auto vars = vayu::http::routes::flatten_variable_scopes (base);
-    overlay.apply_onto (vars);
+    overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["n"], "1");
     EXPECT_FALSE (base.local.contains ("n")) << "a VU's write reached the base";
 

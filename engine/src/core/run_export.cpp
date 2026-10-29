@@ -190,9 +190,9 @@ constexpr auto WARNING_KEYS = std::to_array<std::string_view> (
 constexpr auto SCENARIO_KEYS = std::to_array<std::string_view> ({ "iterations",
 "iterationsCompleted", "stepsExecuted", "passed", "failed", "skipped", "errored",
 "stepsStored", "stepsDropped", "virtualUsers", "iterationsAbandoned" });
-constexpr auto STEP_KEYS =
-std::to_array<std::string_view> ({ "index", "name", "requestId", "method", "executed",
-"errors", "httpErrors", "noResponse", "unresolvedTokens", "preRequestScript" });
+constexpr auto STEP_KEYS     = std::to_array<std::string_view> (
+{ "index", "name", "requestId", "method", "executed", "errors", "httpErrors",
+"noResponse", "unresolvedTokens", "extractorMisses", "preRequestScript" });
 constexpr auto STEP_LATENCY_KEYS =
 std::to_array<std::string_view> ({ "min", "p50", "p95", "p99", "max" });
 constexpr auto ELEMENT_TALLY_KEYS = std::to_array<std::string_view> (

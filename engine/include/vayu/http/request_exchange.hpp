@@ -33,6 +33,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -335,6 +336,12 @@ std::vector<vayu::http::CookieWrite>* writes);
  * part `clear_local` drops at the iteration boundary. The environment,
  * collection and globals entries live as long as the VU (#3044), so a token
  * a `control.once` login extracted still answers every later iteration.
+ *
+ * An unset in one of those three (`unset`, an extractor's miss, #3053) cannot
+ * erase the shared base, so it is kept as a tombstone: the base value of that
+ * name in that scope reads as absent for this VU until it sets the name
+ * again, in every iteration, through `apply_onto`, `materialize` and
+ * `replace_from` alike.
  */
 class ScopeOverlay {
     public:
@@ -342,6 +349,10 @@ class ScopeOverlay {
     /// element's `ElementContext::set_variable` call lands in the same slot
     /// here it would in a design send's shared scopes.
     void set (std::string_view scope, const std::string& name, const std::string& value);
+
+    /// `unset_scope_variable`'s counterpart: drops this VU's own value of
+    /// @p name and hides @p base's, answering whether the scope held one.
+    bool unset (std::string_view scope, const std::string& name, const ScriptVariableScopes& base);
 
     /**
      * After an inline `script.pre` / `script.post` ran against a
@@ -353,7 +364,9 @@ class ScopeOverlay {
      * VU's *prior* overlay applied, so "what came out" already **is** "base
      * plus every override this VU has ever made" - storing it back is the
      * same operation a diff-then-merge would perform, without needing
-     * `Variable`'s equality to find what changed.
+     * `Variable`'s equality to find what changed. A tombstoned name the
+     * copy holds was set by the script, so its tombstone goes; one it lacks
+     * stays hidden.
      */
     void replace_from (const ScriptVariableScopes& scopes);
 
@@ -370,8 +383,10 @@ class ScopeOverlay {
 
     /// Applied lowest precedence first, so the highest-precedence overlay
     /// entry a VU wrote is what survives on @p vars - the same order
-    /// `values_from_scopes` built @p vars in to begin with.
-    void apply_onto (vayu::http::VariableValues& vars) const;
+    /// `values_from_scopes` built @p vars in to begin with. @p vars is
+    /// @p base flattened; a tombstoned name is re-read from @p base's
+    /// scopes, because the flattened map cannot say which scope answered it.
+    void apply_onto (vayu::http::VariableValues& vars, const ScriptVariableScopes& base) const;
 
     /// This VU's local scope as text (#2564), for the one reader that must
     /// tell it apart from the flattened map: a controller template, where a
@@ -390,9 +405,26 @@ class ScopeOverlay {
     [[nodiscard]] ScriptVariableScopes materialize (const ScriptVariableScopes& base) const;
 
     private:
-    vayu::Environment environment_;
-    vayu::Environment collection_;
-    vayu::Environment globals_;
+    /// One saved scope's overrides: what this VU wrote, and the base names it
+    /// unset. A name is in at most one of the two.
+    struct Layer {
+        vayu::Environment written;
+        std::set<std::string> unset;
+
+        [[nodiscard]] bool empty () const {
+            return written.empty () && unset.empty ();
+        }
+    };
+
+    Layer& layer (std::string_view scope);
+    /// What `values_from_scopes` would answer for @p name over
+    /// `materialize (base)`, without the copy: nothing when no scope does.
+    [[nodiscard]] std::optional<std::string>
+    visible_value (const std::string& name, const ScriptVariableScopes& base) const;
+
+    Layer environment_;
+    Layer collection_;
+    Layer globals_;
     vayu::Environment local_;
 };
 
@@ -423,6 +455,16 @@ void set_scope_variable (ScriptVariableScopes& scopes,
 std::string_view scope,
 const std::string& name,
 const std::string& value);
+
+/**
+ * `extract.*`'s miss without a `default` (#3053): erase @p name from the scope
+ * `set_scope_variable` would write, answering whether it was there. An
+ * ancestor collection's value of the same name answers again, because only
+ * the leaf collection is writable.
+ */
+bool unset_scope_variable (ScriptVariableScopes& scopes,
+std::string_view scope,
+const std::string& name);
 
 /**
  * One exchange's inputs: a composed request, auth-resolved unless its auth

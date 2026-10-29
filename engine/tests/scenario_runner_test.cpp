@@ -27,6 +27,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -34,6 +35,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <httplib.h>
@@ -1351,6 +1353,217 @@ TEST_F (ScenarioRunnerTest, AnUnreadableBodyFailsJsonAssertionsAndRequiredExtrac
     EXPECT_EQ (optional_trace["elements"][0]["outcome"], "skipped");
 
     EXPECT_EQ (summary_of (run_id)["scenario"]["failed"].get<size_t> (), 2u);
+}
+
+// ----------------------------------------------------------------------------
+// An extractor that finds nothing unsets its variable (#3053), so the next step
+// sends the literal `{{name}}` rather than an earlier iteration's value.
+// ----------------------------------------------------------------------------
+
+/// The stored value each scope starts with, which a miss must hide too.
+constexpr const char* STORED_TOKEN_VARIABLES =
+R"({"token":{"value":"stored-old","enabled":true}})";
+
+/// One iteration per entry of @p endpoints: step 0 GETs `/<endpoint>` and
+/// runs @p extractor on the answer, step 1 GETs `/echo-auth` sending
+/// `Authorization: Bearer {{token}}` and @p marker as `X-Marker`. Answers what
+/// each iteration's step 1 sent, in order.
+class ScenarioRunnerExtractorMissTest : public ScenarioRunnerTest {
+    protected:
+    std::vector<SeenRequest> step_one_after (const json& extractor,
+    const std::vector<std::string>& endpoints,
+    const std::string& marker         = "",
+    const std::string& environment_id = "") {
+        seed_request_with_elements (
+        "req_a", 0, "/{{data.from}}", json::array ({ extractor }));
+        json headers = json::array ({ { { "key", "Authorization" },
+        { "value", "Bearer {{token}}" }, { "enabled", true } } });
+        if (!marker.empty ()) {
+            headers.push_back (
+            { { "key", "X-Marker" }, { "value", marker }, { "enabled", true } });
+        }
+        seed_request ("req_b", 1, "/echo-auth", "", "", "", "", headers.dump ());
+
+        json rows = json::array ();
+        for (const auto& endpoint : endpoints) {
+            rows.push_back ({ { "from", endpoint } });
+        }
+        const auto run_id = start_with_data (rows, std::nullopt, environment_id);
+        EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+        last_run_ = run_id;
+
+        std::vector<SeenRequest> sent;
+        for (const auto& seen : server_->requests ()) {
+            if (seen.path == "/echo-auth") {
+                sent.push_back (seen);
+            }
+        }
+        return sent;
+    }
+
+    static std::vector<std::string> authorizations (const std::vector<SeenRequest>& sent) {
+        std::vector<std::string> out;
+        out.reserve (sent.size ());
+        for (const auto& seen : sent) {
+            out.push_back (seen.authorization);
+        }
+        return out;
+    }
+
+    /// Each stored step's `extractorMisses` in run order, then each `step`
+    /// frame's: -1 where the key is absent, so a written 0 shows.
+    std::pair<std::vector<int64_t>, std::vector<int64_t>> misses_stored_and_live () {
+        const auto misses_in = [] (const json& node) {
+            return node.contains ("extractorMisses") ?
+            node["extractorMisses"].get<int64_t> () :
+            -1;
+        };
+        std::pair<std::vector<int64_t>, std::vector<int64_t>> out;
+        for (const auto& row : db_->get_results (last_run_)) {
+            out.first.push_back (misses_in (json::parse (row.trace_data)));
+        }
+        for (const auto& frame : step_frames (context_for (last_run_))) {
+            out.second.push_back (
+            misses_in (json::parse (frame.substr (frame.find ("data: ") + 6))));
+        }
+        return out;
+    }
+
+    static json extract_token (const std::string& scope = "collection") {
+        return { { "id", "el_token" }, { "kind", "extract.json" }, { "enabled", true },
+            { "config",
+            { { "path", "$.token" }, { "variable", "token" }, { "scope", scope } } } };
+    }
+
+    std::string last_run_;
+};
+
+/// The scope an extractor writes, and how to read its stored row back.
+struct ExtractorScopeCase {
+    const char* scope;
+    const char* environment_id; // "" when the run names no environment
+};
+
+class ScenarioRunnerExtractorScopeTest
+: public ScenarioRunnerExtractorMissTest,
+  public ::testing::WithParamInterface<ExtractorScopeCase> {
+    protected:
+    /// The variables stored for the case's scope once the run has persisted.
+    vayu::Environment stored_variables () {
+        const std::string scope = GetParam ().scope;
+        std::string text;
+        if (scope == "env") {
+            text =
+            db_->get_environment ("env_1").value_or (vayu::db::Environment{}).variables;
+        } else if (scope == "globals") {
+            text = db_->get_globals ().value_or (vayu::db::Globals{}).variables;
+        } else {
+            text =
+            db_->get_collection ("col_1").value_or (vayu::db::Collection{}).variables;
+        }
+        return vayu::json::parse_variables (text);
+    }
+};
+
+// Mutation check: drop the `unset` in `write_miss` (extract_kinds.cpp) and the
+// second iteration sends `Bearer secret-abc` again.
+TEST_P (ScenarioRunnerExtractorScopeTest, AMissUnsetsTheVariableInsteadOfKeepingTheLastValue) {
+    const std::string scope = GetParam ().scope;
+    seed_collection ("col_1", scope == "collection" ? STORED_TOKEN_VARIABLES : "");
+    seed_environment ("env_1", scope == "env" ? STORED_TOKEN_VARIABLES : "");
+    if (scope == "globals") {
+        db_->save_globals ({ "globals", STORED_TOKEN_VARIABLES, 1 });
+    }
+
+    const auto sent = step_one_after (
+    extract_token (scope), { "token", "ok" }, "", GetParam ().environment_id);
+
+    EXPECT_EQ (authorizations (sent),
+    (std::vector<std::string>{ "Bearer secret-abc", "Bearer {{token}}" }))
+    << "iteration 2's miss left iteration 1's token in use";
+    EXPECT_FALSE (stored_variables ().contains ("token"))
+    << "the unset did not reach the stored " << scope << " row";
+}
+
+INSTANTIATE_TEST_SUITE_P (EachScope,
+ScenarioRunnerExtractorScopeTest,
+::testing::Values (ExtractorScopeCase{ "collection", "" },
+ExtractorScopeCase{ "env", "env_1" },
+ExtractorScopeCase{ "globals", "" }),
+[] (const ::testing::TestParamInfo<ExtractorScopeCase>& info) {
+    return std::string (info.param.scope);
+});
+
+TEST_F (ScenarioRunnerExtractorMissTest, ADefaultStillStandsInForAMiss) {
+    seed_collection ("col_1");
+    auto extractor                 = extract_token ();
+    extractor["config"]["default"] = "anon";
+
+    EXPECT_EQ (authorizations (step_one_after (extractor, { "token", "ok" })),
+    (std::vector<std::string>{ "Bearer secret-abc", "Bearer anon" }));
+    const std::vector<int64_t> none{ -1, -1, -1, -1 };
+    EXPECT_EQ (misses_stored_and_live (), std::make_pair (none, none))
+    << "a miss the default answered is not counted";
+}
+
+// The miss is counted on the step that missed, in the iteration it missed in,
+// on the stored row and the live frame alike; a hit and a step with no
+// extractor carry no key. Mutation check: drop the `extractorMisses` write in
+// `store_step_record` (scenario_runner.cpp) and the stored half fails; in
+// `build_step_payload` and the live half does.
+TEST_F (ScenarioRunnerExtractorMissTest, AMissIsCountedOnItsOwnStepLiveAndStored) {
+    seed_collection ("col_1");
+
+    step_one_after (extract_token (), { "token", "ok" });
+
+    const std::vector<int64_t> second_iteration_step_zero{ -1, -1, 1, -1 };
+    EXPECT_EQ (misses_stored_and_live (),
+    std::make_pair (second_iteration_step_zero, second_iteration_step_zero));
+}
+
+TEST_F (ScenarioRunnerExtractorMissTest, AnAbsentResponseHeaderUnsetsTheVariable) {
+    seed_collection ("col_1");
+    const json extractor = { { "id", "el_header" },
+        { "kind", "extract.header" }, { "enabled", true },
+        { "config", { { "header", "Set-Cookie" }, { "variable", "token" } } } };
+
+    EXPECT_EQ (authorizations (step_one_after (extractor, { "login", "ok" })),
+    (std::vector<std::string>{ "Bearer sid=session-1; Path=/", "Bearer {{token}}" }));
+}
+
+// An optional `extract.json` over a body it cannot read is `skipped`, and an
+// earlier response's value goes all the same.
+TEST_F (ScenarioRunnerExtractorMissTest, AnUnreadableBodyUnsetsTheVariable) {
+    seed_collection ("col_1");
+
+    EXPECT_EQ (authorizations (step_one_after (extract_token (), { "token", "html" })),
+    (std::vector<std::string>{ "Bearer secret-abc", "Bearer {{token}}" }));
+    const auto rows = db_->get_results (last_run_);
+    ASSERT_EQ (rows.size (), 4u);
+    EXPECT_EQ (json::parse (rows[2].trace_data)["elements"][0]["outcome"], "skipped");
+    // Counted as a miss all the same: the value went.
+    const std::vector<int64_t> counted{ -1, -1, 1, -1 };
+    EXPECT_EQ (misses_stored_and_live (), std::make_pair (counted, counted));
+}
+
+// `matchNo: -1` writes `ids_1` .. `ids_N` and `ids_matchNr`: a shorter list
+// unsets the numbered names past its own end, and a miss unsets them all.
+// `[a-z]+` finds `token secret abc`, then `token tok`, then nothing.
+// Mutation check: drop the `unset_numbered_from` call after a hit and the
+// second marker ends `abc`.
+TEST_F (ScenarioRunnerExtractorMissTest, EveryMatchUnsetsTheNumberedNamesNoLongerMatched) {
+    seed_collection ("col_1");
+    const json extractor = { { "id", "el_ids" }, { "kind", "extract.regex" },
+        { "enabled", true },
+        { "config", { { "pattern", "[a-z]+" }, { "variable", "ids" }, { "matchNo", -1 } } } };
+
+    const auto sent = step_one_after (extractor, { "token", "login-n", "ok" },
+    "{{ids_matchNr}} {{ids_1}} {{ids_3}}");
+
+    ASSERT_EQ (sent.size (), 3u);
+    EXPECT_EQ (sent[0].marker, "3 token abc");
+    EXPECT_EQ (sent[1].marker, "2 token {{ids_3}}");
+    EXPECT_EQ (sent[2].marker, "{{ids_matchNr}} {{ids_1}} {{ids_3}}");
 }
 
 // `timer.think` waits between steps, outside either one's own latency, and

@@ -50,7 +50,7 @@ import { memo, useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
-import { Callout, SentBodyFileNote } from "@/components/shared";
+import { Callout, ExtractorMisses, SentBodyFileNote } from "@/components/shared";
 import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
@@ -211,6 +211,12 @@ function ScenarioStepCard({
 					 * run being watched says more than "failed".
 					 */}
 					{tests && <TestsChip tests={tests} className="shrink-0" />}
+					{/*
+					 * In the row, live and stored alike (issue #3053): the step
+					 * can pass while its extractor found nothing, and the next
+					 * step then sends that name unresolved.
+					 */}
+					<ExtractorMisses count={step.extractorMisses} className="shrink-0" />
 				</span>
 			}
 			actions={

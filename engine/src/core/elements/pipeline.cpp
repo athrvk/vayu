@@ -178,6 +178,22 @@ nlohmann::json ElementOutcome::to_json () const {
     return node;
 }
 
+bool is_extractor_miss (const ElementOutcome& outcome) {
+    if (!outcome.kind.starts_with ("extract.")) {
+        return false;
+    }
+    if (outcome.status == "missing") {
+        return true;
+    }
+    return outcome.status == "skipped" &&
+    outcome.message == constants::elements::BODY_UNREADABLE_MESSAGE;
+}
+
+size_t count_extractor_misses (const std::vector<ElementOutcome>& outcomes) {
+    return static_cast<size_t> (
+    std::count_if (outcomes.begin (), outcomes.end (), is_extractor_miss));
+}
+
 void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
     if (outcome.status == "ok") {
         passed.fetch_add (1, std::memory_order_relaxed);
