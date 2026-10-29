@@ -346,7 +346,8 @@ export const ENGINE_READING_GUARDS = {
 	/*
 	 * The `vayu://elements/kinds` resource and the `elements` argument's `kind`
 	 * examples both name element kinds by string (issue #1517); this is what
-	 * pins them to the registry the engine's own fixture describes.
+	 * pins them to the registry the engine's own fixture describes. It also
+	 * holds `start_load_run`'s collection-only kinds to the fixture's (#3070).
 	 */
 	mcpElementKinds: {
 		reader: "app/electron/mcp/element-kinds.conformance.test.ts",
