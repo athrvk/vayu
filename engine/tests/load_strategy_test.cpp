@@ -3097,12 +3097,21 @@ TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmi
     const size_t ITERATIONS = 3;
     vayu::db::Database db (TEST_DB_PATH);
 
-    const auto summary = run_single_request_summary (db, "run-elements-extract-header",
-    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
-    nlohmann::json::array ({ nlohmann::json{ { "id", "el_found" }, { "kind", "extract.header" },
-                             { "config", { { "header", "content-type" }, { "variable", "contentType" } } } },
-    nlohmann::json{ { "id", "el_missing" }, { "kind", "extract.header" },
-    { "config", { { "header", "X-Absent" }, { "variable", "absent" } } } } })));
+    const nlohmann::json found_element = { { "id", "el_found" },
+                                           { "kind", "extract.header" },
+                                           { "config",
+                                             { { "header", "content-type" },
+                                               { "variable", "contentType" } } } };
+    const nlohmann::json missing_element = { { "id", "el_missing" },
+                                             { "kind", "extract.header" },
+                                             { "config",
+                                               { { "header", "X-Absent" },
+                                                 { "variable", "absent" } } } };
+    const auto elements = nlohmann::json::array ({ found_element, missing_element });
+
+    const auto summary = run_single_request_summary (
+    db, "run-elements-extract-header",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1, elements));
 
     const auto found = element_entry (summary, "el_found");
     ASSERT_FALSE (found.is_null ()) << summary.dump ();
