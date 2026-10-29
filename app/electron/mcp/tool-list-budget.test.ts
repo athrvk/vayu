@@ -128,6 +128,11 @@
  * `list_trash` and `list_client_certificates` each gained a sentence) took the
  * rows to 147,481 / 144,755 / 217,136 / 212,739 B, and the four caps went to
  * 147,600 / 144,900 / 217,300 / 212,900.
+ *
+ * #3031's `declined` bucket (a sentence each in `diff_spec` and `sync_spec`, and
+ * the key in `diff_spec`'s output schema) took the rows to 147,636 / 144,910 /
+ * 217,409 / 213,012 B, and the four caps went to 147,900 / 145,200 / 217,700 /
+ * 213,300.
  */
 
 import { describe, it, expect } from "vitest";
@@ -147,10 +152,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_600 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 144_900 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 217_300 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 212_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_900 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_200 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 217_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

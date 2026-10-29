@@ -297,7 +297,7 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 			created: 1,
 			updated: 2,
 			deleted: 0,
-			skipped: { requests: 1, fields: 3, deletions: 1 },
+			skipped: { requests: 1, fields: 3, deletions: 1, declined: 2 },
 		}),
 		diffSpec: vi.fn().mockResolvedValue({
 			identical: false,
@@ -306,6 +306,18 @@ function fakeClient(overrides: Partial<Record<keyof EngineClient, unknown>> = {}
 					operation: { operationId: "listOwners", method: "GET", path: "/owners" },
 					folder: "owners",
 					draft: { name: "List owners", method: "GET", url: "{{baseUrl}}/owners" },
+				},
+			],
+			declined: [
+				{
+					operation: {
+						operationId: "getOwner",
+						method: "GET",
+						path: "/owners/{ownerId}",
+					},
+					folder: "owners",
+					safe: false,
+					draft: { name: "Get an owner", method: "GET", url: "{{baseUrl}}/owners/1" },
 				},
 			],
 			removed: [
@@ -13801,12 +13813,21 @@ describe("OpenAPI spec binding tools", () => {
 		expect(value.identical).toBe(false);
 		expect(value.summary).toEqual({
 			added: 1,
+			declined: 1,
 			removed: 1,
 			changed: 1,
 			unchanged: 12,
 			unmapped: 1,
 		});
 		expect(value.added[0].operation.operationId).toBe("listOwners");
+		// Its own bucket, shaped like `added` and without the draft: a deleted
+		// request is not a missing one, and the agent must not read it as new.
+		expect(value.declined).toEqual([
+			{
+				operation: { operationId: "getOwner", method: "GET", path: "/owners/{ownerId}" },
+				folder: "owners",
+			},
+		]);
 		expect(value.removed[0].requestId).toBe("req_9");
 		expect(value.changed[0].fields[0]).toMatchObject({
 			field: "name",
@@ -13888,6 +13909,69 @@ describe("OpenAPI spec binding tools", () => {
 		expect(JSON.parse(firstText(res)).changed[0].fields[0].userTouched).toBe(true);
 	});
 
+	test("diff_spec says what a declined operation is, and only when there is one", async () => {
+		const withDeclined = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(fakeClient())
+		);
+		const text = allText(withDeclined);
+		expect(text).toMatch(/1 operation the user deleted the request for/);
+		expect(text).toMatch(/never creates one/);
+		// The sentence offers nobody a way to bring one back: that is the user's.
+		expect(text).toMatch(/the user's call/);
+		expect(text).not.toMatch(/pass .*declined|tick .*declined/i);
+
+		const none = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(
+				fakeClient({
+					diffSpec: vi.fn().mockResolvedValue({
+						identical: false,
+						added: [],
+						removed: [],
+						changed: [],
+						unchanged: 3,
+						unmapped: 0,
+					}),
+				})
+			)
+		);
+		expect(allText(none)).not.toMatch(/the user deleted the request for/);
+		// The bucket is present and empty even from an engine that omits it.
+		expect(JSON.parse(firstText(none)).declined).toEqual([]);
+		expect(JSON.parse(firstText(none)).summary.declined).toBe(0);
+	});
+
+	test("diff_spec caps the declined bucket and reports the true total", async () => {
+		const over = MAX_SPEC_DIFF_ENTRIES + 3;
+		const client = fakeClient({
+			diffSpec: vi.fn().mockResolvedValue({
+				identical: false,
+				added: [],
+				declined: Array.from({ length: over }, (_unused, index) => ({
+					operation: { operationId: `op_${index}`, method: "GET", path: `/p${index}` },
+					folder: "",
+				})),
+				removed: [],
+				changed: [],
+				unchanged: 0,
+				unmapped: 0,
+			}),
+		});
+		const res = await dispatchTool(
+			"diff_spec",
+			{ collectionId: "col_1", content: "{}" },
+			ctxWith(client)
+		);
+		const value = JSON.parse(firstText(res));
+		expect(value.declined).toHaveLength(MAX_SPEC_DIFF_ENTRIES);
+		expect(value.summary.declined).toBe(over);
+		// A cut declined list is a cut list: the flag and the caveat say so.
+		expect(value.entriesTruncated).toBe(true);
+	});
+
 	test("diff_spec says a byte-identical document has nothing to apply", async () => {
 		const client = fakeClient({
 			diffSpec: vi.fn().mockResolvedValue({
@@ -13908,6 +13992,7 @@ describe("OpenAPI spec binding tools", () => {
 		expect(value.identical).toBe(true);
 		expect(value.summary).toEqual({
 			added: 0,
+			declined: 0,
 			removed: 0,
 			changed: 0,
 			unchanged: 14,
@@ -14381,11 +14466,18 @@ describe("OpenAPI spec binding tools", () => {
 		expect(text).toMatch(/1 changed request left untouched/i);
 		expect(text).toMatch(/3 fields not written/i);
 		expect(text).toMatch(/NOT deleted/);
+		// A request the user deleted is not an omission to fix, and the agent is
+		// told so rather than left to conclude the sync lost it. Dropping the
+		// `skipped.declined` branch of `describeSync` reddens this.
+		expect(text).toMatch(
+			/2 operations whose request the user deleted and which was NOT created again/
+		);
 		// And the counts are in the structured body too, not only in the prose.
 		expect(JSON.parse(firstText(res)).skipped).toEqual({
 			requests: 1,
 			fields: 3,
 			deletions: 1,
+			declined: 2,
 		});
 	});
 
@@ -14399,7 +14491,7 @@ describe("OpenAPI spec binding tools", () => {
 				created: 0,
 				updated: 1,
 				deleted: 0,
-				skipped: { requests: 0, fields: 0, deletions: 0 },
+				skipped: { requests: 0, fields: 0, deletions: 0, declined: 0 },
 			}),
 		});
 		const res = await dispatchTool(
@@ -14456,6 +14548,17 @@ describe("OpenAPI spec binding tools", () => {
 		expect((stated as { spec: { sourceUrl?: string } }).spec.sourceUrl).toBe(
 			"https://api.example.com/openapi.json"
 		);
+	});
+
+	test("sync_spec's description says a user-deleted request is not re-created, and offers no way to", () => {
+		const description = TOOLS.find((t) => t.name === "sync_spec")?.description;
+		expect(typeof description).toBe("string");
+		expect(description).toMatch(/except those the user deleted the request for \(`declined`\)/);
+		expect(description).toMatch(/declined operations not re-created/);
+		// No argument could name a declined operation to create: the schema is the
+		// three it always was.
+		const shape = TOOLS.find((t) => t.name === "sync_spec")?.inputSchema ?? {};
+		expect(Object.keys(shape).sort()).toEqual(["collectionId", "content", "sourceUrl"]);
 	});
 
 	test("sync_spec declares both families it changes", () => {
