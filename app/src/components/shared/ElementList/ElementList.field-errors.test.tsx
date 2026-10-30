@@ -22,6 +22,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { ElementConfigSchema, ElementDef, ElementKindSchema } from "@/types";
+import { elementNeeds, notRunReason } from "@/lib/elements";
 import { ElementList } from "./index";
 import { expectShowsError, expectShowsNoError } from "./field-error.testkit";
 
@@ -145,17 +146,21 @@ const KINDS: ElementKindSchema[] = [
 	}),
 ];
 
-function renderOpen(elementKind: string, config: Record<string, unknown>) {
+function renderRow(elementKind: string, config: Record<string, unknown>, open: boolean) {
 	const element: ElementDef = { id: "e1", kind: elementKind, enabled: true, config };
 	render(
 		<ElementList
 			elements={[element]}
 			onChange={vi.fn()}
 			kinds={KINDS}
-			openIds={new Set([element.id])}
+			openIds={new Set(open ? [element.id] : [])}
 		/>
 	);
+	return element;
 }
+
+const renderOpen = (elementKind: string, config: Record<string, unknown>) =>
+	renderRow(elementKind, config, true);
 
 interface Case {
 	name: string;
@@ -284,4 +289,48 @@ describe("ElementList - a refused value is told on its field (#3048)", () => {
 	// Mutation check: stop passing `errors={fieldErrors}` to the generic form in
 	// `ElementRow` and every case above except the mode kinds (Percent, the
 	// range) reds; stop passing it to the bespoke form and those two red.
+});
+
+describe("ElementList - the row marks what Send leaves out (#3066)", () => {
+	const markOf = () => document.querySelector("[data-element-incomplete]");
+
+	it("marks a collapsed row whose value is refused, with the field and its message", () => {
+		renderRow("control.loop", { count: 0 }, false);
+
+		expect(markOf()).toHaveTextContent("count: Must be at least 1");
+	});
+
+	it("marks an open row the same way", () => {
+		renderRow("control.loop", { count: 0 }, true);
+
+		expect(markOf()).toHaveTextContent("count: Must be at least 1");
+	});
+
+	it("keeps the Needs label for a missing key", () => {
+		renderRow("timer.pacing", {}, false);
+
+		expect(markOf()).toHaveTextContent(/^Needs Cadence$/);
+	});
+
+	it("shows no mark, and the summary, for an element that passes", () => {
+		renderRow("control.loop", { count: 3 }, false);
+
+		expect(markOf()).toBeNull();
+		expect(screen.getByText("count: 3")).toBeInTheDocument();
+	});
+
+	it.each([
+		["a missing key", "timer.pacing", {}],
+		["a refused value", "control.loop", { count: 0 }],
+		["both", "extract.json", { variable: "" }],
+	])("says what the response's Not run line says for %s", (_name, elementKind, config) => {
+		const element = renderRow(elementKind, config, false);
+		const needs = elementNeeds(element, KINDS);
+
+		expect(needs).not.toBeNull();
+		const reason = notRunReason(needs!);
+		const mark = markOf()?.textContent ?? "";
+		expect(reason.startsWith("Not run - ")).toBe(true);
+		expect(mark.toLowerCase()).toBe(reason.slice("Not run - ".length).toLowerCase());
+	});
 });

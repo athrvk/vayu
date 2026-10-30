@@ -1699,8 +1699,12 @@ handlers take it before the compose call, so a send that throws still says it),
 and a streamed one, which carries it in `execution-events-store` for both the
 live placeholder and the stored response that replaces it. The response's
 Elements section draws each as `Not run - needs <fields>`, so a check that did
-not run is never read as one that passed. The element's own row already says
-the same through its "Needs ..." chip, which reads `elementNeeds` live.
+not run is never read as one that passed. The element's own row says
+the same before the send, collapsed or open, through the mark in the summary's
+place (`describeNeeds`, the wording `notRunReason` builds on): "Needs <fields>"
+for a missing key, `<field>: <message>` for a refused value. It reads
+`elementNeeds` live and shows for every element Send leaves out as incomplete;
+a switched-off element is left out too but is not flagged, its switch says so.
 A response restored from History carries none: it is not the send that composed
 the payload. With the catalogue not yet loaded, disabled elements and the
 operand rules still apply and a kind's required keys wait for the engine. The

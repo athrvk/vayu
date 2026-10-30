@@ -455,16 +455,32 @@ export interface LeftOutElement {
 }
 
 /**
- * What a response says of an element Send left out (#3066): the "Needs ..."
- * chip's labels, then each value the schema refuses as `field: message`. A
- * fragment, so it takes no full stop; "not run" is the app's own word, apart
- * from the engine's `skipped` outcome (an element it chose not to run).
+ * What keeps an element from running, as one fragment: the "Needs ..." labels,
+ * then each value the schema refuses as `field: message`. The one wording the
+ * row's mark and the response's "Not run" line share (#3066), so the list and
+ * the result cannot name different reasons. @p sentenceStart capitalises the
+ * lead word for a mark that stands alone; the fields keep their keys' case.
  */
-export function notRunReason({ missing, invalid }: ElementNeeds): string {
+export function describeNeeds(
+	{ missing, invalid }: ElementNeeds,
+	{ sentenceStart }: { sentenceStart: boolean }
+): string {
 	const parts: string[] = [];
-	if (missing.length > 0) parts.push(`needs ${missing.join(", ")}`);
+	if (missing.length > 0) {
+		parts.push(`${sentenceStart ? "Needs" : "needs"} ${missing.join(", ")}`);
+	}
 	for (const [field, message] of Object.entries(invalid)) parts.push(`${field}: ${message}`);
-	return `Not run - ${parts.join("; ")}`;
+	return parts.join("; ");
+}
+
+/**
+ * What a response says of an element Send left out (#3066): {@link describeNeeds}
+ * behind "Not run". A fragment, so it takes no full stop; "not run" is the app's
+ * own word, apart from the engine's `skipped` outcome (an element it chose not
+ * to run).
+ */
+export function notRunReason(needs: ElementNeeds): string {
+	return `Not run - ${describeNeeds(needs, { sentenceStart: false })}`;
 }
 
 /**
