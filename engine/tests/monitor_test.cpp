@@ -106,6 +106,33 @@ TEST (MonitorConfigValidation, RejectsAnUnusableBlock) {
     }
 }
 
+// The exposition parser matches a sample by its bare name, so a label filter
+// or a space in a requested name never matches anything and the run scraped a
+// healthy endpoint for nothing (#3120). Mutation check: drop the Prometheus
+// name rule in `read_monitor_series` and every case here is accepted.
+TEST (MonitorConfigValidation, APrometheusSeriesWithALabelFilterOrASpaceIsRejected) {
+    for (const char* name : { "http_requests_total{code=\"500\"}", "node_cpu{",
+         "process cpu", " up", "up\t" }) {
+        auto config = monitor_config (
+        json{ { "url", "http://x/m" }, { "series", json::array ({ name }) } });
+        const auto reason = validate_monitor_config (config);
+        ASSERT_HAS_VALUE (reason) << "accepted the series name '" << name << "'";
+        EXPECT_NE (reason->find ("matched by name"), std::string::npos) << *reason;
+        EXPECT_FALSE (monitor_config_from (config).has_value ()) << name;
+    }
+}
+
+// A flat JSON object's key may legally hold either character, so the rule is
+// the Prometheus format's alone.
+TEST (MonitorConfigValidation, AJsonSeriesMayHoldABraceOrASpace) {
+    auto config = monitor_config (json{ { "url", "http://x/m" }, { "format", "json" },
+    { "series", json::array ({ "requests{500}", "queue depth" }) } });
+    EXPECT_FALSE (validate_monitor_config (config).has_value ());
+    const auto parsed = monitor_config_from (config);
+    ASSERT_HAS_VALUE (parsed);
+    EXPECT_EQ (parsed->series.size (), 2u);
+}
+
 TEST (MonitorConfigValidation, LoopbackAndPrivateTargetsAreAllowed) {
     // Deliberate: this is a local tool scraping the user's own infrastructure.
     for (const char* url : { "http://127.0.0.1:9100/metrics", "http://192.168.1.4:9090/metrics",

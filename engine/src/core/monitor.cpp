@@ -99,7 +99,20 @@ MonitorConfig& out) {
         if (!entry.is_string () || entry.get<std::string> ().empty ()) {
             return "'monitor.series' entries must be non-empty metric names";
         }
-        out.series.push_back (entry.get<std::string> ());
+        const auto& name = entry.get_ref<const std::string&> ();
+        // The exposition parser reads a sample's name up to its first '{' or
+        // space, so a name holding either can never match and the run would
+        // scrape a healthy endpoint for nothing (#3120). A JSON key may hold
+        // both legally, which is why the rule is the Prometheus format's alone;
+        // `read_monitor_format` has already run.
+        if (out.format == MonitorFormat::Prometheus &&
+        name.find_first_of ("{ \t\r\n\f\v") != std::string::npos) {
+            return "'monitor.series' entry \"" + name +
+            "\" is not a metric name: series are matched by name alone and the "
+            "samples of every label set are summed, so write the bare name "
+            "with no '{...}' label filter and no spaces";
+        }
+        out.series.push_back (name);
     }
 
     return std::nullopt;

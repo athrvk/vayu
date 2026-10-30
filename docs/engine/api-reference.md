@@ -9049,11 +9049,15 @@ than accepted and never scraped; add a `mode` beside `scenario` to scrape.
 
 - **`prometheus`** - the text exposition format. Comment and blank lines are
   skipped, a trailing exposition timestamp is ignored, and a value that is not a
-  finite number (`NaN`, `+Inf`) is dropped. **Samples sharing a name across
-  label sets are summed**, so `node_cpu_seconds_total{cpu="0"}` and
-  `{cpu="1"}` chart as one series.
+  finite number (`NaN`, `+Inf`) is dropped. **Series are matched by name, and
+  samples sharing a name across label sets are summed**, so
+  `node_cpu_seconds_total{cpu="0"}` and `{cpu="1"}` chart as one series. A
+  `series` entry is therefore a bare name: one holding a `{` (a label filter
+  such as `http_requests_total{code="500"}`) or whitespace could never match,
+  and is refused (below).
 - **`json`** - a flat object of numbers, where `series` lists the keys to read.
-  A key that is absent or non-numeric is skipped.
+  A key that is absent or non-numeric is skipped. A key may hold any
+  character, `{` and spaces included.
 
 A name the body does not carry is **absent** from that sample rather than zero,
 and a scrape that reads nothing at all - a transport failure, an unreadable
@@ -9081,8 +9085,9 @@ scraping the user's own infrastructure. The one exception is every outbound
 path's: the engine's own port and the MCP port are refused
 ([Reserved local ports](#reserved-local-ports)). An unusable block (no `url`, a
 non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
-`intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
-field, before the run row is created.
+`intervalMs`, an unknown `format`, or under `prometheus` a `series` name holding
+a `{` or whitespace) is a `400` `invalid_run_config` naming the field, before
+the run row is created.
 
 A `monitor` block beside a `scenario` that carries no load `mode` (absent,
 empty or not a string) is likewise a `400` `invalid_run_config` naming
