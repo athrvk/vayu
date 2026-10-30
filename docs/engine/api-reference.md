@@ -5849,7 +5849,7 @@ started, and a running listener keeps what it was started with:
 
 | Setting | Default | Range | What it bounds |
 |---------|---------|-------|----------------|
-| `inboxMaxBodyBytes` | 65536 | 256 - 8388608 | Stored body per capture. Past it the body is kept as a prefix with `bodyTruncated: true`; `bodyBytes` is always the size as received |
+| `inboxMaxBodyBytes` | 65536 | 256 - 8388608 | Stored body per capture. Past it the body is kept as a prefix with `bodyTruncated: true`, cut on a character boundary so a prefix of text is still text; `bodyBytes` is always the size as received |
 | `inboxMaxCaptures` | 500 | 1 - 10000 | Captures retained per inbox, oldest evicted first. Also the ceiling on one `limit` of the capture list |
 | `inboxLivePollIntervalMs` | 250 | 25 - 5000 | How often a watched inbox checks for new captures - the delay between a webhook landing and its event |
 
@@ -6029,6 +6029,7 @@ The captures, **newest first**, in the standard `{data, pagination}` envelope.
       "query": "attempt=2",
       "headers": { "Content-Type": "application/json" },
       "body": "{\"id\":7}",
+      "bodyEncoding": "utf8",
       "bodyBytes": 8,
       "bodyTruncated": false,
       "remoteAddr": "127.0.0.1"
@@ -6042,6 +6043,17 @@ The captures, **newest first**, in the standard `{data, pagination}` envelope.
 `headers` joins a repeated name with `, `. `query` is the raw query string
 without the `?`.
 
+**`bodyEncoding` says how to read `body`** (issue #3109). A JSON string holds
+only UTF-8 and a sender can post any bytes, so `"utf8"` means `body` is the
+stored text itself, and `"base64"` means the stored bytes were not valid UTF-8
+text (or held a NUL) and `body` is their standard, padded base64. It is decided
+when the capture is read, so every capture carries it, and `bodyBytes` is the
+size as received in both cases, never the length of the encoded string. A body
+the byte cap cut is first trimmed back to a character boundary, so a cut inside
+a multi-byte character leaves `utf8` text rather than turning the whole prefix
+into `base64`; `bodyTruncated` still says it was cut. `path` and `query` are
+not classified: a byte in either that is not UTF-8 is answered as U+FFFD.
+
 ### DELETE /inbox/:inboxId/requests
 
 Clear the captures, keeping the listener: `{"inboxId": "...", "cleared": 12}`.
@@ -6049,7 +6061,7 @@ Clear the captures, keeping the listener: `{"inboxId": "...", "cleared": 12}`.
 ### GET /inbox/:inboxId/live
 
 Server-Sent Events, one event per capture, each carrying the same object as the
-list above and an SSE `id:` equal to the capture's `id`. A reconnect that sends
+list above (`bodyEncoding` included) and an SSE `id:` equal to the capture's `id`. A reconnect that sends
 `Last-Event-ID` resumes after that capture, so nothing is missed across a drop.
 The stream ends when the inbox is stopped.
 

@@ -21,8 +21,10 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/invariant.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 
@@ -71,6 +73,28 @@ nlohmann::json headers_to_json (const httplib::Headers& headers) {
     return out;
 }
 VAYU_DIAGNOSTIC_POP
+
+/**
+ * The prefix of @p body the byte cap keeps. The cap can fall inside a
+ * character, and a stored body that ends mid-sequence is no longer text, so the
+ * incomplete tail is dropped (#3109); `bodyBytes` still reports the size as
+ * received.
+ */
+std::string stored_body (const std::string& body, int64_t max_body_bytes) {
+    const auto cap = static_cast<size_t> (max_body_bytes);
+    if (body.size () <= cap) {
+        return body;
+    }
+    const std::string_view prefix = std::string_view (body).substr (0, cap);
+    return std::string (vayu::utils::without_incomplete_utf8_tail (prefix));
+}
+
+/// The headers as the text a capture stores. A header value is bytes: one lone
+/// 0xC0 must not make `dump` throw and the sender's delivery vanish (#3109).
+std::string headers_json_text (const httplib::Headers& headers) {
+    return headers_to_json (headers).dump (
+    -1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
 
 /// The raw query string of a request target, without the '?'.
 std::string query_of (const std::string& target) {
@@ -489,7 +513,18 @@ nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {
         // A row this engine wrote always parses; a damaged one still lists.
         out["headers"] = nlohmann::json::object ();
     }
-    out["body"]          = capture.body;
+    // A JSON string holds only UTF-8 and a capture is whatever a sender wrote
+    // (#3109), so a body that is not text travels as its base64, as a response
+    // body does (`bodyEncoding`, `request_exchange.cpp`). Decided here, at the
+    // read, so a row stored before the field needs no migration. `bodyBytes` is
+    // the size as received either way, never the encoded length.
+    if (vayu::utils::is_valid_utf8_text (capture.body)) {
+        out["body"]         = capture.body;
+        out["bodyEncoding"] = vayu::json::BODY_ENCODING_UTF8;
+    } else {
+        out["body"]         = vayu::utils::base64_encode (capture.body);
+        out["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
+    }
     out["bodyBytes"]     = capture.body_bytes;
     out["bodyTruncated"] = capture.body_truncated;
     out["remoteAddr"]    = capture.remote_addr;
@@ -598,12 +633,10 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         // still on the target. See AnyPathServer.
         capture_row.path       = path_of (req.target);
         capture_row.query      = query_of (req.target);
-        capture_row.headers    = headers_to_json (req.headers).dump ();
+        capture_row.headers    = headers_json_text (req.headers);
         capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
-        capture_row.body        = capture_row.body_truncated ?
-        req.body.substr (0, static_cast<size_t> (raw->limits.max_body_bytes)) :
-        req.body;
+        capture_row.body = stored_body (req.body, raw->limits.max_body_bytes);
         capture_row.remote_addr = req.remote_addr;
 
         try {
@@ -1083,7 +1116,10 @@ httplib::Response& res) {
         auto [status, body] =
         inbox_captures_response (ctx.db, ctx.inbox_manager, inbox_id, limit, offset);
         res.status = status;
-        res.set_content (body.dump (), "application/json");
+        // `replace` is the belt behind `inbox_capture_json`: a path or query
+        // the sender sent as bytes must not turn the list into a 500.
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error (
         "inbox", "GET /inbox/:id/requests - Error: " + std::string (e.what ()));
@@ -1119,6 +1155,25 @@ enum class InboxStep : std::uint8_t {
 };
 
 /**
+ * One capture as an SSE frame, or nothing when it cannot be built. A capture
+ * that cannot be written is skipped rather than thrown: the stream's thread
+ * would end with the claim still held and every later capture unseen (#3109).
+ */
+std::optional<std::string> live_capture_frame (const vayu::db::InboxRequest& capture) {
+    try {
+        return "id: " + std::to_string (capture.id) + "\ndata: " +
+        inbox_capture_json (capture).dump (
+        -1, ' ', false, nlohmann::json::error_handler_t::replace) +
+        "\n\n";
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning ("inbox",
+        "GET /inbox/:id/live - skipped capture " + std::to_string (capture.id) +
+        ": " + std::string (e.what ()));
+        return std::nullopt;
+    }
+}
+
+/**
  * One poll: every capture since @p last_id, and - when there are none - a
  * keep-alive on a still-running inbox.
  *
@@ -1141,9 +1196,8 @@ httplib::DataSink& sink) {
         return InboxStep::Ended;
     }
     for (const auto& capture : fresh) {
-        const std::string payload = "id: " + std::to_string (capture.id) +
-        "\ndata: " + inbox_capture_json (capture).dump () + "\n\n";
-        if (!sink.write (payload.data (), payload.size ())) {
+        const auto payload = live_capture_frame (capture);
+        if (payload && !sink.write (payload->data (), payload->size ())) {
             return InboxStep::Closed;
         }
         last_id = capture.id;
