@@ -331,7 +331,7 @@ class InboxListenerTest : public ::testing::Test {
     /// Replace the manager with one that sees @p addresses as this machine's
     /// interfaces and counts how often it is asked, so a wildcard bind's answer
     /// does not depend on the NICs of the host the suite runs on.
-    void use_local_addresses (std::vector<std::string> addresses) {
+    void use_local_addresses (const std::vector<std::string>& addresses) {
         address_lookups_ = 0;
         manager_         = std::make_unique<InboxManager> ([this, addresses] () {
             ++address_lookups_;
