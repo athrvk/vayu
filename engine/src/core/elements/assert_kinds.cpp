@@ -18,6 +18,7 @@
  * not two.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <expected>
@@ -159,7 +160,7 @@ class AssertJsonPathElement final : public Element {
             return;
         }
         const auto matches = detail::evaluate_json_path (*body, *path_);
-        const bool negate  = config_.value ("negate", false);
+        const bool negate = config_.value ("negate", element_defaults::ASSERT_NEGATE);
 
         if (config_.contains ("exists")) {
             // `exists` already says which way it asserts, so `negate` folds
@@ -236,9 +237,10 @@ class AssertContainsElement final : public Element {
             ctx.outcome_message = "no response";
             return;
         }
-        const std::string field = config_.value ("field", "body");
-        const std::string text  = config_.value ("text", "");
-        const std::string mode  = config_.value ("mode", "contains");
+        const std::string field = config_.value ("field", element_defaults::RESPONSE_FIELD);
+        const std::string text = config_.value ("text", "");
+        const std::string mode =
+        config_.value ("mode", element_defaults::ASSERT_CONTAINS_MODE);
         std::string storage;
         const std::string_view subject = response_field_text (ctx, field, storage);
 
@@ -259,15 +261,17 @@ class AssertContainsElement final : public Element {
             passed = subject.find (text) != std::string_view::npos;
             verb   = "contain";
         }
-        if (config_.value ("negate", false)) {
+        if (config_.value ("negate", element_defaults::ASSERT_NEGATE)) {
             passed = !passed;
         }
         record_assertion (ctx,
-        field + " " + (config_.value ("negate", false) ? "does not " + verb : verb) +
+        field +
+        " " + (config_.value ("negate", element_defaults::ASSERT_NEGATE) ? "does not " + verb : verb) +
         " '" + text + "'",
         passed,
         "expected " + field + " to " +
-        (config_.value ("negate", false) ? "not " + verb : verb) + " '" + text + "'");
+        (config_.value ("negate", element_defaults::ASSERT_NEGATE) ? "not " + verb : verb) +
+        " '" + text + "'");
     }
 
     private:
@@ -330,7 +334,7 @@ class AssertSizeElement final : public Element {
         }
         const int64_t bound = config_.value ("bytes", 0);
         const auto actual   = static_cast<int64_t> (ctx.response->body.size ());
-        const std::string op = config_.value ("op", "lte");
+        const std::string op = config_.value ("op", element_defaults::ASSERT_SIZE_OP);
         bool passed;
         if (op == "lt") {
             passed = actual < bound;
@@ -488,7 +492,7 @@ ElementKind make_assert_jsonpath_kind () {
         "none is. Use it alone: it cannot be combined with 'expected' "
         "or 'regex'." } } },
         { "negate",
-        { { "type", "boolean" }, { "title", "Negate" },
+        { { "type", "boolean" }, { "default", element_defaults::ASSERT_NEGATE }, { "title", "Negate" },
         { "description",
         "Flips the assertion's pass/fail verdict. A response "
         "body that cannot be read as JSON fails it either way." } } } } },
@@ -516,18 +520,20 @@ ElementKind make_assert_contains_kind () {
         { "type", "object" },
         { "properties",
         { { "field",
-          { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } }, { "title", "Field" },
+          { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } },
+          { "default", element_defaults::RESPONSE_FIELD }, { "title", "Field" },
           { "description",
           "Which part of the response to check: body, headers, url "
           "or status." } } },
         { "text", { { "type", "string" }, { "title", "Text" }, { "description", "The text to look for, per the selected mode." } } },
         { "mode",
-        { { "type", "string" }, { "enum", { "contains", "equals", "matches" } }, { "title", "Mode" },
+        { { "type", "string" }, { "enum", { "contains", "equals", "matches" } },
+        { "default", element_defaults::ASSERT_CONTAINS_MODE }, { "title", "Mode" },
         { "description",
         "How to compare: contains, equals or matches (a regular "
         "expression in RE2 syntax)." } } },
         { "negate",
-        { { "type", "boolean" }, { "title", "Negate" },
+        { { "type", "boolean" }, { "default", element_defaults::ASSERT_NEGATE }, { "title", "Negate" },
         { "description", "Flips the assertion's pass/fail verdict." } } } } },
         { "required", nlohmann::json::array ({ "text" }) },
         { "additionalProperties", false },
@@ -581,7 +587,8 @@ ElementKind make_assert_size_kind () {
           { { "type", "integer" }, { "minimum", 0 }, { "title", "Body size" }, { "x-vayu-unit", "B" },
           { "description", "The body size to compare against, in bytes." } } },
         { "op",
-        { { "type", "string" }, { "enum", { "lt", "lte", "gt", "gte", "eq" } }, { "title", "Comparison" },
+        { { "type", "string" }, { "enum", { "lt", "lte", "gt", "gte", "eq" } },
+        { "default", element_defaults::ASSERT_SIZE_OP }, { "title", "Comparison" },
         { "description",
         "How the body size must compare to the bound: less than, "
         "less than or equal, greater than, greater than or equal, "

@@ -28,8 +28,8 @@ import { composePathParams } from "./path-variables";
  * Where the composed request's elements come from.
  *
  * `chain` is the live case: the collection chain root to leaf, then the
- * request's own, minus whatever its `inherit.disable` entries name
- * (`elementsParts`, issue #1512). `resolved` is a list the caller already
+ * request's own, minus whatever an `inherit.disable` entry at any level of
+ * that chain names (`elementsParts`, issue #1512). `resolved` is a list the caller already
  * built - the History replay runs the collection scripts as the run recorded
  * them, not as the chain reads now.
  */

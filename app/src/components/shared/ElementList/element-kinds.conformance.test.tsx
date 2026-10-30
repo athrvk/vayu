@@ -29,7 +29,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, screen } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import {
 	hasIncompleteElement,
@@ -41,6 +41,7 @@ import {
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
+import { GenericElementForm } from "./GenericElementForm";
 import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
 import type { ElementConfigProperty, ElementDef, ElementKindSchema } from "@/types";
 
@@ -78,6 +79,7 @@ const NON_CONSTRAINT_KEYWORDS = new Set([
 	"additionalProperties",
 	"title",
 	"description",
+	"default",
 	"x-vayu-group",
 	"x-vayu-unit",
 ]);
@@ -510,6 +512,61 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			});
 			view.unmount();
 		}
+	});
+
+	describe("an untouched field shows the default the engine runs (#3045)", () => {
+		/** Every enum or boolean property the catalogue gives a `default`. */
+		const withDefault = (fixture: ElementKindSchema[]) =>
+			fixture.flatMap((kind) =>
+				Object.entries(kind.configSchema.properties ?? {})
+					.filter(
+						(entry): entry is [string, ElementConfigProperty] =>
+							entry[1] != null &&
+							entry[1].default !== undefined &&
+							(entry[1].type === "boolean" || entry[1].enum !== undefined)
+					)
+					.map(([name, property]) => ({ kind, name, property }))
+			);
+		const rows = withDefault(fixture);
+
+		it("scanned a non-empty set of defaults, booleans and enums both", () => {
+			expect(rows.length).toBeGreaterThan(0);
+			expect(rows.some((row) => row.property.type === "boolean")).toBe(true);
+			expect(rows.some((row) => row.property.enum !== undefined)).toBe(true);
+		});
+
+		it.each(rows.map((row) => [`${row.kind.kind}.${row.name}`, row] as const))(
+			"%s renders as its default with the key absent",
+			(_label, { kind, name, property }) => {
+				const onChange = vi.fn();
+				const view = render(
+					<GenericElementForm
+						schema={kind.configSchema}
+						config={{}}
+						onChange={onChange}
+					/>
+				);
+				if (property["x-vayu-group"] === "advanced") {
+					fireEvent.click(screen.getByText("Advanced"));
+				}
+				const label = property.title ?? name;
+
+				if (property.type === "boolean") {
+					const toggle = screen.getByRole("switch", { name: label });
+					if (property.default === true) expect(toggle).toBeChecked();
+					else expect(toggle).not.toBeChecked();
+				} else {
+					expect(screen.getByRole("combobox", { name: label })).toHaveTextContent(
+						String(property.default)
+					);
+				}
+				expect(
+					onChange,
+					"rendering must not write the default into config"
+				).not.toHaveBeenCalled();
+				view.unmount();
+			}
+		);
 	});
 
 	it("has a family icon for every category the fixture actually uses", () => {

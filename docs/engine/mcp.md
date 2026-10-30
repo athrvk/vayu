@@ -1558,7 +1558,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   too (issue #1594 - the composed `elements` become the run's own
   `requestElements`, a step-level pipeline `POST /runs` now runs per
   submission), and so does `run_request` with a `requestId` and no `url`.
-  An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
+  `start_load_run` does not forward a collection's or folder's `script.setup` /
+  `script.teardown` that `/compose` emits: `requestElements` is validated as a
+  request's own and refuses them, and they belong to the collection's own run
+  (#3070). An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
   call has no chain to compose from, and they are composed after the stored
   ones when it sends a saved request; `start_load_run` takes the same
@@ -2275,7 +2278,11 @@ generated element forms read (issue #1516). `create_request` / `update_request`
 `run_request`'s ad-hoc `elements` argument both name a `kind` as a bare
 string rather than an enumerated one, precisely so a kind the engine adds
 later needs no MCP change - read this resource rather than guessing a kind or
-its config shape. `element-kinds.conformance.test.ts` pins the resource, the
+its config shape. A property with a `default` in that schema is run with
+that value when its key is left out, so an agent omits the key rather than
+restating it (`assert.size` with no `op` compares `lte`, an `extract.*` with
+no `scope` writes the collection scope; issue #3045).
+`element-kinds.conformance.test.ts` pins the resource, the
 schema's own examples and every kind literal a tool description names to the
 engine's own fixture, so a kind renamed engine-side without a matching update
 here fails the build rather than telling an agent to write a kind that no

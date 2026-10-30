@@ -7,8 +7,8 @@
 
 /**
  * `elementsParts` walks the collection chain's elements, root to leaf, then
- * the request's own (issue #1512), honouring an `inherit.disable` entry on
- * the request's own list that suppresses one ancestor element by id.
+ * the request's own (issue #1512), honouring an `inherit.disable` entry at any
+ * level (#3070) that suppresses one element by id.
  * `scriptTextFor` (re-exported from `@/lib/elements`) is covered here too,
  * since this is the one place both are consumed together.
  */
@@ -19,6 +19,7 @@ import {
 	hasReplayedPostScript,
 	scriptTextFor,
 	withoutDisabled,
+	withoutInheritedCollectionOnly,
 } from "./elements-parts";
 import type { Collection, ElementDef } from "@/types";
 
@@ -111,6 +112,69 @@ describe("elementsParts", () => {
 		// r1 is suppressed; r2 still runs, and the disable entry itself is never
 		// forwarded as an element of the request's own.
 		expect(parts?.map((p) => p.id)).toEqual(["r2"]);
+	});
+
+	describe("an inherit.disable entry on a chain level (#3070)", () => {
+		const disable = (id: string, elementId: string) =>
+			element({ id, kind: "inherit.disable", config: { elementId } });
+
+		it("lets a folder suppress an element of the root, and is itself never a part", () => {
+			const chain: Collection[] = [
+				collection("root", "Root", [
+					element({ id: "loop", kind: "control.loop" }),
+					element({ id: "r2", kind: "extract.json" }),
+				]),
+				collection("folder", "Folder", [disable("d1", "loop")]),
+			];
+
+			const parts = elementsParts(chain, "req_1", []);
+
+			expect(parts?.map((p) => p.id)).toEqual(["r2"]);
+		});
+
+		it("lets the root suppress an element of a folder", () => {
+			const chain: Collection[] = [
+				collection("root", "Root", [disable("d1", "f1")]),
+				collection("folder", "Folder", [
+					element({ id: "f1", kind: "timer.pacing" }),
+					element({ id: "f2", kind: "assert.status" }),
+				]),
+			];
+
+			expect(elementsParts(chain, "req_1", [])?.map((p) => p.id)).toEqual(["f2"]);
+		});
+
+		it("lets a collection suppress the request's own element, as /compose does", () => {
+			const chain: Collection[] = [collection("root", "Root", [disable("d1", "q1")])];
+			const requestElements = [
+				element({ id: "q1", kind: "control.loop" }),
+				element({ id: "q2", kind: "assert.status" }),
+			];
+
+			expect(elementsParts(chain, "req_1", requestElements)?.map((p) => p.id)).toEqual([
+				"q2",
+			]);
+		});
+
+		it("answers undefined when a chain level holds only a disable entry", () => {
+			const chain: Collection[] = [collection("root", "Root", [disable("d1", "nothing")])];
+
+			expect(elementsParts(chain, "req_1", [])).toBeUndefined();
+		});
+
+		it("keeps the replayed-post-script verdict in step with the disable", () => {
+			const post = element({
+				id: "post",
+				kind: "script.post",
+				config: { script: "pm.test('ok', () => {});" },
+			});
+			const chain: Collection[] = [
+				collection("root", "Root", [post]),
+				collection("folder", "Folder", [disable("d1", "post")]),
+			];
+
+			expect(hasReplayedPostScript(elementsParts(chain, "req_1", []))).toBe(false);
+		});
 	});
 
 	it("returns undefined, not an empty list, when the resolved list is empty", () => {
@@ -252,5 +316,49 @@ describe("withoutDisabled (#3050)", () => {
 		expect(parts).toHaveLength(1);
 		expect(withoutDisabled(parts)).toBeUndefined();
 		expect(withoutDisabled(undefined)).toBeUndefined();
+	});
+});
+
+describe("withoutInheritedCollectionOnly (#3070)", () => {
+	const chain = [
+		collection("root", "Root", [
+			element({ id: "setup", kind: "script.setup" }),
+			element({ id: "teardown", kind: "script.teardown" }),
+			element({ id: "assert", kind: "assert.status" }),
+		]),
+	];
+
+	it("drops a collection's setup and teardown scripts and keeps its other elements", () => {
+		const parts = elementsParts(chain, "req_1", [element({ id: "q1", kind: "script.pre" })]);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["assert", "q1"]);
+	});
+
+	it("drops them from a folder too, which is a collection level", () => {
+		const parts = elementsParts(
+			[collection("root", "Root", []), collection("folder", "Folder", chain[0].elements)],
+			"req_1",
+			[]
+		);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["assert"]);
+	});
+
+	it("leaves one the request itself carries, for the engine to refuse by name", () => {
+		const parts = elementsParts([], "req_1", [element({ id: "own", kind: "script.setup" })]);
+
+		expect(withoutInheritedCollectionOnly(parts)?.map((el) => el.id)).toEqual(["own"]);
+	});
+
+	it("answers undefined when nothing is left, and for undefined", () => {
+		const parts = elementsParts(
+			[collection("root", "Root", [chain[0].elements[0]])],
+			"req_1",
+			[]
+		);
+
+		expect(parts).toHaveLength(1);
+		expect(withoutInheritedCollectionOnly(parts)).toBeUndefined();
+		expect(withoutInheritedCollectionOnly(undefined)).toBeUndefined();
 	});
 });

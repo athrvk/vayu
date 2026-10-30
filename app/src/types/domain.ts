@@ -794,6 +794,12 @@ export interface ElementConfigProperty {
 	title?: string;
 	/** One sentence of hint text for this field (issue #1607). */
 	description?: string;
+	/**
+	 * What the engine runs when the key is absent (#3045), emitted from the
+	 * constant the kind itself reads. A form shows it for an untouched field and
+	 * a summary reads it; neither writes it into the element's config.
+	 */
+	default?: string | number | boolean;
 	/** `"advanced"` folds this field under a disclosure instead of the form's main rows (issue #1607). */
 	"x-vayu-group"?: "advanced";
 	/** A numeric suffix to render beside this field's value: `"ms"`, `"%"` or `"B"` (issue #1607). */

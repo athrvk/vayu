@@ -619,16 +619,16 @@ logged as a warning: it means a client skipped composition.
   joined with a blank line in compile order, not only the first one - the
   same join `read_script` always did before this run shape had elements).
   Only the phase-0 kinds #1514 gave the design send run here at all -
-  `validate_request_elements_run_override` refuses an enabled `control.*` kind,
-  `timer.pacing` and `timer.throughput` by name (naming the element's label
-  and `origin`, never its index in the merged list; a disabled entry passes,
-  #3050), because none of the state
-  they need (`controller_state`, `pacing_state`, a plan-wide throughput
-  scan) exists on this path; admitting one would report `"ok"` for behaviour
-  that never ran rather than failing loudly. There is no persistent virtual
-  user on this path, so the `ScopeOverlay` lives on
-  the submission rather than a VU - built fresh from the run's flattened base
-  scopes (`RunContext::step_base_vars`) and discarded once that submission
+  `validate_request_elements_run_override` refuses any other enabled kind
+  (`control.*`, `metric.*`, `timer.pacing`, `timer.throughput`) by name
+  (naming the element's label and `origin`, never its index in the merged
+  list; a disabled entry passes, #3050), because none of the state they need
+  (`controller_state`, `pacing_state`, a plan-wide throughput scan) exists on
+  this path; admitting one would report `"ok"` for behaviour that never ran
+  rather than failing loudly. There is no persistent virtual user on this
+  path, so the `ScopeOverlay` lives on the submission rather than a VU - built
+  fresh from the run's flattened base scopes (`RunContext::step_base_vars`)
+  and discarded once that submission
   settles - and `timer.think`'s wait is a run-level concurrency reservation
   (`RunContext::reserve_think_wait`, folded into `in_flight()`) rather than a
   per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its
@@ -645,7 +645,10 @@ logged as a warning: it means a client skipped composition.
   is an element kind. A kind's labels are in its schema (#1607): every
   `config_schema` property carries `title` and `description`, so a generated
   form has words to render instead of falling back to a raw property name -
-  #1608 is what wires the app's own form to read them.
+  #1608 is what wires the app's own form to read them. An enum or boolean
+  property the kind gives a value when its key is absent also carries `default`, and the value
+  is the named constant in `include/vayu/core/element_defaults.hpp` the kind's
+  reader uses (#3045), never a second literal in the schema.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the

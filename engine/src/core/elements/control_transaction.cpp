@@ -34,6 +34,7 @@
  * extensibility contract, rule 1).
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <algorithm>
@@ -208,7 +209,8 @@ ElementKind make_control_transaction_kind () {
           { { "type", "string" }, { "minLength", 1 }, { "title", "Transaction name" },
           { "description", "The name this folder's summed latency is reported under." } } },
         { "includeTimers",
-        { { "type", "boolean" }, { "title", "Include timers" },
+        { { "type", "boolean" }, { "default", element_defaults::CONTROL_TRANSACTION_INCLUDE_TIMERS },
+        { "title", "Include timers" },
         { "description",
         "Folds a between-member timer wait into the transaction's "
         "summed time." } } } } },

@@ -321,6 +321,7 @@ jobs:
               - 'engine/include/vayu/http/grant_secret.hpp'
               - 'engine/src/http/routes/execution.cpp'
               - 'engine/src/core/scenario_load.cpp'
+              - 'engine/src/core/load_strategy.cpp'
               - 'engine/src/core/jmeter_import.cpp'
               - 'engine/src/db/config_seeds/general.cpp'
               - 'engine/src/db/config_seeds/network.cpp'

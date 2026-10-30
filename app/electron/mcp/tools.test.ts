@@ -8691,6 +8691,74 @@ describe("dispatchTool", () => {
 		expect(payload.elements).toBeUndefined();
 	});
 
+	// #3070: /compose emits an enabled collection's `script.setup` / `.teardown`
+	// stamped with a collection origin, and POST /runs validates `requestElements`
+	// as a request's own, which refuses them with a 400 an agent cannot trace.
+	describe("start_load_run leaves a collection's run-boundary scripts out", () => {
+		const collectionOnly = (kind: string) => ({
+			id: `el_${kind}`,
+			kind,
+			enabled: true,
+			config: { script: "pm.environment.set('k', 'v');" },
+			origin: { kind: "collection", id: "col_1", name: "API" },
+		});
+		const collectionAssert = {
+			id: "el_col_assert",
+			kind: "assert.status",
+			enabled: true,
+			config: { expected: 200 },
+			origin: { kind: "collection", id: "col_1", name: "API" },
+		};
+		const requestPost = {
+			id: "el_own_post",
+			kind: "script.post",
+			enabled: true,
+			config: { script: "pm.test('own', function () {});" },
+			origin: { kind: "request", id: "req_1" },
+		};
+		const requestTeardown = {
+			...collectionOnly("script.teardown"),
+			origin: requestPost.origin,
+		};
+
+		const startPayload = async (elements: unknown[]) => {
+			const client = savedRequestClient({ elements });
+			const res = await dispatchTool(
+				"start_load_run",
+				{ requestId: "req_1", duration: "30s", confirmed: true },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		};
+
+		test("drops collection-origin setup and teardown, keeps the rest in order", async () => {
+			const payload = await startPayload([
+				collectionOnly("script.setup"),
+				collectionAssert,
+				collectionOnly("script.teardown"),
+				requestPost,
+			]);
+
+			expect(payload.requestElements).toEqual([collectionAssert, requestPost]);
+		});
+
+		test("sends no requestElements when only setup and teardown were composed", async () => {
+			const payload = await startPayload([
+				collectionOnly("script.setup"),
+				collectionOnly("script.teardown"),
+			]);
+
+			expect(payload.requestElements).toBeUndefined();
+		});
+
+		test("keeps a setup or teardown that is the request's own, for the engine to judge", async () => {
+			const payload = await startPayload([requestTeardown]);
+
+			expect(payload.requestElements).toEqual([requestTeardown]);
+		});
+	});
+
 	test("start_load_run reports the pre-request script it cannot run", async () => {
 		const client = savedRequestClient();
 		const res = await dispatchTool(

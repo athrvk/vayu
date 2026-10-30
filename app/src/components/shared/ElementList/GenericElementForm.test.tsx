@@ -23,7 +23,7 @@
 import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import type { ElementConfigSchema } from "@/types";
+import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
 import { expectShowsError, expectShowsNoError } from "./field-error.testkit";
 
@@ -927,4 +927,117 @@ describe("GenericElementForm - a message under the field it is about (#3048)", (
 	// above but the no-message ones reds; drop `aria-invalid` from the text input
 	// and its case reds on the attribute alone; slice the nested level with the
 	// wrong key (`errorsWithin(errors, "min")`) and the nested case reds.
+});
+
+describe("GenericElementForm - an untouched field shows the catalogue default (#3045)", () => {
+	const PACING = schema({
+		everyMs: { type: "integer", title: "Cadence" },
+		perUser: { type: "boolean", title: "Per user", default: true, "x-vayu-group": "advanced" },
+	});
+
+	function openAdvanced() {
+		fireEvent.click(screen.getByText("Advanced"));
+	}
+
+	it("shows a comparison select the engine would run as its default, not the first option", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					op: {
+						type: "string",
+						enum: ["lt", "lte", "gt", "gte", "eq"],
+						default: "lte",
+						title: "Comparison",
+					},
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByRole("combobox", { name: "Comparison" })).toHaveTextContent("lte");
+	});
+
+	it("shows the stored value over the default, and the first option when there is no default", () => {
+		const op: ElementConfigProperty = {
+			type: "string",
+			enum: ["lt", "lte"],
+			title: "Comparison",
+		};
+		const { rerender } = render(
+			<GenericElementForm
+				schema={schema({ op: { ...op, default: "lte" } })}
+				config={{ op: "lt" }}
+				onChange={vi.fn()}
+			/>
+		);
+		expect(screen.getByRole("combobox", { name: "Comparison" })).toHaveTextContent("lt");
+
+		rerender(<GenericElementForm schema={schema({ op })} config={{}} onChange={vi.fn()} />);
+		expect(screen.getByRole("combobox", { name: "Comparison" })).toHaveTextContent("lt");
+	});
+
+	it("treats an empty stored string as absent for a select, as before", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					op: {
+						type: "string",
+						enum: ["lt", "lte"],
+						default: "lte",
+						title: "Comparison",
+					},
+				})}
+				config={{ op: "" }}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByRole("combobox", { name: "Comparison" })).toHaveTextContent("lte");
+	});
+
+	it("shows a default-true toggle on for an absent key, and writes nothing on render", () => {
+		const onChange = vi.fn();
+		render(<GenericElementForm schema={PACING} config={{}} onChange={onChange} />);
+		openAdvanced();
+
+		expect(screen.getByRole("switch", { name: "Per user" })).toBeChecked();
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("stores false on the first click of a default-true toggle", () => {
+		const onChange = vi.fn();
+		render(<GenericElementForm schema={PACING} config={{}} onChange={onChange} />);
+		openAdvanced();
+
+		fireEvent.click(screen.getByRole("switch", { name: "Per user" }));
+
+		expect(onChange).toHaveBeenCalledWith({ perUser: false });
+	});
+
+	it("keeps a stored false unchecked although the default is true", () => {
+		render(
+			<GenericElementForm schema={PACING} config={{ perUser: false }} onChange={vi.fn()} />
+		);
+
+		expect(screen.getByRole("switch", { name: "Per user" })).not.toBeChecked();
+	});
+
+	it("shows a default-false toggle off for an absent key", () => {
+		render(
+			<GenericElementForm
+				schema={schema({
+					perUser: { type: "boolean", title: "Per user", default: false },
+				})}
+				config={{}}
+				onChange={vi.fn()}
+			/>
+		);
+
+		expect(screen.getByRole("switch", { name: "Per user" })).not.toBeChecked();
+	});
+
+	// Mutation check: revert the toggle to `checked={value === true}` and the
+	// default-true case reds; drop `asString(property.default)` from the select
+	// and the comparison case reds (it falls back to `lt`).
 });
