@@ -51,6 +51,7 @@
  * (issue #1571), which states the same intent as a rate rather than a gap.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include "pacing_math.hpp"
@@ -66,7 +67,7 @@ class TimerPacingElement final : public Element {
       element_id_ (config_.value ("_elementId", std::string{})),
       scope_entry_ (config_.value ("_scopeEntry", false)),
       every_ms_ (config_.value ("everyMs", int64_t{ 0 })),
-      per_user_ (config_.value ("perUser", true)) {
+      per_user_ (config_.value ("perUser", element_defaults::TIMER_PACING_PER_USER)) {
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -158,7 +159,8 @@ ElementKind make_timer_pacing_kind () {
           "How often this node starts, start to start, in "
           "milliseconds." } } },
         { "perUser",
-        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { { "type", "boolean" }, { "default", element_defaults::TIMER_PACING_PER_USER },
+        { "title", "Per user" }, { "x-vayu-group", "advanced" },
         { "description",
         "Paces each virtual user independently instead of sharing "
         "one cadence across all of them." } } } } },

@@ -28,6 +28,7 @@
 #include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/capacity_controller.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
@@ -568,7 +569,7 @@ struct RunContext {
         if (scripts_mode == ScriptsOverrideMode::AllDeferred) {
             return false;
         }
-        return element_config.value ("inline", false);
+        return element_config.value ("inline", element_defaults::SCRIPT_INLINE);
     }
 
     /**

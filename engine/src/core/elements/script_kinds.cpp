@@ -30,6 +30,7 @@
  * request that happened to carry it, a question the model has no answer for.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <initializer_list>
@@ -269,6 +270,7 @@ make_script_kind (Phase phase, const char* kind, const char* label, const char* 
 void allow_inline_marking (ElementKind& kind) {
     kind.config_schema["properties"]["inline"] = {
         { "type", "boolean" },
+        { "default", element_defaults::SCRIPT_INLINE },
         { "title", "Run inline" },
         { "description",
         "Runs on the load path's own producer/completion hooks instead of "

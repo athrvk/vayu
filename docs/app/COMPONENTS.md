@@ -2352,7 +2352,11 @@ input suffix. A kind the app has never seen is still editable the day the
 engine ships it, which is the whole point of the catalogue being
 schema-carrying rather than a label list - `extract.json`'s path field is
 deliberately generic-form only, proving the point rather than special-casing
-it.
+it. **An absent key shows the property's catalogue `default`** (#3045), the
+value the engine runs, so `assert.size`'s `op` reads `lte` and `timer.pacing`'s
+`perUser` toggle starts on; the summary reads the same field for
+`extract.*`'s `scope` and pacing's `perUser`. It is display only: nothing is
+written into the config until the user changes the field.
 
 **A property with no `type` takes a JSON field, not a text one** (#3046).
 `assert.jsonpath`'s `expected` and a `metric.record` condition's `value` can

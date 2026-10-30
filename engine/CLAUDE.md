@@ -645,7 +645,10 @@ logged as a warning: it means a client skipped composition.
   is an element kind. A kind's labels are in its schema (#1607): every
   `config_schema` property carries `title` and `description`, so a generated
   form has words to render instead of falling back to a raw property name -
-  #1608 is what wires the app's own form to read them.
+  #1608 is what wires the app's own form to read them. An enum or boolean
+  property the kind gives a value when its key is absent also carries `default`, and the value
+  is the named constant in `include/vayu/core/element_defaults.hpp` the kind's
+  reader uses (#3045), never a second literal in the schema.
 - **Saved examples are nested under their request** (`/requests/:id/examples`,
   #481): the owner is checked before the example on every path, so an example
   reached through the wrong request is a `404`, and `delete_request` and the
