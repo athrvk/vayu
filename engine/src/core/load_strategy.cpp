@@ -19,9 +19,12 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/path_template.hpp"
@@ -574,6 +577,42 @@ std::optional<std::string> refuse_scenario_only_element (const nlohmann::json& e
     kind != nullptr ? kind->label : kind_name, element_whereabouts (entry));
 }
 
+/// The level a composed entry was declared at, as one comparable key: the
+/// `origin` composition stamps (`emit_level`) name a collection, a folder or
+/// the request by kind, scope and id. An entry with no `origin` (written
+/// straight into the payload, or not an object) keys as the empty string.
+std::string level_key (const nlohmann::json& entry) {
+    if (!entry.is_object ()) {
+        return {};
+    }
+    const auto origin = entry.find ("origin");
+    if (origin == entry.end () || !origin->is_object ()) {
+        return {};
+    }
+    return std::format ("{}/{}/{}", string_member (*origin, "kind"),
+    string_member (*origin, "scope"), string_member (*origin, "id"));
+}
+
+/// @p elements split into one array per level, in the order each level first
+/// appears. An element id is unique only within the list of the level that
+/// declares it, and a duplicated collection or a folder repeated down a chain
+/// repeats ids across levels, so uniqueness cannot be judged over the merged
+/// list (#3101; `validate_execute_elements` makes the same call for
+/// `POST /execute`).
+std::vector<nlohmann::json> split_by_level (const nlohmann::json& elements) {
+    std::vector<nlohmann::json> levels;
+    std::unordered_map<std::string, size_t> position;
+    for (const auto& entry : elements) {
+        const auto [slot, inserted] =
+        position.try_emplace (level_key (entry), levels.size ());
+        if (inserted) {
+            levels.push_back (nlohmann::json::array ());
+        }
+        levels.at (slot->second).push_back (entry);
+    }
+    return levels;
+}
+
 } // namespace
 
 std::optional<std::string> validate_request_elements_run_override (
@@ -598,10 +637,15 @@ const nlohmann::json& config) {
     nlohmann::json stamped = *elements;
     vayu::core::stamp_default_element_ids (stamped);
     // Every entry, a disabled one included, so a bad config still fails here
-    // rather than the moment the entry is switched on.
-    if (auto reason = vayu::core::Registry::instance ().validate (
-        stamped, vayu::core::ElementOwner::Request)) {
-        return reason;
+    // rather than the moment the entry is switched on. Judged a level at a
+    // time, so a refusal's `Item N` counts within that level's entries. Every
+    // level is judged as a request's: a collection-only kind (`script.setup`)
+    // is refused here, and the renderer filters those out before sending (#3070).
+    for (const auto& level : split_by_level (stamped)) {
+        if (auto reason = vayu::core::Registry::instance ().validate (
+            level, vayu::core::ElementOwner::Request)) {
+            return reason;
+        }
     }
     for (const auto& entry : stamped) {
         if (auto refusal = refuse_scenario_only_element (entry)) {

@@ -8837,7 +8837,13 @@ the same shape a request's own stored `elements` column holds:
 
 Validated the same way a stored `elements` column is (`Registry::validate`
 per entry, a bad `kind` or `config` a `400` naming the index); `id` and
-`enabled` are optional, defaulting to a generated id and `true`. Refused
+`enabled` are optional, defaulting to a generated id and `true`. The list may
+be a composed one, so an id is unique only within the level that declares it
+(the `origin` kind, scope and id `POST /compose` stamps; an entry with no
+`origin` is the request's own level), and may repeat across levels, as on
+[`POST /execute`](#post-execute) (#3101): a duplicated collection, or a folder
+repeated down a chain, repeats its ids. A repeat within one level is a `400`,
+and the `Item N` in a refusal counts within that level's entries. Refused
 outright beside a `scenario` block, whose steps already carry their own
 resolved elements from the plan. This is the field MCP's `start_load_run`
 renames a composed request's chain-then-own `elements` onto, since `POST

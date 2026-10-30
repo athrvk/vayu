@@ -1285,6 +1285,38 @@ TEST_F (RunConfigValidationRouteTest, ASingleRequestLoadRunKeepsItsMonitor) {
     vayu::RunStatus::Completed);
 }
 
+// `requestElements` is a composed list: a collection's elements ride beside the
+// request's own, and an id is unique only within the level that declares it
+// (#3101). Mutation check: validate the whole array in one `Registry::validate`
+// call and the first case answers 400.
+TEST_F (RunConfigValidationRouteTest, RequestElementsMayRepeatAnIdAcrossLevelsButNotWithinOne) {
+    const vayu::tests::EchoServer echo;
+    const auto status_assert = [] (const std::string& kind, const std::string& origin_id) {
+        return json{ { "id", "el_1" }, { "kind", "assert.status" },
+            { "config", { { "in", json::array ({ 200 }) } } },
+            { "origin", { { "kind", kind }, { "scope", kind }, { "id", origin_id } } } };
+    };
+
+    auto across_levels               = iterations_run (echo);
+    across_levels["requestElements"] = json::array (
+    { status_assert ("collection", "col_1"), status_assert ("request", "req_1") });
+    const auto [accepted, accepted_body] = post_run (across_levels);
+    ASSERT_EQ (accepted, 202) << accepted_body.dump ();
+    EXPECT_EQ (settled_status (accepted_body.value ("runId", std::string ())),
+    vayu::RunStatus::Completed);
+
+    const auto rows_before            = db_->get_all_runs ().size ();
+    auto within_a_level               = iterations_run (echo);
+    within_a_level["requestElements"] = json::array (
+    { status_assert ("request", "req_1"), status_assert ("request", "req_1") });
+    const auto [refused, refused_body] = post_run (within_a_level);
+    EXPECT_EQ (refused, 400) << refused_body.dump ();
+    EXPECT_NE (vayu::http::routes::error_message_of (refused_body).find ("same id"),
+    std::string::npos)
+    << refused_body.dump ();
+    EXPECT_EQ (db_->get_all_runs ().size (), rows_before);
+}
+
 // Only the sequential collection runner reads `failOnSchemaError`, so `true`
 // on a single-request or scenario load run was accepted and decided nothing
 // (#3039). Mutation check: drop the
