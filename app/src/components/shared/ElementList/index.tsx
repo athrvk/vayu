@@ -63,7 +63,7 @@ import {
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { FieldError } from "@/components/shared/FieldError";
 import { generateId } from "@/lib/id";
-import { elementNeeds, isBlankScriptElement } from "@/lib/elements";
+import { describeNeeds, elementNeeds, isBlankScriptElement } from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -267,10 +267,9 @@ function ElementRow({
 	// same judgement Send leaves the element out on (#3066): what the row flags
 	// is what does not run.
 	const needs = elementNeeds(element, kinds);
-	// A present-but-invalid value shows on its field (#3048); an absent key is
-	// the "Needs ..." chip's.
+	// A present-but-invalid value shows on its field (#3048) as well as in the
+	// mark, so a collapsed row says it too.
 	const fieldErrors = needs?.invalid ?? {};
-	const missingLabels = needs?.missing ?? [];
 
 	const [localOpen, setLocalOpen] = useState(isNew);
 	const open = controlledOpen ?? localOpen;
@@ -446,16 +445,18 @@ function ElementRow({
 								)}
 							</span>
 							{/*
-							 * A missing required field (issue #1635) takes the summary's
-							 * spot rather than sharing the row with it - both being
-							 * `min-w-0 flex-1` would split what little room is left
-							 * after the title, and "why isn't this saving" outranks the
+							 * An element that will not run (issue #1635, #3066) takes the
+							 * summary's spot rather than sharing the row with it - both
+							 * being `min-w-0 flex-1` would split what little room is left
+							 * after the title, and "why isn't this running" outranks the
 							 * config preview. Shown whether the card is open or
 							 * collapsed: a list of collapsed cards is exactly where a
-							 * user needs to spot which one is blocking the save
-							 * without expanding each in turn.
+							 * user needs to spot which one Send will leave out without
+							 * expanding each in turn. It says what the response's
+							 * "Not run" line will (`describeNeeds`): a missing key by
+							 * its label, a refused value as `field: message`.
 							 */}
-							{missingLabels.length > 0 ? (
+							{needs ? (
 								<span
 									className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground"
 									data-element-incomplete
@@ -464,7 +465,9 @@ function ElementRow({
 										className="h-2 w-2 shrink-0 rounded-full bg-warning"
 										aria-hidden
 									/>
-									<TruncatedText className="cap-centred">{`Needs ${missingLabels.join(", ")}`}</TruncatedText>
+									<TruncatedText className="cap-centred">
+										{describeNeeds(needs, { sentenceStart: true })}
+									</TruncatedText>
 								</span>
 							) : (
 								!open &&
