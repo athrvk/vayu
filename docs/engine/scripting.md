@@ -2698,6 +2698,20 @@ Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
 rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
 
+Four built-in objects have no useful JSON form and print the way Node prints
+them (#3130):
+
+| Value | Printed as |
+|-------|------------|
+| `new Error('boom')` | `Error: boom`, then the stack on the following lines (the message line is not repeated when the stack already begins with it) |
+| `new Map([[1, 2]])` | `Map(1) {1 => 2}` |
+| `new Set([1])` | `Set(1) {1}` |
+| `new Date(0)` | `1970-01-01T00:00:00.000Z`, unquoted; an invalid date prints `Invalid Date` |
+
+Map and Set members are written as compact JSON (a string keeps its quotes), so
+an object inside a Map prints on one line, and a Map or Set nested inside
+another prints `{}`.
+
 **The level travels with the line.** Each entry on the wire is
 `{ "source": "pre" | "test", "scope"?: "collection" | "folder" | "request",
 "level": "log" | "info" | "warn" | "error", "message": "..." }` - see

@@ -50,6 +50,120 @@ namespace {
 // Console Implementation
 // ============================================================================
 
+// Formatting a value must never become a throw of its own, so every failed
+// QuickJS call below drops the exception it left pending.
+void discard_pending_exception (JSContext* ctx) {
+    JS_FreeValue (ctx, JS_GetException (ctx));
+}
+
+// ToString of a value, or a placeholder when that throws (a Symbol, a hostile
+// toString).
+std::string display_text (JSContext* ctx, JSValueConst val) {
+    const char* str = JS_ToCString (ctx, val);
+    if (!str) {
+        discard_pending_exception (ctx);
+        return "[unserializable]";
+    }
+    std::string text (str);
+    JS_FreeCString (ctx, str);
+    return text;
+}
+
+// One Map/Set member: compact JSON, so a string keeps its quotes and a nested
+// object stays on the line. JSON has no spelling for undefined, functions or
+// symbols, which fall back to their string form.
+std::string entry_text (JSContext* ctx, JSValueConst val) {
+    ScopedValue json (ctx, JS_JSONStringify (ctx, val, JS_UNDEFINED, JS_UNDEFINED));
+    if (JS_IsException (json.get ())) {
+        discard_pending_exception (ctx);
+        return "[Object: unserializable]";
+    }
+    if (JS_IsUndefined (json.get ()))
+        return display_text (ctx, val);
+    return js_to_string (ctx, json.get ());
+}
+
+// "Error: boom" followed by the stack. QuickJS's `stack` holds only the "at"
+// frames, but another engine's (or a script's own) can lead with the message
+// line, which must not print twice.
+std::string error_text (JSContext* ctx, JSValueConst err) {
+    std::string head = display_text (ctx, err);
+
+    ScopedValue stack (ctx, JS_GetPropertyStr (ctx, err, "stack"));
+    if (JS_IsException (stack.get ()))
+        discard_pending_exception (ctx);
+    if (!JS_IsString (stack.get ()))
+        return head;
+
+    std::string trace = js_to_string (ctx, stack.get ());
+    while (!trace.empty () && trace.back () == '\n')
+        trace.pop_back ();
+    if (trace.empty ())
+        return head;
+    if (trace.starts_with (head))
+        return trace;
+    return head + "\n" + trace;
+}
+
+// An unquoted ISO string, as Node prints a Date; an invalid one has no ISO form.
+std::string date_text (JSContext* ctx, JSValueConst date) {
+    ScopedValue method (ctx, JS_GetPropertyStr (ctx, date, "toISOString"));
+    ScopedValue iso (ctx, JS_Call (ctx, method.get (), date, 0, nullptr));
+    if (JS_IsException (iso.get ())) {
+        discard_pending_exception (ctx);
+        return "Invalid Date";
+    }
+    return js_to_string (ctx, iso.get ());
+}
+
+// `Map(1) {1 => 2}` / `Set(1) {1}`. The members are read through Array.from,
+// which also gives the count; nullopt when that call fails (a script replaced
+// Array.from), so the caller falls back to its generic path.
+std::optional<std::string>
+collection_text (JSContext* ctx, JSValueConst collection, const char* label, bool is_map) {
+    ScopedValue global (ctx, JS_GetGlobalObject (ctx));
+    ScopedValue array_ctor (ctx, JS_GetPropertyStr (ctx, global.get (), "Array"));
+    ScopedValue from (ctx, JS_GetPropertyStr (ctx, array_ctor.get (), "from"));
+    ScopedValue items (ctx, JS_Call (ctx, from.get (), array_ctor.get (), 1, &collection));
+    if (!JS_IsArray (items.get ())) {
+        discard_pending_exception (ctx);
+        return std::nullopt;
+    }
+
+    ScopedValue length (ctx, JS_GetPropertyStr (ctx, items.get (), "length"));
+    uint32_t count = 0;
+    JS_ToUint32 (ctx, &count, length.get ());
+
+    std::string body;
+    for (uint32_t i = 0; i < count; i++) {
+        ScopedValue item (ctx, JS_GetPropertyUint32 (ctx, items.get (), i));
+        if (i > 0)
+            body += ", ";
+        if (!is_map) {
+            body += entry_text (ctx, item.get ());
+            continue;
+        }
+        ScopedValue key (ctx, JS_GetPropertyUint32 (ctx, item.get (), 0));
+        ScopedValue value (ctx, JS_GetPropertyUint32 (ctx, item.get (), 1));
+        body += entry_text (ctx, key.get ()) + " => " + entry_text (ctx, value.get ());
+    }
+    return std::string (label) + "(" + std::to_string (count) + ") {" + body + "}";
+}
+
+// The objects JSON.stringify would flatten to "{}" or a quoted string: an
+// Error, a Date, a Map and a Set.
+std::optional<std::string> builtin_object_text (JSContext* ctx, JSValueConst val) {
+    if (JS_IsError (val))
+        return error_text (ctx, val);
+    if (JS_IsDate (val))
+        return date_text (ctx, val);
+    if (JS_IsMap (val))
+        return collection_text (ctx, val, "Map", true);
+    if (JS_IsSet (val))
+        return collection_text (ctx, val, "Set", false);
+    return std::nullopt;
+}
+
 /**
  * Every `console.*` method, distinguished by QuickJS's `magic` argument.
  *
@@ -72,6 +186,10 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
         // JSON.stringify instead, matching standard console.log behavior.
         // Functions are left to JS_ToCString (which yields their source).
         if (JS_IsObject (argv[i]) && !JS_IsFunction (ctx, argv[i])) {
+            if (auto text = builtin_object_text (ctx, argv[i])) {
+                ss << *text;
+                continue;
+            }
             JSValue indent = JS_NewInt32 (ctx, 2);
             JSValue json = JS_JSONStringify (ctx, argv[i], JS_UNDEFINED, indent);
             JS_FreeValue (ctx, indent);
