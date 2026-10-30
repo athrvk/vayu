@@ -111,6 +111,7 @@ add_executable(vayu_tests
     jsonrpc_body_test.cpp
     url_parts_test.cpp
     script_request_url_test.cpp
+    script_request_auth_test.cpp
     script_request_body_test.cpp
     script_request_methods_test.cpp
     xml_body_test.cpp

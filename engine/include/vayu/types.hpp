@@ -562,6 +562,12 @@ struct Request {
      */
     std::string auth_header;
     /**
+     * @brief A pre-request script assigned `pm.request.auth`, so the auth on
+     *        the request is the script's and a deferred auth block
+     *        (`apply_late_auth`) applies nothing over it (#3131).
+     */
+    bool auth_from_script = false;
+    /**
      * @brief Why the request's auth block put nothing on the wire, empty when
      *        it was sent or there was none.
      *

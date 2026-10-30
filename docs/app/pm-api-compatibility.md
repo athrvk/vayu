@@ -31,8 +31,8 @@ supported is listed [below](#not-yet-supported).
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`) |
-| Request methods     | `pm.request.addHeader()`, `.upsertHeader()`, `.removeHeader()`, `.forEachHeader()`, `.getHeaders(options?)`, `.addQueryParams()`, `.removeQueryParams()`, `.toJSON()` - each the member method it names, see [Request methods](#request-methods) |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`), `.auth` (basic, bearer, apikey, noauth; see [Request mutation](#request-mutation--url-variables)) |
+| Request methods     | `pm.request.addHeader()`, `.upsertHeader()`, `.removeHeader()`, `.forEachHeader()`, `.getHeaders(options?)`, `.addQueryParams()`, `.removeQueryParams()`, `.toJSON()` - each the member method it names - and `.authorizeUsing()`, which assigns `.auth`; see [Request methods](#request-methods) |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
@@ -1754,6 +1754,7 @@ pm.request.url = 'https://api.example.com/v2/users';
 pm.request.method = 'POST';
 pm.request.body = JSON.stringify({ n: 2 });
 pm.request.addHeader({ key: 'X-Trace', value: 't-1' });
+pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' }] };
 ```
 
 - **The object is authoritative, not a diff.** Whatever `pm.request.headers` holds at the
@@ -1765,6 +1766,21 @@ pm.request.addHeader({ key: 'X-Trace', value: 't-1' });
   request a pre-request script runs before, is applied after the script instead (#2473,
   #2521), as Postman applies all auth; a script-set `Authorization`
   still wins, since auth never replaces a header the request carries.
+- **`pm.request.auth` replaces the request's auth** (#3131). It takes Postman's
+  `{ type, <type>: params }` block, the params as `[{ key, value }]` or `{ name: value }`,
+  and is read by the same reader as `pm.sendRequest`'s `options.auth`: `basic`, `bearer`,
+  `apikey` and `noauth` are composed by the engine's own resolver, a `{{name}}` in a
+  credential resolved against the scopes the script left, and any other type, `oauth2`
+  included, fails the write-back naming it. The credential the engine applied before the
+  script is taken off first unless the script rewrote it; a header the engine did not
+  write still wins, as it does over the Auth tab; and auth waiting on the script is not
+  applied at all. Divergences, each deliberate: `pm.request.auth` reads `undefined` until
+  the script assigns it (Postman's reads the request's `RequestAuth`; here the engine's
+  credential is visible as the header it wrote), and an assignment is a plain object
+  rather than a `RequestAuth` with methods. Postman's precedence differs too: its auth
+  helper replaces a typed `Authorization`, where Vayu keeps the header the request
+  carries (#2475). The full rules are in
+  [scripting.md](../engine/scripting.md#mutating-the-request-pre-request-scripts).
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
   (one of the seven verbs); `body` must be a string, the `RequestBody` object
   `pm.request.body` itself holds, or a Postman body description (below) - an object
@@ -1939,7 +1955,8 @@ method's error:
 | `getHeaders(options?)` | `headers.toObject(false, !options.ignoreCase)` |
 | `addQueryParams(params)` | `url.addQueryParams` |
 | `removeQueryParams(params)` | `url.removeQueryParams` |
-| `toJSON()` | `{ url, method, header: [{ key, value }], body? }`, also what `JSON.stringify(pm.request)` writes |
+| `toJSON()` | `{ url, method, header: [{ key, value }], body?, auth? }`, also what `JSON.stringify(pm.request)` writes |
+| `authorizeUsing(type, options?)` | assigns `pm.request.auth`: `('basic', { username, password })`, `({ type, ...options })` or the block itself; `null` removes it |
 
 ```javascript
 pm.request.addHeader({ key: 'X-Trace', value: 't-1' });
@@ -1957,11 +1974,15 @@ Divergences, each deliberate:
   matches the case unless its `ignoreCase` option says otherwise.
 - **`toJSON().url` is the URL string**, what `pm.request.url.toJSON()` answers, where
   Postman's is its Url object's parts. `header` and `body` are Postman's shapes, read
-  from `pm.request` as the script has left it; `body` is absent for a request with none.
+  from `pm.request` as the script has left it; `body` is absent for a request with none,
+  `auth` for a script that assigned none.
+- **`authorizeUsing` throws on a type it cannot compose**, naming it, at the call; Postman's
+  ignores an invalid type and sends the request with no auth.
 - **`clone()`, `size()` and `update()` throw by name** with what to use instead, rather
   than the bare `not a function` an unbound name gives.
 
-The methods are non-enumerable, so `Object.keys(pm.request)` is still the four members.
+The methods are non-enumerable, so `Object.keys(pm.request)` is still the four members,
+and `auth` once the script assigns it.
 
 ---
 

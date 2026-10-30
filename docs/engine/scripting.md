@@ -955,6 +955,7 @@ pm.request.method            // HTTP method (string)
 pm.request.url               // Full URL (Postman Url object - see below)
 pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (Postman RequestBody object, if any - see below)
+pm.request.auth              // The auth the script assigned, else undefined - see below
 ```
 
 **`headers` is a different set in each hook, and that is the point.** A
@@ -1156,7 +1157,7 @@ plausible wrong number is worse than a break you can see.
 
 ### Mutating the request (pre-request scripts)
 
-In a **pre-request** script these four fields are writable, directly or through
+In a **pre-request** script these five fields are writable, directly or through
 the Request methods that write them, and what they hold when the script returns
 is what goes on the wire. In a **test** script they are
 a read-only record of what was already sent - writes there are discarded.
@@ -1170,6 +1171,12 @@ pm.request.body.update('{"n":3}');              // Postman's setter, in place
 pm.request.body = JSON.stringify({ n: 2 });     // replace the body
 pm.request.body = { mode: 'raw', raw: '{}' };   // Postman's description of one
 delete pm.request.body;                         // send no body
+pm.request.auth = { type: 'basic', basic: [     // replace the request's auth
+  { key: 'username', value: 'alice' },
+  { key: 'password', value: '{{password}}' },
+] };
+pm.request.authorizeUsing('bearer', { token: 'abc' }); // Postman's setter for it
+pm.request.auth = { type: 'noauth' };           // send no credential
 ```
 
 The [Request methods](#request-methods-pmrequestaddheader-and-the-rest) are
@@ -1196,6 +1203,32 @@ Rules worth knowing before you rely on them:
   never replaces one the request already carries. The order is the same on a
   Send, on every step of a collection run, and under load after an `inline`
   `script.pre` (a single-request load run's through `requestElements`).
+- **An assigned `pm.request.auth` replaces the request's own auth** (#3131).
+  It takes Postman's block, `{ type, <type>: params }`, the params as
+  `[{ key, value }]` (an exported collection's shape) or `{ name: value }`:
+  `basic` (`username`, `password`), `bearer` (`token`), `apikey` (`key`,
+  `value`, `in: 'header' | 'query'`) and `noauth`, which sends no credential.
+  Any other type, `oauth2` included, fails the write-back naming it, since
+  acquiring a token needs state the sandbox does not hold - build that header
+  yourself. A `{{name}}` in a credential resolves against the scopes as the
+  script left them, as in `pm.sendRequest`, and the engine's own composer
+  (`apply_auth`) writes the credential, so an api key in the query is encoded
+  by the same rule. The credential the engine applied before the script - the
+  header it wrote, or the query pair - is taken off first, unless the script
+  rewrote it, in which case the script's value is its own and stays. A header
+  the engine did not write (typed on the Headers tab, or one the script added)
+  is never removed and still wins over the assigned auth, exactly as it wins
+  over the Auth tab; delete it to let the assigned auth through. Auth that
+  waits on the script is not applied at all once the script assigns one, so
+  no deferred credential lands beside the script's and no OAuth 2.0 token is
+  fetched. `pm.request.auth` reads `undefined` until the script assigns it
+  (the engine's credential is visible as the header it wrote), the
+  assignment reads back as written, and `delete pm.request.auth` or `null`
+  leaves the request's own auth in force. `pm.request.authorizeUsing(type,
+  options)` is Postman's setter for it: `('basic', { username, password })`,
+  `({ type: 'bearer', token })` or the block itself; `null` removes an
+  assigned auth, and a type `pm.request.auth` would refuse throws at the
+  call, where Postman ignores it and sends the request bare.
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`
@@ -1358,8 +1391,11 @@ console.log(copy.header.length, JSON.stringify(pm.request) === JSON.stringify(co
   string, as `url.toJSON()` answers - Postman's is its Url object's parts),
   `method`, `header` as `[{ key, value }]` in the object's own key order, and
   `body` as Postman's `{ mode, raw | urlencoded | formdata | graphql | file }`,
-  absent for a request with no body. It is what `JSON.stringify(pm.request)`
-  writes. The result is a copy; writing to it sends nothing.
+  absent for a request with no body, and `auth` when the script assigned one.
+  It is what `JSON.stringify(pm.request)` writes. The result is a copy;
+  writing to it sends nothing.
+- **`authorizeUsing` assigns `pm.request.auth`** - see
+  [Mutating the request](#mutating-the-request-pre-request-scripts).
 - **Each method is looked up on its member when it is called**, so after
   `pm.request.headers = { ... }` a call to `addHeader` throws saying the
   object it reached for is gone, rather than writing to one nothing sends.
@@ -1368,7 +1404,8 @@ console.log(copy.header.length, JSON.stringify(pm.request) === JSON.stringify(co
   `not a function` would not say which call failed.
 
 The methods are non-enumerable, so `Object.keys(pm.request)` still lists
-`url`, `method`, `headers` and `body` and nothing else.
+`url`, `method`, `headers` and `body` and nothing else, until the script
+assigns `auth`.
 
 ### URL parts (`pm.request.url`)
 
@@ -2956,6 +2993,13 @@ name - set one rather than delete it.)
 ```javascript
 delete pm.request.headers['Authorization'];
 pm.request.headers['X-Api-Key'] = pm.environment.get('apiKey');
+```
+
+For a scheme the engine composes, assigning `pm.request.auth` does the swap
+in one write, a waiting credential included:
+
+```javascript
+pm.request.auth = { type: 'apikey', apikey: { key: 'X-Api-Key', value: '{{apiKey}}' } };
 ```
 
 **Use the exact name, capitals included.** `pm.request.headers` is a plain JS

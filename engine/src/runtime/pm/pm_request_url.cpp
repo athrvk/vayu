@@ -10,14 +10,17 @@
  * @brief `pm.request`, its `Url` object, `pm.info` and the pre-request write-back.
  */
 
+#include "pm_auth.hpp"
 #include "pm_internal.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -2199,8 +2202,9 @@ JSValue request_json_body (JSContext* ctx, JSValueConst body) {
 }
 
 /**
- * `toJSON ()` - the request as a plain object: `url`, `method`, `header` and
- * `body` (absent when there is none), read from `pm.request` as it stands, so
+ * `toJSON ()` - the request as a plain object: `url`, `method`, `header`,
+ * `body` (absent when there is none) and the `auth` the script assigned
+ * (absent when it assigned none), read from `pm.request` as it stands, so
  * it describes what the write-back would send. `url` is the string, the answer
  * `pm.request.url.toJSON ()` gives, where Postman's is its Url object's parts.
  * Being `toJSON`, it is also what `JSON.stringify (pm.request)` writes.
@@ -2236,7 +2240,100 @@ JSValue js_request_to_json (JSContext* ctx, JSValueConst this_val, int argc, JSV
     if (!JS_IsUndefined (body.get ()) && !JS_IsNull (body.get ())) {
         JS_SetPropertyStr (ctx, out, "body", request_json_body (ctx, body.get ()));
     }
+    ScopedValue auth (ctx, JS_GetPropertyStr (ctx, this_val, "auth"));
+    if (!JS_IsUndefined (auth.get ()) && !JS_IsNull (auth.get ())) {
+        JS_SetPropertyStr (ctx, out, "auth", JS_DupValue (ctx, auth.get ()));
+    }
     return out;
+}
+
+constexpr ScriptAuthSlot PM_REQUEST_AUTH{ "pm.request.auth", "pm.request.auth" };
+
+/**
+ * `{ type, <type>: params }` from what `authorizeUsing` was handed: a type and
+ * its parameters, Postman's `{ type, ...params }`, or that shape already.
+ * Throws, answering JS_EXCEPTION, for anything else.
+ */
+JSValue authorize_using_description (JSContext* ctx, JSValueConst type, JSValueConst options) {
+    const bool has_options = !JS_IsUndefined (options) && !JS_IsNull (options);
+    if (JS_IsString (type)) {
+        JSValue out = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, out, "type", JS_DupValue (ctx, type));
+        if (has_options) {
+            const std::string name = js_to_string (ctx, type);
+            JS_SetPropertyStr (ctx, out, name.c_str (), JS_DupValue (ctx, options));
+        }
+        return out;
+    }
+    if (!JS_IsObject (type) || JS_IsArray (type) || JS_IsFunction (ctx, type) || has_options) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.authorizeUsing takes (type, options?), "
+        "({ type, ...options }) or null, got %s",
+        js_type_name (ctx, type));
+    }
+    ScopedValue named (ctx, JS_GetPropertyStr (ctx, type, "type"));
+    if (!JS_IsString (named.get ())) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.authorizeUsing needs a string 'type' (basic, bearer, "
+        "apikey or noauth), got %s",
+        js_type_name (ctx, named.get ()));
+    }
+    const std::string name = js_to_string (ctx, named.get ());
+    ScopedValue block (ctx, JS_GetPropertyStr (ctx, type, name.c_str ()));
+    if (!JS_IsUndefined (block.get ())) {
+        // Already `{ type, <type>: params }`, the shape pm.request.auth takes.
+        return JS_DupValue (ctx, type);
+    }
+    // Postman's `{ type, ...params }`: every other member is a parameter.
+    std::vector<std::string> keys;
+    if (!js_own_enumerable_keys (ctx, type, keys)) {
+        return JS_EXCEPTION;
+    }
+    JSValue params = JS_NewObject (ctx);
+    for (const auto& key : keys) {
+        if (key != "type") {
+            JS_SetPropertyStr (ctx, params, key.c_str (),
+            JS_GetPropertyStr (ctx, type, key.c_str ()));
+        }
+    }
+    JSValue out = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "type", JS_DupValue (ctx, named.get ()));
+    JS_SetPropertyStr (ctx, out, name.c_str (), params);
+    return out;
+}
+
+/**
+ * `authorizeUsing (type, options?)` - Postman's setter for the request's auth,
+ * which assigns `pm.request.auth`. `null` removes an assigned one, so the
+ * request's own auth applies again. Read here by the reader the write-back
+ * uses, so a type it would refuse throws at the call, naming itself, where
+ * Postman ignores the call and sends the request unauthenticated.
+ */
+JSValue js_request_authorize_using (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!request_this_is_usable (ctx, this_val, "authorizeUsing")) {
+        return JS_EXCEPTION;
+    }
+    JSValueConst type    = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JSValueConst options = argc >= 2 ? argv[1] : JS_UNDEFINED;
+    if (JS_IsNull (type)) {
+        const JSAtom auth = JS_NewAtom (ctx, "auth");
+        const int deleted = JS_DeleteProperty (ctx, this_val, auth, 0);
+        JS_FreeAtom (ctx, auth);
+        return deleted < 0 ? JS_EXCEPTION : JS_UNDEFINED;
+    }
+    ScopedValue description (ctx, authorize_using_description (ctx, type, options));
+    if (JS_IsException (description.get ())) {
+        return JS_EXCEPTION;
+    }
+    vayu::http::Auth checked = vayu::http::NoAuth{};
+    if (auto reason = read_script_auth (ctx, description.get (), PM_REQUEST_AUTH, checked)) {
+        return JS_ThrowTypeError (ctx, "pm.request.authorizeUsing: %s", reason->c_str ());
+    }
+    if (JS_SetPropertyStr (
+        ctx, this_val, "auth", JS_DupValue (ctx, description.get ())) < 0) {
+        return JS_EXCEPTION;
+    }
+    return JS_UNDEFINED;
 }
 
 /// Postman Request methods with no Vayu meaning, bound only to refuse by name:
@@ -2279,6 +2376,8 @@ void install_request_methods (JSContext* ctx, JSValue request) {
     JS_NewCFunction (ctx, js_request_get_headers, "getHeaders", 0), flags);
     JS_DefinePropertyValueStr (ctx, request, "toJSON",
     JS_NewCFunction (ctx, js_request_to_json, "toJSON", 0), flags);
+    JS_DefinePropertyValueStr (ctx, request, "authorizeUsing",
+    JS_NewCFunction (ctx, js_request_authorize_using, "authorizeUsing", 2), flags);
     for (size_t i = 0; i < UNSUPPORTED_REQUEST_METHODS.size (); i++) {
         const char* name = UNSUPPORTED_REQUEST_METHODS.at (i).name;
         JS_DefinePropertyValueStr (ctx, request, name,
@@ -2533,6 +2632,142 @@ HeaderList apply_script_headers (const HeaderList& lines, const Headers& written
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// pm.request.auth (#3131)
+// ---------------------------------------------------------------------------
+
+/// A URL cut around its query: what precedes the `?`, the parsed pairs, and
+/// the fragment, `#` included. `query` is nullopt for a URL with no `?`.
+struct UrlQuerySplit {
+    std::string head;
+    std::optional<std::vector<vayu::http::UrlQueryParam>> query;
+    std::string fragment;
+};
+
+UrlQuerySplit split_url_query (const std::string& url) {
+    UrlQuerySplit out;
+    const auto hash = url.find ('#');
+    out.head        = url.substr (0, hash);
+    if (hash != std::string::npos) {
+        out.fragment = url.substr (hash);
+    }
+    if (const auto mark = out.head.find ('?'); mark != std::string::npos) {
+        out.query = vayu::http::parse_query_params (
+        std::string_view (out.head).substr (mark + 1));
+        out.head.erase (mark);
+    }
+    return out;
+}
+
+/// The pair `apply_auth` appended for @p request's query credential: the last
+/// one under its name, as typed or as the query rule encodes it.
+std::optional<vayu::http::UrlQueryParam> engine_query_credential (const Request& request) {
+    if (request.auth_query_param.empty ()) {
+        return std::nullopt;
+    }
+    const std::string& raw = request.auth_query_param;
+    const std::string encoded =
+    vayu::core::encode_query_component (raw, vayu::core::QueryPart::Key);
+    const auto split = split_url_query (request.url);
+    if (!split.query) {
+        return std::nullopt;
+    }
+    const auto& pairs = *split.query;
+    const auto found  = std::find_if (
+    pairs.rbegin (), pairs.rend (), [&] (const vayu::http::UrlQueryParam& pair) {
+        return pair.key == raw || pair.key == encoded;
+    });
+    if (found == pairs.rend ()) {
+        return std::nullopt;
+    }
+    return *found;
+}
+
+/// @p url without the last pair equal to @p pair, the rest of it kept; false
+/// when it holds none.
+bool remove_last_query_pair (std::string& url, const vayu::http::UrlQueryParam& pair) {
+    auto split = split_url_query (url);
+    if (!split.query) {
+        return false;
+    }
+    auto& pairs      = *split.query;
+    const auto found = std::find_if (
+    pairs.rbegin (), pairs.rend (), [&] (const vayu::http::UrlQueryParam& p) {
+        return p.key == pair.key && p.value == pair.value;
+    });
+    if (found == pairs.rend ()) {
+        return false;
+    }
+    pairs.erase (std::next (found).base ());
+    const std::string query = vayu::http::compose_query (pairs);
+    url = split.head + (query.empty () ? "" : "?" + query) + split.fragment;
+    return true;
+}
+
+/**
+ * Take off @p staged the credential the engine applied to @p before, so the
+ * script's own auth replaces it rather than landing beside it.
+ *
+ * Only what the engine wrote, and only while the script left it as it read
+ * it: `Request::auth_header` names the header and `auth_query_param` the query
+ * pair. A value the script wrote itself under either is the script's, and a
+ * header the engine did not write - typed on the request, or skipped by
+ * `apply_auth` because one was there - is not touched, so it still wins over
+ * the assigned auth as it wins over the request's own (#2475).
+ */
+void drop_engine_credential (const Request& before, const Headers& written, Request& staged) {
+    if (!before.auth_header.empty ()) {
+        const Headers shown = before.headers.folded ();
+        const auto was      = shown.find (before.auth_header);
+        const auto now      = written.find (before.auth_header);
+        if (was != shown.end () && now != written.end () && now->second == was->second) {
+            staged.headers.erase (before.auth_header);
+            std::erase_if (staged.secret_header_names, [&] (const std::string& name) {
+                return CaseInsensitiveLess::equal (name, before.auth_header);
+            });
+        }
+    }
+    if (const auto pair = engine_query_credential (before)) {
+        if (remove_last_query_pair (staged.url, *pair)) {
+            staged.auth_query_param.clear ();
+        }
+    }
+    // It described the engine's auth, which no longer applies.
+    staged.auth_notice.clear ();
+}
+
+/**
+ * A `pm.request.auth` the script assigned, composed onto @p staged in place of
+ * the engine's: read by `pm.sendRequest`'s reader, resolved against the
+ * scopes as the script left them, then applied by `apply_auth`. Undefined or
+ * null - never assigned, deleted, or `authorizeUsing (null)` - leaves the
+ * request's own auth as it is, which is what an absent auth means in Postman.
+ */
+std::optional<std::string> apply_script_auth (JSContext* ctx,
+JSValueConst js_auth,
+const Request& before,
+const Headers& written,
+Request& staged) {
+    if (JS_IsUndefined (js_auth) || JS_IsNull (js_auth)) {
+        return std::nullopt;
+    }
+    vayu::http::Auth auth = vayu::http::NoAuth{};
+    if (auto reason = read_script_auth (ctx, js_auth, PM_REQUEST_AUTH, auth)) {
+        return reason;
+    }
+    if (auto reason = resolve_script_auth (ctx, auth, PM_REQUEST_AUTH.label)) {
+        return reason;
+    }
+    drop_engine_credential (before, written, staged);
+    // `db` is null because no type the reader accepts needs one.
+    if (const auto applied = vayu::http::apply_auth (staged, auth, nullptr);
+    !applied.ok) {
+        return "pm.request.auth could not be applied: " + applied.message;
+    }
+    staged.auth_from_script = true;
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -2551,7 +2786,8 @@ HeaderList apply_script_headers (const HeaderList& lines, const Headers& written
  * simply later. Auth that waits on the script (`apply_late_auth`: a credential
  * naming a variable, or any `{{name}}` of a request a pre-request script runs
  * before, #2521) is applied after it, so the script's set lacks that header and
- * a header the script sets still wins.
+ * a header the script sets still wins. An assigned `pm.request.auth` replaces
+ * the engine's credential and stops the deferred one (`apply_script_auth`).
  *
  * All-or-nothing. Every field is staged and validated before anything is
  * committed, so a script that sets a good header and a bad method sends
@@ -2679,6 +2915,12 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
                 staged.body.mode = BodyMode::Text;
             }
         }
+    }
+
+    // Last, because it writes into the URL and headers staged above.
+    ScopedValue js_auth (ctx, JS_GetPropertyStr (ctx, js_request.get (), "auth"));
+    if (auto reason = apply_script_auth (ctx, js_auth.get (), request, written, staged)) {
+        return reason;
     }
 
     request = std::move (staged);

@@ -1279,7 +1279,7 @@ declare const pm: {
 	/**
 	 * Access the HTTP request data including URL, method, headers, and body.
 	 * 
-	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. An Auth tab credential still holding a {{variable}} nothing defined is applied after the script instead, so its header is not in pm.request yet and a variable this script sets reaches it. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
+	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. An Auth tab credential still holding a {{variable}} nothing defined is applied after the script instead, so its header is not in pm.request yet and a variable this script sets reaches it. Assigning pm.request.auth replaces the Auth tab's credential, deferred or not. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
 	 */
 	request: {
 		/**
@@ -1290,6 +1290,14 @@ declare const pm: {
 		 * Postman's Request.addQueryParams: pm.request.url.addQueryParams() under its Request name.
 		 */
 		addQueryParams(params: string | { key: string, value?: string | number | boolean | null } | ReadonlyArray<string | { key: string, value?: string | number | boolean | null }>): void;
+		/**
+		 * The request's auth as Postman's block: { type, <type>: params }, the params as [{ key, value }] or { name: value }. basic, bearer, apikey and noauth are composed; any other type, oauth2 included, is refused by name. Assigning one replaces the credential the Auth tab applied - noauth sends none - and a {{variable}} in it resolves against what this script set. A header the Auth tab did not write still wins. undefined until the script assigns one: the Auth tab's credential is visible as the header it wrote, and delete pm.request.auth puts it back.
+		 */
+		auth: { [key: string]: any } | undefined;
+		/**
+		 * Postman's Request.authorizeUsing: assigns pm.request.auth from a type and its parameters - ('basic', { username, password }), ({ type: 'bearer', token }) or the { type, bearer: ... } block itself. null removes the assigned auth. A type pm.request.auth refuses throws here, at the call.
+		 */
+		authorizeUsing(type: string | { [key: string]: any } | null, options?: { [key: string]: any } | { key: string, value: string }[]): void;
 		/**
 		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists, the graphql pair and the file.
 		 * 

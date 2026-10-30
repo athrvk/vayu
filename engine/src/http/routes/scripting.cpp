@@ -641,7 +641,8 @@ nlohmann::json get_script_completions () {
     "the one the Auth tab applied. An Auth tab credential still holding a "
     "{{variable}} nothing defined is applied after the script instead, so its "
     "header is not in pm.request yet and a variable this script sets reaches "
-    "it. A value the engine cannot send - an empty "
+    "it. Assigning pm.request.auth replaces the Auth tab's credential, "
+    "deferred or not. A value the engine cannot send - an empty "
     "URL, an unrecognised method - rejects the whole edit rather than part of "
     "it: the request goes out exactly as it was before the script ran, and "
     "the reason is reported in the Console tab. In a **test** script it is a "
@@ -1308,6 +1309,34 @@ nlohmann::json get_script_completions () {
     "graphql | file }, absent when there is none. It is what "
     "JSON.stringify(pm.request) writes. A copy: writing to it sends nothing." },
     { "sortText", "1_pm_request_toJSON" } });
+
+    completions.push_back ({ { "label", "pm.request.auth" }, { "kind", KIND_FIELD },
+    { "insertText", "pm.request.auth" }, { "detail", "object | undefined (writable pre-request)" },
+    { "documentation",
+    "The request's auth as Postman's block: { type, <type>: params }, the "
+    "params as [{ key, value }] or { name: value }. basic, bearer, apikey and "
+    "noauth are composed; any other type, oauth2 included, is refused by name. "
+    "Assigning one replaces the credential the Auth tab applied - noauth sends "
+    "none - and a {{variable}} in it resolves against what this script set. A "
+    "header the Auth tab did not write still wins. undefined until the script "
+    "assigns one: the Auth tab's credential is visible as the header it wrote, "
+    "and delete pm.request.auth puts it back." },
+    { "sortText", "1_pm_request_auth" } });
+
+    completions.push_back ({ { "label", "pm.request.authorizeUsing" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.authorizeUsing(\"${1:bearer}\", { ${2:token: \"value\"} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.authorizeUsing(type: string | { [key: string]: any } | null, "
+    "options?: { [key: string]: any } | { key: string, value: string }[]): "
+    "void" },
+    { "documentation",
+    "Postman's Request.authorizeUsing: assigns pm.request.auth from a type "
+    "and its parameters - ('basic', { username, password }), ({ type: "
+    "'bearer', token }) or the { type, bearer: ... } block itself. null "
+    "removes the assigned auth. A type pm.request.auth refuses throws here, "
+    "at the call." },
+    { "sortText", "1_pm_request_authorizeUsing" } });
 
     // Snippets for the mutation patterns. Without these, `pm.request.` offers
     // only the four reads and the capability is invisible in the editor.
