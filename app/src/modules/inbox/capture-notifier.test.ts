@@ -39,6 +39,7 @@ function capture(overrides: Partial<InboxCapture> = {}): InboxCapture {
 		query: "",
 		headers: {},
 		body: "",
+		bodyEncoding: "utf8",
 		bodyBytes: 0,
 		bodyTruncated: false,
 		remoteAddr: "127.0.0.1",

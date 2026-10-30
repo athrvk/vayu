@@ -10,7 +10,7 @@
  *
  * A capture is an exchange with no response - `UnifiedResponseViewer` already
  * handles exactly that (it guards on request-or-response, not both), and
- * `buildRawRequest` already produces the raw HTTP text. Rendering an inbound
+ * `CaptureRaw` prints the raw HTTP text. Rendering an inbound
  * request with the same components as an outbound one is the point: a webhook
  * you received should read like a request you sent.
  */
@@ -23,9 +23,9 @@ import {
 	MethodBadge,
 	UnifiedResponseViewer,
 } from "@/components/shared";
-import { buildRawRequest } from "@/components/shared/response-viewer/utils";
 import { captureReference } from "@/lib/agent-reference";
 import type { InboxCapture } from "@/types";
+import { CaptureRaw } from "./CaptureRaw";
 import { captureUrl } from "./utils";
 
 interface CaptureDetailProps {
@@ -83,12 +83,7 @@ export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
 				}}
 			/>
 
-			<div className="flex min-h-0 flex-col gap-1">
-				<span className="text-xs font-medium text-muted-foreground">Raw</span>
-				<pre className="max-h-48 overflow-auto surface-sunken border border-rule rounded-md p-2 font-mono text-xs whitespace-pre-wrap break-all">
-					{buildRawRequest(capture.method, url, capture.headers, capture.body)}
-				</pre>
-			</div>
+			<CaptureRaw capture={capture} url={url} />
 		</div>
 	);
 }

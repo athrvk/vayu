@@ -208,7 +208,7 @@ export const WEBHOOK_INBOX_TOOLS: McpTool[] = [
 		notFound: { ...ID_KINDS.inbox, idArg: "inboxId" },
 		description: (config) =>
 			"Read what a webhook inbox recorded, newest first. Each row is the whole captured request - method, path, query string, headers, body and the caller's address - so this is the assertion half of a webhook test: start an inbox, trigger the sender, read the captures. An inbox that has received nothing returns an empty page, not an error. " +
-			`A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. ` +
+			`A body that is not valid UTF-8 (a protobuf, an image) arrives as base64, \`bodyEncoding: "base64"\`, and decodes to the sender's bytes; any other is text, \`"utf8"\`. A body the engine cut at its capture cap carries \`bodyTruncated\` beside \`bodyBytes\`, the true original size in bytes. BOUNDED: ${DEFAULT_INBOX_CAPTURE_LIMIT} captures per call by default, ${MAX_INBOX_CAPTURE_LIMIT} at most - a larger \`limit\` is refused, not clamped - and each body is cut to ${MAX_INLINE_BODY_BYTES / 1024} KB for this result. ` +
 			PAGE_CURSOR_SENTENCE +
 			" There is no live stream over MCP: poll this after triggering the sender." +
 			withheldPointer(config, "recorded"),

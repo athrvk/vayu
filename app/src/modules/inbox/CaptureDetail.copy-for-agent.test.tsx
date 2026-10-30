@@ -34,6 +34,7 @@ const CAPTURE: InboxCapture = {
 	query: `token=${SENTINEL}`,
 	headers: { Authorization: `Bearer ${SENTINEL}` },
 	body: JSON.stringify({ password: SENTINEL }),
+	bodyEncoding: "utf8",
 	bodyBytes: 30,
 	bodyTruncated: false,
 	remoteAddr: "127.0.0.1",

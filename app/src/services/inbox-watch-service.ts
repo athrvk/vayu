@@ -62,6 +62,8 @@ export function parseCaptureEvent(raw: unknown): InboxCapture | null {
 				? (e.headers as Record<string, string>)
 				: {},
 		body: typeof e.body === "string" ? e.body : "",
+		// Anything but the one value that changes how `body` reads is text.
+		bodyEncoding: e.bodyEncoding === "base64" ? "base64" : "utf8",
 		bodyBytes: typeof e.bodyBytes === "number" ? e.bodyBytes : 0,
 		bodyTruncated: e.bodyTruncated === true,
 		remoteAddr: typeof e.remoteAddr === "string" ? e.remoteAddr : "",

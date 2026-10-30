@@ -363,6 +363,11 @@ merge-patch - an omitted field keeps what the inbox is serving - and the live
 capture stream (`INBOX_LIVE`) is a plain `EventSource` rather than `SSEClient`,
 which maps load-test metrics specifically. Captures arriving on that stream are
 merged into the `listInboxCaptures` cache, so there is one list.
+`InboxCapture.bodyEncoding` is `"base64"` when the stored bytes are not valid
+UTF-8 (issue #3109): `body` is then the base64 of the stored prefix, and
+`bodyBytes` is the size as received. `parseCaptureEvent` reads the marker off the
+stream the same way the list route carries it, because a payload that dropped it
+would show the base64 as the body's text.
 `deleteInbox` is the stronger of the two lifecycle calls: `stopInbox` frees the
 listener and leaves the record and its captures readable for the life of the
 engine process, while a delete takes both (issue #553). Its mutation *removes*

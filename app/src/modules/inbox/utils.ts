@@ -5,6 +5,8 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatSize } from "@/components/shared/response-viewer/utils";
+import { decodeResponseBody } from "@/modules/request-builder/utils/response-bytes";
 import type { InboxCannedResponse, InboxCapture } from "@/types";
 
 /**
@@ -32,4 +34,43 @@ export function cannedResponseKey(inboxId: string, response: InboxCannedResponse
 		.map(([name, value]) => `${name}=${value}`)
 		.join("|");
 	return [inboxId, response.status, response.delayMs, response.body, headers].join("\u0000");
+}
+
+/**
+ * The exact bytes a base64 capture stored, or `null` for a body that is text or
+ * whose base64 does not decode. Never throws: the capture is read in render,
+ * and a body the engine mislabelled must leave the rest of the pane readable.
+ *
+ * No headers are passed on purpose. `decodeResponseBody` would otherwise read a
+ * `text/*` type as a body to decode through a charset, and a capture whose bytes
+ * the engine already found are not UTF-8 is shown as bytes whatever it claims.
+ */
+export function captureBinaryBytes(
+	capture: Pick<InboxCapture, "body" | "bodyEncoding">
+): Uint8Array<ArrayBuffer> | null {
+	if (capture.bodyEncoding !== "base64") return null;
+	try {
+		return (
+			decodeResponseBody({ bodyRaw: capture.body, bodyEncoding: "base64" }).bytes?.data ??
+			null
+		);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The line that stands where a base64 body would print in the Raw view. The
+ * size is `bodyBytes`, what arrived, and `held` is how much of it the engine
+ * kept: they differ exactly when the body was truncated.
+ */
+export function binaryBodyPlaceholder(
+	capture: Pick<InboxCapture, "bodyBytes" | "bodyTruncated">,
+	held: number | undefined
+): string {
+	const received = formatSize(capture.bodyBytes);
+	if (capture.bodyTruncated && held !== undefined) {
+		return `[Binary data, not shown as text: the first ${formatSize(held)} of ${received} was kept.]`;
+	}
+	return `[${received} of binary data, not shown as text.]`;
 }

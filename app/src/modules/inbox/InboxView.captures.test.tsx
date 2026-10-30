@@ -101,6 +101,7 @@ function capture(id: number, overrides: Partial<InboxCapture> = {}): InboxCaptur
 		query: "",
 		headers: {},
 		body: "{}",
+		bodyEncoding: "utf8",
 		bodyBytes: 2,
 		bodyTruncated: false,
 		remoteAddr: "127.0.0.1",

@@ -12536,6 +12536,48 @@ describe("webhook inbox tools", () => {
 			expect(captures[1]).toEqual({ id: 2, method: "POST", body: "small", bodyBytes: 5 });
 		});
 
+		test("a base64 capture body is cut in decoded bytes and stays whole base64", async () => {
+			// 3 bytes per 4 characters: bounding it as text would cut at 4/3 of the
+			// limit and could end mid-quad, a string that no longer decodes (#3109).
+			const bytes = Buffer.alloc(MAX_INLINE_BODY_BYTES + 3000, 0xff);
+			const body = bytes.toString("base64");
+			const client = fakeClient({
+				getInboxCaptures: vi.fn().mockResolvedValue(
+					page([
+						{
+							id: 1,
+							method: "POST",
+							body,
+							bodyEncoding: "base64",
+							bodyBytes: bytes.length,
+							bodyTruncated: false,
+						},
+					])
+				),
+			});
+			const res = await dispatchTool(
+				"get_inbox_captures",
+				{ inboxId: "inbox_1" },
+				ctxWith(client)
+			);
+			const [capture] = (JSON.parse(firstText(res)) as { data: Record<string, unknown>[] })
+				.data;
+			// The marker an agent needs to know the body is not text survives the cut.
+			expect(capture.bodyEncoding).toBe("base64");
+			expect(capture.bodyTruncated).toBe(true);
+			expect(capture.bodyBytes).toBe(bytes.length);
+			const kept = Buffer.from(capture.body as string, "base64");
+			expect(kept.length).toBeLessThanOrEqual(MAX_INLINE_BODY_BYTES);
+			expect(kept.length).toBeGreaterThan(MAX_INLINE_BODY_BYTES - 3);
+			expect(kept.toString("base64")).toBe(capture.body);
+		});
+
+		test("the description tells an agent that a body may be base64", () => {
+			expect(descriptionOf(byName().get("get_inbox_captures"))).toMatch(
+				/bodyEncoding.*base64/
+			);
+		});
+
 		test("an unknown inbox is an engine error, not an empty page", async () => {
 			const client = fakeClient({
 				getInboxCaptures: vi
@@ -16928,6 +16970,40 @@ describe("secret withholding", () => {
 			body: '{"key":"<redacted>"}',
 			bodyBytes: 30,
 		});
+		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
+		expect(revealed.body).toEqual(lastPageAnswer(captures));
+	});
+
+	test("get_inbox_captures masks a secret inside a base64 capture body and keeps it base64", async () => {
+		// A multipart upload or a protobuf is not UTF-8, so the engine sends it
+		// base64 (#3109); the secret is in the bytes, not in the base64 text.
+		const bytes = Buffer.concat([
+			Buffer.from([0xff, 0xfe]),
+			Buffer.from(`key=${RUN_SECRET}`),
+			Buffer.from([0x00]),
+		]);
+		const captures = page([
+			{
+				id: 1,
+				method: "POST",
+				path: "/hook",
+				headers: {},
+				body: bytes.toString("base64"),
+				bodyEncoding: "base64",
+				bodyBytes: bytes.length,
+				bodyTruncated: false,
+			},
+		]);
+		const client = runClient({ getInboxCaptures: vi.fn().mockResolvedValue(captures) });
+		const withheld = await read("get_inbox_captures", client, undefined, {
+			inboxId: "inbox_1",
+		});
+		const [capture] = withheld.body.data;
+		expect(capture.bodyEncoding).toBe("base64");
+		expect(capture.bodyBytes).toBe(bytes.length);
+		const decoded = Buffer.from(capture.body, "base64").toString("latin1");
+		expect(decoded).not.toContain(RUN_SECRET);
+		expect(decoded).toContain("key=<redacted>");
 		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
 		expect(revealed.body).toEqual(lastPageAnswer(captures));
 	});

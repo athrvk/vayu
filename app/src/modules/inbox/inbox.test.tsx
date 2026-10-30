@@ -32,6 +32,7 @@ function capture(overrides: Partial<InboxCapture> = {}): InboxCapture {
 		query: "attempt=2",
 		headers: { "X-Signature": "sha256=abc" },
 		body: '{"id":7}',
+		bodyEncoding: "utf8",
 		bodyBytes: 8,
 		bodyTruncated: false,
 		remoteAddr: "127.0.0.1",
@@ -127,5 +128,17 @@ describe("the live stream", () => {
 		expect(parsed?.query).toBe("");
 		expect(parsed?.bodyBytes).toBe(0);
 		expect(parsed?.bodyTruncated).toBe(false);
+		expect(parsed?.bodyEncoding).toBe("utf8");
+	});
+
+	it("keeps the engine's base64 marker and reads anything else as utf8", () => {
+		const event = { id: 4, inboxId: "inbox_a", method: "PUT", path: "/hook", body: "iVBORw==" };
+		// Dropping the marker would show the base64 as the payload's text.
+		expect(parseCaptureEvent({ ...event, bodyEncoding: "base64" })?.bodyEncoding).toBe(
+			"base64"
+		);
+		expect(parseCaptureEvent({ ...event, bodyEncoding: "utf8" })?.bodyEncoding).toBe("utf8");
+		expect(parseCaptureEvent({ ...event, bodyEncoding: "rot13" })?.bodyEncoding).toBe("utf8");
+		expect(parseCaptureEvent(event)?.bodyEncoding).toBe("utf8");
 	});
 });
