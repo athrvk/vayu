@@ -78,8 +78,12 @@ json healthy_summary () {
         { "extractorMisses", 1 }, { "preRequestScript", "skipped" },
         { "latency", { { "min", 1 }, { "p50", 2 }, { "p95", 3 }, { "p99", 4 }, { "max", 5 } } },
         { "elements",
-        json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "passed", 10 },
-        { "failed", 0 }, { "skipped", 0 }, { "deferred", 0 } } }) } } }) },
+        json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "passed", 10 }, { "failed", 0 },
+                       { "missing", 0 }, { "error", 0 }, { "skipped", 0 }, { "deferred", 0 } },
+        { { "id", "el_2" }, { "kind", "extract.json" }, { "name", "Session id" },
+        { "origin", { { "kind", "request" }, { "scope", "request" }, { "id", "req_1" }, { "name", "login" } } },
+        { "required", true }, { "passed", 9 }, { "failed", 0 }, { "missing", 1 },
+        { "error", 0 }, { "skipped", 0 }, { "deferred", 0 } } }) } } }) },
         { "transactions",
         json::array ({ { { "name", "checkout" }, { "count", 10 }, { "errors", 0 },
         { "latency",
@@ -122,11 +126,16 @@ json healthy_summary () {
         { "failures", json::array () }, { "failuresTotal", 0 } } },
         { "lifecycle",
         { { "setup",
-        json::array ({ { { "id", "el_s" }, { "kind", "script.setup" },
-        { "origin", json::object () }, { "outcome", "ok" }, { "waitedMs", 1.0 } } }) } } },
+        json::array ({ { { "id", "el_s" }, { "kind", "script.setup" }, { "name", "Seed data" },
+        { "origin",
+        { { "kind", "collection" }, { "scope", "collection" },
+        { "id", "col_1" }, { "name", "Shop" }, { "unlisted", "dropped" } } },
+        { "outcome", "ok" }, { "waitedMs", 1.0 } } }) } } },
         { "elements",
-        json::array ({ { { "id", "el_1" }, { "kind", "assert.status" },
-        { "passed", 1 }, { "failed", 0 }, { "skipped", 0 }, { "deferred", 0 } } }) },
+        json::array ({ { { "id", "el_1" }, { "kind", "assert.status" }, { "name", "Is 200" },
+        { "origin", { { "kind", "collection" }, { "id", "col_1" } } },
+        { "passed", 1 }, { "failed", 0 }, { "missing", 0 }, { "error", 1 },
+        { "skipped", 0 }, { "deferred", 0 } } }) },
         { "warnings",
         json::array ({ { { "code", "unresolved_tokens" }, { "message", "1 request sent with an unresolved variable: token" },
                        { "count", 1 }, { "names", { "token" } } },
@@ -297,6 +306,30 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     // validation does.
     EXPECT_EQ (
     document["report"]["scenario"]["steps"].at (0).value ("extractorMisses", -1), 1);
+    // A tally row names its element and counts a miss and an error apart
+    // (#3051). Mutation check: drop "missing" from ELEMENT_TALLY_KEYS, or the
+    // origin pick in `element_tallies`, and the matching assertion fails; drop
+    // a key from the schema's `elementTally` and the validation does.
+    const auto& tally =
+    document["report"]["scenario"]["steps"].at (0)["elements"].at (1);
+    EXPECT_EQ (tally.value ("name", ""), "Session id");
+    EXPECT_EQ (tally.value ("required", false), true);
+    EXPECT_EQ (tally.value ("missing", -1), 1);
+    EXPECT_EQ (tally.value ("error", -1), 0);
+    EXPECT_EQ (tally.value ("origin", json ()),
+    (json{ { "kind", "request" }, { "scope", "request" }, { "id", "req_1" },
+    { "name", "login" } }));
+    const auto& request_tally = document["report"]["elements"].at (0);
+    EXPECT_EQ (request_tally.value ("error", -1), 1);
+    EXPECT_EQ (request_tally.value ("origin", json ()),
+    (json{ { "kind", "collection" }, { "id", "col_1" } }));
+    EXPECT_EQ (document["report"]["lifecycle"]["setup"].at (0).value ("name", ""), "Seed data");
+    // A lifecycle outcome names its level too, member by member, so a member
+    // the origin gains is not carried unread. Mutation check: pick lifecycle
+    // outcomes with `pick_each` again (run_export.cpp) and `origin` is gone.
+    EXPECT_EQ (document["report"]["lifecycle"]["setup"].at (0).value ("origin", json ()),
+    (json{ { "kind", "collection" }, { "scope", "collection" },
+    { "id", "col_1" }, { "name", "Shop" } }));
     EXPECT_FALSE (document["timeSeries"].empty ());
 }
 

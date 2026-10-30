@@ -195,8 +195,10 @@ constexpr auto STEP_KEYS     = std::to_array<std::string_view> (
 "noResponse", "unresolvedTokens", "extractorMisses", "preRequestScript" });
 constexpr auto STEP_LATENCY_KEYS =
 std::to_array<std::string_view> ({ "min", "p50", "p95", "p99", "max" });
-constexpr auto ELEMENT_TALLY_KEYS = std::to_array<std::string_view> (
-{ "id", "kind", "passed", "failed", "skipped", "deferred" });
+constexpr auto ELEMENT_TALLY_KEYS = std::to_array<std::string_view> ({ "id", "kind",
+"name", "required", "passed", "failed", "missing", "error", "skipped", "deferred" });
+constexpr auto ELEMENT_ORIGIN_KEYS =
+std::to_array<std::string_view> ({ "kind", "scope", "id", "name" });
 constexpr auto TRANSACTION_KEYS =
 std::to_array<std::string_view> ({ "name", "count", "errors" });
 constexpr auto TRANSACTION_LATENCY_KEYS =
@@ -228,7 +230,7 @@ constexpr auto KEYWORD_COUNT_KEYS =
 std::to_array<std::string_view> ({ "keyword", "count" });
 // `message` is left behind: it is what a setup or teardown script threw.
 constexpr auto LIFECYCLE_OUTCOME_KEYS =
-std::to_array<std::string_view> ({ "id", "kind", "outcome", "waitedMs" });
+std::to_array<std::string_view> ({ "id", "kind", "name", "outcome", "waitedMs" });
 constexpr auto THRESHOLD_KEYS =
 std::to_array<std::string_view> ({ "passed", "failed", "verdict" });
 constexpr auto THRESHOLD_CHECK_KEYS = std::to_array<std::string_view> (
@@ -271,13 +273,33 @@ ordered stream_section (const json& stream) {
     return out;
 }
 
+/// Each of @p rows, one per element: its @p keys, then the level it came from.
+ordered element_rows (const json& rows, Keys keys) {
+    ordered out = ordered::array ();
+    if (!rows.is_array ()) {
+        return out;
+    }
+    for (const json& row : rows) {
+        ordered picked = pick (row, keys);
+        if (const json& origin = member (row, "origin"); origin.is_object ()) {
+            picked["origin"] = pick (origin, ELEMENT_ORIGIN_KEYS);
+        }
+        out.push_back (std::move (picked));
+    }
+    return out;
+}
+
+ordered element_tallies (const json& rows) {
+    return element_rows (rows, ELEMENT_TALLY_KEYS);
+}
+
 ordered scenario_step (const json& step) {
     ordered out = pick (step, STEP_KEYS);
     if (const json& latency = member (step, "latency"); latency.is_object ()) {
         out["latency"] = pick (latency, STEP_LATENCY_KEYS);
     }
     if (const json& elements = member (step, "elements"); elements.is_array ()) {
-        out["elements"] = pick_each (elements, ELEMENT_TALLY_KEYS);
+        out["elements"] = element_tallies (elements);
     }
     return out;
 }
@@ -347,7 +369,7 @@ ordered lifecycle_section (const json& lifecycle) {
     ordered out = ordered::object ();
     for (const char* phase : { "setup", "teardown" }) {
         if (const json& outcomes = member (lifecycle, phase); outcomes.is_array ()) {
-            out[phase] = pick_each (outcomes, LIFECYCLE_OUTCOME_KEYS);
+            out[phase] = element_rows (outcomes, LIFECYCLE_OUTCOME_KEYS);
         }
     }
     return out;
@@ -403,7 +425,7 @@ constexpr auto REPORT_SECTIONS = std::to_array<ReportSection> ({
 { "coverage", coverage_section },
 { "schemaValidation", schema_validation_section },
 { "lifecycle", lifecycle_section },
-{ "elements", [] (const json& s) { return pick_each (s, ELEMENT_TALLY_KEYS); } },
+{ "elements", element_tallies },
 { "thresholdValidation", threshold_section },
 { "customMetrics",
 [] (const json& s) { return pick_named (s, CUSTOM_METRIC_KEYS); } },

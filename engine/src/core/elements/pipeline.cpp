@@ -167,9 +167,15 @@ int64_t SharedThroughputBudgets::claim (const std::string& name, double target_r
 
 nlohmann::json ElementOutcome::to_json () const {
     nlohmann::json node;
-    node["id"]      = id;
-    node["kind"]    = kind;
-    node["origin"]  = origin;
+    node["id"]   = id;
+    node["kind"] = kind;
+    if (!name.empty ()) {
+        node["name"] = name;
+    }
+    node["origin"] = origin;
+    if (required) {
+        node["required"] = true;
+    }
     node["outcome"] = status;
     if (message) {
         node["message"] = *message;
@@ -197,30 +203,51 @@ size_t count_extractor_misses (const std::vector<ElementOutcome>& outcomes) {
 }
 
 void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
+    std::atomic<size_t>* bucket = &skipped;
     if (outcome.status == "ok") {
-        passed.fetch_add (1, std::memory_order_relaxed);
-    } else if (outcome.status == "failed" || outcome.status == "error") {
-        failed.fetch_add (1, std::memory_order_relaxed);
+        bucket = &passed;
+    } else if (outcome.status == "failed") {
+        bucket = &failed;
+    } else if (outcome.status == "missing") {
+        bucket = &missing;
+    } else if (outcome.status == "error") {
+        bucket = &error;
     } else if (outcome.deferred) {
-        deferred.fetch_add (1, std::memory_order_relaxed);
-    } else {
-        skipped.fetch_add (1, std::memory_order_relaxed);
+        bucket = &deferred;
     }
+    bucket->fetch_add (1, std::memory_order_relaxed);
 }
 
 void ElementOutcomeCounts::append_report_row (nlohmann::json& rows,
-const std::string& id,
-const std::string& kind) const {
+const CompiledElement& element) const {
     const size_t passed_count   = passed.load (std::memory_order_relaxed);
     const size_t failed_count   = failed.load (std::memory_order_relaxed);
+    const size_t missing_count  = missing.load (std::memory_order_relaxed);
+    const size_t error_count    = error.load (std::memory_order_relaxed);
     const size_t skipped_count  = skipped.load (std::memory_order_relaxed);
     const size_t deferred_count = deferred.load (std::memory_order_relaxed);
-    if (passed_count + failed_count + skipped_count + deferred_count == 0) {
+    const size_t recorded       = passed_count + failed_count + missing_count +
+    error_count + skipped_count + deferred_count;
+    if (recorded == 0) {
         return;
     }
-    rows.push_back ({ { "id", id }, { "kind", kind },
-    { "passed", passed_count }, { "failed", failed_count },
-    { "skipped", skipped_count }, { "deferred", deferred_count } });
+    nlohmann::json row = { { "id", element.id }, { "kind", element.kind } };
+    if (!element.name.empty ()) {
+        row["name"] = element.name;
+    }
+    if (element.origin.is_object () && !element.origin.empty ()) {
+        row["origin"] = element.origin;
+    }
+    if (element.required) {
+        row["required"] = true;
+    }
+    row["passed"]   = passed_count;
+    row["failed"]   = failed_count;
+    row["missing"]  = missing_count;
+    row["error"]    = error_count;
+    row["skipped"]  = skipped_count;
+    row["deferred"] = deferred_count;
+    rows.push_back (std::move (row));
 }
 
 nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
@@ -266,6 +293,15 @@ std::string scope_of_origin (const nlohmann::json& origin) {
     return {};
 }
 
+/// Whether @p config sets `required` to `true`; anything else is not required.
+bool config_requires (const nlohmann::json& config) {
+    if (!config.is_object ()) {
+        return false;
+    }
+    const auto found = config.find ("required");
+    return found != config.end () && found->is_boolean () && found->get<bool> ();
+}
+
 } // namespace
 
 std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
@@ -278,12 +314,17 @@ std::vector<CompiledElement> compile_elements (const nlohmann::json& elements) {
     const auto& registry = Registry::instance ();
     for (const auto& entry : elements) {
         CompiledElement out;
-        out.id      = entry.value ("id", "");
-        out.kind    = entry.value ("kind", "");
-        out.origin  = entry.value ("origin", nlohmann::json::object ());
-        out.scope   = scope_of_origin (out.origin);
-        out.config  = entry.value ("config", nlohmann::json::object ());
-        out.enabled = !entry.contains ("enabled") ||
+        out.id   = entry.value ("id", "");
+        out.kind = entry.value ("kind", "");
+        if (const auto name = entry.find ("name");
+        name != entry.end () && name->is_string ()) {
+            out.name = name->get<std::string> ();
+        }
+        out.origin   = entry.value ("origin", nlohmann::json::object ());
+        out.scope    = scope_of_origin (out.origin);
+        out.config   = entry.value ("config", nlohmann::json::object ());
+        out.required = config_requires (out.config);
+        out.enabled  = !entry.contains ("enabled") ||
         entry["enabled"].is_null () || entry.value ("enabled", true);
 
         if (const auto* kind = registry.find (out.kind); kind != nullptr &&
@@ -434,7 +475,9 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         sink.push_back (ElementOutcome{
         compiled.id,
         compiled.kind,
+        compiled.name,
         compiled.origin,
+        compiled.required,
         ctx.outcome_status,
         ctx.outcome_message,
         ctx.outcome_waited_ms,

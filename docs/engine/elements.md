@@ -461,8 +461,13 @@ load path cannot support yet) no longer applies to either.
 A design send's and a sequential run step's stored trace gains an `elements` array beside the
 existing `scripts` node - one entry per compiled element that ran at `step.before` or `step.after`
 (`step.between` too, for the sequential run), each
-`{ id, kind, origin, outcome, message?, waitedMs? }`. `outcome` is one of `ok` | `failed` | `missing` |
+`{ id, kind, name?, origin, required?, outcome, message?, waitedMs? }`, `name` being the element's
+own label when it has one. `outcome` is one of `ok` | `failed` | `missing` |
 `skipped` | `error`; a disabled element is reported `skipped` without its `apply` ever running.
+An extractor's `missing` carries what found nothing as its message (`no match for '$.token'`,
+`no 'X-Request-Id' response header`), required or not (#3051). `required` is present, as `true`,
+only for an element whose `config.required` is boolean `true`: on an extractor's `missing` it is
+what says the miss failed the step.
 An `assert.*` whose own config leaves it nothing to judge (no operand, a JSONPath or pattern that
 does not compile: all refused when written, so only a row stored before that check reaches this)
 reports `error` with the reason and also records a failed assertion under the same reason, so the
@@ -550,16 +555,24 @@ latency histogram, so the run's `max` is never below a step's. What stays on the
 stored trace's `totalMs` (it stays consistent with the phase breakdown beside it), the per-phase
 histograms and the `slow_threshold_ms` decision.
 
-**Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, passed, failed, skipped,
-deferred }` beside the existing `tests` node, one row per element that ran at least once this run -
-`StepElementTallies`, sized once from the plan's compiled elements so recording on the
-completion path is a lookup, never a lock or an allocation. A single-request run's
-`summary.elements` is `RequestElementTallies`, classifying by the same rule
-(`ElementOutcomeCounts`). `deferred` (issue #2144) is an un-inlined `script.post` left to the
+**Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, name?, origin?, required?,
+passed, failed, missing, error, skipped, deferred }` beside the existing `tests` node, one row per
+element that ran at least once this run - `StepElementTallies`, sized once from the plan's
+compiled elements so recording on the completion path is a lookup, never a lock or an allocation.
+Ids are unique within one level's list, not across the chain (a duplicated collection keeps its
+elements' ids), so a step's composed list can hold one id twice; each still gets its own row,
+counts and label, told apart by its `origin.id`.
+A single-request run's `summary.elements` is `RequestElementTallies`, classifying by the same rule
+(`ElementOutcomeCounts`). Each count is one outcome word (#3051): `ok` is `passed`, and `failed`,
+`missing` and `error` count under their own names, so a miss never reads as a skip nor an error as
+a failed check. The row names its element: `name` (its label) and `origin` (the level it was
+composed from) when it has them, and `required: true` for an extractor whose miss fails the step.
+`deferred` (issue #2144) is an un-inlined `script.post` left to the
 replay: the load path's `skip_reason` hook answers it with `ElementSkip::deferred` set, which the
-pipeline copies onto the outcome. `skipped` is every other `skipped` or `missing` outcome,
+pipeline copies onto the outcome. `skipped` is every other `skipped` outcome,
 including the two that never run at all: a disabled element and an un-inlined `script.pre`
-(no pre-request replay exists). An extractor's miss is one of those `skipped`, and is counted again,
+(no pre-request replay exists). An extractor's miss is a `missing` (or, for an optional
+`extract.json` that could not read the body, a `skipped`), and is counted again,
 per step, in `scenario.steps[i].extractorMisses` (above).
 
 **A controller's skip, under load too (issue #1515).** `control.if` / `control.once` /

@@ -20,7 +20,7 @@ import { describe, it, expect } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import ScenarioStepsTab from "./ScenarioStepsTab";
-import type { RunScenarioStepStat } from "@/types";
+import type { RunScenarioStepElementTally, RunScenarioStepStat } from "@/types";
 
 const STEPS: RunScenarioStepStat[] = [
 	{
@@ -441,6 +441,70 @@ describe("the per-step element tallies", () => {
 		expect(within(rows[1]).queryByText(/skipped/)).toBeNull();
 	});
 
+	describe("a missing and an error tally, a name and an origin (issue #3051)", () => {
+		const oneRow = (over: Partial<RunScenarioStepElementTally>) => {
+			render(
+				<ScenarioStepsTab
+					steps={[
+						{
+							...STEPS[0],
+							elements: [
+								{
+									id: "el_9",
+									kind: "extract.json",
+									passed: 5,
+									failed: 0,
+									skipped: 0,
+									...over,
+								},
+							],
+						},
+					]}
+					virtualUsers={8}
+				/>
+			);
+			return screen.getAllByRole("row").slice(1)[1];
+		};
+
+		it("shows missing and error under their own colours, hidden at zero", () => {
+			const row = oneRow({ missing: 3, error: 2 });
+			expect(
+				within(row).getByText("3 missing", { selector: "span.text-status-warning-text" })
+			).toBeTruthy();
+			expect(
+				within(row).getByText("2 error", { selector: "span.text-status-error-text" })
+			).toBeTruthy();
+			expect(within(row).queryByText(/skipped/)).toBeNull();
+		});
+
+		it("states neither at zero, nor for a row stored before them", () => {
+			const row = oneRow({ missing: 0, error: 0 });
+			expect(within(row).queryByText(/missing|error/)).toBeNull();
+		});
+
+		it("reads a required extractor's miss as a failure", () => {
+			const row = oneRow({ required: true, missing: 4 });
+			expect(within(row).getByText("4 missing (required)")).toHaveClass(
+				"text-status-error-text"
+			);
+		});
+
+		it("names the element and the collection it came from", () => {
+			const row = oneRow({
+				name: "Session token",
+				origin: { kind: "collection", scope: "collection", name: "Billing" },
+			});
+			expect(within(row).getByText("Session token")).toBeTruthy();
+			expect(within(row).getByText("extract.json")).toBeTruthy();
+			expect(within(row).getByText('from "Billing"')).toBeTruthy();
+		});
+
+		it("keeps an old-shape row as the bare kind and passed count", () => {
+			const row = oneRow({});
+			expect(row.textContent).toBe("extract.json5 passed");
+		});
+	});
+
 	it("renders no element rows for a step with none", () => {
 		// Mutation check: reverting to `STEPS` (no `elements` field on either
 		// step) must drop back to exactly one row per step.
@@ -470,7 +534,8 @@ describe("the per-step extractor misses", () => {
 								kind: "extract.json",
 								passed: 40,
 								failed: 0,
-								skipped: 1234,
+								missing: 1234,
+								skipped: 0,
 							},
 						],
 					},
