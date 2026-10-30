@@ -1784,10 +1784,17 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   write still wins, as it does over the Auth tab; and auth waiting on the script is not
   applied at all. Divergences, each deliberate: `pm.request.auth` reads `undefined` until
   the script assigns it (Postman's reads the request's `RequestAuth`; here the engine's
-  credential is visible as the header it wrote), and an assignment is a plain object
-  rather than a `RequestAuth` with methods. Postman's precedence differs too: its auth
+  credential is visible as the header it wrote), so a lifted `pm.request.auth.type` or
+  `pm.request.auth.bearer.get('token')` throws an ordinary `TypeError` before an
+  assignment; and an assignment is a plain object rather than a `RequestAuth` with
+  methods, so its blocks have no `get()` either. Postman's precedence differs too: its auth
   helper replaces a typed `Authorization`, where Vayu keeps the header the request
-  carries (#2475). The full rules are in
+  carries (#2475). A refused assignment (an `oauth2` type, a parameter the type does not
+  take, a `{{name}}` naming a column the bound data row lacks) applies nothing the
+  script wrote to `pm.request` and the request is still sent with the Auth tab's own
+  credential, the reason reported as the pre-request script error in the Console -
+  unlike `pm.sendRequest`, which refuses to send a request whose `auth` it cannot
+  compose. The full rules are in
   [scripting.md](../engine/scripting.md#mutating-the-request-pre-request-scripts).
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
   (one of the seven verbs); `body` must be a string, the `RequestBody` object
@@ -1861,8 +1868,11 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   body would otherwise be parsed back into form fields; another mode is refused by
   name, as are `formdata`, `file` and `graphql`. So a string `update('...')` is
   refused on a urlencoded or GraphQL body, where assigning the same string to `.raw`
-  is taken; on a GraphQL body the refusal names `.raw`. Postman's `update` without a
-  `mode` is a silent no-op; here it throws.
+  is taken; on a GraphQL body the refusal names `.raw`. A second divergence: a
+  description's `options` is ignored, so no `Content-Type` is derived from
+  `options.raw.language` as Postman derives one; the request's own body type implies
+  it (`text/plain` for a body added to a bodyless request) unless the script sets the
+  header. Postman's `update` without a `mode` is a silent no-op; here it throws.
 - **Setting a variable re-renders the request's `{{…}}` placeholders, Postman's
   order** (#1008, #2521). `POST /compose` (engine-side since #226) resolves them
   at compose time **unless a pre-request script runs before the send** - an

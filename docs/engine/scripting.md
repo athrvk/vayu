@@ -1226,13 +1226,29 @@ Rules worth knowing before you rely on them:
   waits on the script is not applied at all once the script assigns one, so
   no deferred credential lands beside the script's and no OAuth 2.0 token is
   fetched. `pm.request.auth` reads `undefined` until the script assigns it
-  (the engine's credential is visible as the header it wrote), the
-  assignment reads back as written, and `delete pm.request.auth` or `null`
-  leaves the request's own auth in force. `pm.request.authorizeUsing(type,
+  (the engine's credential is visible as the header it wrote), so a lifted
+  read of the request's own auth - `pm.request.auth.type`,
+  `pm.request.auth.bearer.get('token')` - throws an ordinary `TypeError`
+  before an assignment. The assignment reads back as the plain object
+  written, not Postman's `RequestAuth`, so its blocks have no `get()` either.
+  `delete pm.request.auth` or `null` leaves the request's own auth in force.
+  `pm.request.authorizeUsing(type,
   options)` is Postman's setter for it: `('basic', { username, password })`,
   `({ type: 'bearer', token })` or the block itself; `null` removes an
   assigned auth, and a type `pm.request.auth` would refuse throws at the
   call, where Postman ignores it and sends the request bare.
+- **A refused `pm.request.auth` still sends the request, with its own
+  credential.** When the write-back refuses the assignment - an `oauth2` type,
+  a parameter the type does not take, or a `{{name}}` naming a column the
+  bound data row does not carry - nothing the script wrote to `pm.request` is
+  applied, and the request goes out with the Auth tab's credential exactly as
+  it would have without the script (applied before it, or after it when it
+  waits on the script). The reason is the pre-request script error, in the
+  Console. `authorizeUsing` throws at the call for the same refusals, so its
+  assignment never happens and the request keeps its own credential the same
+  way. This is unlike `pm.sendRequest`, which refuses to send a request
+  whose `auth` it cannot compose, because that block is the only credential
+  the request has.
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`
@@ -1265,7 +1281,11 @@ Rules worth knowing before you rely on them:
   `{ mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }`, and
   `update()` takes a string as `{ mode: 'raw', raw: string }`, as Postman does.
   Each means exactly what assigning its string to `.raw` would: the pairs are
-  encoded as the wire body, a disabled pair left out. The mode has to be the
+  encoded as the wire body, a disabled pair left out. Every other member of
+  the description is ignored, Postman's `options` included: nothing is derived
+  from `options.raw.language`, so the `Content-Type` is the one the request's
+  own body type implies (`text/plain` for a body added to a request that had
+  none) unless the script sets the header. The mode has to be the
   one the body already has - a `raw` body (json, text, xml, jsonrpc) takes
   `raw`, a urlencoded body `urlencoded`, a request with no body `raw`, which it
   sends as text - because the write-back keeps a request's body mode, and
