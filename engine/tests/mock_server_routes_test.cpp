@@ -953,7 +953,8 @@ TEST_F (MockServerTest, AStartCountsTheDuplicatesAndServesTheOneWithAnExample) {
     vayu::http::mock_server_info_json (started.info)["duplicateRoutes"], 1);
     const auto listed = manager.get (started.info.mock_id);
     ASSERT_HAS_VALUE (listed);
-    EXPECT_EQ (listed->duplicate_routes, 1) << "GET /mock reports what start did";
+    EXPECT_EQ (listed->duplicate_routes, 1)
+    << "GET /mock reports what start did";
 
     httplib::Client client ("127.0.0.1", started.info.port);
     client.set_connection_timeout (2);
