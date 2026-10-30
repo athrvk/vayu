@@ -1156,8 +1156,9 @@ plausible wrong number is worse than a break you can see.
 
 ### Mutating the request (pre-request scripts)
 
-In a **pre-request** script these four fields are writable, and what they hold
-when the script returns is what goes on the wire. In a **test** script they are
+In a **pre-request** script these four fields are writable, directly or through
+the Request methods that write them, and what they hold when the script returns
+is what goes on the wire. In a **test** script they are
 a read-only record of what was already sent - writes there are discarded.
 
 ```javascript
@@ -1170,6 +1171,9 @@ pm.request.body = JSON.stringify({ n: 2 });     // replace the body
 pm.request.body = { mode: 'raw', raw: '{}' };   // Postman's description of one
 delete pm.request.body;                         // send no body
 ```
+
+The [Request methods](#request-methods-pmrequestaddheader-and-the-rest) are
+Postman's other spelling of the same writes.
 
 Rules worth knowing before you rely on them:
 
@@ -1318,6 +1322,53 @@ throws if its first argument is not a function. Detaching a method from its
 object (`const get = pm.request.headers.get`) throws rather than answering as
 though the header were missing. A throw out of an `each` callback propagates as
 the script's own error.
+
+### Request methods (`pm.request.addHeader` and the rest)
+
+A script lifted from Postman calls some writes on the request itself rather
+than on its members (#3131). Each is the member method it names, so it reaches
+the wire the same way and refuses bad input with that method's own error:
+
+```javascript
+pm.request.addHeader({ key: 'X-Trace', value: 't-1' }); // headers.upsert, or ('X-Trace', 't-1')
+pm.request.upsertHeader('X-Trace', 't-2');              // headers.upsert
+pm.request.removeHeader('Authorization');               // headers.remove
+pm.request.forEachHeader(function (header, index) {     // headers.each
+  console.log(index, header.key, header.value);
+});
+pm.request.getHeaders();                    // { 'Content-Type': ... }, spelling kept
+pm.request.getHeaders({ ignoreCase: true }); // { 'content-type': ... }
+pm.request.addQueryParams('page=2');        // url.addQueryParams
+pm.request.removeQueryParams(['sort']);     // url.removeQueryParams
+var copy = pm.request.toJSON();             // { url, method, header: [...], body? }
+console.log(copy.header.length, JSON.stringify(pm.request) === JSON.stringify(copy));
+```
+
+- **`addHeader` replaces a header the request already carries**, whatever its
+  casing, because it is `headers.upsert`. Postman's appends a second line; a
+  request here holds one value per name, and a lifted `addHeader` is usually
+  called on a header the Headers tab may already set. `headers.add` keeps its
+  refusal - the two are different calls.
+- **`removeHeader` matches case-insensitively**, as every header method here
+  does; Postman's matches the case unless told to ignore it.
+- **`getHeaders` keeps each name's spelling** and lower-cases only with
+  `{ ignoreCase: true }` - Postman's default, which is `toObject`'s the other
+  way round.
+- **`toJSON` describes `pm.request` as the script has left it**: `url` (the
+  string, as `url.toJSON()` answers - Postman's is its Url object's parts),
+  `method`, `header` as `[{ key, value }]` in the object's own key order, and
+  `body` as Postman's `{ mode, raw | urlencoded | formdata | graphql | file }`,
+  absent for a request with no body. It is what `JSON.stringify(pm.request)`
+  writes. The result is a copy; writing to it sends nothing.
+- **Each method is looked up on its member when it is called**, so after
+  `pm.request.headers = { ... }` a call to `addHeader` throws saying the
+  object it reached for is gone, rather than writing to one nothing sends.
+- **`clone()`, `size()` and `update()` throw by name**, each with what to use
+  instead. They are Postman Request methods with no Vayu meaning, and a bare
+  `not a function` would not say which call failed.
+
+The methods are non-enumerable, so `Object.keys(pm.request)` still lists
+`url`, `method`, `headers` and `body` and nothing else.
 
 ### URL parts (`pm.request.url`)
 

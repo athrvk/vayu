@@ -1216,6 +1216,99 @@ nlohmann::json get_script_completions () {
     "refused by name." },
     { "sortText", "2_pm_request_body_update" } });
 
+    // Postman's Request methods. Each is the member method it names, or the
+    // request as a plain object (toJSON).
+    completions.push_back ({ { "label", "pm.request.addHeader" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.addHeader({ key: \"${1:X-Header}\", value: ${2:\"value\"} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.addHeader(header: { key: string, value: string | number | "
+    "boolean } | string, value?: string | number | boolean): void" },
+    { "documentation",
+    "Postman's Request.addHeader: pm.request.headers.upsert() under its "
+    "Request name, taking ({ key, value }) or (name, value). A header the "
+    "request already carries is replaced, whatever its casing - Postman "
+    "appends a second line, and a request here holds one value per name." },
+    { "sortText", "1_pm_request_addHeader" } });
+
+    completions.push_back ({ { "label", "pm.request.upsertHeader" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.upsertHeader({ key: \"${1:X-Header}\", value: ${2:\"value\"} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.upsertHeader(header: { key: string, value: string | number | "
+    "boolean } | string, value?: string | number | boolean): void" },
+    { "documentation",
+    "Postman's Request.upsertHeader: pm.request.headers.upsert() under its "
+    "Request name. Adds the header, replacing any of that name whatever its "
+    "casing." },
+    { "sortText", "1_pm_request_upsertHeader" } });
+
+    completions.push_back ({ { "label", "pm.request.removeHeader" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.removeHeader(\"${1:Authorization}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.removeHeader(name: string): void" },
+    { "documentation",
+    "Postman's Request.removeHeader: pm.request.headers.remove() under its "
+    "Request name. Case-insensitive always, where Postman's matches the case "
+    "unless told to ignore it; removing an absent header is a no-op." },
+    { "sortText", "1_pm_request_removeHeader" } });
+
+    completions.push_back ({ { "label", "pm.request.forEachHeader" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.forEachHeader((header) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.forEachHeader(fn: (header: { key: string; value: string }, "
+    "index: number, all: { key: string; value: string }[]) => void, thisArg?: "
+    "any): void" },
+    { "documentation",
+    "Postman's Request.forEachHeader: pm.request.headers.each() under its "
+    "Request name." },
+    { "sortText", "1_pm_request_forEachHeader" } });
+
+    completions.push_back ({ { "label", "pm.request.getHeaders" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.getHeaders()" },
+    { "detail", "pm.request.getHeaders(options?: { ignoreCase?: boolean }): Record<string, string>" },
+    { "documentation",
+    "Postman's Request.getHeaders: the outgoing headers as a plain { name: "
+    "value } copy, each name spelled as the request holds it; { ignoreCase: "
+    "true } lower-cases them. Writing to the copy sends nothing." },
+    { "sortText", "1_pm_request_getHeaders" } });
+
+    completions.push_back ({ { "label", "pm.request.addQueryParams" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.addQueryParams(\"${1:a=1&b=2}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.addQueryParams(params: string | { key: string, value?: string "
+    "| number | boolean | null } | ReadonlyArray<string | { key: string, "
+    "value?: string | number | boolean | null }>): void" },
+    { "documentation",
+    "Postman's Request.addQueryParams: pm.request.url.addQueryParams() under "
+    "its Request name." },
+    { "sortText", "1_pm_request_addQueryParams" } });
+
+    completions.push_back (
+    { { "label", "pm.request.removeQueryParams" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.removeQueryParams(${1:[\"page\", \"sort\"]})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void" },
+    { "documentation",
+    "Postman's Request.removeQueryParams: pm.request.url.removeQueryParams() "
+    "under its Request name." },
+    { "sortText", "1_pm_request_removeQueryParams" } });
+
+    completions.push_back ({ { "label", "pm.request.toJSON" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.toJSON()" },
+    { "detail",
+    "pm.request.toJSON(): { url: string, method: string, header: { key: "
+    "string, value: string }[], body?: { [key: string]: any } }" },
+    { "documentation",
+    "The request as a plain object, as the script has left it: url (the "
+    "string - Postman's is its Url object's parts), method, header as [{ key, "
+    "value }], and body as Postman's { mode, raw | urlencoded | formdata | "
+    "graphql | file }, absent when there is none. It is what "
+    "JSON.stringify(pm.request) writes. A copy: writing to it sends nothing." },
+    { "sortText", "1_pm_request_toJSON" } });
+
     // Snippets for the mutation patterns. Without these, `pm.request.` offers
     // only the four reads and the capability is invisible in the editor.
     // filterText keeps each reachable from the prefix a user actually types.

@@ -32,6 +32,7 @@ supported is listed [below](#not-yet-supported).
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`) |
+| Request methods     | `pm.request.addHeader()`, `.upsertHeader()`, `.removeHeader()`, `.forEachHeader()`, `.getHeaders(options?)`, `.addQueryParams()`, `.removeQueryParams()`, `.toJSON()` - each the member method it names, see [Request methods](#request-methods) |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
@@ -1675,6 +1676,8 @@ accepted and warns:
 - `pm.cookies.set(...)` / `.unset(...)` / `.clear()` - the *flat* write half.
   Writing goes through `pm.cookies.jar()`, which ships whole - see
   [above](#the-cookie-jar-pmcookies)
+- `pm.request.clone()`, `.size()` and `.update()` - each throws a `TypeError`
+  naming itself and what to use instead (see [Request methods](#request-methods))
 - The rest of postman-collection's `PropertyList` on a header object - `map`,
   `filter`, `find`, `idx`, `insert`, the list-level `has(item, value)`,
   `assimilate`, `populate`, `clear`, `eachParent`, `toString`. Only the read
@@ -1750,6 +1753,7 @@ delete pm.request.headers['Authorization'];
 pm.request.url = 'https://api.example.com/v2/users';
 pm.request.method = 'POST';
 pm.request.body = JSON.stringify({ n: 2 });
+pm.request.addHeader({ key: 'X-Trace', value: 't-1' });
 ```
 
 - **The object is authoritative, not a diff.** Whatever `pm.request.headers` holds at the
@@ -1918,6 +1922,46 @@ Bad input fails loudly: a name must be a non-empty string, a value a string, num
 boolean (the set plain assignment already accepts), `each` throws if its first argument
 is not a function, and calling a method detached from its object throws rather than
 answering as though the header were missing.
+
+### Request methods
+
+Postman's `Request` carries writes of its own, and a lifted script calls them on
+`pm.request` itself (#3131). Each is the member method it names, looked up when it is
+called, so it writes the object the write-back reads and refuses bad input with that
+method's error:
+
+| Request method | Is |
+| -------------- | -- |
+| `addHeader(header)` | `headers.upsert` |
+| `upsertHeader(header)` | `headers.upsert` |
+| `removeHeader(name)` | `headers.remove` |
+| `forEachHeader(fn, thisArg?)` | `headers.each` |
+| `getHeaders(options?)` | `headers.toObject(false, !options.ignoreCase)` |
+| `addQueryParams(params)` | `url.addQueryParams` |
+| `removeQueryParams(params)` | `url.removeQueryParams` |
+| `toJSON()` | `{ url, method, header: [{ key, value }], body? }`, also what `JSON.stringify(pm.request)` writes |
+
+```javascript
+pm.request.addHeader({ key: 'X-Trace', value: 't-1' });
+pm.request.removeHeader('Authorization');
+console.log(pm.request.getHeaders()['X-Trace'], pm.request.toJSON().method);
+```
+
+Divergences, each deliberate:
+
+- **`addHeader` replaces a header the request already carries** - it is `upsert`, not
+  `add`. Postman's appends a second line, which a request holding one value per name
+  cannot represent, and a lifted `addHeader` is usually called on a header the request
+  may already set. `headers.add` still refuses an existing name.
+- **`removeHeader` is case-insensitive**, like every header method here; Postman's
+  matches the case unless its `ignoreCase` option says otherwise.
+- **`toJSON().url` is the URL string**, what `pm.request.url.toJSON()` answers, where
+  Postman's is its Url object's parts. `header` and `body` are Postman's shapes, read
+  from `pm.request` as the script has left it; `body` is absent for a request with none.
+- **`clone()`, `size()` and `update()` throw by name** with what to use instead, rather
+  than the bare `not a function` an unbound name gives.
+
+The methods are non-enumerable, so `Object.keys(pm.request)` is still the four members.
 
 ---
 

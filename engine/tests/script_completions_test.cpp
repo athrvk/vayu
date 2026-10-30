@@ -1188,6 +1188,10 @@ bool is_deliberately_uncompletable (const std::string& name) {
     // that cannot work.
     name == "pm.iterationData.set" || name == "pm.iterationData.unset" ||
     name == "pm.iterationData.clear" ||
+    // Bound only to throw by name (#3131): Postman Request methods with no Vayu
+    // meaning, so a lifted call says what to use instead of dying on a bare
+    // "not a function". Offering one would suggest a call that cannot work.
+    name == "pm.request.clone" || name == "pm.request.size" || name == "pm.request.update" ||
     // The assertion chain root and everything hanging off it. It is offered as
     // the terminal `pm.response.to.be.*` labels instead, which is what an
     // author types and what EveryOfferedResponseStatusClassExistsInTheRuntime

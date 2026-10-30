@@ -2057,6 +2057,237 @@ BodyText script_body_text (JSContext* ctx, JSValueConst value, BodyMode current)
     std::string (js_type_name (ctx, value)));
 }
 
+// ---------------------------------------------------------------------------
+// pm.request's own methods - Postman's Request API (#3131)
+// ---------------------------------------------------------------------------
+
+/// `this` is the request a method was reached through; detached, it is not.
+bool request_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* method) {
+    if (JS_IsObject (this_val) && !JS_IsFunction (ctx, this_val)) {
+        return true;
+    }
+    JS_ThrowTypeError (ctx,
+    "pm.request.%s must be called on pm.request (got %s), not detached from it",
+    method, js_type_name (ctx, this_val));
+    return false;
+}
+
+/**
+ * `this.<member>.<method> (...args)`, for a Request method that is its
+ * member's method under Postman's other name.
+ *
+ * Looked up at call time rather than bound at setup, so a script that replaced
+ * `pm.request.headers` with an object of its own is told so, rather than
+ * writing to the object it replaced - which the write-back no longer reads.
+ */
+JSValue call_member_method (JSContext* ctx,
+JSValueConst request,
+const char* caller,
+const char* member,
+const char* method,
+int argc,
+JSValueConst* argv) {
+    if (!request_this_is_usable (ctx, request, caller)) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue target (ctx, JS_GetPropertyStr (ctx, request, member));
+    if (JS_IsException (target.get ())) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue fn (ctx,
+    JS_IsObject (target.get ()) ? JS_GetPropertyStr (ctx, target.get (), method) : JS_UNDEFINED);
+    if (JS_IsException (fn.get ())) {
+        return JS_EXCEPTION;
+    }
+    if (!JS_IsFunction (ctx, fn.get ())) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.%s() calls pm.request.%s.%s(), and pm.request.%s (%s) has "
+        "no such method - it was replaced by something other than the object "
+        "pm.request.%s started as",
+        caller, member, method, member, js_type_name (ctx, target.get ()), member);
+    }
+    return JS_Call (ctx, fn.get (), target.get (), argc, argv);
+}
+
+/// A Request method that is one of its members' methods by another name.
+/// `addHeader` is `upsert`, not `add` (#3131): a lifted script calls it on a
+/// header the request may already carry, and Postman's appended duplicate has
+/// nowhere to live in a request that holds one value per name.
+struct RequestAlias {
+    const char* name;
+    const char* member;
+    const char* method;
+};
+constexpr auto REQUEST_ALIASES = std::to_array<RequestAlias> ({
+{ "addHeader", "headers", "upsert" },
+{ "upsertHeader", "headers", "upsert" },
+{ "removeHeader", "headers", "remove" },
+{ "forEachHeader", "headers", "each" },
+{ "addQueryParams", "url", "addQueryParams" },
+{ "removeQueryParams", "url", "removeQueryParams" },
+});
+
+JSValue
+js_request_alias (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    const auto& alias = REQUEST_ALIASES.at (static_cast<size_t> (magic));
+    return call_member_method (
+    ctx, this_val, alias.name, alias.member, alias.method, argc, argv);
+}
+
+/// `getHeaders (options?)` - Postman's is `headers.toObject` with the case
+/// switch inverted: names keep their spelling unless `ignoreCase` lower-cases
+/// them. Its other options (`enabled`, `multiValue`, `sanitizeKeys`) decide
+/// nothing here, for the reasons `toObject` gives.
+JSValue js_request_get_headers (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    bool ignore_case = false;
+    if (argc >= 1 && JS_IsObject (argv[0])) {
+        ScopedValue flag (ctx, JS_GetPropertyStr (ctx, argv[0], "ignoreCase"));
+        ignore_case = JS_ToBool (ctx, flag.get ()) == 1;
+    }
+    JSValueConst args[2]{ JS_NewBool (ctx, 0), JS_NewBool (ctx, ignore_case ? 0 : 1) };
+    return call_member_method (ctx, this_val, "getHeaders", "headers", "toObject", 2, args);
+}
+
+/// The header object as Postman's `header` list, `[{ key, value }]` in the
+/// object's own key order.
+JSValue request_json_header (JSContext* ctx, JSValueConst headers) {
+    std::vector<std::string> keys;
+    if (!JS_IsObject (headers) || JS_IsArray (headers) || JS_IsFunction (ctx, headers)) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.toJSON: pm.request.headers must be an object, got %s",
+        js_type_name (ctx, headers));
+    }
+    if (!js_own_enumerable_keys (ctx, headers, keys)) {
+        return JS_EXCEPTION;
+    }
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& key : keys) {
+        JSValue member = JS_NewObject (ctx);
+        JS_SetPropertyStr (
+        ctx, member, "key", JS_NewStringLen (ctx, key.data (), key.size ()));
+        JS_SetPropertyStr (
+        ctx, member, "value", JS_GetPropertyStr (ctx, headers, key.c_str ()));
+        JS_SetPropertyUint32 (ctx, list, next++, member);
+    }
+    return list;
+}
+
+/**
+ * The body as Postman's description: `{mode, <mode>: ...}` read off the
+ * RequestBody's own members, so it says what those members say. A string is
+ * the raw body it is sent as; a description the script assigned is already the
+ * shape and is handed back as it stands.
+ */
+JSValue request_json_body (JSContext* ctx, JSValueConst body) {
+    if (JS_IsString (body)) {
+        JSValue out = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, out, "mode", JS_NewString (ctx, "raw"));
+        JS_SetPropertyStr (ctx, out, "raw", JS_DupValue (ctx, body));
+        return out;
+    }
+    auto* state = request_body_state (body);
+    if (!state) {
+        return JS_DupValue (ctx, body);
+    }
+    // Postman's mode names are the names of the members that carry each mode.
+    const char* mode = postman_body_mode (state->body.mode);
+    JSValue out      = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "mode", JS_NewString (ctx, mode));
+    JS_SetPropertyStr (ctx, out, mode, JS_GetPropertyStr (ctx, body, mode));
+    return out;
+}
+
+/**
+ * `toJSON ()` - the request as a plain object: `url`, `method`, `header` and
+ * `body` (absent when there is none), read from `pm.request` as it stands, so
+ * it describes what the write-back would send. `url` is the string, the answer
+ * `pm.request.url.toJSON ()` gives, where Postman's is its Url object's parts.
+ * Being `toJSON`, it is also what `JSON.stringify (pm.request)` writes.
+ */
+JSValue js_request_to_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    if (!request_this_is_usable (ctx, this_val, "toJSON")) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue url (ctx, JS_GetPropertyStr (ctx, this_val, "url"));
+    std::string url_error;
+    auto url_text = script_url_text (ctx, url.get (), &url_error);
+    if (!url_text) {
+        if (url_error.empty ()) {
+            url_error =
+            "pm.request.url must be a string or a URL object, got " +
+            std::string (js_type_name (ctx, url.get ()));
+        }
+        return JS_ThrowTypeError (ctx, "pm.request.toJSON: %s", url_error.c_str ());
+    }
+    ScopedValue headers (ctx, JS_GetPropertyStr (ctx, this_val, "headers"));
+    JSValue header = request_json_header (ctx, headers.get ());
+    if (JS_IsException (header)) {
+        return header;
+    }
+    JSValue out = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "url",
+    JS_NewStringLen (ctx, url_text->data (), url_text->size ()));
+    JS_SetPropertyStr (ctx, out, "method", JS_GetPropertyStr (ctx, this_val, "method"));
+    JS_SetPropertyStr (ctx, out, "header", header);
+    ScopedValue body (ctx, JS_GetPropertyStr (ctx, this_val, "body"));
+    if (!JS_IsUndefined (body.get ()) && !JS_IsNull (body.get ())) {
+        JS_SetPropertyStr (ctx, out, "body", request_json_body (ctx, body.get ()));
+    }
+    return out;
+}
+
+/// Postman Request methods with no Vayu meaning, bound only to refuse by name:
+/// unbound, a lifted call would die on a bare "not a function".
+struct UnsupportedRequestMethod {
+    const char* name;
+    const char* instead;
+};
+constexpr auto UNSUPPORTED_REQUEST_METHODS = std::to_array<UnsupportedRequestMethod> ({
+{ "clone", "pm.request.toJSON() returns a plain copy" },
+{ "size", "read pm.request.body.length for the body's size" },
+{ "update", "assign pm.request.url, .method, .headers or .body instead" },
+});
+
+JSValue
+js_request_unsupported (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    const auto& method = UNSUPPORTED_REQUEST_METHODS.at (static_cast<size_t> (magic));
+    return JS_ThrowTypeError (ctx,
+    "pm.request.%s() is not supported in Vayu - %s", method.name, method.instead);
+}
+
+/**
+ * Postman's Request methods on `pm.request`. Non-enumerable, as the header
+ * methods are, so `Object.keys (pm.request)` still lists the request's own
+ * four members and nothing a script would mistake for one.
+ */
+void install_request_methods (JSContext* ctx, JSValue request) {
+    constexpr int flags = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+    for (size_t i = 0; i < REQUEST_ALIASES.size (); i++) {
+        const char* name = REQUEST_ALIASES.at (i).name;
+        JS_DefinePropertyValueStr (ctx, request, name,
+        JS_NewCFunctionMagic (ctx, js_request_alias, name, 1,
+        JS_CFUNC_generic_magic, static_cast<int> (i)),
+        flags);
+    }
+    JS_DefinePropertyValueStr (ctx, request, "getHeaders",
+    JS_NewCFunction (ctx, js_request_get_headers, "getHeaders", 0), flags);
+    JS_DefinePropertyValueStr (ctx, request, "toJSON",
+    JS_NewCFunction (ctx, js_request_to_json, "toJSON", 0), flags);
+    for (size_t i = 0; i < UNSUPPORTED_REQUEST_METHODS.size (); i++) {
+        const char* name = UNSUPPORTED_REQUEST_METHODS.at (i).name;
+        JS_DefinePropertyValueStr (ctx, request, name,
+        JS_NewCFunctionMagic (ctx, js_request_unsupported, name, 0,
+        JS_CFUNC_generic_magic, static_cast<int> (i)),
+        flags);
+    }
+}
+
 } // namespace
 
 void setup_pm_request (JSContext* ctx, JSValue pm) {
@@ -2107,6 +2338,8 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
                 JS_SetPropertyStr (ctx, request, "body", body);
             }
         }
+
+        install_request_methods (ctx, request);
     }
 
     JS_SetPropertyStr (ctx, pm, "request", request);

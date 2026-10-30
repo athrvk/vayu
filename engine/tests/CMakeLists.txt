@@ -112,6 +112,7 @@ add_executable(vayu_tests
     url_parts_test.cpp
     script_request_url_test.cpp
     script_request_body_test.cpp
+    script_request_methods_test.cpp
     xml_body_test.cpp
     stats_route_test.cpp
     live_metrics_route_test.cpp
