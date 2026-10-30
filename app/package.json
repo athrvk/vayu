@@ -1,6 +1,6 @@
 {
 	"name": "vayu-client",
-	"version": "0.46.1",
+	"version": "0.47.0",
 	"description": "Vayu - High-Performance API Testing Platform",
 	"desktopName": "vayu.desktop",
 	"author": {
