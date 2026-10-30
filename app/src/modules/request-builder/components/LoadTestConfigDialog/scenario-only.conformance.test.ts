@@ -13,18 +13,49 @@
  * off the live registry and routed here through `ENGINE_READING_GUARDS`.
  *
  * Mutation check: drop `"metric."` from `SCENARIO_ONLY_FAMILIES` and both
- * cases redden; add a `control.*` kind to the engine and the second does.
+ * cases redden; add a `control.*` kind to the engine and the second does. The
+ * accepted-set cases (#3070) redden when `ACCEPTED_BY_NAME` loses a name, when
+ * the C++ array gains one, and when a new catalogue kind is neither accepted,
+ * collection-only, a disable nor flagged by `isScenarioOnlyKind`.
  */
 
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import type { ElementKindSchema } from "@/types";
+import { COLLECTION_ONLY_KINDS } from "../../utils/elements-parts";
 import { isScenarioOnlyKind } from "./scenario-only";
 
-const [FIXTURE_PATH] = ENGINE_READING_GUARDS.scenarioOnlyKinds.paths.map(fromRepoRoot);
+const [FIXTURE_PATH, LOAD_STRATEGY_PATH] =
+	ENGINE_READING_GUARDS.scenarioOnlyKinds.paths.map(fromRepoRoot);
 
-describe.runIf(existsSync(FIXTURE_PATH))(
+/**
+ * The kinds a single-request run's `requestElements` accepts by name: the ten
+ * in `REQUEST_ELEMENTS_SUPPORTED_KINDS` (`load_strategy.cpp`). Written out once,
+ * here; the source scan below holds it to the C++ array. The engine also
+ * accepts every kind whose `hotPathClass` is `script`, by class rather than by
+ * name.
+ */
+const ACCEPTED_BY_NAME = [
+	"assert.contains",
+	"assert.duration",
+	"assert.jsonpath",
+	"assert.size",
+	"assert.status",
+	"extract.boundary",
+	"extract.header",
+	"extract.json",
+	"extract.regex",
+	"timer.think",
+];
+
+/** The string literals of `REQUEST_ELEMENTS_SUPPORTED_KINDS`' initialiser. */
+function supportedKindsIn(source: string): string[] {
+	const initialiser = /REQUEST_ELEMENTS_SUPPORTED_KINDS\{([^}]*)\}/.exec(source)?.[1] ?? "";
+	return [...initialiser.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+describe.runIf(existsSync(FIXTURE_PATH) && existsSync(LOAD_STRATEGY_PATH))(
 	"scenario-only kinds conformance (fixture present)",
 	() => {
 		const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as ElementKindSchema[];
@@ -56,6 +87,39 @@ describe.runIf(existsSync(FIXTURE_PATH))(
 				.map((k) => k.kind);
 
 			expect(unflagged).toEqual([]);
+		});
+
+		it("keeps ACCEPTED_BY_NAME equal to the engine's REQUEST_ELEMENTS_SUPPORTED_KINDS (#3070)", () => {
+			const fromSource = supportedKindsIn(readFileSync(LOAD_STRATEGY_PATH, "utf8"));
+
+			expect(fromSource.length).toBeGreaterThan(0);
+			expect([...fromSource].sort()).toEqual([...ACCEPTED_BY_NAME].sort());
+		});
+
+		it("accounts for every catalogue kind as accepted, scenario-only, collection-only or a disable (#3070)", () => {
+			const engineAccepts = (k: ElementKindSchema) =>
+				ACCEPTED_BY_NAME.includes(k.kind) || k.hotPathClass === "script";
+			const handled = (k: ElementKindSchema) =>
+				k.collectionOnly ||
+				k.kind === "inherit.disable" ||
+				engineAccepts(k) ||
+				isScenarioOnlyKind(k.kind);
+
+			expect(fixture.filter((k) => !handled(k)).map((k) => k.kind)).toEqual([]);
+			// The renderer must not block a kind the engine accepts, and every name
+			// the engine lists must still exist, or the list is stale.
+			expect(fixture.filter((k) => engineAccepts(k) && isScenarioOnlyKind(k.kind))).toEqual(
+				[]
+			);
+			expect(ACCEPTED_BY_NAME.filter((n) => !fixture.some((k) => k.kind === n))).toEqual([]);
+			expect(fixture.some((k) => k.hotPathClass === "script")).toBe(true);
+		});
+
+		it("holds COLLECTION_ONLY_KINDS to the catalogue's collectionOnly kinds (#3070)", () => {
+			const catalogue = fixture.filter((k) => k.collectionOnly).map((k) => k.kind);
+
+			expect(catalogue.length).toBeGreaterThan(0);
+			expect([...COLLECTION_ONLY_KINDS].sort()).toEqual(catalogue.sort());
 		});
 	}
 );

@@ -1558,7 +1558,10 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   too (issue #1594 - the composed `elements` become the run's own
   `requestElements`, a step-level pipeline `POST /runs` now runs per
   submission), and so does `run_request` with a `requestId` and no `url`.
-  An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
+  `start_load_run` does not forward a collection's or folder's `script.setup` /
+  `script.teardown` that `/compose` emits: `requestElements` is validated as a
+  request's own and refuses them, and they belong to the collection's own run
+  (#3070). An ad-hoc `run_request` (a `url`) takes a `preRequestScript` /
   `postRequestScript` instead (folded into elements, above), since an ad-hoc
   call has no chain to compose from, and they are composed after the stored
   ones when it sends a saved request; `start_load_run` takes the same

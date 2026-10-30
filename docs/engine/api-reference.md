@@ -8851,7 +8851,8 @@ renames a composed request's chain-then-own `elements` onto, since `POST
 
 **Only the kinds this run shape's own hooks actually dispatch are accepted**:
 `extract.*`, `assert.*`, `timer.think`, `script.pre`/`script.post` - the same
-phase-0 set issue #1514 gave the design send. A `control.*` kind or
+phase-0 set issue #1514 gave the design send (`extract.*` includes
+`extract.header`). A `control.*` or `metric.*` kind or
 `timer.pacing`/`timer.throughput` is a `400` naming the element by its kind
 label and where it was declared (`from the collection 'Orders'` for a
 collection or a folder under it, `set on this request`, read from the entry's
@@ -8867,6 +8868,15 @@ state. **A disabled entry (`"enabled": false`) is not refused**: the pipeline
 skips it before its `apply` runs, so a switched-off pacing timer inherited
 from a collection does not block the run. It is still validated like any other
 entry, so a malformed `config` fails now rather than when it is switched on.
+
+**A collection-origin `script.setup` / `script.teardown` is refused as a
+request's own** (#3070). `POST /compose` emits an enabled collection's or
+folder's run-boundary scripts stamped `origin.kind: "collection"`, but this
+array is validated as a request's own list and `Registry::validate` refuses the
+two kinds there: they belong to the collection's own run (or to
+`lifecycleElements`, below), not to one request's submission. The app's load
+dialog and MCP's `start_load_run` leave them out of the payload they build, so
+only a hand-written client sees the `400`.
 
 `vayu::core::ElementPipeline` runs the compiled list per submission, the same
 phases a design send uses: `script.pre` at `step.before`, `extract.*` /

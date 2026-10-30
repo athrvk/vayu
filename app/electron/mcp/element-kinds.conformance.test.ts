@@ -32,6 +32,7 @@ import {
 } from "./tools.js";
 import { resolveSafetyConfig } from "./config.js";
 import type { EngineClient } from "./engine-client.js";
+import { COLLECTION_ONLY_KINDS } from "./tools/compose.js";
 
 const [fixturePath] = ENGINE_READING_GUARDS.mcpElementKinds.paths.map(fromRepoRoot);
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as ElementKindEntry[];
@@ -119,5 +120,18 @@ describe("every element kind a tool schema names is a real registry kind", () =>
 			return kindLiteralsIn(`${listedText(tool)}\n${fieldText}`).length > 0;
 		});
 		expect(anyMentioned).toBe(true);
+	});
+});
+
+// #3070: `start_load_run` leaves a collection's run-boundary scripts out of
+// `requestElements` by a restated list, since `electron/` cannot import the
+// renderer's. A kind the engine later marks collection-only, or one it stops
+// marking, must turn this red rather than reach POST /runs as a refusal.
+describe("start_load_run's collection-only kinds agree with the engine's fixture", () => {
+	test("COLLECTION_ONLY_KINDS equals the catalogue's collectionOnly kinds", () => {
+		const catalogue = fixture.filter((k) => k.collectionOnly).map((k) => k.kind);
+
+		expect(catalogue.length).toBeGreaterThan(0);
+		expect([...COLLECTION_ONLY_KINDS].sort()).toEqual(catalogue.sort());
 	});
 });

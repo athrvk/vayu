@@ -69,6 +69,7 @@ import {
 	hasReplayedPostScript,
 	scriptTextFor,
 	withoutDisabled,
+	withoutInheritedCollectionOnly,
 } from "./utils/elements-parts";
 import { scenarioOnlyElements } from "./components/LoadTestConfigDialog/scenario-only";
 import { buildComposeBody } from "./utils/compose-body";
@@ -816,7 +817,12 @@ export default function RequestBuilder() {
 					// collide under one name. A disabled element is left out
 					// (#3050): the pipeline skips it, so it has nothing to add, and
 					// a scenario-only kind among them must not be what refuses the run.
-					requestElements: withoutDisabled(requestElements),
+					// Nor is a collection's own setup / teardown script sent (#3070): a
+					// single-request run never takes one, and the engine refuses it as a
+					// request's.
+					requestElements: withoutInheritedCollectionOnly(
+						withoutDisabled(requestElements)
+					),
 					elements: config.elements,
 					success_sample_rate: config.success_sample_period,
 					slow_threshold_ms: config.slow_threshold_ms,

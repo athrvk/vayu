@@ -105,7 +105,9 @@ everything.
   a 507 (`lastErrorDiskFull`), and a call that omits the error reads `failed`
   (#2685); a save an editor declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
-  blame the engine for it. An editor takes part
+  blame the engine for it. The request builder declines only the part it
+  knows the engine refuses: an invalid elements list is held back while every
+  other touched field is still sent (#3048). An editor takes part
   by registering a save context; one that saves on its own is outside all of
   it, which is the defect #1450 was.
 - **The builder's PUT is a merge-patch of changed fields** (`buildUpdatePayload`,
