@@ -737,9 +737,10 @@ TEST_F (MockServerTest, TheRequestThatAnswersIsTheOneTheOtherIsMarkedShadowedBy)
     EXPECT_FALSE (routes[1].shadowed_by.has_value ());
 
     for (const std::size_t shadowed : { std::size_t{ 0 }, std::size_t{ 2 } }) {
-        ASSERT_HAS_VALUE (routes[shadowed].shadowed_by);
-        EXPECT_EQ (routes[shadowed].shadowed_by->request_id, "req_second");
-        EXPECT_EQ (routes[shadowed].shadowed_by->request_name, "second-hasex");
+        const auto& mark = routes[shadowed].shadowed_by;
+        ASSERT_HAS_VALUE (mark);
+        EXPECT_EQ (mark->request_id, "req_second");
+        EXPECT_EQ (mark->request_name, "second-hasex");
     }
 }
 
@@ -750,8 +751,9 @@ TEST_F (MockServerTest, WithNoExampleAnywhereTheFirstWinsAndTheRestAreShadowed) 
     auto routes = vayu::http::build_mock_routes (*db_, "col_root");
     EXPECT_EQ (vayu::http::mark_shadowed_routes (routes), 1u);
     EXPECT_FALSE (routes[0].shadowed_by.has_value ());
-    ASSERT_HAS_VALUE (routes[1].shadowed_by);
-    EXPECT_EQ (routes[1].shadowed_by->request_id, "req_a");
+    const auto& mark = routes[1].shadowed_by;
+    ASSERT_HAS_VALUE (mark);
+    EXPECT_EQ (mark->request_id, "req_a");
 }
 
 TEST_F (MockServerTest, TemplateNamesDoNotMakeRoutesDifferent) {
@@ -949,8 +951,9 @@ TEST_F (MockServerTest, AStartCountsTheDuplicatesAndServesTheOneWithAnExample) {
     EXPECT_EQ (started.info.duplicate_routes, 1);
     EXPECT_EQ (
     vayu::http::mock_server_info_json (started.info)["duplicateRoutes"], 1);
-    EXPECT_EQ (manager.get (started.info.mock_id)->duplicate_routes, 1)
-    << "GET /mock reports what start did";
+    const auto listed = manager.get (started.info.mock_id);
+    ASSERT_HAS_VALUE (listed);
+    EXPECT_EQ (listed->duplicate_routes, 1) << "GET /mock reports what start did";
 
     httplib::Client client ("127.0.0.1", started.info.port);
     client.set_connection_timeout (2);
