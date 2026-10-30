@@ -389,14 +389,14 @@ const ScenarioPlan& plan);
  *        load-path sibling of the sequential run's per-step `elements` trace.
  *
  * Sized once at construction from the plan's already-compiled `elements` per
- * step, so recording is a lookup by element id (and, for an id two levels of
- * the chain share, by `origin.id`, so each element keeps its own row) into a
- * fixed-size atomic array - no lock and no allocation on the completion path. The buckets are
- * `ElementOutcomeCounts::record`'s, shared with `RequestElementTallies`: one
- * per outcome word (#3051), with a `script.*` element left to the post-run
- * replay counted as `deferred`, not `skipped` (#2144), because it does run,
- * later. Beside them, one count per step of the outcomes `is_extractor_miss`
- * names (#3053).
+ * step, so recording is an `ElementSlotIndex` lookup (by id, then by level,
+ * so each of two levels sharing an id keeps its own row) into a fixed-size
+ * atomic array - no lock and no allocation on the completion path. The
+ * buckets are `ElementOutcomeCounts::record`'s, shared with
+ * `RequestElementTallies`: one per outcome word (#3051), with a `script.*`
+ * element left to the post-run replay counted as `deferred`, not `skipped`
+ * (#2144), because it does run, later. Beside them, one count per step of the
+ * outcomes `is_extractor_miss` names (#3053).
  */
 class StepElementTallies {
     public:
@@ -417,20 +417,10 @@ class StepElementTallies {
     [[nodiscard]] size_t extractor_misses (size_t step) const;
 
     private:
-    /// One element of a step's list: where its counts are, and the
-    /// `origin.id` that tells it apart from another level's element under the
-    /// same id. Ids are unique within a level, not across one (a duplicated
-    /// collection keeps its elements' ids), so a step's composed list can
-    /// hold one id twice, each time from a different owner.
-    struct ElementSlot {
-        size_t index = 0;
-        std::string origin_id;
-    };
-
     std::vector<std::vector<ElementOutcomeCounts>> counts_by_step_;
     /// Sized once, like the counts beside it, so recording never reallocates.
     std::vector<std::atomic<size_t>> misses_by_step_;
-    std::vector<std::unordered_map<std::string, std::vector<ElementSlot>>> slots_by_step_;
+    std::vector<ElementSlotIndex> slots_by_step_;
 };
 
 /**

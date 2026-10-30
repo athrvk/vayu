@@ -2888,6 +2888,85 @@ TEST (RequestElementsRunOverrideValidationTest, AcceptsAnEntryWithNoId) {
     EXPECT_FALSE (vayu::core::validate_request_elements_run_override (config).has_value ());
 }
 
+namespace {
+
+/// An enabled `assert.status` as `compose_elements` emits it: @p id declared
+/// at the level @p origin_kind / @p origin_scope / @p origin_id names.
+nlohmann::json composed_status_assert (const std::string& id,
+const std::string& origin_kind,
+const std::string& origin_scope,
+const std::string& origin_id) {
+    return nlohmann::json{ { "id", id }, { "kind", "assert.status" },
+        { "config", { { "in", nlohmann::json::array ({ 200 }) } } },
+        { "origin", { { "kind", origin_kind }, { "scope", origin_scope }, { "id", origin_id } } } };
+}
+
+} // namespace
+
+// Ids are unique within one level's list, so a duplicated collection, or a
+// folder repeated down a chain, repeats them across levels (#3101). Mutation
+// check: validate the whole array in one `Registry::validate` call and this
+// reddens on "has the same id".
+TEST (RequestElementsRunOverrideValidationTest, AcceptsTheSameIdAtDifferentLevels) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ composed_status_assert ("el_1", "collection", "collection", "col_1"),
+    composed_status_assert ("el_1", "collection", "folder", "col_2"),
+    composed_status_assert ("el_1", "request", "request", "req_1") }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
+// A hand-written entry carries no origin and is the request's own level, apart
+// from every stamped one.
+TEST (RequestElementsRunOverrideValidationTest, AnEntryWithoutAnOriginIsALevelOfItsOwn) {
+    nlohmann::json bare = composed_status_assert ("el_1", "request", "request", "req_1");
+    bare.erase ("origin");
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array (
+    { composed_status_assert ("el_1", "collection", "collection", "col_1"), bare }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
+// The level is the origin's kind, scope and id together: a folder and a
+// collection that happened to share an id are still two levels.
+TEST (RequestElementsRunOverrideValidationTest, ALevelIsKeyedOnKindScopeAndId) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ composed_status_assert ("el_1", "collection", "collection", "same"),
+    composed_status_assert ("el_1", "collection", "folder", "same") }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    EXPECT_FALSE (reason.has_value ()) << reason.value_or ("");
+}
+
+// The per-level split loosens where an id may repeat, not whether it may:
+// two entries of one level sharing an id is still refused, and `Item N`
+// counts within that level, not across the merged list.
+TEST (RequestElementsRunOverrideValidationTest, RefusesTheSameIdWithinOneLevel) {
+    const nlohmann::json config{ { "requestElements",
+    nlohmann::json::array ({ composed_status_assert ("other", "collection", "collection", "col_1"),
+    composed_status_assert ("el_1", "request", "request", "req_1"),
+    composed_status_assert ("el_1", "request", "request", "req_1") }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("Item 2 has the same id ('el_1')"), std::string::npos)
+    << *reason;
+}
+
+// Judging per level must not widen what a request may carry: a collection-only
+// kind is still refused wherever it sits, as the renderer's filter (#3070)
+// assumes.
+TEST (RequestElementsRunOverrideValidationTest, StillRefusesACollectionOnlyKindInACollectionLevel) {
+    nlohmann::json setup =
+    composed_status_assert ("el_1", "collection", "collection", "col_1");
+    setup["kind"]   = "script.setup";
+    setup["config"] = { { "script", "pm.environment.set('a', '1');" } };
+    const nlohmann::json config{ { "requestElements", nlohmann::json::array ({ setup }) } };
+    auto reason = vayu::core::validate_request_elements_run_override (config);
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_NE (reason->find ("can only be added to a collection"), std::string::npos)
+    << *reason;
+}
+
 // The wire-shape rule the issue settles: a scenario's steps already carry
 // their own resolved elements off the plan, so the two must not both claim
 // what a step runs.
@@ -3091,7 +3170,7 @@ TEST_F (LoadStrategyTest, AnUnreadableBodyFailsAJsonAssertionOnEverySubmission) 
 
 // `extract.header` runs on every submission of a single-request run (#3070):
 // a header the response carries is found whatever its case, and one it lacks
-// tallies `skipped` (the "missing" outcome). The whitelist itself is held by
+// tallies `missing`, its own bucket since #3100. The whitelist itself is held by
 // `AcceptsAnExtractHeaderElement`; this drives the run past it.
 TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmission) {
     const size_t ITERATIONS = 3;
@@ -3114,7 +3193,8 @@ TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmi
 
     const auto missing = element_entry (summary, "el_missing");
     ASSERT_FALSE (missing.is_null ()) << summary.dump ();
-    EXPECT_EQ (missing["skipped"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (missing["missing"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (missing["skipped"], 0u) << summary.dump ();
     EXPECT_EQ (missing["passed"], 0u) << summary.dump ();
 }
 

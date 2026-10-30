@@ -20,6 +20,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { ElementTally } from "./ElementTally";
+import { elementRowKey } from "./element-origin";
 import type { RunReport } from "@/types/domain";
 
 export interface RequestElementsSummaryProps {
@@ -37,8 +38,8 @@ export function RequestElementsSummary({ elements, className }: RequestElementsS
 			</CardHeader>
 			<CardContent>
 				<ul className="space-y-1.5">
-					{elements.map((element) => (
-						<li key={element.id}>
+					{elements.map((element, i) => (
+						<li key={elementRowKey(element, i)}>
 							<ElementTally element={element} className="text-sm" />
 						</li>
 					))}

@@ -8841,7 +8841,16 @@ the same shape a request's own stored `elements` column holds:
 
 Validated the same way a stored `elements` column is (`Registry::validate`
 per entry, a bad `kind` or `config` a `400` naming the index); `id` and
-`enabled` are optional, defaulting to a generated id and `true`. Refused
+`enabled` are optional, defaulting to a generated id and `true`. The list may
+be a composed one, so an id is unique only within the level that declares it
+(the `origin` kind, scope and id `POST /compose` stamps; an entry with no
+`origin` is the request's own level), and may repeat across levels, the same
+per-level id rule as [`POST /execute`](#post-execute) (#3101): a duplicated
+collection, or a folder repeated down a chain, repeats its ids. The owner rules
+differ: every level here is judged as a request's own list, so a
+collection-only kind stays refused (below) where `/execute` accepts it at a
+collection level. A repeat within one level is a `400`,
+and the `Item N` in a refusal counts within that level's entries. Refused
 outright beside a `scenario` block, whose steps already carry their own
 resolved elements from the plan. This is the field MCP's `start_load_run`
 renames a composed request's chain-then-own `elements` onto, since `POST
@@ -12005,7 +12014,9 @@ past the cap), and the section is absent when none of its traces was slow.
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
 submission in the row shape a scenario step's `elements` uses (`{id, kind, name?, origin?,
 required?, passed, failed, missing, error, skipped, deferred}`, one count per outcome word,
-#3051; see [Scenario load runs](#scenario-load-runs)). `deferred` (issue #2144)
+#3051; see [Scenario load runs](#scenario-load-runs)). There is one row per element,
+in `requestElements` order, so a collection's element and the request's own that share an
+id (#3101) are two rows, each with its own counts and `origin`. `deferred` (issue #2144)
 counts the submissions an un-inlined `script.post` was left to the completion replay on:
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is every other skip: a disabled element, an un-inlined

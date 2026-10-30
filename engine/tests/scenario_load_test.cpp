@@ -3052,8 +3052,8 @@ TEST_F (ScenarioLoadTest, AMissAndAnErrorAreTalliedAsThemselvesOnANamedRow) {
 
 // Ids are unique within a level, not across one: a collection's element and
 // the request's own can share one. Each keeps its own row, counts and label,
-// told apart by its origin. Mutation check: key `StepElementTallies::record`
-// (scenario_load.cpp) by id alone and the two rows fold into one of 4 misses.
+// told apart by its origin. Mutation check: match `ElementSlotIndex::find`
+// (pipeline.cpp) by id alone and the two rows fold into one of 4 misses.
 TEST_F (ScenarioLoadTest, ElementsSharingAnIdAcrossLevelsKeepTheirOwnRows) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/login") });

@@ -19,3 +19,19 @@ export function elementOriginLabel(origin: ElementOrigin | undefined): string | 
 	if (origin?.kind !== "collection") return undefined;
 	return origin.name ? `from "${origin.name}"` : "from a collection";
 }
+
+/**
+ * The React key of one element tally row. An id is unique only within the
+ * level that declares it (#3101), so a report can hold one id twice, once per
+ * level; the row's origin joins the id, as the engine tells the rows apart. A
+ * row with no origin falls back to its position: a report stored before rows
+ * carried one can repeat an id with nothing else to tell the rows apart.
+ */
+export function elementRowKey(
+	element: { id: string; origin?: ElementOrigin },
+	index: number
+): string {
+	const { origin } = element;
+	if (!origin) return `${index}:${element.id}`;
+	return `${origin.kind}/${origin.scope ?? ""}/${origin.id ?? ""}:${element.id}`;
+}

@@ -1988,7 +1988,9 @@ mono beside it as secondary text; a row with no `name` (every report stored befo
 engine wrote one, and an element nobody labelled) prints the kind alone, as it always did.
 A collection-level element adds `from "<collection>"` (`elementOriginLabel`); a request's
 own says nothing, and the word "Folder" never appears (`docs/ux-writing.md`). The
-sequential run's `ElementOutcomes` list uses the same helper.
+sequential run's `ElementOutcomes` list uses the same helper. Both parents key a row with
+`elementRowKey` (#3101): an id repeats across levels, so its origin joins it, and a row with
+no origin (a report stored before rows carried one) keys by position.
 
 **`missing` and `error` are buckets of their own (#3051).** The engine counts one bucket per
 outcome word: an extractor that found nothing is "N missing" (warning text), an element that

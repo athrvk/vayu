@@ -16,7 +16,7 @@
  * just the layout, are asserted here.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import ScenarioStepsTab from "./ScenarioStepsTab";
@@ -578,5 +578,57 @@ describe("the run summary line", () => {
 		expect(screen.getByText("12,345")).toBeTruthy();
 		expect(screen.getByText("23,456")).toBeTruthy();
 		expect(screen.getByText("34,567")).toBeTruthy();
+	});
+});
+
+/**
+ * Issue #3101: a step's collection element and its request's own can share an
+ * id, and the breakdown keeps a row for each (#3100). Mutation check: key the
+ * element row by `element.id` alone and React warns about a duplicate key.
+ */
+describe("two levels of a step sharing an element id (issue #3101)", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("renders both rows without a duplicate-key warning", () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const shared = (name: string, origin: RunScenarioStepElementTally["origin"]) => ({
+			id: "el_1",
+			kind: "assert.status",
+			name,
+			origin,
+			passed: 1,
+			failed: 0,
+			skipped: 0,
+		});
+		render(
+			<ScenarioStepsTab
+				steps={[
+					{
+						...STEPS[0],
+						elements: [
+							shared("Collection check", {
+								kind: "collection",
+								scope: "collection",
+								id: "col_1",
+							}),
+							shared("Request check", {
+								kind: "request",
+								scope: "request",
+								id: "req_a",
+							}),
+						],
+					},
+				]}
+				virtualUsers={8}
+			/>
+		);
+		expect(screen.getByText("Collection check")).toBeTruthy();
+		expect(screen.getByText("Request check")).toBeTruthy();
+		const keyWarnings = consoleError.mock.calls.filter((call) =>
+			call.some((arg) => typeof arg === "string" && arg.includes("same key"))
+		);
+		expect(keyWarnings).toEqual([]);
 	});
 });

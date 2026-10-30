@@ -17,7 +17,7 @@
  * silently loses the row.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { RequestElementsSummary } from "./RequestElementsSummary";
 import type { RunScenarioStepElementTally } from "@/types/domain";
@@ -212,5 +212,46 @@ describe("a missing and an error tally, a name and an origin (issue #3051)", () 
 			<RequestElementsSummary elements={[tally({ kind: "assert.status", passed: 7 })]} />
 		);
 		expect(container.querySelector("li")?.textContent).toBe("assert.status7 passed");
+	});
+});
+
+/**
+ * Issue #3101: an id is unique only within its level, so a collection's element
+ * and the request's own can share one, and the report keeps a row for each.
+ * Mutation check: key the row by `element.id` alone and React warns about a
+ * duplicate key.
+ */
+describe("two levels sharing an element id (issue #3101)", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("renders both rows without a duplicate-key warning", () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		render(
+			<RequestElementsSummary
+				elements={[
+					tally({
+						name: "Collection check",
+						passed: 3,
+						origin: { kind: "collection", scope: "collection", id: "col_1" },
+					}),
+					tally({
+						name: "Request check",
+						passed: 0,
+						failed: 2,
+						origin: { kind: "request", scope: "request", id: "req_1" },
+					}),
+				]}
+			/>
+		);
+		expect(screen.getAllByRole("listitem")).toHaveLength(2);
+		expect(screen.getByText("Collection check")).toBeTruthy();
+		expect(screen.getByText("Request check")).toBeTruthy();
+		expect(screen.getByText("2 failed")).toBeTruthy();
+		const keyWarnings = consoleError.mock.calls.filter((call) =>
+			call.some((arg) => typeof arg === "string" && arg.includes("same key"))
+		);
+		expect(keyWarnings).toEqual([]);
 	});
 });

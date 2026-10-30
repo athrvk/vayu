@@ -46,6 +46,7 @@ import {
 	ScenarioFacts,
 	StepLabelCell,
 	deferredResponsesOf,
+	elementRowKey,
 } from "@/components/shared";
 import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -213,9 +214,9 @@ export default function ScenarioStepsTab({
 								    ran - extractors, assertions, timers - tallied across
 								    every virtual user and iteration the way the Tests
 								    column already is for scripts (issue #1516). */}
-								{step.elements?.map((element) => (
+								{step.elements?.map((element, i) => (
 									<TableRow
-										key={`${step.index}-${element.id}`}
+										key={`${step.index}-${elementRowKey(element, i)}`}
 										className="bg-muted/20"
 									>
 										<TableCell colSpan={8} className="py-1.5 pl-9">
