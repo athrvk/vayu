@@ -866,7 +866,8 @@ TEST_F (MockServerTest, AHeadIsAnsweredByTheGetRouteOfThatPath) {
 
 TEST_F (MockServerTest, AStoredHeadRouteWinsOverTheGetFallback) {
     seed_pet_store ();
-    seed_request ("req_head", "col_pets", vayu::HttpMethod::HEAD, "{{baseUrl}}/pets", "Head pets");
+    seed_request ("req_head", "col_pets", vayu::HttpMethod::HEAD,
+    "{{baseUrl}}/pets", "Head pets");
     seed_example ("exa_head", "req_head", 204, "");
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
 
@@ -1089,7 +1090,8 @@ TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNot
 TEST_F (MockServerTest, AHeadToAMockedGetPathAnswersTheGetsStatusAndHeadersWithNoBody) {
     seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
     seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
-    json::array ({ json{ { "key", "X-Custom" }, { "value", "kept" }, { "enabled", true } } }));
+    json::array (
+    { json{ { "key", "X-Custom" }, { "value", "kept" }, { "enabled", true } } }));
 
     MockServerManager manager;
     MockStartRequest request;
@@ -1110,7 +1112,8 @@ TEST_F (MockServerTest, AHeadToAMockedGetPathAnswersTheGetsStatusAndHeadersWithN
     EXPECT_EQ (head->get_header_value ("X-Custom"), "kept");
     EXPECT_EQ (head->get_header_value ("Content-Type"), "application/json");
     // The length a GET would have sent, and no body behind it.
-    EXPECT_EQ (head->get_header_value ("Content-Length"), get->get_header_value ("Content-Length"));
+    EXPECT_EQ (head->get_header_value ("Content-Length"),
+    get->get_header_value ("Content-Length"));
     EXPECT_TRUE (head->body.empty ());
 
     const auto missing = client.Head ("/orders", no_compression);
