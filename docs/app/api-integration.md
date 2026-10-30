@@ -1068,6 +1068,11 @@ path either. A disabled element is left out of `requestElements` (`withoutDisabl
 scenario-only kind there. An *enabled* `timer.pacing`, `timer.throughput`,
 `control.*` or `metric.record`, the request's own or inherited, never reaches the
 payload - the dialog blocks Start and offers the collection run instead.
+A collection's own `script.setup` / `script.teardown` (the `collectionOnly`
+kinds) is left out too (`withoutInheritedCollectionOnly`, issue #3070): a
+single-request run never takes a collection's lifecycle scripts, and the engine
+validates `requestElements` as a request's own. Send and code generation, which
+compose through `POST /compose`, keep them.
 `LoadTestConfigDialog` offers no Timers twin, but not because
 the engine ignores the override there - `elements.timers` applies to a single
 target's own `timer.think` exactly the way it does to a scenario step's - the
@@ -1661,8 +1666,10 @@ await apiService.executeRequest({
 
 `elements` (issue #1512) is the resolved, ordered list of typed behaviours to
 run - the collection chain's (root→leaf), then the request's own, minus
-whatever the request's own `inherit.disable` entries name, each stamped with
-its `origin`. A script is one of these now (`kind: "script.pre"` /
+whatever an `inherit.disable` entry at any level names (a folder's can name a
+root element, a collection's the request's own; `POST /compose` gathers the
+targets the same way, and the entries themselves are never forwarded), each
+stamped with its `origin`. A script is one of these now (`kind: "script.pre"` /
 `"script.post"`, `config.script` the text) - it replaces the old
 `preRequestScripts` / `postRequestScripts` `ScriptPart[]` fields, which the
 engine now refuses outright (400 naming `elements`). The renderer builds the

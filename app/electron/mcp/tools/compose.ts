@@ -426,6 +426,37 @@ export function refuseAgentScripts(
 const SCRIPT_ELEMENT_KINDS = { pre: "script.pre", post: "script.post" } as const;
 
 /**
+ * Kinds the engine accepts only on a collection (`collectionOnly` in
+ * `GET /elements/kinds`). `electron/` compiles with `rootDir: electron`, so it
+ * cannot import the renderer's copy (`COLLECTION_ONLY_KINDS` in
+ * `src/modules/request-builder/utils/elements-parts.ts`); the two are held to
+ * the same catalogue fixture by `element-kinds.conformance.test.ts` here and
+ * `scenario-only.conformance.test.ts` there.
+ */
+export const COLLECTION_ONLY_KINDS: ReadonlySet<string> = new Set([
+	"script.setup",
+	"script.teardown",
+]);
+
+/**
+ * Whether a composed element is a collection's own run-boundary script.
+ * `POST /compose` emits an enabled collection or folder `script.setup` /
+ * `script.teardown` with a collection `origin`, but `POST /runs` validates
+ * `requestElements` as a request's own and refuses the kind (#3070) - they
+ * belong to the collection's own run, so a single-request load run leaves them
+ * out, as the app's load dialog does (`withoutInheritedCollectionOnly`).
+ */
+function isInheritedCollectionOnly(el: unknown): boolean {
+	return (
+		isRecord(el) &&
+		isRecord(el.origin) &&
+		el.origin.kind === "collection" &&
+		typeof el.kind === "string" &&
+		COLLECTION_ONLY_KINDS.has(el.kind)
+	);
+}
+
+/**
  * One `elements` entry carrying a script.
  *
  * `id` is optional because the two destinations differ: `POST /requests` and
@@ -666,7 +697,9 @@ export async function composeLoadRunRequest(
 	// the only place a post-request script is placed on this array - the
 	// handler does not add one again.
 	const adHocScript = readValidationScript(args);
-	let elements = Array.isArray(payload.elements) ? payload.elements : [];
+	let elements = (Array.isArray(payload.elements) ? payload.elements : []).filter(
+		(el) => !isInheritedCollectionOnly(el)
+	);
 	if (adHocScript !== undefined) {
 		elements = elements.filter(
 			(el) => !(isRecord(el) && el.kind === SCRIPT_ELEMENT_KINDS.post)
