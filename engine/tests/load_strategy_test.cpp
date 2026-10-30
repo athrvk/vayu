@@ -36,6 +36,7 @@
 #include "echo_server.hpp"
 #include "load_start_stamp.hpp"
 #include "mock_server.hpp"
+#include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
@@ -3212,6 +3213,134 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreElementsHeaderEditReachesTheWire) {
     { "config", { { "script", "pm.request.headers['X-Signed'] = 'yes';" }, { "inline", true } } } } })));
 
     EXPECT_EQ (echo.header ("X-Signed"), "yes") << summary.dump ();
+}
+
+namespace {
+
+/// What an inline script reads about its own submission, as one string:
+/// `vu/iteration/row/bare-column|replaceIn(vu/iteration/data.user)`. The row
+/// half is guarded so an unbound row reads `no-row` rather than throwing,
+/// which keeps a failure's message about the value that was wrong.
+constexpr const char* SEEN_IDENTITY_JS =
+"(pm.info.vu + '/' + pm.info.iteration + '/' +"
+" (pm.iterationData ? pm.iterationData.get('user') : 'no-row') + '/' +"
+" pm.variables.get('user') + '|' +"
+" pm.variables.replaceIn('{{$vu}}/{{$iteration}}/{{data.user}}'))";
+
+/// Two rows over four iterations, so the cursor wraps and every submission
+/// has its own iteration: iteration `i` binds row `i % 2`.
+nlohmann::json two_user_rows () {
+    return nlohmann::json::array ({ { { "user", "ada" } }, { { "user", "bob" } } });
+}
+
+} // namespace
+
+// #3124: an inline `script.pre` on a single-request load run reads the
+// iteration, the virtual user and the row its own submission was bound with,
+// through every accessor - `pm.info`, `pm.iterationData`, the bare column on
+// `pm.variables` and `replaceIn`. Read off the wire, one header per
+// submission. Mutation check: drop `bind_submission_identity` from
+// `run_request_elements_step_before` and every header reads
+// `undefined/undefined/no-row/undefined|1/0/{{data.user}}`.
+TEST_F (LoadStrategyTest, AnInlineScriptPreReadsTheRowIterationAndUserOfItsSubmission) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config    = request_elements_payload (echo.url (), 4, 2,
+    nlohmann::json::array ({ vayu::tests::script_element_json ("el_pre", "script.pre",
+    std::string ("pm.request.headers['X-Seen'] = ") + SEEN_IDENTITY_JS + ";",
+    /*inline_script=*/true) }));
+    config["data"] = two_user_rows ();
+
+    const auto summary =
+    run_single_request_summary (db, "run-inline-pre-identity", config);
+
+    auto seen = echo.header_per_request ("X-Seen");
+    std::sort (seen.begin (), seen.end ());
+    EXPECT_EQ (seen,
+    (std::vector<std::string>{ "1/0/ada/ada|1/0/ada", "1/1/bob/bob|1/1/bob",
+    "1/2/ada/ada|1/2/ada", "1/3/bob/bob|1/3/bob" }))
+    << summary.dump ();
+}
+
+// The same on the completion side: an inline `script.post` reads what the
+// request it ran beside was bound with, which that request carries in
+// `X-Bound` through the binder's own `{{$vu}}`, `{{$iteration}}` and
+// `{{data.user}}`. Mutation check: drop `bind_submission_identity` from
+// `run_request_elements_after_submission` and all four tests fail.
+TEST_F (LoadStrategyTest, AnInlineScriptPostReadsTheRowIterationAndUserOfTheRequestItRanBeside) {
+    const size_t ITERATIONS = 4;
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const std::string script = std::string ("pm.test('beside', function () {") + " pm.expect(" +
+    SEEN_IDENTITY_JS + ").to.equal(pm.request.headers.get('X-Bound'));" + " });";
+    auto config       = request_elements_payload (echo.url (), ITERATIONS, 2,
+    nlohmann::json::array ({ vayu::tests::script_element_json (
+    "el_post", "script.post", script, /*inline_script=*/true) }));
+    config["data"]    = two_user_rows ();
+    config["headers"] = { { "X-Bound",
+    "{{$vu}}/{{$iteration}}/{{data.user}}/{{data.user}}|"
+    "{{$vu}}/{{$iteration}}/{{data.user}}" } };
+
+    const auto summary =
+    run_single_request_summary (db, "run-inline-post-identity", config);
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (entry["failed"], 0u) << summary.dump ();
+}
+
+// A run sent without rows still tells an inline script which submission it
+// is, and leaves `pm.iterationData` absent rather than an empty row - the
+// distinction the deferred replay keeps (`load_data_test.cpp`). Mutation
+// check: drop `bind_submission_identity` from
+// `run_request_elements_step_before` and every header reads
+// `undefined/undefined/undefined|1/0`.
+TEST_F (LoadStrategyTest, WithoutRowsAnInlineScriptPreStillReadsItsIterationAndUser) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-inline-pre-no-rows",
+    request_elements_payload (echo.url (), 3, 1,
+    nlohmann::json::array ({ vayu::tests::script_element_json ("el_pre", "script.pre",
+    "pm.request.headers['X-Seen'] ="
+    " typeof pm.iterationData + '/' + pm.info.vu + '/' + pm.info.iteration +"
+    " '|' + pm.variables.replaceIn('{{$vu}}/{{$iteration}}');",
+    /*inline_script=*/true) })));
+
+    auto seen = echo.header_per_request ("X-Seen");
+    std::sort (seen.begin (), seen.end ());
+    EXPECT_EQ (seen,
+    (std::vector<std::string>{ "undefined/1/0|1/0", "undefined/1/1|1/1", "undefined/1/2|1/2" }))
+    << summary.dump ();
+}
+
+// The submission that sends the shared request - no rows, no template, no
+// `step.before` kind - still hands its identity to an inline `script.post`.
+// Mutation check: drop `bind_submission_identity` from
+// `run_request_elements_after_submission` and all three tests fail.
+TEST_F (LoadStrategyTest, AnInlineScriptPostOnTheSharedRequestReadsItsIterationAndUser) {
+    const size_t ITERATIONS = 3;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-inline-post-shared",
+    request_elements_payload (mock_server->fast_url (), ITERATIONS, 1,
+    nlohmann::json::array ({ vayu::tests::script_element_json ("el_post", "script.post",
+    "pm.test('identity', function () {"
+    "  pm.expect(typeof pm.iterationData).to.equal('undefined');"
+    "  pm.expect(pm.info.vu).to.equal(1);"
+    "  pm.expect(pm.info.iteration).to.be.within(0, 2);"
+    "  pm.expect(pm.variables.replaceIn('{{$iteration}}'))"
+    "    .to.equal(String(pm.info.iteration));"
+    "});",
+    /*inline_script=*/true) })));
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (entry["failed"], 0u) << summary.dump ();
 }
 
 // Issue #2473 on the single-request path: a basic password an inline

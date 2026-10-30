@@ -486,19 +486,23 @@ std::optional<size_t> row) {
     return row ? &data_rows.at (*row) : nullptr;
 }
 
-/// This step's `id`-less request identity, for `pm.info` inside an inline
-/// script - the same fields `execute_exchange`'s own `bind` lambda sets.
+/// This step's `id`-less request identity and the submission's row, for
+/// `pm.info` and `pm.iterationData` inside an inline script - the same fields
+/// `execute_exchange`'s own `bind` lambda sets (#3124). @p data_row is null
+/// for a run with no dataset, which a script reads as `undefined`.
 void bind_step_identity (vayu::runtime::ScriptContext& ctx,
 const ScenarioStep& step,
 size_t iteration,
-size_t vu_index) {
+size_t vu_index,
+const nlohmann::json* data_row) {
     ctx.request_id = step.request_id.empty () ?
     std::nullopt :
     std::optional<std::string> (step.request_id);
     ctx.request_name =
     step.name.empty () ? std::nullopt : std::optional<std::string> (step.name);
-    ctx.iteration = iteration;
-    ctx.vu        = vu_index;
+    ctx.iteration      = iteration;
+    ctx.vu             = vu_index;
+    ctx.iteration_data = data_row;
 }
 
 /// `run_step_before`'s answer: elapsed pipeline time on `includeScriptTime`'s
@@ -584,7 +588,7 @@ const nlohmann::json* data_row) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
-            bind_step_identity (script_ctx, step, iteration, vu_index);
+            bind_step_identity (script_ctx, step, iteration, vu_index, data_row);
             script_ctx.record_metric = [&context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -684,6 +688,8 @@ ScenarioLoadState& state,
 VirtualUser& vu,
 const ScenarioStep& step,
 size_t step_index,
+size_t iteration,
+size_t vu_index,
 vayu::Request& request,
 const vayu::Response& response,
 const nlohmann::json* data_row) {
@@ -710,7 +716,7 @@ const nlohmann::json* data_row) {
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
             script_ctx.cookie_read_lines = &vu.cookies;
-            bind_step_identity (script_ctx, step, vu.iteration, vu.index);
+            bind_step_identity (script_ctx, step, iteration, vu_index, data_row);
             script_ctx.record_metric = [&context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -737,7 +743,7 @@ const nlohmann::json* data_row) {
             return vayu::http::resolve_template_with_optional_row (
             text, vars, data_row, vu.scope_overlay.local_values ());
         },
-        .iteration        = vu.iteration,
+        .iteration        = iteration,
         .step_position    = step_index,
         .element_spans    = &state.element_spans,
         .controller_state = &vu.controller_state,
@@ -929,8 +935,8 @@ class ScenarioLoadDriver {
             const vayu::Response& response = result.value ();
             StepAfterResult after;
             if (sent_request) {
-                after = run_step_after (context, *state, *vu, *step_ptr,
-                step_index, *sent_request, response, data_row);
+                after = run_step_after (context, *state, *vu, *step_ptr, step_index,
+                iteration, vu_index, *sent_request, response, data_row);
             }
 
             const bool errored = response.has_error ();

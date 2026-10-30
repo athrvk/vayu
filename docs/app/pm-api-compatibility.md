@@ -42,7 +42,7 @@ supported is listed [below](#not-yet-supported).
 | Modules             | `require('crypto-js')` (also the `CryptoJS` global; a Vayu-written shim), `require('uuid')` (npm's `uuid`, vendored; callable), `require('lodash')` (also the `_` global; npm's `lodash`, vendored), `require('moment')` (npm's `moment`, vendored; English only), `require('csv-parse/lib/sync')` (npm's `csv-parse` 1.2.4 sync parser, bundled; string input), `require('xml2js')` (npm's `xml2js` 0.6.2 with `sax` 1.2.4, bundled; also Postman's `xml2Json` global over it) `require('chai')` (npm's `chai` 4.4.1, bundled; a separate object from `pm.expect`, with chai-postman's response assertions installed), `require('ajv')` (npm's `ajv` 6.12.5, vendored; draft-07) and `require('tv4')` (npm's `tv4` 1.3.0, minified; draft-04; also the `tv4` global) - any other module throws; see [The `require` shelf](#the-require-shelf) |
 | Send from script    | `pm.sendRequest(urlOrOptions, callback?)` - synchronous; a settled promise without the callback; refused for agent-started runs, see below |
 | Flow control        | `pm.execution.setNextRequest(name \| null)`, `.skipRequest()` - collection runs only, see below |
-| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a scenario load run's deferred per-step script, see below |
+| Data rows           | `pm.iterationData.get(name)`, `.has(name)`, `.toObject()` - read-only, a data-driven collection run, a send-with-row, or a data-driven load run's scripts (inline or deferred), see below |
 | Base64              | `btoa(binaryString)`, `atob(base64)` - globals, standard web semantics           |
 | Timers              | `setTimeout`, `setInterval`, `clearTimeout`, `clearInterval` - globals, run before the script ends without waiting, see below |
 | Legacy `postman`    | `postman.setEnvironmentVariable` and the other ten pre-`pm.*` helper methods, each an alias of the `pm.*` method Postman names - see [The legacy `postman` object](#the-legacy-postman-object) |
@@ -1445,11 +1445,12 @@ caret and MCP's `run_request` both take one row on `POST /execute`, which is
 what makes a script that reads `pm.iterationData` testable without starting a
 run. `pm.info.iteration` is then `0` of `1` - the send is row 0 of 1.
 
-A **scenario load run's deferred per-step script** reads one too: the sampled
-response carries the row its iteration was bound to. Those three - a
-data-driven collection run, a send-with-row, and that deferred script - are
-every surface that binds a row, and they are what a stashed
-`pm.iterationData` names when it refuses a later call.
+A **load run given rows** binds one into its scripts too, on either shape: a
+deferred script reads the row its sampled response was bound to, and an
+inline `script.pre` / `script.post` reads the row of the request it runs
+beside (#3124). Those three - a data-driven collection run, a send-with-row,
+and a data-driven load run - are every surface that binds a row, and they are
+what a stashed `pm.iterationData` names when it refuses a later call.
 
 Divergences from Postman:
 

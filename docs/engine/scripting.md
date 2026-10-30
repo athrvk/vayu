@@ -2614,7 +2614,14 @@ carries the row the submission or iteration that produced it was bound to, so
 the row is a fact about that response rather than a guess. (`pm.info.iteration` and
 `pm.info.vu` travel the same way and are populated on both shapes since issue
 #994 - what a sample carries is the identity its submission claimed before it
-was sent, never its position in a reservoir.) That is deliberate, and it is the opposite treatment to `pm.execution`
+was sent, never its position in a reservoir.) An **inline** `script.pre` or
+`script.post` under load reads the same three as the request it runs beside,
+on both shapes (#3124): the row through `pm.iterationData`, its bare columns
+through `pm.variables.get` and `{{data.column}}` through
+`pm.variables.replaceIn`, beside `pm.info.iteration` and `pm.info.vu` - so a
+script that correlates under load sees the row its own URL was bound with.
+Without rows `pm.iterationData` stays `undefined` there too, while
+`iteration` and `vu` are still set. That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:

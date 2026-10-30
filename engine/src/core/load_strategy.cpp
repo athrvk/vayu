@@ -750,6 +750,22 @@ class SubmissionRequest {
     size_t cursor_            = 0;
 };
 
+/// This submission's iteration, virtual user and row, for `pm.info` and
+/// `pm.iterationData` inside an inline script (#3124) - what the deferred
+/// replay binds off the stored record (`run_manager.cpp`), read here off the
+/// live submission. The row points into the run's own set, which outlives
+/// every script of the run; `iteration_count` stays unset, as it does there.
+void bind_submission_identity (vayu::runtime::ScriptContext& script_ctx,
+const RunContext& context,
+const ResultAnnotations& annotations) {
+    script_ctx.iteration    = annotations.iteration;
+    script_ctx.vu           = annotations.vu;
+    const LoadDataSet* data = context.load_data.get ();
+    if (data != nullptr && annotations.data_row_index) {
+        script_ctx.iteration_data = &data->rows.at (*annotations.data_row_index);
+    }
+}
+
 /**
  * Runs @p context's `requestElements` `step.before` elements against @p
  * request, mutating it in place and writing into @p overlay - a fresh
@@ -760,7 +776,8 @@ class SubmissionRequest {
  */
 void run_request_elements_step_before (const std::shared_ptr<RunContext>& context,
 vayu::Request& request,
-vayu::http::routes::ScopeOverlay& overlay) {
+vayu::http::routes::ScopeOverlay& overlay,
+const ResultAnnotations& annotations) {
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult pre_result;
     vayu::ScriptResult unused_post_result;
@@ -775,6 +792,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
+            bind_submission_identity (script_ctx, *context, annotations);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -843,7 +861,8 @@ vayu::http::routes::ScopeOverlay& overlay) {
 void run_request_elements_after_submission (const std::shared_ptr<RunContext>& context,
 vayu::Request& request,
 const vayu::Response& response,
-vayu::http::routes::ScopeOverlay& overlay) {
+vayu::http::routes::ScopeOverlay& overlay,
+const ResultAnnotations& annotations) {
     std::vector<vayu::core::ElementOutcome> outcomes;
     vayu::ScriptResult unused_pre_result;
     vayu::ScriptResult post_result;
@@ -859,6 +878,7 @@ vayu::http::routes::ScopeOverlay& overlay) {
             auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
+            bind_submission_identity (script_ctx, *context, annotations);
             script_ctx.record_metric = [context] (const std::string& name,
                                        vayu::core::CustomMetricType type, double value) {
                 context->metrics_collector->record_custom_metric (name, type, value);
@@ -960,7 +980,7 @@ std::shared_ptr<vayu::http::routes::ScopeOverlay> overlay) {
     overlay = std::move (overlay)] (size_t, const vayu::Result<vayu::Response>& result) {
         if (sent_request && overlay && result.is_ok ()) {
             run_request_elements_after_submission (
-            context, *sent_request, result.value (), *overlay);
+            context, *sent_request, result.value (), *overlay, annotations);
         }
         handle_result (context, db, result, annotations);
     });
@@ -1089,7 +1109,7 @@ SubmissionRequest& live) {
     auto overlay =
     has_step_elements ? std::make_shared<vayu::http::routes::ScopeOverlay> () : nullptr;
     if (has_step_elements && context->step_elements_have_step_before) {
-        run_request_elements_step_before (context, request, *overlay);
+        run_request_elements_step_before (context, request, *overlay, annotations);
     }
 
     // Whatever the bind above (and a `step.before` extractor or script, when

@@ -930,10 +930,10 @@ JSValue js_from_json (JSContext* ctx, const nlohmann::json& value, const char* l
 // rather than answer about a run that has finished.
 //
 // The message names every surface that binds a row, not just the collection run
-// #356 shipped with: #402 made a send-with-row one and #599 made a scenario load
-// run's deferred per-step script another, so a message naming only collection
-// runs steers a user who stashed the object during either of those to look for a
-// mistake that is not there.
+// #356 shipped with: #402 made a send-with-row one, and #599, #993 and #3124
+// made every script of a load run given rows another, so a message naming only
+// collection runs steers a user who stashed the object during one of those to
+// look for a mistake that is not there.
 ContextData* iteration_data_context (JSContext* ctx, const char* member) {
     auto* data = get_context_data (ctx);
     if (!data || !data->iteration_data) {
@@ -941,8 +941,8 @@ ContextData* iteration_data_context (JSContext* ctx, const char* member) {
         "pm.iterationData.%s is not available here: this script has no data "
         "row "
         "bound. A row is bound by an iteration of a collection run with a data "
-        "set, by a send-with-row, and by a scenario load run's deferred "
-        "per-step script. See docs/engine/scripting.md.",
+        "set, by a send-with-row, and by a load run's scripts when the run has "
+        "a data set. See docs/engine/scripting.md.",
         member);
         return nullptr;
     }
