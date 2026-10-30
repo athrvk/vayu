@@ -352,7 +352,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `list_webhook_inboxes` | read     | `GET /inbox`                                 | -                          |
 | `stop_webhook_inbox`   | execute  | `POST /inbox/:id/stop`                       | - (frees the port, keeps the record and its captures) |
 | `delete_webhook_inbox` | write    | `GET /inbox` + `DELETE /inbox/:id`           | write toggle + confirm (the prompt names the capture count) |
-| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max, with `pagination.nextOffset` / `note` as `list_runs`; each body capped at 32 KB; secret values and credential header values read `<redacted>` unless revealed |
+| `get_inbox_captures`   | read     | `GET /inbox/:id/requests?limit=&offset=`     | 25 captures per call by default, 100 max, with `pagination.nextOffset` / `note` as `list_runs`; each body capped at 32 KB (a body that is not valid UTF-8 arrives as `bodyEncoding: "base64"` and is cut in decoded bytes, #3109); secret values and credential header values read `<redacted>` unless revealed |
 | `clear_inbox_captures` | write    | `DELETE /inbox/:id/requests`                 | write toggle               |
 | `update_inbox_response`| execute  | `PUT /inbox/:id` (merge-patch)               | - (live edit of the canned reply) |
 
@@ -1221,7 +1221,10 @@ Notes:
   (a second is a `409`) and the app's own inbox tab may hold it, so MCP polls
   `get_inbox_captures` instead - the same bounded-snapshot posture
   `get_live_metrics` takes. Capture bodies are cut to 32 KB for the result with
-  the engine's own `bodyTruncated` / `bodyBytes` disclosure kept intact, since
+  the engine's own `bodyTruncated` / `bodyBytes` disclosure kept intact (a body
+  that is not valid UTF-8 carries `bodyEncoding: "base64"`, is cut in decoded
+  bytes so it stays whole base64, and is masked in its bytes like any other
+  base64 body, #3109), since
   `inboxMaxBodyBytes` reaches 8 MB and a webhook payload is whatever the sender
   sent. **`allowedOrigins`** (issue #2367) is forwarded the same way as the
   mock's - an array of strings, validated by the engine, echoed canonical by the

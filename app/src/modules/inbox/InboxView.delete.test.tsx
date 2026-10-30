@@ -100,6 +100,7 @@ function capture(id: number): InboxCapture {
 		query: "",
 		headers: {},
 		body: "{}",
+		bodyEncoding: "utf8",
 		bodyBytes: 2,
 		bodyTruncated: false,
 		remoteAddr: "127.0.0.1",

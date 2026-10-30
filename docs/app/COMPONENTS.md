@@ -842,6 +842,13 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   table's trailing blank row replaced the panel's own "Add header" button. Header names complete
   from the same `STANDARD_HEADERS` list as the request builder's Headers tab (#1449) - the mount
   had reused the primitive without its header-specific suggestion prop.
+- `CaptureRaw.tsx` - the detail pane's Raw view (issue #3109). A capture whose `bodyEncoding` is
+  `base64` is not printed: the view shows a "[N of binary data, not shown as text.]" line from
+  `bodyBytes` (naming the kept prefix when the body is truncated), beside **Download body**, which
+  writes the exact stored bytes typed and named by the Content-Type, and **Copy as base64**. The
+  bytes come from `captureBinaryBytes` (`utils.ts`), which reuses `decodeResponseBody` and never
+  throws, so a body that does not decode leaves Copy and drops Download. A text body prints as it
+  always did. There is no hex view: the Download is the way to inspect the bytes.
 - `capture-notifier.ts` - the OS notification a capture raises while Vayu is in the background
   (issue #1388), and the two gates it passes first: the global opt-in, read by `services/notify.ts`
   for every kind, and this inbox's own `Notify` toggle in the header, read here and off by default.

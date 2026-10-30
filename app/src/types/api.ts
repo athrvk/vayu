@@ -1387,9 +1387,21 @@ export interface InboxCapture {
 	/** Raw query string, without the `?`. */
 	query: string;
 	headers: Record<string, string>;
-	/** At most the engine's per-capture cap; see `bodyTruncated`. */
+	/**
+	 * At most the engine's per-capture cap; see `bodyTruncated`. UTF-8 text, or
+	 * the base64 of the stored bytes when `bodyEncoding` is `"base64"`.
+	 */
 	body: string;
-	/** Size as received, which is larger than `body.length` when truncated. */
+	/**
+	 * `"base64"` when the stored bytes are not valid UTF-8 (a protobuf, an image,
+	 * a gzip), so `body` is a spelling of bytes and not text to show. A truncated
+	 * base64 body is still one whole base64 string, of the stored prefix.
+	 */
+	bodyEncoding: "utf8" | "base64";
+	/**
+	 * Size as received, in bytes: larger than the stored body when truncated,
+	 * and for base64 not the length of `body`, which is the encoded spelling.
+	 */
 	bodyBytes: number;
 	bodyTruncated: boolean;
 	remoteAddr: string;

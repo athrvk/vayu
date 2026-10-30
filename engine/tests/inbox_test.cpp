@@ -9,6 +9,7 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
@@ -21,8 +22,12 @@
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/inbox.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/utils/encoding.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::http::InboxCannedResponse;
@@ -795,6 +800,54 @@ TEST_F (InboxListenerTest, ABodyPastTheCapIsStoredTruncatedAndSaysSo) {
     EXPECT_TRUE (captures.front ().body_truncated);
 }
 
+// The cap falls where it falls, and a stored body ending mid-character is no
+// longer text (#3109). `bodyBytes` still reports the size as received.
+TEST_F (InboxListenerTest, ABodyCutInsideACharacterIsStoredWithoutItsBrokenTail) {
+    set_config ("inboxMaxBodyBytes", inbox_constants::MIN_BODY_BYTES);
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    // The leading 'x' puts every two-byte e-acute on an odd offset, so the
+    // 256-byte cap lands between the two bytes of one of them.
+    std::string body = "x";
+    while (static_cast<int64_t> (body.size ()) < inbox_constants::MIN_BODY_BYTES + 40) {
+        body += "\xC3\xA9";
+    }
+    ASSERT_TRUE (client.Post ("/hook", body, "text/plain"));
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 1, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto& capture = captures.front ();
+    EXPECT_EQ (static_cast<int64_t> (capture.body.size ()),
+    inbox_constants::MIN_BODY_BYTES - 1);
+    EXPECT_TRUE (capture.body_truncated);
+    EXPECT_EQ (capture.body_bytes, static_cast<int64_t> (body.size ()));
+
+    const auto wire = vayu::http::inbox_capture_json (capture);
+    EXPECT_EQ (wire["bodyEncoding"], "utf8");
+    EXPECT_EQ (wire["body"], capture.body);
+}
+
+// A header value is bytes: it must not make the capture's own JSON throw and
+// the delivery vanish.
+TEST_F (InboxListenerTest, ANonUtf8HeaderValueStillRecordsTheDelivery) {
+    auto started = start ();
+    auto client  = client_for (started.info);
+
+    httplib::Headers headers = { { "X-Raw", "a\xC0z" } };
+    auto posted = client.Post ("/hook", headers, "{}", "application/json");
+    ASSERT_TRUE (posted);
+    EXPECT_EQ (posted->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 1, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto stored_headers = json::parse (captures.front ().headers);
+    // nlohmann writes U+FFFD for the byte that is not UTF-8.
+    EXPECT_EQ (stored_headers.value ("X-Raw", ""),
+    "a\xEF\xBF\xBD"
+    "z");
+}
+
 TEST_F (InboxListenerTest, StopFreesTheListenerAndKeepsTheHistory) {
     auto started = start ();
     {
@@ -1277,6 +1330,190 @@ TEST (InboxWireShape, CaptureAndInfoCarryEveryFieldTheUiReads) {
     info.allowed_origins = { "https://app.example.test" };
     EXPECT_EQ (vayu::http::inbox_info_json (info)["allowedOrigins"],
     json::array ({ "https://app.example.test" }));
+}
+
+// A JSON string holds only UTF-8, and a capture is whatever the sender wrote
+// (#3109): text travels as itself, anything else as its base64.
+TEST (InboxWireShape, ATextBodyTravelsAsItselfAndSaysUtf8) {
+    vayu::db::InboxRequest capture;
+    capture.headers    = "{}";
+    capture.body       = "caf\xC3\xA9";
+    capture.body_bytes = 5;
+
+    const auto wire = vayu::http::inbox_capture_json (capture);
+    EXPECT_EQ (wire["body"], "caf\xC3\xA9");
+    EXPECT_EQ (wire["bodyEncoding"], "utf8");
+    EXPECT_EQ (wire["bodyBytes"], 5);
+    EXPECT_NO_THROW (static_cast<void> (wire.dump ()));
+}
+
+TEST (InboxWireShape, ABodyThatIsNotTextTravelsAsBase64WithItsReceivedSize) {
+    struct Case {
+        std::string bytes;
+        int64_t received;
+    };
+    const std::vector<Case> cases = {
+        { std::string ("\xC0\xFF"), 2 },
+        // NUL is valid UTF-8 and never text.
+        { std::string ("a\0b", 3), 3 },
+        // A cut body reports what arrived, not what was kept or encoded.
+        { std::string ("\xC0\xFF"), 4096 },
+    };
+    for (const auto& c : cases) {
+        vayu::db::InboxRequest capture;
+        capture.headers    = "{}";
+        capture.body       = c.bytes;
+        capture.body_bytes = c.received;
+
+        const auto wire = vayu::http::inbox_capture_json (capture);
+        EXPECT_EQ (wire["body"], vayu::utils::base64_encode (c.bytes));
+        EXPECT_EQ (wire["bodyEncoding"], "base64");
+        EXPECT_EQ (wire["bodyBytes"], c.received);
+        EXPECT_NO_THROW (static_cast<void> (wire.dump ()));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bytes through the real routes (#3109)
+// ---------------------------------------------------------------------------
+
+
+int free_port () {
+    httplib::Server probe;
+    const int port = probe.bind_to_any_port ("127.0.0.1");
+    std::thread runner ([&probe] () { probe.listen_after_bind (); });
+    probe.wait_until_ready ();
+    probe.stop ();
+    runner.join ();
+    return port;
+}
+
+/// The JSON of every complete `data:` frame in an SSE byte stream.
+std::vector<json> data_frames (const std::string& stream) {
+    std::vector<json> frames;
+    size_t start = 0;
+    for (size_t end = stream.find ("\n\n"); end != std::string::npos;
+    end             = stream.find ("\n\n", start)) {
+        const std::string block = stream.substr (start, end - start);
+        start                   = end + 2;
+        const size_t at         = block.find ("data: ");
+        if (at != std::string::npos) {
+            frames.push_back (json::parse (block.substr (at + 6)));
+        }
+    }
+    return frames;
+}
+
+class InboxRouteTest : public ::testing::Test {
+    protected:
+    static constexpr const char* DB_PATH = "test_inbox_route.db";
+
+    void SetUp () override {
+        vayu::tests::remove_database_files (DB_PATH);
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+        port_ = free_port ();
+        server_ = std::make_unique<vayu::http::Server> (*db_, run_manager_, port_);
+        ASSERT_TRUE (server_->start ()) << server_->bind_error ();
+
+        auto started = management ().Post ("/inbox/start", "{}", "application/json");
+        ASSERT_TRUE (started);
+        ASSERT_EQ (started->status, 200) << started->body;
+        const auto info = json::parse (started->body);
+        inbox_id_       = info.at ("inboxId");
+        inbox_port_     = info.at ("port");
+    }
+    void TearDown () override {
+        server_.reset ();
+        db_.reset ();
+        vayu::tests::remove_database_files (DB_PATH);
+    }
+
+    [[nodiscard]] httplib::Client management () const {
+        return httplib::Client ("127.0.0.1", port_);
+    }
+
+    void deliver (const std::string& body) const {
+        httplib::Client sender ("127.0.0.1", inbox_port_);
+        ASSERT_TRUE (sender.Post ("/hook", body, "application/octet-stream"));
+    }
+
+    /// Reads `GET /inbox/:id/live` until @p frames data frames arrived, or the
+    /// wait deadline passes with fewer. The deadline is checked on every chunk
+    /// because a healthy idle stream still writes a keep-alive each poll, so a
+    /// read timeout alone would never end a stream that skipped a frame.
+    [[nodiscard]] std::vector<json> read_live (size_t frames) const {
+        auto client = management ();
+        std::string received;
+        std::vector<json> parsed;
+        const auto until = std::chrono::steady_clock::now () + vayu::tests::WAIT_DEADLINE;
+        client.Get ("/inbox/" + inbox_id_ + "/live", [&] (const char* data, size_t length) {
+            received.append (data, length);
+            parsed = data_frames (received);
+            return parsed.size () < frames && std::chrono::steady_clock::now () < until;
+        });
+        return parsed;
+    }
+
+    std::unique_ptr<vayu::db::Database> db_;
+    vayu::core::RunManager run_manager_;
+    std::unique_ptr<vayu::http::Server> server_;
+    int port_ = 0;
+    std::string inbox_id_;
+    int inbox_port_ = 0;
+};
+
+TEST_F (InboxRouteTest, ABinaryCaptureListsWith200AndAGoodOneBesideItIsUntouched) {
+    deliver (std::string ("\xC0\xFF"));
+    deliver ("{\"ok\":true}");
+
+    auto listed = management ().Get ("/inbox/" + inbox_id_ + "/requests");
+    ASSERT_TRUE (listed);
+    ASSERT_EQ (listed->status, 200) << listed->body;
+    const auto data = json::parse (listed->body).at ("data");
+    ASSERT_EQ (data.size (), 2u);
+    // Newest first.
+    EXPECT_EQ (data[0]["body"], "{\"ok\":true}");
+    EXPECT_EQ (data[0]["bodyEncoding"], "utf8");
+    EXPECT_EQ (data[1]["body"], "wP8=");
+    EXPECT_EQ (data[1]["bodyEncoding"], "base64");
+    EXPECT_EQ (data[1]["bodyBytes"], 2);
+}
+
+TEST_F (InboxRouteTest, ABinaryCaptureDoesNotStallTheLiveStreamBehindIt) {
+    deliver (std::string ("\xC0\xFF"));
+    deliver ("later");
+
+    const auto frames = read_live (2);
+    ASSERT_EQ (frames.size (), 2u)
+    << "the stream ended before the good capture arrived";
+    EXPECT_EQ (frames[0]["body"], "wP8=");
+    EXPECT_EQ (frames[0]["bodyEncoding"], "base64");
+    EXPECT_EQ (frames[1]["body"], "later");
+    EXPECT_EQ (frames[1]["bodyEncoding"], "utf8");
+}
+
+// A path or query is bytes too and no classification covers it; the serialiser
+// replaces what is not UTF-8 so the list and the stream still answer.
+TEST_F (InboxRouteTest, ARowWithANonUtf8PathStillListsAndStreams) {
+    vayu::db::InboxRequest capture;
+    capture.inbox_id    = inbox_id_;
+    capture.received_at = 1700000000000;
+    capture.method      = "POST";
+    capture.path        = "/\xFF";
+    capture.headers     = "{}";
+    capture.body        = "x";
+    capture.body_bytes  = 1;
+    db_->add_inbox_request (capture, 100);
+    deliver ("after");
+
+    auto listed = management ().Get ("/inbox/" + inbox_id_ + "/requests");
+    ASSERT_TRUE (listed);
+    EXPECT_EQ (listed->status, 200) << listed->body;
+
+    const auto frames = read_live (2);
+    ASSERT_EQ (frames.size (), 2u);
+    EXPECT_EQ (frames[1]["body"], "after");
 }
 
 } // namespace
