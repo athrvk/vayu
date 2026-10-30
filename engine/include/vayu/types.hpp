@@ -552,6 +552,16 @@ struct Request {
      */
     std::string auth_query_param;
     /**
+     * @brief The header `apply_auth` wrote a credential into (`Authorization`,
+     *        or an API key's name), empty when it wrote none - a header the
+     *        request already carried under that name included.
+     *
+     * Not recorded on the trace: it exists so a pre-request script assigning
+     * `pm.request.auth` replaces the credential the engine applied and no
+     * header anyone else wrote (#3131).
+     */
+    std::string auth_header;
+    /**
      * @brief Why the request's auth block put nothing on the wire, empty when
      *        it was sent or there was none.
      *

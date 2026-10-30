@@ -94,6 +94,30 @@ TEST (AuthResolver, ApiKeyNameAndValueAreTrimmedInBothPlacements) {
     EXPECT_EQ (query_req.auth_query_param, "key");
 }
 
+// The header `apply_auth` wrote is named, and one a header the request already
+// carried kept it from writing is not (#3131): the pm.request write-back
+// replaces only what the engine applied.
+TEST (AuthResolver, TheHeaderAuthWroteIsNamedAndOneItSkippedIsNot) {
+    auto bearer = make_request ();
+    ASSERT_TRUE (vayu::http::apply_auth (
+    bearer, json{ { "mode", "bearer" }, { "token", "t" } }, nullptr)
+    .ok);
+    EXPECT_EQ (bearer.auth_header, "Authorization");
+
+    auto api_key = make_request ();
+    ASSERT_TRUE (vayu::http::apply_auth (api_key,
+    json{ { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "v" } }, nullptr)
+    .ok);
+    EXPECT_EQ (api_key.auth_header, "X-Api-Key");
+
+    auto typed                     = make_request ();
+    typed.headers["authorization"] = "Custom typed";
+    ASSERT_TRUE (vayu::http::apply_auth (typed,
+    json{ { "mode", "basic" }, { "username", "u" }, { "password", "p" } }, nullptr)
+    .ok);
+    EXPECT_TRUE (typed.auth_header.empty ());
+}
+
 // An API key header whose name is not a token is refused with nothing written.
 // Mutation check: drop the `invalid_header_name_refusal` call in
 // `apply_api_key` and the line goes out as `X Key`.
