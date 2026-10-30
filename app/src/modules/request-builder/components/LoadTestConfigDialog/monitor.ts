@@ -79,7 +79,21 @@ export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES
 	if (series.length > maxSeries) {
 		return `At most ${maxSeries} metrics can be charted; you named ${series.length}. Raise "Server monitoring metric limit" in Settings to chart more.`;
 	}
+	const unmatchable = draft.format === "prometheus" && series.find(isNotAPrometheusName);
+	if (unmatchable) {
+		return `"${unmatchable}" is not a metric name. Series are matched by name and every label set is summed, so write the name without a {…} label filter or spaces.`;
+	}
 	return null;
+}
+
+/**
+ * The engine's Prometheus series rule (`read_monitor_series` in
+ * `engine/src/core/monitor.cpp`): the exposition parser reads a name up to its
+ * first `{` or whitespace, so a name holding either never matches (#3120). A
+ * JSON key may hold both, which is why the rule is the Prometheus format's.
+ */
+function isNotAPrometheusName(name: string): boolean {
+	return /[{\s]/.test(name);
 }
 
 /**

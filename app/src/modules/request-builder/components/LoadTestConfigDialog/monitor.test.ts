@@ -60,6 +60,30 @@ describe("monitorError", () => {
 			/at most 8/i
 		);
 	});
+
+	// The engine's 400 for a name its exposition parser can never match (#3120).
+	// Mutation check: return false from `isNotAPrometheusName` and the
+	// Prometheus cases pass the dialog.
+	it("rejects a Prometheus name holding a label filter or a space", () => {
+		const base = { url: "http://localhost:9100/metrics", format: "prometheus" as const };
+		for (const name of ['http_requests_total{code="500"}', "process cpu", "node_cpu{"]) {
+			expect(monitorError(draft({ ...base, series: `up\n${name}` }))).toMatch(
+				/matched by name/i
+			);
+		}
+	});
+
+	it("accepts a brace or a space in a JSON key, which may legally hold either", () => {
+		expect(
+			monitorError(
+				draft({
+					url: "http://localhost:9100/metrics",
+					format: "json",
+					series: "requests{500}\nqueue depth",
+				})
+			)
+		).toBeNull();
+	});
 });
 
 describe("monitorSeriesList", () => {
