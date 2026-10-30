@@ -62,13 +62,18 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { create } from "zustand";
 import type { RunExportAction } from "@/lib/run-export-formats";
 import type { RequestState } from "@/modules/request-builder/types";
-import type { Collection } from "@/types";
+import type { Collection, ElementKindSchema } from "@/types";
 
 /** The mounted builder's editor state, as it stands when it is read. */
 export interface EditorDraft {
 	request: RequestState;
 	/** The collection chain, root first, that the builder composes Send with. */
 	ancestors: Collection[];
+	/**
+	 * The element catalogue Send judges the draft's elements by (#3066); empty
+	 * while it is still loading, as for Send.
+	 */
+	elementKinds: ElementKindSchema[];
 }
 
 /**

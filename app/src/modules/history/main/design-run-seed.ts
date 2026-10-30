@@ -38,6 +38,7 @@ import { pathRowsFromUrl, pathRowsOf } from "@/modules/request-builder/utils/pat
 import { generateId } from "@/lib/id";
 import { headerLinesOf } from "@/lib/header-lines";
 import { holdsWithheld, isWithheld } from "@/lib/withheld-value";
+import { isBlankScriptElement } from "@/lib/elements";
 import { noFile } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
@@ -277,9 +278,13 @@ function paramsFromSnapshot(snapshot: DesignSnapshot) {
 	];
 }
 
-/** The request's own part, or "" when the run predates script parts. */
+/**
+ * The request's own part, or "" when the run predates script parts or the part
+ * holds no script text (a stored part is not guaranteed to).
+ */
 function ownScript(parts: ScriptPart[] | undefined): string {
-	return parts?.find((p) => p.origin === "request")?.script ?? "";
+	const script: unknown = parts?.find((p) => p.origin === "request")?.script;
+	return typeof script === "string" ? script : "";
 }
 
 /** The chain's parts, in recorded order, without the request's own. */
@@ -293,18 +298,24 @@ function collectionParts(parts: ScriptPart[] | undefined): ScriptPart[] {
  * a replay now sends - see `DesignRunView.tsx`'s `handleExecute`. Only the
  * script text and origin survive a stored run; `enabled` is always true,
  * since a disabled element was never recorded as a part in the first place.
+ *
+ * `null` for a part whose script is missing, not a string or only whitespace
+ * (`isBlankScriptElement`, #1609): the engine refuses a script element with no
+ * script (#3052), so replaying one would turn the whole resend into a 400. The
+ * part is left out instead, as a blank script is everywhere else.
  */
 export function scriptPartToElement(
-	part: ScriptPart,
+	part: Omit<ScriptPart, "script"> & { script?: unknown },
 	kind: "script.pre" | "script.post"
-): ElementDef {
-	return {
+): ElementDef | null {
+	const element: ElementDef = {
 		id: part.id ? `${part.id}-${kind}` : `legacy-${kind}`,
 		kind,
 		enabled: true,
 		...(part.name ? { name: part.name } : {}),
 		config: { script: part.script },
 	};
+	return isBlankScriptElement(element) ? null : element;
 }
 
 export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSeed {

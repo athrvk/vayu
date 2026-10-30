@@ -39,6 +39,7 @@
  */
 
 import { create } from "zustand";
+import type { LeftOutElement } from "@/lib/elements";
 import type { StreamEndReason, StreamEvent, StreamOpen } from "@/types";
 
 interface ExecutionEventsState {
@@ -65,9 +66,21 @@ interface ExecutionEventsState {
 	endReason: StreamEndReason | null;
 	/** A transport failure on the relay; cleared by the next `startStream`. */
 	error: string | null;
+	/**
+	 * The draft elements this stream's Send left out of its payload (#3066). The
+	 * stream's response is built twice - the placeholder from the `open` frame,
+	 * then the stored run's - and neither carries what the app composed, so both
+	 * read it here.
+	 */
+	leftOut: LeftOutElement[];
 
 	/** Begin a stream: clears any previous one's rows, then starts streaming. */
-	startStream: (params: { requestId: string | null; runId: string; eventsUrl: string }) => void;
+	startStream: (params: {
+		requestId: string | null;
+		runId: string;
+		eventsUrl: string;
+		leftOut?: LeftOutElement[];
+	}) => void;
 	noteOpen: (runId: string, open: StreamOpen) => void;
 	/** Append what one flush window collected, oldest first. */
 	addEvents: (runId: string, events: StreamEvent[]) => void;
@@ -87,6 +100,7 @@ const EMPTY = {
 	isStreaming: false,
 	endReason: null,
 	error: null,
+	leftOut: [],
 } satisfies Omit<
 	ExecutionEventsState,
 	"startStream" | "noteOpen" | "addEvents" | "endStream" | "setError" | "clear"
@@ -95,8 +109,8 @@ const EMPTY = {
 export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
 	...EMPTY,
 
-	startStream: ({ requestId, runId, eventsUrl }) =>
-		set({ ...EMPTY, requestId, runId, eventsUrl, isStreaming: true }),
+	startStream: ({ requestId, runId, eventsUrl, leftOut = [] }) =>
+		set({ ...EMPTY, requestId, runId, eventsUrl, leftOut, isStreaming: true }),
 
 	/*
 	 * Every writer below is addressed to a run, and a write for a run this store

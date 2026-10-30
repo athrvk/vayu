@@ -24,10 +24,11 @@ import { render, screen, act } from "@testing-library/react";
 import { RequestBuilderProvider, useRequestBuilderContext } from "./context";
 import EditorDraftSurface from "./components/EditorDraftSurface";
 import { editorDraftFor, useLiveCommandSurfaceStore } from "@/lib/commands/live-surfaces";
-import type { Collection } from "@/types";
+import type { Collection, ElementKindSchema } from "@/types";
 import type { RequestState } from "./types";
 
 const CHAIN = [{ id: "col_1", name: "Users", elements: [] }] as unknown as Collection[];
+const KINDS = [{ kind: "extract.json" }] as ElementKindSchema[];
 const ancestorsFor = (collectionId: string | null | undefined) =>
 	collectionId === "col_1" ? CHAIN : [];
 
@@ -44,7 +45,7 @@ vi.mock("@/hooks", () => ({
 }));
 
 vi.mock("@/queries", () => ({
-	useElementKindsQuery: () => ({ data: [] }),
+	useElementKindsQuery: () => ({ data: KINDS }),
 	useGlobalsQuery: () => ({ data: { variables: {} } }),
 	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
 	useCollectionsQuery: () => ({ data: [] }),
@@ -101,6 +102,12 @@ describe("the request builder publishes its editor state for the Code section", 
 		expect(draft?.ancestors).toBe(CHAIN);
 	});
 
+	it("carries the element catalogue Send judges the draft's elements by (#3066)", () => {
+		render(<Harness />);
+
+		expect(editorDraftFor("req_1")?.elementKinds).toBe(KINDS);
+	});
+
 	it("keeps one publication across edits, so typing does not churn the store", () => {
 		render(<Harness />);
 		const first = published();
@@ -144,7 +151,7 @@ describe("the request builder publishes its editor state for the Code section", 
 		act(() =>
 			useLiveCommandSurfaceStore.getState().clearSurface("editorDraft", {
 				requestId: "req_1",
-				read: () => ({ request: {} as RequestState, ancestors: [] }),
+				read: () => ({ request: {} as RequestState, ancestors: [], elementKinds: [] }),
 			})
 		);
 

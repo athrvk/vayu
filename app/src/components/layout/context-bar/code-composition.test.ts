@@ -48,7 +48,7 @@ const DRAFT = {
 } as unknown as RequestState;
 
 function holdDraft() {
-	const draft: EditorDraft = { request: DRAFT, ancestors: [] };
+	const draft: EditorDraft = { request: DRAFT, ancestors: [], elementKinds: [] };
 	useLiveCommandSurfaceStore
 		.getState()
 		.registerSurface("editorDraft", { requestId: DRAFT.id, read: () => draft });

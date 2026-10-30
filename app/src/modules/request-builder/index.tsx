@@ -41,6 +41,7 @@ import {
 	isRequestNotFound,
 	useUpdateRequestMutation,
 	useCollectionAncestors,
+	useElementKindsQuery,
 	queryKeys,
 } from "@/queries";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
@@ -63,6 +64,7 @@ import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValue
 import { toHeaderItems } from "./utils/system-headers";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
+import type { LeftOutElement } from "@/lib/elements";
 import { toHeaderRows } from "./utils/key-value";
 import {
 	elementsParts,
@@ -72,7 +74,7 @@ import {
 	withoutInheritedCollectionOnly,
 } from "./utils/elements-parts";
 import { scenarioOnlyElements } from "./components/LoadTestConfigDialog/scenario-only";
-import { buildComposeBody } from "./utils/compose-body";
+import { buildComposeBody, withLeftOut } from "./utils/compose-body";
 import {
 	disabledDefaults,
 	responseFromExecuteResult,
@@ -456,15 +458,21 @@ export default function RequestBuilder() {
 		};
 	}, [fetchedRequest]);
 
+	// Judges the draft's elements at Send (#3066) by the same schemas the Elements
+	// tab flags them with; `ElementsPanel` already fetches it, so this is a cache read.
+	const { data: elementKinds } = useElementKindsQuery();
+
 	/**
-	 * The composed payload a Send puts on the wire, and the script parts that
-	 * went into it.
+	 * The compose body a Send puts on the wire, the script parts that went into
+	 * it, and the draft elements it leaves out (`leftOut`, #3066).
 	 *
 	 * Shared by the buffered and the streaming send (issue #574): the two differ
 	 * only in which endpoint answer they take, and everything up to that point -
-	 * the headers, the body builder, the collection chain's scripts, the
-	 * engine-side composition - has to be identical, or a stream would measure a
-	 * different request from the one Send sends.
+	 * the headers, the body builder, the collection chain's scripts - has to be
+	 * identical, or a stream would measure a different request from the one Send
+	 * sends. Built apart from the engine-side composition so a handler holds
+	 * `leftOut` before that call can fail: a failed send still says what it left
+	 * out.
 	 *
 	 * `collectionAncestors` is the live chain, so a stream's refusal for
 	 * carrying scripts is decided by what the send *would* run, not by what this
@@ -473,16 +481,22 @@ export default function RequestBuilder() {
 	 * `dataRow` is Send-with-row's chosen row (issue #601), and composition needs
 	 * it for its *names* alone - see the `dataColumns` field below.
 	 */
-	const composeForSend = useCallback(
-		async (
+	const buildSendBody = useCallback(
+		(
 			request: RequestState,
 			ownerId: string,
 			ownerCollectionId: string,
 			dataRow?: Record<string, unknown>
-		) => {
-			const { body, elements } = buildComposeBody({
+		) =>
+			buildComposeBody({
 				request,
-				elements: { chain: collectionAncestors, ownerId },
+				// The draft's unfinished elements stay out of the payload (#3066), as
+				// in the Code section; an unloaded catalogue judges what it can.
+				elements: {
+					chain: collectionAncestors,
+					ownerId,
+					onlyRunnable: { kinds: elementKinds ?? [] },
+				},
 				collectionId: ownerCollectionId,
 				environmentId: activeEnvironmentId,
 				// The row's own keys, which is exactly the set the engine's bind
@@ -490,11 +504,8 @@ export default function RequestBuilder() {
 				// survive composition to reach that bind. Absent for an ordinary
 				// Send, which composes exactly as it did.
 				dataColumns: dataRow ? Object.keys(dataRow) : undefined,
-			});
-			const composed = await engineComposeRequest(body);
-			return { composed, elements };
-		},
-		[collectionAncestors, engineComposeRequest, activeEnvironmentId]
+			}),
+		[collectionAncestors, activeEnvironmentId, elementKinds]
 	);
 
 	// Execute request callback
@@ -505,13 +516,18 @@ export default function RequestBuilder() {
 		): Promise<ResponseState | null> => {
 			if (!fetchedRequest) return null;
 
+			// Outside the try: a send that fails still left these out.
+			let leftOut: LeftOutElement[] = [];
 			try {
-				const { composed, elements } = await composeForSend(
+				const built = buildSendBody(
 					request,
 					fetchedRequest.id,
 					fetchedRequest.collectionId,
 					dataRow
 				);
+				const { elements } = built;
+				leftOut = built.leftOut;
+				const composed = await engineComposeRequest(built.body);
 
 				const result = await engineExecuteRequest(
 					// `stream: false` explicitly, never elided - the two answers
@@ -577,29 +593,33 @@ export default function RequestBuilder() {
 				}
 
 				// Shared with the History run view's send path - see execute-mapping.ts
-				return responseFromExecuteResult(result);
+				return withLeftOut(responseFromExecuteResult(result), leftOut);
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
-				return {
-					status: 0,
-					statusText: "Error",
-					headers: {},
-					body: errorMsg,
-					bodyType: "text",
-					time: 0,
-					size: 0,
-					// Compose runs first, so an engine that is down throws here
-					// before any send - a plain Error from the fetch, not an
-					// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
-					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
-					errorMessage: errorMsg,
-				};
+				return withLeftOut(
+					{
+						status: 0,
+						statusText: "Error",
+						headers: {},
+						body: errorMsg,
+						bodyType: "text",
+						time: 0,
+						size: 0,
+						// Compose runs first, so an engine that is down throws here
+						// before any send - a plain Error from the fetch, not an
+						// `ApiError`. Same rule as `useEngine`'s `executeRequest`.
+						errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
+						errorMessage: errorMsg,
+					},
+					leftOut
+				);
 			}
 		},
 		[
 			fetchedRequest,
-			composeForSend,
+			buildSendBody,
+			engineComposeRequest,
 			engineExecuteRequest,
 			activeEnvironmentId,
 			queryClient,
@@ -630,13 +650,17 @@ export default function RequestBuilder() {
 		): Promise<StreamStartResult | null> => {
 			if (!fetchedRequest) return null;
 
+			// Outside the try: a send that fails still left these out.
+			let leftOut: LeftOutElement[] = [];
 			try {
-				const { composed } = await composeForSend(
+				const built = buildSendBody(
 					request,
 					fetchedRequest.id,
 					fetchedRequest.collectionId,
 					dataRow
 				);
+				leftOut = built.leftOut;
+				const composed = await engineComposeRequest(built.body);
 
 				const started = await apiService.executeStreamRequest({
 					...composed,
@@ -659,28 +683,38 @@ export default function RequestBuilder() {
 					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
 				});
 
-				return { ok: true, runId: started.runId, eventsUrl: started.eventsUrl };
+				return { ok: true, runId: started.runId, eventsUrl: started.eventsUrl, leftOut };
 			} catch (error) {
 				console.error("Stream request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
 				showToast(errorMsg, "error");
 				return {
 					ok: false,
-					response: {
-						status: 0,
-						statusText: "Error",
-						headers: {},
-						body: errorMsg,
-						bodyType: "text",
-						time: 0,
-						size: 0,
-						errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
-						errorMessage: errorMsg,
-					},
+					response: withLeftOut(
+						{
+							status: 0,
+							statusText: "Error",
+							headers: {},
+							body: errorMsg,
+							bodyType: "text",
+							time: 0,
+							size: 0,
+							errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",
+							errorMessage: errorMsg,
+						},
+						leftOut
+					),
 				};
 			}
 		},
-		[fetchedRequest, composeForSend, activeEnvironmentId, queryClient, showToast]
+		[
+			fetchedRequest,
+			buildSendBody,
+			engineComposeRequest,
+			activeEnvironmentId,
+			queryClient,
+			showToast,
+		]
 	);
 
 	// Save request callback: only the fields the user actually changed since

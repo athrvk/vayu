@@ -244,6 +244,7 @@ export default function ResponseViewer() {
 		(s) => !!s.requestId && !!requestId && s.requestId === requestId
 	);
 	const liveOpen = useExecutionEventsStore((s) => s.open);
+	const liveLeftOut = useExecutionEventsStore((s) => s.leftOut);
 	const liveEvents = useExecutionEventsStore((s) => s.events);
 	// The stream's identity, for the Events tab's render window: its list grows
 	// in place, so the window must reset when the stream changes and not when a
@@ -279,8 +280,9 @@ export default function ResponseViewer() {
 			bodyType: "text" as const,
 			size: 0,
 			time: 0,
+			...(liveLeftOut.length > 0 ? { leftOutElements: liveLeftOut } : {}),
 		};
-	}, [response, streamIsMine, liveOpen]);
+	}, [response, streamIsMine, liveOpen, liveLeftOut]);
 
 	const shown = response ?? streamedResponse;
 
@@ -400,6 +402,8 @@ export default function ResponseViewer() {
 	// Non-script outcomes (issue #1512) - extractors, assertions and timers,
 	// beside `testResults` above which stays the script kinds' own shape.
 	const elementOutcomes = shown.elements ?? [];
+	// Draft elements Send left out (#3066), shown as "Not run" beside the outcomes.
+	const notRunElements = shown.leftOutElements ?? [];
 
 	/*
 	 * Two sources, one list (issue #574) - the handoff `ScenarioRunView` makes.
@@ -799,15 +803,20 @@ export default function ResponseViewer() {
 					 * collection with no spec bound sees exactly what it saw
 					 * before.
 					 */}
-					{testResults.length > 0 || shown.validation || elementOutcomes.length > 0 ? (
+					{testResults.length > 0 ||
+					shown.validation ||
+					elementOutcomes.length > 0 ||
+					notRunElements.length > 0 ? (
 						<div className="h-full overflow-auto p-4 space-y-4">
 							{shown.validation && <SchemaValidation validation={shown.validation} />}
 							{testResults.length > 0 && (
 								<TestResults results={testResults} inset={false} />
 							)}
-							{elementOutcomes.length > 0 && (
-								<ElementOutcomes outcomes={elementOutcomes} inset={false} />
-							)}
+							<ElementOutcomes
+								outcomes={elementOutcomes}
+								notRun={notRunElements}
+								inset={false}
+							/>
 						</div>
 					) : (
 						<EmptyState

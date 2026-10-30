@@ -11,7 +11,7 @@
 /**
  * The preview and the send agreeing about a bound data row (issue #1062).
  *
- * #1007 wired the *payload* side of a Send-with-row - `composeForSend` sends
+ * #1007 wired the *payload* side of a Send-with-row - `buildSendBody` sends
  * the row's column names on `POST /compose`, so the engine defers a bare
  * `{{username}}` and binds it from the row - and left the preview resolving
  * with no row at all. The URL bar, the params and body previews and the

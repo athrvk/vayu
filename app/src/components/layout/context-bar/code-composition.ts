@@ -67,7 +67,12 @@ export function editorComposeBody(
 ): ComposeRequestRequest {
 	return buildComposeBody({
 		request: draft.request,
-		elements: { chain: draft.ancestors, ownerId: requestId },
+		// Send's own filter (#3066): the snippet omits what Send leaves out.
+		elements: {
+			chain: draft.ancestors,
+			ownerId: requestId,
+			onlyRunnable: { kinds: draft.elementKinds },
+		},
 		collectionId: draft.request.collectionId ?? undefined,
 		environmentId,
 	}).body;

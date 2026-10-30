@@ -17,7 +17,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import ElementOutcomes from "./ElementOutcomes";
-import type { ElementOutcome } from "@/types";
+import type { LeftOutElement } from "@/lib/elements";
+import type { ElementDef, ElementOutcome } from "@/types";
 import { REQUIRED_MISS_HINT } from "@/components/shared";
 
 afterEach(cleanup);
@@ -181,5 +182,70 @@ describe("ElementOutcomes", () => {
 		const text = screen.getByText(message);
 		expect(text).toHaveClass("break-words");
 		expect(text).not.toHaveClass("truncate");
+	});
+
+	describe("elements Send left out (#3066)", () => {
+		function leftOut(
+			over: Partial<ElementDef>,
+			needs: Partial<LeftOutElement["needs"]> = {}
+		): LeftOutElement {
+			return {
+				element: { id: "el_1", kind: "assert.status", enabled: true, config: {}, ...over },
+				needs: { missing: ["accepted codes or a range"], invalid: {}, ...needs },
+			};
+		}
+
+		it("shows the Elements section with only not-run rows", () => {
+			render(<ElementOutcomes outcomes={[]} notRun={[leftOut({})]} />);
+
+			expect(screen.getByRole("heading", { name: "Elements" })).toBeTruthy();
+			expect(screen.getByText("assert.status")).toBeTruthy();
+			expect(screen.getByText("Not run - needs accepted codes or a range")).toBeTruthy();
+		});
+
+		it("draws nothing when there is neither an outcome nor a not-run row", () => {
+			const { container } = render(<ElementOutcomes outcomes={[]} notRun={[]} />);
+			expect(container.firstChild).toBeNull();
+		});
+
+		it("lists them after the engine's outcomes, in a word of their own", () => {
+			const { container } = render(
+				<ElementOutcomes
+					outcomes={[row({ id: "o1", kind: "extract.json", outcome: "skipped" })]}
+					notRun={[leftOut({ id: "el_2" })]}
+				/>
+			);
+
+			const text = container.textContent ?? "";
+			expect(text.indexOf("extract.json")).toBeLessThan(text.indexOf("Not run"));
+			// The engine's `skipped` stays the engine's; the app's word differs.
+			expect(screen.getAllByText("skipped")).toHaveLength(1);
+			expect(screen.getByText(/^Not run/)).not.toHaveTextContent("skipped");
+		});
+
+		it("names a named element by its name with the kind beside it, and a refused value by its field", () => {
+			render(
+				<ElementOutcomes
+					outcomes={[]}
+					notRun={[
+						leftOut(
+							{ name: "Created", kind: "assert.duration" },
+							{ missing: [], invalid: { maxMs: "Must be at least 1" } }
+						),
+					]}
+				/>
+			);
+
+			expect(screen.getByText("Created")).toBeTruthy();
+			expect(screen.getByText("assert.duration")).toBeTruthy();
+			expect(screen.getByText("Not run - maxMs: Must be at least 1")).toBeTruthy();
+		});
+
+		it("repeats the reason on hover, like every other row", () => {
+			const { container } = render(<ElementOutcomes outcomes={[]} notRun={[leftOut({})]} />);
+			expect(
+				container.querySelector('[title="Not run - needs accepted codes or a range"]')
+			).not.toBeNull();
+		});
 	});
 });

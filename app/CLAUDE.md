@@ -107,7 +107,11 @@ everything.
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. The request builder declines only the part it
   knows the engine refuses: an invalid elements list is held back while every
-  other touched field is still sent (#3048). An editor takes part
+  other touched field is still sent (#3048). Send does the same: it leaves out
+  the draft's disabled and incomplete elements (`sendElementsParts`, judged by
+  the `elementNeeds` the editor's "Needs ..." chip uses) and sends the rest of
+  the request, and the response's Elements section lists each incomplete one
+  as "Not run - needs ..." (`leftOutElements`, #3066). An editor takes part
   by registering a save context; one that saves on its own is outside all of
   it, which is the defect #1450 was.
 - **The builder's PUT is a merge-patch of changed fields** (`buildUpdatePayload`,

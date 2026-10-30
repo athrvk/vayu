@@ -8,11 +8,13 @@
 import { describe, it, expect } from "vitest";
 
 import {
+	elementNeeds,
 	errorsWithin,
 	hasIncompleteElement,
 	isBlankScriptElement,
 	missingOperand,
 	missingRequiredKeys,
+	notRunReason,
 	parseElementRefusal,
 	isSupportedJsonPath,
 	JSON_PATH_FIELDS,
@@ -448,6 +450,60 @@ describe("missingOperand", () => {
 	});
 });
 
+describe("elementNeeds", () => {
+	const titled = kindFixture("extract.json", ["variable", "path"], {
+		type: "object",
+		required: ["variable", "path"],
+		properties: {
+			variable: { type: "string", title: "Variable name" },
+			path: { type: "string" },
+		},
+	});
+
+	it("names a missing required key by its schema title, and by the key without one", () => {
+		expect(elementNeeds({ kind: "extract.json", config: {} }, [titled])).toEqual({
+			missing: ["Variable name", "path"],
+			invalid: {},
+		});
+	});
+
+	it("appends the kind's operand phrase after the keys", () => {
+		const kinds = [kindFixture("assert.status", ["name"])];
+		expect(elementNeeds({ kind: "assert.status", config: {} }, kinds)).toEqual({
+			missing: ["name", "accepted codes or a range"],
+			invalid: {},
+		});
+	});
+
+	it("needs the operand alone with no catalogue, the safe direction while it loads", () => {
+		expect(elementNeeds({ kind: "assert.status", config: {} }, [])).toEqual({
+			missing: ["accepted codes or a range"],
+			invalid: {},
+		});
+		expect(elementNeeds({ kind: "extract.json", config: {} }, [])).toBeNull();
+	});
+
+	it("carries a value the schema refuses as invalid, with nothing missing", () => {
+		const needs = elementNeeds(
+			{ kind: "control.loop", config: { count: 0 } },
+			CONSTRAINED_KINDS
+		);
+		expect(needs).toEqual({ missing: [], invalid: { count: "Must be at least 1" } });
+	});
+
+	it("is null for an element that passes", () => {
+		expect(
+			elementNeeds({ kind: "control.loop", config: { count: 3 } }, CONSTRAINED_KINDS)
+		).toBeNull();
+		expect(elementNeeds({ kind: "assert.status", config: { in: [200] } }, [])).toBeNull();
+	});
+
+	it("does not flag a blank script, which the editor leaves unflagged too", () => {
+		const kinds = [kindFixture("script.pre", ["script"])];
+		expect(elementNeeds({ kind: "script.pre", config: { script: "" } }, kinds)).toBeNull();
+	});
+});
+
 describe("hasIncompleteElement", () => {
 	const kinds = [kindFixture("extract.json", ["variable"]), kindFixture("timer.pacing", [])];
 
@@ -660,6 +716,31 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 		// A table entry with no case here would be restated and never checked.
 		expect(JSON_PATH_FIELDS.map((f) => `${f.kind} ${f.path.join(".")}`).sort()).toEqual(
 			SITES.map(([kind, key]) => `${kind} ${key}`).sort()
+		);
+	});
+});
+
+describe("notRunReason", () => {
+	it("names what a missing field and a missing operand still need", () => {
+		expect(notRunReason({ missing: ["Variable name", "path"], invalid: {} })).toBe(
+			"Not run - needs Variable name, path"
+		);
+	});
+
+	it("says what is wrong with a value for an element that misses nothing", () => {
+		expect(notRunReason({ missing: [], invalid: { count: "Must be at least 1" } })).toBe(
+			"Not run - count: Must be at least 1"
+		);
+	});
+
+	it("puts the missing fields first, then each refused value", () => {
+		expect(
+			notRunReason({
+				missing: ["text to look for"],
+				invalid: { count: "Must be at least 1", "range.max": "Can't be empty" },
+			})
+		).toBe(
+			"Not run - needs text to look for; count: Must be at least 1; range.max: Can't be empty"
 		);
 	});
 });

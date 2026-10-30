@@ -63,12 +63,7 @@ import {
 import { RowActionsMenu, TruncatedText, type RowAction } from "@/components/shared";
 import { FieldError } from "@/components/shared/FieldError";
 import { generateId } from "@/lib/id";
-import {
-	isBlankScriptElement,
-	missingOperand,
-	missingRequiredKeys,
-	validateElementConfig,
-} from "@/lib/elements";
+import { elementNeeds, isBlankScriptElement } from "@/lib/elements";
 import { cn } from "@/lib/utils";
 import { useCopy } from "@/hooks/useCopy";
 import { useInlineRename } from "@/hooks/useInlineRename";
@@ -265,21 +260,17 @@ function ElementRow({
 		<Icon className="size-icon-sm shrink-0 text-muted-foreground" />
 	);
 	const summary = summarizeElement(element, schema);
-	// The same judgement `hasIncompleteElement` gates the save on (#3048), shown
-	// on the field that fails it. A present-but-invalid value only: an absent
-	// key is the "Needs ..." chip's.
-	const fieldErrors = validateElementConfig(element, kinds);
 	// Issue #1635: a fresh element's `config` is missing whatever its kind
 	// requires until the user fills the form below, and saving in that state
 	// 400s the whole request - `RequestBuilderProvider`/`ElementsTab` hold the
-	// list back for exactly this, so the row has to say which field is why.
-	const missingLabels = missingRequiredKeys(element, kinds).map(
-		(key) => schema?.configSchema.properties?.[key]?.title ?? key
-	);
-	// A kind that needs one of several operands (#3043) names no single key, so
-	// it joins the chip as the phrase itself.
-	const operandNeed = missingOperand(element);
-	if (operandNeed) missingLabels.push(operandNeed);
+	// list back for exactly this, so the row has to say which field is why. The
+	// same judgement Send leaves the element out on (#3066): what the row flags
+	// is what does not run.
+	const needs = elementNeeds(element, kinds);
+	// A present-but-invalid value shows on its field (#3048); an absent key is
+	// the "Needs ..." chip's.
+	const fieldErrors = needs?.invalid ?? {};
+	const missingLabels = needs?.missing ?? [];
 
 	const [localOpen, setLocalOpen] = useState(isNew);
 	const open = controlledOpen ?? localOpen;

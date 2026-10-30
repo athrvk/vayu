@@ -129,7 +129,7 @@ const CHAIN = [{ id: "col_1", name: "Users", elements: [] }] as unknown as Colle
 
 /** Publish a draft the way `EditorDraftSurface` does, through the slot itself. */
 function publishDraft(request: RequestState) {
-	const draft: EditorDraft = { request, ancestors: CHAIN };
+	const draft: EditorDraft = { request, ancestors: CHAIN, elementKinds: [] };
 	act(() =>
 		useLiveCommandSurfaceStore
 			.getState()

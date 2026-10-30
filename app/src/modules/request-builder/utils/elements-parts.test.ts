@@ -18,10 +18,11 @@ import {
 	elementsParts,
 	hasReplayedPostScript,
 	scriptTextFor,
+	sendElementsParts,
 	withoutDisabled,
 	withoutInheritedCollectionOnly,
 } from "./elements-parts";
-import type { Collection, ElementDef } from "@/types";
+import type { Collection, ElementDef, ElementKindSchema } from "@/types";
 
 /** Minimal `Collection` fixture - only `id`, `name` and `elements` matter here. */
 function collection(id: string, name: string, elements: ElementDef[] = []): Collection {
@@ -360,5 +361,125 @@ describe("withoutInheritedCollectionOnly (#3070)", () => {
 		expect(parts).toHaveLength(1);
 		expect(withoutInheritedCollectionOnly(parts)).toBeUndefined();
 		expect(withoutInheritedCollectionOnly(undefined)).toBeUndefined();
+	});
+});
+
+describe("sendElementsParts (#3066)", () => {
+	/** `extract.json` needs a `variable`; `assert.status` is the operand rule's. */
+	const kinds: ElementKindSchema[] = [
+		{
+			kind: "extract.json",
+			version: 1,
+			label: "Extract from JSON",
+			description: "",
+			category: "extract",
+			hotPathClass: "declarative",
+			collectionOnly: false,
+			configSchema: {
+				type: "object",
+				required: ["variable"],
+				properties: { variable: { type: "string", title: "Variable name" } },
+			},
+			phases: [],
+		},
+	];
+	const ids = (parts: ElementDef[] | undefined) => (parts ?? []).map((el) => el.id);
+
+	it("leaves out an unconfigured assertion and reports what it needs", () => {
+		const own = element({ id: "q1", kind: "assert.status" });
+
+		const { parts, leftOut } = sendElementsParts([], "req_1", [own], kinds);
+
+		expect(parts).toBeUndefined();
+		expect(leftOut).toHaveLength(1);
+		expect(leftOut[0].element.id).toBe("q1");
+		expect(leftOut[0].needs).toEqual({ missing: ["accepted codes or a range"], invalid: {} });
+	});
+
+	it("leaves out an element missing a required key, by its schema title", () => {
+		const { leftOut } = sendElementsParts(
+			[],
+			"req_1",
+			[element({ id: "q1", kind: "extract.json" })],
+			kinds
+		);
+
+		expect(leftOut.map((l) => l.needs.missing)).toEqual([["Variable name"]]);
+	});
+
+	it("leaves out a switched-off element without reporting it", () => {
+		const own = [
+			element({ id: "off", kind: "assert.status", enabled: false, config: { in: [200] } }),
+			element({ id: "off-incomplete", kind: "assert.status", enabled: false }),
+			element({ id: "on", kind: "assert.status", config: { in: [200] } }),
+		];
+
+		const { parts, leftOut } = sendElementsParts([], "req_1", own, kinds);
+
+		expect(ids(parts)).toEqual(["on"]);
+		expect(leftOut).toEqual([]);
+	});
+
+	it("keeps a complete element, in order, beside the one it leaves out", () => {
+		const own = [
+			element({ id: "a", kind: "assert.status", config: { in: [200] } }),
+			element({ id: "b", kind: "assert.status" }),
+			element({ id: "c", kind: "extract.json", config: { variable: "token" } }),
+		];
+
+		const { parts, leftOut } = sendElementsParts([], "req_1", own, kinds);
+
+		expect(ids(parts)).toEqual(["a", "c"]);
+		expect(leftOut.map((l) => l.element.id)).toEqual(["b"]);
+	});
+
+	it("passes a collection level through as elementsParts composes it, incomplete or off", () => {
+		const chain = [
+			collection("root", "Root", [
+				element({ id: "r1", kind: "assert.status" }),
+				element({ id: "r2", kind: "timer.pacing", enabled: false }),
+			]),
+		];
+
+		const { parts, leftOut } = sendElementsParts(chain, "req_1", [], kinds);
+
+		expect(ids(parts)).toEqual(["r1", "r2"]);
+		expect(leftOut).toEqual([]);
+	});
+
+	it("still lets the request's inherit.disable suppress an ancestor's element", () => {
+		const chain = [collection("root", "Root", [element({ id: "r1", kind: "script.pre" })])];
+		const disable = element({
+			id: "d1",
+			kind: "inherit.disable",
+			enabled: false,
+			config: { elementId: "r1" },
+		});
+
+		const { parts, leftOut } = sendElementsParts(chain, "req_1", [disable], kinds);
+
+		expect(parts).toBeUndefined();
+		expect(leftOut).toEqual([]);
+	});
+
+	it("judges the operand rules and switched-off state with no catalogue loaded", () => {
+		const own = [
+			element({ id: "a", kind: "assert.status" }),
+			element({ id: "b", kind: "extract.json" }),
+			element({ id: "c", kind: "timer.pacing", enabled: false }),
+		];
+
+		const { parts, leftOut } = sendElementsParts([], "req_1", own, []);
+
+		// `extract.json`'s required key lives in the catalogue, so only the engine
+		// can refuse it until the catalogue lands.
+		expect(ids(parts)).toEqual(["b"]);
+		expect(leftOut.map((l) => l.element.id)).toEqual(["a"]);
+	});
+
+	it("keeps a blank script, which the editor does not flag", () => {
+		const blank = element({ id: "s", kind: "script.pre", config: { script: "" } });
+
+		expect(ids(sendElementsParts([], "req_1", [blank], kinds).parts)).toEqual(["s"]);
 	});
 });

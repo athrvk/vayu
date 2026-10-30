@@ -410,6 +410,71 @@ describe("DesignRunView - sending it again", () => {
 		expect(payload.requestId).toBe("req_1");
 	});
 
+	// The engine refuses a script element with no script (#3052). A stored part
+	// that lost its text must be left out of the resend, not turn it into a 400.
+	it("replays without a recorded script part that has no script", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		renderView(
+			designRun({
+				configSnapshot: {
+					method: "GET",
+					url: "https://api.example.test/users",
+					preRequestScripts: [
+						{ origin: "collection", id: "col_1", name: "API" },
+						{ origin: "collection", id: "col_2", name: "Billing", script: " \n " },
+						{ origin: "collection", id: "col_3", name: "Auth", script: "setup();" },
+						{ origin: "request", id: "req_1" },
+					],
+					postRequestScripts: [{ origin: "collection", id: "col_1", name: "API" }],
+					requestId: "req_1",
+				},
+			} as unknown as Partial<Run>)
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		expect(executeRequest.mock.calls[0][0].elements).toEqual([
+			{
+				id: "col_3-script.pre",
+				kind: "script.pre",
+				enabled: true,
+				name: "Auth",
+				config: { script: "setup();" },
+				origin: { kind: "collection", id: "col_3", name: "Auth" },
+			},
+		]);
+	});
+
+	it("replays a run whose only recorded scripts are blank without any elements", async () => {
+		executeRequest.mockResolvedValue({
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			body: "{}",
+		});
+		renderView(
+			designRun({
+				configSnapshot: {
+					method: "GET",
+					url: "https://api.example.test/users",
+					preRequestScript: "   ",
+					requestId: "req_1",
+				},
+			} as unknown as Partial<Run>)
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+		await vi.waitFor(() => expect(executeRequest).toHaveBeenCalled());
+
+		expect(executeRequest.mock.calls[0][0].elements).toBeUndefined();
+	});
+
 	it("resends on the protocol the run actually used, not the default", async () => {
 		// design-run-seed.ts seeds httpVersion from the snapshot; this is the
 		// fourth send site, alongside the request builder's execute/save/load

@@ -25,7 +25,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore } from "@/stores";
 import { useLiveCommandSurfaceStore } from "@/lib/commands/live-surfaces";
-import type { Collection } from "@/types";
+import type { Collection, ElementKindSchema } from "@/types";
 import type { RequestState } from "./types";
 
 const engineCompose = vi.fn();
@@ -40,6 +40,21 @@ const CHAIN = [
 		elements: [{ id: "el_1", kind: "script.pre", enabled: true, config: { code: "1" } }],
 	},
 ] as unknown as Collection[];
+
+/** The catalogue Send and the Code section both judge the draft's elements by. */
+const KINDS = [
+	{
+		kind: "extract.json",
+		version: 1,
+		label: "Extract from JSON",
+		description: "",
+		category: "extract",
+		hotPathClass: "declarative",
+		collectionOnly: false,
+		configSchema: { type: "object", required: ["variable"] },
+		phases: [],
+	},
+] as ElementKindSchema[];
 
 const requestQuery = {
 	data: {
@@ -75,6 +90,7 @@ vi.mock("@/queries", async (importOriginal) => {
 		useRequestQuery: () => requestQuery,
 		useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), mutate: vi.fn() }),
 		useCollectionAncestors: () => CHAIN,
+		useElementKindsQuery: () => ({ data: KINDS }),
 	};
 });
 
@@ -156,27 +172,40 @@ beforeEach(() => {
 	useLiveCommandSurfaceStore.setState({ editorDraft: null });
 });
 
+/** Sends @p draft through the builder, then composes it for the Code section. */
+async function sendAndCompose(draft: RequestState) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	render(<RequestBuilder />, { wrapper });
+	const onExecute = providerProps.onExecute as (
+		request: RequestState
+	) => Promise<{ leftOutElements?: { element: { id: string } }[] } | null>;
+
+	let response: Awaited<ReturnType<typeof onExecute>> = null;
+	await act(async () => {
+		response = await onExecute(draft);
+	});
+	useLiveCommandSurfaceStore.getState().registerSurface("editorDraft", {
+		requestId: "req_1",
+		read: () => ({ request: draft, ancestors: CHAIN, elementKinds: KINDS }),
+	});
+	await composeForCode("req_1", "env_1");
+
+	expect(engineCompose).toHaveBeenCalledTimes(1);
+	expect(codeCompose).toHaveBeenCalledTimes(1);
+	return {
+		response: response as Awaited<ReturnType<typeof onExecute>>,
+		sendBody: engineCompose.mock.calls[0][0] as Record<string, unknown>,
+		codeBody: codeCompose.mock.calls[0][0] as unknown,
+	};
+}
+
 describe("the Code section composes what Send composes (#2638)", () => {
 	it("hands POST /compose the same body for the same draft", async () => {
-		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-		const wrapper = ({ children }: { children: ReactNode }) => (
-			<QueryClientProvider client={client}>{children}</QueryClientProvider>
-		);
-		render(<RequestBuilder />, { wrapper });
-		const onExecute = providerProps.onExecute as (request: RequestState) => Promise<unknown>;
+		const { sendBody, codeBody } = await sendAndCompose(DRAFT);
 
-		await act(async () => {
-			await onExecute(DRAFT);
-		});
-		useLiveCommandSurfaceStore.getState().registerSurface("editorDraft", {
-			requestId: "req_1",
-			read: () => ({ request: DRAFT, ancestors: CHAIN }),
-		});
-		await composeForCode("req_1", "env_1");
-
-		expect(engineCompose).toHaveBeenCalledTimes(1);
-		expect(codeCompose).toHaveBeenCalledTimes(1);
-		const sendBody = engineCompose.mock.calls[0][0] as Record<string, unknown>;
 		// Guards the comparison itself: an inline body with the chain's script
 		// and the request's own, stamped with its owner.
 		expect(sendBody).toMatchObject({
@@ -190,6 +219,43 @@ describe("the Code section composes what Send composes (#2638)", () => {
 			collectionId: "col_1",
 			environmentId: "env_1",
 		});
-		expect(codeCompose.mock.calls[0][0]).toEqual(sendBody);
+		expect(codeBody).toEqual(sendBody);
+	});
+});
+
+describe("Send leaves out the draft's disabled and incomplete elements (#3066)", () => {
+	const UNFINISHED = [
+		{ id: "el_2", kind: "script.post", enabled: true, config: { code: "2" } },
+		// The operand rule: no accepted codes or range.
+		{ id: "el_assert", kind: "assert.status", enabled: true, config: {} },
+		// The catalogue's required key.
+		{ id: "el_extract", kind: "extract.json", enabled: true, config: {} },
+		{ id: "el_off", kind: "script.post", enabled: false, config: { code: "3" } },
+	] as unknown as RequestState["elements"];
+	const DRAFT_WITH_UNFINISHED: RequestState = { ...DRAFT, elements: UNFINISHED };
+
+	it("sends the request without them, and the Code section composes the same", async () => {
+		const { sendBody, codeBody } = await sendAndCompose(DRAFT_WITH_UNFINISHED);
+
+		const sentIds = (sendBody.request as { elements: { id: string }[] }).elements.map(
+			(e) => e.id
+		);
+		expect(sentIds).toEqual(["el_1", "el_2"]);
+		expect(codeBody).toEqual(sendBody);
+	});
+
+	it("hands the incomplete ones back with the response, and not the switched-off one", async () => {
+		const { response } = await sendAndCompose(DRAFT_WITH_UNFINISHED);
+
+		expect(response?.leftOutElements?.map((l) => l.element.id)).toEqual([
+			"el_assert",
+			"el_extract",
+		]);
+	});
+
+	it("carries no left-out list on a send that left nothing out", async () => {
+		const { response } = await sendAndCompose(DRAFT);
+
+		expect(response).not.toHaveProperty("leftOutElements");
 	});
 });

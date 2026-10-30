@@ -24,6 +24,7 @@ import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
+import type { LeftOutElement } from "@/lib/elements";
 import type { ElementErrors } from "@/components/shared/ElementList/useElementRefusals";
 import type {
 	BodyMode,
@@ -441,6 +442,21 @@ export interface ResponseState {
 	 * before this field did.
 	 */
 	sentRequest?: ExampleSentRequest;
+	/**
+	 * The draft elements that figured in this response's Send but were left out
+	 * of its payload because they failed the app's own check (#3066) - what the
+	 * response must say did not run, so a check added and sent before it was
+	 * filled in is never read as having passed.
+	 *
+	 * Set by the builder's send handlers on the response of a live send,
+	 * buffered or streamed, and on a failed one: it describes the payload the
+	 * app composed, which neither `/execute` nor a stored trace carries, so
+	 * neither response funnel has it. A streamed send carries it through
+	 * `useExecutionEventsStore` to both its placeholder and its stored
+	 * response. Absent when nothing was left out, and on a response restored
+	 * from History or a cold start.
+	 */
+	leftOutElements?: LeftOutElement[];
 	errorCode?: string;
 	errorMessage?: string;
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */
@@ -492,9 +508,13 @@ export interface ResponseState {
  * or with `transient` is a `400` a user needs to read - so the failure travels
  * as the response it should render, not as an absence the caller has to invent
  * a message for. `null` stays reserved for "there was nothing to send".
+ *
+ * `leftOut` is the draft elements the stream's payload omits (#3066), which the
+ * provider hands to the execution events store for the pane to show.
  */
 export type StreamStartResult =
-	{ ok: true; runId: string; eventsUrl: string } | { ok: false; response: ResponseState };
+	| { ok: true; runId: string; eventsUrl: string; leftOut?: LeftOutElement[] }
+	| { ok: false; response: ResponseState };
 
 // ============================================================================
 // Context Types

@@ -1072,7 +1072,10 @@ A collection's own `script.setup` / `script.teardown` (the `collectionOnly`
 kinds) is left out too (`withoutInheritedCollectionOnly`, issue #3070): a
 single-request run never takes a collection's lifecycle scripts, and the engine
 validates `requestElements` as a request's own. Send and code generation, which
-compose through `POST /compose`, keep them.
+compose through `POST /compose`, keep them, and leave out the request's own
+disabled and incomplete draft elements instead (`sendElementsParts`, issue
+#3066; see Elements below). The load run does not: the engine validates its
+`requestElements`, and the dialog's notices read the request's full list.
 `LoadTestConfigDialog` offers no Timers twin, but not because
 the engine ignores the override there - `elements.timers` applies to a single
 target's own `timer.think` exactly the way it does to a scenario step's - the
@@ -1179,7 +1182,7 @@ streaming - because the engine binds a row on either path, and a row silently
 dropped on one of them is the written-but-never-read defect. An ordinary Send
 passes no argument at all, so its payload is byte-identical to what it was.
 
-The row's **names** do reach composition, though (issue #1007): `composeForSend`
+The row's **names** do reach composition, though (issue #1007): `buildSendBody`
 sends `dataColumns: Object.keys(row)` on `POST /compose`, because a bare
 `{{username}}` is a name the scopes *can* answer and composition has to be told
 to leave it for the bind instead. Names only - a value there would be this row's
@@ -1543,7 +1546,7 @@ an engine-side default decide would not know which one it was about to parse.
 ### Streaming Request Execution (issue #574)
 
 A request whose **Event stream** setting is on takes the same composition and a
-different answer. `composeForSend` is shared with the buffered path - the two
+different answer. `buildSendBody` is shared with the buffered path - the two
 must put the identical request on the wire, or a stream would measure something
 Send does not - and only the last two steps differ:
 
@@ -1679,6 +1682,31 @@ list from its editor state (`elementsParts()` in
 is never interpolated; the by-id compose path (used by MCP) resolves the same
 list engine-side (`compose_elements`). The **engine** runs each element at its
 kind's phase - see `docs/engine/elements.md`.
+
+**Send leaves out the request's own draft elements that cannot run** (issue
+#3066). `POST /execute` validates inline `elements` and refuses the whole
+request over one that fails its kind's schema, and an element just added has
+`config: {}`. So Send and the Code section (both build through
+`buildComposeBody` with `onlyRunnable`, `sendElementsParts`) omit a draft
+element that is switched off, or that fails the app's own check
+(`elementNeeds` in `lib/elements.ts`: `missingRequiredKeys`,
+`validateElementConfig` and `missingOperand`, the judgement behind the
+editor's "Needs ..." chip and the save gate). Only the request's own elements
+are judged; the collection chain's pass through as composed. The incomplete
+ones come back as `leftOut` and ride the response as
+`ResponseState.leftOutElements` - on a buffered send, a failed one (the
+handlers take it before the compose call, so a send that throws still says it),
+and a streamed one, which carries it in `execution-events-store` for both the
+live placeholder and the stored response that replaces it. The response's
+Elements section draws each as `Not run - needs <fields>`, so a check that did
+not run is never read as one that passed. The element's own row already says
+the same through its "Needs ..." chip, which reads `elementNeeds` live.
+A response restored from History carries none: it is not the send that composed
+the payload. With the catalogue not yet loaded, disabled elements and the
+operand rules still apply and a kind's required keys wait for the engine. The
+engine keeps validating: an element that reaches `/execute` invalid by another
+road (an MCP caller, a `{{variable}}` that resolves badly) is still a `400`. A
+load run composes the chain without the filter.
 
 **Redirect policy, protocol and TLS verification are always sent, never
 elided - and the request's timeout is the deliberate exception.**

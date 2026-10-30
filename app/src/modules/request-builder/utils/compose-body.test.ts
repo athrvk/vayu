@@ -13,9 +13,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { Collection, ResolvedElement } from "@/types";
-import type { RequestState } from "../types";
-import { buildComposeBody, type ComposeBodyInput } from "./compose-body";
+import type { Collection, ElementKindSchema, ResolvedElement } from "@/types";
+import type { RequestState, ResponseState } from "../types";
+import { buildComposeBody, withLeftOut, type ComposeBodyInput } from "./compose-body";
 import { createDefaultRequestState } from "./request-state";
 
 const OWN_TIMEOUT = 1500;
@@ -200,6 +200,50 @@ describe("buildComposeBody", () => {
 		expect(body.request?.elements).toBe(replayed);
 	});
 
+	describe("onlyRunnable (#3066)", () => {
+		const unfinished = { id: "el_new", kind: "assert.status", enabled: true, config: {} };
+		const switchedOff = {
+			id: "el_off",
+			kind: "script.post",
+			enabled: false,
+			config: { script: "2" },
+		};
+		const idsOf = (elements: unknown) => (elements as ResolvedElement[]).map((el) => el.id);
+		const withDraft = (onlyRunnable?: { kinds: ElementKindSchema[] }) =>
+			input({
+				request: {
+					...editedRequest(),
+					elements: [...editedRequest().elements, unfinished, switchedOff],
+				},
+				elements: { chain, ownerId: "req_1", ...(onlyRunnable ? { onlyRunnable } : {}) },
+			});
+
+		it("leaves the unfinished and the switched-off draft elements off the wire and reports the first", () => {
+			const { body, elements, leftOut } = buildComposeBody(withDraft({ kinds: [] }));
+
+			expect(idsOf(body.request?.elements)).toEqual(["el_root", "el_own"]);
+			expect(elements).toBe(body.request?.elements);
+			expect(leftOut.map((l) => l.element.id)).toEqual(["el_new"]);
+		});
+
+		it("sends every draft element, and reports none, when the caller does not ask", () => {
+			const { body, leftOut } = buildComposeBody(withDraft());
+
+			expect(idsOf(body.request?.elements)).toEqual([
+				"el_root",
+				"el_own",
+				"el_new",
+				"el_off",
+			]);
+			expect(leftOut).toEqual([]);
+		});
+
+		it("reports none for a caller's resolved elements", () => {
+			const resolved: ResolvedElement[] = [{ ...unfinished }];
+			expect(buildComposeBody(input({ elements: { resolved } })).leftOut).toEqual([]);
+		});
+	});
+
 	it("scopes collectionId and environmentId only when set", () => {
 		const unset = buildComposeBody(input({ collectionId: undefined, environmentId: null }));
 		expect(unset.body).not.toHaveProperty("collectionId");
@@ -225,5 +269,29 @@ describe("buildComposeBody", () => {
 		expect(
 			buildComposeBody(input({ deferDynamicVariables: true })).body.deferDynamicVariables
 		).toBe(true);
+	});
+});
+
+describe("withLeftOut", () => {
+	const response: ResponseState = {
+		status: 200,
+		statusText: "OK",
+		headers: {},
+		body: "",
+		bodyType: "text",
+		time: 1,
+		size: 0,
+	};
+	const left = {
+		element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
+		needs: { missing: ["accepted codes or a range"], invalid: {} },
+	};
+
+	it("attaches what the Send left out", () => {
+		expect(withLeftOut(response, [left]).leftOutElements).toEqual([left]);
+	});
+
+	it("leaves the field absent, not empty, when nothing was left out", () => {
+		expect(withLeftOut(response, [])).not.toHaveProperty("leftOutElements");
 	});
 });
