@@ -8844,9 +8844,12 @@ per entry, a bad `kind` or `config` a `400` naming the index); `id` and
 `enabled` are optional, defaulting to a generated id and `true`. The list may
 be a composed one, so an id is unique only within the level that declares it
 (the `origin` kind, scope and id `POST /compose` stamps; an entry with no
-`origin` is the request's own level), and may repeat across levels, as on
-[`POST /execute`](#post-execute) (#3101): a duplicated collection, or a folder
-repeated down a chain, repeats its ids. A repeat within one level is a `400`,
+`origin` is the request's own level), and may repeat across levels, the same
+per-level id rule as [`POST /execute`](#post-execute) (#3101): a duplicated
+collection, or a folder repeated down a chain, repeats its ids. The owner rules
+differ: every level here is judged as a request's own list, so a
+collection-only kind stays refused (below) where `/execute` accepts it at a
+collection level. A repeat within one level is a `400`,
 and the `Item N` in a refusal counts within that level's entries. Refused
 outright beside a `scenario` block, whose steps already carry their own
 resolved elements from the plan. This is the field MCP's `start_load_run`

@@ -637,10 +637,9 @@ const nlohmann::json& config) {
     nlohmann::json stamped = *elements;
     vayu::core::stamp_default_element_ids (stamped);
     // Every entry, a disabled one included, so a bad config still fails here
-    // rather than the moment the entry is switched on. Judged a level at a
-    // time, so a refusal's `Item N` counts within that level's entries. Every
-    // level is judged as a request's: a collection-only kind (`script.setup`)
-    // is refused here, and the renderer filters those out before sending (#3070).
+    // rather than the moment the entry is switched on. Every level is judged
+    // as a request's own list, so a collection-only kind (`script.setup`)
+    // stays refused; the renderer filters those out before sending (#3070).
     for (const auto& level : split_by_level (stamped)) {
         if (auto reason = vayu::core::Registry::instance ().validate (
             level, vayu::core::ElementOwner::Request)) {
