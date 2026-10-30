@@ -83,14 +83,16 @@ import {
 } from "@/lib/graphql/graphql-body";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { requestModelPath } from "../../../../utils/editor-models";
 
 export interface GraphQLBodyProps {
 	body: string;
 	onBodyChange: (body: string) => void;
 	/**
-	 * Whose body this is. Read only to tell a reveal command written for this
-	 * request from one written for another, for the reason the body drafts carry
-	 * the same field (`utils/body-drafts.ts`).
+	 * Whose body this is. Tells a reveal command written for this request from
+	 * one written for another, for the reason the body drafts carry the same
+	 * field (`utils/body-drafts.ts`), and files each pane's Monaco model, with
+	 * its undo stack, under this request (`utils/editor-models.ts`).
 	 */
 	requestId: string | null;
 	/**
@@ -377,14 +379,24 @@ export function GraphQLBody({
 	 * model nobody is editing.
 	 */
 	const variablesDiagnostics = useRef<{ dispose: () => void } | null>(null);
-	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
-		monacoRef.current = monacoInstance;
-		const model = editorInstance.getModel();
+	const attachVariablesModel = (
+		monacoInstance: Parameters<OnMount>[1],
+		model: editor.ITextModel | null
+	) => {
 		setVariablesModelUri(model?.uri.toString() ?? null);
 		variablesDiagnostics.current?.dispose();
 		variablesDiagnostics.current = model
 			? attachVariablesDiagnostics(monacoInstance, model)
 			: null;
+	};
+	const handleVariablesMount: OnMount = (editorInstance, monacoInstance) => {
+		monacoRef.current = monacoInstance;
+		attachVariablesModel(monacoInstance, editorInstance.getModel());
+		// A request switch moves this editor to the next request's model (#3136),
+		// and the schema and the masked twin belong to the model, not the editor.
+		editorInstance.onDidChangeModel(() =>
+			attachVariablesModel(monacoInstance, editorInstance.getModel())
+		);
 	};
 	useEffect(
 		() => () => {
@@ -530,6 +542,18 @@ export function GraphQLBody({
 	const [variables, setVariables] = useState(
 		() => variablesDraft ?? parseGraphQLBody(body || "").variables
 	);
+	/*
+	 * A request switch re-seeds the pane in the render that carries the new
+	 * request, not in the effect below. The pane's model changes with the
+	 * request, and a model created or edited from the previous request's text
+	 * in between is the cross-request undo this keying exists to prevent
+	 * (#3136).
+	 */
+	const [variablesFor, setVariablesFor] = useState(requestId);
+	if (variablesFor !== requestId) {
+		setVariablesFor(requestId);
+		setVariables(parseGraphQLBody(body || "").variables);
+	}
 	// Seeded with the mounted body so the effect below does not immediately
 	// re-derive the pane from it and discard the draft just restored.
 	const lastWrittenBody = useRef<string | undefined>(body);
@@ -841,6 +865,7 @@ export function GraphQLBody({
 						height="100%"
 						language="graphql"
 						ariaLabel="GraphQL query"
+						path={requestModelPath(requestId, "graphql-query")}
 						value={query}
 						onChange={(q) => write({ query: q ?? "" })}
 						onMount={handleQueryMount}
@@ -893,6 +918,7 @@ export function GraphQLBody({
 						height="100%"
 						language="json"
 						ariaLabel="GraphQL variables"
+						path={requestModelPath(requestId, "graphql-variables")}
 						value={variables}
 						onChange={(v) => {
 							setVariables(v ?? "");

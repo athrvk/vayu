@@ -94,6 +94,7 @@ import { ContentTypeNotice } from "./body/ContentTypeNotice";
 import BinaryBodyPanel from "./body/BinaryBodyPanel";
 import { binaryContentType } from "./body/binary-content-type";
 import { ownVariablesDraft, switchBody } from "../../../utils/body-drafts";
+import { requestModelPath } from "../../../utils/editor-models";
 
 /*
  * The GraphQL pane is the entry chunk's largest optional passenger: the
@@ -458,6 +459,7 @@ export default function BodyPanel() {
 										: "plaintext"
 							}
 							ariaLabel="Request body"
+							path={requestModelPath(request.id, "body")}
 							value={request.body || ""}
 							onChange={(v) => updateField("body", v ?? "")}
 						/>
