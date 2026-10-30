@@ -110,8 +110,10 @@ everything.
   other touched field is still sent (#3048). Send does the same: it leaves out
   the draft's disabled and incomplete elements (`sendElementsParts`, judged by
   the `elementNeeds` the editor's "Needs ..." chip uses) and sends the rest of
-  the request (#3066). An editor takes part by registering a save context; one
-  that saves on its own is outside all of it, which is the defect #1450 was.
+  the request, and the response's Elements section lists each incomplete one
+  as "Not run - needs ..." (`leftOutElements`, #3066). An editor takes part
+  by registering a save context; one that saves on its own is outside all of
+  it, which is the defect #1450 was.
 - **The builder's PUT is a merge-patch of changed fields** (`buildUpdatePayload`,
   #1436), never the whole record. The converse rule for a copy: spread the
   record, never a hand-written field list, because the list drops every field

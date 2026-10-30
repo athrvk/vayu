@@ -1182,7 +1182,7 @@ streaming - because the engine binds a row on either path, and a row silently
 dropped on one of them is the written-but-never-read defect. An ordinary Send
 passes no argument at all, so its payload is byte-identical to what it was.
 
-The row's **names** do reach composition, though (issue #1007): `composeForSend`
+The row's **names** do reach composition, though (issue #1007): `buildSendBody`
 sends `dataColumns: Object.keys(row)` on `POST /compose`, because a bare
 `{{username}}` is a name the scopes *can* answer and composition has to be told
 to leave it for the bind instead. Names only - a value there would be this row's
@@ -1546,7 +1546,7 @@ an engine-side default decide would not know which one it was about to parse.
 ### Streaming Request Execution (issue #574)
 
 A request whose **Event stream** setting is on takes the same composition and a
-different answer. `composeForSend` is shared with the buffered path - the two
+different answer. `buildSendBody` is shared with the buffered path - the two
 must put the identical request on the wire, or a stream would measure something
 Send does not - and only the last two steps differ:
 
@@ -1693,9 +1693,16 @@ element that is switched off, or that fails the app's own check
 `validateElementConfig` and `missingOperand`, the judgement behind the
 editor's "Needs ..." chip and the save gate). Only the request's own elements
 are judged; the collection chain's pass through as composed. The incomplete
-ones come back as `leftOut` and ride the live response as
-`ResponseState.leftOutElements`, so a check that did not run is never read as
-one that passed. With the catalogue not yet loaded, disabled elements and the
+ones come back as `leftOut` and ride the response as
+`ResponseState.leftOutElements` - on a buffered send, a failed one (the
+handlers take it before the compose call, so a send that throws still says it),
+and a streamed one, which carries it in `execution-events-store` for both the
+live placeholder and the stored response that replaces it. The response's
+Elements section draws each as `Not run - needs <fields>`, so a check that did
+not run is never read as one that passed. The element's own row already says
+the same through its "Needs ..." chip, which reads `elementNeeds` live.
+A response restored from History carries none: it is not the send that composed
+the payload. With the catalogue not yet loaded, disabled elements and the
 operand rules still apply and a kind's required keys wait for the engine. The
 engine keeps validating: an element that reaches `/execute` invalid by another
 road (an MCP caller, a `{{variable}}` that resolves badly) is still a `400`. A

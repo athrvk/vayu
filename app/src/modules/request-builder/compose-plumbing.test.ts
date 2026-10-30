@@ -60,16 +60,17 @@ describe("every send site composes engine-side and never resolves client-side", 
 
 	it("the builder composes for Send and for a load test", () => {
 		/*
-		 * Two compose call sites, not three. `composeForSend` is shared by the
+		 * Three engine compose calls, two bodies. `buildSendBody` is shared by the
 		 * buffered Send and the streaming one (issue #574) - they differ only in
-		 * which endpoint answer they take, so a second composer for the stream
+		 * which endpoint answer they take, so a second builder for the stream
 		 * would be a copy that could drift into measuring a different request.
-		 * The other site is `handleConfirmLoadTest`. Both compose the shared
-		 * builder's body; an inline `engineComposeRequest({` literal is a send
-		 * site that stopped going through it.
+		 * Each handler makes the engine call itself, after taking `leftOut` from
+		 * the built body (#3066). The other body is `handleConfirmLoadTest`'s.
+		 * Both are the shared builder's; an inline `engineComposeRequest({` literal
+		 * is a send site that stopped going through it.
 		 */
 		const calls = (builder ?? "").match(/engineComposeRequest\(/g) ?? [];
-		expect(calls).toHaveLength(2);
+		expect(calls).toHaveLength(3);
 		expect(builder).not.toMatch(/engineComposeRequest\(\{/);
 		expect((builder ?? "").match(/buildComposeBody\(\{/g) ?? []).toHaveLength(2);
 		/*
@@ -102,12 +103,12 @@ describe("every send site composes engine-side and never resolves client-side", 
 		/*
 		 * `onlyRunnable` is Send's filter. A load run composes the same chain
 		 * without it (its dialog reads every element the request holds), so the
-		 * option appears once in the builder: inside `composeForSend`, ahead of the
+		 * option appears once in the builder: inside `buildSendBody`, ahead of the
 		 * load-test composition.
 		 */
 		const uses = (builder ?? "").match(/onlyRunnable:/g) ?? [];
 		expect(uses).toHaveLength(1);
-		const sendCompose = (builder ?? "").indexOf("const composeForSend");
+		const sendCompose = (builder ?? "").indexOf("const buildSendBody");
 		const loadCompose = (builder ?? "").indexOf("const handleConfirmLoadTest");
 		const filter = (builder ?? "").indexOf("onlyRunnable:");
 		expect(sendCompose).toBeGreaterThan(-1);

@@ -448,10 +448,13 @@ export interface ResponseState {
 	 * response must say did not run, so a check added and sent before it was
 	 * filled in is never read as having passed.
 	 *
-	 * Set on a live buffered send only, by `handleExecute`: it describes the
-	 * payload the app composed, which neither `/execute` nor a stored trace
-	 * carries, so neither response funnel has it. Absent when nothing was left
-	 * out, and on a streaming send.
+	 * Set by the builder's send handlers on the response of a live send,
+	 * buffered or streamed, and on a failed one: it describes the payload the
+	 * app composed, which neither `/execute` nor a stored trace carries, so
+	 * neither response funnel has it. A streamed send carries it through
+	 * `useExecutionEventsStore` to both its placeholder and its stored
+	 * response. Absent when nothing was left out, and on a response restored
+	 * from History or a cold start.
 	 */
 	leftOutElements?: LeftOutElement[];
 	errorCode?: string;
@@ -505,9 +508,13 @@ export interface ResponseState {
  * or with `transient` is a `400` a user needs to read - so the failure travels
  * as the response it should render, not as an absence the caller has to invent
  * a message for. `null` stays reserved for "there was nothing to send".
+ *
+ * `leftOut` is the draft elements the stream's payload omits (#3066), which the
+ * provider hands to the execution events store for the pane to show.
  */
 export type StreamStartResult =
-	{ ok: true; runId: string; eventsUrl: string } | { ok: false; response: ResponseState };
+	| { ok: true; runId: string; eventsUrl: string; leftOut?: LeftOutElement[] }
+	| { ok: false; response: ResponseState };
 
 // ============================================================================
 // Context Types

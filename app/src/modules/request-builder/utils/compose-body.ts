@@ -24,7 +24,7 @@ import type {
 	ResolvedElement,
 } from "@/types";
 import type { LeftOutElement } from "@/lib/elements";
-import type { RequestState } from "../types";
+import type { RequestState, ResponseState } from "../types";
 import { buildExecBody, execIdentity, protocolSettings } from "./execute-mapping";
 import { elementsParts, sendElementsParts } from "./elements-parts";
 import { bodyModeHeaders, toHeaderRows } from "./key-value";
@@ -146,4 +146,13 @@ export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 	};
 
 	return { body, elements, leftOut };
+}
+
+/**
+ * @p response with the elements its Send left out (#3066) attached, so the
+ * response can say they did not run. Returned as is when nothing was left out,
+ * which keeps the field absent rather than an empty list.
+ */
+export function withLeftOut<T extends ResponseState>(response: T, leftOut: LeftOutElement[]): T {
+	return leftOut.length > 0 ? { ...response, leftOutElements: leftOut } : response;
 }

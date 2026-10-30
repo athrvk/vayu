@@ -14,8 +14,8 @@
 
 import { describe, it, expect } from "vitest";
 import type { Collection, ElementKindSchema, ResolvedElement } from "@/types";
-import type { RequestState } from "../types";
-import { buildComposeBody, type ComposeBodyInput } from "./compose-body";
+import type { RequestState, ResponseState } from "../types";
+import { buildComposeBody, withLeftOut, type ComposeBodyInput } from "./compose-body";
 import { createDefaultRequestState } from "./request-state";
 
 const OWN_TIMEOUT = 1500;
@@ -269,5 +269,29 @@ describe("buildComposeBody", () => {
 		expect(
 			buildComposeBody(input({ deferDynamicVariables: true })).body.deferDynamicVariables
 		).toBe(true);
+	});
+});
+
+describe("withLeftOut", () => {
+	const response: ResponseState = {
+		status: 200,
+		statusText: "OK",
+		headers: {},
+		body: "",
+		bodyType: "text",
+		time: 1,
+		size: 0,
+	};
+	const left = {
+		element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
+		needs: { missing: ["accepted codes or a range"], invalid: {} },
+	};
+
+	it("attaches what the Send left out", () => {
+		expect(withLeftOut(response, [left]).leftOutElements).toEqual([left]);
+	});
+
+	it("leaves the field absent, not empty, when nothing was left out", () => {
+		expect(withLeftOut(response, [])).not.toHaveProperty("leftOutElements");
 	});
 });

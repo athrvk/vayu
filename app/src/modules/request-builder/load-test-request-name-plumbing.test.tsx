@@ -11,7 +11,7 @@
 /**
  * `requestName` on the load test dialog's compose call.
  *
- * Send's own compose call (`composeForSend`) has carried `execIdentity`
+ * Send's own compose call (`buildSendBody`) has carried `execIdentity`
  * (`{ requestName }`) since issue #300, for the script sandbox's `pm.info`.
  * The load test dialog composes separately (`handleConfirmLoadTest`,
  * `index.tsx`) and was the one caller that never spread it in - so a load

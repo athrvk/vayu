@@ -455,6 +455,19 @@ export interface LeftOutElement {
 }
 
 /**
+ * What a response says of an element Send left out (#3066): the "Needs ..."
+ * chip's labels, then each value the schema refuses as `field: message`. A
+ * fragment, so it takes no full stop; "not run" is the app's own word, apart
+ * from the engine's `skipped` outcome (an element it chose not to run).
+ */
+export function notRunReason({ missing, invalid }: ElementNeeds): string {
+	const parts: string[] = [];
+	if (missing.length > 0) parts.push(`needs ${missing.join(", ")}`);
+	for (const [field, message] of Object.entries(invalid)) parts.push(`${field}: ${message}`);
+	return `Not run - ${parts.join("; ")}`;
+}
+
+/**
  * Whether any element in the list is missing a required config key outright
  * (issue #1635), its kind's "one of" operand (#3043) or holds a value its schema
  * refuses (#3048) - the shapes that 400 the *entire* `elements` array on save,

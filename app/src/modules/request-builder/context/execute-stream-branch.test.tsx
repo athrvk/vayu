@@ -313,4 +313,61 @@ describe("the streaming send branch", () => {
 		// stream, Stop button and all.
 		expect(ctx().isStreaming).toBe(false);
 	});
+
+	describe("the elements the Send left out (#3066)", () => {
+		const LEFT_OUT = [
+			{
+				element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
+				needs: { missing: ["accepted codes or a range"], invalid: {} },
+			},
+		];
+		const startedWithLeftOut = async (): Promise<StreamStartResult> => ({
+			ok: true,
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+			leftOut: LEFT_OUT,
+		});
+
+		it("hands them to the store for the live pane", async () => {
+			render(renderFor("A", startedWithLeftOut));
+
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+
+			expect(useExecutionEventsStore.getState().leftOut).toEqual(LEFT_OUT);
+		});
+
+		it("puts them on the stored response that replaces the live one", async () => {
+			getRunReport.mockResolvedValue(reportWithEvents("stored body"));
+			render(renderFor("A", startedWithLeftOut));
+
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+
+			await waitFor(() => expect(ctx().response?.body).toBe("stored body"));
+			expect(ctx().response?.leftOutElements).toEqual(LEFT_OUT);
+			const stored = useResponseStore.getState().getResponse("A") as ResponseState | null;
+			expect(stored?.leftOutElements).toEqual(LEFT_OUT);
+		});
+
+		it("leaves the stored response without the field when nothing was left out", async () => {
+			getRunReport.mockResolvedValue(reportWithEvents("stored body"));
+			render(renderFor("A", started));
+
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+
+			await waitFor(() => expect(ctx().response?.body).toBe("stored body"));
+			expect(ctx().response).not.toHaveProperty("leftOutElements");
+		});
+	});
 });

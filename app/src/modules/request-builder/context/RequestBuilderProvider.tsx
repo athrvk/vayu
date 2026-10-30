@@ -1085,6 +1085,8 @@ export default function RequestBuilderProvider({
 	 */
 	useEffect(() => {
 		if (!streamRunId || !streamEndReason) return;
+		// The run's own report cannot say what the app left out of the payload.
+		const { leftOut } = useExecutionEventsStore.getState();
 		let cancelled = false;
 		void (async () => {
 			try {
@@ -1092,10 +1094,12 @@ export default function RequestBuilderProvider({
 				const stored = responseFromRunResult(report?.results?.[0], streamRunId);
 				if (cancelled || !stored) return;
 				const snapshot = streamSentRef.current;
-				const restored =
+				const withSent =
 					snapshot && snapshot.runId === streamRunId
 						? { ...stored, sentRequest: snapshot.sent }
 						: stored;
+				const restored =
+					leftOut.length > 0 ? { ...withSent, leftOutElements: leftOut } : withSent;
 				// Keyed by the request that streamed, exactly like the execute
 				// path: `storeSetResponse` is safe even if the builder has since
 				// moved on, and the live pane is only touched when it has not.
@@ -1191,6 +1195,7 @@ export default function RequestBuilderProvider({
 						requestId: executingId,
 						runId: started.runId,
 						eventsUrl: started.eventsUrl,
+						leftOut: started.leftOut,
 					});
 				} catch (error) {
 					console.error("Request execution failed:", error);

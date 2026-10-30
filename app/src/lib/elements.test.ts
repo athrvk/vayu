@@ -14,6 +14,7 @@ import {
 	isBlankScriptElement,
 	missingOperand,
 	missingRequiredKeys,
+	notRunReason,
 	parseElementRefusal,
 	isSupportedJsonPath,
 	JSON_PATH_FIELDS,
@@ -715,6 +716,31 @@ describe("validateElementConfig - a JSONPath the engine cannot read", () => {
 		// A table entry with no case here would be restated and never checked.
 		expect(JSON_PATH_FIELDS.map((f) => `${f.kind} ${f.path.join(".")}`).sort()).toEqual(
 			SITES.map(([kind, key]) => `${kind} ${key}`).sort()
+		);
+	});
+});
+
+describe("notRunReason", () => {
+	it("names what a missing field and a missing operand still need", () => {
+		expect(notRunReason({ missing: ["Variable name", "path"], invalid: {} })).toBe(
+			"Not run - needs Variable name, path"
+		);
+	});
+
+	it("says what is wrong with a value for an element that misses nothing", () => {
+		expect(notRunReason({ missing: [], invalid: { count: "Must be at least 1" } })).toBe(
+			"Not run - count: Must be at least 1"
+		);
+	});
+
+	it("puts the missing fields first, then each refused value", () => {
+		expect(
+			notRunReason({
+				missing: ["text to look for"],
+				invalid: { count: "Must be at least 1", "range.max": "Can't be empty" },
+			})
+		).toBe(
+			"Not run - needs text to look for; count: Must be at least 1; range.max: Can't be empty"
 		);
 	});
 });

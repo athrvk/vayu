@@ -19,6 +19,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useExecutionEventsStore } from "./execution-events-store";
+import type { LeftOutElement } from "@/lib/elements";
 import type { StreamEvent } from "@/types";
 
 const event = (data: string): StreamEvent => ({ event: "message", data });
@@ -110,6 +111,26 @@ describe("execution events store", () => {
 		expect(s.endReason).toBeNull();
 		expect(s.totalEvents).toBeNull();
 		expect(s.error).toBeNull();
+	});
+
+	it("holds the elements the Send left out for the stream's response, and forgets them with it (#3066)", () => {
+		const leftOut: LeftOutElement[] = [
+			{
+				element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
+				needs: { missing: ["accepted codes or a range"], invalid: {} },
+			},
+		];
+		useExecutionEventsStore.getState().startStream({
+			requestId: "req_1",
+			runId: "run_1",
+			eventsUrl: "/runs/run_1/events",
+			leftOut,
+		});
+		expect(useExecutionEventsStore.getState().leftOut).toEqual(leftOut);
+
+		// The next stream is another Send, with its own payload.
+		start("run_2");
+		expect(useExecutionEventsStore.getState().leftOut).toEqual([]);
 	});
 
 	it("keeps the engine's own total, which is not the row count once capped", () => {

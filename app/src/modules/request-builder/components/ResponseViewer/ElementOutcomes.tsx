@@ -22,17 +22,32 @@
  * its element - `name` when it has one, the kind beside it - and a collection's
  * element says which collection it came from. A required extractor's `missing`
  * failed the step, so it takes the failure's colours and says it was required.
+ *
+ * `notRun` is the draft elements Send left out for being incomplete (#3066),
+ * drawn after the outcomes in the muted colours of `skipped` but worded "Not
+ * run - needs ...": the engine never saw them, and a row that read as one the
+ * engine skipped would hide that the check was never asked to run.
  */
 
-import { AlertTriangle, CheckCircle, CircleSlash, HelpCircle, XCircle } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle,
+	CircleDashed,
+	CircleSlash,
+	HelpCircle,
+	XCircle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatLatency } from "@/lib/format-number";
+import { notRunReason, type LeftOutElement } from "@/lib/elements";
 import type { ElementOutcome } from "@/types";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
 import { elementOriginLabel, REQUIRED_MISS_HINT } from "@/components/shared";
 
 export interface ElementOutcomesProps {
 	outcomes: readonly ElementOutcome[];
+	/** Incomplete draft elements Send left out of the payload (#3066). */
+	notRun?: readonly LeftOutElement[];
 	/** See {@link TestResultsProps.inset} - same convention, same reason. */
 	inset?: boolean;
 }
@@ -61,8 +76,32 @@ const OUTCOME_CARD_CLASS: Record<ElementOutcome["outcome"], string> = {
 	skipped: "bg-muted/50 border-border",
 };
 
-export default function ElementOutcomes({ outcomes, inset = true }: ElementOutcomesProps) {
-	if (outcomes.length === 0) return null;
+function NotRunRow({ element, needs }: LeftOutElement) {
+	const reason = notRunReason(needs);
+	return (
+		<div className="p-2.5 rounded-md border bg-muted/50 border-border" title={reason}>
+			<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+				<CircleDashed className="size-icon-sm shrink-0 text-muted-foreground" />
+				<span className="text-xs font-medium text-muted-foreground">
+					{element.name ?? element.kind}
+				</span>
+				{element.name && (
+					<span className="text-micro font-mono text-muted-foreground">
+						{element.kind}
+					</span>
+				)}
+				<span className="min-w-0 break-words text-micro text-foreground">{reason}</span>
+			</div>
+		</div>
+	);
+}
+
+export default function ElementOutcomes({
+	outcomes,
+	notRun = [],
+	inset = true,
+}: ElementOutcomesProps) {
+	if (outcomes.length === 0 && notRun.length === 0) return null;
 
 	return (
 		<div className={inset ? "p-4 overflow-auto h-full" : undefined}>
@@ -129,6 +168,9 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 						</div>
 					);
 				})}
+				{notRun.map((left) => (
+					<NotRunRow key={`not-run-${left.element.id}`} {...left} />
+				))}
 			</div>
 		</div>
 	);
