@@ -161,6 +161,35 @@ TEST_F (ScriptRequestAuthTest, AnAssignmentReplacesAnEngineAppliedQueryKey) {
     EXPECT_EQ (authorization (), "Bearer mine");
 }
 
+// The engine's pair is found by its wire bytes, so a URL the script edited a
+// member at a time - recomposed from its parts - still gives it up, whether
+// the assignment sends nothing or a query key of its own, which is then the
+// one name the trace masks. Mutation check: skip the query pair's removal in
+// `drop_engine_credential` and both halves keep `api_key=a%20b%26c`.
+TEST_F (ScriptRequestAuthTest, AnEngineQueryKeyIsTakenOffAUrlTheScriptEditedFirst) {
+    apply_engine_auth (vayu::http::ApiKeyAuth{ "api_key", "a b&c", true });
+    ASSERT_EQ (request.url, std::string (BASE_URL) + "&api_key=a%20b%26c");
+    const Request engine_applied = request;
+
+    auto result = run (R"JS(
+        pm.request.url.addQueryParams('page=2');
+        pm.request.auth = { type: 'noauth' };
+    )JS");
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, std::string (BASE_URL) + "&page=2");
+    EXPECT_TRUE (request.auth_query_param.empty ());
+
+    request = engine_applied;
+    result  = run (R"JS(
+        pm.request.url.addQueryParams([{ key: 'page', value: '2' }]);
+        pm.request.url.path.push('me');
+        pm.request.auth = { type: 'apikey', apikey: { key: 'token', value: 'n e w', in: 'query' } };
+    )JS");
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.url, "https://api.example.com/v2/users/me?a=1&page=2&token=n%20e%20w");
+    EXPECT_EQ (request.auth_query_param, "token");
+}
+
 // The keep half. A header the engine did not write - here, one the request
 // carried, so `apply_auth` wrote none - wins over the assigned auth as it wins
 // over the request's own. Mutation check: drop the `auth_header` emptiness
