@@ -884,7 +884,7 @@ TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesAPairItCannotSendByName) {
     auto result  = engine.execute_prerequest (R"JS(
         pm.request.body.update({ mode: 'urlencoded', urlencoded: [{ key: 'a', value: { n: 1 } }] });
     )JS",
-     request, env);
+    request, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (
@@ -916,7 +916,7 @@ TEST_F (ScriptRequestBodyTest, AssigningARawDescriptionToABodylessRequestSendsTe
     auto result  = engine.execute_prerequest (R"JS(
         pm.request.body = { mode: 'raw', raw: 'hello' };
     )JS",
-     request, env);
+    request, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (request.body.mode, BodyMode::Text);
@@ -948,7 +948,7 @@ TEST_F (ScriptRequestBodyTest, AssigningADescriptionOfAnotherModeIsRefusedByName
     auto result  = engine.execute_prerequest (R"JS(
         pm.request.body = { mode: 'raw', raw: 'name=Grace' };
     )JS",
-     request, env);
+    request, env);
 
     EXPECT_FALSE (result.success);
     EXPECT_NE (result.error_message.find (

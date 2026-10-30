@@ -213,7 +213,7 @@ TEST_F (ScriptRequestMethodsTest, ToJsonCarriesNoBodyForABodylessRequest) {
     auto result  = engine.execute_prerequest (R"JS(
         pm.environment.set('has', String('body' in pm.request.toJSON()));
     )JS",
-     request, env);
+    request, env);
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (read_back ("has"), "false");
