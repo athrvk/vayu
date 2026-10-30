@@ -27,6 +27,7 @@
 #include <span>
 #include <string>
 #include <system_error>
+#include <vector>
 
 // Platform detection macros
 // Macros, not an enum: every consumer is a preprocessor conditional
@@ -381,6 +382,24 @@ std::string default_data_dir ();
  * block under its own lock rather than the CRT's shared copy.
  */
 std::string home_directory ();
+
+// ============================================================================
+// Network Interfaces
+// ============================================================================
+
+/**
+ * @brief The IPv4 addresses of this machine's interfaces that are up, as
+ *        dotted-quad text, loopback included, in the order the OS lists them
+ * @return Empty when the OS cannot be asked or the machine has none. Never
+ *         throws.
+ *
+ * A listener bound to every address (`0.0.0.0`) has no one address a sender
+ * can be told to use; this is what the inbox picks from (#3114). The caller
+ * filters (loopback is not a sender's address) so that a test can inject a
+ * list without a particular NIC. POSIX: `getifaddrs`. Windows:
+ * `GetAdaptersAddresses`, which needs `iphlpapi`.
+ */
+[[nodiscard]] std::vector<std::string> local_ipv4_addresses ();
 
 // ============================================================================
 // High-Resolution Timer

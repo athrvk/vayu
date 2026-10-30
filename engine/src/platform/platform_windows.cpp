@@ -27,10 +27,14 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 
+#include <iphlpapi.h>
 #include <sddl.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -405,6 +409,52 @@ std::string home_directory () {
     } catch (const std::system_error&) {
         return {};
     }
+}
+
+std::vector<std::string> local_ipv4_addresses () {
+    constexpr ULONG FLAGS =
+    GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+
+    // The adapter list can grow between the sizing call and the filling one,
+    // so a too-small buffer is retried at the size it reports, a few times.
+    ULONG size = 16 * 1024;
+    std::vector<unsigned char> buffer;
+    ULONG status = ERROR_BUFFER_OVERFLOW;
+    for (int attempt = 0; attempt < 3 && status == ERROR_BUFFER_OVERFLOW; ++attempt) {
+        buffer.resize (size);
+        // GetAdaptersAddresses writes a linked list of IP_ADAPTER_ADDRESSES
+        // into raw bytes.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        auto* adapters = reinterpret_cast<IP_ADAPTER_ADDRESSES*> (buffer.data ());
+        status = GetAdaptersAddresses (AF_INET, FLAGS, nullptr, adapters, &size);
+    }
+    if (status != NO_ERROR) {
+        return {};
+    }
+
+    std::vector<std::string> addresses;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    for (const auto* adapter = reinterpret_cast<const IP_ADAPTER_ADDRESSES*> (buffer.data ());
+         adapter != nullptr; adapter = adapter->Next) {
+        if (adapter->OperStatus != IfOperStatusUp) {
+            continue;
+        }
+        for (const auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr;
+             unicast = unicast->Next) {
+            const SOCKADDR* address = unicast->Address.lpSockaddr;
+            if (address == nullptr || address->sa_family != AF_INET) {
+                continue;
+            }
+            // The family was just checked, so this is a SOCKADDR_IN.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            const auto* inet = reinterpret_cast<const SOCKADDR_IN*> (address);
+            std::array<char, INET_ADDRSTRLEN> text{};
+            if (inet_ntop (AF_INET, &inet->sin_addr, text.data (), text.size ()) != nullptr) {
+                addresses.emplace_back (text.data ());
+            }
+        }
+    }
+    return addresses;
 }
 
 // The 1 ms timer request used to live here, held for the process' whole life.
