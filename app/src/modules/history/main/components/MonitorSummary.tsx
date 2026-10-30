@@ -147,9 +147,9 @@ function NoMatchCallout({
 		return (
 			<Callout severity="blocking" title="No scrape carried the requested metrics">
 				The endpoint answered {formatNumber(noMatch)} of {formatNumber(total)}{" "}
-				{pluralize(total, "scrape")} but carried none of{names}. Series are matched by
-				metric name, with every label set summed - check the names against the
-				endpoint&apos;s output.
+				{pluralize(total, "scrape")} but carried none of{names}. Check the names against the
+				endpoint&apos;s output, and that the output is in the format the monitor was set to
+				read.
 			</Callout>
 		);
 	}

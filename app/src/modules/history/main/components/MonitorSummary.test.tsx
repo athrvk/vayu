@@ -162,7 +162,7 @@ describe("the Server Vitals summary on a stored run", () => {
 		expect(callout).toHaveTextContent(
 			"The endpoint answered 7 of 7 scrapes but carried none of: vayu_cpu, rss_bytes."
 		);
-		expect(callout).toHaveTextContent(/matched by metric name/);
+		expect(callout).toHaveTextContent(/format the monitor was set to read/);
 		expect(screen.queryByText(/every scrape failed/i)).toBeNull();
 		expect(screen.queryByText(/reachable/i)).toBeNull();
 	});

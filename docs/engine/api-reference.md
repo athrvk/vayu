@@ -11911,7 +11911,7 @@ are HTTP-only, the same rule a failed assertion follows
   "monitor": {
     "samples": 58, "failures": 2, "noMatchScrapes": 0, "lastError": "timed out",
     "series": {
-      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 60 }
+      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 58 }
     }
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },

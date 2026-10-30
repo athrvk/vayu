@@ -93,7 +93,7 @@ export function monitorError(draft: MonitorDraft, maxSeries = MONITOR_MAX_SERIES
  * JSON key may hold both, which is why the rule is the Prometheus format's.
  */
 function isNotAPrometheusName(name: string): boolean {
-	return /[{\s]/.test(name);
+	return /[{ \t\r\n\f\v]/.test(name);
 }
 
 /**
