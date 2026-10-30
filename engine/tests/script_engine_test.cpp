@@ -3141,8 +3141,8 @@ class ConsoleFormatTest : public ScriptEngineTest {
     protected:
     // The one line a script logs.
     std::string run (const std::string& script) {
-        auto result = engine.execute_test (script + "\npm.test('t', function () {});",
-        request, response, env);
+        const std::string full = script + "\npm.test('t', function () {});";
+        auto result = engine.execute_test (full, request, response, env);
         EXPECT_TRUE (result.success) << result.error_message;
         EXPECT_EQ (result.console_output.size (), 1u);
         return result.console_output.empty () ? "" : result.console_output[0].message;
