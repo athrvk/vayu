@@ -434,13 +434,14 @@ std::vector<std::string> local_ipv4_addresses () {
 
     std::vector<std::string> addresses;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    for (const auto* adapter = reinterpret_cast<const IP_ADAPTER_ADDRESSES*> (buffer.data ());
-         adapter != nullptr; adapter = adapter->Next) {
+    for (const auto* adapter =
+         reinterpret_cast<const IP_ADAPTER_ADDRESSES*> (buffer.data ());
+    adapter != nullptr; adapter = adapter->Next) {
         if (adapter->OperStatus != IfOperStatusUp) {
             continue;
         }
-        for (const auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr;
-             unicast = unicast->Next) {
+        for (const auto* unicast    = adapter->FirstUnicastAddress;
+        unicast != nullptr; unicast = unicast->Next) {
             const SOCKADDR* address = unicast->Address.lpSockaddr;
             if (address == nullptr || address->sa_family != AF_INET) {
                 continue;

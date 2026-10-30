@@ -614,13 +614,13 @@ struct InboxManager::Inbox {
 
     InboxInfo info_locked (const LocalAddressSource& local_addresses) const {
         InboxInfo info;
-        info.inbox_id = id;
-        info.bind     = bind;
-        info.port     = port;
-        info.url      = inbox_url (bind, port);
-        info.running  = listener.is_listening ();
-        info.loopback = is_loopback_bind (bind);
-        info.response = response;
+        info.inbox_id        = id;
+        info.bind            = bind;
+        info.port            = port;
+        info.url             = inbox_url (bind, port);
+        info.running         = listener.is_listening ();
+        info.loopback        = is_loopback_bind (bind);
+        info.response        = response;
         info.allowed_origins = cors.allowed_origins;
         if (is_wildcard_bind (bind)) {
             report_wildcard_reachability (info, local_addresses ());

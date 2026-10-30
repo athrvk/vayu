@@ -333,7 +333,7 @@ class InboxListenerTest : public ::testing::Test {
     /// does not depend on the NICs of the host the suite runs on.
     void use_local_addresses (const std::vector<std::string>& addresses) {
         address_lookups_ = 0;
-        manager_         = std::make_unique<InboxManager> ([this, addresses] () {
+        manager_ = std::make_unique<InboxManager> ([this, addresses] () {
             ++address_lookups_;
             return addresses;
         });
@@ -759,13 +759,14 @@ TEST_F (InboxListenerTest, StartAndListEchoTheAllowedOrigins) {
 TEST_F (InboxListenerTest, AWildcardBindReportsTheFirstNonLoopbackAddressAndAllOfThem) {
     use_local_addresses ({ "127.0.0.1", "10.1.2.3", "192.168.5.6", "10.1.2.3", "0.0.0.0" });
     InboxStartRequest request;
-    request.bind = "0.0.0.0";
-    auto started = start (request);
+    request.bind           = "0.0.0.0";
+    auto started           = start (request);
     const std::string port = std::to_string (started.info.port);
 
     EXPECT_EQ (started.info.url, "http://10.1.2.3:" + port + "/");
     EXPECT_EQ (started.info.reachable_at,
-    (std::vector<std::string>{ "http://10.1.2.3:" + port + "/", "http://192.168.5.6:" + port + "/" }));
+    (std::vector<std::string>{
+    "http://10.1.2.3:" + port + "/", "http://192.168.5.6:" + port + "/" }));
 
     const json wire = vayu::http::routes::inbox_json (*db_, started.info);
     EXPECT_EQ (wire["url"], "http://10.1.2.3:" + port + "/");
@@ -789,18 +790,20 @@ TEST_F (InboxListenerTest, AWildcardBindWithNoUsableAddressFallsBackToLoopback) 
         InboxStartRequest request;
         request.bind = "0.0.0.0";
         auto started = start (request);
-        const std::string url = "http://127.0.0.1:" + std::to_string (started.info.port) + "/";
+        const std::string url =
+        "http://127.0.0.1:" + std::to_string (started.info.port) + "/";
 
         EXPECT_EQ (started.info.url, url);
         EXPECT_TRUE (started.info.reachable_at.empty ());
         // The key is still on the wire, as an empty list: it marks the bind.
-        EXPECT_EQ (vayu::http::inbox_info_json (started.info)["reachableAt"], json::array ());
+        EXPECT_EQ (vayu::http::inbox_info_json (started.info)["reachableAt"],
+        json::array ());
     }
 }
 
 TEST_F (InboxListenerTest, ALoopbackBindKeepsItsBindAddressAndAsksNoOneForInterfaces) {
     use_local_addresses ({ "10.1.2.3" });
-    auto started = start ();
+    auto started           = start ();
     const std::string port = std::to_string (started.info.port);
 
     EXPECT_EQ (started.info.url, "http://127.0.0.1:" + port + "/");
