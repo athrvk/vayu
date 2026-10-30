@@ -3135,6 +3135,90 @@ TEST_F (ScriptEngineTest, ConsoleLevelWireSpellings) {
     EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Error), "error");
 }
 
+// JSON.stringify flattens an Error, a Map and a Set to "{}" and quotes a Date;
+// the console prints all four the way Node does (#3130).
+class ConsoleFormatTest : public ScriptEngineTest {
+    protected:
+    // The one line a script logs.
+    std::string run (const std::string& script) {
+        auto result = engine.execute_test (script + "\npm.test('t', function () {});",
+        request, response, env);
+        EXPECT_TRUE (result.success) << result.error_message;
+        EXPECT_EQ (result.console_output.size (), 1u);
+        return result.console_output.empty () ? "" : result.console_output[0].message;
+    }
+
+    std::string logged (const std::string& expression) {
+        return run ("console.log (" + expression + ");");
+    }
+};
+
+TEST_F (ConsoleFormatTest, ErrorPrintsItsMessageAndStack) {
+    auto message = logged ("new Error ('boom')");
+    EXPECT_EQ (message.rfind ("Error: boom", 0), 0u) << message;
+    EXPECT_NE (message.find ("\n    at "), std::string::npos)
+    << "the stack follows the message line: " << message;
+}
+
+TEST_F (ConsoleFormatTest, ErrorNamesItsKindAndKeepsTheMessageOnce) {
+    auto message = logged ("new TypeError ('bad type')");
+    EXPECT_EQ (message.rfind ("TypeError: bad type", 0), 0u) << message;
+    EXPECT_EQ (message.find ("bad type"), message.rfind ("bad type"))
+    << "the message line is not repeated by the stack: " << message;
+}
+
+TEST_F (ConsoleFormatTest, ErrorWhoseStackAlreadyLeadsWithTheMessageIsNotDoubled) {
+    EXPECT_EQ (run (R"(
+        var e = new Error ('boom');
+        e.stack = 'Error: boom\n    at here\n';
+        console.log (e);
+    )"),
+    "Error: boom\n    at here");
+}
+
+TEST_F (ConsoleFormatTest, ErrorWithAnEmptyStackPrintsItsStringForm) {
+    EXPECT_EQ (run (R"(
+        var e = new Error ('boom');
+        e.stack = '';
+        console.log (e);
+    )"),
+    "Error: boom");
+}
+
+TEST_F (ConsoleFormatTest, MapPrintsItsEntries) {
+    EXPECT_EQ (logged ("new Map ([[1, 2]])"), "Map(1) {1 => 2}");
+    EXPECT_EQ (logged ("new Map ([['a', 1], ['b', 2]])"), R"(Map(2) {"a" => 1, "b" => 2})");
+    EXPECT_EQ (logged ("new Map ()"), "Map(0) {}");
+}
+
+TEST_F (ConsoleFormatTest, MapEntriesRenderNestedObjectsAndUnserializableValues) {
+    EXPECT_EQ (logged ("new Map ([['k', { a: [1, 2] }]])"), R"(Map(1) {"k" => {"a":[1,2]}})");
+    EXPECT_EQ (logged ("new Map ([[1, undefined]])"), "Map(1) {1 => undefined}");
+    EXPECT_EQ (logged ("new Map ([[1, Symbol ('s')]])"), "Map(1) {1 => [unserializable]}");
+}
+
+TEST_F (ConsoleFormatTest, SetPrintsItsValues) {
+    EXPECT_EQ (logged ("new Set ([1])"), "Set(1) {1}");
+    EXPECT_EQ (logged ("new Set (['a', 'b'])"), R"(Set(2) {"a", "b"})");
+    EXPECT_EQ (logged ("new Set ()"), "Set(0) {}");
+}
+
+TEST_F (ConsoleFormatTest, ACollectionStillPrintsWhenAScriptReplacesArrayFrom) {
+    // The members are read through Array.from; when that is gone the line
+    // degrades to the generic path rather than throwing.
+    EXPECT_EQ (logged ("(Array.from = undefined, new Set ([1]))"), "{}");
+}
+
+TEST_F (ConsoleFormatTest, DatePrintsAnUnquotedIsoString) {
+    EXPECT_EQ (logged ("new Date (0)"), "1970-01-01T00:00:00.000Z");
+    EXPECT_EQ (logged ("new Date (NaN)"), "Invalid Date");
+}
+
+TEST_F (ConsoleFormatTest, OtherObjectsAreStillPrettyPrintedJson) {
+    EXPECT_EQ (logged ("{ a: 1 }"), "{\n  \"a\": 1\n}");
+    EXPECT_EQ (logged ("[1, 2]"), "[\n  1,\n  2\n]");
+}
+
 // ============================================================================
 // Script Parts: Shared Scope
 // ============================================================================
