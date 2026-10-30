@@ -414,8 +414,7 @@ const std::string& path) {
     // `/pets/{{petId}}`, otherwise which one answers depends on the order an
     // import happened to write the two requests in. Among equally specific
     // routes the query is not part of the route, so `/q?kind=a` and
-    // `/q?kind=b` collide and the one with an example answers (#3115): else a
-    // 501 "import or save one" sits one row above the example it asks for.
+    // `/q?kind=b` collide and the one with an example answers (#3115).
     std::optional<std::size_t> best;
     for (const auto index : path_matches) {
         if (routes[index].method != method) {

@@ -58,8 +58,7 @@ export function mockServerStartPayload(args: Record<string, unknown>): Record<st
  * being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
  * case and gets its own line: there is nothing to point a client at.
  * `duplicateRoutes` (#3115) is the other silent one: a request that shares a
- * method and path with another never answers, so a client sees the other's body
- * and the shadowed request's example looks unused.
+ * method and path with another never answers.
  */
 export function mockServerCaveat(started: unknown): string {
 	if (!isRecord(started)) return "";
