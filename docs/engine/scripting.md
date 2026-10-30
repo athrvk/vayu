@@ -1208,6 +1208,10 @@ Rules worth knowing before you rely on them:
   `[{ key, value }]` (an exported collection's shape) or `{ name: value }`:
   `basic` (`username`, `password`), `bearer` (`token`), `apikey` (`key`,
   `value`, `in: 'header' | 'query'`) and `noauth`, which sends no credential.
+  A parameter name the type does not take, or a block with no credential in
+  it, fails naming the accepted ones, as in
+  [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest); a block Postman
+  exported reads as it is.
   Any other type, `oauth2` included, fails the write-back naming it, since
   acquiring a token needs state the sandbox does not hold - build that header
   yourself. A `{{name}}` in a credential resolves against the scopes as the
@@ -2261,9 +2265,15 @@ or the percent-encoded query parameter is the one every other send would have
 written, and an `Authorization` header the script set itself still wins. Every
 other type throws naming it - `oauth2` included, because acquiring its token
 needs the database this path deliberately does not carry. So does a type whose
-block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
-misspelled, is refused rather than composed as the empty credential `basic`'s two
-optional halves would otherwise make of it. Dropping the option would send an
+block is not there (`{ type: 'basic' }` with no `basic` beside it, or the key
+misspelled), a parameter the type does not take, and a block with no credential
+in it. Each type takes the names Postman's own auth helper reads: `basic`
+`username` and `password` (either may be empty, not both), `bearer` `token`
+(not empty), `apikey` `key` (required), `value` and `in`. The refusal names the
+parameter and lists those, so `basic: { user, pass }` fails saying so rather
+than composing `Basic Og==`. What Postman's export writes beside the
+credential still reads: an entry's own `type` member, and the basic helper's
+`showPassword`, which sends nothing. Dropping the option would send an
 unauthenticated request that looks like the script's own mistake, which is the
 reason the body modes it cannot send whole (`file`, `graphql`, a file part) are
 refused too.

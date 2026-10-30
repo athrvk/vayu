@@ -714,9 +714,28 @@ TEST_F (SendRequestTest, AnAuthBlockMissingItsCredentialIsRefused) {
     EXPECT_EQ (server.hit_count (), 0);
 }
 
-// Basic is the type with no required parameter - Postman sends an empty half as
-// the empty string - so a block that is not there at all has to be caught by
-// its absence, or a misspelled key composes `Basic Og==` and sends it.
+// A misspelled parameter name is refused naming the accepted ones, not read
+// past into an empty credential (#3131).
+TEST_F (SendRequestTest, AnAuthParameterTheTypeDoesNotTakeIsRefusedByName) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'basic', basic: { user: 'a', pass: 'b' } "
+    "} "
+    "}, function () {});");
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (
+    result.error_message.find ("options.auth.basic has no parameter 'user' - "
+                               "basic takes username, password"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (server.hit_count (), 0)
+    << "a misspelled credential was sent as an empty one";
+}
+
+// A block that is not there at all is caught by its absence and named as the
+// block, so a misspelled type key does not read as a missing credential.
 TEST_F (SendRequestTest, AnAuthTypeWithNoBlockToReadIsRefused) {
     SendRequestServer server;
 

@@ -20,6 +20,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -45,6 +46,130 @@ namespace {
 // One auth block's parameters, by name.
 using AuthParameters = std::map<std::string, std::string>;
 
+/// The parameter names one composable auth type takes, as Postman names them.
+struct AuthTypeParameters {
+    std::string_view type;
+    /// Read into the credential.
+    std::span<const std::string_view> accepted;
+    /// Written by Postman's own auth helper beside the credential and read by
+    /// nothing that sends: skipped, so an exported block still reads.
+    std::span<const std::string_view> ignored;
+};
+
+constexpr auto BASIC_PARAMETERS =
+std::to_array<std::string_view> ({ "username", "password" });
+constexpr auto BASIC_HELPER_STATE =
+std::to_array<std::string_view> ({ "showPassword" });
+constexpr auto BEARER_PARAMETERS =
+std::to_array<std::string_view> ({ "token" });
+constexpr auto API_KEY_PARAMETERS =
+std::to_array<std::string_view> ({ "key", "value", "in" });
+constexpr auto COMPOSABLE_AUTH_TYPES = std::to_array<AuthTypeParameters> ({
+{ "basic", BASIC_PARAMETERS, BASIC_HELPER_STATE },
+{ "bearer", BEARER_PARAMETERS, {} },
+{ "apikey", API_KEY_PARAMETERS, {} },
+});
+
+const AuthTypeParameters* composable_auth_type (std::string_view type) {
+    const auto found =
+    std::find_if (COMPOSABLE_AUTH_TYPES.begin (), COMPOSABLE_AUTH_TYPES.end (),
+    [type] (const AuthTypeParameters& named) { return named.type == type; });
+    return found == COMPOSABLE_AUTH_TYPES.end () ? nullptr : &*found;
+}
+
+bool names_one_of (std::span<const std::string_view> names, std::string_view name) {
+    return std::find (names.begin (), names.end (), name) != names.end ();
+}
+
+/// `username, password`, for a refusal that has to say what would have read.
+std::string listed (std::span<const std::string_view> names) {
+    std::string out;
+    for (const std::string_view name : names) {
+        out += (out.empty () ? "" : ", ") + std::string (name);
+    }
+    return out;
+}
+
+/**
+ * One parameter of @p spec's block into @p out, by its name. A name the type
+ * does not take is refused listing the ones it does: read past, a misspelled
+ * `user` would leave `username` empty and send the credential without it.
+ */
+std::optional<std::string> read_auth_parameter (JSContext* ctx,
+const AuthTypeParameters& spec,
+const std::string& where,
+const std::string& name,
+JSValueConst value,
+AuthParameters& out) {
+    if (names_one_of (spec.ignored, name)) {
+        return std::nullopt;
+    }
+    if (!names_one_of (spec.accepted, name)) {
+        return where + " has no parameter '" + name + "' - " +
+        std::string (spec.type) + " takes " + listed (spec.accepted);
+    }
+    if (JS_IsUndefined (value) || JS_IsNull (value)) {
+        return std::nullopt;
+    }
+    if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
+        return where + "." + name + " must be a string, got " +
+        std::string (js_type_name (ctx, value));
+    }
+    out[name] = js_to_string (ctx, value);
+    return std::nullopt;
+}
+
+/// `[{ key, value }]`, an exported collection's spelling. An entry's other
+/// members (Postman writes `type: 'string'`) describe the entry, not the
+/// credential. A repeated key reads as its last entry, as an import reads it.
+std::optional<std::string> read_auth_entries (JSContext* ctx,
+JSValueConst block,
+const AuthTypeParameters& spec,
+const std::string& where,
+AuthParameters& out) {
+    int64_t length = 0;
+    if (JS_GetLength (ctx, block, &length) < 0) {
+        return where + " could not be enumerated";
+    }
+    for (int64_t i = 0; i < length; i++) {
+        ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, block, i));
+        if (!JS_IsObject (entry.get ()) || JS_IsArray (entry.get ())) {
+            return where + " entries must be { key, value } objects, got " +
+            std::string (js_type_name (ctx, entry.get ()));
+        }
+        ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry.get (), "key"));
+        if (!JS_IsString (key.get ())) {
+            return where + " entries need a string 'key', got " +
+            std::string (js_type_name (ctx, key.get ()));
+        }
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry.get (), "value"));
+        if (auto reason = read_auth_parameter (ctx, spec, where,
+            js_to_string (ctx, key.get ()), value.get (), out)) {
+            return reason;
+        }
+    }
+    return std::nullopt;
+}
+
+/// `{ name: value }`, a hand-written block's spelling.
+std::optional<std::string> read_auth_members (JSContext* ctx,
+JSValueConst block,
+const AuthTypeParameters& spec,
+const std::string& where,
+AuthParameters& out) {
+    std::vector<std::string> names;
+    if (!js_own_enumerable_keys (ctx, block, names)) {
+        return where + " could not be enumerated";
+    }
+    for (const auto& name : names) {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, block, name.c_str ()));
+        if (auto reason = read_auth_parameter (ctx, spec, where, name, value.get (), out)) {
+            return reason;
+        }
+    }
+    return std::nullopt;
+}
+
 // Postman writes an auth block in two shapes and a script may hand over either:
 // `[{ key, value }]` as an exported collection carries it, or `{ name: value }`
 // as a script hand-writes it. Both are read, for the same reason the header
@@ -52,11 +177,9 @@ using AuthParameters = std::map<std::string, std::string>;
 // sent with the wrong credential.
 std::optional<std::string> read_auth_parameters (JSContext* ctx,
 JSValueConst block,
+const AuthTypeParameters& spec,
 const std::string& where,
 AuthParameters& out) {
-    if (JS_IsUndefined (block) || JS_IsNull (block)) {
-        return std::nullopt;
-    }
     // A scalar the block's own value: `{ type: 'bearer', bearer: 'tok' }` is
     // not a shape Postman writes, and reading it as a token would guess which
     // parameter was meant.
@@ -64,59 +187,8 @@ AuthParameters& out) {
         return where + " must be an object or an array of { key, value } entries, got " +
         std::string (js_type_name (ctx, block));
     }
-
-    const auto read_value = [&] (JSValueConst value, const std::string& name,
-                            std::optional<std::string>& reason) -> std::optional<std::string> {
-        if (JS_IsUndefined (value) || JS_IsNull (value)) {
-            return std::nullopt;
-        }
-        if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
-            reason = where + "." + name + " must be a string, got " +
-            std::string (js_type_name (ctx, value));
-            return std::nullopt;
-        }
-        return js_to_string (ctx, value);
-    };
-
-    std::optional<std::string> reason;
-    if (JS_IsArray (block)) {
-        int64_t length = 0;
-        if (JS_GetLength (ctx, block, &length) < 0) {
-            return where + " could not be enumerated";
-        }
-        for (int64_t i = 0; i < length; i++) {
-            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, block, i));
-            if (!JS_IsObject (entry.get ()) || JS_IsArray (entry.get ())) {
-                return where + " entries must be { key, value } objects, got " +
-                std::string (js_type_name (ctx, entry.get ()));
-            }
-            ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry.get (), "key"));
-            if (!JS_IsString (key.get ())) {
-                return where + " entries need a string 'key', got " +
-                std::string (js_type_name (ctx, key.get ()));
-            }
-            const std::string name = js_to_string (ctx, key.get ());
-            ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry.get (), "value"));
-            if (auto text = read_value (value.get (), name, reason)) {
-                out[name] = std::move (*text);
-            }
-            if (reason) {
-                return reason;
-            }
-        }
-        return std::nullopt;
-    }
-
-    for (const char* name : { "token", "username", "password", "key", "value", "in" }) {
-        ScopedValue value (ctx, JS_GetPropertyStr (ctx, block, name));
-        if (auto text = read_value (value.get (), name, reason)) {
-            out[name] = std::move (*text);
-        }
-        if (reason) {
-            return reason;
-        }
-    }
-    return std::nullopt;
+    return JS_IsArray (block) ? read_auth_entries (ctx, block, spec, where, out) :
+                                read_auth_members (ctx, block, spec, where, out);
 }
 
 // An api key's parameters, refused where the header or query parameter it
@@ -177,7 +249,8 @@ vayu::http::Auth& out) {
         out = vayu::http::NoAuth{};
         return std::nullopt;
     }
-    if (type != "basic" && type != "bearer" && type != "apikey") {
+    const AuthTypeParameters* spec = composable_auth_type (type);
+    if (spec == nullptr) {
         // oauth2 included, and deliberately: acquiring a token needs the
         // database this path does not have, so composing it here would either
         // reach for state the sandbox has no business holding or send the
@@ -190,17 +263,14 @@ vayu::http::Auth& out) {
     ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
     if (JS_IsUndefined (block.get ()) || JS_IsNull (block.get ())) {
         // A type naming a block that is not there - `{ type: 'basic' }`, or the
-        // key misspelled - is refused rather than read as an empty credential.
-        // Basic is why this is checked here rather than left to the per-type
-        // reads below: neither of its halves is required, so an absent block
-        // would compose `Basic Og==` and send it, which is the silent wrong
-        // request in the one shape the required-field checks cannot see.
+        // key misspelled - is refused naming the block, which says more than
+        // the missing credential the per-type reads below would report.
         return label + " names type \"" + type + "\" but carries no " +
         std::string (slot.path) + "." + type + " block to read it from";
     }
     const std::string where = label + "." + type;
     AuthParameters params;
-    if (auto reason = read_auth_parameters (ctx, block.get (), where, params)) {
+    if (auto reason = read_auth_parameters (ctx, block.get (), *spec, where, params)) {
         return reason;
     }
 
@@ -217,9 +287,16 @@ vayu::http::Auth& out) {
         out = vayu::http::BearerAuth{ std::move (token->second) };
         return std::nullopt;
     }
-    // Basic. Neither half is required: Postman sends an empty username or
-    // password as the empty string, and the pair is base64-encoded either way.
-    out = vayu::http::BasicAuth{ params["username"], params["password"] };
+    // Basic. Either half may be empty - Postman sends it as the empty string -
+    // but not both: `Basic Og==` carries no credential at all.
+    std::string username = params["username"];
+    std::string password = params["password"];
+    if (username.empty () && password.empty ()) {
+        return where +
+        " needs a 'username' or a 'password' - with neither, the header "
+        "would carry an empty credential";
+    }
+    out = vayu::http::BasicAuth{ std::move (username), std::move (password) };
     return std::nullopt;
 }
 

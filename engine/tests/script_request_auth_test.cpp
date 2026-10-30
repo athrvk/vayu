@@ -258,6 +258,81 @@ TEST_F (ScriptRequestAuthTest, ATypeWithNoBlockToReadIsRefused) {
     EXPECT_FALSE (request.headers.contains ("Authorization"));
 }
 
+// A parameter the type does not take, in either spelling, is named with the
+// ones it does take: read past, `user` / `pass` composed `Basic Og==` and sent
+// it. Mutation check: let `read_auth_parameter` skip an unaccepted name
+// instead of refusing it, and every case here sends.
+TEST_F (ScriptRequestAuthTest, AParameterTheTypeDoesNotTakeIsRefusedNamingTheOnesItDoes) {
+    const auto expect_refused = [this] (const std::string& script, const std::string& named) {
+        request.headers.erase ("Authorization");
+        const auto result = run (script);
+
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (result.error_message.find (named), std::string::npos)
+        << result.error_message;
+        EXPECT_FALSE (request.headers.contains ("Authorization")) << script;
+        EXPECT_FALSE (request.auth_from_script) << script;
+    };
+
+    expect_refused (R"JS(
+        pm.request.auth = { type: 'basic', basic: { user: 'a', pass: 'b' } };
+    )JS",
+    "pm.request.auth.basic has no parameter 'user' - basic takes username, "
+    "password");
+    expect_refused (R"JS(
+        pm.request.auth = { type: 'basic', basic: [{ key: 'user', value: 'a' }] };
+    )JS",
+    "pm.request.auth.basic has no parameter 'user'");
+    expect_refused (R"JS(
+        pm.request.auth = { type: 'bearer', bearer: { token: 't', prefix: 'Token' } };
+    )JS",
+    "pm.request.auth.bearer has no parameter 'prefix' - bearer takes token");
+    expect_refused (R"JS(
+        pm.request.auth = { type: 'apikey', apikey: [
+            { key: 'key', value: 'X-K' }, { key: 'addTo', value: 'header' } ] };
+    )JS",
+    "pm.request.auth.apikey has no parameter 'addTo' - apikey takes key, "
+    "value, in");
+}
+
+// What Postman's own export writes beside the credential reads: each entry's
+// `type`, and the basic helper's `showPassword`, which sends nothing.
+// Mutation check: drop `showPassword` from the basic type's ignored names and
+// this is refused as an unknown parameter.
+TEST_F (ScriptRequestAuthTest, AnExportedBlockWithPostmansHelperStateReads) {
+    auto result = run (R"JS(
+        pm.request.auth = { type: 'basic', basic: [
+            { key: 'password', value: 's3cret', type: 'string' },
+            { key: 'username', value: 'alice', type: 'string' },
+            { key: 'showPassword', value: false, type: 'boolean' } ] };
+    )JS");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (authorization (), basic ("alice:s3cret"));
+}
+
+// Either half of basic may be empty, as in Postman; both is no credential.
+// Mutation check: drop the both-empty refusal and the first case sends
+// `Basic Og==`.
+TEST_F (ScriptRequestAuthTest, ABasicBlockWithNeitherHalfIsRefused) {
+    for (const char* script :
+    { "pm.request.auth = { type: 'basic', basic: { showPassword: false } };",
+    "pm.request.authorizeUsing('basic', { username: '', password: '' });" }) {
+        const auto result = run (script);
+
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (
+        result.error_message.find ("needs a 'username' or a 'password'"), std::string::npos)
+        << result.error_message;
+        EXPECT_FALSE (request.headers.contains ("Authorization")) << script;
+    }
+
+    const auto result =
+    run ("pm.request.auth = { type: 'basic', basic: { username: 'alice' } };");
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (authorization (), basic ("alice:"));
+}
+
 TEST_F (ScriptRequestAuthTest, AnApiKeyWhoseNameIsNotAHeaderNameIsRefused) {
     auto result = run (R"JS(
         pm.request.auth = { type: 'apikey', apikey: { key: 'X Key', value: 'v' } };

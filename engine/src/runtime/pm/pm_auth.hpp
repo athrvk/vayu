@@ -46,8 +46,10 @@ struct ScriptAuthSlot {
  * `vayu::http::apply_auth` composes; every other type, `oauth2` included, is
  * refused naming it, because acquiring a token needs the database the sandbox
  * does not hold. A parameter block may be `[{ key, value }]`, as an exported
- * collection carries it, or `{ name: value }`, as a script hand-writes it.
- * Undefined or null leaves @p out as it was.
+ * collection carries it, or `{ name: value }`, as a script hand-writes it. A
+ * parameter name the type does not take is refused listing the ones it does
+ * (Postman's `showPassword` aside), and so is a block with no credential in
+ * it. Undefined or null leaves @p out as it was.
  *
  * @return why the block was refused, or nullopt when @p out is filled.
  */

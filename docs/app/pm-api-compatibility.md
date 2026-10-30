@@ -404,9 +404,16 @@ request and an `Authorization` header the script set itself still wins.
 say this one request carries no credential rather than omitting the option.
 Every other type - `oauth2` included, whose token acquisition needs a database
 this path deliberately does not carry - is refused by name rather than dropped, and so
-is a type whose parameter block is absent or misspelled, since `basic` requires
-neither of its halves and would otherwise compose an empty credential and send
-it. A request that goes out unauthenticated because the sandbox skipped an option
+is a type whose parameter block is absent or misspelled, a parameter name the type
+does not take, and a block with no credential in it (`basic` with neither half,
+`bearer` with no token, `apikey` with no key). Each type takes the names Postman's
+own auth helper reads - `basic` `username`/`password`, `bearer` `token`, `apikey`
+`key`/`value`/`in` - and the refusal lists them, so `basic: { user, pass }` fails
+naming `user` rather than composing `Basic Og==` and sending it. An exported block
+still reads: an entry's `type` member and the basic helper's `showPassword` are
+Postman's own and send nothing. One divergence: Postman sends a basic block whose
+two halves are both empty as `Basic Og==`; here it is refused as no credential.
+A request that goes out unauthenticated because the sandbox skipped an option
 is the same silent wrong request the body modes are refused to prevent.
 
 ### Hashing (`pm.crypto`) is Vayu's own name, and it is synchronous
@@ -1771,7 +1778,8 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   and is read by the same reader as `pm.sendRequest`'s `options.auth`: `basic`, `bearer`,
   `apikey` and `noauth` are composed by the engine's own resolver, a `{{name}}` in a
   credential resolved against the scopes the script left, and any other type, `oauth2`
-  included, fails the write-back naming it. The credential the engine applied before the
+  included, fails the write-back naming it, as does a parameter name the type does not
+  take or a block with no credential in it. The credential the engine applied before the
   script is taken off first unless the script rewrote it; a header the engine did not
   write still wins, as it does over the Auth tab; and auth waiting on the script is not
   applied at all. Divergences, each deliberate: `pm.request.auth` reads `undefined` until
