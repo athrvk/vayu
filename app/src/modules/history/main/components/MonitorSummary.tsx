@@ -12,11 +12,13 @@
  * scrape. The chart above it answers "when"; this answers "how high did it get",
  * which previously could only be read by hovering the line.
  *
- * It also states the two outcomes a chart cannot draw, because both look like an
- * empty panel: every scrape failing, and scrapes succeeding while carrying none
- * of the metrics the run asked for.
+ * It also states the two kinds of missed scrape a chart cannot draw, because
+ * both look like an empty panel and need different fixes (#3120): a failure (no
+ * 2xx answer, so the URL or the endpoint is at fault, with the engine's cause)
+ * and a no-match (answered, but none of the requested names matched).
  */
 
+import type { ReactNode } from "react";
 import { fmtVitals } from "@/modules/dashboard/components/charts/uplot";
 import type { RunReport } from "@/types";
 import { formatNumber } from "@/lib/format-number";
@@ -27,6 +29,8 @@ type MonitorSection = NonNullable<RunReport["monitor"]>;
 
 interface MonitorSummaryProps {
 	monitor: MonitorSection;
+	/** The names the run asked for (its config snapshot); absent until it loads. */
+	requestedSeries?: string[];
 }
 
 /** One metric's min / avg / max, plus how many scrapes actually carried it. */
@@ -76,37 +80,94 @@ function SeriesCard({
 	);
 }
 
-export default function MonitorSummary({ monitor }: MonitorSummaryProps) {
+/** Every scrape the engine made, whichever way it went. */
+function scrapeCount(monitor: MonitorSection): number {
+	return monitor.samples + monitor.failures + (monitor.noMatchScrapes ?? 0);
+}
+
+/**
+ * The scrapes that got no 2xx answer, with the engine's cause for the last.
+ *
+ * A run recorded before the engine counted no-matches apart (`noMatchScrapes`
+ * absent) folded them into `failures`, so its advice names both causes.
+ */
+function FailureCallout({ monitor }: { monitor: MonitorSection }): ReactNode {
+	if (monitor.failures === 0) return null;
+	const total = scrapeCount(monitor);
+	const cause = monitor.lastError ? ` (last cause: ${monitor.lastError})` : "";
+	const nothingAnswered = monitor.samples === 0 && !monitor.noMatchScrapes;
+
+	if (nothingAnswered) {
+		const legacy = monitor.noMatchScrapes === undefined;
+		return (
+			/* Block-level, not field-level: this is a condition about the whole
+			   pane rather than a control refusing a value, so it is a Callout -
+			   see the three error levels in docs/design-system.md. */
+			<Callout severity="blocking" title="Every scrape failed">
+				{formatNumber(monitor.failures)} of {formatNumber(total)}
+				{cause}. Nothing was recorded, so there is no chart above - check that the monitor
+				URL was reachable from Vayu&apos;s engine for the life of the run
+				{legacy ? " and that its output carried the requested metrics" : ""}.
+			</Callout>
+		);
+	}
+	return (
+		<Callout severity={monitor.samples === 0 ? "blocking" : "warning"}>
+			{formatNumber(monitor.failures)} of {formatNumber(total)} scrapes failed{cause}
+			{monitor.samples > 0 ? " - the gaps in the chart are those." : "."}
+		</Callout>
+	);
+}
+
+/**
+ * The 2xx answers that carried none of the requested names: the endpoint is
+ * healthy and the names are wrong, which a failure's "check the URL" would send
+ * the user away from.
+ */
+function NoMatchCallout({
+	monitor,
+	requestedSeries,
+}: {
+	monitor: MonitorSection;
+	requestedSeries?: string[];
+}): ReactNode {
+	const noMatch = monitor.noMatchScrapes ?? 0;
+	if (noMatch === 0) return null;
+	const total = scrapeCount(monitor);
+	const names =
+		requestedSeries && requestedSeries.length > 0 ? (
+			<>
+				: <span className="font-mono">{requestedSeries.join(", ")}</span>
+			</>
+		) : (
+			" the requested metrics"
+		);
+
+	if (monitor.samples === 0) {
+		return (
+			<Callout severity="blocking" title="No scrape carried the requested metrics">
+				The endpoint answered {formatNumber(noMatch)} of {formatNumber(total)}{" "}
+				{pluralize(total, "scrape")} but carried none of{names}. Series are matched by
+				metric name, with every label set summed - check the names against the
+				endpoint&apos;s output.
+			</Callout>
+		);
+	}
+	return (
+		<Callout severity="warning">
+			{formatNumber(noMatch)} of {formatNumber(total)} scrapes were answered but carried none
+			of{names} - the chart has gaps there too.
+		</Callout>
+	);
+}
+
+export default function MonitorSummary({ monitor, requestedSeries }: MonitorSummaryProps) {
 	const series = Object.entries(monitor.series ?? {}).sort(([a], [b]) => a.localeCompare(b));
-	const attempts = monitor.samples + monitor.failures;
 
 	return (
 		<div className="space-y-3">
-			{monitor.samples === 0 && monitor.failures > 0 && (
-				/* Block-level, not field-level: this is a condition about the whole
-				   pane rather than a control refusing a value, so it is a Callout -
-				   see the three error levels in docs/design-system.md. */
-				<Callout severity="blocking" title="Every scrape failed">
-					{formatNumber(monitor.failures)} of {formatNumber(attempts)}. Nothing was
-					recorded, so there is no chart above - check that the monitor URL was reachable
-					from Vayu&apos;s engine for the life of the run.
-				</Callout>
-			)}
-
-			{monitor.samples > 0 && series.length === 0 && (
-				<Callout severity="warning" title="Scrapes carried no metrics">
-					{formatNumber(monitor.samples)} {pluralize(monitor.samples, "scrape")}{" "}
-					succeeded, but none carried the metrics this run asked for - check the metric
-					names against the endpoint&apos;s output.
-				</Callout>
-			)}
-
-			{monitor.samples > 0 && monitor.failures > 0 && (
-				<Callout severity="warning">
-					{formatNumber(monitor.failures)} of {formatNumber(attempts)} scrapes failed -
-					the gaps in the chart are those.
-				</Callout>
-			)}
+			<FailureCallout monitor={monitor} />
+			<NoMatchCallout monitor={monitor} requestedSeries={requestedSeries} />
 
 			{series.length > 0 && (
 				<>

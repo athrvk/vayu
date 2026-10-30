@@ -66,6 +66,8 @@ export interface PerformanceTabProps extends TabProps {
 	ticksPerBucket?: number;
 	/** Scrapes folded into each point of `monitorSamples`; absent when they are raw. */
 	monitorTicksPerBucket?: number;
+	/** The metric names the run's monitor asked for, from its config snapshot. */
+	monitorSeries?: string[];
 }
 
 export interface LoadTestDetailProps {
