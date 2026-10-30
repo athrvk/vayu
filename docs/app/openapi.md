@@ -188,7 +188,9 @@ removed.
 **Bound** shows where the document came from (its URL, or the file name if this
 machine is the one that picked it), the first characters of its hash, when it
 was fetched and when it was bound, and how many of the collection's requests -
-across its whole subtree - carry an operation identity.
+across its subtree - carry an operation identity. A folder under it that is
+bound to a *different* document is that document's own contract, and a bind, a
+check or a sync here leaves it alone.
 
 **Unbind** clears the binding and nothing else. The requests stay, their
 recorded operations stay, and the document stays for whatever else binds it.

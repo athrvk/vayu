@@ -12,6 +12,7 @@
  *        at one phase of a step.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <algorithm>
@@ -48,7 +49,7 @@ SharedThroughputCounters::SharedThroughputCounters (const ScenarioPlan& plan) {
             if (kind == nullptr || !kind->supports_shared_state) {
                 continue;
             }
-            if (element.config.value ("perUser", true)) {
+            if (element.config.value ("perUser", element_defaults::CONTROL_THROUGHPUT_PER_USER)) {
                 continue; // This occurrence kept its own, per-VU counter.
             }
             counters_[element.id] = std::make_unique<Counters> ();
@@ -72,7 +73,8 @@ std::unordered_map<std::string, int64_t>& controller_state) {
     for (const auto& compiled : elements) {
         const auto* kind = registry.find (compiled.kind);
         if (kind == nullptr || kind->category != "transaction" ||
-        !compiled.config.value ("includeTimers", false)) {
+        !compiled.config.value (
+        "includeTimers", element_defaults::CONTROL_TRANSACTION_INCLUDE_TIMERS)) {
             continue;
         }
         const auto span = spans.find (compiled.id);

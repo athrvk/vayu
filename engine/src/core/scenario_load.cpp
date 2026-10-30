@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/load_pacing.hpp"
 #include "vayu/core/load_strategy.hpp"
@@ -300,11 +301,12 @@ shared_element_ids (const ScenarioPlan& plan, std::string_view kind, bool per_us
 } // namespace
 
 std::vector<std::string> shared_pacing_element_ids (const ScenarioPlan& plan) {
-    return shared_element_ids (plan, "timer.pacing", /*per_user_default=*/true);
+    return shared_element_ids (plan, "timer.pacing", element_defaults::TIMER_PACING_PER_USER);
 }
 
 std::vector<std::string> shared_throughput_element_ids (const ScenarioPlan& plan) {
-    return shared_element_ids (plan, "timer.throughput", /*per_user_default=*/false);
+    return shared_element_ids (
+    plan, "timer.throughput", element_defaults::TIMER_THROUGHPUT_PER_USER);
 }
 
 namespace {

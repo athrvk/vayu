@@ -29,14 +29,15 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, screen } from "@testing-library/react";
 import { ENGINE_READING_GUARDS, fromRepoRoot } from "@/lib/routed-inputs.testkit";
 import { hasIncompleteElement, OPERAND_RULES } from "@/lib/elements";
 import { ELEMENT_FORM_OVERRIDES } from "./elementForms";
 import { ELEMENT_MODES, modeKeys } from "./element-modes";
 import { ElementList } from "./index";
+import { GenericElementForm } from "./GenericElementForm";
 import { categoryIcon, effectiveCategory, kindIcon } from "./element-categories";
-import type { ElementDef, ElementKindSchema } from "@/types";
+import type { ElementConfigProperty, ElementDef, ElementKindSchema } from "@/types";
 
 // `script.pre` / `script.post` render the bespoke `ScriptElementForm`, whose
 // `CodeEditor` (Monaco) does not run under jsdom, and whose snippets list
@@ -185,7 +186,9 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 				expect(declared, `${kind} declares no "${property}"`).toContain(property);
 			}
 			// The rule only applies where the schema leaves the operand optional:
-			// a `required` operand is `missingRequiredKeys`' to report.
+			// a `required` operand is `missingRequiredKeys`' to report, unless the
+			// rule says it judges that operand's value instead.
+			if (rule.judgesValue) continue;
 			for (const property of rule.properties) {
 				expect(
 					entry!.configSchema.required ?? [],
@@ -196,6 +199,23 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 	});
 
 	it("flags a fresh element of each rule's kind as incomplete, and a satisfied one as not", () => {
+		// A kind whose operand is not "any one listed key" names its own shapes:
+		// `timer_think_problem` wants both bounds of a range, and
+		// `assert_contains_problem` judges a required `text`'s value.
+		const SHAPES: Record<string, { unmet: Record<string, unknown>; met: object[] }> = {
+			"timer.think": {
+				unmet: { minMs: 100 },
+				met: [
+					{ ms: 0 },
+					{ gaussian: { meanMs: 1, deviationMs: 1 } },
+					{ minMs: 1, maxMs: 2 },
+				],
+			},
+			"assert.contains": {
+				unmet: { text: "" },
+				met: [{ text: "x" }, { text: "", mode: "equals" }],
+			},
+		};
 		for (const [kind, rule] of Object.entries(OPERAND_RULES)) {
 			// Every `required` key filled, so only the operand can be what is missing.
 			const required = fixture.find((k) => k.kind === kind)!.configSchema.required ?? [];
@@ -203,6 +223,20 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			const incomplete = (config: Record<string, unknown>) =>
 				hasIncompleteElement([{ id: "el_1", kind, enabled: true, config }], fixture);
 
+			const shape = SHAPES[kind];
+			if (shape) {
+				expect(
+					incomplete({ ...base, ...shape.unmet }),
+					`${kind} with ${JSON.stringify(shape.unmet)}`
+				).toBe(true);
+				for (const met of shape.met) {
+					expect(
+						incomplete({ ...base, ...met }),
+						`${kind} with ${JSON.stringify(met)}`
+					).toBe(false);
+				}
+				continue;
+			}
 			expect(incomplete(base), `${kind} with no operand`).toBe(true);
 			for (const property of rule.properties) {
 				const operand = property === "in" ? [200] : true;
@@ -293,6 +327,61 @@ describe.runIf(fixtureExists)("element-kinds conformance (fixture present)", () 
 			});
 			view.unmount();
 		}
+	});
+
+	describe("an untouched field shows the default the engine runs (#3045)", () => {
+		/** Every enum or boolean property the catalogue gives a `default`. */
+		const withDefault = (fixture: ElementKindSchema[]) =>
+			fixture.flatMap((kind) =>
+				Object.entries(kind.configSchema.properties ?? {})
+					.filter(
+						(entry): entry is [string, ElementConfigProperty] =>
+							entry[1] != null &&
+							entry[1].default !== undefined &&
+							(entry[1].type === "boolean" || entry[1].enum !== undefined)
+					)
+					.map(([name, property]) => ({ kind, name, property }))
+			);
+		const rows = withDefault(fixture);
+
+		it("scanned a non-empty set of defaults, booleans and enums both", () => {
+			expect(rows.length).toBeGreaterThan(0);
+			expect(rows.some((row) => row.property.type === "boolean")).toBe(true);
+			expect(rows.some((row) => row.property.enum !== undefined)).toBe(true);
+		});
+
+		it.each(rows.map((row) => [`${row.kind.kind}.${row.name}`, row] as const))(
+			"%s renders as its default with the key absent",
+			(_label, { kind, name, property }) => {
+				const onChange = vi.fn();
+				const view = render(
+					<GenericElementForm
+						schema={kind.configSchema}
+						config={{}}
+						onChange={onChange}
+					/>
+				);
+				if (property["x-vayu-group"] === "advanced") {
+					fireEvent.click(screen.getByText("Advanced"));
+				}
+				const label = property.title ?? name;
+
+				if (property.type === "boolean") {
+					const toggle = screen.getByRole("switch", { name: label });
+					if (property.default === true) expect(toggle).toBeChecked();
+					else expect(toggle).not.toBeChecked();
+				} else {
+					expect(screen.getByRole("combobox", { name: label })).toHaveTextContent(
+						String(property.default)
+					);
+				}
+				expect(
+					onChange,
+					"rendering must not write the default into config"
+				).not.toHaveBeenCalled();
+				view.unmount();
+			}
+		);
 	});
 
 	it("has a family icon for every category the fixture actually uses", () => {

@@ -21,6 +21,7 @@
  * once *ever* for the user they belong to, not once per iteration.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
 #include <expected>
@@ -243,7 +244,8 @@ class ControlThroughputElement final : public Element {
         // send `ctx.shared_controller_state` is always null (the single
         // implicit user already makes `controller_state` below the
         // "shared" instance), so `perUser` changes nothing there.
-        if (!config_.value ("perUser", true) && ctx.shared_controller_state != nullptr) {
+        if (!config_.value ("perUser", element_defaults::CONTROL_THROUGHPUT_PER_USER) &&
+        ctx.shared_controller_state != nullptr) {
             if (auto* shared = ctx.shared_controller_state->find (ctx.element_id);
             shared != nullptr) {
                 apply_shared (ctx, *shared);
@@ -323,6 +325,22 @@ class ControlThroughputElement final : public Element {
 
     nlohmann::json config_;
 };
+
+/// `apply` takes `everyN` before `percent`, so a config naming both would have
+/// `percent` silently ignored, and one naming neither never skips (#3055).
+std::optional<std::string> control_throughput_problem (const nlohmann::json& config) {
+    const bool has_percent = config.contains ("percent");
+    const bool has_every_n = config.contains ("everyN");
+    if (has_percent && has_every_n) {
+        return "'percent' cannot be combined with 'everyN' - set one: a share "
+               "of occurrences, or every Nth one";
+    }
+    if (!has_percent && !has_every_n) {
+        return "'percent' or 'everyN' is required - without one this "
+               "controller runs every occurrence";
+    }
+    return std::nullopt;
+}
 
 } // namespace
 
@@ -431,6 +449,7 @@ ElementKind make_control_throughput_kind () {
     // `SharedThroughputCounters` find this occurrence generically, without
     // the scan naming this kind (#1512's extensibility contract, rule 1).
     kind.supports_shared_state = true;
+    kind.validate_config       = control_throughput_problem;
     kind.config_schema         = {
         { "type", "object" },
         { "properties",
@@ -444,7 +463,8 @@ ElementKind make_control_throughput_kind () {
         { { "type", "integer" }, { "minimum", 1 }, { "title", "Every Nth" },
         { "description", "Runs only every Nth occurrence." } } },
         { "perUser",
-        { { "type", "boolean" }, { "title", "Per user" }, { "x-vayu-group", "advanced" },
+        { { "type", "boolean" }, { "default", element_defaults::CONTROL_THROUGHPUT_PER_USER },
+        { "title", "Per user" }, { "x-vayu-group", "advanced" },
         { "description",
         "Counts occurrences per virtual user instead of sharing "
         "one counter across all of them." } } } } },

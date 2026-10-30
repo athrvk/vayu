@@ -611,6 +611,28 @@ TEST (JmeterImport, AJavaOnlyPatternIsTalliedUnmappableRatherThanImported) {
     EXPECT_TRUE (has_skipped_kind (parsed.result.at ("meta"), "extract.regex_unmappable"));
 }
 
+/**
+ * A Substring assertion on an empty string finds it in every response, so the
+ * `assert.contains` it would become is refused (#3055) and tallied
+ * `assert.contains_unmappable`; the same empty string under Equals or Matches
+ * is a judgement and is kept. Mutation check: drop `assert_contains_problem`'s
+ * empty-text rule and the Substring plan imports the element.
+ */
+TEST (JmeterImport, AnEmptySubstringAssertionIsTalliedUnmappable) {
+    const nlohmann::ordered_json substring = response_assertion_plan (16, { "" });
+    EXPECT_FALSE (first_request (substring.at ("collections").at (0)).contains ("elements"));
+    EXPECT_TRUE (has_skipped_kind (substring.at ("meta"), "assert.contains_unmappable"));
+
+    for (const long equals_or_matches : { 8L, 1L }) {
+        const nlohmann::ordered_json kept =
+        response_assertion_plan (equals_or_matches, { "" });
+        EXPECT_TRUE (first_request (kept.at ("collections").at (0)).contains ("elements"))
+        << equals_or_matches;
+        EXPECT_FALSE (has_skipped_kind (kept.at ("meta"), "assert.contains_unmappable"))
+        << equals_or_matches;
+    }
+}
+
 /// `HTTPsampler.Files` (`HTTPFileArgs`/`HTTPFileArg`) is nested inside the
 /// sampler tag itself rather than a sibling tag the generic fallback would
 /// tally on its own, so a file-only upload builds a `form-data` body row per

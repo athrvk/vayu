@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +41,9 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/custom_metric_type.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/core/run_manager.hpp"
+#include "vayu/core/scenario_load.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/schema_error_text.hpp"
 #include "wide_json.hpp"
 
@@ -1313,6 +1317,285 @@ TEST_F (ElementKindsTest, AnOutcomeRowOmitsWhatItsElementDoesNotHave) {
     EXPECT_FALSE (rows[0].contains ("origin"));
     EXPECT_FALSE (rows[0].contains ("required"));
     EXPECT_EQ (rows[0]["missing"], 1);
+}
+
+// ---------------------------------------------------------------------------
+// A key the config leaves out behaves as the catalogue's `default` says
+// (issue #3045). The expected value is read from `GET /elements/kinds`' own
+// catalogue, not restated here: the form shows that `default`, so what the
+// kind runs for the absent key has to be it. `elements_registry_test.cpp`
+// pins the catalogue's values themselves.
+// ---------------------------------------------------------------------------
+
+const nlohmann::json* catalogue_default (const nlohmann::json& catalogue,
+const std::string& kind,
+const std::string& property) {
+    for (const auto& entry : catalogue) {
+        if (entry["kind"] != kind) {
+            continue;
+        }
+        // contains () + at (), not find () against end (): GCC 13 at -O3
+        // reports a null dereference inside nlohmann's const iterator.
+        const auto& properties = entry["configSchema"]["properties"];
+        if (!properties.contains (property)) {
+            break;
+        }
+        const auto& schema = properties.at (property);
+        return schema.contains ("default") ? &schema.at ("default") : nullptr;
+    }
+    return nullptr;
+}
+
+std::string default_text (const std::string& kind, const std::string& property) {
+    const nlohmann::json catalogue = vayu::core::elements_catalogue ();
+    const auto* found = catalogue_default (catalogue, kind, property);
+    const auto* text =
+    found == nullptr ? nullptr : found->get_ptr<const std::string*> ();
+    if (text == nullptr) {
+        ADD_FAILURE () << kind << "." << property << " has no string default";
+        return {};
+    }
+    return *text;
+}
+
+bool default_flag (const std::string& kind, const std::string& property) {
+    const nlohmann::json catalogue = vayu::core::elements_catalogue ();
+    const auto* found = catalogue_default (catalogue, kind, property);
+    if (found == nullptr || !found->is_boolean ()) {
+        ADD_FAILURE () << kind << "." << property << " has no boolean default";
+        return false;
+    }
+    return found->get<bool> ();
+}
+
+// Run against a 10-byte body, a bound of 5, 10 and 20 tells the five
+// comparisons apart: only `lte` (and the explicit default's own answer)
+// fails the first and passes the other two.
+TEST_F (ElementKindsTest, AssertSizeWithNoOpComparesAsTheCatalogueDefaultSays) {
+    response             = ok_json_response (200, std::string (10, 'x'));
+    const std::string op = default_text ("assert.size", "op");
+    for (const int64_t bound : { 5, 10, 20 }) {
+        const auto absent = one_element (nlohmann::json{ { "id", "e1" },
+        { "kind", "assert.size" }, { "config", { { "bytes", bound } } } });
+        const auto stated = one_element (nlohmann::json{ { "id", "e1" },
+        { "kind", "assert.size" }, { "config", { { "bytes", bound }, { "op", op } } } });
+        const auto absent_outcomes = run_after (absent);
+        const auto stated_outcomes = run_after (stated);
+        ASSERT_EQ (absent_outcomes.size (), 1u);
+        ASSERT_EQ (stated_outcomes.size (), 1u);
+        EXPECT_EQ (absent_outcomes[0].status, stated_outcomes[0].status)
+        << "bound " << bound << " against op '" << op << "'";
+        EXPECT_EQ (absent_outcomes[0].status, bound >= 10 ? "ok" : "failed")
+        << "bound " << bound << " (lte)";
+    }
+}
+
+TEST_F (ElementKindsTest, AnExtractorWithNoScopeWritesTheCatalogueDefaultScope) {
+    response                = ok_json_response (200, R"({"n": "7"})");
+    response.headers["X-N"] = "7";
+    const std::vector<nlohmann::json> configs = {
+        { { "kind", "extract.json" }, { "config", { { "path", "$.n" } } } },
+        { { "kind", "extract.regex" }, { "config", { { "pattern", "[0-9]+" } } } },
+        { { "kind", "extract.header" }, { "config", { { "header", "X-N" } } } },
+        { { "kind", "extract.boundary" },
+        { "config", { { "leftBoundary", "\"n\": \"" }, { "rightBoundary", "\"" } } } },
+    };
+    for (nlohmann::json entry : configs) {
+        const std::string kind      = entry["kind"].get<std::string> ();
+        entry["id"]                 = "e1";
+        entry["config"]["variable"] = "n";
+        variables.clear ();
+        const auto outcomes = run_after (one_element (entry));
+        ASSERT_EQ (outcomes.size (), 1u) << kind;
+        EXPECT_EQ (outcomes[0].status, "ok") << kind;
+        EXPECT_EQ (variables,
+        (std::map<std::string, std::string>{ { default_text (kind, "scope") + ":n", "7" } }))
+        << kind;
+    }
+}
+
+TEST_F (ElementKindsTest, AnExtractorWithNoRequiredFlagFollowsTheCatalogueDefault) {
+    response = ok_json_response (200, "no digits here");
+    const std::vector<nlohmann::json> configs = {
+        { { "kind", "extract.json" }, { "config", { { "path", "$.n" } } } },
+        { { "kind", "extract.regex" }, { "config", { { "pattern", "[0-9]+" } } } },
+        { { "kind", "extract.header" }, { "config", { { "header", "X-N" } } } },
+        { { "kind", "extract.boundary" },
+        { "config", { { "leftBoundary", "<" }, { "rightBoundary", ">" } } } },
+    };
+    for (nlohmann::json entry : configs) {
+        const std::string kind      = entry["kind"].get<std::string> ();
+        entry["id"]                 = "e1";
+        entry["config"]["variable"] = "n";
+        const auto run              = run_after_recording (one_element (entry));
+        // A required miss appends a failed test; an optional one appends none.
+        EXPECT_EQ (run.tests.size (), default_flag (kind, "required") ? 1u : 0u) << kind;
+    }
+}
+
+TEST_F (ElementKindsTest, AnExtractRegexWithNoFieldSearchesTheCatalogueDefaultField) {
+    response                = ok_json_response (200, "body-7");
+    response.headers["X-N"] = "header-9";
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "extract.regex" },
+    { "config", { { "pattern", "(body|header)-[0-9]" }, { "variable", "n" } } } });
+
+    const std::string field = default_text ("extract.regex", "field");
+    ASSERT_EQ (field, "body")
+    << "the body is the only field this response matches in";
+    EXPECT_EQ (run_after (elements)[0].status, "ok");
+    EXPECT_EQ (variables.at ("collection:n"), "body-7");
+}
+
+TEST_F (ElementKindsTest, AnAssertContainsWithNoFieldModeOrNegateFollowsTheCatalogueDefaults) {
+    response                       = ok_json_response (200, "hello world");
+    response.headers["X-Greeting"] = "other";
+    // `body` (the header does not hold it), `contains` (a substring is not the
+    // whole text) and not negated: all three have to hold for this to pass.
+    const auto elements = one_element (nlohmann::json{ { "id", "e1" },
+    { "kind", "assert.contains" }, { "config", { { "text", "hello" } } } });
+
+    EXPECT_EQ (default_text ("assert.contains", "field"), "body");
+    EXPECT_EQ (default_text ("assert.contains", "mode"), "contains");
+    EXPECT_FALSE (default_flag ("assert.contains", "negate"));
+    EXPECT_EQ (run_after (elements)[0].status, "ok");
+}
+
+TEST_F (ElementKindsTest, AnAssertJsonPathWithNoNegateFollowsTheCatalogueDefault) {
+    response = ok_json_response (200, R"({"n": 7})");
+    const auto elements =
+    one_element (nlohmann::json{ { "id", "e1" }, { "kind", "assert.jsonpath" },
+    { "config", { { "path", "$.n" }, { "expected", 7 } } } });
+
+    EXPECT_FALSE (default_flag ("assert.jsonpath", "negate"));
+    EXPECT_EQ (run_after (elements)[0].status, "ok");
+}
+
+// A step-level script is deferred unless it is marked `inline`.
+TEST (ElementDefaultsTest, AScriptWithNoInlineKeyIsRunAsTheCatalogueDefaultSays) {
+    for (const char* kind : { "script.pre", "script.post" }) {
+        EXPECT_EQ (vayu::core::RunContext::script_element_runs_inline (
+                   nlohmann::json::object (), vayu::core::ScriptsOverrideMode::AsMarked),
+        default_flag (kind, "inline"))
+        << kind;
+    }
+}
+
+/// Calls the kind's scheduling hook once, as a load run's producer does for a
+/// scope entry, and says whether it kept its clock per virtual user (in
+/// `pacing_state`) or shared (in the run-wide clock or budget).
+bool kept_per_user (const nlohmann::json& element) {
+    auto elements = vayu::core::compile_elements (nlohmann::json::array ({ element }));
+    if (elements.size () != 1 || elements[0].element == nullptr) {
+        ADD_FAILURE () << "the element did not compile";
+        return false;
+    }
+    const std::vector<std::string> names{ "e1" };
+    vayu::core::SharedPacingClocks clocks (names);
+    vayu::core::SharedThroughputBudgets budgets (names);
+    vayu::core::SharedScheduleState shared;
+    shared.pacing     = &clocks;
+    shared.throughput = &budgets;
+    std::unordered_map<std::string, int64_t> pacing_state;
+    (void)elements[0].element->scheduled_ready_delay_ms (pacing_state, shared, 1000);
+    return !pacing_state.empty ();
+}
+
+nlohmann::json timer_at_scope_entry (const char* kind, nlohmann::json config) {
+    config["_scopeEntry"] = true;
+    return { { "id", "e1" }, { "kind", kind }, { "config", std::move (config) } };
+}
+
+vayu::core::ScenarioPlan plan_of_one (const nlohmann::json& element) {
+    vayu::core::ScenarioPlan plan;
+    plan.steps.emplace_back ();
+    plan.steps.back ().elements = std::make_shared<const std::vector<CompiledElement>> (
+    vayu::core::compile_elements (nlohmann::json::array ({ element })));
+    return plan;
+}
+
+TEST (ElementDefaultsTest, TimerPacingWithNoPerUserKeyFollowsTheCatalogueDefault) {
+    const auto element = timer_at_scope_entry ("timer.pacing", { { "everyMs", 100 } });
+    EXPECT_EQ (kept_per_user (element), default_flag ("timer.pacing", "perUser"));
+    EXPECT_EQ (vayu::core::shared_pacing_element_ids (plan_of_one (element)).empty (),
+    default_flag ("timer.pacing", "perUser"))
+    << "the plan scan that sizes the shared clocks reads the same default";
+}
+
+TEST (ElementDefaultsTest, TimerThroughputWithNoPerUserKeyFollowsTheCatalogueDefault) {
+    const auto element =
+    timer_at_scope_entry ("timer.throughput", { { "targetPerMinute", 60 } });
+    EXPECT_EQ (kept_per_user (element), default_flag ("timer.throughput", "perUser"));
+    EXPECT_EQ (vayu::core::shared_throughput_element_ids (plan_of_one (element)).empty (),
+    default_flag ("timer.throughput", "perUser"))
+    << "the plan scan that sizes the shared budgets reads the same default";
+}
+
+TEST (ElementDefaultsTest, ControlThroughputWithNoPerUserKeyFollowsTheCatalogueDefault) {
+    const bool per_user = default_flag ("control.throughput", "perUser");
+    const nlohmann::json bare{ { "id", "e1" }, { "kind", "control.throughput" },
+        { "config", { { "everyN", 2 } } } };
+
+    // The run's scan slots a shared counter only for an element that is not
+    // per user.
+    auto bare_plan = plan_of_one (bare);
+    vayu::core::SharedThroughputCounters bare_counters (bare_plan);
+    EXPECT_EQ (bare_counters.find ("e1") == nullptr, per_user);
+
+    // The kind's own reader: handed a shared slot (as an explicit
+    // `perUser: false` would have earned it), an element with no key still
+    // counts on the virtual user's own state exactly when the default says so.
+    nlohmann::json shared_config       = bare;
+    shared_config["config"]["perUser"] = false;
+    auto shared_plan                   = plan_of_one (shared_config);
+    vayu::core::SharedThroughputCounters counters (shared_plan);
+    ASSERT_NE (counters.find ("e1"), nullptr);
+
+    vayu::Request request;
+    vayu::ScriptResult pre_result;
+    vayu::ScriptResult post_result;
+    std::unordered_map<std::string, int64_t> controller_state;
+    ElementContext ctx{
+        .request            = request,
+        .response           = nullptr,
+        .run_pre_script     = {},
+        .run_post_script    = {},
+        .pre_script_result  = pre_result,
+        .post_script_result = post_result,
+        .set_variable       = {},
+        .should_stop        = {},
+        .record_metric      = {},
+    };
+    ctx.controller_state        = &controller_state;
+    ctx.shared_controller_state = &counters;
+    const auto elements =
+    vayu::core::compile_elements (nlohmann::json::array ({ bare }));
+    std::vector<ElementOutcome> outcomes;
+    ElementPipeline::run (Phase::StepBefore, ctx, elements, outcomes);
+
+    EXPECT_EQ (controller_state.contains ("e1"), per_user);
+    EXPECT_EQ (counters.find ("e1")->count.load (), per_user ? 0 : 1);
+}
+
+// A wait after the folder's first of two members: the fold lands in the open
+// pass's sum exactly when the catalogue default says the timers are included.
+TEST (ElementDefaultsTest, ControlTransactionWithNoIncludeTimersKeyFoldsAsTheCatalogueDefaultSays) {
+    const nlohmann::json bare{ { "id", "e1" }, { "kind", "control.transaction" },
+        { "config", { { "name", "checkout" } } } };
+    const auto elements =
+    vayu::core::compile_elements (nlohmann::json::array ({ bare }));
+    const std::unordered_map<std::string, vayu::core::ElementSpan> spans{
+        { "e1", vayu::core::ElementSpan{ .first = 0, .last = 1, .first_step_name = {} } }
+    };
+    const std::string sum_key = vayu::core::transaction_sum_key ("e1", 0);
+    std::unordered_map<std::string, int64_t> controller_state{ { sum_key, 0 } };
+
+    vayu::core::fold_between_wait_into_open_transactions (
+    elements, spans, 0, 0, 60, controller_state);
+
+    constexpr int64_t WAIT_US = 60'000;
+    EXPECT_EQ (controller_state.at (sum_key),
+    default_flag ("control.transaction", "includeTimers") ? WAIT_US : 0);
 }
 
 } // namespace

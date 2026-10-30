@@ -22,13 +22,16 @@
  * two.
  */
 
+#include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
 
+#include <format>
 #include <random>
 #include <span>
 
 #include "json_path.hpp"
 #include "user_regex.hpp"
+#include "vayu/http/request_composer.hpp"
 
 namespace vayu::core {
 
@@ -148,12 +151,12 @@ class ExtractJsonElement final : public Element {
     : config_ (std::move (config)) {
         path_     = detail::parse_json_path (config_.value ("path", ""));
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
     }
 
     [[nodiscard]] Phase phase () const override {
@@ -249,11 +252,11 @@ class ExtractRegexElement final : public Element {
     : config_ (std::move (config)),
       pattern_ (compile_user_regex (config_.value ("pattern", ""))) {
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
-        field_    = config_.value ("field", "body");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
+        field_    = config_.value ("field", element_defaults::RESPONSE_FIELD);
         template_ = config_.value ("template", "$0$");
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -302,8 +305,8 @@ class ExtractHeaderElement final : public Element {
     : config_ (std::move (config)) {
         header_   = config_.value ("header", "");
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
-        required_ = config_.value ("required", false);
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -355,9 +358,9 @@ class ExtractBoundaryElement final : public Element {
         left_     = config_.value ("leftBoundary", "");
         right_    = config_.value ("rightBoundary", "");
         variable_ = config_.value ("variable", "");
-        scope_    = config_.value ("scope", "collection");
+        scope_    = config_.value ("scope", element_defaults::EXTRACT_SCOPE);
         match_no_ = config_.value ("matchNo", 1);
-        required_ = config_.value ("required", false);
+        required_ = config_.value ("required", element_defaults::EXTRACT_REQUIRED);
         if (config_.contains ("default") && config_["default"].is_string ()) {
             fallback_ = config_["default"].get<std::string> ();
         }
@@ -407,9 +410,66 @@ class ExtractBoundaryElement final : public Element {
 };
 
 nlohmann::json variable_scope_schema () {
-    return { { "type", "string" },
-        { "enum", { "env", "collection", "globals" } }, { "title", "Store in" },
+    return { { "type", "string" }, { "enum", { "env", "collection", "globals" } },
+        { "default", element_defaults::EXTRACT_SCOPE }, { "title", "Store in" },
         { "description", "Which variable scope to write the result into." } };
+}
+
+/// Whether @p name begins or ends in a character `{{ }}` trims off a name it
+/// reads: the set is `trim` in `http/request_composer.cpp`.
+bool has_edge_whitespace (const std::string& name) {
+    constexpr std::string_view TRIMMED = " \t\r\n";
+    return TRIMMED.find (name.front ()) != std::string_view::npos ||
+    TRIMMED.find (name.back ()) != std::string_view::npos;
+}
+
+/// The refusal for an extractor whose `variable` no `{{name}}` can read back
+/// (#3055): the extractor would run and report `ok`, and the value would be
+/// unreachable. `nullopt` for an absent or non-string value (the schema
+/// reports those) and for an empty one (`minLength`).
+std::optional<std::string> variable_name_problem (const nlohmann::json& config) {
+    const auto found = config.find ("variable");
+    if (found == config.end () || !found->is_string ()) {
+        return std::nullopt;
+    }
+    const auto& name = found->get_ref<const std::string&> ();
+    if (name.empty ()) {
+        return std::nullopt;
+    }
+    // A token is `{{` then one or more characters but braces, trimmed.
+    if (name.find_first_of ("{}") != std::string::npos) {
+        return "'variable' cannot contain '{' or '}' - a {{name}} reference "
+               "stops at a brace, so nothing could read it back";
+    }
+    if (has_edge_whitespace (name)) {
+        return "'variable' cannot start or end with whitespace - a {{name}} "
+               "reference trims the name it reads, so nothing could read it "
+               "back";
+    }
+    if (vayu::http::is_data_variable_name (name)) {
+        return "'variable' cannot start with 'data.' - {{data.column}} reads "
+               "the run's data set, never a variable";
+    }
+    if (vayu::http::is_identity_variable_name (name)) {
+        return std::format ("'variable' cannot be '{}' - that name is the "
+                            "running virtual user's identity, never a variable",
+        name);
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> extract_json_problem (const nlohmann::json& config) {
+    if (auto problem = detail::json_path_problem (config, "path", "path")) {
+        return problem;
+    }
+    return variable_name_problem (config);
+}
+
+std::optional<std::string> extract_regex_problem (const nlohmann::json& config) {
+    if (auto problem = user_regex_problem (config, "pattern", "pattern")) {
+        return problem;
+    }
+    return variable_name_problem (config);
 }
 
 } // namespace
@@ -428,10 +488,8 @@ ElementKind make_extract_json_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractJsonElement> (config);
     };
-    kind.validate_config = [] (const nlohmann::json& config) {
-        return detail::json_path_problem (config, "path", "path");
-    };
-    kind.config_schema = {
+    kind.validate_config = extract_json_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "path",
@@ -452,7 +510,7 @@ ElementKind make_extract_json_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "path", "variable" }) },
         { "additionalProperties", false },
@@ -475,10 +533,8 @@ ElementKind make_extract_regex_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractRegexElement> (config);
     };
-    kind.validate_config = [] (const nlohmann::json& config) {
-        return user_regex_problem (config, "pattern", "pattern");
-    };
-    kind.config_schema = {
+    kind.validate_config = extract_regex_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "pattern",
@@ -492,7 +548,8 @@ ElementKind make_extract_regex_kind () {
         "A $1$-style template of the match's capture groups; $0$ is "
         "the whole match." } } },
         { "field",
-        { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } }, { "title", "Field" },
+        { { "type", "string" }, { "enum", { "body", "headers", "url", "status" } },
+        { "default", element_defaults::RESPONSE_FIELD }, { "title", "Field" },
         { "description",
         "Which part of the response to search: body, headers, url "
         "or status." } } },
@@ -509,7 +566,7 @@ ElementKind make_extract_regex_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "pattern", "variable" }) },
         { "additionalProperties", false },
@@ -530,7 +587,8 @@ ElementKind make_extract_header_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractHeaderElement> (config);
     };
-    kind.config_schema = {
+    kind.validate_config = variable_name_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "header",
@@ -544,7 +602,7 @@ ElementKind make_extract_header_kind () {
         { { "type", "string" }, { "title", "Fallback value" },
         { "description", "Written to the variable when there is no match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "header", "variable" }) },
         { "additionalProperties", false },
@@ -567,7 +625,8 @@ ElementKind make_extract_boundary_kind () {
     kind.compile = [] (const nlohmann::json& config) -> std::unique_ptr<Element> {
         return std::make_unique<ExtractBoundaryElement> (config);
     };
-    kind.config_schema = {
+    kind.validate_config = variable_name_problem;
+    kind.config_schema   = {
         { "type", "object" },
         { "properties",
         { { "leftBoundary",
@@ -589,7 +648,7 @@ ElementKind make_extract_boundary_kind () {
         "Selects among multiple matches: 1-based index, 0 for random, "
         "-1 to write every match." } } },
         { "required",
-        { { "type", "boolean" }, { "title", "Required" },
+        { { "type", "boolean" }, { "default", element_defaults::EXTRACT_REQUIRED }, { "title", "Required" },
         { "description", "Fails the step's assertions when no match is found." } } } } },
         { "required", nlohmann::json::array ({ "variable" }) },
         { "additionalProperties", false },

@@ -374,7 +374,7 @@ diff_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     const auto collections = db.get_collections ();
-    const auto subtree = collection_subtree_ids (collections, collection_id);
+    const auto subtree = spec_contract_subtree_ids (collections, collection_id);
 
     // The comparison itself, shared with a `"safe"` sync (issue #871): the route
     // that says what would change and the route that changes it read one answer,

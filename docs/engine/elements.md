@@ -93,6 +93,24 @@ carries `"%"`, `assert.size.bytes` carries `"B"`. A new kind's schema ships `tit
 `ElementsRegistryTest.EveryPropertyOfEveryKindCarriesATitleAndDescription`
 (`engine/tests/elements_registry_test.cpp`) fails the build on one that does not.
 
+An enum or boolean property whose absence the engine reads as a value also carries the standard
+`default` keyword (issue #3045; a numeric or free-text fallback such as `matchNo` or `template` does
+not yet): `assert.size.op` is `lte`, every `extract.*` `scope` is `collection`,
+`timer.pacing.perUser` and `control.throughput.perUser` are `true`, `timer.throughput.perUser` is
+`false`, and a boolean flag that is simply off (`negate`, an extractor's `required`, a script's
+`inline`, `control.transaction`'s `includeTimers`) says `false`. The value is not retyped in the schema: it is a named constant in
+`engine/include/vayu/core/element_defaults.hpp` that the kind reads (`config.value (key, DEFAULT)`)
+and the schema serves, so what a form shows for an unset key is what the engine runs. An absent
+key means the default, and a client renders it that way without ever writing the key: the stored
+config is exactly what the user set. A property with no `default` has no value of its own for its
+absence - a `required` one cannot be absent, and `assert.jsonpath.exists`, `control.throughput`'s
+`percent` / `everyN` and `assert.status`'s `in` / `range` mean "not asserting that" or "no budget"
+when left out. Note `default` is also a property *name* in the `extract.*` schemas (the fallback
+value written on a miss); the annotation sits one level deeper, in the property's own schema, so
+the two never meet. `ElementsRegistryTest.TheCatalogueDeclaresTheDefaultEachKindRuns` pins the
+values, `EveryPropertyOfEveryKindCarriesATitleAndDescription` holds each `default` to its
+property's `type` and `enum`, and `element_kinds_test.cpp` runs each kind with the key absent.
+
 ## Kinds
 
 `inherit.disable` has no `compile`: it is consumed at compose time (`compose_elements`), never
@@ -148,7 +166,11 @@ every non-overlapping match, leftmost first (`$N$` past the pattern's last group
 occurrence of `leftBoundary` and the next occurrence of `rightBoundary` on the response body - no
 `field` selector, unlike `extract.regex`'s four, because JMeter's own Boundary Extractor has none
 either. All four extractors share `variable`, `scope` (`env` | `collection` | `globals`), `default`
-and `required`. `extract.json`, `extract.regex` and `extract.boundary` also share the JMeter `matchNo`
+and `required`. A `variable` no `{{name}}` could read back is refused when it is written (#3055): one
+containing `{` or `}`, one starting or ending in whitespace (`{{ name }}` trims the name it reads),
+one inside the reserved `data.` namespace (`data.id` addresses a data-set column, never a variable)
+and the two identity names `$vu` and `$iteration`. A name with an inner space (`1 bad`) is fine: the
+token grammar is any run of non-brace characters, trimmed. `extract.json`, `extract.regex` and `extract.boundary` also share the JMeter `matchNo`
 convention: `1`-based picks a match, `0` picks one at random, `-1` writes every match as
 `<variable>_1` .. `<variable>_N` plus a `<variable>_matchNr` count, numbered in the order the matches
 were found (document order for `extract.json`, leftmost first for the two text extractors).
@@ -210,13 +232,17 @@ presence and they assert the value; a negated `expected` or `regex` failure read
 `7` and the string `"7"` are different values; the app's field for either reads what is typed as JSON
 (`7`, `true`, `null`, `{"a":1}`), stores the text as a string when it is not JSON, and takes a quoted
 value (`"7"`) to force a string (#3046). `assert.contains` compares a `field` (`body` | `headers` | `url` | `status`) against `text` in
-`contains` | `equals` | `matches` (an RE2 search, above) mode;
+`contains` | `equals` | `matches` (an RE2 search, above) mode. An empty `text` is refused in
+`contains` mode (the default), which finds it in every response so the verdict never depends on one
+(#3055); `equals` against `""` and `matches` with an empty pattern stay valid;
 `assert.duration` takes `maxMs`; `assert.size` compares the body's byte length against `bytes` with
 an `op`. `timer.think` takes `ms`, `minMs`/`maxMs` for a uniform random wait, or `gaussian:
 {meanMs, deviationMs}` (both required, issue #1498) for a normally-distributed one, drawn from
 `std::normal_distribution` and clamped to zero (a draw below it would be a negative wait, which
-means nothing) then rounded to the nearest millisecond - `gaussian` is checked first, so it and
-`ms`/`minMs`/`maxMs` are mutually exclusive in practice even though the schema does not enforce it.
+means nothing) then rounded to the nearest millisecond. A config must name a wait (#3055): `ms`, or
+both `minMs` and `maxMs`, or `gaussian`; an empty config, or one bound alone, is a `400`. `gaussian` is
+checked first, then `minMs`/`maxMs`, then `ms`, so the three are mutually exclusive in practice
+even though validation does not refuse a combination.
 It runs in `step.between`, after this step's own outcome is decided and before the next step
 begins, so the wait never counts against either step's latency, and it polls the run's stop signal
 every 50ms so a `Stop` mid-wait lands promptly rather than at the end of a multi-second think. A
@@ -353,7 +379,9 @@ resolved `{{variable}}` is false - `{{v}} == x`, `!=`, `matches /re/` (an RE2 se
 with the element; see the pattern paragraph above), or `{{v}} exists`, refused at validate outside
 that grammar. `control.once` runs on this user's first iteration only. `control.throughput`
 runs a share of occurrences by `percent` (an exact integer-carry accumulator, not a random draw) or
-`everyN`, on the producer's own counter - no lock, no body parse. `perUser` (default `true`) keeps that
+`everyN`, on the producer's own counter - no lock, no body parse. Exactly one of the two is
+required (#3055): `everyN` is read first, so a config naming both would have `percent` ignored, and
+one naming neither would never skip. `perUser` (default `true`) keeps that
 counter per virtual user; `perUser: false` (issue #1569, JMeter's "All threads" throughput mode) shares
 one atomic counter pair across every VU of a scenario load run instead, allocated up front from a plan
 scan (`SharedThroughputCounters`, `ElementKind::supports_shared_state` read through the registry rather

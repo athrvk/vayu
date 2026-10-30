@@ -238,7 +238,7 @@ const std::string& content) {
         return *refusal;
     }
 
-    const auto subtree = collection_subtree_ids (collections, collection_id);
+    const auto subtree = spec_contract_subtree_ids (collections, collection_id);
     const auto stored  = collection_subtree_requests (db, collections, subtree);
 
     StampOutcome outcome;

@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -324,6 +325,106 @@ TEST_F (ElementsRegistryTest, AnAssertionOrExtractorThatCanRunIsAccepted) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A setting the engine accepted and then ignored is refused naming the field
+// (#3055). Mutation check: drop the `validate_config` of `control.throughput`,
+// `timer.think` or `assert.contains`, or `variable_name_problem` from an
+// `extract.*` kind, and its rows here are accepted.
+// ---------------------------------------------------------------------------
+
+TEST_F (ElementsRegistryTest, ASettingThatWouldDoNothingIsRefusedNamingTheField) {
+    struct Refused {
+        json entry;
+        std::string wording;
+    };
+    const auto extract_with = [] (const std::string& kind, const json& variable) {
+        json config = { { "variable", variable } };
+        if (kind == "extract.json") {
+            config["path"] = "$.a";
+        } else if (kind == "extract.regex") {
+            config["pattern"] = "a";
+        } else if (kind == "extract.header") {
+            config["header"] = "X-A";
+        }
+        return entry_of (kind, config);
+    };
+    std::vector<Refused> cases = {
+        { entry_of ("control.throughput", json::object ()), "'percent' or 'everyN' is required" },
+        { entry_of ("control.throughput", { { "perUser", false } }),
+        "'percent' or 'everyN' is required" },
+        { entry_of ("control.throughput", { { "percent", 50 }, { "everyN", 2 } }),
+        "'percent' cannot be combined with 'everyN'" },
+        { entry_of ("timer.think", json::object ()), "'ms' is required" },
+        { entry_of ("timer.think", { { "minMs", 100 } }), "'maxMs' is required beside 'minMs'" },
+        { entry_of ("timer.think", { { "maxMs", 100 } }), "'minMs' is required beside 'maxMs'" },
+        { entry_of ("assert.contains", { { "text", "" } }), "'text' cannot be empty" },
+        { entry_of ("assert.contains", { { "text", "" }, { "mode", "contains" } }),
+        "'text' cannot be empty" },
+        { entry_of ("assert.contains", { { "text", "" }, { "negate", true } }),
+        "'text' cannot be empty" },
+    };
+    for (const char* kind :
+    { "extract.json", "extract.regex", "extract.header", "extract.boundary" }) {
+        cases.push_back (
+        { extract_with (kind, "a{b"), "'variable' cannot contain '{' or '}'" });
+        cases.push_back (
+        { extract_with (kind, "a}"), "'variable' cannot contain '{' or '}'" });
+        cases.push_back ({ extract_with (kind, " x"),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back ({ extract_with (kind, "x\t"),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back ({ extract_with (kind, "  "),
+        "'variable' cannot start or end with whitespace" });
+        cases.push_back (
+        { extract_with (kind, "data.id"), "'variable' cannot start with 'data.'" });
+        cases.push_back ({ extract_with (kind, "$vu"), "'variable' cannot be '$vu'" });
+        cases.push_back (
+        { extract_with (kind, "$iteration"), "'variable' cannot be '$iteration'" });
+    }
+    for (const auto& [entry, wording] : cases) {
+        const auto reason = validate_entry (entry);
+        ASSERT_HAS_VALUE (reason) << entry.dump ();
+        EXPECT_NE (reason->find ("(item 1): " + wording), std::string::npos)
+        << entry.dump () << ": " << *reason;
+    }
+}
+
+TEST_F (ElementsRegistryTest, ASettingThatDoesSomethingIsAccepted) {
+    std::vector<json> entries = {
+        entry_of ("control.throughput", { { "percent", 50 } }),
+        entry_of ("control.throughput", { { "everyN", 3 }, { "perUser", false } }),
+        entry_of ("timer.think", { { "ms", 250 } }),
+        entry_of ("timer.think", { { "ms", 0 } }),
+        entry_of ("timer.think", { { "minMs", 100 }, { "maxMs", 300 } }),
+        entry_of ("timer.think",
+        { { "gaussian", { { "meanMs", 200 }, { "deviationMs", 20 } } } }),
+        // A combination the draw order already resolves is not refused.
+        entry_of ("timer.think", { { "ms", 250 }, { "minMs", 100 } }),
+        entry_of ("assert.contains", { { "text", "ok" } }),
+        entry_of ("assert.contains", { { "text", "" }, { "mode", "equals" } }),
+        entry_of ("assert.contains", { { "text", "" }, { "mode", "matches" } }),
+        // Whitespace inside a name is part of it; `{{1 bad}}` is a token.
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "1 bad" } }),
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "dataset" } }),
+        entry_of ("extract.json", { { "path", "$.a" }, { "variable", "data." } }),
+        entry_of ("extract.regex", { { "pattern", "a" }, { "variable", "$guid_" } }),
+        entry_of ("extract.header", { { "header", "X-A" }, { "variable", "token" } }),
+        entry_of ("extract.boundary", { { "variable", "token" } }),
+    };
+    for (const auto& entry : entries) {
+        const auto reason = validate_entry (entry);
+        EXPECT_FALSE (reason.has_value ())
+        << entry.dump () << ": " << reason.value_or ("");
+    }
+}
+
+TEST_F (ElementsRegistryTest, AnEmptyVariableKeepsTheSchemasOwnError) {
+    const auto reason =
+    validate_entry (entry_of ("extract.boundary", { { "variable", "" } }));
+    ASSERT_HAS_VALUE (reason);
+    EXPECT_EQ (reason->find ("cannot"), std::string::npos) << *reason;
+}
+
 TEST_F (ElementsRegistryTest, AMistypedPatternKeepsTheSchemasOwnError) {
     const auto reason = validate_entry (
     entry_of ("extract.regex", { { "pattern", 7 }, { "variable", "v" } }));
@@ -339,15 +440,55 @@ TEST_F (ElementsRegistryTest, AMetricConditionPathIsOnlyReadWhenItsFieldIsJsonpa
     validate_entry (metric_source_entry ({ { "condition", condition } })).has_value ());
 }
 
+/// Whether @p value is a JSON value of the JSON-Schema @p type.
+bool json_matches_schema_type (const json& value, const std::string& type) {
+    if (type == "string") {
+        return value.is_string ();
+    }
+    if (type == "boolean") {
+        return value.is_boolean ();
+    }
+    if (type == "integer") {
+        return value.is_number_integer ();
+    }
+    if (type == "number") {
+        return value.is_number ();
+    }
+    return false;
+}
+
+/// A property's `default`, when it has one, must be a value the property
+/// would accept: the declared type, and a member of the `enum` if it has one.
+void expect_default_is_valid (const std::string& kind_name,
+const std::string& property_name,
+const json& schema) {
+    const auto found = schema.find ("default");
+    if (found == schema.end ()) {
+        return;
+    }
+    const std::string where = kind_name + "." + property_name;
+    const auto* type =
+    schema.contains ("type") ? schema["type"].get_ptr<const std::string*> () : nullptr;
+    ASSERT_NE (type, nullptr) << where << " has a default but no type";
+    EXPECT_TRUE (json_matches_schema_type (*found, *type))
+    << where << " has a default that is not a " << *type;
+    if (schema.contains ("enum")) {
+        const auto& members = schema["enum"];
+        EXPECT_NE (std::find (members.begin (), members.end (), *found), members.end ())
+        << where << " has a default outside its enum";
+    }
+}
+
 /**
  * Recursively asserts every property in a JSON-Schema `properties` map
  * (issue #1607) carries a non-empty `title` and `description`, and that the
  * two vendor annotation keywords stay inside their closed sets -
  * `x-vayu-group` only ever `"advanced"`, `x-vayu-unit` only ever one of
- * `"ms"`, `"%"`, `"B"`. Descends into a nested object property's own
- * `properties` (`assert.status`'s `range`, `timer.think`'s `gaussian`,
- * `metric.record`'s `source` and its own nested `condition`), holding a
- * nested field to the same rule as a top-level one.
+ * `"ms"`, `"%"`, `"B"`; and that a `default` (issue #3045), when present, is
+ * of the property's declared `type` and a member of its `enum`. Descends into
+ * a nested object property's own `properties` (`assert.status`'s `range`,
+ * `timer.think`'s `gaussian`, `metric.record`'s `source` and its own nested
+ * `condition`), holding a nested field to the same rule as a top-level one.
  */
 void expect_every_property_annotated (const std::string& kind_name, const json& properties) {
     // get_ptr, not value (): GCC 13 at -O3 reports a null dereference inside
@@ -370,6 +511,7 @@ void expect_every_property_annotated (const std::string& kind_name, const json& 
         EXPECT_TRUE (has_text (schema, "title")) << kind_name << "." << name << " has no title";
         EXPECT_TRUE (has_text (schema, "description"))
         << kind_name << "." << name << " has no description";
+        expect_default_is_valid (kind_name, name, schema);
         if (schema.contains ("x-vayu-group")) {
             EXPECT_EQ (schema["x-vayu-group"], "advanced")
             << kind_name << "." << name << " has an unknown x-vayu-group";
@@ -398,6 +540,100 @@ TEST_F (ElementsRegistryTest, EveryPropertyOfEveryKindCarriesATitleAndDescriptio
             continue; // e.g. control.once, whose schema declares no properties at all.
         }
         expect_every_property_annotated (kind_name, kind["configSchema"]["properties"]);
+    }
+}
+
+/// The property schema of @p kind_name's @p property_name in @p catalogue, or
+/// null when the kind or the property is not there.
+const json* property_schema (const json& catalogue,
+const std::string& kind_name,
+const std::string& property_name) {
+    for (const auto& kind : catalogue) {
+        if (kind["kind"] != kind_name) {
+            continue;
+        }
+        const auto& properties = kind["configSchema"]["properties"];
+        const auto found       = properties.find (property_name);
+        return found == properties.end () ? nullptr : &*found;
+    }
+    return nullptr;
+}
+
+// Issue #3045: a form shows `default` for a key the config leaves out, so each
+// value below is what the engine runs for that absent key. The behaviour is
+// held in `element_kinds_test.cpp`; this pins the values the catalogue serves.
+TEST_F (ElementsRegistryTest, TheCatalogueDeclaresTheDefaultEachKindRuns) {
+    struct DefaultCase {
+        const char* kind;
+        const char* property;
+        json expected;
+    };
+    const std::vector<DefaultCase> cases = {
+        { "assert.size", "op", "lte" },
+        { "assert.contains", "field", "body" },
+        { "assert.contains", "mode", "contains" },
+        { "assert.contains", "negate", false },
+        { "assert.jsonpath", "negate", false },
+        { "extract.json", "scope", "collection" },
+        { "extract.regex", "scope", "collection" },
+        { "extract.header", "scope", "collection" },
+        { "extract.boundary", "scope", "collection" },
+        { "extract.json", "required", false },
+        { "extract.regex", "required", false },
+        { "extract.header", "required", false },
+        { "extract.boundary", "required", false },
+        { "extract.regex", "field", "body" },
+        { "timer.pacing", "perUser", true },
+        { "timer.throughput", "perUser", false },
+        { "control.throughput", "perUser", true },
+        { "control.transaction", "includeTimers", false },
+        { "script.pre", "inline", false },
+        { "script.post", "inline", false },
+    };
+    const json catalogue = vayu::core::elements_catalogue ();
+    for (const auto& entry : cases) {
+        const json* schema = property_schema (catalogue, entry.kind, entry.property);
+        ASSERT_NE (schema, nullptr) << entry.kind << "." << entry.property;
+        const auto found = schema->find ("default");
+        ASSERT_NE (found, schema->end ())
+        << entry.kind << "." << entry.property << " declares no default";
+        EXPECT_EQ (*found, entry.expected) << entry.kind << "." << entry.property;
+    }
+}
+
+// A property that is required cannot be absent, and one whose absence is a
+// state of its own (`exists` unset means "not asserting existence", an
+// unset `percent` / `everyN` means "no budget") has no value to show for it.
+TEST_F (ElementsRegistryTest, NoDefaultIsDeclaredWhereAbsenceMeansSomethingElse) {
+    const json catalogue = vayu::core::elements_catalogue ();
+    for (const auto& kind : catalogue) {
+        if (!kind["configSchema"].contains ("required")) {
+            continue;
+        }
+        const auto* kind_name = kind["kind"].get_ptr<const std::string*> ();
+        ASSERT_NE (kind_name, nullptr);
+        for (const auto& required : kind["configSchema"]["required"]) {
+            const auto* name = required.get_ptr<const std::string*> ();
+            ASSERT_NE (name, nullptr);
+            const json* schema = property_schema (catalogue, *kind_name, *name);
+            if (schema == nullptr) {
+                continue;
+            }
+            EXPECT_FALSE (schema->contains ("default"))
+            << *kind_name << "." << *name << " is required";
+        }
+    }
+    const std::vector<std::pair<const char*, const char*>> tri_state = {
+        { "assert.jsonpath", "exists" },
+        { "control.throughput", "percent" },
+        { "control.throughput", "everyN" },
+        { "assert.status", "range" },
+        { "assert.status", "in" },
+    };
+    for (const auto& [kind, property] : tri_state) {
+        const json* schema = property_schema (catalogue, kind, property);
+        ASSERT_NE (schema, nullptr) << kind << "." << property;
+        EXPECT_FALSE (schema->contains ("default")) << kind << "." << property;
     }
 }
 

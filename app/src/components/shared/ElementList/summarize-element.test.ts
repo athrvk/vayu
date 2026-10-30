@@ -104,6 +104,57 @@ describe("summarizeElement - extract.json", () => {
 		).toBe("$.token → token (env)");
 	});
 
+	it("reads an absent scope from the catalogue default, not a hand-copied one", () => {
+		const withDefault = kind({
+			kind: "extract.json",
+			configSchema: {
+				type: "object",
+				properties: {
+					scope: { type: "string", enum: ["env", "collection"], default: "collection" },
+				},
+			},
+		});
+		expect(
+			summarizeElement(
+				element("extract.json", { path: "$.token", variable: "token" }),
+				withDefault
+			)
+		).toBe("$.token → token (collection)");
+		expect(
+			summarizeElement(
+				element("extract.json", { path: "$.token", variable: "token", scope: "" }),
+				withDefault
+			)
+		).toBe("$.token → token (collection)");
+	});
+
+	it("keeps a stored scope over the default", () => {
+		const withDefault = kind({
+			kind: "extract.json",
+			configSchema: {
+				type: "object",
+				properties: {
+					scope: { type: "string", enum: ["env", "collection"], default: "collection" },
+				},
+			},
+		});
+		expect(
+			summarizeElement(
+				element("extract.json", { path: "$.token", variable: "token", scope: "env" }),
+				withDefault
+			)
+		).toBe("$.token → token (env)");
+	});
+
+	it("names no scope when the catalogue declares no default", () => {
+		expect(summarizeElement(element("extract.json", { path: "$.t", variable: "t" }), k)).toBe(
+			"$.t → t"
+		);
+		expect(
+			summarizeElement(element("extract.json", { path: "$.t", variable: "t" }), undefined)
+		).toBe("$.t → t");
+	});
+
 	it("falls back to the kind's description without a variable", () => {
 		expect(summarizeElement(element("extract.json", { path: "$.token" }), k)).toBe(
 			k.description
@@ -155,6 +206,31 @@ describe("summarizeElement - timer.pacing", () => {
 
 	it("falls back to the kind's description without a cadence", () => {
 		expect(summarizeElement(element("timer.pacing", {}), k)).toBe(k.description);
+	});
+
+	describe("with the catalogue's perUser default (#3045)", () => {
+		const withDefault = kind({
+			kind: "timer.pacing",
+			configSchema: {
+				type: "object",
+				properties: { perUser: { type: "boolean", default: true } },
+			},
+		});
+
+		it("names per-user pacing when the key is absent", () => {
+			expect(summarizeElement(element("timer.pacing", { everyMs: 1000 }), withDefault)).toBe(
+				"every 1000 ms · per user"
+			);
+		});
+
+		it("does not name it when the user switched it off", () => {
+			expect(
+				summarizeElement(
+					element("timer.pacing", { everyMs: 1000, perUser: false }),
+					withDefault
+				)
+			).toBe("every 1000 ms");
+		});
 	});
 });
 

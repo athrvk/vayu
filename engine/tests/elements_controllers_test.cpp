@@ -206,7 +206,11 @@ constexpr auto CONTROLLER_CONFIG_CASES = std::to_array<ControllerConfigCase> ({
 { "ControlOnceAcceptsAnEmptyConfig", "control.once", "{}", false },
 // Issue #1569: `perUser: false` shares one budget across every virtual user
 // of a scenario load run rather than keeping one per user.
-{ "ControlThroughputAcceptsPerUser", "control.throughput", R"({"perUser":false})", false },
+{ "ControlThroughputAcceptsPerUser", "control.throughput",
+R"({"percent":50,"perUser":false})", false },
+// Issue #3055: exactly one of the two operands.
+{ "ControlThroughputRefusesNoOperand", "control.throughput", R"({"perUser":false})", true },
+{ "ControlThroughputRefusesBothOperands", "control.throughput", R"({"percent":50,"everyN":2})", true },
 // Issue #1569: folds a between-member `timer.*` wait into the sum.
 { "ControlTransactionAcceptsIncludeTimers", "control.transaction",
 R"({"name":"checkout","includeTimers":true})", false },

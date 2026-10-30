@@ -512,11 +512,7 @@ export_spec_response (vayu::db::Database& db, const nlohmann::json& json) {
     }
 
     const auto collections = db.get_collections ();
-    const auto subtree     = collection_subtree_ids (
-    collections, collection_id, [&] (const vayu::db::Collection& child) {
-        const std::string binding = bound_spec_id (child.openapi);
-        return binding.empty () || binding == exported_spec_id;
-    });
+    const auto subtree = spec_contract_subtree_ids (collections, collection_id);
 
     // In the sidebar's order, so a skeleton lists its operations as the tree
     // does; the walk is the whole subtree and `subtree` is where it stops.
