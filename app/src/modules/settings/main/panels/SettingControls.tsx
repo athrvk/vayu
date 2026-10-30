@@ -386,6 +386,8 @@ interface SelectSettingRowProps {
 	onChange: (value: string) => void;
 	options: readonly { readonly value: string; readonly label: string }[];
 	disabled?: boolean;
+	/** Validation message from the owner; also drives `aria-invalid`, as on {@link NumberSettingRow}. */
+	error?: string;
 	/**
 	 * The denser variant - see {@link ToggleRow}'s `compact`. The trigger drops
 	 * the `max-w-[12rem]` cap with it, because a compact row is laid out by
@@ -427,10 +429,12 @@ export function SelectSettingRow({
 	onChange,
 	options,
 	disabled,
+	error,
 	compact = false,
 }: SelectSettingRowProps) {
 	const triggerId = useId();
 	const descriptionId = `${triggerId}-description`;
+	const errorId = `${triggerId}-error`;
 	return (
 		// `data-setting-row` names the row's box from the same string the trigger
 		// is named by - the convention the other two rows already keep.
@@ -450,10 +454,16 @@ export function SelectSettingRow({
 					id={triggerId}
 					className={cn(
 						"text-sm",
-						compact ? "h-control-sm w-full" : "h-control max-w-[12rem]"
+						compact ? "h-control-sm w-full" : "h-control max-w-[12rem]",
+						error && "border-destructive"
 					)}
 					aria-label={label}
-					aria-describedby={description ? descriptionId : undefined}
+					aria-invalid={error ? true : undefined}
+					aria-describedby={
+						[error ? errorId : null, description ? descriptionId : null]
+							.filter(Boolean)
+							.join(" ") || undefined
+					}
 				>
 					<SelectValue />
 				</SelectTrigger>
@@ -465,6 +475,7 @@ export function SelectSettingRow({
 					))}
 				</SelectContent>
 			</Select>
+			<FieldError id={errorId}>{error}</FieldError>
 			{description && (
 				<p id={descriptionId} className="text-xs text-muted-foreground">
 					{description}

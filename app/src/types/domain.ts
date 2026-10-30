@@ -781,6 +781,12 @@ export interface ElementConfigProperty {
 	items?: { type?: string };
 	minimum?: number;
 	maximum?: number;
+	/** The numeric form (`value > exclusiveMinimum`), the only one the registry emits. */
+	exclusiveMinimum?: number;
+	minLength?: number;
+	maxLength?: number;
+	/** A plain pattern, unanchored unless it says otherwise; `validateElementConfig` runs it as a JS `RegExp`. */
+	pattern?: string;
 	/** Present only when `type` is `"object"` - one level deep, never further. */
 	properties?: Record<string, ElementConfigProperty | null>;
 	required?: string[];
@@ -842,7 +848,8 @@ export interface ElementKindSchema {
  * other kind, edited through the same `ElementList` as the rest.
  *
  * `config` is validated against the kind's schema engine-side on save; the
- * app's form (generated or bespoke) is the only client-side check.
+ * app's own check is `validateElementConfig` (`lib/elements.ts`), which covers
+ * the keywords the registry uses and reports every failing field.
  */
 export interface ElementDef {
 	id: string;

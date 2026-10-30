@@ -854,7 +854,8 @@ the reported verdict. A reported `"saved"` still fills in the silence with
 `completeSaveThenIdle` (the draft editors publish nothing on success), but never
 over another context's `error` or `pending`. `pending` is a save that settled
 without persisting its edit: a `SaveBlockedError` (the editor declined to send an
-incomplete element) or an edit that landed while the write was in flight. It is
+incomplete element; the request builder still sends the rest of the request,
+#3048) or an edit that landed while the write was in flight. It is
 not a failure - no toast, no "Not saved", no retry - and `flushAll` counts it in
 `pending`. `"final"` is a failure that will not retry (a 4xx); `flushAll` counts
 it in `failed`. `"disk-full"` is a failure that retries like any other and knows

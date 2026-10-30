@@ -779,7 +779,7 @@ Revealing a result is one mechanism for both halves: the sidebar passes the resu
 - `OptionButtons` - the pick-one tile grid. `preview: (isSelected) => ReactNode` per option draws the theme badge, the accent swatch or the roundedness shape, so Appearance no longer re-implements the selected-card style three times.
 - `ToggleRow` - label (a node, for the MCP tool rows' `<code>` and counts), description, `disabled`, `title`. Takes an `anchor` like `NumberSettingRow` does, for the switches search reveals individually (Word wrap, Line numbers, Minimap), and names its box with `data-setting-row` from the same string that names the switch. A string label is wired to the switch with `htmlFor`/`id` as well as naming it through `aria-label`, so the words are part of the hit area - a Radix switch is a `<button>`, which is labelable; a node label has no text to associate, which is what `ariaLabel` is for.
 - `NumberSettingRow` - input, unit suffix, range hint, `aria-invalid` + message, and the Default line. Its `commit` prop is the one thing the four old copies really disagreed about: `"change"` for settings that apply live, `"blur"` for owners that do real work per write (the MCP caps cross IPC). An unparseable draft is never committed - it stays in the field until it is a number again, unless the owner treats empty as a state of its own and commits it from `onDraftChange` (the request timeout, whose optional `placeholder` says what empty means: "Use default (30,000 ms)"). The description is pointed at with `aria-describedby` rather than only rendered (both ids, in reading order, when there is an error too), because a description like "Only applies while Follow redirects is on" is the reason the field is disabled. `data-setting-row` names the row's box. `compact` is the opt-in denser variant the element card's schema-generated form uses (`text-xs` label, `size="sm"` input, no width cap, so the field fills a half-width grid column) - opt-in because the settings panels are read one row at a time and keep the roomier default.
-- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it. It takes `compact` too, alongside `NumberSettingRow`, which drops `w-48` for the same reason that row drops its input cap.
+- `SelectSettingRow` - the pick-one row as a dropdown, for a set that reads as a list rather than a tile grid: `OptionButtons` stays the default where a user browses three or four choices, and this is for a value they already know the name of (the request tab's **Protocol**). `useId` pairs the visible label with the trigger and names it, because the trigger's text is the *chosen option*, not the setting. `onChange` hands back a `string` - a `Select` cannot promise the owner's union, so the owner narrows it (`isHttpVersion`) and decides what an unknown value means. Its second consumer is the engine view's `enum` card (`defaultHttpVersion`, `dbSynchronous`, `proxyMode`), which wrote the same row out by hand until issue #747: there the `CardTitle` is the setting's name, so it passes `labelHidden` and the label goes `sr-only` rather than away - it is what names the trigger, exactly as on `NumberSettingRow`. The trigger's width belongs to the row rather than to either caller (`w-48`, where `NumberSettingRow`'s input already stops), so the two control types end at the same place down a card; the engine's longest option label, "From environment", fits it. The card keeps its own guard for an entry whose `options` the engine omitted - rendering nothing is deliberate, and the primitive does not learn about it. It takes `compact` too, alongside `NumberSettingRow`, which drops `w-48` for the same reason that row drops its input cap. It takes an `error` as well, as `NumberSettingRow` does (#3048): `aria-invalid`, a destructive trigger border and a `FieldError` the trigger's `aria-describedby` names.
 - `DefaultValueLine` - "Default: x" plus the reset that goes there. Used by `NumberSettingRow` and by the boolean/enum/string engine cards, so every entry type has one.
 - `CollapsibleText` - a description that reads as one or two lines with a "Show more"/"Show less" toggle, for the engine's per-setting `CardDescription` (every `/config` entry across all six categories) and the MCP panel's card and per-tool descriptions, both of which run to full paragraphs. Character-counted against a clamp rather than a CSS `line-clamp` plus a measured overflow, since jsdom lays out nothing for a test to measure. Callers pass the plain-string description as `text`; a description built from JSX (the Allowlist card's inline `<code>` spans) is left outside this primitive rather than forced through it.
 
@@ -2285,18 +2285,67 @@ than a settings page read one row at a time. The collapsed header (`h-8`,
 matching every other drawer row) is untouched; only what opens beneath it got
 denser.
 **A missing required field names itself, in place of the summary** (issue
-#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the same presence-only
-check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
+#1635): `missingRequiredKeys` (`lib/elements.ts`) reads the presence-only
+top-level check `addElement`'s fresh `config: {}` can trigger, and the row shows "Needs
 `<title>`" with a warning dot instead of `summarizeElement`'s preview -
 whether the card is open or collapsed, since a list of collapsed cards is
 exactly where a user needs to spot which one is blocking the save without
 expanding each in turn. `RequestBuilderProvider`'s `handleSave` and
-`ElementsTab`'s `persist` hold the save back for the same reason
+`ElementsTab`'s `persist` hold the list back for the same reason
 `defaultConfigFor` exists above - a request's whole `elements` array 400s on
 one incomplete member - and throw `SaveBlockedError` instead of sending a
 payload already known to fail; `useSaveManager` reads that type to stay
 "pending" rather than backing off a retry against a payload that will not
-have changed by the next attempt.
+have changed by the next attempt. Only the list is held back (#3048): the
+builder still sends every other field the user touched (a URL, a header) and
+throws once that save lands, keeping `elements` touched and its baseline at
+the last saved list, so a retry while the element is still invalid sends
+nothing and the fixed list goes out on its own.
+
+**A value the schema refuses is held back by the same gate** (#3048):
+`validateElementConfig` (`lib/elements.ts`) walks the kind's `configSchema` and
+returns one short message per failing field, keyed by dot path (`range.max`),
+for every field at once where the engine names only the first. It judges the
+keywords the catalogue uses - `minLength`, `maxLength`, `minimum`,
+`exclusiveMinimum`, `maximum`, `pattern` and a nested `required` - and not `type`
+or `enum`, which the form's controls write. A missing top-level `required` key
+stays `missingRequiredKeys`' chip, so no field is reported twice; a nested one
+(`assert.status`'s `range` without `max`) has no chip, so the validator names
+it. A `pattern` that fails shows the hint in `PATTERN_HINTS` where there is one
+(`control.if`'s "Use {{var}} == value") and "Doesn't match the expected format"
+otherwise; a pattern JavaScript cannot compile is no constraint.
+A **malformed JSONPath** is the one rule no keyword carries (the schema says only
+`type: string`): `JSON_PATH_FIELDS` lists every config string the engine reads
+as one - `assert.jsonpath` and `extract.json`'s `path`, `metric.record`'s
+`source.jsonpath`, and its `source.condition.jsonpath` only while that
+condition's `field` is `jsonpath` - and `isSupportedJsonPath` refuses what
+`parse_json_path` (`engine/src/core/elements/json_path.cpp`) refuses: no leading
+`$`, an empty `.name`, a filter, an unterminated or empty `['name']`, a `[n]`
+that is not a whole integer. The message is "Start with $, then use .name,
+['name'], [n] or [*]". Like `OPERAND_RULES` this **restates the C++**: the
+conformance test holds each entry to a property the live catalogue declares,
+but a change to `parse_json_path` or to where `json_path_problem` is called
+needs a hand edit in `lib/elements.ts`. Only a string is judged; an absent or
+mistyped value is the schema's.
+`hasIncompleteElement` is also true when the validator finds anything, so the
+save gate and the messages agree. `element-kinds.conformance.test.tsx` fails
+when the catalogue gains a keyword the validator does not judge.
+
+**The message is shown on the field it is about** (#3048). `ElementRow` runs
+`validateElementConfig` once per element and hands the map to the kind's form as
+`errors`: `GenericElementForm` reads each row's message by name and gives a
+nested object its slice (`errorsWithin`, so `range.max` reaches `Maximum` and
+not `Minimum`), and `ModeElementForm` slices again for the `source` level and a
+nested mode before handing its generic parts theirs. A row shows its message the
+way `NumberSettingRow` always has: `aria-invalid` on the control, the
+`border-destructive` edge and a `FieldError` the control's `aria-describedby`
+names, ahead of the hint's id. Number, text, dropdown (`SelectSettingRow`'s
+`error` prop) and untyped JSON fields all do; the script forms have no
+constrained field and ignore the prop. Only a value that is present and refused
+shows a message: a fresh element's absent keys stay the "Needs ..." chip's, so
+the same field is never told twice. The engine's refusal of a whole element
+(above) is a row-level line under the header and ends when the element is
+edited, so it does not repeat a field's own message.
 
 **A kind that needs one of several operands is held back the same way**
 (#3043, #3055): `assert.status` needs a non-empty `in` or a `range`,
