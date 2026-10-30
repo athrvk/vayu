@@ -434,9 +434,8 @@ std::vector<std::string> local_ipv4_addresses () {
 
     std::vector<std::string> addresses;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
-    for (const auto* adapter =
-         reinterpret_cast<const IP_ADAPTER_ADDRESSES*> (buffer.data ());
-    adapter != nullptr; adapter = adapter->Next) {
+    const auto* first = reinterpret_cast<const IP_ADAPTER_ADDRESSES*> (buffer.data ());
+    for (const auto* adapter = first; adapter != nullptr; adapter = adapter->Next) {
         if (adapter->OperStatus != IfOperStatusUp) {
             continue;
         }
