@@ -182,6 +182,8 @@ export default function MockServerControl({ collectionId }: { collectionId: stri
 					{running.routeCount} {pluralize(running.routeCount, "route")}
 					{running.routesWithoutExample > 0 &&
 						`, ${running.routesWithoutExample} without an example`}
+					{!!running.duplicateRoutes &&
+						`, ${running.duplicateRoutes} shadowed by a shared path`}
 				</span>
 			</span>
 			<TooltipIconButton

@@ -448,6 +448,14 @@ unlike an inbox, which stays listed with `running: false` - so the mutation
 *removes* the routes cache entry instead of invalidating it, which would
 refetch an id the engine now answers `404` for.
 
+Requests that share a method and path are one route, because the mock drops the
+query (#3115). `MockServer.duplicateRoutes` counts the ones that never answer
+(optional in the type: an engine older than the fix omits it), and each such
+`MockServerRoute` carries `shadowed: true` and `shadowedBy: { requestId,
+requestName }`; both keys are absent, never `false`, on every other row. The
+route table marks the row and names the request that answers, and
+`MockServerControl`'s chip counts them beside the routes without an example.
+
 #### Create vs update
 
 For collections, requests and environments the engine splits the write verbs:

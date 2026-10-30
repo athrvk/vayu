@@ -1349,7 +1349,7 @@ export class EngineClient {
 	 * Start a mock: `POST /mock/start`. `collectionId` is required; the engine
 	 * assigns the id and, for `port: 0`, the port. The reply is the mock record
 	 * (`mockId`, `collectionId`, `collectionName`, `url`, `port`, `latencyMs`,
-	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `createdAt`,
+	 * `errorRatePct`, `routeCount`, `routesWithoutExample`, `duplicateRoutes`, `createdAt`,
 	 * `allowedOrigins`).
 	 */
 	startMockServer(payload: unknown, signal?: AbortSignal): Promise<unknown> {

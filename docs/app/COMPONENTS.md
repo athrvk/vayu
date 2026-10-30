@@ -1110,6 +1110,8 @@ log, it needs a surface that can grow while it is watched.
   served. Both poll at `TIMING.MOCK_ACTIVITY_POLL_INTERVAL_MS`: the route table's *shape* is a
   start-time snapshot, but each route's `hits` moves live as traffic arrives, so it joined the fast
   interval alongside Activity rather than the mock list's slower one.
+  A shadowed route (another request has its method and path, #3115) carries a `shadowed` badge and a
+  line beneath it naming the request that answers instead, both in `text-status-warning-text`.
   Each section shows a `ListSkeleton` on its first fetch, and the Routes count a dash, rather than
   "Routes (0)" or "Nothing served yet" for a query still in flight (#1928). The header also states
   the mock's CORS policy on a line of its own, `Origins: any` or the origins it was started with

@@ -153,6 +153,20 @@ describe("the collection header's mock-server control", () => {
 		expect(screen.getByText(/3 routes, 1 without an example/i)).toBeInTheDocument();
 	});
 
+	it("counts the requests a shared path shadows, and says nothing when there are none (#3115)", async () => {
+		listMockServers.mockResolvedValue([mock({ duplicateRoutes: 2 })]);
+		const { unmount } = renderControl();
+		expect(
+			await screen.findByText(/3 routes, 2 shadowed by a shared path/i)
+		).toBeInTheDocument();
+		unmount();
+
+		listMockServers.mockResolvedValue([mock({ duplicateRoutes: 0 })]);
+		renderControl();
+		expect(await screen.findByText("3 routes")).toBeInTheDocument();
+		expect(screen.queryByText(/shadowed/i)).not.toBeInTheDocument();
+	});
+
 	it("opens the running mock's own tab, so its routes and activity are one click away", async () => {
 		listMockServers.mockResolvedValue([mock()]);
 		renderControl();
