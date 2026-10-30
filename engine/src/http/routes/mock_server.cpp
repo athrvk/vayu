@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <map>
 #include <set>
 #include <string_view>
 #include <thread>
@@ -325,6 +326,64 @@ build_mock_routes (vayu::db::Database& db, const std::string& collection_id) {
     return routes;
 }
 
+namespace {
+
+std::size_t wildcard_count (const MockRoute& route) {
+    return static_cast<std::size_t> (
+    std::count_if (route.segments.begin (), route.segments.end (),
+    [] (const MockPathSegment& segment) { return segment.templated; }));
+}
+
+/// Specificity first, then a saved example over none. Strict, so between two
+/// routes that tie on both the earlier in the table stays the winner.
+bool outranks (const MockRoute& candidate, const MockRoute& best) {
+    const auto candidate_wildcards = wildcard_count (candidate);
+    const auto best_wildcards      = wildcard_count (best);
+    if (candidate_wildcards != best_wildcards) {
+        return candidate_wildcards < best_wildcards;
+    }
+    return candidate.has_response && !best.has_response;
+}
+
+/// Method plus the segment shape: literals are kept, a template's own name is
+/// not, since `{{a}}` and `{{b}}` match the same paths. A literal segment never
+/// holds `/`, so the key cannot collide across shapes.
+std::string route_shape_key (const MockRoute& route) {
+    std::string key = route.method;
+    for (const auto& segment : route.segments) {
+        key += segment.templated ? "/*" : "/=" + segment.literal;
+    }
+    return key;
+}
+
+} // namespace
+
+std::size_t mark_shadowed_routes (std::vector<MockRoute>& routes) {
+    std::vector<std::string> keys;
+    keys.reserve (routes.size ());
+    std::map<std::string, std::size_t> winners;
+    for (std::size_t i = 0; i < routes.size (); ++i) {
+        keys.push_back (route_shape_key (routes[i]));
+        const auto [slot, first_of_shape] = winners.try_emplace (keys.back (), i);
+        if (!first_of_shape && outranks (routes[i], routes[slot->second])) {
+            slot->second = i;
+        }
+    }
+
+    std::size_t shadowed = 0;
+    for (std::size_t i = 0; i < routes.size (); ++i) {
+        const auto winner = winners.at (keys[i]);
+        if (winner == i) {
+            routes[i].shadowed_by.reset ();
+            continue;
+        }
+        routes[i].shadowed_by =
+        MockRouteWinner{ routes[winner].request_id, routes[winner].request_name };
+        ++shadowed;
+    }
+    return shadowed;
+}
+
 MockMatch resolve_mock_route (const std::vector<MockRoute>& routes,
 const std::string& method,
 const std::string& path) {
@@ -353,19 +412,16 @@ const std::string& path) {
 
     // Specificity decides, not registration order: `/pets/mine` must beat
     // `/pets/{{petId}}`, otherwise which one answers depends on the order an
-    // import happened to write the two requests in.
+    // import happened to write the two requests in. Among equally specific
+    // routes the query is not part of the route, so `/q?kind=a` and
+    // `/q?kind=b` collide and the one with an example answers (#3115).
     std::optional<std::size_t> best;
-    std::size_t best_wildcards = 0;
     for (const auto index : path_matches) {
         if (routes[index].method != method) {
             continue;
         }
-        const auto wildcards = static_cast<std::size_t> (
-        std::count_if (routes[index].segments.begin (), routes[index].segments.end (),
-        [] (const MockPathSegment& segment) { return segment.templated; }));
-        if (!best || wildcards < best_wildcards) {
-            best           = index;
-            best_wildcards = wildcards;
+        if (!best || outranks (routes[index], routes[*best])) {
+            best = index;
         }
     }
 
@@ -449,6 +505,7 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info) {
     out["errorRatePct"]         = info.error_rate_pct;
     out["routeCount"]           = info.route_count;
     out["routesWithoutExample"] = info.routes_without_example;
+    out["duplicateRoutes"]      = info.duplicate_routes;
     out["createdAt"]            = info.created_at;
     out["allowedOrigins"]       = info.allowed_origins;
     return out;
@@ -463,6 +520,11 @@ nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits) {
     out["hasExample"]  = route.has_response;
     out["mode"]        = route.mode;
     out["hits"]        = hits;
+    if (route.shadowed_by) {
+        out["shadowed"]   = true;
+        out["shadowedBy"] = { { "requestId", route.shadowed_by->request_id },
+            { "requestName", route.shadowed_by->request_name } };
+    }
     if (!route.has_response) {
         out["status"] = 0;
         return out;
@@ -565,6 +627,7 @@ struct MockServerManager::MockServer {
     /// restart it, which is documented and is what keeps this true.
     std::vector<MockRoute> routes;
     int routes_without_example = 0;
+    int duplicate_routes       = 0;
     /// Feeds the error-injection roll. Atomic because every pool thread bumps
     /// it; nothing else about a served response is mutable.
     std::atomic<std::uint64_t> served{ 0 };
@@ -595,6 +658,7 @@ struct MockServerManager::MockServer {
         out.error_rate_pct  = error_rate_pct;
         out.route_count     = static_cast<int> (routes.size ());
         out.routes_without_example = routes_without_example;
+        out.duplicate_routes       = duplicate_routes;
         out.created_at             = created_at;
         out.allowed_origins        = cors.allowed_origins;
         return out;
@@ -792,6 +856,7 @@ const MockStartRequest& request) {
     server->routes_without_example =
     static_cast<int> (std::count_if (server->routes.begin (), server->routes.end (),
     [] (const MockRoute& route) { return !route.has_response; }));
+    server->duplicate_routes = static_cast<int> (mark_shadowed_routes (server->routes));
 
     MockServer* raw = server.get ();
 
@@ -1031,7 +1096,7 @@ void register_mock_server_routes (RouteContext& ctx) {
      * Starts a loopback listener answering the collection tree's saved
      * examples. Returns the started mock: {mockId, collectionId,
      * collectionName, url, port, latencyMs, errorRatePct, routeCount,
-     * routesWithoutExample, createdAt}.
+     * routesWithoutExample, duplicateRoutes, createdAt, allowedOrigins}.
      */
     ctx.server.Post (
     "/mock/start", [&ctx] (const httplib::Request& req, httplib::Response& res) {

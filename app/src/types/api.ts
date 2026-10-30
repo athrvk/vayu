@@ -1539,6 +1539,11 @@ export interface MockServer {
 	 * is reported rather than left to be discovered one 501 at a time.
 	 */
 	routesWithoutExample: number;
+	/**
+	 * Requests that share a method and path with another and so never answer
+	 * (#3115). Absent from an engine older than that fix.
+	 */
+	duplicateRoutes?: number;
 	createdAt: number;
 	/**
 	 * The pages granted credentialed CORS (#2367), canonical spelling. Empty is
@@ -1585,6 +1590,13 @@ export interface MockServerRoute {
 	exampleName?: string;
 	/** How many times this route has answered a request, since the mock started. */
 	hits: number;
+	/**
+	 * Present (and `true`) only when another request has the same method and
+	 * path and answers for both (#3115). Absent, never `false`, otherwise.
+	 */
+	shadowed?: true;
+	/** The request that answers in this row's place; present exactly when `shadowed` is. */
+	shadowedBy?: { requestId: string; requestName: string };
 }
 
 export interface ListMockServerRoutesResponse {

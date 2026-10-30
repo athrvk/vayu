@@ -100,6 +100,38 @@ describe("MockServerView", () => {
 		expect(routes.getByText("3")).toBeInTheDocument();
 	});
 
+	it("marks a shadowed route and names the request that answers instead (#3115)", () => {
+		vi.mocked(useMockServerRoutesQuery).mockReturnValue({
+			data: [
+				{ ...ROUTE, requestId: "req_ok", requestName: "login ok", path: "/login" },
+				{
+					...ROUTE,
+					requestId: "req_fail",
+					requestName: "login fail",
+					path: "/login",
+					hits: 0,
+					shadowed: true,
+					shadowedBy: { requestId: "req_ok", requestName: "login ok" },
+				},
+			],
+			isError: false,
+		} as ReturnType<typeof useMockServerRoutesQuery>);
+		render(<MockServerView />);
+		const routes = within(screen.getByText("Routes (2)").closest("section")!);
+		// One mark, on the shadowed row only; the winner is not flagged.
+		expect(routes.getAllByText("shadowed")).toHaveLength(1);
+		expect(routes.getByText(/same method and path as login ok/i)).toHaveTextContent(
+			"Same method and path as login ok, which answers instead."
+		);
+	});
+
+	it("shows no shadowed mark when no route is shadowed", () => {
+		render(<MockServerView />);
+		const routes = within(screen.getByText("Routes (1)").closest("section")!);
+		expect(routes.queryByText("shadowed")).not.toBeInTheDocument();
+		expect(routes.queryByText(/same method and path/i)).not.toBeInTheDocument();
+	});
+
 	it("opens the collection this mock serves, so a page load is not a dead end", () => {
 		render(<MockServerView />);
 		fireEvent.click(screen.getByRole("button", { name: /open collection/i }));

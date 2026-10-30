@@ -11068,6 +11068,48 @@ describe("mock server tools", () => {
 		expect(text).toMatch(/404/);
 	});
 
+	test("a mock with shadowed requests says which ones never answer (#3115)", async () => {
+		const client = fakeClient({
+			startMockServer: vi.fn().mockResolvedValue({
+				mockId: "mock_4",
+				url: "http://127.0.0.1:45013",
+				routeCount: 5,
+				routesWithoutExample: 0,
+				duplicateRoutes: 2,
+			}),
+		});
+		const res = await dispatchTool(
+			"start_mock_server",
+			{ collectionId: "col_1" },
+			ctxWith(client)
+		);
+		expect(res.isError).toBeFalsy();
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/2 request\(s\) share a method and path/);
+		expect(text).toMatch(/get_mock_routes/);
+		expect(text).not.toMatch(/no saved example/);
+	});
+
+	test("missing examples and shadowed requests are both reported", async () => {
+		const client = fakeClient({
+			startMockServer: vi.fn().mockResolvedValue({
+				mockId: "mock_5",
+				url: "http://127.0.0.1:45014",
+				routeCount: 5,
+				routesWithoutExample: 1,
+				duplicateRoutes: 1,
+			}),
+		});
+		const res = await dispatchTool(
+			"start_mock_server",
+			{ collectionId: "col_1" },
+			ctxWith(client)
+		);
+		const text = res.content.map((c) => c.text).join("\n");
+		expect(text).toMatch(/1 of 5 route\(s\) have no saved example/);
+		expect(text).toMatch(/1 request\(s\) share a method and path/);
+	});
+
 	test("a fully-exampled mock gets no caveat at all", async () => {
 		// The mutation check for the two above: with nothing to warn about, the
 		// result is the engine's record and nothing else.

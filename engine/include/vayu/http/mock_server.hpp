@@ -38,6 +38,12 @@ struct MockPathSegment {
     bool templated = false;
 };
 
+/** The request that answers in place of a shadowed one (#3115). */
+struct MockRouteWinner {
+    std::string request_id;
+    std::string request_name;
+};
+
 /**
  * One entry of a mock's route table: a stored request, its path template, and
  * every one of its saved examples (issue #481 phase 3 widened this from just
@@ -53,7 +59,7 @@ struct MockRoute {
     /// Upper-cased, as the wire carries it.
     std::string method;
     /// The normalized template, e.g. `/pets/{{petId}}` - what a 404 prints and
-    /// what `GET /mock` lists, so a user can see what the mock will answer.
+    /// what `GET /mock/:id/routes` lists, so a user can see what the mock will answer.
     std::string path_template;
     std::vector<MockPathSegment> segments;
     /// This request's saved examples, in stored order, tombstones excluded -
@@ -71,6 +77,11 @@ struct MockRoute {
     /// than "no such route", and it is the one an import that dropped its
     /// examples produces.
     bool has_response = false;
+    /// Set by `mark_shadowed_routes` when another request has this one's method
+    /// and path shape and answers for both (the query is not part of a route,
+    /// so `/q?kind=a` and `/q?kind=b` are one path). Unset for the request that
+    /// answers, and for every route of a table nobody marked.
+    std::optional<MockRouteWinner> shadowed_by;
 };
 
 /** Why a request did not match, so the 404 body can say which near-miss it was. */
@@ -112,7 +123,11 @@ struct MockServerInfo {
     /// mock, so it is reported rather than left to be discovered per-404.
     int route_count            = 0;
     int routes_without_example = 0;
-    int64_t created_at         = 0;
+    /// How many requests are shadowed by another with the same method and path
+    /// (`mark_shadowed_routes`): rows that can never answer, whatever their
+    /// query says.
+    int duplicate_routes = 0;
+    int64_t created_at   = 0;
     /// The origins granted credentialed CORS, canonical; empty is the
     /// anonymous `*` default (`routes::CorsPolicy`).
     std::vector<std::string> allowed_origins;
@@ -203,12 +218,29 @@ std::vector<MockRoute>
 build_mock_routes (vayu::db::Database& db, const std::string& collection_id);
 
 /**
+ * Mark every route that another route of the same method and path shape
+ * answers in place of, and return how many it marked (#3115).
+ *
+ * The mock drops the query, so `GET /q?kind=a` and `GET /q?kind=b` are one
+ * route and only one of them can ever answer. Two routes share a shape when
+ * they have the same segment count and agree at every position on literal or
+ * templated, and on the literal where there is one (`/a/{{x}}/b` and
+ * `/a/b/{{y}}` have equal specificity but are different shapes, not
+ * duplicates). The winner of a shape is the one `resolve_mock_route` serves
+ * for a path only that shape matches: the first with a saved example, else the
+ * first. Call once on the finished table; it is never marked again.
+ */
+std::size_t mark_shadowed_routes (std::vector<MockRoute>& routes);
+
+/**
  * Resolve one inbound `method + path` against @p routes.
  *
  * Specificity, not registration order, decides between two matching routes:
  * fewer templated segments wins, so `/pets/mine` beats `/pets/{{petId}}` for
  * `/pets/mine`. Without it the answer would depend on which request an import
  * happened to write first, and a literal route could be permanently shadowed.
+ * Between routes of equal specificity one with a saved example beats one
+ * without (#3115), else the earlier in the table wins.
  */
 MockMatch resolve_mock_route (const std::vector<MockRoute>& routes,
 const std::string& method,
@@ -241,7 +273,8 @@ nlohmann::json mock_server_info_json (const MockServerInfo& info);
 /** The wire shape of one route, for `GET /mock/:id/routes`. `hits` is a
  *  snapshot of that route's serve count, read separately from the manager
  *  (issue #481 phase 3) since it is mutable state the route table itself is
- *  not. */
+ *  not. A shadowed route also carries `shadowed: true` and `shadowedBy`
+ *  (`{requestId, requestName}`); both are absent otherwise. */
 nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits);
 
 /**

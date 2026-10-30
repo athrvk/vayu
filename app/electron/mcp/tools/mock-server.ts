@@ -49,27 +49,45 @@ export function mockServerStartPayload(args: Record<string, unknown>): Record<st
 }
 
 /**
- * What a started mock could not serve, or "" when every route has an example.
+ * What a started mock could not serve, or "" when every route has an example
+ * and none is shadowed.
  *
  * A mock with routes but no examples answers `501` to each of them, which reads
  * as a broken mock rather than as an empty collection - so the count the engine
  * already reports (`routesWithoutExample`) is turned into a sentence instead of
  * being left for an agent to notice in the JSON. `routeCount: 0` is the sharper
  * case and gets its own line: there is nothing to point a client at.
+ * `duplicateRoutes` (#3115) is the other silent one: a request that shares a
+ * method and path with another never answers.
  */
 export function mockServerCaveat(started: unknown): string {
 	if (!isRecord(started)) return "";
 	const routes = Number(started.routeCount);
-	const without = Number(started.routesWithoutExample);
 	if (Number.isFinite(routes) && routes === 0) {
 		return (
 			"\nThis mock serves no routes: the collection has no requests the mock could map. " +
 			"Every path answers 404."
 		);
 	}
+	return (
+		missingExampleCaveat(routes, Number(started.routesWithoutExample)) +
+		duplicateRoutesCaveat(Number(started.duplicateRoutes))
+	);
+}
+
+function missingExampleCaveat(routes: number, without: number): string {
 	if (!Number.isFinite(without) || without <= 0) return "";
 	return (
 		`\n${without} of ${routes} route(s) have no saved example, and answer 501 rather than a body. ` +
 		"Save an example on those requests (or check get_mock_routes for which they are) before pointing a client at them."
+	);
+}
+
+function duplicateRoutesCaveat(duplicates: number): string {
+	if (!Number.isFinite(duplicates) || duplicates <= 0) return "";
+	return (
+		`\n${duplicates} request(s) share a method and path with another request and never answer: ` +
+		"the mock drops the query, so only one request per path is served and the rest show 0 hits. " +
+		"get_mock_routes marks each one (shadowed, shadowedBy); give them distinct paths to serve them all."
 	);
 }

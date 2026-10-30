@@ -221,27 +221,43 @@ export default function MockServerView() {
 							{routes.map((route) => (
 								<li
 									key={`${route.method} ${route.path} ${route.requestId}`}
-									className="flex items-center gap-2 py-1 text-xs"
+									className="py-1 text-xs"
 								>
-									<MethodBadge
-										method={route.method}
-										variant="text"
-										size="sm"
-										className="w-[5ch]"
-									/>
-									<TruncatedText className="min-w-0 flex-1 font-mono">
-										{route.path}
-									</TruncatedText>
-									<Badge variant="outline" className="shrink-0">
-										{route.mode}
-									</Badge>
-									<span className="shrink-0 text-muted-foreground">
-										{route.exampleName ??
-											(route.hasExample ? "varies" : "no example")}
-									</span>
-									<span className="shrink-0 tabular-nums text-muted-foreground">
-										{route.hits}
-									</span>
+									<div className="flex items-center gap-2">
+										<MethodBadge
+											method={route.method}
+											variant="text"
+											size="sm"
+											className="w-[5ch]"
+										/>
+										<TruncatedText className="min-w-0 flex-1 font-mono">
+											{route.path}
+										</TruncatedText>
+										{route.shadowed && (
+											<Badge
+												variant="outline"
+												className="shrink-0 text-status-warning-text"
+											>
+												shadowed
+											</Badge>
+										)}
+										<Badge variant="outline" className="shrink-0">
+											{route.mode}
+										</Badge>
+										<span className="shrink-0 text-muted-foreground">
+											{route.exampleName ??
+												(route.hasExample ? "varies" : "no example")}
+										</span>
+										<span className="shrink-0 tabular-nums text-muted-foreground">
+											{route.hits}
+										</span>
+									</div>
+									{route.shadowedBy && (
+										<p className="break-words pl-[calc(5ch+0.5rem)] text-status-warning-text">
+											Same method and path as {route.shadowedBy.requestName},
+											which answers instead.
+										</p>
+									)}
 								</li>
 							))}
 						</ul>
