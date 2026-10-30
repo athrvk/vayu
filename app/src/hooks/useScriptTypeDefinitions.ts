@@ -24,16 +24,20 @@ import { useScriptTypeDefinitionsQuery } from "@/queries";
 
 /**
  * The sandbox is QuickJS plus `pm`, `console`, the two base64 globals and the
- * timers - no DOM, no Node. So the lib list is deliberately `es2022` alone:
+ * timers - no DOM, no Node. So the lib list is deliberately `esnext` alone:
  * including `dom` would have the editor offer `fetch` and `URL`, neither of which
  * exists at runtime, and the script would fail only once it ran. The timers are
  * declared by the engine's own file, with the sandbox's semantics.
  *
- * ES2022 rather than ES2020 because the runtime is quickjs-ng, where
- * `Object.hasOwn` and `Array.prototype.at` work - targeting ES2020 would mark
- * both as errors while they run fine (see docs/engine/scripting.md).
+ * ESNext rather than a dated edition because the runtime is quickjs-ng, which
+ * tracks the language closely: `Object.hasOwn`, `Array.prototype.at`,
+ * `toSorted`, `findLast`, `Object.groupBy` and `Promise.withResolvers` all run,
+ * and a lib that stops short of one marks it as an error while it works (#3128,
+ * see docs/engine/scripting.md). The price is the opposite error: a method
+ * TypeScript adds to ESNext before quickjs-ng has it is offered and fails only
+ * when the script runs.
  */
-export const SCRIPT_LIB = ["es2022"];
+export const SCRIPT_LIB = ["esnext"];
 
 /**
  * The diagnostics a *correct* script in this editor produces, which must
@@ -47,11 +51,9 @@ export const SCRIPT_LIB = ["es2022"];
  *   - an assignment to an undeclared name (`jsonData = pm.response.json()`)
  *     creates a global in the sloppy-mode IIFE, which the engine permits and
  *     `docs/engine/scripting.md` names under "Isolation between scripts";
- *   - quickjs-ng provides nine globals `lib.es2022` does not declare
- *     (`queueMicrotask`, `performance`, `DOMException`, `Float16Array`,
- *     `Iterator`, `DisposableStack`, `AsyncDisposableStack`, `SuppressedError`,
- *     `InternalError`), each of which would need declaring and holding to the
- *     runtime.
+ *   - quickjs-ng provides four globals `lib.esnext` does not declare
+ *     (`queueMicrotask`, `performance`, `DOMException`, `InternalError`), each
+ *     of which would need declaring and holding to the runtime.
  *   The collection-level part of a script is not one of them: each script
  *   element runs in a context of its own, so a name declared there is not
  *   visible here at run time, and only the deferred load-test replay still
