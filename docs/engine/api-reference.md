@@ -5924,7 +5924,7 @@ inbox on a free port that answers `200` with no body.
 | Field | Meaning |
 |-------|---------|
 | `port` | `0` (default) picks a free port |
-| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback`. Loopback is decided by parsing the *address*, so a hostname that merely starts `127.` (or `localhost.example.com`) is not loopback and needs the confirmation |
+| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback`. Loopback is decided by parsing the *address*, so a hostname that merely starts `127.` (or `localhost.example.com`) is not loopback and needs the confirmation. `0.0.0.0`, `::` and `[::]` bind every interface; the response then names where to send (`reachableAt`, below) |
 | `response.status` | 100-599 |
 | `response.headers` | String values only; a `Content-Type` here is used verbatim |
 | `response.delayMs` | 0-30000, applied before every reply |
@@ -5967,6 +5967,26 @@ hand out a port it is already using.
 `captureCount` is how many captures the inbox is holding right now - what a
 `DELETE /inbox/:inboxId` would destroy with it. Every route that returns an
 inbox fills it, so a client can word a confirmation without a second round trip.
+
+`url` is where a sender sends, which is the bind address unless the inbox is
+bound to every address (`0.0.0.0`, `::` or `[::]`, each needing
+`confirmNonLoopback`): that is no address a sender can use, so `url` is the
+first non-loopback IPv4 address of the machine, and `reachableAt` lists a URL
+for every one (the machine has several; `url` is only the first the OS names):
+
+```json
+{
+  "url": "http://192.168.1.20:41235/",
+  "bind": "0.0.0.0",
+  "reachableAt": ["http://192.168.1.20:41235/", "http://10.0.0.7:41235/"]
+}
+```
+
+`reachableAt` is on the wire for a wildcard bind only, and lists IPv4
+addresses only. A
+machine with no non-loopback IPv4 address reports `reachableAt: []` and a
+`url` on `127.0.0.1`. It is read from the interfaces each time the inbox is
+read, not fixed at start, so it follows a change of network.
 
 ### GET /inbox
 

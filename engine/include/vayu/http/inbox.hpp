@@ -40,7 +40,13 @@ struct InboxCannedResponse {
 /** A started inbox as `GET /inbox` and the start/update routes report it. */
 struct InboxInfo {
     std::string inbox_id;
-    std::string url; // http://<bind>:<port>/
+    /// http://<bind>:<port>/ - except for a wildcard bind (`is_wildcard_bind`),
+    /// where `bind` is no address a sender can use, so it is the first of
+    /// `reachable_at` (or this machine's loopback address when it has none).
+    std::string url;
+    /// Every non-loopback IPv4 address of this machine as an inbox URL, for a
+    /// wildcard bind only (#3114); empty otherwise, and then not on the wire.
+    std::vector<std::string> reachable_at;
     std::string bind;
     int port = 0;
     /// False once stopped. A stopped inbox keeps its record - and therefore its
@@ -112,6 +118,20 @@ InboxLimits read_inbox_limits (vayu::db::Database& db);
 
 /** Is @p bind an address only this machine can reach? */
 bool is_loopback_bind (const std::string& bind);
+
+/**
+ * Does @p bind listen on every interface: `0.0.0.0` (any `0.x.x.x`, the
+ * "this network" block that is never a destination) or the IPv6 `::` / `[::]`?
+ *
+ * Such a bind is the one whose address a sender cannot use, so the inbox
+ * reports where it can be reached instead (#3114). It is neither loopback nor
+ * a name for one interface, which is why `start` asks it to be confirmed.
+ */
+bool is_wildcard_bind (const std::string& bind);
+
+/// The IPv4 addresses of this machine's up interfaces, loopback included;
+/// `vayu::platform::local_ipv4_addresses` unless a test injects its own.
+using LocalAddressSource = std::function<std::vector<std::string> ()>;
 
 /**
  * Validate a `POST /inbox/start` payload.
@@ -189,7 +209,11 @@ class InboxManager {
     public:
     // Out-of-line because the map holds unique_ptr<Inbox> and Inbox is
     // incomplete here (same reason as OAuth2AuthorizeManager).
-    InboxManager ();
+    //
+    // @p local_addresses is where a wildcard bind looks up the addresses to
+    // report; empty means the machine's own. Injected so a test does not
+    // depend on the NICs of the host it runs on.
+    explicit InboxManager (LocalAddressSource local_addresses = {});
     ~InboxManager ();
 
     InboxManager (const InboxManager&)            = delete;
@@ -311,6 +335,8 @@ class InboxManager {
     struct Inbox;
     std::mutex mutex_;
     std::map<std::string, std::unique_ptr<Inbox>> inboxes_;
+    /// Never empty after construction; read under `mutex_` by `Inbox::info_locked`.
+    LocalAddressSource local_addresses_;
 
     void teardown_locked (Inbox& inbox);
 };
