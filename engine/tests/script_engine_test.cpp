@@ -5088,15 +5088,15 @@ TEST_F (ScriptEngineTest, ScopedReplaceInResolvesFromItsOwnScopeAndNoOther) {
         const char* expected;
     };
     const std::array<ScopeCase, 3> cases{ {
-        { "environment",
-        "from-environment|e1|{{globalsOnly}}|{{collOnly}}|"
-        "{{localOnly}}|{{hidden}}|{{ancestorOnly}}" },
-        { "globals",
-        "from-globals|{{envOnly}}|g1|{{collOnly}}|{{localOnly}}|"
-        "{{hidden}}|{{ancestorOnly}}" },
-        { "collectionVariables",
-        "from-collection|{{envOnly}}|{{globalsOnly}}|"
-        "c1|{{localOnly}}|{{hidden}}|from-ancestor" },
+    { "environment",
+    "from-environment|e1|{{globalsOnly}}|{{collOnly}}|"
+    "{{localOnly}}|{{hidden}}|{{ancestorOnly}}" },
+    { "globals",
+    "from-globals|{{envOnly}}|g1|{{collOnly}}|{{localOnly}}|"
+    "{{hidden}}|{{ancestorOnly}}" },
+    { "collectionVariables",
+    "from-collection|{{envOnly}}|{{globalsOnly}}|"
+    "c1|{{localOnly}}|{{hidden}}|from-ancestor" },
     } };
 
     for (const auto& scope : cases) {
@@ -5152,7 +5152,7 @@ TEST_F (ScriptEngineTest, ScopedReplaceInStillAnswersTheNamesThatAreNotScopes) {
         Environment globals;
         Environment collVars;
         Environment local;
-        local["userId"] = Variable{ "from-local", false, true };
+        local["userId"]         = Variable{ "from-local", false, true };
         Environment* under_test = &collVars;
         if (std::string (accessor) == "environment") {
             under_test = &environment;
@@ -5177,7 +5177,8 @@ TEST_F (ScriptEngineTest, ScopedReplaceInStillAnswersTheNamesThatAreNotScopes) {
         script += "pm.variables.set('first', pair[0]);\n";
         script += "pm.variables.set('second', pair[1]);\n";
         script += "pm.variables.set('rest', " + call;
-        script += "('{{$vu}}/{{$iteration}}/{{data.city}}/{{userId}}/{{scopeOnly}}'));";
+        script +=
+        "('{{$vu}}/{{$iteration}}/{{data.city}}/{{userId}}/{{scopeOnly}}'));";
         auto result = engine.execute (script, ctx);
 
         ASSERT_TRUE (result.success) << accessor << ": " << result.error_message;
