@@ -6648,8 +6648,9 @@ consent screens and multi-tenant realms are deliberate non-goals.
 engine listener already holds is a `500` with code `mock_issuer_bind_failed`
 naming that listener, for the [same `SO_REUSEPORT`
 reason](#webhook-inbox) the inbox refuses one. `clients` empty accepts **any**
-client id; with clients configured, an id must be one of them and one carrying a
-secret must present it (Basic header or body - both RFC 6749 §2.3.1 placements).
+client id; with clients configured, an id must be one of them and, at `/token`,
+one carrying a secret must present it (Basic header or body - both RFC 6749
+§2.3.1 placements); `/authorize` checks the id only.
 A field present with the wrong type or an out-of-range value is a `400`
 (`mock_issuer_invalid_config`) rather than a silent fallback to the default - a
 mock issuer running with an expiry other than the one asked for would defeat the

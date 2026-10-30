@@ -209,22 +209,35 @@ ClientAuth read_client_auth (const httplib::Request& req) {
 /**
  * A client id is always required. With no `clients` configured any id is
  * accepted (the common "I just need a token" case); with clients configured the
- * id must be one of them, and one carrying a secret must present it.
+ * id must be one of them. `/authorize` asks only this: a browser redirect never
+ * carries a secret, so the secret is `/token`'s to check.
  */
-bool authenticate_client (const MockIssuerSettings& settings, const ClientAuth& auth) {
-    if (auth.client_id.empty ()) {
+bool is_known_client (const MockIssuerSettings& settings, const std::string& client_id) {
+    if (client_id.empty ()) {
         return false;
     }
     if (settings.clients.empty ()) {
         return true;
     }
     for (const auto& client : settings.clients) {
-        if (client.client_id != auth.client_id) {
-            continue;
+        if (client.client_id == client_id) {
+            return true;
         }
-        return client.client_secret.empty () || client.client_secret == auth.client_secret;
     }
     return false;
+}
+
+/// A known client that carries a secret must also present it.
+bool authenticate_client (const MockIssuerSettings& settings, const ClientAuth& auth) {
+    if (!is_known_client (settings, auth.client_id)) {
+        return false;
+    }
+    for (const auto& client : settings.clients) {
+        if (client.client_id == auth.client_id) {
+            return client.client_secret.empty () || client.client_secret == auth.client_secret;
+        }
+    }
+    return true; // no clients configured
 }
 
 void send_oauth_error (httplib::Response& res,
@@ -627,7 +640,7 @@ void handle_authorize (Issuer& issuer, const httplib::Request& req, httplib::Res
     }
 
     std::lock_guard<std::mutex> lock (issuer.state_mutex);
-    if (!authenticate_client (issuer.settings, ClientAuth{ client_id, {} })) {
+    if (!is_known_client (issuer.settings, client_id)) {
         send_oauth_error (res, 400, "invalid_client",
         client_id.empty () ? "client_id is required" : "Unknown client");
         return;

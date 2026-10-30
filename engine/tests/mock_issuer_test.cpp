@@ -430,6 +430,35 @@ TEST_F (MockIssuerTest, ConfiguredClientsGateTheTokenEndpoint) {
     EXPECT_TRUE (std::holds_alternative<vayu::http::oauth::TokenError> (unknown_client));
 }
 
+// #3116: a browser redirect carries no secret, so /authorize checks the id only.
+TEST_F (MockIssuerTest, AuthorizeChecksTheClientIdButNeverASecret) {
+    MockIssuerManager mgr;
+    const auto issuer = mgr.start (json{ { "clients",
+    json::array ({ json{ { "clientId", "known" }, { "clientSecret", "s3cret" } } }) } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+
+    const std::string redirect = "http://127.0.0.1:9/callback";
+    EXPECT_FALSE (authorize_for_code (issuer, "known", redirect, "").empty ());
+    EXPECT_TRUE (authorize_for_code (issuer, "stranger", redirect, "").empty ());
+    EXPECT_TRUE (authorize_for_code (issuer, "", redirect, "").empty ());
+
+    // The code still has to be redeemed with the secret at /token.
+    const std::string code = authorize_for_code (issuer, "known", redirect, "");
+    ASSERT_FALSE (code.empty ());
+    httplib::Client cli (issuer.issuer_url);
+    const std::string body =
+    "grant_type=authorization_code&client_id=known&code=" + vayu::utils::url_encode (code) +
+    "&redirect_uri=" + vayu::utils::url_encode (redirect);
+    auto without_secret = cli.Post (
+    "/token", body + "&client_secret=nope", "application/x-www-form-urlencoded");
+    ASSERT_TRUE (without_secret != nullptr);
+    EXPECT_EQ (without_secret->status, 401);
+    auto with_secret = cli.Post ("/token", body + "&client_secret=s3cret",
+    "application/x-www-form-urlencoded");
+    ASSERT_TRUE (with_secret != nullptr);
+    EXPECT_EQ (with_secret->status, 200);
+}
+
 // ---------------------------------------------------------------------------
 // Failure modes
 // ---------------------------------------------------------------------------
