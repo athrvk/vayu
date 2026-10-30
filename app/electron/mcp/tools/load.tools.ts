@@ -297,12 +297,12 @@ export const LOAD_TOOLS: McpTool[] = [
 					series: z
 						.array(z.string())
 						.describe(
-							'Metric names to read out of each scrape, e.g. ["process_cpu_seconds_total"]. At least one; the ceiling is the `monitorMaxSeries` setting (8 by default).'
+							'Metric names to read out of each scrape, e.g. ["process_cpu_seconds_total"]. At least one; the ceiling is the `monitorMaxSeries` setting (8 by default). A Prometheus series is matched by bare name and its label sets are summed, so a name holding `{` or whitespace (a label filter such as `http_requests_total{code="500"}`) is refused; a JSON key may hold either.'
 						),
 				})
 				.optional()
 				.describe(
-					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus the sample and failed-scrape counts. Omit for a run that measures only the client side."
+					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg, the sample count, `failures` (scrapes with no 2xx answer, the latest cause in `lastError`) and `noMatchScrapes` (2xx answers carrying none of the requested names, so the names are wrong, not the URL). Omit for a run that measures only the client side."
 				),
 			// The redirect policy of the request being load-tested. A saved
 			// request carries its own (composed in, never elided), so these are
