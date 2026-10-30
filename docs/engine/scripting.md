@@ -1708,7 +1708,7 @@ an MCP agent's withholding read the stored flag too.
 that scope is never stored and never masked, so a `secret` flag on it has no
 effect.
 
-### The six methods every scope has
+### The seven methods every scope has
 
 | Method | Returns | Notes |
 |---|---|---|
@@ -1718,6 +1718,7 @@ effect.
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
 | `toObject()` | plain object | every enabled variable, each value as `get()` answers it; a snapshot, not a live view |
+| `replaceIn(template)` | string | resolves `{{name}}` against **this scope's** enabled values alone, so a name only another scope defines stays `{{name}}`; `{{$guid}}` and the other generators, `{{$vu}}` / `{{$iteration}}` and a bound row's columns answer as they do on `pm.variables.replaceIn` ([below](#the-local-scope-pmvariablesset)); a non-string is a `TypeError` naming the call |
 
 ```javascript
 if (pm.environment.has('auth_token')) {
@@ -1743,7 +1744,7 @@ this is deliberately not an error.
 ## Collection and Global Variables
 
 The other two scopes are reached the same way as the environment, each through
-its own accessor, and answer the same six methods:
+its own accessor, and answer the same seven methods:
 
 ```javascript
 const value = pm.collectionVariables.get('baseUrl');
@@ -1870,8 +1871,13 @@ occurrence:
 const id = pm.variables.replaceIn("{{$guid}}"); // fresh UUID v4
 ```
 
-It exists only on the merged accessor - the scoped `replaceIn` variants stay
-absent - and its argument must be a string (a non-string is a `TypeError`).
+Its argument must be a string (a non-string is a `TypeError`). The three scopes
+have their own `replaceIn` (issue #3133): `pm.environment.replaceIn`,
+`pm.globals.replaceIn` and `pm.collectionVariables.replaceIn` run this same
+resolver over that one scope's enabled values only (the collection scope with its
+ancestors), so a name another scope defines stays `{{name}}`, and the run-local
+scope is read by the merged form alone. The generators, the identity and the
+bound row below answer on all four, and each refusal names the call written.
 This is the one sanctioned way to `{{...}}` in a script: script *source* is
 never interpolated (issue #226, D16 - a rewrite cannot tell code from a string
 literal, and splicing values into source is an injection). The editor now

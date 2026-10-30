@@ -33,9 +33,9 @@ supported is listed [below](#not-yet-supported).
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
 | Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
-| Environment         | `pm.environment.get/set/has/unset/clear/toObject`                                |
-| Globals             | `pm.globals.get/set/has/unset/clear/toObject`                                    |
-| Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject`                        |
+| Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
+| Globals             | `pm.globals.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
+| Collection vars     | `pm.collectionVariables.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
 | Merged variables    | `pm.variables.get(name)`, `.has(name)`, `.toObject()`, `.replaceIn(template)` - the local scope first, then a bound row's bare column names; `.set(name, value)`, `.unset(name)`, `.clear()` write the local scope, never stored, see below |
 | Script identity     | `pm.info.requestId`, `.requestName`, `.eventName`, `.iteration`, `.vu`, `.iterationCount` - each optional, see below |
 | Crypto              | `pm.crypto.sha256(data, encoding?)`, `.hmacSha256(key, data, encoding?)` - synchronous, see below |
@@ -230,6 +230,28 @@ script context's - the request's whole collection chain, leaf shadowing
 ancestor, the same walk `pm.collectionVariables` does (#234). The argument must
 be a string; anything else is a `TypeError` rather than a silently coerced
 `"undefined"`.
+
+#### Scoped `replaceIn`
+
+`pm.environment.replaceIn(template)`, `pm.globals.replaceIn(template)` and
+`pm.collectionVariables.replaceIn(template)` (issue #3133) are Postman's
+per-scope forms: the template resolves against **that scope's enabled values
+alone**, so a name only another scope defines keeps its braces. Everything that
+is not a scope answers as it does for `pm.variables.replaceIn` - `{{$guid}}` and
+the other generators, `{{$vu}}` / `{{$iteration}}`, and a bound row's
+`{{data.column}}` and bare column names, which win over the scope's own value
+of the same name. The run-local scope (`pm.variables.set`) is a scope of its
+own, so it is read only by the merged form. `pm.collectionVariables` reads its
+ancestor collections as it does everywhere else, and the argument rules and
+errors are the merged form's, naming the call the script wrote.
+
+```javascript
+pm.environment.set("host", "api.example.com");
+pm.globals.set("host", "other.example.com");
+pm.environment.replaceIn("https://{{host}}/{{$guid}}"); // "https://api.example.com/<a fresh UUID>"
+pm.globals.replaceIn("{{host}}");                       // "other.example.com"
+pm.collectionVariables.replaceIn("{{host}}");           // "{{host}}" - not defined in this scope
+```
 
 ### Script identity (`pm.info`) - seven fields, all optional
 
@@ -1644,11 +1666,6 @@ These Postman APIs are **not** implemented. A script that calls one throws; a
 read of one of the properties returns `undefined`, and the visualizer is
 accepted and warns:
 
-- `replaceIn(...)` on the **scoped** accessors (`pm.environment.replaceIn`,
-  `pm.globals.replaceIn`, `pm.collectionVariables.replaceIn`) - only the merged
-  `pm.variables.replaceIn(template)` exists (see below), and it answers with
-  the same precedence `{{name}}` uses, which is what a template means everywhere
-  else in Vayu
 - `pm.environment.name` - the active environment's name
 - **Dynamic variables via `pm.variables.get("$guid")`** - the *getter* does not
   fall through to the generator table; only `{{…}}` templates reach it. A script

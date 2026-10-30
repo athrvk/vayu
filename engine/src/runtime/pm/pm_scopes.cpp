@@ -122,7 +122,7 @@ JSValue cast_variable_to_jsvalue (JSContext* ctx, const Variable& var) {
 
 // Which of the run's variable maps a binding reads and writes. The value is the
 // `magic` argument QuickJS hands back, so one implementation serves every
-// scope. They were three hand-written copies of get/set; six methods each
+// scope. They were three hand-written copies of get/set; seven methods each
 // would have tripled that, and a copy is exactly what stops a fix landing
 // everywhere it belongs. `SCOPE_LOCAL` is the run-local scope behind
 // `pm.variables.set` / `unset` / `clear` (#2564); it has no accessor of its own
@@ -520,6 +520,11 @@ js_pm_scope_to_object (JSContext* ctx, JSValueConst this_val, int argc, JSValueC
     return snapshot;
 }
 
+// Defined with `pm.variables.replaceIn` below, which resolves through the same
+// helpers.
+JSValue
+js_pm_scope_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic);
+
 void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBinding& binding) {
     JSValue scope   = JS_NewObject (ctx);
     const int magic = binding.scope;
@@ -537,6 +542,9 @@ void setup_pm_variable_scope (JSContext* ctx, JSValue pm, const VariableScopeBin
     JS_SetPropertyStr (ctx, scope, "toObject",
     JS_NewCFunctionMagic (
     ctx, js_pm_scope_to_object, "toObject", 0, JS_CFUNC_generic_magic, magic));
+    JS_SetPropertyStr (ctx, scope, "replaceIn",
+    JS_NewCFunctionMagic (
+    ctx, js_pm_scope_replace_in, "replaceIn", 1, JS_CFUNC_generic_magic, magic));
 
     JS_SetPropertyStr (ctx, pm, binding.property, scope);
 }
@@ -668,37 +676,6 @@ JSValue js_pm_variables_to_object (JSContext* ctx, JSValueConst this_val, int ar
     return snapshot;
 }
 
-// pm.variables.replaceIn - full `{{template}}` resolution of a string the
-// script opts in, at call time.
-//
-// This is the sanctioned way to `{{...}}` inside a script. Script *text* is
-// never interpolated (issue #226, D16: a rewrite cannot tell code from a
-// string literal, and splicing variable values into source is an injection);
-// replaceIn keeps values as data - the same resolver the engine's POST
-// /compose uses (`resolve_template`), so the semantics are identical: the
-// `{{$vu}}`/`{{$iteration}}` identity answers ahead of every scope (issue
-// #1088), the local scope wins over a bound row's column (#2564), which wins
-// over the scopes (issue #1007), scopes win over generators, a dynamic
-// `{{$guid}}` generates per occurrence, and a name nothing answers keeps its
-// braces - an unknown `$name` and an ordinary unknown name alike (issue
-// #1009). A substituted value that
-// carries tokens of its own is resolved through them in turn, bounded by
-// `MAX_NESTED_RESOLUTIONS` (`request_composer.cpp`) and by a cycle rule
-// that leaves a name already being expanded written as it stands.
-//
-// Two deliberate differences from compose-time resolution, both consequences
-// of *when* this runs:
-//  - The map is built at call time from the script's scopes, so a variable
-//    set earlier in the same script resolves here at once; the request's own
-//    `{{}}` waits for the pre-request script to end (#2521).
-//  - The collection scope is the script context's - the request's collection
-//    chain, leaf shadowing ancestor (issue #234) - with pm.variables' own
-//    precedence (local > environment > collection > globals). The raw stored
-//    string substitutes, never the typed value - matching `{{}}`, not
-//    pm.variables.get.
-//
-// Strict about its argument: a non-string is a TypeError rather than a
-// coerced "undefined" - the caller almost certainly holds a bug.
 /// The row's columns, in payload order, for the "columns: ..." half of the
 /// refusal above. Mirrors `core/scenario_data.cpp`'s `describe_columns`, whose
 /// wording a bind-time failure already uses - the same mistake should read the
@@ -715,11 +692,10 @@ std::string describe_iteration_columns (const nlohmann::json& row) {
     return out.empty () ? "none" : out;
 }
 
-// The local scope's enabled values, the text each substitutes.
-vayu::http::VariableValues local_variable_values (JSContext* ctx) {
+// One scope's enabled values, the text each substitutes.
+vayu::http::VariableValues scope_variable_values (JSContext* ctx, int magic) {
     vayu::http::VariableValues values;
-    merge_visible_variables (
-    ctx, SCOPE_LOCAL, [&] (const std::string& key, const Variable& variable) {
+    merge_visible_variables (ctx, magic, [&] (const std::string& key, const Variable& variable) {
         values[key] = variable.value;
     });
     return values;
@@ -729,7 +705,7 @@ vayu::http::VariableValues local_variable_values (JSContext* ctx) {
 // overwrites - the same walk toObject() does, and the same answer get() would
 // give per name. Read at call time rather than at bind time, which is what
 // makes a write earlier in the same script visible here. The bound row is not
-// in it: `resolve_script_template` hands the row to the resolver beside it.
+// in it: `resolve_against` hands the row to the resolver beside it.
 vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
     vayu::http::VariableValues values;
     for (auto it = std::rbegin (variables_precedence);
@@ -739,7 +715,7 @@ vayu::http::VariableValues visible_variable_values (JSContext* ctx) {
             values[key] = variable.value;
         });
     }
-    for (auto& [key, value] : local_variable_values (ctx)) {
+    for (auto& [key, value] : scope_variable_values (ctx, SCOPE_LOCAL)) {
         values[key] = std::move (value);
     }
     return values;
@@ -777,23 +753,43 @@ vayu::http::IterationIdentity script_identity (const ContextData* data) {
     return identity;
 }
 
-} // namespace
-
-// One resolution of `input` against everything the script can see: the four
-// scopes as they stand now, the iteration identity this script is running as,
-// plus the bound data row's columns when the run has one.
-// `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
-// so a script cannot get one answer from the template it renders and another
-// from the request it sends.
+// Full `{{template}}` resolution of a string a script opts in, at call time,
+// against @p values: the one resolver behind every `replaceIn`.
 //
+// This is the sanctioned way to `{{...}}` inside a script. Script *text* is
+// never interpolated (issue #226, D16: a rewrite cannot tell code from a
+// string literal, and splicing variable values into source is an injection);
+// replaceIn keeps values as data - the same resolver the engine's POST
+// /compose uses (`resolve_template`), so the semantics are identical: the
+// `{{$vu}}`/`{{$iteration}}` identity answers ahead of every scope (issue
+// #1088), @p local wins over a bound row's column (#2564), which wins over
+// @p values (issue #1007), @p values win over generators, a dynamic
+// `{{$guid}}` generates per occurrence, and a name nothing answers keeps its
+// braces - an unknown `$name` and an ordinary unknown name alike (issue
+// #1009). A substituted value that carries tokens of its own is resolved
+// through them in turn, bounded by `MAX_NESTED_RESOLUTIONS`
+// (`request_composer.cpp`) and by a cycle rule that leaves a name already
+// being expanded written as it stands.
+//
+// Two deliberate differences from compose-time resolution, both consequences
+// of *when* this runs:
+//  - The maps are built at call time from the script's scopes, so a variable
+//    set earlier in the same script resolves here at once; the request's own
+//    `{{}}` waits for the pre-request script to end (#2521).
+//  - The collection scope is the script context's - the request's collection
+//    chain, leaf shadowing ancestor (issue #234). The raw stored string
+//    substitutes, never the typed value - matching `{{}}`, not
+//    pm.variables.get.
+//
+// @param local the run-local scope's values, the one tier above a bound row.
 // @param missing_column receives the {{data.column}} name the bound row does
 //        not carry, when that is why the resolution failed.
 // @return the resolved text, or nullopt when a column was named and missing.
-std::optional<std::string> resolve_script_template (JSContext* ctx,
+std::optional<std::string> resolve_against (JSContext* ctx,
 const std::string& input,
+const vayu::http::VariableValues& values,
+const vayu::http::VariableValues& local,
 std::string& missing_column) {
-    const vayu::http::VariableValues values = visible_variable_values (ctx);
-
     auto* data                                   = get_context_data (ctx);
     const vayu::http::IterationIdentity identity = script_identity (data);
     if (data == nullptr || data->iteration_data == nullptr ||
@@ -815,7 +811,7 @@ std::string& missing_column) {
     for (const auto& [column, cell] : data->iteration_data->items ()) {
         row.columns[column] = vayu::http::render_data_value (cell);
     }
-    row.local = local_variable_values (ctx);
+    row.local = local;
 
     std::optional<std::string> missing;
     std::string resolved =
@@ -825,6 +821,21 @@ std::string& missing_column) {
         return std::nullopt;
     }
     return resolved;
+}
+
+} // namespace
+
+// One resolution of `input` against everything the script can see: the four
+// scopes as they stand now, the iteration identity this script is running as,
+// plus the bound data row's columns when the run has one.
+// `pm.variables.replaceIn` and `pm.sendRequest` both resolve through this,
+// so a script cannot get one answer from the template it renders and another
+// from the request it sends. The resolution rules are `resolve_against`'s.
+std::optional<std::string> resolve_script_template (JSContext* ctx,
+const std::string& input,
+std::string& missing_column) {
+    return resolve_against (ctx, input, visible_variable_values (ctx),
+    scope_variable_values (ctx, SCOPE_LOCAL), missing_column);
 }
 
 // The bind-time rule, in the shape a script can catch: naming the token and the
@@ -844,21 +855,55 @@ missing_column_message (JSContext* ctx, const std::string& what, const std::stri
 
 namespace {
 
-JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
-    (void)this_val;
+// The argument check and the answer of every `replaceIn`; @p resolve is the one
+// part that differs, the values the template resolves against. @p api names the
+// call in both refusals. Strict about the argument: a non-string is a
+// TypeError rather than a coerced "undefined" - the caller almost certainly
+// holds a bug.
+template <typename Resolve>
+JSValue
+replace_in (JSContext* ctx, int argc, JSValueConst* argv, const std::string& api, Resolve&& resolve) {
     if (argc < 1 || !JS_IsString (argv[0])) {
         return JS_ThrowTypeError (ctx,
-        "pm.variables.replaceIn expects a string, e.g. "
-        "pm.variables.replaceIn(\"{{$guid}}\")");
+        "%s expects a string, e.g. %s(\"{{$guid}}\")", api.c_str (), api.c_str ());
     }
 
     std::string missing;
-    auto resolved = resolve_script_template (ctx, js_to_string (ctx, argv[0]), missing);
+    auto resolved = resolve (js_to_string (ctx, argv[0]), missing);
     if (!resolved) {
-        return JS_ThrowTypeError (ctx, "%s",
-        missing_column_message (ctx, "pm.variables.replaceIn", missing).c_str ());
+        return JS_ThrowTypeError (
+        ctx, "%s", missing_column_message (ctx, api, missing).c_str ());
     }
     return JS_NewString (ctx, resolved->c_str ());
+}
+
+JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)this_val;
+    return replace_in (ctx, argc, argv, "pm.variables.replaceIn",
+    [&] (const std::string& input, std::string& missing) {
+        return resolve_script_template (ctx, input, missing);
+    });
+}
+
+// `pm.environment.replaceIn` and its siblings: Postman resolves against that
+// scope alone, so a name only another scope defines stays written as it stands.
+// What is not a scope - the `$` names, the iteration identity, the bound row -
+// answers as it does for `pm.variables.replaceIn`, and the run-local scope
+// sits out because it is a scope of its own.
+JSValue
+js_pm_scope_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    std::string api = "pm.";
+    for (const auto& binding : variable_scope_bindings) {
+        if (binding.scope == magic) {
+            api += binding.property;
+        }
+    }
+    api += ".replaceIn";
+    return replace_in (
+    ctx, argc, argv, api, [&] (const std::string& input, std::string& missing) {
+        return resolve_against (ctx, input, scope_variable_values (ctx, magic), {}, missing);
+    });
 }
 
 } // namespace

@@ -1596,6 +1596,23 @@ nlohmann::json get_script_completions () {
                      "console.log({}.toObject());",
         noun, accessor, accessor) },
         { "sortText", sort + "toObject" } });
+
+        completions.push_back ({ { "label", accessor + ".replaceIn" },
+        { "kind", KIND_FUNCTION }, { "insertText", accessor + ".replaceIn(\"${1:template}\")" },
+        { "insertTextRules", INSERT_AS_SNIPPET },
+        { "detail", accessor + ".replaceIn(template: string): string" },
+        { "documentation",
+        std::format (
+        "Resolve {{{{name}}}} placeholders in a string against the {}s alone - "
+        "a name only another scope defines stays written as it stands, which "
+        "is what sets this apart from pm.variables.replaceIn. {{{{$guid}}}}, "
+        "{{{{$timestamp}}}} and {{{{$random*}}}} still generate a fresh value "
+        "per occurrence, {{{{$vu}}}} and {{{{$iteration}}}} resolve to the "
+        "numbers the request beside this script was bound with, and a bound "
+        "data row answers {{{{column}}}} and {{{{data.column}}}}.\n\nExample:\n"
+        "const id = {}.replaceIn('{{{{$guid}}}}-{{{{{}}}}}');",
+        noun, accessor, scope.example) },
+        { "sortText", sort + "replaceIn" } });
     }
 
     // ========================================

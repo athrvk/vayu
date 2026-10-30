@@ -850,6 +850,13 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
+		 * Resolve {{name}} placeholders in a string against the collection variables alone - a name only another scope defines stays written as it stands, which is what sets this apart from pm.variables.replaceIn. {{$guid}}, {{$timestamp}} and {{$random*}} still generate a fresh value per occurrence, {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with, and a bound data row answers {{column}} and {{data.column}}.
+		 * 
+		 * Example:
+		 * const id = pm.collectionVariables.replaceIn('{{$guid}}-{{base_url}}');
+		 */
+		replaceIn(template: string): string;
+		/**
 		 * Set a collection variable on the request's own collection - it shadows a parent collection's variable of the same name rather than changing it. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
@@ -995,6 +1002,13 @@ declare const pm: {
 		 */
 		has(name: string): boolean;
 		/**
+		 * Resolve {{name}} placeholders in a string against the environment variables alone - a name only another scope defines stays written as it stands, which is what sets this apart from pm.variables.replaceIn. {{$guid}}, {{$timestamp}} and {{$random*}} still generate a fresh value per occurrence, {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with, and a bound data row answers {{column}} and {{data.column}}.
+		 * 
+		 * Example:
+		 * const id = pm.environment.replaceIn('{{$guid}}-{{auth_token}}');
+		 */
+		replaceIn(template: string): string;
+		/**
 		 * Set an environment variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
 		 * The optional third argument is a type name ('string', 'number', 'boolean', 'json'; 'array' and 'object' mean 'json') or { type, secret }. { secret: true } marks the variable secret, { secret: false } clears the flag. Run snapshots mask a secret from the next run on, not the run that set it.
@@ -1092,6 +1106,13 @@ declare const pm: {
 		 * if (pm.globals.has('api_key')) { /* ... *\/ }
 		 */
 		has(name: string): boolean;
+		/**
+		 * Resolve {{name}} placeholders in a string against the global variables alone - a name only another scope defines stays written as it stands, which is what sets this apart from pm.variables.replaceIn. {{$guid}}, {{$timestamp}} and {{$random*}} still generate a fresh value per occurrence, {{$vu}} and {{$iteration}} resolve to the numbers the request beside this script was bound with, and a bound data row answers {{column}} and {{data.column}}.
+		 * 
+		 * Example:
+		 * const id = pm.globals.replaceIn('{{$guid}}-{{api_key}}');
+		 */
+		replaceIn(template: string): string;
 		/**
 		 * Set a global variable. Later reads in this run answer the value as set; its string form is what {{name}} substitutes and what is persisted.
 		 * 
