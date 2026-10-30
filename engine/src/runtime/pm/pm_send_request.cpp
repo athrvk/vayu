@@ -7,9 +7,11 @@
 
 /**
  * @file pm_send_request.cpp
- * @brief `pm.sendRequest`.
+ * @brief `pm.sendRequest`, and the auth block reader it shares with
+ *        `pm.request.auth` (`pm_auth.hpp`).
  */
 
+#include "pm_auth.hpp"
 #include "pm_internal.hpp"
 
 #include <algorithm>
@@ -19,6 +21,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -32,7 +35,216 @@
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::runtime::pm_detail {
+
+// ============================================================================
+// Postman's auth block - pm.sendRequest's options.auth and pm.request.auth
+// ============================================================================
+
 namespace {
+
+// One auth block's parameters, by name.
+using AuthParameters = std::map<std::string, std::string>;
+
+// Postman writes an auth block in two shapes and a script may hand over either:
+// `[{ key, value }]` as an exported collection carries it, or `{ name: value }`
+// as a script hand-writes it. Both are read, for the same reason the header
+// option reads both spellings - a parameter silently vanishing is a request
+// sent with the wrong credential.
+std::optional<std::string> read_auth_parameters (JSContext* ctx,
+JSValueConst block,
+const std::string& where,
+AuthParameters& out) {
+    if (JS_IsUndefined (block) || JS_IsNull (block)) {
+        return std::nullopt;
+    }
+    // A scalar the block's own value: `{ type: 'bearer', bearer: 'tok' }` is
+    // not a shape Postman writes, and reading it as a token would guess which
+    // parameter was meant.
+    if (!JS_IsObject (block) || JS_IsFunction (ctx, block)) {
+        return where + " must be an object or an array of { key, value } entries, got " +
+        std::string (js_type_name (ctx, block));
+    }
+
+    const auto read_value = [&] (JSValueConst value, const std::string& name,
+                            std::optional<std::string>& reason) -> std::optional<std::string> {
+        if (JS_IsUndefined (value) || JS_IsNull (value)) {
+            return std::nullopt;
+        }
+        if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
+            reason = where + "." + name + " must be a string, got " +
+            std::string (js_type_name (ctx, value));
+            return std::nullopt;
+        }
+        return js_to_string (ctx, value);
+    };
+
+    std::optional<std::string> reason;
+    if (JS_IsArray (block)) {
+        int64_t length = 0;
+        if (JS_GetLength (ctx, block, &length) < 0) {
+            return where + " could not be enumerated";
+        }
+        for (int64_t i = 0; i < length; i++) {
+            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, block, i));
+            if (!JS_IsObject (entry.get ()) || JS_IsArray (entry.get ())) {
+                return where + " entries must be { key, value } objects, got " +
+                std::string (js_type_name (ctx, entry.get ()));
+            }
+            ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry.get (), "key"));
+            if (!JS_IsString (key.get ())) {
+                return where + " entries need a string 'key', got " +
+                std::string (js_type_name (ctx, key.get ()));
+            }
+            const std::string name = js_to_string (ctx, key.get ());
+            ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry.get (), "value"));
+            if (auto text = read_value (value.get (), name, reason)) {
+                out[name] = std::move (*text);
+            }
+            if (reason) {
+                return reason;
+            }
+        }
+        return std::nullopt;
+    }
+
+    for (const char* name : { "token", "username", "password", "key", "value", "in" }) {
+        ScopedValue value (ctx, JS_GetPropertyStr (ctx, block, name));
+        if (auto text = read_value (value.get (), name, reason)) {
+            out[name] = std::move (*text);
+        }
+        if (reason) {
+            return reason;
+        }
+    }
+    return std::nullopt;
+}
+
+// An api key's parameters, refused where the header or query parameter it
+// names could not be written.
+std::optional<std::string> read_api_key (const AuthParameters& params,
+const std::string& where,
+vayu::http::Auth& out) {
+    const auto parameter = [&params] (const std::string& name) {
+        const auto it = params.find (name);
+        return it == params.end () ? std::string () : it->second;
+    };
+    const std::string in = parameter ("in");
+    if (!in.empty () && in != "header" && in != "query") {
+        return where + ".in must be 'header' or 'query' (got \"" + in + "\")";
+    }
+    std::string key = parameter ("key");
+    if (key.empty ()) {
+        return where +
+        " needs a 'key' - the header name, or query parameter name, "
+        "the value is sent under";
+    }
+    out = vayu::http::ApiKeyAuth{ std::move (key), parameter ("value"), in == "query" };
+    return std::nullopt;
+}
+
+} // namespace
+
+// The three types the engine can compose become its typed `Auth`, applied by
+// `vayu::http::apply_auth` - the same function every other send here composes
+// credentials with, because a second copy of "Basic " + base64 in the script
+// layer would not receive that one's fixes. Every other type is refused by
+// name: dropping the block sends an unauthenticated request that looks like
+// the script's own mistake, which is the silent wrong request the body modes
+// are refused to prevent.
+std::optional<std::string> read_script_auth (JSContext* ctx,
+JSValueConst value,
+const ScriptAuthSlot& slot,
+vayu::http::Auth& out) {
+    if (JS_IsUndefined (value) || JS_IsNull (value)) {
+        return std::nullopt;
+    }
+    const std::string label (slot.label);
+    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
+        return label +
+        " must be an object like "
+        "{ type: 'bearer', bearer: { token: '...' } }, got " +
+        std::string (js_type_name (ctx, value));
+    }
+
+    ScopedValue js_type (ctx, JS_GetPropertyStr (ctx, value, "type"));
+    if (!JS_IsString (js_type.get ())) {
+        return label + " needs a string 'type' (basic, bearer, apikey or noauth), got " +
+        std::string (js_type_name (ctx, js_type.get ()));
+    }
+
+    const std::string type = js_to_string (ctx, js_type.get ());
+    if (type == "noauth" || type == "none") {
+        out = vayu::http::NoAuth{};
+        return std::nullopt;
+    }
+    if (type != "basic" && type != "bearer" && type != "apikey") {
+        // oauth2 included, and deliberately: acquiring a token needs the
+        // database this path does not have, so composing it here would either
+        // reach for state the sandbox has no business holding or send the
+        // request with no token at all.
+        return label + " type \"" + type +
+        "\" is not supported - the sandbox composes basic, bearer and apikey. "
+        "Build the credential yourself and set the header.";
+    }
+
+    ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
+    if (JS_IsUndefined (block.get ()) || JS_IsNull (block.get ())) {
+        // A type naming a block that is not there - `{ type: 'basic' }`, or the
+        // key misspelled - is refused rather than read as an empty credential.
+        // Basic is why this is checked here rather than left to the per-type
+        // reads below: neither of its halves is required, so an absent block
+        // would compose `Basic Og==` and send it, which is the silent wrong
+        // request in the one shape the required-field checks cannot see.
+        return label + " names type \"" + type + "\" but carries no " +
+        std::string (slot.path) + "." + type + " block to read it from";
+    }
+    const std::string where = label + "." + type;
+    AuthParameters params;
+    if (auto reason = read_auth_parameters (ctx, block.get (), where, params)) {
+        return reason;
+    }
+
+    if (type == "apikey") {
+        return read_api_key (params, where, out);
+    }
+    if (type == "bearer") {
+        auto token = params.find ("token");
+        if (token == params.end () || token->second.empty ()) {
+            return where +
+            " needs a 'token' - an empty one would send the header "
+            "with nothing after \"Bearer\"";
+        }
+        out = vayu::http::BearerAuth{ std::move (token->second) };
+        return std::nullopt;
+    }
+    // Basic. Neither half is required: Postman sends an empty username or
+    // password as the empty string, and the pair is base64-encoded either way.
+    out = vayu::http::BasicAuth{ params["username"], params["password"] };
+    return std::nullopt;
+}
+
+std::optional<std::string>
+resolve_script_auth (JSContext* ctx, vayu::http::Auth& auth, std::string_view label) {
+    std::optional<std::string> failure;
+    vayu::http::walk_auth_credentials (
+    auth, [&] (std::string& credential, vayu::http::CredentialDestination) {
+        if (failure) {
+            return;
+        }
+        std::string missing;
+        auto resolved = resolve_script_template (ctx, credential, missing);
+        if (!resolved) {
+            failure = missing_column_message (ctx, std::string (label), missing);
+            return;
+        }
+        credential = std::move (*resolved);
+    });
+    return failure;
+}
+
+namespace {
+
+constexpr ScriptAuthSlot SEND_REQUEST_AUTH{ "pm.sendRequest options.auth", "options.auth" };
 
 // ============================================================================
 // pm.sendRequest
@@ -257,181 +469,6 @@ read_send_request_body (JSContext* ctx, JSValueConst value, Body& out) {
     return std::nullopt;
 }
 
-// One auth block's parameters, by name.
-using AuthParameters = std::map<std::string, std::string>;
-
-// Postman writes an auth block in two shapes and a script may hand over either:
-// `[{ key, value }]` as an exported collection carries it, or `{ name: value }`
-// as a script hand-writes it. Both are read, for the same reason the header
-// option reads both spellings - a parameter silently vanishing is a request
-// sent with the wrong credential.
-std::optional<std::string> read_auth_parameters (JSContext* ctx,
-JSValueConst block,
-const std::string& type,
-AuthParameters& out) {
-    const std::string where = "pm.sendRequest options.auth." + type;
-    if (JS_IsUndefined (block) || JS_IsNull (block)) {
-        return std::nullopt;
-    }
-    // A scalar the block's own value: `{ type: 'bearer', bearer: 'tok' }` is
-    // not a shape Postman writes, and reading it as a token would guess which
-    // parameter was meant.
-    if (!JS_IsObject (block) || JS_IsFunction (ctx, block)) {
-        return where + " must be an object or an array of { key, value } entries, got " +
-        std::string (js_type_name (ctx, block));
-    }
-
-    const auto read_value = [&] (JSValueConst value, const std::string& name,
-                            std::optional<std::string>& reason) -> std::optional<std::string> {
-        if (JS_IsUndefined (value) || JS_IsNull (value)) {
-            return std::nullopt;
-        }
-        if (!JS_IsString (value) && !JS_IsNumber (value) && !JS_IsBool (value)) {
-            reason = where + "." + name + " must be a string, got " +
-            std::string (js_type_name (ctx, value));
-            return std::nullopt;
-        }
-        return js_to_string (ctx, value);
-    };
-
-    std::optional<std::string> reason;
-    if (JS_IsArray (block)) {
-        int64_t length = 0;
-        if (JS_GetLength (ctx, block, &length) < 0) {
-            return where + " could not be enumerated";
-        }
-        for (int64_t i = 0; i < length; i++) {
-            ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, block, i));
-            if (!JS_IsObject (entry.get ()) || JS_IsArray (entry.get ())) {
-                return where + " entries must be { key, value } objects, got " +
-                std::string (js_type_name (ctx, entry.get ()));
-            }
-            ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry.get (), "key"));
-            if (!JS_IsString (key.get ())) {
-                return where + " entries need a string 'key', got " +
-                std::string (js_type_name (ctx, key.get ()));
-            }
-            const std::string name = js_to_string (ctx, key.get ());
-            ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry.get (), "value"));
-            if (auto text = read_value (value.get (), name, reason)) {
-                out[name] = std::move (*text);
-            }
-            if (reason) {
-                return reason;
-            }
-        }
-        return std::nullopt;
-    }
-
-    for (const char* name : { "token", "username", "password", "key", "value", "in" }) {
-        ScopedValue value (ctx, JS_GetPropertyStr (ctx, block, name));
-        if (auto text = read_value (value.get (), name, reason)) {
-            out[name] = std::move (*text);
-        }
-        if (reason) {
-            return reason;
-        }
-    }
-    return std::nullopt;
-}
-
-// pm.sendRequest's `auth`, in Postman's own shape: `{ type, <type>: params }`.
-//
-// The three types the engine can compose become its typed `Auth`, applied by
-// `vayu::http::apply_auth` - the same function every other send here composes
-// credentials with, because a second copy of "Basic " + base64 in the script
-// layer would not receive that one's fixes. Every other type is refused by
-// name: dropping the option sends an unauthenticated request that looks like
-// the script's own mistake, which is the silent wrong request the body modes
-// are refused to prevent.
-std::optional<std::string>
-read_send_request_auth (JSContext* ctx, JSValueConst value, vayu::http::Auth& out) {
-    if (JS_IsUndefined (value) || JS_IsNull (value)) {
-        return std::nullopt;
-    }
-    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
-        return "pm.sendRequest options.auth must be an object like "
-               "{ type: 'bearer', bearer: { token: '...' } }, got " +
-        std::string (js_type_name (ctx, value));
-    }
-
-    ScopedValue js_type (ctx, JS_GetPropertyStr (ctx, value, "type"));
-    if (!JS_IsString (js_type.get ())) {
-        return "pm.sendRequest options.auth needs a string 'type' (basic, "
-               "bearer, apikey or noauth), got " +
-        std::string (js_type_name (ctx, js_type.get ()));
-    }
-
-    const std::string type = js_to_string (ctx, js_type.get ());
-    if (type == "noauth" || type == "none") {
-        out = vayu::http::NoAuth{};
-        return std::nullopt;
-    }
-    if (type != "basic" && type != "bearer" && type != "apikey") {
-        // oauth2 included, and deliberately: acquiring a token needs the
-        // database this path does not have, so composing it here would either
-        // reach for state the sandbox has no business holding or send the
-        // request with no token at all.
-        return "pm.sendRequest options.auth type \"" + type +
-        "\" is not supported - the sandbox composes basic, bearer and apikey. "
-        "Build the credential yourself and set the header; the request is "
-        "refused rather than sent unauthenticated.";
-    }
-
-    AuthParameters params;
-    ScopedValue block (ctx, JS_GetPropertyStr (ctx, value, type.c_str ()));
-    if (JS_IsUndefined (block.get ()) || JS_IsNull (block.get ())) {
-        // A type naming a block that is not there - `{ type: 'basic' }`, or the
-        // key misspelled - is refused rather than read as an empty credential.
-        // Basic is why this is checked here rather than left to the per-type
-        // reads below: neither of its halves is required, so an absent block
-        // would compose `Basic Og==` and send it, which is the silent wrong
-        // request in the one shape the required-field checks cannot see.
-        return "pm.sendRequest options.auth names type \"" + type +
-        "\" but carries no options.auth." + type + " block to read it from";
-    }
-    if (auto reason = read_auth_parameters (ctx, block.get (), type, params)) {
-        return reason;
-    }
-    const auto parameter = [&params] (const std::string& name) {
-        const auto it = params.find (name);
-        return it == params.end () ? std::string () : it->second;
-    };
-
-    if (type == "bearer") {
-        std::string token = parameter ("token");
-        if (token.empty ()) {
-            return std::string ("pm.sendRequest options.auth.bearer needs a "
-                                "'token' - an empty one would send the header "
-                                "with nothing after \"Bearer\"");
-        }
-        out = vayu::http::BearerAuth{ std::move (token) };
-        return std::nullopt;
-    }
-    if (type == "basic") {
-        // Neither half is required: Postman sends an empty username or password
-        // as the empty string, and the pair is base64-encoded either way.
-        out = vayu::http::BasicAuth{ parameter ("username"), parameter ("password") };
-        return std::nullopt;
-    }
-
-    const std::string in = parameter ("in");
-    if (!in.empty () && in != "header" && in != "query") {
-        return "pm.sendRequest options.auth.apikey.in must be 'header' or "
-               "'query' (got \"" +
-        in + "\")";
-    }
-    std::string key = parameter ("key");
-    if (key.empty ()) {
-        return std::string (
-        "pm.sendRequest options.auth.apikey needs a 'key' - "
-        "the header name, or query parameter name, the "
-        "value is sent under");
-    }
-    out = vayu::http::ApiKeyAuth{ std::move (key), parameter ("value"), in == "query" };
-    return std::nullopt;
-}
-
 // One string pm.sendRequest was handed, resolved against the scopes the script
 // can see. @p what names the field a refusal is about.
 std::optional<std::string>
@@ -551,17 +588,7 @@ interpolate_send_request (JSContext* ctx, Request& request, vayu::http::Auth& au
         }
     }
 
-    // Driven by the walk `apply_auth` shares, so a credential cannot be
-    // resolved in one place and applied from another.
-    std::optional<std::string> failure;
-    vayu::http::walk_auth_credentials (
-    auth, [&] (std::string& credential, vayu::http::CredentialDestination) {
-        if (failure) {
-            return;
-        }
-        failure = resolve_send_request_text (ctx, credential, "options.auth");
-    });
-    return failure;
+    return resolve_script_auth (ctx, auth, SEND_REQUEST_AUTH.label);
 }
 
 // Translate pm.sendRequest's first argument into a Request.
@@ -671,7 +698,7 @@ build_send_request (JSContext* ctx, JSValueConst arg, Request& out, vayu::http::
     }
 
     ScopedValue js_auth (ctx, JS_GetPropertyStr (ctx, arg, "auth"));
-    return read_send_request_auth (ctx, js_auth.get (), auth);
+    return read_script_auth (ctx, js_auth.get (), SEND_REQUEST_AUTH, auth);
 }
 
 // The response a pm.sendRequest callback receives.
