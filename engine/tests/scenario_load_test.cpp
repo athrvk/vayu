@@ -1926,7 +1926,7 @@ TEST_F (ScenarioLoadTest, AScenarioLoadRunRunsNoInlineScriptsAndSamplesOnlyScrip
         { "concurrency", 1 } };
     run (config, execution);
 
-    EXPECT_TRUE (context_->test_script.empty ())
+    EXPECT_TRUE (context_->test_scripts.empty ())
     << "a scenario load run must not acquire a run-level test script";
     const auto& mc = *context_->metrics_collector;
     EXPECT_EQ (mc.response_samples ().size (), 0u)

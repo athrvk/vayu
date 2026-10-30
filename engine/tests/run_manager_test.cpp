@@ -1960,8 +1960,7 @@ TEST (RunManagerRetention, SweepEvictsExpiredOnly) {
 // A single-request run's own `requestElements` may declare a `script.post`
 // element (issue #1594); when it is not marked to run inline, its script text
 // is what the deferred replay (`validate_scripts`) reads back through
-// `test_script` - the same field the retired `tests` payload field used to
-// populate directly.
+// `test_scripts`.
 //
 // This exercises the wiring through RunContext's constructor, not
 // `compile_elements` in isolation.
@@ -1973,16 +1972,15 @@ TEST (RunManager, ConstructorReadsDeferredPostScriptFromRequestElements) {
     })");
 
     RunContext ctx ("r", config);
-    EXPECT_EQ (ctx.test_script, "pm.test(\"a\",()=>{});");
+    EXPECT_EQ (ctx.test_scripts, std::vector<std::string>{ "pm.test(\"a\",()=>{});" });
 }
 
 // A saved request composes the collection chain's `script.post` elements
 // before its own (issue #1514's `compose_elements` order), and both are
 // deferred by default - so a request whose collection also asserts
-// something must run both under load, not only the first, the way
-// `read_script` always joined every enabled part before this run shape had
-// elements at all.
-TEST (RunManager, ConstructorJoinsEveryDeferredPostScriptWithABlankLine) {
+// something must run both under load, not only the first. Each stays its own
+// entry, never joined, so the replay runs each in its own scope (#3125).
+TEST (RunManager, ConstructorKeepsEveryDeferredPostScriptApart) {
     auto config = nlohmann::json::parse (R"({
       "requestElements": [
         { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
@@ -1991,29 +1989,32 @@ TEST (RunManager, ConstructorJoinsEveryDeferredPostScriptWithABlankLine) {
     })");
 
     RunContext ctx ("r", config);
-    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+    EXPECT_EQ (ctx.test_scripts,
+    (std::vector<std::string>{ "pm.test(\"chain\",()=>{});", "pm.test(\"own\",()=>{});" }));
 }
 
-// The inline one is left out of the join entirely - both because it must not
-// run twice and because it may sit between two deferred ones in compile
-// order, which must not leave a stray blank line where it was skipped.
-TEST (RunManager, ConstructorSkipsAnInlineScriptPostWhenJoiningTheRest) {
+// The inline one is left out entirely, because it must not run twice, even
+// where it sits between two deferred ones in compile order. A blank one is
+// left out too: replayed alone it would tally a pass for asserting nothing.
+TEST (RunManager, ConstructorSkipsInlineAndBlankScriptPostsKeepingTheRest) {
     auto config = nlohmann::json::parse (R"({
       "requestElements": [
         { "kind": "script.post", "config": { "script": "pm.test(\"chain\",()=>{});" } },
         { "kind": "script.post",
           "config": { "script": "pm.test(\"inline\",()=>{});", "inline": true } },
+        { "kind": "script.post", "config": { "script": "  \n  " } },
         { "kind": "script.post", "config": { "script": "pm.test(\"own\",()=>{});" } }
       ]
     })");
 
     RunContext ctx ("r", config);
-    EXPECT_EQ (ctx.test_script, "pm.test(\"chain\",()=>{});\n\npm.test(\"own\",()=>{});");
+    EXPECT_EQ (ctx.test_scripts,
+    (std::vector<std::string>{ "pm.test(\"chain\",()=>{});", "pm.test(\"own\",()=>{});" }));
 }
 
 // A `script.post` marked `inline` runs on the pipeline hooks instead
 // (`submit_one_request` / `run_request_elements_after_submission`), so the
-// deferred replay must not run it a second time - `test_script` stays empty.
+// deferred replay must not run it a second time - `test_scripts` stays empty.
 TEST (RunManager, ConstructorLeavesTestScriptEmptyForAnInlineScriptPost) {
     auto config = nlohmann::json::parse (R"({
       "requestElements": [
@@ -2023,19 +2024,19 @@ TEST (RunManager, ConstructorLeavesTestScriptEmptyForAnInlineScriptPost) {
     })");
 
     RunContext ctx ("r", config);
-    EXPECT_TRUE (ctx.test_script.empty ());
+    EXPECT_TRUE (ctx.test_scripts.empty ());
 }
 
 // The route refuses `tests`/`postRequestScript(s)` outright now (issue
 // #1594's cut-over) - the constructor itself no longer reads any of them, so
 // a payload that still carries one (a stale caller the route did not run in
 // front of, as this unit test bypasses it) is simply ignored rather than
-// populating `test_script`.
+// populating `test_scripts`.
 TEST (RunManager, ConstructorIgnoresTheRetiredTestsField) {
     auto config = nlohmann::json::parse (R"({"tests":"pm.test(\"a\",()=>{});"})");
 
     RunContext ctx ("r", config);
-    EXPECT_TRUE (ctx.test_script.empty ());
+    EXPECT_TRUE (ctx.test_scripts.empty ());
 }
 
 // The wiring nobody else covers: what a collector counted has to reach the

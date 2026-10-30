@@ -188,7 +188,9 @@ class LoadIdentityTest : public ::testing::Test {
         context->load_data     = std::move (read.set);
         context->load_auth     = std::move (read.auth);
         context->load_template = tokenize_bindable_fields (built.request);
-        context->test_script   = payload.value ("tests", std::string ());
+        if (const auto tests = payload.value ("tests", std::string ()); !tests.empty ()) {
+            context->test_scripts = { tests };
+        }
         vayu::http::EventLoopConfig loop_config;
         loop_config.max_concurrent = 100;
         loop_config.max_per_host   = 100;

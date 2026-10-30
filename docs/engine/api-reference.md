@@ -8957,7 +8957,7 @@ discarded after - which is what keeps many concurrent submissions from
 writing through one shared map.
 
 **`pm.info.requestName` is not bound for an inline element on this path.**
-The deferred replay (the un-inlined `script.post` case, `test_script`) reads
+The deferred replay (the un-inlined `script.post` case, `test_scripts`) reads
 `requestName` off the run's own config exactly as it always has; an inline
 `script.pre` / `script.post` element's `ScriptContext` does not carry it:
 this path's `bind_submission_identity` (`load_strategy.cpp`) binds the
@@ -9726,10 +9726,12 @@ knob.
   the run drains, that step's own post-request script is replayed against the
   responses that step produced, and the tallies appear on that step's entry in
   the breakdown as `tests` (see `scenario.steps` below). A step with several
-  un-inlined, enabled `script.post` elements replays all of them as one
-  script, their texts joined in order - only this deferred replay joins; an
-  inline element runs in its own fresh context; a disabled one never runs and
-  tallies `skipped`. A step that carries
+  un-inlined, enabled `script.post` elements replays each one as its own
+  script, in order, against every sample (issue #3125): a `const` one declares
+  is not visible to the next, while a variable-scope write is. Their `pm.test`
+  results add up, and an element that calls none and does not throw counts as
+  one pass. An inline element runs in its own fresh context during the run; a
+  disabled one never runs and tallies `skipped`. A step that carries
   no script, whose script ran inline this run, or whose script never got a
   sampled response, carries no `tests` object at all rather than a row of
   zeros.

@@ -909,7 +909,7 @@ const vayu::ScriptResult& post);
  * "nothing this build can run" shape an unknown kind gets, so
  * `ElementPipeline::run` reports no outcome for it), not counted as "this
  * step carries a script" (`scenario_plan.cpp`'s `step_has_script`,
- * `run_manager.cpp`'s `find_step_post_script`). The stored row is untouched -
+ * `run_manager.cpp`'s `find_step_post_scripts`). The stored row is untouched -
  * a user mid-edit still sees and can edit it in its own Elements tab.
  */
 [[nodiscard]] bool

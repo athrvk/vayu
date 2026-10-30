@@ -842,12 +842,11 @@ carry from one to the next goes through `pm.environment` /
 `pm.collectionVariables` / `pm.globals` / `pm.iterationData`, or, for a
 `pm.request` edit, through the one `Request` object every element at the step
 shares. Script text is **never** interpolated - a `{{...}}` inside a script is
-user JavaScript, not a template. `POST /runs`'s own deferred `tests` script is
-unchanged by any of this (#1495's job): it still takes an ordered list of parts
-(`{ origin: "collection" | "request", id?, name?, script }`, or the legacy
-single-string field) joined with `"\n\n"` into one script run once
-(`engine/src/http/script_parts.cpp::read_script`), and a scenario load run does
-not run any element at all - see [scripting.md](scripting.md#script-elements-design-send-and-the-sequential-run).
+user JavaScript, not a template. A load run's deferred replay keeps the same
+rule (#3125): each un-inlined `script.post` element (a single-request run's
+`RunContext::test_scripts`, a scenario step's `find_step_post_scripts`) is
+replayed as its own script against every sample, never a joined text - see
+[scripting.md](scripting.md#load-test-scripts).
 
 ### Database (`SQLite`)
 

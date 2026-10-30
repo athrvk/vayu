@@ -362,7 +362,7 @@ class ScriptSendRequestCapLoadTest : public ::testing::Test {
         payload["max_response_samples"] = 10;
         payload["allowScriptRequests"]  = true;
         auto context = std::make_shared<vayu::core::RunContext> (RUN_ID, payload);
-        context->test_script = script;
+        context->test_scripts = { script };
 
         vayu::Response sample;
         sample.status_code     = 200;

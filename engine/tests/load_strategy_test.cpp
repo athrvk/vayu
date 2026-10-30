@@ -3474,7 +3474,7 @@ TEST_F (LoadStrategyTest, AnUnmarkedScriptPostElementDefersToTheCompletionReplay
 // The same element marked `inline` runs per submission instead - and must not
 // then run a second time on the deferred replay. `compile_step_elements`
 // prevents that by folding only an *un-inlined* `script.post` into
-// `RunContext::test_script`, which is what the absent `tests` node below
+// `RunContext::test_scripts`, which is what the absent `tests` node below
 // reads: fold an inline one in too and this run would report both an
 // `elements` tally and a `tests` tally for one script.
 TEST_F (LoadStrategyTest, AnInlineScriptPostElementRunsPerSubmissionAndIsNotReplayed) {

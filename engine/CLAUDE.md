@@ -615,9 +615,10 @@ logged as a warning: it means a client skipped composition.
   `Phase::StepBefore` / `Phase::StepAfter` per submission, the same
   inline-vs-deferred `script.*` dispatch the scenario path uses
   (`RunContext::script_element_runs_inline`); every un-inlined `script.post`
-  folds into the run's own completion replay (`RunContext::test_script`,
-  joined with a blank line in compile order, not only the first one - the
-  same join `read_script` always did before this run shape had elements).
+  joins the run's own completion replay (`RunContext::test_scripts`, one
+  entry per element in compile order, not only the first one). The replay
+  runs each element as its own script, never a joined text (#3125), on this
+  path and a scenario step's (`find_step_post_scripts`) alike.
   Only the phase-0 kinds #1514 gave the design send run here at all -
   `validate_request_elements_run_override` refuses any other enabled kind
   (`control.*`, `metric.*`, `timer.pacing`, `timer.throughput`) by name

@@ -18,7 +18,7 @@
  * `CompiledElement`, so the returned list carries a genuine `Element` -
  * exactly what a caller that runs the pipeline (`execute_exchange`, the
  * sequential runner) needs; a caller that only reads `kind` / `config` (the
- * load path's `find_step_post_script`, `step_has_script`) is served just as
+ * load path's `find_step_post_scripts`, `step_has_script`) is served just as
  * well by it.
  */
 

@@ -26,6 +26,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "optional_assert.hpp"
 #include "step_elements_test_helper.hpp"
@@ -141,13 +143,18 @@ class LoadScriptScopesTest : public ::testing::Test {
             cfg["environmentId"] = "env_eu";
         }
         auto context = std::make_shared<vayu::core::RunContext> ("run-scopes", cfg);
-        context->test_script = script;
+        context->test_scripts = { script };
         return context;
     }
 
     /// A scenario load run of `col_leaf` with one scripted step, its store
     /// seeded directly - the executor is not what is under test here.
     static std::shared_ptr<vayu::core::RunContext> scenario_run (const std::string& step_script) {
+        return scenario_run (vayu::tests::step_elements_with_post_script (step_script));
+    }
+
+    static std::shared_ptr<vayu::core::RunContext> scenario_run (
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements) {
         const json cfg = { { "response_sample_rate", 1 },
             { "max_response_samples", 100 }, { "environmentId", "env_eu" } };
         auto context =
@@ -159,10 +166,10 @@ class LoadScriptScopesTest : public ::testing::Test {
         execution->request.iterations    = 1;
 
         vayu::core::ScenarioStep step;
-        step.index      = 0;
-        step.request_id = "req_1";
-        step.name       = "List users";
-        step.elements = vayu::tests::step_elements_with_post_script (step_script);
+        step.index          = 0;
+        step.request_id     = "req_1";
+        step.name           = "List users";
+        step.elements       = std::move (step_elements);
         step.request.method = vayu::HttpMethod::GET;
         step.request.url    = "https://api.example.com/users";
         execution->plan.steps.push_back (step);
@@ -392,6 +399,66 @@ TEST_F (LoadScriptScopesTest, AScenarioStepReplayNamesWhyItsCookiesWereNotRecord
     const auto failure = stored_failure_text (*db_, "run-scenario-scopes");
     EXPECT_NE (failure.find ("not recorded"), std::string::npos)
     << "unexpected failure text: " << failure;
+}
+
+/// Two deferred `script.post` elements that each declare `const x`, the way a
+/// collection's and a request's scripts both declare `const json`. The second
+/// also reads the first one's scope write, which must still reach it.
+std::vector<json> two_post_scripts_declaring_x () {
+    return { vayu::tests::script_element_json ("el_first", "script.post",
+             "const x = 1;\n"
+             "pm.globals.set('first_ran', 'yes');\n"
+             "pm.test('first', function () { pm.expect(x).to.eql(1); });"),
+        vayu::tests::script_element_json ("el_second", "script.post",
+        "const x = 2;\n"
+        "pm.test('second', function () {\n"
+        "    pm.expect(x).to.eql(2);\n"
+        "    pm.expect(pm.globals.get('first_ran')).to.eql('yes');\n"
+        "});") };
+}
+
+// Each deferred element replays as its own script (#3125), as Send and a
+// collection run execute it. Mutation check: join the two texts with a blank
+// line in `run_replay` and run them as one, and this reports one failure,
+// "SyntaxError: invalid redefinition of lexical identifier"; join them in
+// `compile_step_elements` instead and the size assertion fails first.
+TEST_F (LoadScriptScopesTest, SingleRequestPostScriptsEachDeclaringTheSameConstBothPass) {
+    const json cfg = { { "response_sample_rate", 1 },
+        { "max_response_samples", 100 }, { "requestId", "req_1" },
+        { "requestElements", json (two_post_scripts_declaring_x ()) } };
+    auto context = std::make_shared<vayu::core::RunContext> ("run-scopes", cfg);
+    ASSERT_EQ (context->test_scripts.size (), 2u);
+    context->metrics_collector->record_response_sample (response_with ("{}"));
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->sampled, 1u);
+    EXPECT_EQ (validation.run->passed, 2u);
+    EXPECT_EQ (validation.run->failed, 0u)
+    << "the replay ran the elements as one script: "
+    << stored_failure_text (*db_, "run-scopes");
+}
+
+// The scenario shape of the same rule. Mutation check: join the texts in
+// `find_step_post_scripts` and this fails the same way.
+TEST_F (LoadScriptScopesTest, ScenarioStepPostScriptsEachDeclaringTheSameConstBothPass) {
+    auto context =
+    scenario_run (vayu::tests::compiled_elements (two_post_scripts_declaring_x ()));
+    context->metrics_collector->record_step_response_sample (
+    response_with ("{}"), 0,
+    vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->sampled, 1u);
+    EXPECT_EQ (first_step->passed, 2u);
+    EXPECT_EQ (first_step->failed, 0u)
+    << "the replay ran the elements as one script: "
+    << stored_failure_text (*db_, "run-scenario-scopes");
 }
 
 } // namespace
