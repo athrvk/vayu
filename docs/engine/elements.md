@@ -639,8 +639,9 @@ uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
 `true` or the run's `elements.scripts` override forces it -
 `RunContext::script_element_runs_inline` deciding exactly as it does for a
 scenario step. An unmarked `script.post` defers to this run's own completion
-replay (`RunContext::test_script`, folded from the un-inlined element at
-compile time so the replay does not need to know `elements` exist); an
+replay (`RunContext::test_scripts`, one entry per un-inlined element taken at
+compile time so the replay does not need to know `elements` exist, each
+replayed as its own script, #3125); an
 unmarked `script.pre` simply never runs, since there is no pre-request replay
 on this path to defer it to.
 

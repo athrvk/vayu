@@ -76,8 +76,8 @@ inline int64_t steady_now_ms () {
 }
 
 /**
- * @brief One deferred replay: a script, the samples it runs against, and the
- *        identity `pm.info` reports while it does.
+ * @brief One deferred replay: the scripts, the samples they run against, and
+ *        the identity `pm.info` reports while they do.
  *
  * A single-request run builds exactly one of these; a scenario load run builds
  * one per scripted step, which is the whole of the per-step extension - the
@@ -85,7 +85,10 @@ inline int64_t steady_now_ms () {
  * into reporting a pass differently.
  */
 struct ScriptReplay {
-    const std::string* script                  = nullptr;
+    /// One entry per `script.post` element, in compile order, each executed
+    /// on its own (#3125): joined, two elements that both declare `const json`
+    /// are a SyntaxError here while Send and a collection run pass them.
+    const std::vector<std::string>* scripts    = nullptr;
     const vayu::Request* request               = nullptr;
     const std::vector<ResponseSample>* samples = nullptr;
     /// The run's data rows, so a sampled iteration reads the row it was bound
@@ -150,8 +153,102 @@ RecordFailure&& record_failure) {
     }
 }
 
+/// The response a recorded sample stands for, as a script reads it.
+vayu::Response sample_response (const ResponseSample& sample) {
+    vayu::Response response;
+    response.status_code     = sample.status_code;
+    response.status_text     = sample.status_text;
+    response.body            = sample.body;
+    response.headers         = sample.headers;
+    response.timing.total_ms = sample.latency_ms;
+    return response;
+}
+
 /**
- * @brief Replay one script against one set of samples, tallying the results.
+ * @brief The context every script of @p replay reads for one sample.
+ *
+ * Read-only for the engine (`execute` takes it by `const&` and opens a fresh
+ * JavaScript context per call), so one context serves each element in turn;
+ * only a scope write carries from one element to the next, through @p scopes.
+ * @p response and @p stream_events are bound by address and must outlive
+ * every execute that reads the result.
+ */
+vayu::runtime::ScriptContext replay_context (const ScriptReplay& replay,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const ResponseSample& sample,
+const vayu::Response& response,
+nlohmann::json& stream_events) {
+    auto script_ctx = vayu::runtime::ScriptContext::for_test (*replay.request, response);
+    // All four scopes, through the one function that knows which of them a
+    // script may write (issue #728). Binding only `environment` here - and an
+    // empty one at that - is what made the same test script pass on Send and
+    // fail on every replay.
+    vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
+    script_ctx.cookie_read_refusal = replay.cookie_read_refusal;
+    script_ctx.request_id          = replay.request_id;
+    script_ctx.request_name        = replay.request_name;
+    // The iteration this response was actually sent in and the virtual user
+    // that sent it, both claimed on the submission path before the send
+    // (issue #994) - which is what keeps issue #300's ruling intact rather
+    // than reopening it: what that ruling refuses is reporting a *reservoir
+    // position* as an iteration number, and neither of these is one.
+    // `iterationCount` stays absent even here - a duration-bounded run has no
+    // total to report, and a script that could read it from one mode and not
+    // the other is worse than one that never reads it.
+    script_ctx.iteration = sample.iteration;
+    script_ctx.vu        = sample.vu;
+    replay.send.apply (script_ctx);
+    if (replay.data_rows != nullptr && sample.data_row_index &&
+    *sample.data_row_index < replay.data_rows->size ()) {
+        script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
+    }
+    // `pm.response.events` for a sampled stream (issue #657). Parsed here, at
+    // the end of the run, rather than copied on the completion path: the body
+    // already is the event list, and the deferred pass is where the expensive
+    // half of sampling belongs. A sample that did not stream sets nothing, so
+    // the script reads `undefined` - the same absent-not-empty rule the live
+    // path keeps.
+    if (sample.stream_events) {
+        stream_events = vayu::http::buffered_stream_events_node (sample.body,
+        replay.sse_limits, static_cast<int64_t> (*sample.stream_events),
+        // A load sample keeps the whole body it captured: the reservoir
+        // copies `Response::body`, which the byte cap has already ended the
+        // transfer over if it was ever exceeded. `CapturedExchange` is the
+        // path that truncates, and it is not this one.
+        true);
+        script_ctx.response_events = &stream_events;
+    }
+    return script_ctx;
+}
+
+/**
+ * @brief Run every script of @p replay against one sample, each on its own.
+ *
+ * A throw from one element is that element's failure; the elements after it
+ * still run, the way a Send's pipeline runs the next level after one throws.
+ */
+template <typename RecordFailure>
+void replay_sample (vayu::runtime::ScriptEngine& engine,
+vayu::http::routes::ScriptVariableScopes& scopes,
+const ScriptReplay& replay,
+const ResponseSample& sample,
+ScriptValidationTotals& totals,
+RecordFailure& record_failure) {
+    const vayu::Response response = sample_response (sample);
+    nlohmann::json stream_events;
+    const auto script_ctx = replay_context (replay, scopes, sample, response, stream_events);
+    for (const auto& script : *replay.scripts) {
+        try {
+            tally_replay_result (engine.execute (script, script_ctx), totals, record_failure);
+        } catch (const std::exception& e) {
+            totals.failed++;
+            record_failure ("Exception: " + std::string (e.what ()));
+        }
+    }
+}
+
+/**
+ * @brief Replay @p replay's scripts against its samples, tallying the results.
  *
  * @param scopes The run's stored variable scopes, shared by every replay of the
  *        pass and mutated in place by any `set()` a script performs - see
@@ -174,63 +271,10 @@ std::vector<std::string>& failure_messages) {
     };
 
     for (const auto& sample : *replay.samples) {
-        // Build Response from sample
-        vayu::Response response;
-        response.status_code     = sample.status_code;
-        response.status_text     = sample.status_text;
-        response.body            = sample.body;
-        response.headers         = sample.headers;
-        response.timing.total_ms = sample.latency_ms;
-
+        // A sample whose context cannot be built runs none of its scripts and
+        // fails once.
         try {
-            auto script_ctx =
-            vayu::runtime::ScriptContext::for_test (*replay.request, response);
-            // All four scopes, through the one function that knows which of
-            // them a script may write (issue #728). Binding only `environment`
-            // here - and an empty one at that - is what made the same test
-            // script pass on Send and fail on every replay.
-            vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
-            script_ctx.cookie_read_refusal = replay.cookie_read_refusal;
-            script_ctx.request_id          = replay.request_id;
-            script_ctx.request_name        = replay.request_name;
-            // The iteration this response was actually sent in and the virtual
-            // user that sent it, both claimed on the submission path before the
-            // send (issue #994) - which is what keeps issue #300's ruling
-            // intact rather than reopening it: what that ruling refuses is
-            // reporting a *reservoir position* as an iteration number, and
-            // neither of these is one. `iterationCount` stays absent even here
-            // - a duration-bounded run has no total to report, and a script
-            // that could read it from one mode and not the other is worse than
-            // one that never reads it.
-            script_ctx.iteration = sample.iteration;
-            script_ctx.vu        = sample.vu;
-            replay.send.apply (script_ctx);
-            if (replay.data_rows != nullptr && sample.data_row_index &&
-            *sample.data_row_index < replay.data_rows->size ()) {
-                script_ctx.iteration_data = &(*replay.data_rows)[*sample.data_row_index];
-            }
-            // `pm.response.events` for a sampled stream (issue #657). Parsed
-            // here, at the end of the run, rather than copied on the completion
-            // path: the body already is the event list, and the deferred pass
-            // is where the expensive half of sampling belongs. A sample that
-            // did not stream sets nothing, so the script reads `undefined` -
-            // the same absent-not-empty rule the live path keeps.
-            //
-            // Declared in the loop so the node outlives the execute it is bound
-            // to and no longer.
-            nlohmann::json stream_events;
-            if (sample.stream_events) {
-                stream_events = vayu::http::buffered_stream_events_node (sample.body,
-                replay.sse_limits, static_cast<int64_t> (*sample.stream_events),
-                // A load sample keeps the whole body it captured: the reservoir
-                // copies `Response::body`, which the byte cap has already ended
-                // the transfer over if it was ever exceeded. `CapturedExchange`
-                // is the path that truncates, and it is not this one.
-                true);
-                script_ctx.response_events = &stream_events;
-            }
-            auto result = engine.execute (*replay.script, script_ctx);
-            tally_replay_result (result, totals, record_failure);
+            replay_sample (engine, scopes, replay, sample, totals, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
@@ -348,18 +392,19 @@ std::optional<vayu::db::Request>& linked_request) {
 }
 
 /**
- * A step's un-inlined, enabled `script.post` scripts joined with a blank line,
- * or empty if it has none (issue #1514's cut-over: `ScenarioStep::post_script`
- * is gone, so the deferred replay below reads the same `elements` list the
- * sequential runner does). Every such element joins, the way
- * `RunContext::compile_step_elements` joins them for a single-request run, so
- * the `deferred` tally and the replay count the same elements (#2167).
+ * A step's un-inlined, enabled, non-blank `script.post` texts in compile
+ * order, or none (issue #1514's cut-over: `ScenarioStep::post_script` is gone,
+ * so the deferred replay below reads the same `elements` list the sequential
+ * runner does). Every such element is kept, the way
+ * `RunContext::compile_step_elements` keeps them for a single-request run, so
+ * the `deferred` tally and the replay count the same elements (#2167); each
+ * replays as its own script (#3125).
  */
-std::string find_step_post_script (const ScenarioStep& step,
+std::vector<std::string> find_step_post_scripts (const ScenarioStep& step,
 RunContext::ScriptsOverrideMode scripts_mode) {
-    std::string joined;
+    std::vector<std::string> scripts;
     if (!step.elements) {
-        return joined;
+        return scripts;
     }
     for (const auto& element : *step.elements) {
         if (element.kind != "script.post" || !element.enabled) {
@@ -373,13 +418,10 @@ RunContext::ScriptsOverrideMode scripts_mode) {
         if (auto found = element.config.find ("script");
         found != element.config.end () && found->is_string () &&
         !vayu::core::is_blank_script_text (found->get_ref<const std::string&> ())) {
-            if (!joined.empty ()) {
-                joined += "\n\n";
-            }
-            joined += found->get_ref<const std::string&> ();
+            scripts.push_back (found->get<std::string> ());
         }
     }
-    return joined;
+    return scripts;
 }
 
 /**
@@ -406,12 +448,12 @@ std::vector<std::string>& failure_messages) {
     for (size_t i = 0; i < steps; ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
-        const std::string post_script =
-        find_step_post_script (step, context->scripts_override);
+        const std::vector<std::string> post_scripts =
+        find_step_post_scripts (step, context->scripts_override);
         // A step with no script, or one whose script never got a sample to
         // run against, reports nothing rather than a row of zeros - the
         // same distinction the whole-run section has always kept.
-        if (post_script.empty () || samples.empty ()) {
+        if (post_scripts.empty () || samples.empty ()) {
             continue;
         }
 
@@ -421,7 +463,7 @@ std::vector<std::string>& failure_messages) {
         { { "runId", context->run_id }, { "sampleCount", samples.size () } });
 
         ScriptReplay replay;
-        replay.script = &post_script;
+        replay.scripts = &post_scripts;
         replay.cookie_read_refusal =
         "pm.cookies.%s is not available here: a replayed script runs after "
         "the run, against a recorded response; the user's cookies at that "
@@ -491,7 +533,7 @@ vayu::db::Database& db) {
     const bool per_step = context->scenario != nullptr &&
     context->metrics_collector->step_sample_step_count () > 0;
 
-    if (!per_step && context->test_script.empty ()) {
+    if (!per_step && context->test_scripts.empty ()) {
         return validation; // No script to validate
     }
 
@@ -603,7 +645,7 @@ vayu::db::Database& db) {
         { { "runId", context->run_id }, { "sampleCount", samples.size () } });
 
         ScriptReplay replay;
-        replay.script  = &context->test_script;
+        replay.scripts = &context->test_scripts;
         replay.request = &dummy_request;
         replay.samples = &samples;
         replay.cookie_read_refusal =
@@ -871,10 +913,9 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
  * `requestElements` (issue #1594), compiled once here into @ref
  * step_elements - refused beside a `scenario` block by the route, so this is
  * a no-op for that shape. Every `script.post` element found here that is not
- * running inline has its script text folded into @ref test_script, joined
- * with a blank line in compiled order exactly as `read_script` always joined
- * multiple parts, for the existing deferred replay (`validate_scripts`) to
- * read; an inline one is left for the pipeline hooks
+ * running inline has its script text appended to @ref test_scripts in
+ * compiled order, for the deferred replay (`validate_scripts`) to run one by
+ * one (#3125); an inline one is left for the pipeline hooks
  * (`submit_one_request` / `run_request_elements_after_submission`,
  * `load_strategy.cpp`) to run, and the deferred replay must not run it a
  * second time. Split out of the constructor to keep its own cognitive
@@ -899,18 +940,15 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
         RunContext::script_element_runs_inline (element.config, scripts_override)) {
             continue;
         }
-        // Every un-inlined `script.post` folds in here, not only the first:
-        // a saved request composes the collection chain's elements before its
-        // own (issue #1514's `compose_elements` order), and both are deferred
-        // by default, the same as `read_script` always joined every enabled
-        // part with a blank line before this run shape had elements at all.
+        // Every un-inlined `script.post` is kept, not only the first: a saved
+        // request composes the collection chain's elements before its own
+        // (issue #1514's `compose_elements` order), and both are deferred by
+        // default. A blank one is left out: replayed on its own it would
+        // tally a pass per sample for a script that asserts nothing.
         if (auto script = element.config.find ("script");
         script != element.config.end () && script->is_string () &&
-        !script->get<std::string> ().empty ()) {
-            if (!test_script.empty ()) {
-                test_script += "\n\n";
-            }
-            test_script += script->get<std::string> ();
+        !vayu::core::is_blank_script_text (script->get_ref<const std::string&> ())) {
+            test_scripts.push_back (script->get<std::string> ());
         }
     }
     element_tallies = vayu::core::RequestElementTallies (*compiled);

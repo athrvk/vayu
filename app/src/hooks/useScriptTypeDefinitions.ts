@@ -56,8 +56,7 @@ export const SCRIPT_LIB = ["esnext"];
  *     of which would need declaring and holding to the runtime.
  *   The collection-level part of a script is not one of them: each script
  *   element runs in a context of its own, so a name declared there is not
- *   visible here at run time, and only the deferred load-test replay still
- *   joins `script.post` parts.
+ *   visible here at run time, the deferred load-test replay included (#3125).
  *
  * What suppressing 2304 costs is every undeclared name drawing nothing. The
  * engine keeps the names a script is likeliest to reach for by declaring them

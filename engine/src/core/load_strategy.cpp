@@ -198,7 +198,7 @@ const ResultAnnotations& annotations) {
     if (annotations.step_index) {
         context->metrics_collector->record_step_response_sample (
         response, *annotations.step_index, identity);
-    } else if (!context->test_script.empty ()) {
+    } else if (!context->test_scripts.empty ()) {
         context->metrics_collector->record_response_sample (response, identity);
     }
 }

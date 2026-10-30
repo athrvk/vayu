@@ -169,7 +169,7 @@ compute_element_spans (const ScenarioPlan& plan);
  * #1514's cut-over - `ScenarioStep::pre_script` / `post_script` are gone).
  * Says nothing about whether it ran inline: reporting a script a load run
  * left behind is @ref step_has_deferred_script. The deferred replay reads a
- * step's script *text*, which is `find_step_post_script` in `run_manager.cpp`.
+ * step's script *text*, which is `find_step_post_scripts` in `run_manager.cpp`.
  */
 [[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
 
@@ -192,7 +192,7 @@ enum class ScriptsOverrideMode : std::uint8_t {
  * run inline under @p scripts_mode - the script a load run leaves behind, as
  * opposed to @ref step_has_script, which cannot tell the two apart. Decided by
  * `RunContext::script_element_runs_inline`, the one rule the load hooks and
- * the deferred replay (`find_step_post_script`) share, so the run-level
+ * the deferred replay (`find_step_post_scripts`) share, so the run-level
  * `pre_request_script_skipped` warning and the per-step `preRequestScript`
  * marker read the same answer (issue #1938).
  */

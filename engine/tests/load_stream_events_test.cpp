@@ -233,7 +233,7 @@ class LoadReplayEventsTest : public ::testing::Test {
     static std::shared_ptr<vayu::core::RunContext> context_with (const std::string& script) {
         const json cfg = { { "response_sample_rate", 1 }, { "max_response_samples", 100 } };
         auto context = std::make_shared<vayu::core::RunContext> ("run-replay", cfg);
-        context->test_script = script;
+        context->test_scripts = { script };
         return context;
     }
 

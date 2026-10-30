@@ -3923,9 +3923,14 @@ The **language** is current; what is missing is the **host environment**:
   naming `requestElements`, like every legacy script field. The collection chain's
   test scripts arrive as `script.post` elements in `requestElements`, ahead of
   the request's own, so a collection-level assertion is checked under load, not
-  only in design mode. Each element not running inline is folded into the one
-  deferred replay, their texts joined in order; an inline one runs in its own
-  context instead (see
+  only in design mode. Each element not running inline is replayed against
+  every sample as **its own script**, in compile order, the way a Send runs it:
+  a `const` one element declares is not visible to the next, so two that both
+  declare `const json` both run (issue #3125). A write to `pm.environment`,
+  `pm.collectionVariables` or `pm.globals` is still read by the elements after
+  it. Each element's `pm.test` calls add to the tally, and an element that
+  calls none and does not throw counts as one pass. An inline element runs
+  during the run instead (see
   [Script elements](#script-elements-design-send-and-the-sequential-run)
   below)
 - For a pre-request script that is **not** inlined, a value it would have set -
@@ -3957,8 +3962,9 @@ store. If a load run's scripts must leave a value behind, write it in design
 mode instead.
 
 **A scenario load run validates per step instead.** It has no run-level `tests`
-field: each plan step carries its own post-request script, and after the run
-drains each is replayed against the responses *that step* produced. The tallies
+field: each plan step carries its own `script.post` elements, and after the run
+drains each un-inlined one is replayed, on its own as above, against the
+responses *that step* produced. The tallies
 land on `scenario.steps[].tests` in the report - a whole-run pass/fail count
 over a sequence says something failed, not which step - while the aggregate
 still appears as `testValidation`. Three differences from the single-request

@@ -28,11 +28,10 @@ import type {
  * (`ColumnAudit`, `column-audit.ts`, `request-references.ts`) need: one flat
  * string per entity rather than the element list itself.
  *
- * Joined with the engine's own separator (`"\n\n"`,
- * `RunContext::compile_step_elements`) so it reproduces what a load run's
- * deferred replay runs when more than one `script.post` element defers - the
- * common case is exactly one such element, and this degrades sensibly for
- * more than one rather than silently dropping every part past the first.
+ * Joined with a blank line only so a scanner reads one string; nothing runs
+ * the joined text (the engine runs each element as its own script, #3125).
+ * Every part is kept rather than only the first, so a reference in a later
+ * element is still found.
  */
 export function scriptTextFor(
 	elements: ElementDef[],

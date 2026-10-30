@@ -795,7 +795,7 @@ TEST_F (LoadRunScriptTransportTest, ADeferredScriptTraversesTheRunsProxy) {
 
     auto context =
     std::make_shared<vayu::core::RunContext> ("run-script-transport", run_config ());
-    context->test_script = fetch_script (upstream.url ("/hello"));
+    context->test_scripts = { fetch_script (upstream.url ("/hello")) };
     configure_run (context);
     context->metrics_collector->record_response_sample (sampled_response ());
 
@@ -863,7 +863,7 @@ TEST_F (LoadRunScriptTransportTest, ADeferredScriptStaysOffTheProxyWhenTheRunDoe
 
     auto context =
     std::make_shared<vayu::core::RunContext> ("run-script-no-proxy", run_config ());
-    context->test_script = fetch_script (upstream.url ("/hello"));
+    context->test_scripts = { fetch_script (upstream.url ("/hello")) };
     configure_run (context);
     context->metrics_collector->record_response_sample (sampled_response ());
 

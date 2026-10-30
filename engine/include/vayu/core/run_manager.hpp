@@ -408,8 +408,11 @@ struct RunContext {
     /// clock; 0 while load has not started, and never negative.
     [[nodiscard]] double seconds_since_load_start (int64_t now_steady_ms) const;
 
-    // Test script for deferred validation
-    std::string test_script;
+    /// The deferred replay's scripts (`validate_scripts`), one entry per
+    /// un-inlined `script.post` element in compile order. Each runs as its own
+    /// script, never joined into one (#3125), so the replay scopes a `const`
+    /// the way a Send does. Empty means no replay and no samples recorded.
+    std::vector<std::string> test_scripts;
 
     /**
      * A single-request run's own step-level elements (issue #1594), compiled
@@ -421,8 +424,8 @@ struct RunContext {
      * `submit_one_request`'s token-free fast path exactly as cheap as before
      * this existed (#992). A `script.post` element found here that is not
      * running inline (@ref script_element_runs_inline) has its `config.script`
-     * text copied into @ref test_script instead, for the existing deferred
-     * replay (`validate_scripts`) to read unchanged.
+     * text appended to @ref test_scripts instead, for the deferred replay
+     * (`validate_scripts`) to read.
      */
     std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements;
 
@@ -548,7 +551,7 @@ struct RunContext {
      * one way or the other, else the element's own `config.inline`.
      *
      * A free function taking @p element_config directly - never a
-     * `CompiledElement` - so `run_manager.cpp`'s `find_step_post_script` (a
+     * `CompiledElement` - so `run_manager.cpp`'s `find_step_post_scripts` (a
      * step's own script text, not its outcome) and `scenario_load.cpp`'s
      * pipeline hooks share one answer without either including the other's
      * header. Declarative kinds (`extract.*`, `assert.*`, `timer.think`)
@@ -577,7 +580,7 @@ struct RunContext {
      * and, since issue #1594, a single-request run's own.
      *
      * Only a `step.after` script is *deferred* (#2144): the post-run replay
-     * runs the post-request script (`find_step_post_script`,
+     * runs the post-request script (`find_step_post_scripts`,
      * `compile_step_elements`) and nothing else, so an un-inlined
      * `step.before` script is a plain skip - it never runs at all.
      */
@@ -1263,10 +1266,15 @@ struct ScriptValidation {
  * path: a `tests` script is executed once per *sampled* response, never per
  * completion. Two shapes, chosen by what the run is:
  *
- * - a single-request run replays `RunContext::test_script` against the run's
+ * - a single-request run replays `RunContext::test_scripts` against the run's
  *   one sample store;
- * - a **scenario** load run replays each step's own `post_script` against that
- *   step's samples, and reports the tallies per step (issue #450).
+ * - a **scenario** load run replays each step's own un-inlined `script.post`
+ *   elements against that step's samples, and reports the tallies per step
+ *   (issue #450).
+ *
+ * Either way each script element runs as its own script, in its own context,
+ * against every sample, and its tests add to the tally (#3125); an element
+ * that calls no `pm.test` and does not throw counts as one pass.
  *
  * `pm.execution` throws in both (`in_scenario` stays false) - a script that has
  * already run against a recorded response cannot redirect a sequence that

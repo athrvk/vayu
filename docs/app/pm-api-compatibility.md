@@ -1971,8 +1971,8 @@ script in this editor produces them:
 is joined to the request's before the engine runs it. That no longer holds: each script
 element runs in a context of its own, so a name declared in the collection's script is
 not visible in the request's (see [Isolation between
-scripts](../engine/scripting.md#isolation-between-scripts)). Only the deferred load-test
-replay still joins `script.post` parts.
+scripts](../engine/scripting.md#isolation-between-scripts)). The deferred load-test
+replay runs each `script.post` element on its own too (#3125).
 
 Un-suppressing `2304` was weighed and declined. Typing an undeclared name would then be
 an error, which is the more useful behaviour, but it would flag correct code, and it
