@@ -17,10 +17,16 @@
  * deliberate: the editor state may be ahead of the saved row.
  */
 
-import type { Collection, ComposeRequestRequest, ResolvedElement } from "@/types";
+import type {
+	Collection,
+	ComposeRequestRequest,
+	ElementKindSchema,
+	ResolvedElement,
+} from "@/types";
+import type { LeftOutElement } from "@/lib/elements";
 import type { RequestState } from "../types";
 import { buildExecBody, execIdentity, protocolSettings } from "./execute-mapping";
-import { elementsParts } from "./elements-parts";
+import { elementsParts, sendElementsParts } from "./elements-parts";
 import { bodyModeHeaders, toHeaderRows } from "./key-value";
 import { composePathParams } from "./path-variables";
 
@@ -32,9 +38,18 @@ import { composePathParams } from "./path-variables";
  * that chain names (`elementsParts`, issue #1512). `resolved` is a list the caller already
  * built - the History replay runs the collection scripts as the run recorded
  * them, not as the chain reads now.
+ *
+ * `onlyRunnable` is Send's and code generation's (#3066): the request's own
+ * draft elements that are disabled or fail the app's check against `kinds` are
+ * left out (`sendElementsParts`). A load run composes the chain without it, so
+ * it still carries every element the request holds.
  */
 export type ComposeElementsSource =
-	| { chain: Collection[]; ownerId: string | undefined }
+	| {
+			chain: Collection[];
+			ownerId: string | undefined;
+			onlyRunnable?: { kinds: ElementKindSchema[] };
+	  }
 	| { resolved: ResolvedElement[] | undefined };
 
 export interface ComposeBodyInput {
@@ -61,14 +76,33 @@ export interface ComposeBody {
 	body: ComposeRequestRequest;
 	/** The resolved elements the body carries, for the caller's after-send checks. */
 	elements: ResolvedElement[] | undefined;
+	/**
+	 * The incomplete draft elements `onlyRunnable` left out; empty when it is
+	 * not asked for.
+	 */
+	leftOut: LeftOutElement[];
+}
+
+function composedElements(
+	source: ComposeElementsSource,
+	request: RequestState
+): Pick<ComposeBody, "elements" | "leftOut"> {
+	if ("resolved" in source) return { elements: source.resolved, leftOut: [] };
+	const { chain, ownerId, onlyRunnable } = source;
+	if (!onlyRunnable)
+		return { elements: elementsParts(chain, ownerId, request.elements), leftOut: [] };
+	const { parts, leftOut } = sendElementsParts(
+		chain,
+		ownerId,
+		request.elements,
+		onlyRunnable.kinds
+	);
+	return { elements: parts, leftOut };
 }
 
 export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 	const { request } = input;
-	const elements =
-		"resolved" in input.elements
-			? input.elements.resolved
-			: elementsParts(input.elements.chain, input.elements.ownerId, request.elements);
+	const { elements, leftOut } = composedElements(input.elements, request);
 
 	const body: ComposeRequestRequest = {
 		request: {
@@ -111,5 +145,5 @@ export function buildComposeBody(input: ComposeBodyInput): ComposeBody {
 		...(input.deferDynamicVariables ? { deferDynamicVariables: true } : {}),
 	};
 
-	return { body, elements };
+	return { body, elements, leftOut };
 }

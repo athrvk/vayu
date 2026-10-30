@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+	elementNeeds,
 	errorsWithin,
 	hasIncompleteElement,
 	isBlankScriptElement,
@@ -445,6 +446,60 @@ describe("missingOperand", () => {
 
 	it("has no opinion on a kind without an operand rule", () => {
 		expect(missingOperand({ kind: "assert.duration", config: {} })).toBeNull();
+	});
+});
+
+describe("elementNeeds", () => {
+	const titled = kindFixture("extract.json", ["variable", "path"], {
+		type: "object",
+		required: ["variable", "path"],
+		properties: {
+			variable: { type: "string", title: "Variable name" },
+			path: { type: "string" },
+		},
+	});
+
+	it("names a missing required key by its schema title, and by the key without one", () => {
+		expect(elementNeeds({ kind: "extract.json", config: {} }, [titled])).toEqual({
+			missing: ["Variable name", "path"],
+			invalid: {},
+		});
+	});
+
+	it("appends the kind's operand phrase after the keys", () => {
+		const kinds = [kindFixture("assert.status", ["name"])];
+		expect(elementNeeds({ kind: "assert.status", config: {} }, kinds)).toEqual({
+			missing: ["name", "accepted codes or a range"],
+			invalid: {},
+		});
+	});
+
+	it("needs the operand alone with no catalogue, the safe direction while it loads", () => {
+		expect(elementNeeds({ kind: "assert.status", config: {} }, [])).toEqual({
+			missing: ["accepted codes or a range"],
+			invalid: {},
+		});
+		expect(elementNeeds({ kind: "extract.json", config: {} }, [])).toBeNull();
+	});
+
+	it("carries a value the schema refuses as invalid, with nothing missing", () => {
+		const needs = elementNeeds(
+			{ kind: "control.loop", config: { count: 0 } },
+			CONSTRAINED_KINDS
+		);
+		expect(needs).toEqual({ missing: [], invalid: { count: "Must be at least 1" } });
+	});
+
+	it("is null for an element that passes", () => {
+		expect(
+			elementNeeds({ kind: "control.loop", config: { count: 3 } }, CONSTRAINED_KINDS)
+		).toBeNull();
+		expect(elementNeeds({ kind: "assert.status", config: { in: [200] } }, [])).toBeNull();
+	});
+
+	it("does not flag a blank script, which the editor leaves unflagged too", () => {
+		const kinds = [kindFixture("script.pre", ["script"])];
+		expect(elementNeeds({ kind: "script.pre", config: { script: "" } }, kinds)).toBeNull();
 	});
 });
 

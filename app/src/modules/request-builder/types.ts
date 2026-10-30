@@ -24,6 +24,7 @@ import type { HeaderLine as WireHeaderLine } from "@/components/shared/response-
 import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
+import type { LeftOutElement } from "@/lib/elements";
 import type { ElementErrors } from "@/components/shared/ElementList/useElementRefusals";
 import type {
 	BodyMode,
@@ -441,6 +442,18 @@ export interface ResponseState {
 	 * before this field did.
 	 */
 	sentRequest?: ExampleSentRequest;
+	/**
+	 * The draft elements that figured in this response's Send but were left out
+	 * of its payload because they failed the app's own check (#3066) - what the
+	 * response must say did not run, so a check added and sent before it was
+	 * filled in is never read as having passed.
+	 *
+	 * Set on a live buffered send only, by `handleExecute`: it describes the
+	 * payload the app composed, which neither `/execute` nor a stored trace
+	 * carries, so neither response funnel has it. Absent when nothing was left
+	 * out, and on a streaming send.
+	 */
+	leftOutElements?: LeftOutElement[];
 	errorCode?: string;
 	errorMessage?: string;
 	/** A `string` is the pre-structured engine shape - see `parse-logs.ts`. */

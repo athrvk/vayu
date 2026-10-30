@@ -16,18 +16,27 @@
  * of a past run never stands in for the request on the tab.
  *
  * The chain is read from the draft's own collection, the one the provider was
- * handed and Send composes with.
+ * handed and Send composes with, and the element catalogue is the one Send
+ * judges the draft's elements by (#3066).
  */
 
 import { useMemo } from "react";
-import { useCollectionAncestors } from "@/queries";
+import { useCollectionAncestors, useElementKindsQuery } from "@/queries";
 import { useRegisterEditorDraftSurface } from "@/lib/commands";
+import type { ElementKindSchema } from "@/types";
 import { useRequestBuilderContext } from "../context";
+
+const NO_KINDS: ElementKindSchema[] = [];
 
 export default function EditorDraftSurface(): null {
 	const { request } = useRequestBuilderContext();
 	const ancestors = useCollectionAncestors(request.collectionId);
-	const draft = useMemo(() => ({ request, ancestors }), [request, ancestors]);
+	const { data: kinds } = useElementKindsQuery();
+	const elementKinds = kinds ?? NO_KINDS;
+	const draft = useMemo(
+		() => ({ request, ancestors, elementKinds }),
+		[request, ancestors, elementKinds]
+	);
 	useRegisterEditorDraftSurface(draft);
 	return null;
 }

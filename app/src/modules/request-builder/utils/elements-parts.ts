@@ -17,11 +17,14 @@
  * whole chain itself rather than asking the engine to resolve it from a
  * stored id - `POST /compose`'s by-id path (what MCP and a saved request's
  * load-test run, issue #1594, both use instead) resolves the same chain
- * engine-side, since it has a real id to resolve from.
+ * engine-side, since it has a real id to resolve from. That chain is
+ * `elementsParts`; Send and code generation take it through
+ * `sendElementsParts`, which also leaves out the request's own draft elements
+ * that cannot run (#3066).
  */
 
-import type { Collection, ElementDef, ResolvedElement } from "@/types";
-import { isBlankScriptElement } from "@/lib/elements";
+import type { Collection, ElementDef, ElementKindSchema, ResolvedElement } from "@/types";
+import { elementNeeds, isBlankScriptElement, type LeftOutElement } from "@/lib/elements";
 
 // Re-exported so existing importers of this file keep resolving it; the
 // implementation lives in `lib/` because `lib/request-references.ts` (which
@@ -51,8 +54,8 @@ export function hasReplayedPostScript(parts: ElementDef[] | undefined): boolean 
  * `elementsParts`' own empty answer. For a load run's `requestElements` only
  * (#3050): the pipeline skips a disabled element, so sending one buys nothing,
  * and a disabled kind a single-request run has no home for would only burden
- * the run. Send and code generation keep the disabled elements, as the
- * Elements tab does.
+ * the run. Send and code generation drop them through `sendElementsParts`,
+ * which also drops the incomplete ones (#3066).
  */
 export function withoutDisabled(
 	parts: ResolvedElement[] | undefined
@@ -133,4 +136,42 @@ export function elementsParts(
 		parts.push({ ...el, origin: { kind: "request", scope: "request", id: requestId } });
 	}
 	return parts.length > 0 ? parts : undefined;
+}
+
+/**
+ * `elementsParts` as a Send puts it on the wire (#3066): the request's own
+ * draft elements that are switched off, or that fail the app's own check
+ * (`elementNeeds`, the judgement behind the editor's "Needs ..." chip), are
+ * left out. The engine refuses an element that fails its schema (#3052), so
+ * sending one would turn an unfinished check into a 400 on the whole request.
+ * What was left out for being incomplete comes back as `leftOut`, so the caller
+ * can say so; a switched-off element is not reported, its row already says it
+ * is off.
+ *
+ * Only the request's own elements are judged. A collection or folder level
+ * passes through as `elementsParts` composed it: the editor of a level the
+ * request does not own is not where its author is mid-edit, and the saved
+ * level was already held to the same check on save (#3048). `kinds` empty (the
+ * catalogue not loaded yet) still drops disabled elements and judges the
+ * operand rules, which need no schema; a kind with no schema fails nothing.
+ */
+export function sendElementsParts(
+	chain: Collection[],
+	requestId: string | undefined,
+	requestElements: ElementDef[],
+	kinds: ElementKindSchema[]
+): { parts: ResolvedElement[] | undefined; leftOut: LeftOutElement[] } {
+	const parts: ResolvedElement[] = [];
+	const leftOut: LeftOutElement[] = [];
+	for (const el of elementsParts(chain, requestId, requestElements) ?? []) {
+		if (el.origin?.kind !== "request") {
+			parts.push(el);
+			continue;
+		}
+		if (!el.enabled) continue;
+		const needs = elementNeeds(el, kinds);
+		if (needs) leftOut.push({ element: el, needs });
+		else parts.push(el);
+	}
+	return { parts: parts.length > 0 ? parts : undefined, leftOut };
 }

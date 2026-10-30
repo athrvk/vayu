@@ -411,6 +411,50 @@ export function missingOperand(element: Pick<ElementDef, "kind" | "config">): st
 }
 
 /**
+ * What keeps one element from passing its kind's schema, in the two shapes the
+ * editor shows it.
+ */
+export interface ElementNeeds {
+	/**
+	 * What the row's "Needs ..." chip names (#1635, #3043): a missing required key
+	 * by its schema title (the key itself when it has none), then the kind's
+	 * "one of" operand phrase.
+	 */
+	missing: string[];
+	/** {@link validateElementConfig}'s per-field messages for values the schema refuses (#3048). */
+	invalid: Record<string, string>;
+}
+
+/**
+ * Everything the app's own check holds against @p element, or `null` when it
+ * passes. The one judgement behind the row's "Needs ..." chip and field errors,
+ * the save gate (`hasIncompleteElement`) and the elements a Send leaves out
+ * (`runnableDraftElements`), so the three cannot disagree about what is
+ * incomplete. A kind absent from @p kinds has no schema to fail, which is the
+ * safe direction while the catalogue is still loading.
+ */
+export function elementNeeds(
+	element: Pick<ElementDef, "kind" | "config">,
+	kinds: ElementKindSchema[]
+): ElementNeeds | null {
+	const properties = kinds.find((k) => k.kind === element.kind)?.configSchema.properties;
+	const missing = missingRequiredKeys(element, kinds).map(
+		(key) => properties?.[key]?.title ?? key
+	);
+	const operand = missingOperand(element);
+	if (operand) missing.push(operand);
+	const invalid = validateElementConfig(element, kinds);
+	if (missing.length === 0 && Object.keys(invalid).length === 0) return null;
+	return { missing, invalid };
+}
+
+/** A draft element a Send left out of its payload because it failed the app's own check. */
+export interface LeftOutElement {
+	element: ElementDef;
+	needs: ElementNeeds;
+}
+
+/**
  * Whether any element in the list is missing a required config key outright
  * (issue #1635), its kind's "one of" operand (#3043) or holds a value its schema
  * refuses (#3048) - the shapes that 400 the *entire* `elements` array on save,
@@ -418,12 +462,7 @@ export function missingOperand(element: Pick<ElementDef, "kind" | "config">): st
  * whenever it is touched (`buildUpdatePayload`).
  */
 export function hasIncompleteElement(elements: ElementDef[], kinds: ElementKindSchema[]): boolean {
-	return elements.some(
-		(el) =>
-			missingRequiredKeys(el, kinds).length > 0 ||
-			missingOperand(el) !== null ||
-			Object.keys(validateElementConfig(el, kinds)).length > 0
-	);
+	return elements.some((el) => elementNeeds(el, kinds) !== null);
 }
 
 /** The engine's refusal of one element: `'<Kind label>' (item N): <problem>`. */

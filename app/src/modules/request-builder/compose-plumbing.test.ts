@@ -98,6 +98,23 @@ describe("every send site composes engine-side and never resolves client-side", 
 		expect(builder).toContain("...composed,");
 	});
 
+	it("only Send's composition leaves out unfinished draft elements, never the load run's (#3066)", () => {
+		/*
+		 * `onlyRunnable` is Send's filter. A load run composes the same chain
+		 * without it (its dialog reads every element the request holds), so the
+		 * option appears once in the builder: inside `composeForSend`, ahead of the
+		 * load-test composition.
+		 */
+		const uses = (builder ?? "").match(/onlyRunnable:/g) ?? [];
+		expect(uses).toHaveLength(1);
+		const sendCompose = (builder ?? "").indexOf("const composeForSend");
+		const loadCompose = (builder ?? "").indexOf("const handleConfirmLoadTest");
+		const filter = (builder ?? "").indexOf("onlyRunnable:");
+		expect(sendCompose).toBeGreaterThan(-1);
+		expect(filter).toBeGreaterThan(sendCompose);
+		expect(filter).toBeLessThan(loadCompose);
+	});
+
 	it("the run view composes for replay", () => {
 		const calls = (runView ?? "").match(/engineComposeRequest\(/g) ?? [];
 		expect(calls).toHaveLength(1);

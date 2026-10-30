@@ -63,9 +63,9 @@ describe("load test's step-level elements are built from the collection chain", 
 		const shared = composeBody ?? "";
 		const calls = shared.match(/elementsParts\(/g) ?? [];
 		expect(calls).toHaveLength(1);
-		expect(shared).toMatch(
-			/elementsParts\(input\.elements\.chain, input\.elements\.ownerId, request\.elements\)/
-		);
+		// The same walk, unfiltered for a load run; Send's filtered form wraps it
+		// (`sendElementsParts`, #3066).
+		expect(shared).toMatch(/elementsParts\(chain, ownerId, request\.elements\)/);
 	});
 
 	it("takes the load test's requestElements from the shared body, built over the chain", () => {

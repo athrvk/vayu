@@ -41,6 +41,7 @@ import {
 	isRequestNotFound,
 	useUpdateRequestMutation,
 	useCollectionAncestors,
+	useElementKindsQuery,
 	queryKeys,
 } from "@/queries";
 import { DetailSkeleton, EmptyState, ErrorState } from "@/components/shared";
@@ -456,6 +457,10 @@ export default function RequestBuilder() {
 		};
 	}, [fetchedRequest]);
 
+	// Judges the draft's elements at Send (#3066) by the same schemas the Elements
+	// tab flags them with; `ElementsPanel` already fetches it, so this is a cache read.
+	const { data: elementKinds } = useElementKindsQuery();
+
 	/**
 	 * The composed payload a Send puts on the wire, and the script parts that
 	 * went into it.
@@ -472,6 +477,8 @@ export default function RequestBuilder() {
 	 *
 	 * `dataRow` is Send-with-row's chosen row (issue #601), and composition needs
 	 * it for its *names* alone - see the `dataColumns` field below.
+	 *
+	 * `leftOut` is the draft's incomplete elements the payload omits (#3066).
 	 */
 	const composeForSend = useCallback(
 		async (
@@ -480,9 +487,15 @@ export default function RequestBuilder() {
 			ownerCollectionId: string,
 			dataRow?: Record<string, unknown>
 		) => {
-			const { body, elements } = buildComposeBody({
+			const { body, elements, leftOut } = buildComposeBody({
 				request,
-				elements: { chain: collectionAncestors, ownerId },
+				// The draft's unfinished elements stay out of the payload (#3066), as
+				// in the Code section; an unloaded catalogue judges what it can.
+				elements: {
+					chain: collectionAncestors,
+					ownerId,
+					onlyRunnable: { kinds: elementKinds ?? [] },
+				},
 				collectionId: ownerCollectionId,
 				environmentId: activeEnvironmentId,
 				// The row's own keys, which is exactly the set the engine's bind
@@ -492,9 +505,9 @@ export default function RequestBuilder() {
 				dataColumns: dataRow ? Object.keys(dataRow) : undefined,
 			});
 			const composed = await engineComposeRequest(body);
-			return { composed, elements };
+			return { composed, elements, leftOut };
 		},
-		[collectionAncestors, engineComposeRequest, activeEnvironmentId]
+		[collectionAncestors, engineComposeRequest, activeEnvironmentId, elementKinds]
 	);
 
 	// Execute request callback
@@ -506,7 +519,7 @@ export default function RequestBuilder() {
 			if (!fetchedRequest) return null;
 
 			try {
-				const { composed, elements } = await composeForSend(
+				const { composed, elements, leftOut } = await composeForSend(
 					request,
 					fetchedRequest.id,
 					fetchedRequest.collectionId,
@@ -577,7 +590,8 @@ export default function RequestBuilder() {
 				}
 
 				// Shared with the History run view's send path - see execute-mapping.ts
-				return responseFromExecuteResult(result);
+				const response = responseFromExecuteResult(result);
+				return leftOut.length > 0 ? { ...response, leftOutElements: leftOut } : response;
 			} catch (error) {
 				console.error("Execute request failed:", error);
 				const errorMsg = error instanceof Error ? error.message : String(error);
