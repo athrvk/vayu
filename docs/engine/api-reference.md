@@ -9059,12 +9059,21 @@ than accepted and never scraped; add a `mode` beside `scenario` to scrape.
   A key that is absent or non-numeric is skipped. A key may hold any
   character, `{` and spaces included.
 
-A name the body does not carry is **absent** from that sample rather than zero,
-and a scrape that reads nothing at all - a transport failure, an unreadable
-body, or a body carrying none of the requested names - stores no row and is
-counted as a gap in the report's `monitor.failures`. A failing scrape never
-fails the run; after five consecutive failures the engine logs once and backs
-off to twice the configured interval until one succeeds.
+A name the body does not carry is **absent** from that sample rather than zero.
+A scrape that reads nothing at all stores no row and sends no live frame, and
+the report counts it under one of two causes, because they need different
+fixes:
+
+- **a failure** (`monitor.failures`) - no 2xx answer: a transport error, a
+  timeout, or a status outside 2xx. `monitor.lastError` names the most recent
+  one's cause.
+- **a no-match** (`monitor.noMatchScrapes`) - a 2xx answer whose body carried
+  none of the requested names (a mistyped name, or a body in the other
+  `format`). The endpoint answered; what it was asked for is wrong.
+
+Neither fails the run. After five consecutive failures the engine logs once
+and backs off to twice the configured interval until a scrape is answered; a
+no-match is an answer, so it ends the backoff rather than extending it.
 
 Three of the limits are settings rather than constants: `intervalMs` defaults to
 **`monitorIntervalMs`** when the block omits it, the `series` ceiling is
@@ -11900,7 +11909,7 @@ are HTTP-only, the same rule a failed assertion follows
     "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
   },
   "monitor": {
-    "samples": 60, "failures": 0,
+    "samples": 58, "failures": 2, "noMatchScrapes": 0, "lastError": "timed out",
     "series": {
       "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 60 }
     }
@@ -12486,11 +12495,21 @@ recorded before 0.15.0.
 
 `monitor` is present only for a run that declared a
 [`monitor` block](#the-monitor-block-server-vitals) - absent is "this run
-scraped nothing", never "the target reported zeros". `samples` counts successful
-scrapes and `failures` counts the ones that read nothing, so a section with
-`samples: 0` and a non-zero `failures` says the endpoint was unreachable for the
-whole run rather than that the run was not monitored. A series that never
-produced a reading is absent from `series` for the same reason. The per-sample
+scraped nothing", never "the target reported zeros". `samples` counts scrapes
+that read at least one requested name; the others are split by cause.
+`failures` counts the scrapes that got no 2xx answer, and `lastError`, present
+once one has, names the most recent one's cause: `HTTP <status>`, or one of
+`timed out`, `unreachable`, `host not found`, `TLS handshake failed`,
+`proxy failed`, `URL refused`, `too many redirects`, `undecodable body`,
+`response too large` and `transport error`. It is never the transport's own
+message, which can quote the URL. `noMatchScrapes` counts the 2xx answers that
+carried none of the requested names. So `samples: 0` with a non-zero `failures`
+says the endpoint was unreachable or erroring for the whole run, and `samples:
+0` with a non-zero `noMatchScrapes` says it answered every time but the names
+matched nothing. A series that never produced a reading is absent from `series`
+for the same reason. `noMatchScrapes` and `lastError` are absent on a run
+recorded by an engine that predates them, whose `failures` count no-matches
+too. The per-sample
 readings are served separately by
 [`GET /runs/:runId/monitor`](#get-runsrunidmonitor).
 

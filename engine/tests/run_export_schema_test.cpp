@@ -90,7 +90,7 @@ json healthy_summary () {
         { { "min", 1 }, { "p50", 2 }, { "p90", 3 }, { "p95", 3 }, { "p99", 4 },
         { "max", 5 } } } } }) } } },
         { "monitor",
-        { { "samples", 10 }, { "failures", 0 },
+        { { "samples", 10 }, { "failures", 1 }, { "noMatchScrapes", 2 }, { "lastError", "HTTP 503" },
         { "series",
         { { "node_cpu", { { "min", 1.0 }, { "max", 2.0 }, { "avg", 1.5 }, { "count", 10 } } } } } } },
         { "tests", { { "sampled", 10 }, { "passed", 10 }, { "failed", 0 } } },
@@ -271,6 +271,11 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     EXPECT_TRUE (document["report"]["slowRequests"].contains ("tracesStored"));
     EXPECT_TRUE (
     document["report"]["rateControl"].contains ("requestsExpected"));
+    // Why the scrape missed (#3120): a no-match and a failure need different
+    // fixes. Mutation check: drop "noMatchScrapes" or "lastError" from
+    // MONITOR_KEYS and the matching assertion fails.
+    EXPECT_EQ (document["report"]["monitor"].value ("noMatchScrapes", -1), 2);
+    EXPECT_EQ (document["report"]["monitor"].value ("lastError", ""), "HTTP 503");
     // The capacity search's error share (#2815), at both levels of the section.
     const auto& capacity = document["report"]["capacity"];
     EXPECT_TRUE (capacity.contains ("maxErrorPct"));

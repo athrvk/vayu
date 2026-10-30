@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/types.hpp"
 
 namespace vayu::db {
 // Only `read_monitor_limits` touches a database, and only by reference - the
@@ -177,6 +178,17 @@ const std::string& body,
 const std::vector<std::string>& series);
 
 /**
+ * @brief Why one scrape got no 2xx answer, or nothing for a scrape that did.
+ *
+ * The cause is a fixed phrase ("timed out", "unreachable", ...) or
+ * `HTTP <status>`, never the transport's own message: libcurl's text can quote
+ * the URL, and a monitor URL may carry credentials into a report that is
+ * exported and shared.
+ */
+[[nodiscard]] std::optional<std::string> scrape_failure_cause (
+const vayu::Result<vayu::Response>& sent);
+
+/**
  * @brief The stored `monitor_samples.payload` object, returned verbatim as one
  *        `data[]` entry by `GET /runs/:id/monitor` and as the `data:` of a live
  *        `monitor` SSE frame.
@@ -193,6 +205,11 @@ const std::map<std::string, double>& values);
 /**
  * @brief Per-series min/max/avg over a whole run, plus what the scrape missed.
  *
+ * A missed scrape is one of two answers that need different fixes: a
+ * *failure* (no 2xx answer, so the URL or the endpoint is at fault) or a
+ * *no-match* (a 2xx answer carrying none of the requested names, so the names
+ * are). Counting them apart is what lets a report say which (#3120).
+ *
  * Written by the monitor thread and read once the worker has joined it - the
  * join is the happens-before edge, exactly as it is for the metrics collector.
  */
@@ -201,8 +218,10 @@ class MonitorTotals {
     /// Fold one successful scrape in. A series absent from @p values is left
     /// untouched rather than counted as a zero sample.
     void add (const std::map<std::string, double>& values);
-    /// Record a scrape that produced nothing (transport error, unreadable body).
-    void record_failure ();
+    /// Record a scrape that got no 2xx answer, with its `scrape_failure_cause`.
+    void record_failure (std::string cause);
+    /// Record a 2xx scrape whose body carried none of the requested names.
+    void record_no_match ();
 
     [[nodiscard]] size_t samples () const {
         return samples_;
@@ -214,9 +233,11 @@ class MonitorTotals {
     /**
      * @brief The run report's `monitor` section, in its wire shape.
      *
-     * `{"samples":n,"failures":n,"series":{"<name>":{"min","max","avg","count"}}}`.
-     * A series that never produced a reading is absent, so the section never
-     * claims a measurement that was not taken.
+     * `{"samples":n,"failures":n,"noMatchScrapes":n,"lastError":"...",
+     * "series":{"<name>":{"min","max","avg","count"}}}`, `lastError` (the most
+     * recent failure's cause) only once a scrape has failed. A series that
+     * never produced a reading is absent, so the section never claims a
+     * measurement that was not taken.
      */
     [[nodiscard]] nlohmann::json to_summary () const;
 
@@ -228,8 +249,10 @@ class MonitorTotals {
         size_t count = 0;
     };
     std::map<std::string, Accumulator> series_;
-    size_t samples_  = 0;
-    size_t failures_ = 0;
+    size_t samples_          = 0;
+    size_t failures_         = 0;
+    size_t no_match_scrapes_ = 0;
+    std::string last_error_;
 };
 
 } // namespace vayu::core
