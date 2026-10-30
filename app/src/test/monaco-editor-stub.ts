@@ -74,6 +74,7 @@ export function fakeEditor(language: string) {
 	};
 	return {
 		getModel: () => model,
+		onDidChangeModel: () => ({ dispose: () => {} }),
 		getPosition: () => editorPositions.get(language) ?? { lineNumber: 1, column: 1 },
 		setPosition: (p: { lineNumber: number; column: number }) =>
 			editorPositions.set(language, p),

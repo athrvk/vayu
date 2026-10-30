@@ -96,7 +96,10 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 		useEffect(() => {
 			if (language !== "json") return;
 			const model = stubModel(VARIABLES_URI, value);
-			onMount?.({ getModel: () => model }, stubMonaco());
+			onMount?.(
+				{ getModel: () => model, onDidChangeModel: () => ({ dispose: () => {} }) },
+				stubMonaco()
+			);
 			// Mount once, exactly as a real editor does.
 			// eslint-disable-next-line react-hooks/exhaustive-deps
 		}, []);

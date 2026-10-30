@@ -154,6 +154,19 @@ export interface CodeEditorProps {
 	 * labels distinct; the type holds them present.
 	 */
 	ariaLabel: string;
+	/**
+	 * The URI of the Monaco model this editor shows, and with it the undo stack,
+	 * cursor and scroll that belong to it. Give one when a single editor serves
+	 * several documents (the request builder's, across request tabs): a changed
+	 * `value` is applied to the model in hand as an undoable edit, so without a
+	 * path of its own per document, undo in one restores another's text.
+	 *
+	 * The library never disposes a model on a path change, only the one the
+	 * editor holds at unmount: the caller that picks paths owns ending the rest
+	 * (`useRequestModelLifecycle`). Omitted, the editor keeps its one anonymous
+	 * model.
+	 */
+	path?: string;
 	/** Coalesces Monaco's `string | undefined` to a plain string. */
 	onChange?: (value: string) => void;
 	/** CSS height; use "100%" inside flex containers. */
@@ -170,6 +183,7 @@ export function CodeEditor({
 	value,
 	language,
 	ariaLabel,
+	path,
 	onChange,
 	height = "100%",
 	readOnly = false,
@@ -285,6 +299,7 @@ export function CodeEditor({
 			<Editor
 				height="100%"
 				language={language}
+				path={path}
 				value={value}
 				theme={themeName}
 				onChange={onChange ? (v) => onChange(v ?? "") : undefined}

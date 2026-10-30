@@ -65,6 +65,7 @@ import { responseFromRunResult } from "../utils/restore-response";
 import { sentRequestOf } from "../utils/execute-mapping";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
 import { useSendWithRow } from "../hooks/useSendWithRow";
+import { useRequestModelLifecycle } from "../hooks/useRequestModelLifecycle";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
 
 /**
@@ -627,6 +628,9 @@ export default function RequestBuilderProvider({
 		};
 		return useTabsStore.subscribe((s) => retainOpen(s.openTabs));
 	}, [retainRowIndexes]);
+
+	// The editors' models are bounded by the same tabs (#3136).
+	useRequestModelLifecycle();
 
 	/**
 	 * The row the preview resolves against - the picked one, once the file it
