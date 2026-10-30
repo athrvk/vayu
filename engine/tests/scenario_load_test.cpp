@@ -32,6 +32,7 @@
 #include <httplib.h>
 
 #include "basic_auth_pair.hpp"
+#include "echo_server.hpp"
 #include "log_capture.hpp"
 #include "mock_server.hpp"
 #include "task_queue.hpp"
@@ -2334,6 +2335,74 @@ TEST_F (ScenarioLoadTest, AScriptPostMarkedInlineCorrelatesPerVirtualUserTheSame
         ASSERT_TRUE (echo.cookie.rfind ("sid=", 0) == 0);
         EXPECT_EQ (echo.authorization, "Bearer tok-" + echo.cookie.substr (4));
     }
+}
+
+namespace {
+
+/// What an inline script reads about its own execution, as one string:
+/// `vu/iteration/row/bare-column|replaceIn(vu/iteration/data.user)`. The row
+/// half is guarded so an unbound row reads `no-row` rather than throwing,
+/// which keeps a failure's message about the value that was wrong.
+constexpr const char* SEEN_IDENTITY_JS =
+"(pm.info.vu + '/' + pm.info.iteration + '/' +"
+" (pm.iterationData ? pm.iterationData.get('user') : 'no-row') + '/' +"
+" pm.variables.get('user') + '|' +"
+" pm.variables.replaceIn('{{$vu}}/{{$iteration}}/{{data.user}}'))";
+
+/// What the binder itself writes for @ref SEEN_IDENTITY_JS's fields, sent as
+/// `X-Bound`, so a script's reading can be compared with the request it ran
+/// beside.
+constexpr const char* BOUND_IDENTITY_TEMPLATE =
+"{{$vu}}/{{$iteration}}/{{data.user}}/{{data.user}}|"
+"{{$vu}}/{{$iteration}}/{{data.user}}";
+
+} // namespace
+
+// #3124: an inline `script.pre` under load reads the virtual user, the
+// iteration and the row its own execution was bound with - two users, so the
+// pairing is per execution rather than per run. Mutation check: pass a null
+// row to `bind_step_identity` in `run_step_before` and every `X-Seen` reads
+// `.../no-row/undefined|.../{{data.user}}`.
+TEST_F (ScenarioLoadTest, AnInlineScriptPreReadsTheRowIterationAndUserItsStepWasBoundWith) {
+    constexpr size_t ITERATIONS = 4;
+    vayu::tests::EchoServer echo;
+    auto execution = plan_over ({ echo.url () });
+    execution.plan.steps[0].request.headers["X-Bound"] = BOUND_IDENTITY_TEMPLATE;
+    with_data (execution, { json{ { "user", "ada" } }, json{ { "user", "bob" } } });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.pre",
+    std::string ("pm.request.headers['X-Seen'] = ") + SEEN_IDENTITY_JS + ";") });
+
+    run (json{ { "mode", "iterations" }, { "iterations", ITERATIONS }, { "concurrency", 2 } },
+    execution, /*pool_size=*/2);
+
+    const auto bound = echo.header_per_request ("X-Bound");
+    ASSERT_EQ (bound.size (), ITERATIONS);
+    EXPECT_EQ (std::set<std::string> (bound.begin (), bound.end ()).size (), ITERATIONS)
+    << "two executions were bound as the same user and iteration";
+    EXPECT_EQ (echo.header_per_request ("X-Seen"), bound);
+}
+
+// The completion side: an inline `script.post` reads what the request it ran
+// beside was bound with. Mutation check: pass a null row to
+// `bind_step_identity` in `run_step_after` and this test fails.
+TEST_F (ScenarioLoadTest, AnInlineScriptPostReadsTheRowIterationAndUserOfTheRequestItRanBeside) {
+    constexpr size_t ITERATIONS = 4;
+    vayu::tests::EchoServer echo;
+    auto execution = plan_over ({ echo.url () });
+    execution.plan.steps[0].request.headers["X-Bound"] = BOUND_IDENTITY_TEMPLATE;
+    with_data (execution, { json{ { "user", "ada" } }, json{ { "user", "bob" } } });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post",
+    std::string ("pm.test('beside', function () { pm.expect(") +
+    SEEN_IDENTITY_JS + ").to.equal(pm.request.headers.get('X-Bound')); });") });
+
+    const auto state = run (json{ { "mode", "iterations" },
+                            { "iterations", ITERATIONS }, { "concurrency", 2 } },
+    execution, /*pool_size=*/2);
+
+    EXPECT_EQ (state->inline_tests_passed.load (), ITERATIONS);
+    EXPECT_EQ (state->inline_tests_failed.load (), 0u);
 }
 
 // #2521: the same correlation through a plan `resolve_scenario` composed from
