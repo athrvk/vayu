@@ -2621,7 +2621,9 @@ through `pm.variables.get` and `{{data.column}}` through
 `pm.variables.replaceIn`, beside `pm.info.iteration` and `pm.info.vu` - so a
 script that correlates under load sees the row its own URL was bound with.
 Without rows `pm.iterationData` stays `undefined` there too, while
-`iteration` and `vu` are still set. That is deliberate, and it is the opposite treatment to `pm.execution`
+`iteration` and `vu` are still set.
+
+That is deliberate, and it is the opposite treatment to `pm.execution`
 above: flow control is a *capability*, and one that silently does nothing is a
 false success, so it is always bound and explains itself. A data row is *data*,
 and "this run is not data-driven" is a fact a script may legitimately branch on:

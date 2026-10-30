@@ -3267,7 +3267,7 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreReadsTheRowIterationAndUserOfItsSubmi
 // request it ran beside was bound with, which that request carries in
 // `X-Bound` through the binder's own `{{$vu}}`, `{{$iteration}}` and
 // `{{data.user}}`. Mutation check: drop `bind_submission_identity` from
-// `run_request_elements_after_submission` and all four tests fail.
+// `run_request_elements_after_submission` and this test and the shared-request one below fail.
 TEST_F (LoadStrategyTest, AnInlineScriptPostReadsTheRowIterationAndUserOfTheRequestItRanBeside) {
     const size_t ITERATIONS = 4;
     vayu::tests::EchoServer echo;
@@ -3320,7 +3320,7 @@ TEST_F (LoadStrategyTest, WithoutRowsAnInlineScriptPreStillReadsItsIterationAndU
 // The submission that sends the shared request - no rows, no template, no
 // `step.before` kind - still hands its identity to an inline `script.post`.
 // Mutation check: drop `bind_submission_identity` from
-// `run_request_elements_after_submission` and all three tests fail.
+// `run_request_elements_after_submission` and this test and the one above fail.
 TEST_F (LoadStrategyTest, AnInlineScriptPostOnTheSharedRequestReadsItsIterationAndUser) {
     const size_t ITERATIONS = 3;
     vayu::db::Database db (TEST_DB_PATH);

@@ -2385,7 +2385,7 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPreReadsTheRowIterationAndUserItsStepWas
 
 // The completion side: an inline `script.post` reads what the request it ran
 // beside was bound with. Mutation check: pass a null row to
-// `bind_step_identity` in `run_step_after` and all four tests fail.
+// `bind_step_identity` in `run_step_after` and this test fails.
 TEST_F (ScenarioLoadTest, AnInlineScriptPostReadsTheRowIterationAndUserOfTheRequestItRanBeside) {
     constexpr size_t ITERATIONS = 4;
     vayu::tests::EchoServer echo;
