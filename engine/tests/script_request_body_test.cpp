@@ -743,6 +743,221 @@ TEST_F (ScriptRequestBodyTest, AssigningRawSomethingThatIsNotAStringIsRefusedAtT
     EXPECT_EQ (request.body.content, before.content);
 }
 
+// ---------------------------------------------------------------------------
+// Postman's body description: `body.update ()` and an object assigned to
+// `pm.request.body` (#3131). Both land on the string view the write-back
+// already reads, so each is asserted against the request that is sent.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptRequestBodyTest, BodyUpdateWithARawDescriptionReplacesTheBodyThatIsSent) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body.update({ mode: 'raw', raw: '{"name":"Grace"}' });
+        pm.environment.set('readBack', pm.request.body.raw);
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, R"({"name":"Grace"})");
+    EXPECT_EQ (request.body.mode, BodyMode::Json)
+    << "the mode is not the script's to change";
+    EXPECT_EQ (env["readBack"].value, R"({"name":"Grace"})")
+    << "update moves the object in place, as a .raw assignment does";
+}
+
+/// Postman's `update (string)` is `{mode: 'raw', raw: string}`.
+TEST_F (ScriptRequestBodyTest, BodyUpdateWithAStringIsARawBody) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body.update('plain text');
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, "plain text");
+}
+
+/**
+ * A urlencoded description becomes the fields that are sent, a disabled pair
+ * left out as the string view leaves one out - and `body.urlencoded` reads the
+ * new list afterwards instead of the composed one. Mutation check: read
+ * `state->body.fields` in the getter and the read-back describes the old body.
+ */
+TEST_F (ScriptRequestBodyTest, BodyUpdateWithUrlencodedPairsReachesTheFields) {
+    request.body = urlencoded_body ();
+
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body.update({ mode: 'urlencoded', urlencoded: [
+            { key: 'grant_type', value: 'password' },
+            { key: 'scope', value: 'read write' },
+            { key: 'retries', value: 3 },
+            { key: 'legacy', value: 'on', disabled: true },
+        ] });
+        pm.environment.set('readBack', pm.request.body.urlencoded.map(function (p) {
+            return p.key + '=' + p.value;
+        }).join('&'));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (request.body.fields.size (), 3u)
+    << "the disabled pair is not sent";
+    EXPECT_EQ (request.body.fields[0].value, "password");
+    EXPECT_EQ (request.body.fields[1].value, "read write");
+    EXPECT_EQ (request.body.fields[2].key, "retries");
+    EXPECT_EQ (request.body.fields[2].value, "3");
+    EXPECT_EQ (env["readBack"].value, "grant_type=password&scope=read write&retries=3");
+}
+
+/// The same follow-the-write rule for the shipped `.raw` write, which the list
+/// used to ignore.
+TEST_F (ScriptRequestBodyTest, TheUrlencodedListFollowsARawAssignment) {
+    request.body = urlencoded_body ();
+    expect_script_passes (R"JS(
+        pm.request.body.raw = 'audience=api';
+        pm.expect(pm.request.body.urlencoded.length).to.equal(1);
+        pm.expect(pm.request.body.urlencoded[0].key).to.equal('audience');
+    )JS");
+}
+
+/**
+ * The write-back keeps a request's mode, so a description naming another one
+ * is refused by name rather than sent as the mode the request already has -
+ * `{mode: 'raw'}` on a urlencoded body would otherwise be parsed back into
+ * form fields. Mutation check: drop the mode comparison in
+ * `check_settable_body_mode` and the urlencoded body takes the raw text.
+ */
+TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesAModeChangeByName) {
+    struct Case {
+        Body body;
+        const char* script = "";
+    };
+    for (const auto& [body, script] :
+    { Case{ json_body (), "pm.request.body.update({ mode: 'urlencoded', urlencoded: [] });" },
+    Case{ urlencoded_body (), "pm.request.body.update({ mode: 'raw', raw: 'a=1' });" },
+    Case{ urlencoded_body (), "pm.request.body.update('a=1');" } }) {
+        request.body      = body;
+        const Body before = request.body;
+
+        auto result = engine.execute_prerequest (script, request, env);
+
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (result.error_message.find ("pm.request.body.update"), std::string::npos)
+        << result.error_message;
+        EXPECT_NE (result.error_message.find ("cannot change a body's mode"), std::string::npos)
+        << result.error_message;
+        EXPECT_EQ (request.body.content, before.content) << script;
+        EXPECT_EQ (request.body.fields.size (), before.fields.size ()) << script;
+    }
+}
+
+TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesTheModesNoStringCarriesByName) {
+    for (const char* mode : { "formdata", "file", "graphql" }) {
+        const std::string script =
+        std::string ("pm.request.body.update({ mode: '") + mode + "', raw: 'x' });";
+        auto result = engine.execute_prerequest (script, request, env);
+
+        EXPECT_FALSE (result.success) << mode;
+        EXPECT_NE (result.error_message.find (std::string ("{ mode: '") + mode +
+                   "' } cannot be set from a script"),
+        std::string::npos)
+        << result.error_message;
+        EXPECT_EQ (request.body.content, json_body ().content) << mode;
+    }
+}
+
+TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesAMalformedDescriptionByName) {
+    for (const auto& [script, expected] :
+    { std::pair{ "pm.request.body.update({ raw: 'x' });", "needs a mode" },
+    std::pair{ "pm.request.body.update({ mode: 'raw', raw: 7 });", "needs raw to be a string" },
+    std::pair{ "pm.request.body.update({ mode: 'binary', raw: 'x' });", "unknown body mode 'binary'" },
+    std::pair{ "pm.request.body.update(42);", "takes a string or" } }) {
+        auto result = engine.execute_prerequest (script, request, env);
+
+        EXPECT_FALSE (result.success) << script;
+        EXPECT_NE (result.error_message.find (expected), std::string::npos)
+        << result.error_message;
+        EXPECT_EQ (request.body.content, json_body ().content) << script;
+    }
+}
+
+TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesAPairItCannotSendByName) {
+    request.body = urlencoded_body ();
+    auto result  = engine.execute_prerequest (R"JS(
+        pm.request.body.update({ mode: 'urlencoded', urlencoded: [{ key: 'a', value: { n: 1 } }] });
+    )JS",
+     request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (
+    result.error_message.find ("urlencoded[0].value must be a string"), std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.fields.size (), urlencoded_body ().fields.size ());
+}
+
+/**
+ * The idiom a lifted script uses to set a body. Mutation check: drop the
+ * description branch from `script_body_text` and this is refused as an
+ * arbitrary object.
+ */
+TEST_F (ScriptRequestBodyTest, AssigningAPostmanRawDescriptionReachesTheWire) {
+    auto result = engine.execute_prerequest (R"JS(
+        pm.request.body = { mode: 'raw', raw: '{}' };
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.content, "{}");
+    EXPECT_EQ (request.body.mode, BodyMode::Json) << "an existing mode is kept";
+}
+
+/// A request that had no body takes a raw description as text, the rule a
+/// string assignment follows.
+TEST_F (ScriptRequestBodyTest, AssigningARawDescriptionToABodylessRequestSendsText) {
+    request.body = Body{};
+    auto result  = engine.execute_prerequest (R"JS(
+        pm.request.body = { mode: 'raw', raw: 'hello' };
+    )JS",
+     request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::Text);
+    EXPECT_EQ (request.body.content, "hello");
+}
+
+/**
+ * The deliberate refusal the description sits beside: an object that does not
+ * name a mode never reaches the wire as `[object Object]`, and the refusal
+ * names the shapes that are taken.
+ */
+TEST_F (ScriptRequestBodyTest, AssigningAnArbitraryObjectIsStillRefused) {
+    for (const char* value : { "{}", "{ raw: 'x' }", "[1, 2]", "42" }) {
+        auto result = engine.execute_prerequest (
+        std::string ("pm.request.body = ") + value + ";", request, env);
+
+        EXPECT_FALSE (result.success) << value;
+        EXPECT_NE (
+        result.error_message.find ("must be a string, the request body object "
+                                   "or a Postman body description"),
+        std::string::npos)
+        << result.error_message;
+        EXPECT_EQ (request.body.content, json_body ().content) << value;
+    }
+}
+
+TEST_F (ScriptRequestBodyTest, AssigningADescriptionOfAnotherModeIsRefusedByName) {
+    request.body = form_data_body ();
+    auto result  = engine.execute_prerequest (R"JS(
+        pm.request.body = { mode: 'raw', raw: 'name=Grace' };
+    )JS",
+     request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find (
+               "pm.request.body: { mode: 'raw' } cannot be applied"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.fields.size (), form_data_body ().fields.size ());
+}
+
 /// A test script has no write-back, so what it does to the body is discarded -
 /// the same rule `pm.request.url` follows.
 TEST_F (ScriptRequestBodyTest, ATestScriptsWritesAreNotWrittenBack) {

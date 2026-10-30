@@ -1056,11 +1056,14 @@ nlohmann::json get_script_completions () {
     "string it used to be - concatenation, template literals, ==, the String "
     "methods and .length all give the body - so `===` and `typeof` are two of "
     "the three things that changed; the third is that assigning it straight to "
-    "a header value is refused, like pm.request.url. Assign a string to "
-    "replace the body, or delete it to send none - both reach the wire "
+    "a header value is refused, like pm.request.url. Assign a string - or "
+    "Postman's { mode: 'raw', raw } description, which body.update() takes "
+    "too - to replace the body, or delete it to send none - both reach the "
+    "wire "
     "correctly, but assigning here replaces this object outright, so a later "
     "pm.request.body.raw in the same script reads undefined, not the string "
-    "you just set. Assign body.raw instead (same wire result) when something "
+    "you just set. Assign body.raw or call body.update() instead (same wire "
+    "result) when something "
     "later in the script - a hash, a length, a re-parse - needs to read the "
     "new body back. A body set on a "
     "request that had none is sent as text/plain unless the script sets a "
@@ -1189,6 +1192,29 @@ nlohmann::json get_script_completions () {
     "The body as a string - what JSON.stringify embeds, so an object holding "
     "the body serialises as the body and not as its members." },
     { "sortText", "2_pm_request_body_toJSON" } });
+
+    // The parameter type is also what assigning pm.request.body takes: the
+    // declaration generator reads an intersection member's setter off its
+    // update() (script_types.cpp, `assigned_type`). `mode` is `string`, not
+    // the literals: TypeScript types an assignment's right-hand side against
+    // the getter, so `{ mode: 'raw' }` widens there and no literal would match.
+    completions.push_back ({ { "label", "pm.request.body.update" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.body.update({ mode: 'raw', raw: ${1:JSON.stringify(body)} })" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.body.update(body: string | { mode: string, raw?: string, "
+    "urlencoded?: { key: string, value?: string | number | boolean | null, "
+    "disabled?: boolean }[] }): void" },
+    { "documentation",
+    "Postman's body setter: a string, or a description - { mode: 'raw', raw } "
+    "or { mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }. It "
+    "reaches the wire exactly as assigning that string to body.raw does, and "
+    "updates this object in place, so body.raw reads the new body afterwards. "
+    "The mode has to be the body's own - a raw body takes raw, a urlencoded "
+    "body urlencoded, a request with no body raw - because a script cannot "
+    "change a body's type; formdata, file and graphql descriptions are "
+    "refused by name." },
+    { "sortText", "2_pm_request_body_update" } });
 
     // Snippets for the mutation patterns. Without these, `pm.request.` offers
     // only the four reads and the capability is invisible in the editor.

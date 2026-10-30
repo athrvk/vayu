@@ -31,7 +31,7 @@ supported is listed [below](#not-yet-supported).
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`) |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
 | Globals             | `pm.globals.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
@@ -1762,8 +1762,10 @@ pm.request.body = JSON.stringify({ n: 2 });
   #2521), as Postman applies all auth; a script-set `Authorization`
   still wins, since auth never replaces a header the request carries.
 - **A value the engine cannot send is refused, not coerced.** `method` must be a string
-  (one of the seven verbs); `body` must be a string or the `RequestBody` object
-  `pm.request.body` itself holds; a header value may be a string, number or boolean.
+  (one of the seven verbs); `body` must be a string, the `RequestBody` object
+  `pm.request.body` itself holds, or a Postman body description (below) - an object
+  with no `mode`, `{}` included, is never sent as `[object Object]`; a header value may
+  be a string, number or boolean.
   Anything else rejects the whole write-back - all or nothing - and surfaces as
   `preScriptError`, which the response pane's Console tab shows. `url` is refused a step
   earlier: assigning anything that is not a URL string throws at the assignment, so the
@@ -1792,8 +1794,8 @@ pm.request.body = JSON.stringify({ n: 2 });
   #991 made for the URL). `mode` (`urlencoded` / `formdata` / `graphql` / `file` / `raw` -
   every other content mode reads `raw`), `raw`, the `urlencoded` / `formdata` field lists,
   the `graphql` pair and the `file`, plus `length`,
-  all read-only; assigning the whole body, or `.raw`, is the one write and is unchanged
-  from what shipped. It still behaves as a string in every context JavaScript allows -
+  all read-only; assigning the whole body or `.raw`, or calling `.update()`, are the
+  writes. It still behaves as a string in every context JavaScript allows -
   concatenation, template literals, `==`, `String.prototype` methods, `JSON.stringify`,
   `.length` - and three things changed: `===`, `typeof`, and assigning it straight into a
   header value, refused the same way `pm.request.url` already is. The full surface and the
@@ -1820,6 +1822,17 @@ pm.request.body = JSON.stringify({ n: 2 });
     bytes once the send has read the file - so a lifted `body.file.src` reads
     `undefined`. The body's string view is `@<name>`, and assigning the body or
     `.raw` on a binary request is refused: a script never chooses the file.
+- **Postman's body description is taken, for the body's own mode** (#3131).
+  `pm.request.body.update(...)` and `pm.request.body = ...` both take
+  `{ mode: 'raw', raw }` and `{ mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }`;
+  `update('...')` is `{ mode: 'raw', raw: '...' }`, as in Postman. Each means what
+  assigning its string to `.raw` means, so `.raw` and `.urlencoded` read the new body
+  afterwards. One divergence: Postman's `update` switches the body's mode, and here the
+  mode must be the one the body already has (a request with no body takes `raw`, as
+  text). The write-back keeps a request's mode, so `{ mode: 'raw' }` on a urlencoded
+  body would otherwise be parsed back into form fields; another mode is refused by
+  name, as are `formdata`, `file` and `graphql`. Postman's `update` without a `mode`
+  is a silent no-op; here it throws.
 - **Setting a variable re-renders the request's `{{…}}` placeholders, Postman's
   order** (#1008, #2521). `POST /compose` (engine-side since #226) resolves them
   at compose time **unless a pre-request script runs before the send** - an

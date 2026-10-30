@@ -1285,7 +1285,7 @@ declare const pm: {
 		/**
 		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists, the graphql pair and the file.
 		 * 
-		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as text/plain unless the script sets a Content-Type. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused. A binary body reads as @ and its file name, and an assignment is refused: a script never chooses the file.
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string - or Postman's { mode: 'raw', raw } description, which body.update() takes too - to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw or call body.update() instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as text/plain unless the script sets a Content-Type. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused. A binary body reads as @ and its file name, and an assignment is refused: a script never chooses the file.
 		 */
 		get body(): string & {
 			/**
@@ -1331,6 +1331,10 @@ declare const pm: {
 			 */
 			toString(): string;
 			/**
+			 * Postman's body setter: a string, or a description - { mode: 'raw', raw } or { mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }. It reaches the wire exactly as assigning that string to body.raw does, and updates this object in place, so body.raw reads the new body afterwards. The mode has to be the body's own - a raw body takes raw, a urlencoded body urlencoded, a request with no body raw - because a script cannot change a body's type; formdata, file and graphql descriptions are refused by name.
+			 */
+			update(body: string | { mode: string, raw?: string, urlencoded?: { key: string, value?: string | number | boolean | null, disabled?: boolean }[] }): void;
+			/**
 			 * { key, value, disabled } for each x-www-form-urlencoded pair, or undefined in any other mode. Values are as the user wrote them, not percent-encoded - the encoding is what body.raw answers. Disabled rows are listed with disabled: true rather than omitted, so a script can see the row it would otherwise re-add.
 			 * 
 			 * Read-only: edit the request's form fields, or assign body.raw.
@@ -1341,7 +1345,7 @@ declare const pm: {
 			 */
 			valueOf(): string;
 		};
-		set body(value: string);
+		set body(value: string | { mode: string, raw?: string, urlencoded?: { key: string, value?: string | number | boolean | null, disabled?: boolean }[] });
 		/**
 		 * Request headers as key-value pairs. The object is authoritative: the set it holds at the end is the set that is sent, so delete removes a header. Names are case-sensitive here (use 'Authorization', not 'authorization'), and values must be a string, number or boolean.
 		 */

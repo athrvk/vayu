@@ -1109,8 +1109,11 @@ Both lists are **read-only**, and so are `.mode`, `.graphql`, `.file` and
 frozen. Writing to a field *inside* an entry is the one edit that does not throw
 - a frozen object drops a write silently in non-strict code, which is
 JavaScript's own rule rather than one this surface adds - and it reaches nothing
-either way. Assign `pm.request.body` or `.raw` to change what is sent, or edit
-the request's form fields directly.
+either way. Assign `pm.request.body` or `.raw`, or call `.update()`, to change
+what is sent, or edit the request's form fields directly. After such a write
+`.urlencoded` reads the pairs the new string carries, the way `.graphql` reads
+the pair a new `.raw` carries, rather than the fields the request was composed
+with.
 
 Reading a form body never rewrites it. The write-back reads `body` off the
 script's object whether or not the script assigned it, so an **unchanged**
@@ -1162,7 +1165,9 @@ pm.request.headers['X-Signature'] = 'abc123';   // add or replace a header
 delete pm.request.headers['Authorization'];     // remove one
 pm.request.url = 'https://api.example.com/v2';  // retarget
 pm.request.method = 'POST';                     // case-insensitive
+pm.request.body.update('{"n":3}');              // Postman's setter, in place
 pm.request.body = JSON.stringify({ n: 2 });     // replace the body
+pm.request.body = { mode: 'raw', raw: '{}' };   // Postman's description of one
 delete pm.request.body;                         // send no body
 ```
 
@@ -1190,9 +1195,11 @@ Rules worth knowing before you rely on them:
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`
-  must be a string or the `RequestBody` object `pm.request.body` itself holds -
+  must be a string, the `RequestBody` object `pm.request.body` itself holds -
   handing the object straight back (`pm.request.body = pm.request.body`)
-  changes nothing. Anything else fails the whole write-back - the request is
+  changes nothing - or a Postman body description (below); an object without a
+  `mode`, `{}` included, is never sent as `[object Object]`. Anything else
+  fails the whole write-back - the request is
   sent unchanged and the reason is reported as the pre-request script error,
   visible in the response pane's Console tab. Assigning a string to a
   `form-data` body fails the same way, for the same reason: a value the engine
@@ -1207,6 +1214,21 @@ Rules worth knowing before you rely on them:
   signs, hashes, measures or re-parses the body it just wrote - the
   `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
   must use `pm.request.body.raw = …`, not `pm.request.body = …`.
+  `pm.request.body.update(…)` is the third spelling and the Postman one; it too
+  updates the object in place.
+- **A Postman body description names the body's own mode** (#3131).
+  `body.update()` and an assignment to `pm.request.body` both take
+  `{ mode: 'raw', raw: '…' }` and
+  `{ mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }`, and
+  `update()` takes a string as `{ mode: 'raw', raw: string }`, as Postman does.
+  Each means exactly what assigning its string to `.raw` would: the pairs are
+  encoded as the wire body, a disabled pair left out. The mode has to be the
+  one the body already has - a `raw` body (json, text, xml, jsonrpc) takes
+  `raw`, a urlencoded body `urlencoded`, a request with no body `raw`, which it
+  sends as text - because the write-back keeps a request's body mode, and
+  `{ mode: 'raw' }` on a urlencoded body would otherwise be parsed back into
+  form fields. Another mode is refused by name, and so are `formdata`, `file`
+  and `graphql` (assign a GraphQL body's envelope to `.raw`).
 - **Setting a variable re-renders the URL of a scripted request.** A request
   a pre-request script runs before (its own, a folder's or the collection's)
   keeps every `{{placeholder}}` a scope answers written when `POST /compose`

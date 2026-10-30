@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <utility>
@@ -1645,6 +1646,20 @@ JSValue body_file_view (JSContext* ctx, const FileRef& file) {
 }
 
 /**
+ * The urlencoded pairs the body carries now: the composed fields while `text`
+ * is still their view, else `text` parsed back the way the write-back will
+ * parse it. So the list follows a `.raw` or `update ()` write instead of
+ * describing the body it replaced - the rule `.graphql` follows by reading
+ * `text` too.
+ */
+std::vector<FormField> current_form_fields (const RequestBodyState& state) {
+    if (state.text == script_body_view (state.body)) {
+        return state.body.fields;
+    }
+    return vayu::http::parse_urlencoded (state.text);
+}
+
+/**
  * The body as a string, and the single answer behind every string context.
  *
  * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
@@ -1687,7 +1702,7 @@ JSValue* func_data) {
         return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
     case BODY_URLENCODED:
         return state->body.mode == BodyMode::Form ?
-        body_field_list (ctx, state->body.fields, /*multipart=*/false) :
+        body_field_list (ctx, current_form_fields (*state), /*multipart=*/false) :
         JS_UNDEFINED;
     case BODY_FORMDATA:
         return state->body.mode == BodyMode::FormData ?
@@ -1750,6 +1765,195 @@ JSValue* func_data) {
     return JS_UNDEFINED;
 }
 
+// ---------------------------------------------------------------------------
+// Postman's body description - `{mode: 'raw', raw}` and
+// `{mode: 'urlencoded', urlencoded}` (#3131)
+// ---------------------------------------------------------------------------
+
+/// The string view a description stands for, or why it was refused.
+using BodyText = std::expected<std::string, std::string>;
+
+/// A mode a description may name and a script still cannot set, with what to
+/// do instead. No string view carries a multipart part or a file, and a
+/// GraphQL body is one string that `.raw` already takes as its envelope.
+struct UnsettableBodyMode {
+    const char* mode;
+    const char* instead;
+};
+constexpr auto UNSETTABLE_BODY_MODES = std::to_array<UnsettableBodyMode> ({
+{ "formdata", "a multipart part is not a string; edit the request's form fields" },
+{ "file", "a script never chooses the file a request sends; choose it in the request" },
+{ "graphql", "assign pm.request.body.raw the {\"query\": ...} envelope instead" },
+});
+
+/**
+ * Whether @p mode may describe a body whose mode is @p current.
+ *
+ * The write-back keeps a request's body mode (`apply_pm_request_writeback`),
+ * so a description naming another mode would be sent as the one the request
+ * already has: `{mode: 'raw'}` on a urlencoded body would be parsed back into
+ * form fields. Refused instead. A request with no body takes `raw`, which it
+ * sends as text - the rule a string assignment follows.
+ */
+std::expected<void, std::string>
+check_settable_body_mode (const std::string& mode, BodyMode current, const char* label) {
+    for (const auto& unsettable : UNSETTABLE_BODY_MODES) {
+        if (mode == unsettable.mode) {
+            return std::unexpected (std::string (label) + ": { mode: '" + mode +
+            "' } cannot be set from a script - " + unsettable.instead);
+        }
+    }
+    if (mode != "raw" && mode != "urlencoded") {
+        return std::unexpected (std::string (label) + ": unknown body mode '" + mode +
+        "' - Postman's modes are raw, urlencoded, formdata, file and graphql");
+    }
+    const std::string held =
+    current == BodyMode::None ? "raw" : postman_body_mode (current);
+    if (mode == held) {
+        return {};
+    }
+    const std::string what = current == BodyMode::None ?
+    "this request has no body, and a body a script adds is raw text" :
+    "this request's body is '" + held + "'";
+    return std::unexpected (std::string (label) + ": { mode: '" + mode +
+    "' } cannot be applied - " + what +
+    ", and a script cannot change a body's mode. Change the body type in the "
+    "request instead");
+}
+
+BodyText raw_description_text (JSContext* ctx, JSValueConst description, const char* label) {
+    ScopedValue raw (ctx, JS_GetPropertyStr (ctx, description, "raw"));
+    if (!JS_IsString (raw.get ())) {
+        return std::unexpected (std::string (label) + ": { mode: 'raw' } needs raw to be a string, got " +
+        js_type_name (ctx, raw.get ()));
+    }
+    return js_to_string (ctx, raw.get ());
+}
+
+/// One `{ key, value?, disabled? }` pair. A missing or null value is the empty
+/// string Postman sends for it; a value that is not a primitive has no wire
+/// form and is refused, as a header value is.
+std::expected<FormField, std::string>
+urlencoded_description_field (JSContext* ctx, JSValueConst entry, int64_t index, const char* label) {
+    const std::string at =
+    std::string (label) + ": urlencoded[" + std::to_string (index) + "]";
+    if (!JS_IsObject (entry) || JS_IsArray (entry) || JS_IsFunction (ctx, entry)) {
+        return std::unexpected (
+        at + " must be a { key, value } object, got " + js_type_name (ctx, entry));
+    }
+    ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry, "key"));
+    ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry, "value"));
+    ScopedValue disabled (ctx, JS_GetPropertyStr (ctx, entry, "disabled"));
+    if (!JS_IsString (key.get ()) || js_to_string (ctx, key.get ()).empty ()) {
+        return std::unexpected (at + ".key must be a non-empty string, got " +
+        js_type_name (ctx, key.get ()));
+    }
+    const bool absent = JS_IsUndefined (value.get ()) || JS_IsNull (value.get ());
+    if (!absent && !JS_IsString (value.get ()) && !JS_IsNumber (value.get ()) &&
+    !JS_IsBool (value.get ())) {
+        return std::unexpected (at + ".value must be a string, number or boolean, got " +
+        js_type_name (ctx, value.get ()));
+    }
+    return FormField{ js_to_string (ctx, key.get ()),
+        absent ? std::string{} : js_to_string (ctx, value.get ()),
+        JS_ToBool (ctx, disabled.get ()) != 1 };
+}
+
+/// The pairs encoded as the wire body - the string view a urlencoded body
+/// reads as, so the write-back parses it straight back into these fields.
+BodyText urlencoded_description_text (JSContext* ctx, JSValueConst description, const char* label) {
+    ScopedValue list (ctx, JS_GetPropertyStr (ctx, description, "urlencoded"));
+    if (!JS_IsArray (list.get ())) {
+        return std::unexpected (std::string (label) + ": { mode: 'urlencoded' } needs urlencoded to be an array of { key, value }, got " +
+        js_type_name (ctx, list.get ()));
+    }
+    int64_t length = 0;
+    if (JS_GetLength (ctx, list.get (), &length) < 0) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return std::unexpected (std::string (label) + ": urlencoded could not be read");
+    }
+    std::vector<FormField> fields;
+    fields.reserve (static_cast<size_t> (length < 0 ? 0 : length));
+    for (int64_t i = 0; i < length; i++) {
+        ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, list.get (), i));
+        auto field = urlencoded_description_field (ctx, entry.get (), i, label);
+        if (!field) {
+            return std::unexpected (std::move (field.error ()));
+        }
+        fields.push_back (std::move (*field));
+    }
+    return vayu::http::encode_urlencoded (fields);
+}
+
+/**
+ * @brief The string view Postman's body description means for a body of mode
+ *        @p current.
+ *
+ * `body.update ()` takes the description and a lifted script assigns one to
+ * `pm.request.body`. Both land on the string view (`RequestBodyState::text`)
+ * the write-back already reads, so a description means exactly what assigning
+ * its string would, and there is still one definition of what writing a body
+ * means. @p label names the surface in every refusal.
+ */
+BodyText body_description_text (JSContext* ctx,
+JSValueConst description,
+BodyMode current,
+const char* label) {
+    ScopedValue js_mode (ctx, JS_GetPropertyStr (ctx, description, "mode"));
+    if (!JS_IsString (js_mode.get ())) {
+        return std::unexpected (std::string (label) +
+        ": a body description needs a mode - { mode: 'raw', raw: '...' } or "
+        "{ mode: 'urlencoded', urlencoded: [...] } - got mode " +
+        js_type_name (ctx, js_mode.get ()));
+    }
+    const std::string mode = js_to_string (ctx, js_mode.get ());
+    if (auto settable = check_settable_body_mode (mode, current, label); !settable) {
+        return std::unexpected (std::move (settable.error ()));
+    }
+    return mode == "raw" ? raw_description_text (ctx, description, label) :
+                           urlencoded_description_text (ctx, description, label);
+}
+
+/// What `update`'s argument means: a string is `{mode: 'raw', raw}`, as in
+/// Postman, so it is held to the same mode rule as the description it stands
+/// for.
+BodyText
+update_argument_text (JSContext* ctx, JSValueConst value, BodyMode current, const char* label) {
+    if (!JS_IsString (value)) {
+        return body_description_text (ctx, value, current, label);
+    }
+    if (auto settable = check_settable_body_mode ("raw", current, label); !settable) {
+        return std::unexpected (std::move (settable.error ()));
+    }
+    return js_to_string (ctx, value);
+}
+
+/// `body.update (body)` - Postman's setter. Only the view moves, as for a
+/// `.raw` assignment.
+JSValue js_body_update (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    constexpr const char* label = "pm.request.body.update";
+    auto* state                 = request_body_state (this_val);
+    if (!state) {
+        return JS_ThrowTypeError (ctx,
+        "%s must be called on the request body object, not detached from it", label);
+    }
+    const bool takes = argc >= 1 &&
+    (JS_IsString (argv[0]) ||
+    (JS_IsObject (argv[0]) && !JS_IsArray (argv[0]) && !JS_IsFunction (ctx, argv[0])));
+    if (!takes) {
+        return JS_ThrowTypeError (ctx,
+        "%s takes a string or { mode: 'raw', raw } / { mode: 'urlencoded', "
+        "urlencoded }, got %s",
+        label, argc > 0 ? js_type_name (ctx, argv[0]) : "no value");
+    }
+    BodyText text = update_argument_text (ctx, argv[0], state->body.mode, label);
+    if (!text) {
+        return JS_ThrowTypeError (ctx, "%s", text.error ().c_str ());
+    }
+    state->text = std::move (*text);
+    return JS_UNDEFINED;
+}
+
 /**
  * @brief A RequestBody object over @p body, with the Postman members on it.
  *
@@ -1783,6 +1987,7 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     define ("toString", JS_NewCFunction (ctx, js_body_to_string, "toString", 0));
     define ("valueOf", JS_NewCFunction (ctx, js_body_to_string, "valueOf", 0));
     define ("toJSON", JS_NewCFunction (ctx, js_body_to_string, "toJSON", 0));
+    define ("update", JS_NewCFunction (ctx, js_body_update, "update", 1));
     JSAtom to_primitive = well_known_symbol_atom (ctx, "toPrimitive");
     JS_DefinePropertyValue (ctx, object, to_primitive,
     JS_NewCFunction (ctx, js_body_to_string, "[Symbol.toPrimitive]", 1),
@@ -1811,25 +2016,45 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     return object;
 }
 
+/// A plain object naming a `mode` - the one object shape, besides the
+/// RequestBody itself, that an assignment to `pm.request.body` reads.
+bool is_body_description (JSContext* ctx, JSValueConst value) {
+    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
+        return false;
+    }
+    JSAtom mode    = JS_NewAtom (ctx, "mode");
+    const int held = JS_HasProperty (ctx, value, mode);
+    JS_FreeAtom (ctx, mode);
+    return held == 1;
+}
+
 /**
- * @brief The body text a value carries, the sibling of `script_url_text`.
+ * @brief The body text a value carries, the sibling of `script_url_text`, for a
+ *        request whose body mode is @p current.
  *
  * A JS string is itself; a RequestBody object is the string view it holds, which
- * a `.raw` assignment has already moved. Anything else is `nullopt`, and the
- * caller says so in its own words.
+ * a `.raw` assignment has already moved; Postman's `{mode, raw}` description is
+ * the view it stands for (`body_description_text`). Anything else is refused.
  *
  * Deliberately *not* "any object, via toString": `pm.request.body = {}` would
  * then become the string `[object Object]` and reach the wire, which is exactly
- * the silent-wrong-request class this program exists to close.
+ * the silent-wrong-request class this program exists to close. A description is
+ * an explicit shape, recognised by its `mode`, and read member by member.
  */
-std::optional<std::string> script_body_text (JSContext* ctx, JSValueConst value) {
+BodyText script_body_text (JSContext* ctx, JSValueConst value, BodyMode current) {
     if (JS_IsString (value)) {
         return js_to_string (ctx, value);
     }
     if (auto* state = request_body_state (value)) {
         return state->text;
     }
-    return std::nullopt;
+    if (is_body_description (ctx, value)) {
+        return body_description_text (ctx, value, current, "pm.request.body");
+    }
+    return std::unexpected (
+    "pm.request.body must be a string, the request body object or a Postman "
+    "body description such as { mode: 'raw', raw: '...' }, got " +
+    std::string (js_type_name (ctx, value)));
 }
 
 } // namespace
@@ -2163,10 +2388,15 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
     if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
         staged.body = Body{};
-    } else if (auto staged_text = script_body_text (ctx, js_body.get ())) {
-        // Either shape: the RequestBody object `pm.request.body` normally holds,
-        // or a plain string, which is what an assignment leaves there. Both are
-        // the body as a string, and both mean the same thing from here on.
+    } else if (auto staged_text =
+               script_body_text (ctx, js_body.get (), staged.body.mode);
+    !staged_text) {
+        return std::move (staged_text.error ());
+    } else {
+        // Any shape: the RequestBody object `pm.request.body` normally holds, a
+        // plain string or a Postman description, which is what an assignment
+        // leaves there. Each is the body as a string, and all three mean the
+        // same thing from here on.
         std::string body_text = std::move (*staged_text);
         // Every other member of pm.request is authoritative rather than a diff:
         // whatever the object holds is what is sent. `body` cannot be read that
@@ -2216,10 +2446,6 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
                 staged.body.mode = BodyMode::Text;
             }
         }
-    } else {
-        return "pm.request.body must be a string or a request body object, "
-               "got " +
-        std::string (js_type_name (ctx, js_body.get ()));
     }
 
     request = std::move (staged);
