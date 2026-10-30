@@ -1929,11 +1929,12 @@ completion table**, so the surface stays declared once. `useScriptTypeDefinition
 (`app/src/hooks/useScriptTypeDefinitions.ts`, called once in `App`) registers it with
 `addExtraLib`.
 
-It also configures the worker to match the sandbox: `lib: ["es2022"]` with **no `dom`**,
+It also configures the worker to match the sandbox: `lib: ["esnext"]` with **no `dom`**,
 because the runtime has no `fetch` or `URL` and the editor must not offer them (the
 timers it does have are declared by the engine's file, with the sandbox's own
-documentation); and `target: ESNext`, because ES2020 would flag `Object.hasOwn` and
-`Array.prototype.at`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
+documentation); and `target: ESNext`, because an older lib or target would flag
+`Object.hasOwn`, `Array.prototype.at`, `toSorted`, `Object.groupBy` and
+`Promise.withResolvers`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
 
 **Semantic diagnostics are on**, which is what makes `pm.response.staus` squiggle with a
 "Did you mean 'status'?" - and, through the same analysis, what makes quick fixes, rename,
@@ -1947,7 +1948,7 @@ script in this editor produces them:
 | Code | Message | Why it is wrong here |
 |------|---------|----------------------|
 | `1108` | A `return` statement can only be used within a function body | The engine wraps every script in an async IIFE before running it, so a top-level `return` to bail out early is legal |
-| `2304` | Cannot find name `x` | An assignment to an undeclared name (`jsonData = pm.response.json()`) creates a global in the sloppy-mode IIFE, which the engine runs; and quickjs-ng provides nine globals the `es2022` lib does not declare |
+| `2304` | Cannot find name `x` | An assignment to an undeclared name (`jsonData = pm.response.json()`) creates a global in the sloppy-mode IIFE, which the engine runs; and quickjs-ng provides four globals the `esnext` lib does not declare |
 
 `2304` was once suppressed for a different reason, that a collection-level script part
 is joined to the request's before the engine runs it. That no longer holds: each script
@@ -1963,11 +1964,9 @@ costs more than it returns today:
 - **Implicit globals run.** `jsonData = pm.response.json();` with no `var` is legal in
   the engine's sloppy-mode wrapper and is a common habit in scripts imported from
   Postman. Each use would be underlined.
-- **Nine runtime globals are missing from `lib.es2022`** and would each need declaring,
+- **Four runtime globals are missing from `lib.esnext`** and would each need declaring,
   and holding to the runtime by a test of their own: `queueMicrotask`, `performance`,
-  `DOMException`, `Float16Array`, `Iterator`, `DisposableStack`,
-  `AsyncDisposableStack`, `SuppressedError` and `InternalError`. A quickjs-ng upgrade
-  can add more.
+  `DOMException` and `InternalError`. A quickjs-ng upgrade can add more.
 - **The examples on this page and in `scripting.md` elide their placeholders** (`value`,
   `id`, `token`). Compiled as written, the corpus draws 89 diagnostics, all of
   them 2304.

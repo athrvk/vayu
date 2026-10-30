@@ -3766,10 +3766,13 @@ The **language** is current; what is missing is the **host environment**:
 
 - **Modern syntax works.** Optional chaining (`?.`) and nullish coalescing
   (`??`) are ES2020 and supported, as are later additions like
-  `Array.prototype.at`, `Object.hasOwn` and `String.prototype.replaceAll`. This
-  section used to say the opposite, listing `?.` and `??` as "ES2021+" and
-  unavailable - wrong on both counts, so any workaround written around that
-  claim can go. What limits a script is the global list above, not the syntax.
+  `Array.prototype.at`, `Object.hasOwn`, `String.prototype.replaceAll`, the
+  ES2023 copying methods (`toSorted`, `toReversed`, `with`), `findLast`,
+  `Object.groupBy` and `Promise.withResolvers`. The script editor's type
+  declarations use TypeScript's `esnext` library, so none of them is marked as
+  an error. This section used to say the opposite, listing `?.` and `??` as
+  "ES2021+" and unavailable - wrong on both counts, so any workaround written
+  around that claim can go. What limits a script is the global list above, not the syntax.
 - **No host globals**: no `fetch`, `URL`, `TextEncoder`,
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
   the ones that have a replacement. The timers are there, and run before the

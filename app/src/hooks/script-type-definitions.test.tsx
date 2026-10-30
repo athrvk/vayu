@@ -92,7 +92,7 @@ describe("useScriptTypeDefinitions", () => {
 	 * have the editor confidently offer `fetch` and `URL`, which do not
 	 * exist at runtime - the failure would surface only when the script ran.
 	 */
-	it("configures the worker for the sandbox: es2022, no dom", async () => {
+	it("configures the worker for the sandbox: esnext, no dom", async () => {
 		renderHook(() => useScriptTypeDefinitions(), { wrapper });
 		await waitFor(() => expect(setCompilerOptions).toHaveBeenCalled());
 
@@ -102,10 +102,11 @@ describe("useScriptTypeDefinitions", () => {
 			allowJs: boolean;
 			strict?: boolean;
 		};
-		expect(options.lib).toEqual(["es2022"]);
+		expect(options.lib).toEqual(["esnext"]);
 		expect(options.lib).not.toContain("dom");
-		// ESNext, not ES2020: the runtime is quickjs-ng, where `Object.hasOwn`
-		// and `.at()` work, and ES2020 would mark them as errors.
+		// ESNext, not ES2020: the runtime is quickjs-ng, where `Object.hasOwn`,
+		// `.at()` and `.toSorted()` work, and an older target or lib would mark
+		// them as errors.
 		expect(options.target).toBe(99);
 		expect(options.allowJs).toBe(true);
 		// Spread over whatever the worker already had, not a replacement of it.
@@ -160,7 +161,7 @@ describe("useScriptTypeDefinitions", () => {
 	/*
 	 * The two diagnostics a *correct* script produces here: a top-level
 	 * `return` (the engine wraps the script in an IIFE) and an assignment to an
-	 * undeclared name, or a quickjs-ng global `lib.es2022` lacks (see
+	 * undeclared name, or a quickjs-ng global `lib.esnext` lacks (see
 	 * SUPPRESSED_DIAGNOSTICS).
 	 *
 	 * The exact list matters in both directions. Too narrow and correct scripts

@@ -94,6 +94,10 @@ const DECLARATIONS_NAME = "/pm.d.ts";
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
 	...SCRIPT_COMPILER_OPTIONS,
+	// Monaco's worker finds `lib.<name>.d.ts` for a bare name; the compiler's own
+	// host does not, and an unresolved lib loads nothing at all, so every script
+	// here would be checked with no standard library (#3128).
+	lib: SCRIPT_COMPILER_OPTIONS.lib.map((name) => `lib.${name}.d.ts`),
 	// Monaco's bundled enum stops at ES2020; the hook targets ESNext for the
 	// same reason, and `lib` above pins the surface either way.
 	target: ts.ScriptTarget.ESNext,
@@ -102,7 +106,7 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
 /**
  * One program per block - each is its own script, and two of them declaring
  * `const jar` is correct documentation a single merged file would reject. What
- * is shared is the *work around* it: `lib.es2022.d.ts` and its references plus
+ * is shared is the *work around* it: `lib.esnext.d.ts` and its references plus
  * the declarations are the overwhelming majority of the cost and are identical
  * every time, so they are parsed once and handed to every program, and each
  * program reuses the last one's structure. Uncached, the 54 blocks take ~19s;
@@ -537,6 +541,39 @@ describe("the names the sandbox lacks, as the editor reports them", () => {
 			)
 		).toBe("");
 		expect(errorsOf("pm.visualizer.set(42);")).toContain("TS2345");
+	});
+});
+
+/*
+ * quickjs-ng runs the ES2023 to ES2025 library methods, so the editor's lib
+ * must declare them or each use is a false "Property does not exist" (#3128).
+ * Each of the four below is implemented in `engine/vendor/quickjs-ng`
+ * (`js_array_toSorted`, `js_object_groupBy` and so on) and is an error under
+ * `lib: ["es2022"]`.
+ */
+describe("library methods newer than ES2022, as the editor reports them", () => {
+	const compile = createCompiler(readFileSync(DECLARATIONS_PATH, "utf8"));
+	const errorsOf = (source: string) => compile({ doc: "inline", line: 1, source }).join("\n");
+
+	it("is clean on the ES2023 and later methods the runtime has", () => {
+		expect(
+			errorsOf(
+				[
+					// Each call stands on its own: one that failed would otherwise type
+					// its result as `any` and hide the next from the compiler.
+					"const sorted = [3, 1, 2].toSorted();",
+					"const last = [3, 1, 2].findLast((n) => n > 1);",
+					"const groups = Object.groupBy([3, 1, 2], (n) => (n > 1 ? 'big' : 'small'));",
+					"const { promise, resolve } = Promise.withResolvers();",
+					"resolve(last);",
+					"pm.environment.set('v', String(await promise) + sorted.length + Object.keys(groups).length);",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	it("still flags a name no standard declares", () => {
+		expect(errorsOf("[1].toSortedBackwards();")).toContain("TS2339");
 	});
 });
 
