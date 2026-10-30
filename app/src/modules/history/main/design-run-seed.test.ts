@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { seedFromRun } from "./design-run-seed";
+import { scriptPartToElement, seedFromRun } from "./design-run-seed";
 import type { Run, Request } from "@/types";
 import {
 	DEFAULT_DISABLE_COOKIES,
@@ -612,6 +612,26 @@ describe("seedFromRun", () => {
 			expect(seed.collectionPostScripts.map((p) => p.script)).toEqual(["post();"]);
 		});
 
+		// A stored part is not guaranteed to hold script text. Seeding the editor
+		// from one that does not must neither throw (`.trim()` of a number) nor
+		// invent an empty element the engine would refuse.
+		it.each([
+			["no script", undefined],
+			["a whitespace-only script", "  \n\t"],
+			["a script that is not a string", 42],
+		])("seeds no element for the request's own part with %s", (_, script) => {
+			const odd = run({
+				configSnapshot: {
+					method: "GET",
+					url: "https://x.test/",
+					preRequestScripts: [{ origin: "request", id: "req_1", script }],
+					postRequestScripts: [{ origin: "request", id: "req_1", script }],
+				},
+			} as unknown as Partial<Run>);
+
+			expect(seedFromRun(odd, liveRequest).request.elements).toEqual([]);
+		});
+
 		it("returns a run stored before script parts as a legacy string", () => {
 			// Nothing marks the boundaries in the old glued string, so it cannot
 			// be split. Show it whole, and let Save leave scripts alone.
@@ -805,5 +825,43 @@ describe("seedFromRun, binary bodies", () => {
 
 	it("reports no file for a run with another body", () => {
 		expect(seedFromRun(run(), liveRequest).requestBodyFile).toBeUndefined();
+	});
+});
+
+describe("scriptPartToElement", () => {
+	it("turns a part with script text into an element of the kind asked", () => {
+		expect(
+			scriptPartToElement(
+				{ origin: "collection", id: "col_1", name: "API", script: "a();" },
+				"script.post"
+			)
+		).toEqual({
+			id: "col_1-script.post",
+			kind: "script.post",
+			enabled: true,
+			name: "API",
+			config: { script: "a();" },
+		});
+	});
+
+	it("gives a part with no id the legacy id", () => {
+		expect(scriptPartToElement({ origin: "request", script: "a();" }, "script.pre")?.id).toBe(
+			"legacy-script.pre"
+		);
+	});
+
+	// The engine refuses a script element with no script, so replaying one
+	// would 400 the whole resend (#3066); it is left out, as a blank script is
+	// everywhere else (#1609).
+	it.each([
+		["missing", undefined],
+		["empty", ""],
+		["whitespace only", " \n\t "],
+		["not a string", 7],
+		["null", null],
+	])("gives no element for a part whose script is %s", (_, script) => {
+		expect(
+			scriptPartToElement({ origin: "collection", id: "col_1", script }, "script.pre")
+		).toBeNull();
 	});
 });

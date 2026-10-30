@@ -172,6 +172,9 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	 * replayed as a single request-origin element. Dropping it (which is what
 	 * happened while nothing read `legacyPreScript`) meant a resend of any
 	 * pre-existing run silently executed no script at all.
+	 *
+	 * A part with no script text is left out rather than replayed (#3066): the
+	 * engine refuses a script element with none, which would 400 the resend.
 	 */
 	const replayElements = useCallback(
 		(
@@ -179,16 +182,18 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 			legacyScript: string | undefined,
 			kind: "script.pre" | "script.post"
 		): ResolvedElement[] => {
-			const elements: ResolvedElement[] = collectionParts.map((part) => ({
-				...scriptPartToElement(part, kind),
-				origin: { kind: "collection", id: part.id, name: part.name },
-			}));
-			if (legacyScript?.trim()) {
-				elements.push({
-					...scriptPartToElement({ origin: "request", script: legacyScript }, kind),
-					origin: { kind: "request" },
-				});
+			const elements: ResolvedElement[] = [];
+			for (const part of collectionParts) {
+				const element = scriptPartToElement(part, kind);
+				if (element) {
+					elements.push({
+						...element,
+						origin: { kind: "collection", id: part.id, name: part.name },
+					});
+				}
 			}
+			const legacy = scriptPartToElement({ origin: "request", script: legacyScript }, kind);
+			if (legacy) elements.push({ ...legacy, origin: { kind: "request" } });
 			return elements;
 		},
 		[]
