@@ -1256,7 +1256,9 @@ Rules worth knowing before you rely on them:
   `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
   must use `pm.request.body.raw = …`, not `pm.request.body = …`.
   `pm.request.body.update(…)` is the third spelling and the Postman one; it too
-  updates the object in place.
+  updates the object in place, but it takes Postman's body description, so it
+  is held to the mode rule below: on a urlencoded or GraphQL body a string
+  `update('…')` is refused by name, where `.raw` takes the same string.
 - **A Postman body description names the body's own mode** (#3131).
   `body.update()` and an assignment to `pm.request.body` both take
   `{ mode: 'raw', raw: '…' }` and
@@ -1269,7 +1271,9 @@ Rules worth knowing before you rely on them:
   sends as text - because the write-back keeps a request's body mode, and
   `{ mode: 'raw' }` on a urlencoded body would otherwise be parsed back into
   form fields. Another mode is refused by name, and so are `formdata`, `file`
-  and `graphql` (assign a GraphQL body's envelope to `.raw`).
+  and `graphql`. A GraphQL body therefore refuses every `update()`, a string
+  included (it is `{ mode: 'raw' }`), and the refusal says to assign the
+  envelope to `.raw`, which keeps the mode.
 - **Setting a variable re-renders the URL of a scripted request.** A request
   a pre-request script runs before (its own, a folder's or the collection's)
   keeps every `{{placeholder}}` a scope answers written when `POST /compose`

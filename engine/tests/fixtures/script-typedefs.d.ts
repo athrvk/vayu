@@ -1347,7 +1347,7 @@ declare const pm: {
 			 */
 			toString(): string;
 			/**
-			 * Postman's body setter: a string, or a description - { mode: 'raw', raw } or { mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }. It reaches the wire exactly as assigning that string to body.raw does, and updates this object in place, so body.raw reads the new body afterwards. The mode has to be the body's own - a raw body takes raw, a urlencoded body urlencoded, a request with no body raw - because a script cannot change a body's type; formdata, file and graphql descriptions are refused by name.
+			 * Postman's body setter: a string, or a description - { mode: 'raw', raw } or { mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }. It reaches the wire exactly as assigning that string to body.raw does, and updates this object in place, so body.raw reads the new body afterwards. The mode has to be the body's own - a raw body takes raw, a urlencoded body urlencoded, a request with no body raw - because a script cannot change a body's type; formdata, file and graphql descriptions are refused by name, and so is a string on a urlencoded or GraphQL body, where body.raw takes it.
 			 */
 			update(body: string | { mode: string, raw?: string, urlencoded?: { key: string, value?: string | number | boolean | null, disabled?: boolean }[] }): void;
 			/**

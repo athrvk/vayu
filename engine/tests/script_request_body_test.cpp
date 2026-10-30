@@ -849,6 +849,32 @@ TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesAModeChangeByName) {
     }
 }
 
+// `update ('...')` is `{ mode: 'raw' }`, so a GraphQL body refuses it by the
+// rule above and names the write that keeps the mode, which `.raw` takes.
+// Mutation check: answer the generic "Change the body type" for a GraphQL
+// body and the pointer to `.raw` is gone.
+TEST_F (ScriptRequestBodyTest, BodyUpdateWithAStringOnAGraphqlBodyNamesTheRawWrite) {
+    request.body = graphql_body (GRAPHQL_ENVELOPE);
+
+    auto result = engine.execute_prerequest (
+    "pm.request.body.update('query Rewritten { ping }');", request, env);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (
+    result.error_message.find ("this request's body is 'graphql', and a "
+                               "script cannot change a body's mode. "
+                               "Assign pm.request.body.raw"),
+    std::string::npos)
+    << result.error_message;
+    EXPECT_EQ (request.body.content, GRAPHQL_ENVELOPE);
+
+    result = engine.execute_prerequest (
+    "pm.request.body.raw = 'query Rewritten { ping }';", request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (request.body.mode, BodyMode::GraphQL);
+    EXPECT_EQ (request.body.content, "query Rewritten { ping }");
+}
+
 TEST_F (ScriptRequestBodyTest, BodyUpdateRefusesTheModesNoStringCarriesByName) {
     for (const char* mode : { "formdata", "file", "graphql" }) {
         const std::string script =

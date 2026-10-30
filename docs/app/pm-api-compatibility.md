@@ -1859,8 +1859,10 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   mode must be the one the body already has (a request with no body takes `raw`, as
   text). The write-back keeps a request's mode, so `{ mode: 'raw' }` on a urlencoded
   body would otherwise be parsed back into form fields; another mode is refused by
-  name, as are `formdata`, `file` and `graphql`. Postman's `update` without a `mode`
-  is a silent no-op; here it throws.
+  name, as are `formdata`, `file` and `graphql`. So a string `update('...')` is
+  refused on a urlencoded or GraphQL body, where assigning the same string to `.raw`
+  is taken; on a GraphQL body the refusal names `.raw`. Postman's `update` without a
+  `mode` is a silent no-op; here it throws.
 - **Setting a variable re-renders the request's `{{…}}` placeholders, Postman's
   order** (#1008, #2521). `POST /compose` (engine-side since #226) resolves them
   at compose time **unless a pre-request script runs before the send** - an

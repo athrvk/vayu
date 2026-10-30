@@ -1818,10 +1818,13 @@ check_settable_body_mode (const std::string& mode, BodyMode current, const char*
     const std::string what = current == BodyMode::None ?
     "this request has no body, and a body a script adds is raw text" :
     "this request's body is '" + held + "'";
-    return std::unexpected (std::string (label) + ": { mode: '" + mode +
-    "' } cannot be applied - " + what +
-    ", and a script cannot change a body's mode. Change the body type in the "
-    "request instead");
+    // A GraphQL body is one string, so its rewrite has a spelling that keeps
+    // the mode, which `update ('...')` - Postman's `{ mode: 'raw' }` - is not.
+    const std::string instead = current == BodyMode::GraphQL ?
+    "Assign pm.request.body.raw the {\"query\": ...} envelope instead" :
+    "Change the body type in the request instead";
+    return std::unexpected (std::string (label) + ": { mode: '" + mode + "' } cannot be applied - " +
+    what + ", and a script cannot change a body's mode. " + instead);
 }
 
 BodyText raw_description_text (JSContext* ctx, JSValueConst description, const char* label) {

@@ -1214,7 +1214,8 @@ nlohmann::json get_script_completions () {
     "The mode has to be the body's own - a raw body takes raw, a urlencoded "
     "body urlencoded, a request with no body raw - because a script cannot "
     "change a body's type; formdata, file and graphql descriptions are "
-    "refused by name." },
+    "refused by name, and so is a string on a urlencoded or GraphQL body, "
+    "where body.raw takes it." },
     { "sortText", "2_pm_request_body_update" } });
 
     // Postman's Request methods. Each is the member method it names, or the
