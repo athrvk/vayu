@@ -5087,7 +5087,7 @@ TEST_F (ScriptEngineTest, ScopedReplaceInResolvesFromItsOwnScopeAndNoOther) {
         const char* accessor;
         const char* expected;
     };
-    const ScopeCase cases[] = {
+    const std::array<ScopeCase, 3> cases{ {
         { "environment",
         "from-environment|e1|{{globalsOnly}}|{{collOnly}}|"
         "{{localOnly}}|{{hidden}}|{{ancestorOnly}}" },
@@ -5097,7 +5097,7 @@ TEST_F (ScriptEngineTest, ScopedReplaceInResolvesFromItsOwnScopeAndNoOther) {
         { "collectionVariables",
         "from-collection|{{envOnly}}|{{globalsOnly}}|"
         "c1|{{localOnly}}|{{hidden}}|from-ancestor" },
-    };
+    } };
 
     for (const auto& scope : cases) {
         Environment environment;
@@ -5153,10 +5153,12 @@ TEST_F (ScriptEngineTest, ScopedReplaceInStillAnswersTheNamesThatAreNotScopes) {
         Environment collVars;
         Environment local;
         local["userId"] = Variable{ "from-local", false, true };
-        Environment* const under_test = std::string (accessor) == "environment" ?
-        &environment :
-        std::string (accessor) == "globals" ? &globals :
-                                              &collVars;
+        Environment* under_test = &collVars;
+        if (std::string (accessor) == "environment") {
+            under_test = &environment;
+        } else if (std::string (accessor) == "globals") {
+            under_test = &globals;
+        }
         (*under_test)["userId"]    = Variable{ "from-scope", false, true };
         (*under_test)["scopeOnly"] = Variable{ "s1", false, true };
 
@@ -5171,13 +5173,12 @@ TEST_F (ScriptEngineTest, ScopedReplaceInStillAnswersTheNamesThatAreNotScopes) {
         ctx.iteration           = 3;
 
         const std::string call = std::string ("pm.") + accessor + ".replaceIn";
-        auto result            = engine.execute ("var pair = " + call +
-                   "('{{$guid}}|{{$guid}}').split('|');\n"
-                              "pm.variables.set('first', pair[0]);\n"
-                              "pm.variables.set('second', pair[1]);\n"
-                              "pm.variables.set('rest', " +
-                   call + "('{{$vu}}/{{$iteration}}/{{data.city}}/{{userId}}/{{scopeOnly}}'));",
-                   ctx);
+        std::string script = "var pair = " + call + "('{{$guid}}|{{$guid}}').split('|');\n";
+        script += "pm.variables.set('first', pair[0]);\n";
+        script += "pm.variables.set('second', pair[1]);\n";
+        script += "pm.variables.set('rest', " + call;
+        script += "('{{$vu}}/{{$iteration}}/{{data.city}}/{{userId}}/{{scopeOnly}}'));";
+        auto result = engine.execute (script, ctx);
 
         ASSERT_TRUE (result.success) << accessor << ": " << result.error_message;
         const std::regex uuid_v4 ("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]"
