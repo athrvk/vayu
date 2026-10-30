@@ -664,6 +664,149 @@ TEST_F (MockServerTest, ALiteralRouteBeatsATemplatedOneWhateverOrderTheyWereWrit
     EXPECT_EQ (routes[*other.route_index].examples.front ().body, "wildcard");
 }
 
+// The mock drops the query, so two requests on one path are one route (#3115).
+// Mutation check: take `has_response` out of `outranks` and the first test
+// answers the 501 `mock_no_example` the second request's example was meant to
+// prevent.
+TEST_F (MockServerTest, ARouteWithAnExampleBeatsAnEquallySpecificOneWithout) {
+    seed_request ("req_first", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup", "first-noex", /*order=*/0);
+    seed_request ("req_second", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup?v=2", "second-hasex", /*order=*/1);
+    seed_example ("exa_second", "req_second", 200, "second", "text/plain");
+
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 2u);
+    ASSERT_FALSE (routes[0].has_response)
+    << "the example-less request must come first";
+
+    const auto match = vayu::http::resolve_mock_route (routes, "GET", "/dup");
+    ASSERT_HAS_VALUE (match.route_index);
+    EXPECT_EQ (routes[*match.route_index].request_id, "req_second");
+    EXPECT_EQ (routes[*match.route_index].examples.front ().body, "second");
+}
+
+TEST_F (MockServerTest, TwoEquallySpecificRoutesWithExamplesServeTheFirst) {
+    seed_request ("req_a", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/q?kind=a", "kind a", /*order=*/0);
+    seed_example ("exa_a", "req_a", 200, "QA", "text/plain");
+    seed_request ("req_b", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/q?kind=b", "kind b", /*order=*/1);
+    seed_example ("exa_b", "req_b", 200, "QB", "text/plain");
+
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 2u);
+    const auto match = vayu::http::resolve_mock_route (routes, "GET", "/q");
+    ASSERT_HAS_VALUE (match.route_index);
+    EXPECT_EQ (routes[*match.route_index].examples.front ().body, "QA");
+}
+
+TEST_F (MockServerTest, AnExampleDoesNotBuyBackSpecificity) {
+    // A more specific route without an example still answers its 501: the
+    // example only breaks a tie, it does not outweigh a literal segment.
+    seed_request ("req_one", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/{petId}", "Get pet", /*order=*/0);
+    seed_example ("exa_one", "req_one", 200, "wildcard", "text/plain");
+    seed_request ("req_mine", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/mine", "My pets", /*order=*/1);
+
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    const auto match = vayu::http::resolve_mock_route (routes, "GET", "/pets/mine");
+    EXPECT_FALSE (match.route_index.has_value ());
+    EXPECT_EQ (match.miss, MockMissKind::NoExample);
+}
+
+TEST_F (MockServerTest, TheRequestThatAnswersIsTheOneTheOtherIsMarkedShadowedBy) {
+    seed_request ("req_first", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup", "first-noex", /*order=*/0);
+    seed_request ("req_second", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup?v=2", "second-hasex", /*order=*/1);
+    seed_example ("exa_second", "req_second", 200, "second", "text/plain");
+    seed_request ("req_third", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup?v=3", "third-hasex", /*order=*/2);
+    seed_example ("exa_third", "req_third", 200, "third", "text/plain");
+
+    auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    EXPECT_EQ (vayu::http::mark_shadowed_routes (routes), 2u);
+
+    // The winner is whichever route `resolve_mock_route` serves, so the mark
+    // and the answer cannot disagree.
+    const auto served = vayu::http::resolve_mock_route (routes, "GET", "/dup");
+    ASSERT_HAS_VALUE (served.route_index);
+    EXPECT_EQ (routes[*served.route_index].request_id, "req_second");
+    EXPECT_FALSE (routes[1].shadowed_by.has_value ());
+
+    for (const std::size_t shadowed : { std::size_t{ 0 }, std::size_t{ 2 } }) {
+        ASSERT_HAS_VALUE (routes[shadowed].shadowed_by);
+        EXPECT_EQ (routes[shadowed].shadowed_by->request_id, "req_second");
+        EXPECT_EQ (routes[shadowed].shadowed_by->request_name, "second-hasex");
+    }
+}
+
+TEST_F (MockServerTest, WithNoExampleAnywhereTheFirstWinsAndTheRestAreShadowed) {
+    seed_request ("req_a", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/dup", "a", 0);
+    seed_request ("req_b", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/dup", "b", 1);
+
+    auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    EXPECT_EQ (vayu::http::mark_shadowed_routes (routes), 1u);
+    EXPECT_FALSE (routes[0].shadowed_by.has_value ());
+    ASSERT_HAS_VALUE (routes[1].shadowed_by);
+    EXPECT_EQ (routes[1].shadowed_by->request_id, "req_a");
+}
+
+TEST_F (MockServerTest, TemplateNamesDoNotMakeRoutesDifferent) {
+    seed_request ("req_id", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/{id}", "by id", 0);
+    seed_request ("req_pet", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/pets/:petId", "by pet id", 1);
+
+    auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    EXPECT_EQ (vayu::http::mark_shadowed_routes (routes), 1u);
+    EXPECT_TRUE (routes[1].shadowed_by.has_value ());
+}
+
+TEST_F (MockServerTest, RoutesOfDifferentShapeOrMethodAreNotDuplicates) {
+    // Equal specificity (one wildcard each) and both match `/a/b/b`, but each
+    // answers paths the other does not: neither is shadowed.
+    seed_request ("req_mid", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/a/{x}/b", "wildcard in the middle", 0);
+    seed_request ("req_tail", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/a/b/{y}", "wildcard at the end", 1);
+    // Same path, another method, and another depth.
+    seed_request ("req_post", "col_root", vayu::HttpMethod::POST,
+    "{{baseUrl}}/a/{x}/b", "post", 2);
+    seed_request ("req_deep", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/a/{x}/b/c", "deeper", 3);
+
+    auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (routes.size (), 4u);
+    EXPECT_EQ (vayu::http::mark_shadowed_routes (routes), 0u);
+    for (const auto& route : routes) {
+        EXPECT_FALSE (route.shadowed_by.has_value ()) << route.request_id;
+    }
+}
+
+TEST_F (MockServerTest, MockRouteJsonMarksAShadowedRouteAndNamesTheWinner) {
+    seed_request ("req_first", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup", "first-noex", /*order=*/0);
+    seed_request ("req_second", "col_root", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup?v=2", "second-hasex", /*order=*/1);
+    seed_example ("exa_second", "req_second", 200, "second", "text/plain");
+    auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+    ASSERT_EQ (vayu::http::mark_shadowed_routes (routes), 1u);
+
+    const auto shadowed = vayu::http::mock_route_json (routes[0], 0);
+    ASSERT_TRUE (shadowed.contains ("shadowedBy"));
+    EXPECT_EQ (shadowed["shadowed"], true);
+    EXPECT_EQ (shadowed["shadowedBy"]["requestId"], "req_second");
+    EXPECT_EQ (shadowed["shadowedBy"]["requestName"], "second-hasex");
+
+    // The row that answers carries neither member.
+    const auto winner = vayu::http::mock_route_json (routes[1], 0);
+    EXPECT_FALSE (winner.contains ("shadowed"));
+    EXPECT_FALSE (winner.contains ("shadowedBy"));
+}
+
 TEST_F (MockServerTest, AMethodMismatchIsNamedRatherThanReportedAsAMissingPath) {
     seed_pet_store ();
     const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
@@ -787,6 +930,67 @@ TEST_F (MockServerTest, AStartedMockServesItsExamplesAndReportsItsTable) {
     ASSERT_HAS_VALUE (table);
     EXPECT_EQ (table->size (), 4u);
     EXPECT_FALSE (manager.routes ("mock_nope").has_value ());
+}
+
+TEST_F (MockServerTest, AStartCountsTheDuplicatesAndServesTheOneWithAnExample) {
+    seed_pet_store ();
+    seed_request ("req_first", "col_pets", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup", "first-noex", /*order=*/10);
+    seed_request ("req_second", "col_pets", vayu::HttpMethod::GET,
+    "{{baseUrl}}/dup?v=2", "second-hasex", /*order=*/11);
+    seed_example ("exa_second", "req_second", 200, "saved", "text/plain");
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+    EXPECT_EQ (started.info.route_count, 5);
+    EXPECT_EQ (started.info.duplicate_routes, 1);
+    EXPECT_EQ (
+    vayu::http::mock_server_info_json (started.info)["duplicateRoutes"], 1);
+    EXPECT_EQ (manager.get (started.info.mock_id)->duplicate_routes, 1)
+    << "GET /mock reports what start did";
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+    for (const char* target : { "/dup", "/dup?v=2" }) {
+        const auto served = client.Get (target);
+        ASSERT_TRUE (served) << target;
+        EXPECT_EQ (served->status, 200) << target << ": " << served->body;
+        EXPECT_EQ (served->body, "saved") << target;
+    }
+
+    const auto table = manager.routes (started.info.mock_id);
+    const auto hits  = manager.route_hits (started.info.mock_id);
+    ASSERT_HAS_VALUE (table);
+    ASSERT_HAS_VALUE (hits);
+    std::size_t shadowed_rows = 0;
+    for (std::size_t i = 0; i < table->size (); ++i) {
+        const auto row = vayu::http::mock_route_json ((*table)[i], (*hits)[i]);
+        if ((*table)[i].request_id == "req_first") {
+            // A const read of a missing member aborts the run, so a broken
+            // build reports this failure rather than dying on the next line.
+            ASSERT_TRUE (row.contains ("shadowedBy"));
+            EXPECT_EQ (row["shadowedBy"]["requestId"], "req_second");
+            EXPECT_EQ (row["hits"], 0u);
+        }
+        shadowed_rows += row.contains ("shadowed") ? 1 : 0;
+    }
+    EXPECT_EQ (shadowed_rows, 1u);
+}
+
+TEST_F (MockServerTest, AStartWithNoDuplicatesReportsZero) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+    EXPECT_EQ (started.info.duplicate_routes, 0);
+    EXPECT_EQ (
+    vayu::http::mock_server_info_json (started.info)["duplicateRoutes"], 0);
 }
 
 TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNotReplayed) {

@@ -6141,6 +6141,19 @@ same first one, and the new row is only reachable once the mock is restarted.
 - **Specificity wins, not registration order**: `/pets/mine` answers
   `GET /pets/mine` even when `/pets/{{petId}}` was stored first.
 - A trailing slash and a repeated `/` are the same route.
+- **Requests that share a method and path are one route** (#3115). The query
+  is dropped, so `GET /q?kind=a` and `GET /q?kind=b` (a Postman collection's
+  "login ok" and "login fail") cannot be told apart: one of them answers both
+  and the other shows `0` hits for good. Among routes of equal specificity the
+  first **that has a saved example** answers, else the first in sidebar order,
+  so an example-less request listed above one with an example no longer turns
+  the path into a `501`. Two routes are duplicates only when they have the same
+  method, the same number of segments and the same literals in the same
+  positions (a wildcard's name does not count): `/a/{{x}}/b` and
+  `/a/b/{{y}}` are equally specific but answer different paths, so neither is
+  shadowed. The start response counts the shadowed requests (`duplicateRoutes`)
+  and `GET /mock/:mockId/routes` marks each one and names the request that
+  answers in its place.
 
 **What a miss says.** The message is most of the debugging value, so the three
 outcomes are distinct rather than one blanket 404:
@@ -6232,6 +6245,7 @@ entry that is not an origin is a `400` `bad_request` naming the entry
   "errorRatePct": 0,
   "routeCount": 12,
   "routesWithoutExample": 3,
+  "duplicateRoutes": 0,
   "createdAt": 1735689600000,
   "allowedOrigins": []
 }
@@ -6240,7 +6254,9 @@ entry that is not an origin is a `400` `bad_request` naming the entry
 `url` has **no trailing slash** - it is a base to concatenate a path onto.
 `routesWithoutExample` is the number that explains an otherwise empty-looking
 mock, which is why it is reported rather than left to be discovered one `501` at
-a time.
+a time. `duplicateRoutes` is the number of requests shadowed by another with
+the same method and path (see above): rows that can never answer, whatever
+their query says. It is `0` for a collection with none.
 
 **Errors:** `404` for a collection that does not exist; `400`
 `mock_no_requests` when the collection and its subtree hold none (a listener
@@ -6282,6 +6298,14 @@ could be. `mode` is the request's `mock_response_mode` (`"first"` / `"fixed"` /
 the mock started. `exampleName` is the example that would answer for `"first"`
 or `"fixed"` - it is absent for `"random"`, since which one answers varies per
 request. `404` for an unknown mock.
+
+A request that shares its method and path with another (see "How a request is
+matched") is shadowed: its row carries `"shadowed": true` and `"shadowedBy":
+{"requestId": "req_2", "requestName": "login ok"}`, naming the request that
+answers for both. Both members are **absent** - not `false` - on every row that
+is not shadowed, including the one that answers. A shadowed row keeps
+`hits: 0`, and its `hasExample` / `status` describe its own examples, which are
+never served.
 
 ### GET /mock/:mockId/activity
 
