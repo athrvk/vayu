@@ -1393,7 +1393,7 @@ std::vector<json> data_frames (const std::string& stream) {
     std::vector<json> frames;
     size_t start = 0;
     for (size_t end = stream.find ("\n\n"); end != std::string::npos;
-         end        = stream.find ("\n\n", start)) {
+    end             = stream.find ("\n\n", start)) {
         const std::string block = stream.substr (start, end - start);
         start                   = end + 2;
         const size_t at         = block.find ("data: ");
