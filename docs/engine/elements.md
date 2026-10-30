@@ -561,9 +561,10 @@ element that ran at least once this run - `StepElementTallies`, sized once from 
 compiled elements so recording on the completion path is a lookup, never a lock or an allocation.
 Ids are unique within one level's list, not across the chain (a duplicated collection keeps its
 elements' ids), so a step's composed list can hold one id twice; each still gets its own row,
-counts and label, told apart by its `origin.id`.
+counts and label, told apart by its `origin` kind, scope and id (`ElementSlotIndex`).
 A single-request run's `summary.elements` is `RequestElementTallies`, classifying by the same rule
-(`ElementOutcomeCounts`). Each count is one outcome word (#3051): `ok` is `passed`, and `failed`,
+(`ElementOutcomeCounts`) and matching an outcome to its row the same way, so a `requestElements`
+id two levels share (#3101) is two rows there too. Each count is one outcome word (#3051): `ok` is `passed`, and `failed`,
 `missing` and `error` count under their own names, so a miss never reads as a skip nor an error as
 a failed check. The row names its element: `name` (its label) and `origin` (the level it was
 composed from) when it has them, and `required: true` for an extractor whose miss fails the step.

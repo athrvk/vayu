@@ -1319,6 +1319,57 @@ TEST_F (ElementKindsTest, AnOutcomeRowOmitsWhatItsElementDoesNotHave) {
     EXPECT_EQ (rows[0]["missing"], 1);
 }
 
+// A single-request run's `requestElements` may hold one id at two levels
+// (#3101), here under two different kinds. Each entry keeps its own counts;
+// an id the list does not have records nothing. Mutation check: match
+// `ElementSlotIndex::find` (pipeline.cpp) by id alone and both outcomes land
+// in the collection's row, leaving the request's row unwritten.
+TEST_F (ElementKindsTest, RequestElementTalliesKeepARowPerLevelUnderASharedId) {
+    using nlohmann::json;
+    const json collection{ { "kind", "collection" }, { "scope", "collection" },
+        { "id", "col_1" } };
+    const json request{ { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } };
+    const auto elements = vayu::core::compile_elements (json::array ({
+    json{ { "id", "el_1" }, { "kind", "assert.status" },
+    { "origin", collection }, { "config", { { "in", json::array ({ 200 }) } } } },
+    json{ { "id", "el_1" }, { "kind", "extract.json" }, { "origin", request },
+    { "config", { { "path", "$.t" }, { "variable", "t" } } } },
+    json{ { "id", "el_2" }, { "kind", "assert.status" }, { "origin", request },
+    { "config", { { "in", json::array ({ 200 }) } } } },
+    }));
+    vayu::core::RequestElementTallies tallies (elements);
+    const auto record = [&] (const std::string& id, const std::string& kind,
+                        const json& origin, const std::string& status) {
+        ElementOutcome outcome;
+        outcome.id     = id;
+        outcome.kind   = kind;
+        outcome.origin = origin;
+        outcome.status = status;
+        tallies.record (outcome);
+    };
+    for (int i = 0; i < 3; ++i) {
+        record ("el_1", "assert.status", collection, "ok");
+    }
+    record ("el_1", "extract.json", request, "missing");
+    record ("el_1", "extract.json", request, "missing");
+    record ("el_2", "assert.status", request, "failed");
+    record ("el_9", "assert.status", request, "ok");
+
+    const auto rows = tallies.build (elements);
+    ASSERT_EQ (rows.size (), 3u) << rows.dump ();
+    EXPECT_EQ (rows[0]["kind"], "assert.status");
+    EXPECT_EQ (rows[0]["origin"]["id"], "col_1");
+    EXPECT_EQ (rows[0]["passed"], 3) << rows[0].dump ();
+    EXPECT_EQ (rows[0]["missing"], 0) << rows[0].dump ();
+    EXPECT_EQ (rows[1]["kind"], "extract.json");
+    EXPECT_EQ (rows[1]["origin"]["id"], "req_1");
+    EXPECT_EQ (rows[1]["passed"], 0) << rows[1].dump ();
+    EXPECT_EQ (rows[1]["missing"], 2) << rows[1].dump ();
+    EXPECT_EQ (rows[2]["id"], "el_2");
+    EXPECT_EQ (rows[2]["failed"], 1) << rows[2].dump ();
+    EXPECT_EQ (rows[2]["passed"], 0) << rows[2].dump ();
+}
+
 // ---------------------------------------------------------------------------
 // A key the config leaves out behaves as the catalogue's `default` says
 // (issue #3045). The expected value is read from `GET /elements/kinds`' own

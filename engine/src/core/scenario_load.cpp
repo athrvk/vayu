@@ -309,40 +309,18 @@ std::vector<std::string> shared_throughput_element_ids (const ScenarioPlan& plan
     plan, "timer.throughput", element_defaults::TIMER_THROUGHPUT_PER_USER);
 }
 
-namespace {
-
-/// `origin.id`, or empty for an origin that names none.
-std::string_view origin_id_of (const nlohmann::json& origin) {
-    if (!origin.is_object ()) {
-        return {};
-    }
-    const auto found = origin.find ("id");
-    if (found == origin.end () || !found->is_string ()) {
-        return {};
-    }
-    return found->get_ref<const std::string&> ();
-}
-
-} // namespace
-
 StepElementTallies::StepElementTallies (const ScenarioPlan& plan)
 : misses_by_step_ (plan.steps.size ()) {
     counts_by_step_.reserve (plan.steps.size ());
     slots_by_step_.reserve (plan.steps.size ());
     for (const auto& step : plan.steps) {
-        std::unordered_map<std::string, std::vector<ElementSlot>> slots;
-        size_t element_count = 0;
-        if (step.elements) {
-            element_count = step.elements->size ();
-            slots.reserve (element_count);
-            for (size_t i = 0; i < element_count; ++i) {
-                const auto& element = (*step.elements)[i];
-                slots[element.id].push_back (
-                { i, std::string (origin_id_of (element.origin)) });
-            }
+        if (!step.elements) {
+            counts_by_step_.emplace_back ();
+            slots_by_step_.emplace_back ();
+            continue;
         }
-        counts_by_step_.emplace_back (element_count);
-        slots_by_step_.push_back (std::move (slots));
+        counts_by_step_.emplace_back (step.elements->size ());
+        slots_by_step_.emplace_back (*step.elements);
     }
 }
 
@@ -350,22 +328,11 @@ void StepElementTallies::record (size_t step, const ElementOutcome& outcome) {
     if (step >= slots_by_step_.size ()) {
         return;
     }
-    const auto found = slots_by_step_[step].find (outcome.id);
-    if (found == slots_by_step_[step].end ()) {
+    const auto slot = slots_by_step_[step].find (outcome);
+    if (!slot) {
         return;
     }
-    // The outcome carries its element's own origin, so an id two levels
-    // share is told apart by it; one id holds a single slot almost always.
-    const auto& slots     = found->second;
-    const auto origin_id  = origin_id_of (outcome.origin);
-    const ElementSlot* at = &slots.front ();
-    for (const auto& slot : slots) {
-        if (slot.origin_id == origin_id) {
-            at = &slot;
-            break;
-        }
-    }
-    counts_by_step_[step][at->index].record (outcome);
+    counts_by_step_[step][*slot].record (outcome);
     if (is_extractor_miss (outcome)) {
         misses_by_step_[step].fetch_add (1, std::memory_order_relaxed);
     }

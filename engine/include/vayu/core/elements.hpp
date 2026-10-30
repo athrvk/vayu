@@ -807,6 +807,49 @@ struct CompiledElement {
 };
 
 /**
+ * The level an element was declared at, as its `origin` stamp names it
+ * (`emit_level`, `request_composer.cpp`): `kind`, `scope` and `id`, each empty
+ * when absent or not a string, all three empty for an entry with no `origin`.
+ * Ids are unique within one level's list, not across the chain (a duplicated
+ * collection keeps its elements' ids, #3101), so a level and an id together
+ * name one element of a composed list. The views borrow from the `origin`
+ * passed to `element_level`.
+ */
+struct ElementLevel {
+    std::string_view kind;
+    std::string_view scope;
+    std::string_view id;
+
+    bool operator== (const ElementLevel&) const = default;
+};
+
+[[nodiscard]] ElementLevel element_level (const nlohmann::json& origin);
+
+/**
+ * Which entry of one compiled list an outcome belongs to, by id and then by
+ * `element_level`, for the load tallies that count per entry
+ * (`StepElementTallies`, `RequestElementTallies`). Built once per list, so
+ * `find` allocates nothing on the completion path, where event-loop workers
+ * call it concurrently.
+ */
+class ElementSlotIndex {
+    public:
+    ElementSlotIndex () = default;
+    explicit ElementSlotIndex (const std::vector<CompiledElement>& elements);
+
+    /// @p outcome's position in the list, or nullopt for an id the list does
+    /// not have. An origin matching none of an id's entries takes the first.
+    [[nodiscard]] std::optional<size_t> find (const ElementOutcome& outcome) const;
+
+    private:
+    struct Slot {
+        size_t index = 0;
+        nlohmann::json origin;
+    };
+    std::unordered_map<std::string, std::vector<Slot>> slots_by_id_;
+};
+
+/**
  * Compile a resolved `elements` array (as `request_composer.cpp`'s
  * `compose_elements` produces it - each entry stamped with `origin`) into the
  * ordered list `ElementPipeline::run` iterates.

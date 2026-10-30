@@ -1287,28 +1287,46 @@ TEST_F (RunConfigValidationRouteTest, ASingleRequestLoadRunKeepsItsMonitor) {
 
 // `requestElements` is a composed list: a collection's elements ride beside the
 // request's own, and an id is unique only within the level that declares it
-// (#3101). Mutation check: validate the whole array in one `Registry::validate`
-// call and the first case answers 400.
+// (#3101), and the report keeps a row per element with its own counts.
+// Mutation checks: validate the whole array in one `Registry::validate` call
+// and the first case answers 400; match `ElementSlotIndex::find`
+// (pipeline.cpp) by id alone and both rows count both outcomes.
 TEST_F (RunConfigValidationRouteTest, RequestElementsMayRepeatAnIdAcrossLevelsButNotWithinOne) {
     const vayu::tests::EchoServer echo;
-    const auto status_assert = [] (const std::string& kind, const std::string& origin_id) {
+    const auto status_assert = [] (const std::string& kind,
+                               const std::string& origin_id, int expected) {
         return json{ { "id", "el_1" }, { "kind", "assert.status" },
-            { "config", { { "in", json::array ({ 200 }) } } },
+            { "config", { { "in", json::array ({ expected }) } } },
             { "origin", { { "kind", kind }, { "scope", kind }, { "id", origin_id } } } };
     };
 
-    auto across_levels               = iterations_run (echo);
-    across_levels["requestElements"] = json::array (
-    { status_assert ("collection", "col_1"), status_assert ("request", "req_1") });
+    auto across_levels = iterations_run (echo);
+    across_levels["requestElements"] =
+    json::array ({ status_assert ("collection", "col_1", 200),
+    status_assert ("request", "req_1", 500) });
     const auto [accepted, accepted_body] = post_run (across_levels);
     ASSERT_EQ (accepted, 202) << accepted_body.dump ();
-    EXPECT_EQ (settled_status (accepted_body.value ("runId", std::string ())),
-    vayu::RunStatus::Completed);
+    const std::string run_id = accepted_body.value ("runId", std::string ());
+    // Its worker's last act is letting go of the run, after the summary.
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return run_manager_.get_run (run_id) == nullptr; }))
+    << "the run never finished";
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Completed);
+    const auto rows = json::parse (run->summary).value ("elements", json::array ());
+    ASSERT_EQ (rows.size (), 2u) << run->summary;
+    EXPECT_EQ (rows[0]["origin"]["id"], "col_1");
+    EXPECT_EQ (rows[0]["passed"], 1) << rows[0].dump ();
+    EXPECT_EQ (rows[0]["failed"], 0) << rows[0].dump ();
+    EXPECT_EQ (rows[1]["origin"]["id"], "req_1");
+    EXPECT_EQ (rows[1]["passed"], 0) << rows[1].dump ();
+    EXPECT_EQ (rows[1]["failed"], 1) << rows[1].dump ();
 
     const auto rows_before            = db_->get_all_runs ().size ();
     auto within_a_level               = iterations_run (echo);
     within_a_level["requestElements"] = json::array (
-    { status_assert ("request", "req_1"), status_assert ("request", "req_1") });
+    { status_assert ("request", "req_1", 200), status_assert ("request", "req_1", 200) });
     const auto [refused, refused_body] = post_run (within_a_level);
     EXPECT_EQ (refused, 400) << refused_body.dump ();
     EXPECT_NE (vayu::http::routes::error_message_of (refused_body).find ("same id"),

@@ -577,20 +577,17 @@ std::optional<std::string> refuse_scenario_only_element (const nlohmann::json& e
     kind != nullptr ? kind->label : kind_name, element_whereabouts (entry));
 }
 
-/// The level a composed entry was declared at, as one comparable key: the
-/// `origin` composition stamps (`emit_level`) name a collection, a folder or
-/// the request by kind, scope and id. An entry with no `origin` (written
-/// straight into the payload, or not an object) keys as the empty string.
+/// `element_level` of a raw entry as a hashable key. An entry with no
+/// `origin` (written straight into the payload) has the empty level, as it
+/// does in the run's tallies.
 std::string level_key (const nlohmann::json& entry) {
-    if (!entry.is_object ()) {
-        return {};
+    vayu::core::ElementLevel level;
+    if (entry.is_object ()) {
+        if (const auto origin = entry.find ("origin"); origin != entry.end ()) {
+            level = vayu::core::element_level (*origin);
+        }
     }
-    const auto origin = entry.find ("origin");
-    if (origin == entry.end () || !origin->is_object ()) {
-        return {};
-    }
-    return std::format ("{}/{}/{}", string_member (*origin, "kind"),
-    string_member (*origin, "scope"), string_member (*origin, "id"));
+    return std::format ("{}/{}/{}", level.kind, level.scope, level.id);
 }
 
 /// @p elements split into one array per level, in the order each level first

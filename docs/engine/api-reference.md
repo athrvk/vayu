@@ -12014,7 +12014,9 @@ past the cap), and the section is absent when none of its traces was slow.
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
 submission in the row shape a scenario step's `elements` uses (`{id, kind, name?, origin?,
 required?, passed, failed, missing, error, skipped, deferred}`, one count per outcome word,
-#3051; see [Scenario load runs](#scenario-load-runs)). `deferred` (issue #2144)
+#3051; see [Scenario load runs](#scenario-load-runs)). There is one row per element,
+in `requestElements` order, so a collection's element and the request's own that share an
+id (#3101) are two rows, each with its own counts and `origin`. `deferred` (issue #2144)
 counts the submissions an un-inlined `script.post` was left to the completion replay on:
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is every other skip: a disabled element, an un-inlined

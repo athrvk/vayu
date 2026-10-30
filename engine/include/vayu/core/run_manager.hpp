@@ -215,33 +215,30 @@ struct EngineDefaults {
 };
 
 /**
- * Per-element pass/fail/skip/defer tallies for a single-request run's own
+ * Per-element outcome tallies for a single-request run's own
  * `requestElements` (issue #1594) - the load-path sibling of
- * `StepElementTallies` (`scenario_load.hpp`), but keyed by element id alone:
- * this run shape has one virtual step (its one request, repeated), not a
- * plan of many. Sized once, from `RunContext::step_elements`, at
- * construction - so `record` below is a lookup into an existing map entry's
- * atomics, never an insert, and safe for the concurrent event-loop worker
- * threads that call it.
+ * `StepElementTallies` (`scenario_load.hpp`) for a run with one virtual step
+ * (its one request, repeated). One counter per entry, matched through
+ * `ElementSlotIndex`, so a collection's element and the request's own keep
+ * separate rows under a shared id. Sized once, from
+ * `RunContext::step_elements`, at construction - so `record` below is a
+ * lookup into existing atomics, never an insert, and safe for the concurrent
+ * event-loop worker threads that call it.
  */
 class RequestElementTallies {
     public:
     RequestElementTallies () = default;
-    explicit RequestElementTallies (const std::vector<vayu::core::CompiledElement>& elements) {
-        for (const auto& element : elements) {
-            counts_.try_emplace (element.id);
-        }
+    explicit RequestElementTallies (const std::vector<vayu::core::CompiledElement>& elements)
+    : slots_ (elements), counts_ (elements.size ()) {
     }
 
     /// A no-op for an element id this run's `step_elements` does not have.
     /// Classified by `ElementOutcomeCounts::record`, the rule
     /// `StepElementTallies` shares.
     void record (const vayu::core::ElementOutcome& outcome) {
-        auto it = counts_.find (outcome.id);
-        if (it == counts_.end ()) {
-            return;
+        if (const auto slot = slots_.find (outcome)) {
+            counts_.at (*slot).record (outcome);
         }
-        it->second.record (outcome);
     }
 
     /// This run's `elements` array for the report, in `step_elements`
@@ -251,18 +248,16 @@ class RequestElementTallies {
     [[nodiscard]] nlohmann::json build (
     const std::vector<vayu::core::CompiledElement>& elements) const {
         nlohmann::json out = nlohmann::json::array ();
-        for (const auto& element : elements) {
-            auto it = counts_.find (element.id);
-            if (it == counts_.end ()) {
-                continue;
-            }
-            it->second.append_report_row (out, element);
+        const size_t count = std::min (elements.size (), counts_.size ());
+        for (size_t i = 0; i < count; ++i) {
+            counts_[i].append_report_row (out, elements[i]);
         }
         return out;
     }
 
     private:
-    std::unordered_map<std::string, vayu::core::ElementOutcomeCounts> counts_;
+    vayu::core::ElementSlotIndex slots_;
+    std::vector<vayu::core::ElementOutcomeCounts> counts_;
 };
 
 // `optin.performance.Padding` is right that size-ordering these fields would

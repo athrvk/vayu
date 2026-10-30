@@ -250,6 +250,51 @@ const CompiledElement& element) const {
     rows.push_back (std::move (row));
 }
 
+namespace {
+
+std::string_view string_view_member (const nlohmann::json& object, const char* key) {
+    const auto found = object.find (key);
+    if (found == object.end () || !found->is_string ()) {
+        return {};
+    }
+    return found->get_ref<const std::string&> ();
+}
+
+} // namespace
+
+ElementLevel element_level (const nlohmann::json& origin) {
+    if (!origin.is_object ()) {
+        return {};
+    }
+    return { string_view_member (origin, "kind"),
+        string_view_member (origin, "scope"), string_view_member (origin, "id") };
+}
+
+ElementSlotIndex::ElementSlotIndex (const std::vector<CompiledElement>& elements) {
+    slots_by_id_.reserve (elements.size ());
+    for (size_t i = 0; i < elements.size (); ++i) {
+        slots_by_id_[elements[i].id].push_back ({ i, elements[i].origin });
+    }
+}
+
+std::optional<size_t> ElementSlotIndex::find (const ElementOutcome& outcome) const {
+    const auto found = slots_by_id_.find (outcome.id);
+    if (found == slots_by_id_.end ()) {
+        return std::nullopt;
+    }
+    const auto& slots = found->second;
+    if (slots.size () == 1) {
+        return slots.front ().index;
+    }
+    const auto level = element_level (outcome.origin);
+    for (const auto& slot : slots) {
+        if (element_level (slot.origin) == level) {
+            return slot.index;
+        }
+    }
+    return slots.front ().index;
+}
+
 nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
 const std::vector<ElementOutcome>& run_end) {
     nlohmann::json node = nlohmann::json::object ();
