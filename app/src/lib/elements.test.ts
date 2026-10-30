@@ -8,6 +8,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+	describeNeeds,
 	elementNeeds,
 	errorsWithin,
 	hasIncompleteElement,
@@ -742,5 +743,33 @@ describe("notRunReason", () => {
 		).toBe(
 			"Not run - needs text to look for; count: Must be at least 1; range.max: Can't be empty"
 		);
+	});
+});
+
+describe("describeNeeds", () => {
+	const needs = { missing: ["Variable name"], invalid: { count: "Must be at least 1" } };
+
+	it("capitalises only the lead word for a mark that stands alone", () => {
+		expect(describeNeeds(needs, { sentenceStart: true })).toBe(
+			"Needs Variable name; count: Must be at least 1"
+		);
+	});
+
+	it("is the wording notRunReason prefixes", () => {
+		expect(notRunReason(needs)).toBe(
+			`Not run - ${describeNeeds(needs, { sentenceStart: false })}`
+		);
+		expect(describeNeeds(needs, { sentenceStart: false })).toBe(
+			"needs Variable name; count: Must be at least 1"
+		);
+	});
+
+	it("leaves a refused value's field in its own case when nothing is missing", () => {
+		expect(
+			describeNeeds(
+				{ missing: [], invalid: { count: "Must be at least 1" } },
+				{ sentenceStart: true }
+			)
+		).toBe("count: Must be at least 1");
 	});
 });
