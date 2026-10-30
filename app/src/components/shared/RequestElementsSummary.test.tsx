@@ -127,3 +127,90 @@ describe("RequestElementsSummary", () => {
 		expect(screen.getByText("timer.think")).toBeTruthy();
 	});
 });
+
+/**
+ * Issue #3051: `missing` and `error` are counts of their own, and a row names
+ * its element. `ScenarioStepsTab.test.tsx` drives the same cases through the
+ * other parent of the shared `ElementTally`.
+ */
+describe("a missing and an error tally, a name and an origin (issue #3051)", () => {
+	it("shows missing as a warning and error as an error, apart from skipped and failed", () => {
+		render(
+			<RequestElementsSummary
+				elements={[tally({ kind: "extract.json", passed: 5, missing: 3, error: 2 })]}
+			/>
+		);
+		expect(
+			screen.getByText("3 missing", { selector: "span.text-status-warning-text" })
+		).toBeTruthy();
+		expect(
+			screen.getByText("2 error", { selector: "span.text-status-error-text" })
+		).toBeTruthy();
+		expect(screen.queryByText(/failed/)).toBeNull();
+		expect(screen.queryByText(/skipped/)).toBeNull();
+	});
+
+	it("hides both at zero, and when the report predates them", () => {
+		render(
+			<RequestElementsSummary
+				elements={[
+					tally({ id: "el_zero", kind: "extract.json", missing: 0, error: 0 }),
+					tally({ id: "el_old", kind: "assert.status" }),
+				]}
+			/>
+		);
+		expect(screen.queryByText(/missing/)).toBeNull();
+		expect(screen.queryByText(/error/)).toBeNull();
+	});
+
+	it("reads a required extractor's miss as a failure", () => {
+		render(
+			<RequestElementsSummary
+				elements={[tally({ kind: "extract.json", required: true, missing: 4 })]}
+			/>
+		);
+		const miss = screen.getByText("4 missing (required)");
+		expect(miss).toHaveClass("text-status-error-text");
+		expect(miss).not.toHaveClass("text-status-warning-text");
+		expect(miss).toHaveAttribute("title", expect.stringMatching(/fails the step/));
+	});
+
+	it("names the element, with its kind beside it, and the collection it came from", () => {
+		render(
+			<RequestElementsSummary
+				elements={[
+					tally({
+						kind: "extract.json",
+						name: "Session token",
+						origin: { kind: "collection", scope: "collection", name: "Billing" },
+					}),
+				]}
+			/>
+		);
+		expect(screen.getByText("Session token")).toBeTruthy();
+		expect(screen.getByText("extract.json")).toBeTruthy();
+		expect(screen.getByText('from "Billing"')).toBeTruthy();
+	});
+
+	it("says nothing about the origin of a request's own element", () => {
+		const { container } = render(
+			<RequestElementsSummary
+				elements={[
+					tally({
+						name: "Is 200",
+						origin: { kind: "request", scope: "request", name: "Log in" },
+					}),
+				]}
+			/>
+		);
+		expect(screen.getByText("Is 200")).toBeTruthy();
+		expect(container.textContent).not.toMatch(/from|Log in/);
+	});
+
+	it("keeps an unnamed, old-shape row as the bare kind", () => {
+		const { container } = render(
+			<RequestElementsSummary elements={[tally({ kind: "assert.status", passed: 7 })]} />
+		);
+		expect(container.querySelector("li")?.textContent).toBe("assert.status7 passed");
+	});
+});

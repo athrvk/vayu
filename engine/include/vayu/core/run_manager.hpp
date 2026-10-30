@@ -256,7 +256,7 @@ class RequestElementTallies {
             if (it == counts_.end ()) {
                 continue;
             }
-            it->second.append_report_row (out, element.id, element.kind);
+            it->second.append_report_row (out, element);
         }
         return out;
     }

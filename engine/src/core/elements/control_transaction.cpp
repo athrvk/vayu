@@ -125,9 +125,11 @@ std::vector<ElementOutcome>& outcomes) {
     });
     if (own == outcomes.end ()) {
         ElementOutcome appended;
-        appended.id     = compiled.id;
-        appended.kind   = compiled.kind;
-        appended.origin = compiled.origin;
+        appended.id       = compiled.id;
+        appended.kind     = compiled.kind;
+        appended.name     = compiled.name;
+        appended.origin   = compiled.origin;
+        appended.required = compiled.required;
         outcomes.push_back (std::move (appended));
         own = std::prev (outcomes.end ());
     }
