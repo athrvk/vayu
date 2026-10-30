@@ -3170,7 +3170,7 @@ TEST_F (LoadStrategyTest, AnUnreadableBodyFailsAJsonAssertionOnEverySubmission) 
 
 // `extract.header` runs on every submission of a single-request run (#3070):
 // a header the response carries is found whatever its case, and one it lacks
-// tallies `skipped` (the "missing" outcome). The whitelist itself is held by
+// tallies `missing`, its own bucket since #3100. The whitelist itself is held by
 // `AcceptsAnExtractHeaderElement`; this drives the run past it.
 TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmission) {
     const size_t ITERATIONS = 3;
@@ -3193,7 +3193,8 @@ TEST_F (LoadStrategyTest, AnExtractHeaderElementReadsAResponseHeaderOnEverySubmi
 
     const auto missing = element_entry (summary, "el_missing");
     ASSERT_FALSE (missing.is_null ()) << summary.dump ();
-    EXPECT_EQ (missing["skipped"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (missing["missing"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (missing["skipped"], 0u) << summary.dump ();
     EXPECT_EQ (missing["passed"], 0u) << summary.dump ();
 }
 
