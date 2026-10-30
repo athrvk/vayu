@@ -980,7 +980,7 @@ TEST_F (MockServerTest, AStartCountsTheDuplicatesAndServesTheOneWithAnExample) {
             EXPECT_EQ (row["shadowedBy"]["requestId"], "req_second");
             EXPECT_EQ (row["hits"], 0u);
         }
-        shadowed_rows += row.contains ("shadowed") ? 1 : 0;
+        shadowed_rows += row.contains ("shadowed") ? 1u : 0u;
     }
     EXPECT_EQ (shadowed_rows, 1u);
 }
