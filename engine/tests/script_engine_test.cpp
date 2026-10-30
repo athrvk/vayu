@@ -5155,6 +5155,157 @@ TEST_F (ScriptEngineTest, ReplaceInRejectsANonStringArgument) {
     }
 }
 
+// pm.environment / pm.globals / pm.collectionVariables .replaceIn (#3133):
+// Postman resolves against the scope it is called on and nothing else. Every
+// scope holds a `shared` name and one of its own, the other scopes and the
+// run-local scope hold their own values too, and the template names them all,
+// so the answer shows which maps were read: a name only another scope defines
+// stays `{{name}}`, a disabled row is invisible, and the collection scope alone
+// reads its ancestors.
+//
+// Mutation-check: leave the binding off `setup_pm_variable_scope` and every
+// case throws "not a function"; hand the resolver the merged map instead and
+// each scope answers the others' names.
+TEST_F (ScriptEngineTest, ScopedReplaceInResolvesFromItsOwnScopeAndNoOther) {
+    struct ScopeCase {
+        const char* accessor;
+        const char* expected;
+    };
+    const std::array<ScopeCase, 3> cases{ {
+    { "environment",
+    "from-environment|e1|{{globalsOnly}}|{{collOnly}}|"
+    "{{localOnly}}|{{hidden}}|{{ancestorOnly}}" },
+    { "globals",
+    "from-globals|{{envOnly}}|g1|{{collOnly}}|{{localOnly}}|"
+    "{{hidden}}|{{ancestorOnly}}" },
+    { "collectionVariables",
+    "from-collection|{{envOnly}}|{{globalsOnly}}|"
+    "c1|{{localOnly}}|{{hidden}}|from-ancestor" },
+    } };
+
+    for (const auto& scope : cases) {
+        Environment environment;
+        environment["shared"]  = Variable{ "from-environment", false, true };
+        environment["envOnly"] = Variable{ "e1", false, true };
+        environment["hidden"]  = Variable{ "env-hidden", false, false };
+        Environment globals;
+        globals["shared"]      = Variable{ "from-globals", false, true };
+        globals["globalsOnly"] = Variable{ "g1", false, true };
+        globals["hidden"]      = Variable{ "globals-hidden", false, false };
+        Environment collVars;
+        collVars["shared"]   = Variable{ "from-collection", false, true };
+        collVars["collOnly"] = Variable{ "c1", false, true };
+        collVars["hidden"]   = Variable{ "coll-hidden", false, false };
+        Environment local;
+        local["shared"]    = Variable{ "from-local", false, true };
+        local["localOnly"] = Variable{ "l1", false, true };
+        Environment ancestor;
+        ancestor["shared"]       = Variable{ "from-ancestor", false, true };
+        ancestor["ancestorOnly"] = Variable{ "from-ancestor", false, true };
+        const std::vector<Environment> ancestors{ ancestor };
+
+        ScriptContext ctx;
+        ctx.request             = &request;
+        ctx.environment         = &environment;
+        ctx.globals             = &globals;
+        ctx.collectionVariables = &collVars;
+        ctx.collectionAncestors = &ancestors;
+        ctx.local               = &local;
+
+        auto result =
+        engine.execute (std::string ("pm.variables.set('out', pm.") + scope.accessor +
+        ".replaceIn('{{shared}}|{{envOnly}}|{{globalsOnly}}|{{collOnly}}|"
+        "{{localOnly}}|{{hidden}}|{{ancestorOnly}}'));",
+        ctx);
+
+        ASSERT_TRUE (result.success) << scope.accessor << ": " << result.error_message;
+        EXPECT_EQ (local["out"].value, scope.expected) << scope.accessor;
+    }
+}
+
+// What is not a scope answers on a scoped replaceIn exactly as it does on
+// pm.variables.replaceIn: the dynamic names, the iteration identity and a bound
+// row. The row sits above the scope's own value, and the run-local scope, which
+// is a scope of its own, stays out even where it outranks the row on the merged
+// path.
+TEST_F (ScriptEngineTest, ScopedReplaceInStillAnswersTheNamesThatAreNotScopes) {
+    const nlohmann::json row{ { "city", "Portland" }, { "userId", "1001" } };
+
+    for (const char* accessor : { "environment", "globals", "collectionVariables" }) {
+        Environment environment;
+        Environment globals;
+        Environment collVars;
+        Environment local;
+        local["userId"]         = Variable{ "from-local", false, true };
+        Environment* under_test = &collVars;
+        if (std::string (accessor) == "environment") {
+            under_test = &environment;
+        } else if (std::string (accessor) == "globals") {
+            under_test = &globals;
+        }
+        (*under_test)["userId"]    = Variable{ "from-scope", false, true };
+        (*under_test)["scopeOnly"] = Variable{ "s1", false, true };
+
+        ScriptContext ctx;
+        ctx.request             = &request;
+        ctx.environment         = &environment;
+        ctx.globals             = &globals;
+        ctx.collectionVariables = &collVars;
+        ctx.local               = &local;
+        ctx.iteration_data      = &row;
+        ctx.vu                  = 7;
+        ctx.iteration           = 3;
+
+        const std::string call = std::string ("pm.") + accessor + ".replaceIn";
+        std::string script = "var pair = " + call + "('{{$guid}}|{{$guid}}').split('|');\n";
+        script += "pm.variables.set('first', pair[0]);\n";
+        script += "pm.variables.set('second', pair[1]);\n";
+        script += "pm.variables.set('rest', " + call;
+        script +=
+        "('{{$vu}}/{{$iteration}}/{{data.city}}/{{userId}}/{{scopeOnly}}'));";
+        auto result = engine.execute (script, ctx);
+
+        ASSERT_TRUE (result.success) << accessor << ": " << result.error_message;
+        const std::regex uuid_v4 ("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab]"
+                                  "[0-9a-f]{3}-[0-9a-f]{12}$");
+        EXPECT_TRUE (std::regex_match (local["first"].value, uuid_v4))
+        << accessor << ": " << local["first"].value;
+        EXPECT_TRUE (std::regex_match (local["second"].value, uuid_v4))
+        << accessor << ": " << local["second"].value;
+        EXPECT_NE (local["first"].value, local["second"].value) << accessor;
+        EXPECT_EQ (local["rest"].value, "7/3/Portland/1001/s1") << accessor;
+    }
+}
+
+// The refusals name the call the script wrote, not pm.variables.replaceIn.
+TEST_F (ScriptEngineTest, ScopedReplaceInRefusesWhatTheMergedOneRefusesUnderItsOwnName) {
+    const nlohmann::json row{ { "userId", "1001" } };
+
+    for (const char* accessor : { "environment", "globals", "collectionVariables" }) {
+        const std::string call = std::string ("pm.") + accessor + ".replaceIn";
+
+        for (const char* argument : { "", "42", "undefined", "{}" }) {
+            auto result =
+            engine.execute_prerequest (call + "(" + argument + ")", request, env);
+            EXPECT_FALSE (result.success) << call << "(" << argument << ")";
+            EXPECT_NE (result.error_message.find (call + " expects a string"),
+            std::string::npos)
+            << call << "(" << argument << ") -> " << result.error_message;
+        }
+
+        ScriptContext ctx;
+        ctx.request        = &request;
+        ctx.iteration_data = &row;
+        auto missing       = engine.execute (call + "('{{data.nosuch}}')", ctx);
+        EXPECT_FALSE (missing.success) << call;
+        EXPECT_NE (missing.error_message.find (call + ": {{data.nosuch}} names a column"),
+        std::string::npos)
+        << call << " -> " << missing.error_message;
+        EXPECT_NE (missing.error_message.find ("columns: userId"), std::string::npos)
+        << call << " -> " << missing.error_message;
+    }
+}
+
 // pm.variables.set writes the local scope (#2564), never a named one. A context
 // that binds no local scope - this convenience entry point binds only the
 // environment - still gives the script one for its own duration, so the write
