@@ -16,8 +16,12 @@
  * raised, a `control.transaction`'s name - prints inline, and so does a timer's
  * wait (`waitedMs`, which is 0 for a silenced timer and still worth saying)
  * (#1941). The message was on hover only for a failure, which left an errored
- * element as a bare chip with its one explanation hidden (#2522); a long one
- * truncates on the row and the card's `title` holds the whole text.
+ * element as a bare chip with its one explanation hidden (#2522); it wraps in
+ * full, since a miss reason ("no match for '$.data.token'") is what tells two
+ * rows of one kind apart (#3051), and the card's `title` repeats it. A row names
+ * its element - `name` when it has one, the kind beside it - and a collection's
+ * element says which collection it came from. A required extractor's `missing`
+ * failed the step, so it takes the failure's colours and says it was required.
  */
 
 import { AlertTriangle, CheckCircle, CircleSlash, HelpCircle, XCircle } from "lucide-react";
@@ -25,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { formatLatency } from "@/lib/format-number";
 import type { ElementOutcome } from "@/types";
 import { EYEBROW_XS_CLASS } from "@/components/ui/eyebrow";
+import { elementOriginLabel, REQUIRED_MISS_HINT } from "@/components/shared";
 
 export interface ElementOutcomesProps {
 	outcomes: readonly ElementOutcome[];
@@ -64,36 +69,54 @@ export default function ElementOutcomes({ outcomes, inset = true }: ElementOutco
 			<h3 className={cn(EYEBROW_XS_CLASS, "mb-1.5")}>Elements</h3>
 			<div className="space-y-1.5">
 				{outcomes.map((outcome, i) => {
-					const Icon = OUTCOME_ICON[outcome.outcome] ?? AlertTriangle;
+					// A required miss failed the step, so it is painted as a failure.
+					const requiredMiss = outcome.outcome === "missing" && outcome.required === true;
+					const tone = requiredMiss ? "failed" : outcome.outcome;
+					const Icon = OUTCOME_ICON[tone] ?? AlertTriangle;
+					const origin = elementOriginLabel(outcome.origin);
 					return (
 						<div
 							key={`${outcome.id}-${i}`}
-							className={cn(
-								"p-2.5 rounded-md border",
-								OUTCOME_CARD_CLASS[outcome.outcome]
-							)}
+							className={cn("p-2.5 rounded-md border", OUTCOME_CARD_CLASS[tone])}
 							title={outcome.message}
 						>
-							<div className="flex items-center gap-2">
+							<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
 								<Icon
 									className={cn(
 										"size-icon-sm shrink-0",
-										OUTCOME_TEXT_CLASS[outcome.outcome]
+										OUTCOME_TEXT_CLASS[tone]
 									)}
 								/>
 								<span
-									className={cn(
-										"text-xs font-medium",
-										OUTCOME_TEXT_CLASS[outcome.outcome]
-									)}
+									className={cn("text-xs font-medium", OUTCOME_TEXT_CLASS[tone])}
 								>
-									{outcome.kind}
+									{outcome.name ?? outcome.kind}
 								</span>
-								<span className="text-micro text-muted-foreground">
-									{outcome.outcome}
+								{outcome.name && (
+									<span className="text-micro font-mono text-muted-foreground">
+										{outcome.kind}
+									</span>
+								)}
+								{origin && (
+									<span className="text-micro text-muted-foreground">
+										{origin}
+									</span>
+								)}
+								<span
+									className={cn(
+										"text-micro",
+										requiredMiss
+											? OUTCOME_TEXT_CLASS[tone]
+											: "text-muted-foreground"
+									)}
+									title={requiredMiss ? REQUIRED_MISS_HINT : undefined}
+								>
+									{requiredMiss
+										? `${outcome.outcome} (required)`
+										: outcome.outcome}
 								</span>
 								{outcome.message && (
-									<span className="min-w-0 truncate text-micro text-foreground">
+									<span className="min-w-0 break-words text-micro text-foreground">
 										{outcome.message}
 									</span>
 								)}

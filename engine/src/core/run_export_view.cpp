@@ -1423,15 +1423,27 @@ ReportText iterations_text (const ordered& scenario) {
     return words (std::move (out));
 }
 
-/// The inline assertion outcomes of one step: `assert.*` elements and the
-/// `script.*` ones whose `pm.test` calls ran inline. A script the engine only
-/// replays afterwards is `deferred` and carries no pass or fail count here.
+/// The inline assertion outcomes of one step: `assert.*` elements, the
+/// `script.*` ones whose `pm.test` calls ran inline, and a required
+/// extractor's misses, each of which failed the step as a failed assertion
+/// does. A script the engine only replays afterwards is `deferred` and
+/// carries no pass or fail count here.
 struct AssertionTally {
     bool counted    = false;
     double passed   = 0;
     double failed   = 0;
     double deferred = 0;
 };
+
+/// How often @p element, a required extractor, found nothing; 0 for any
+/// other element. Its hits are extractions, not assertions, and add nothing.
+double required_misses (const ordered& element) {
+    const ordered& required = member (element, "required");
+    if (!required.is_boolean () || !required.get<bool> ()) {
+        return 0;
+    }
+    return number_at (element, { "missing" }).value_or (0);
+}
 
 AssertionTally assertions_of (const ordered& step) {
     AssertionTally tally;
@@ -1440,13 +1452,20 @@ AssertionTally assertions_of (const ordered& step) {
         return tally;
     }
     for (const ordered& element : elements) {
+        if (const double misses = required_misses (element); misses > 0) {
+            tally.counted = true;
+            tally.failed += misses;
+            continue;
+        }
         const std::string kind = text_at (element, { "kind" });
         if (!kind.starts_with ("assert.") && !kind.starts_with ("script.")) {
             continue;
         }
         tally.counted = true;
         tally.passed += number_at (element, { "passed" }).value_or (0);
-        tally.failed += number_at (element, { "failed" }).value_or (0);
+        // An assertion or script that threw failed it too (#3051).
+        tally.failed += number_at (element, { "failed" }).value_or (0) +
+        number_at (element, { "error" }).value_or (0);
         tally.deferred += number_at (element, { "deferred" }).value_or (0);
     }
     return tally;

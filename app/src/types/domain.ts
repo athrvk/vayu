@@ -876,7 +876,15 @@ export type ElementScope = "collection" | "folder" | "request";
  * chain to resolve from.
  */
 export interface ResolvedElement extends ElementDef {
-	origin?: { kind: "collection" | "request"; scope?: ElementScope; id?: string; name?: string };
+	origin?: ElementOrigin;
+}
+
+/** The level an element was composed from; see {@link ResolvedElement}. */
+export interface ElementOrigin {
+	kind: "collection" | "request";
+	scope?: ElementScope;
+	id?: string;
+	name?: string;
 }
 
 /**
@@ -890,7 +898,11 @@ export interface ResolvedElement extends ElementDef {
 export interface ElementOutcome {
 	id: string;
 	kind: string;
-	origin?: { kind: "collection" | "request"; id: string; name?: string };
+	/** The element's own label; absent when it has none (issue #3051). */
+	name?: string;
+	origin?: ElementOrigin;
+	/** Present only for an element whose config requires it: a `missing` then fails the step. */
+	required?: true;
 	outcome: "ok" | "failed" | "missing" | "skipped" | "error";
 	message?: string;
 	waitedMs?: number;
@@ -2804,12 +2816,25 @@ export interface LoadTestMetrics {
  * all (an un-inlined `script.pre`, a disabled element) stays `skipped`.
  * Absent from a report stored before #2144, which tallied the replayed script
  * as `skipped`; those rows keep their stored numbers.
+ *
+ * One count per outcome word of the sequential trace (issue #3051): `missing`
+ * (an extractor that found nothing) and `error` (an element that could not run
+ * its check) are no longer folded into `skipped` and `failed`. `required` is
+ * present, as `true`, only for an extractor whose miss fails the step. `name`
+ * and `origin` say which element the row is, present only when it carries
+ * them. A report stored before #3051 has none of the five, and its `skipped`
+ * and `failed` keep what they counted then.
  */
 export interface RunScenarioStepElementTally {
 	id: string;
 	kind: string;
+	name?: string;
+	origin?: ElementOrigin;
+	required?: true;
 	passed: number;
 	failed: number;
+	missing?: number;
+	error?: number;
 	skipped: number;
 	deferred?: number;
 }

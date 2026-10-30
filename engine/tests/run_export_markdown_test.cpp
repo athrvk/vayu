@@ -888,6 +888,45 @@ TEST (RunExportMarkdownTest, AStepsAssertionsAreSummedFromItsAssertAndScriptElem
     std::string::npos);
 }
 
+// An assertion that threw is counted apart from one that failed (#3051), and
+// the step's cell still reads it as a failure. Mutation check: drop the
+// `error` term in `assertions_of` (run_export_view.cpp) and this reads 0.
+TEST (RunExportMarkdownTest, AnAssertionThatErroredReadsAsFailedInItsStep) {
+    ordered_json document = read_document ("scenario-sequence");
+    document["report"]["scenario"]["steps"][0]["elements"][0]["error"] = 3;
+    EXPECT_NE (line_starting (render_run_export_markdown (document), "| Log in").find ("2,105 passed, 3 failed"),
+    std::string::npos);
+}
+
+// A required extractor's miss failed its step (#3051), so the step's cell
+// counts it as a failure; an optional one's miss, and a required one that
+// never missed, add nothing. Mutation check: drop the `required_misses` term
+// in `assertions_of` (run_export_view.cpp) and Log in reads 0 failed.
+TEST (RunExportMarkdownTest, ARequiredExtractorsMissReadsAsFailedInItsStep) {
+    ordered_json document = read_document ("scenario-sequence");
+    auto& steps           = document["report"]["scenario"]["steps"];
+    const auto extractor  = [] (const char* id, bool required, int missing) {
+        ordered_json row = { { "id", id }, { "kind", "extract.json" } };
+        if (required) {
+            row["required"] = true;
+        }
+        row["passed"]  = 100;
+        row["failed"]  = 0;
+        row["missing"] = missing;
+        return row;
+    };
+    steps[0]["elements"].push_back (extractor ("el_needed", true, 4));
+    steps[0]["elements"].push_back (extractor ("el_optional", false, 7));
+    steps[2]["elements"] = ordered_json::array ({ extractor ("el_found", true, 0) });
+
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (line_starting (text, "| Log in").find ("2,105 passed, 4 failed"),
+    std::string::npos)
+    << text;
+    EXPECT_NE (line_starting (text, "| Pay").find ("| -"), std::string::npos) << text;
+    EXPECT_EQ (line_starting (text, "| Pay").find ("passed"), std::string::npos) << text;
+}
+
 TEST (RunExportMarkdownTest, ACollectionRunNamesItsStepsOnlyWhenTheDocumentListsThem) {
     EXPECT_NE (render_run_export_markdown (read_document ("scenario-sequence")).find ("| Target         | Collection run, 3 steps per iteration"),
     std::string::npos);

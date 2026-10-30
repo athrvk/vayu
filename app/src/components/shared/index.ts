@@ -61,6 +61,7 @@ export * from "./ScriptLifecycleSummary";
 
 // A single-request run's own step-level element outcomes (issue #1641)
 export * from "./ElementTally";
+export * from "./element-origin";
 export * from "./ExtractorMisses";
 export * from "./RequestElementsSummary";
 
