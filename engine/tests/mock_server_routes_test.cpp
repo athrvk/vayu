@@ -849,6 +849,58 @@ TEST_F (MockServerTest, ATrailingSlashIsTheSameRoute) {
     vayu::http::resolve_mock_route (routes, "GET", "/pets/").route_index.has_value ());
 }
 
+TEST_F (MockServerTest, AHeadIsAnsweredByTheGetRouteOfThatPath) {
+    seed_pet_store ();
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+
+    const auto head = vayu::http::resolve_mock_route (routes, "HEAD", "/pets");
+    const auto get  = vayu::http::resolve_mock_route (routes, "GET", "/pets");
+    ASSERT_HAS_VALUE (get.route_index);
+    EXPECT_EQ (head.route_index, get.route_index);
+
+    // The templated route falls back the same way.
+    const auto one = vayu::http::resolve_mock_route (routes, "HEAD", "/pets/42");
+    ASSERT_HAS_VALUE (one.route_index);
+    EXPECT_EQ (routes[*one.route_index].request_id, "req_one");
+}
+
+TEST_F (MockServerTest, AStoredHeadRouteWinsOverTheGetFallback) {
+    seed_pet_store ();
+    seed_request ("req_head", "col_pets", vayu::HttpMethod::HEAD, "{{baseUrl}}/pets", "Head pets");
+    seed_example ("exa_head", "req_head", 204, "");
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+
+    const auto head = vayu::http::resolve_mock_route (routes, "HEAD", "/pets");
+    ASSERT_HAS_VALUE (head.route_index);
+    EXPECT_EQ (routes[*head.route_index].request_id, "req_head");
+}
+
+TEST_F (MockServerTest, AHeadWithNoGetRouteStillMissesAsBefore) {
+    seed_pet_store ();
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+
+    const auto unknown = vayu::http::resolve_mock_route (routes, "HEAD", "/orders");
+    EXPECT_FALSE (unknown.route_index.has_value ());
+    EXPECT_EQ (unknown.miss, MockMissKind::NoPath);
+
+    // A path served only for POST has no GET to borrow.
+    seed_request ("req_order", "col_pets", vayu::HttpMethod::POST, "{{baseUrl}}/orders");
+    seed_example ("exa_order", "req_order", 201, "{}");
+    const auto only_post = vayu::http::resolve_mock_route (
+    vayu::http::build_mock_routes (*db_, "col_root"), "HEAD", "/orders");
+    EXPECT_FALSE (only_post.route_index.has_value ());
+    EXPECT_EQ (only_post.miss, MockMissKind::MethodMismatch);
+}
+
+TEST_F (MockServerTest, AHeadToAGetRouteWithNoExampleIsTheSame501AsTheGet) {
+    seed_request ("req_bare", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/bare");
+    const auto routes = vayu::http::build_mock_routes (*db_, "col_root");
+
+    const auto head = vayu::http::resolve_mock_route (routes, "HEAD", "/bare");
+    EXPECT_FALSE (head.route_index.has_value ());
+    EXPECT_EQ (head.miss, MockMissKind::NoExample);
+}
+
 // ---------------------------------------------------------------------------
 // The manager and a live listener
 // ---------------------------------------------------------------------------
@@ -1032,6 +1084,38 @@ TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNot
     EXPECT_EQ (listed->body, R"([{"id":1}])");
     EXPECT_FALSE (listed->has_header ("Content-Encoding"));
     EXPECT_EQ (listed->get_header_value ("X-Custom"), "kept");
+}
+
+TEST_F (MockServerTest, AHeadToAMockedGetPathAnswersTheGetsStatusAndHeadersWithNoBody) {
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, R"([{"id":1}])", "application/json",
+    json::array ({ json{ { "key", "X-Custom" }, { "value", "kept" }, { "enabled", true } } }));
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const httplib::Headers no_compression = { { "Accept-Encoding", "identity" } };
+    const auto get  = client.Get ("/pets", no_compression);
+    const auto head = client.Head ("/pets", no_compression);
+    ASSERT_TRUE (get);
+    ASSERT_TRUE (head);
+    EXPECT_EQ (head->status, 200);
+    EXPECT_EQ (head->get_header_value ("X-Custom"), "kept");
+    EXPECT_EQ (head->get_header_value ("Content-Type"), "application/json");
+    // The length a GET would have sent, and no body behind it.
+    EXPECT_EQ (head->get_header_value ("Content-Length"), get->get_header_value ("Content-Length"));
+    EXPECT_TRUE (head->body.empty ());
+
+    const auto missing = client.Head ("/orders", no_compression);
+    ASSERT_TRUE (missing);
+    EXPECT_EQ (missing->status, 404);
 }
 
 // ---------------------------------------------------------------------------

@@ -6166,6 +6166,10 @@ same first one, and the new row is only reachable once the mock is restarted.
   shadowed. The start response counts the shadowed requests (`duplicateRoutes`)
   and `GET /mock/:mockId/routes` marks each one and names the request that
   answers in its place.
+- **A `HEAD` is answered by the `GET` route of that path** (#3118) when no
+  `HEAD` request is stored for it: the GET's status and headers (its
+  `Content-Length` included) and no body, so `curl -I` on a mocked path works.
+  A stored `HEAD` request still wins.
 
 **What a miss says.** The message is most of the debugging value, so the three
 outcomes are distinct rather than one blanket 404:
