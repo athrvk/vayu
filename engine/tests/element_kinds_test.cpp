@@ -1328,14 +1328,15 @@ TEST_F (ElementKindsTest, RequestElementTalliesKeepARowPerLevelUnderASharedId) {
     using nlohmann::json;
     const json collection{ { "kind", "collection" }, { "scope", "collection" },
         { "id", "col_1" } };
-    const json request{ { "kind", "request" }, { "scope", "request" }, { "id", "req_1" } };
+    const json request_level{ { "kind", "request" }, { "scope", "request" },
+        { "id", "req_1" } };
     const auto elements = vayu::core::compile_elements (json::array ({
     json{ { "id", "el_1" }, { "kind", "assert.status" },
     { "origin", collection }, { "config", { { "in", json::array ({ 200 }) } } } },
-    json{ { "id", "el_1" }, { "kind", "extract.json" }, { "origin", request },
+    json{ { "id", "el_1" }, { "kind", "extract.json" }, { "origin", request_level },
     { "config", { { "path", "$.t" }, { "variable", "t" } } } },
-    json{ { "id", "el_2" }, { "kind", "assert.status" }, { "origin", request },
-    { "config", { { "in", json::array ({ 200 }) } } } },
+    json{ { "id", "el_2" }, { "kind", "assert.status" },
+    { "origin", request_level }, { "config", { { "in", json::array ({ 200 }) } } } },
     }));
     vayu::core::RequestElementTallies tallies (elements);
     const auto record = [&] (const std::string& id, const std::string& kind,
@@ -1350,10 +1351,10 @@ TEST_F (ElementKindsTest, RequestElementTalliesKeepARowPerLevelUnderASharedId) {
     for (int i = 0; i < 3; ++i) {
         record ("el_1", "assert.status", collection, "ok");
     }
-    record ("el_1", "extract.json", request, "missing");
-    record ("el_1", "extract.json", request, "missing");
-    record ("el_2", "assert.status", request, "failed");
-    record ("el_9", "assert.status", request, "ok");
+    record ("el_1", "extract.json", request_level, "missing");
+    record ("el_1", "extract.json", request_level, "missing");
+    record ("el_2", "assert.status", request_level, "failed");
+    record ("el_9", "assert.status", request_level, "ok");
 
     const auto rows = tallies.build (elements);
     ASSERT_EQ (rows.size (), 3u) << rows.dump ();
