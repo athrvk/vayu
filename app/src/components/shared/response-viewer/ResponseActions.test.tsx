@@ -87,12 +87,38 @@ describe("Download", () => {
 	});
 
 	it("still writes a utf8 body as its text", async () => {
-		renderActions({ content: '{"ok":true}', fileExtension: "json" });
+		renderActions({ content: '{"ok":true}', contentType: "application/json" });
 
 		download();
 
 		expect(await blobs[0].text()).toBe('{"ok":true}');
-		expect(downloads[0]).toMatch(/\.json$/);
+		expect(downloads[0]).toMatch(/^response-\d+\.json$/);
+	});
+
+	// The extension comes from the response's Content-Type, not a detected body
+	// type: `text/javascript` is detected as javascript but used to save as
+	// `.javascript` (#3140).
+	it.each([
+		["text/javascript; charset=utf-8", "js"],
+		["text/html", "html"],
+		["text/plain", "txt"],
+		["", "txt"],
+		// No usable subtype: `bin` is for bytes, so a readable body falls back to `.txt`.
+		["application/vnd.ms-excel", "txt"],
+	])("names a text body of type %j .%s", (contentType, extension) => {
+		renderActions({ content: "body", contentType });
+
+		download();
+
+		expect(downloads[0]).toMatch(new RegExp(`^response-\\d+\\.${extension}$`));
+	});
+
+	it("names a text body .txt when no content type is given at all", () => {
+		renderActions({ content: "body" });
+
+		download();
+
+		expect(downloads[0]).toMatch(/^response-\d+\.txt$/);
 	});
 });
 

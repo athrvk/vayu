@@ -745,14 +745,12 @@ export default function ResponseViewer() {
 									 * they were taking, which is what let all seven tabs
 									 * render without the strip scrolling.
 									 *
-									 * `shown.bodyType` names the download; the history
-									 * viewer has no such field and keeps `.txt`. A
-									 * base64 body's bytes are named by their type.
+									 * The response's Content-Type names the download,
+									 * for a text body and a base64 one alike.
 									 */
 									actions={
 										<ResponseActions
 											content={receivedBody(shown)}
-											fileExtension={shown.bodyType}
 											rawBytes={shown.rawBytes}
 											contentType={contentTypeOf(shown.headers)}
 										/>
