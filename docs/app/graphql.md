@@ -161,8 +161,9 @@ Its header badges what the text will do when the request is sent:
   and is JSON on the wire, because the engine resolves the body before sending.
   It **is** sent.
 - **Not sent** - the text is broken for some other reason, so the request goes
-  out with no variables at all. To the editor both look like the same red
-  squiggle; on the wire they could not be more different.
+  out with no variables at all. The pane validates a copy with the
+  `{{variable}}` tokens masked, so a templated pane shows no red squiggle; only
+  a pane that will not be sent does.
 
 ## Several operations in one document
 
