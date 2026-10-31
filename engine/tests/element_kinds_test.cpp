@@ -1465,7 +1465,8 @@ TEST_F (ElementKindsTest, AScriptRowsSampleIsSafeUnderConcurrentOffers) {
     for (size_t thread = 0; thread < THREADS; ++thread) {
         for (size_t round = 0; round < ROUNDS; ++round) {
             const auto text = "error " + std::to_string ((thread + round) % DISTINCT);
-            offers_of_dropped += std::ranges::count (texts, text) == 0 ? 1 : 0;
+            offers_of_dropped +=
+            std::ranges::count (texts, text) == 0 ? size_t{ 1 } : size_t{ 0 };
         }
     }
     EXPECT_EQ (counts.messages.dropped (), offers_of_dropped);
