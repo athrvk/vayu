@@ -168,6 +168,38 @@ class AnyPathServer final : public httplib::Server {
     /// already spells.
     static constexpr const char* ROUTE = "/";
 
+    /// Prefixed to a multipart Content-Type by `mask_multipart`, so the media
+    /// type is no longer multipart/form-data and cpp-httplib leaves the body
+    /// alone.
+    static constexpr std::string_view MASK = "x-vayu-raw+";
+
+    /**
+     * Keep a multipart body whole (#3110). cpp-httplib parses a request whose
+     * Content-Type is multipart/form-data into `Request::form` and leaves
+     * `body` empty, so a capture would record the headers and no bytes. The
+     * parse is chosen from the Content-Type as `setup_request` leaves it, so the
+     * media type is masked here and `sender_headers` strips the mask again for
+     * the capture. (A sender that itself opens its Content-Type with the mask
+     * sees it removed from the stored header; nothing else reads it.)
+     */
+    static void mask_multipart (httplib::Request& req) {
+        if (!req.is_multipart_form_data ()) {
+            return;
+        }
+        const auto it = req.headers.find ("Content-Type");
+        it->second.insert (0, MASK);
+    }
+
+    /// The request's headers as the sender wrote them.
+    static httplib::Headers sender_headers (const httplib::Request& req) {
+        httplib::Headers headers = req.headers;
+        const auto it            = headers.find ("Content-Type");
+        if (it != headers.end () && it->second.starts_with (MASK)) {
+            it->second.erase (0, MASK.size ());
+        }
+        return headers;
+    }
+
     private:
     bool process_and_close_socket (::socket_t sock) override {
         // Mirrors httplib::Server::process_and_close_socket. The one difference
@@ -207,7 +239,11 @@ class AnyPathServer final : public httplib::Server {
                 return process_request (
                 strm, remote_addr, remote_port, local_addr, local_port,
                 close_connection, connection_closed,
-                [] (httplib::Request& req) { req.path = ROUTE; }, &websocket_upgraded);
+                [] (httplib::Request& req) {
+                    req.path = ROUTE;
+                    mask_multipart (req);
+                },
+                &websocket_upgraded);
             });
         });
 
@@ -633,7 +669,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         // still on the target. See AnyPathServer.
         capture_row.path       = path_of (req.target);
         capture_row.query      = query_of (req.target);
-        capture_row.headers    = headers_json_text (req.headers);
+        capture_row.headers    = headers_json_text (AnyPathServer::sender_headers (req));
         capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body = stored_body (req.body, raw->limits.max_body_bytes);

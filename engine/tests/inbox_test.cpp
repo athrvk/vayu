@@ -391,6 +391,38 @@ TEST_F (InboxListenerTest, RecordsAPathPastTheRegexRouteLimitWithItsBody) {
     EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
 }
 
+TEST_F (InboxListenerTest, ACapturedMultipartBodyIsKeptWholeWithItsBoundaries) {
+    // cpp-httplib parses multipart/form-data into its form members and leaves
+    // `body` empty, so the capture used to record bodyBytes 0 (#3110). Read
+    // req.body without masking the Content-Type and body_bytes is 0.
+    const std::string boundary = "----vayuBoundary7";
+    const std::string body     = "--" + boundary + "\r\n"
+                                 "Content-Disposition: form-data; name=\"a\"\r\n\r\n"
+                                 "b\r\n"
+                                 "--" + boundary + "\r\n"
+                                 "Content-Disposition: form-data; name=\"note\"; filename=\"n.txt\"\r\n"
+                                 "Content-Type: text/plain\r\n\r\n"
+                                 "hello\r\n"
+                                 "--" + boundary + "--\r\n";
+    const std::string content_type = "multipart/form-data; boundary=" + boundary;
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    auto posted  = client.Post ("/mp", body, content_type);
+    ASSERT_TRUE (posted) << "POST to the inbox failed";
+    EXPECT_EQ (posted->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto& capture = captures.front ();
+    EXPECT_EQ (capture.body, body);
+    EXPECT_EQ (capture.body_bytes, static_cast<int64_t> (body.size ()));
+    EXPECT_FALSE (capture.body_truncated);
+    // The sender's header is stored, not the placeholder the parse is steered by.
+    const auto stored_headers = json::parse (capture.headers);
+    EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
+}
+
 TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
     // The path is read off the target now that routing rewrites `req.path`, so
     // it has to stay the *decoded* path cpp-httplib put there before - the

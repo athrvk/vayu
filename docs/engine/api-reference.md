@@ -5867,6 +5867,10 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
+A `multipart/form-data` body (a file upload, `curl -F`) is captured raw, as
+sent, with its boundaries and parts, and is cut at `inboxMaxBodyBytes` like any
+other body (issue #3110). The capture's `Content-Type` header is the sender's.
+
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
 sender can read the canned response:
