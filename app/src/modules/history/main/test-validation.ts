@@ -10,10 +10,12 @@
  *
  * The engine records them on a **synthetic result row** rather than a captured
  * request: `run_manager.cpp` appends one `Result` whose `trace_data` is
- * `{failures[], totalFailed, totalPassed}`, with `statusCode 0` and the error
- * "Script validation failures". It rides in `report.results` beside the real
- * samples, and `trace.failures` is the only field that tells the two apart - no
- * captured request ever carries it.
+ * `{failures[], failureCounts[], failuresDistinct, totalFailed, totalPassed}`
+ * (#3127: each distinct message once, with how often it failed;
+ * `totalFailed` and `totalPassed` count every occurrence), with `statusCode 0` and the error "Script validation
+ * failures". It rides in `report.results` beside the real samples, and
+ * `trace.failures` is the only field that tells the two apart - no captured
+ * request ever carries it.
  *
  * The live dashboard reads that row inline, per sample. History does not: its
  * Samples tab would render the row as a status-0 card with no request behind it
@@ -26,9 +28,17 @@ import type { SampleResult } from "../types";
 
 /** The named per-test failures a run recorded, lifted off the synthetic row. */
 export interface TestFailures {
-	/** The failure lines, bounded engine-side; {@link total} is the real count. */
+	/** The distinct failure lines, bounded engine-side; {@link distinct} is how many there were. */
 	messages: string[];
+	/** How many times each of {@link messages} failed, parallel to it; 1 each on an old row. */
+	counts: number[];
+	/** Failed assertions, each occurrence counted. */
 	total: number;
+	/**
+	 * Every distinct message the replay saw, kept or not. `undefined` on a row stored
+	 * before the engine deduplicated, whose list is one entry per occurrence.
+	 */
+	distinct: number | undefined;
 	passed: number;
 }
 
@@ -49,13 +59,16 @@ export function isTestValidationRow(result: SampleResult): boolean {
  * quietly reported as complete.
  */
 export function extractTestFailures(results: SampleResult[] | undefined): TestFailures | null {
-	const row = results?.find(isTestValidationRow);
-	const messages = row?.trace?.failures;
-	if (!messages || messages.length === 0) return null;
+	const trace = results?.find(isTestValidationRow)?.trace;
+	const messages = trace?.failures;
+	if (!trace || !messages || messages.length === 0) return null;
 	return {
 		messages,
-		total: row?.trace?.totalFailed ?? messages.length,
-		passed: row?.trace?.totalPassed ?? 0,
+		// A count missing from a short or absent list reads as one occurrence.
+		counts: messages.map((_, i) => trace.failureCounts?.[i] ?? 1),
+		total: trace.totalFailed ?? messages.length,
+		distinct: trace.failuresDistinct,
+		passed: trace.totalPassed ?? 0,
 	};
 }
 

@@ -1548,6 +1548,19 @@ export interface RunResultTrace {
 	 * nowhere before issue #111.
 	 */
 	failures?: string[];
+	/**
+	 * On the deferred replay's validation row (#3127), parallel to
+	 * {@link failures}: how many times each distinct message failed. Absent on a
+	 * row stored before the engine deduplicated, whose entries each stand for one.
+	 */
+	failureCounts?: number[];
+	/**
+	 * Every distinct failure message the replay saw, kept or not, so
+	 * `failuresDistinct - failures.length` were turned away. Absent with
+	 * {@link failureCounts}.
+	 */
+	failuresDistinct?: number;
+	/** Assertions that failed / passed, each occurrence counted. */
 	totalFailed?: number;
 	totalPassed?: number;
 	headers?: Record<string, string>;

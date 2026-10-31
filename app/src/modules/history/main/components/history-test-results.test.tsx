@@ -148,6 +148,36 @@ describe("History Overview - a load run's test outcomes", () => {
 		expect(screen.getByText("Showing 2 of 13.")).toBeInTheDocument();
 	});
 
+	it("lists a failure that repeated on every sampled response once, with its count (#3127)", () => {
+		renderOverview(
+			makeReport({
+				testValidation: {
+					samplesTested: 3,
+					testsPassed: 0,
+					testsFailed: 3,
+					successRate: 0,
+				},
+				results: [
+					CAPTURED_SAMPLE,
+					{
+						...VALIDATION_ROW,
+						trace: {
+							failures: ["status is 200: expected 404 to equal 200"],
+							failureCounts: [3],
+							failuresDistinct: 1,
+							totalFailed: 3,
+							totalPassed: 0,
+						},
+					},
+				],
+			})
+		);
+
+		expect(screen.getAllByText("status is 200: expected 404 to equal 200")).toHaveLength(1);
+		expect(screen.getByText("x3")).toBeInTheDocument();
+		expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+	});
+
 	it("sizes the Elements card's deferred replay by the tested responses (#3127)", () => {
 		renderOverview(
 			makeReport({

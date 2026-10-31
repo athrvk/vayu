@@ -2108,7 +2108,12 @@ not carry one reads "replay of sampled responses"). An inline `script.*` row may
 `messages` (the error it threw and each failing `pm.test`, `{kind: "error" | "test", text}`),
 `console` (`{level, text}`) and the `messagesDropped` / `consoleDropped` counts of what a
 full list turned away (#3127); each key is absent when empty, and the Elements card and the
-Steps tab list them under the row.
+Steps tab list them under the row. The deferred replay's failures arrive on the synthetic
+`results[]` row as `failures` (each distinct message once), `failureCounts` (how often each
+failed), `failuresDistinct` and the occurrence totals `totalFailed` / `totalPassed`; the
+Test validation card shows each message once with `x3` beside a repeat and says "Showing N
+of M distinct" when the engine kept fewer than it saw. A row from before #3127 has no
+`failureCounts` or `failuresDistinct`, and each of its entries counts as one.
 
 An **absent** `sampling` is a run whose stored summary predates the counts, not
 a run that dropped nothing, so the note stays out rather than asserting a

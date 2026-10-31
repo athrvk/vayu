@@ -187,7 +187,9 @@ export default function OverviewTab({
 				testValidation={report.testValidation}
 				sampling={report.sampling}
 				failures={testFailures?.messages}
+				failureCounts={testFailures?.counts}
 				failuresTotal={testFailures?.total}
+				failuresDistinct={testFailures?.distinct}
 				// A sequence's requests mostly carry no script, so the run's total is
 				// no denominator for the replay (#2824); a scenario report with no
 				// deferred script states none rather than that one.

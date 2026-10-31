@@ -22,7 +22,9 @@
  *
  * **`failures` lists the named failures.** The Overview passes them because
  * the synthetic failure row is filtered out of the Samples tab (see
- * `test-validation.ts`), so this is the one place they reach the screen.
+ * `test-validation.ts`), so this is the one place they reach the screen. Each
+ * distinct message is listed once with how often it failed (#3127): a script
+ * failing the same way on every sampled response is one line, `x1,000`.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
@@ -45,7 +47,20 @@ export interface TestValidationSummaryProps {
 	 * set. Omitted by surfaces that already list failures per sample.
 	 */
 	failures?: string[];
+	/**
+	 * How many times each of {@link failures} failed, parallel to it. A count
+	 * above 1 is shown beside the message; absent on a row stored before the
+	 * engine deduplicated, whose every entry stands for one.
+	 */
+	failureCounts?: number[];
+	/** Failed assertions, each occurrence counted - not the length of {@link failures}. */
 	failuresTotal?: number;
+	/**
+	 * Every distinct message the replay saw, kept or not. When it exceeds
+	 * `failures.length` the card says how many of how many it shows; absent on an
+	 * old row, which is judged by {@link failuresTotal} as it always was.
+	 */
+	failuresDistinct?: number;
 	/**
 	 * The run's total request count, `summary.totalRequests`. With it the card
 	 * says how many of the run's requests were tested; without it the card says
@@ -109,11 +124,47 @@ function coverageLine(
 	return null;
 }
 
+/** One failure: the message, and `x3` beside it when it failed more than once. */
+function FailureLine({ message, count }: { message: string; count: number | undefined }) {
+	return (
+		<div className="flex items-start gap-3">
+			<pre className="min-w-0 flex-1 font-mono whitespace-pre-wrap break-words">
+				{message}
+			</pre>
+			{count !== undefined && count > 1 && (
+				<span className="shrink-0 font-mono tabular-nums">x{formatNumber(count)}</span>
+			)}
+		</div>
+	);
+}
+
+/**
+ * The "Showing X of Y" line, or `null` when the list is whole. A row that
+ * carries `failuresDistinct` lists distinct messages, so its denominator is
+ * distinct ones; `failuresTotal` counts occurrences there and cannot be set
+ * against the list's length. An older row listed one entry per occurrence, so
+ * its total still can.
+ */
+function shownCueOf(
+	listed: number,
+	total: number | undefined,
+	distinct: number | undefined
+): string | null {
+	if (distinct !== undefined) {
+		if (distinct <= listed) return null;
+		return `Showing ${formatNumber(listed)} of ${formatNumber(distinct)} distinct.`;
+	}
+	if (total === undefined || total <= listed) return null;
+	return `Showing ${formatNumber(listed)} of ${formatNumber(total)}.`;
+}
+
 export function TestValidationSummary({
 	testValidation,
 	sampling,
 	failures,
+	failureCounts,
 	failuresTotal,
+	failuresDistinct,
 	totalRequests,
 	replayScope,
 	title = TEST_VALIDATION_TITLE,
@@ -126,6 +177,9 @@ export function TestValidationSummary({
 	// report old enough to omit the block reads the same as a run without tests.
 	if (!testValidation && !hasFailures) return null;
 
+	const shownCue = hasFailures
+		? shownCueOf(failures.length, failuresTotal, failuresDistinct)
+		: null;
 	const coverage =
 		testValidation && coverageLine(testValidation.samplesTested, totalRequests, replayScope);
 
@@ -196,22 +250,19 @@ export function TestValidationSummary({
 						<div className="space-y-1.5">
 							{failures.map((failure, i) => (
 								<Callout key={i} severity="blocking">
-									<pre className="font-mono whitespace-pre-wrap break-words">
-										{failure}
-									</pre>
+									<FailureLine message={failure} count={failureCounts?.[i]} />
 								</Callout>
 							))}
 						</div>
 						{/*
-						 * Said out loud when the stored list is shorter than the count:
-						 * a list of ten under a count of forty reads as the whole set of
-						 * problems unless it says otherwise (the SampledSchemaValidation
-						 * precedent beside it).
+						 * Said out loud when the stored list is shorter than what it
+						 * lists: a list of ten under a count of forty reads as the whole
+						 * set of problems unless it says otherwise (the
+						 * SampledSchemaValidation precedent beside it).
 						 */}
-						{failuresTotal !== undefined && failuresTotal > failures.length && (
+						{shownCue && (
 							<p className="mt-2 text-xs text-muted-foreground tabular-nums">
-								Showing {formatNumber(failures.length)} of{" "}
-								{formatNumber(failuresTotal)}.
+								{shownCue}
 							</p>
 						)}
 					</div>
