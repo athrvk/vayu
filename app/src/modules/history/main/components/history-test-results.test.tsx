@@ -148,6 +148,35 @@ describe("History Overview - a load run's test outcomes", () => {
 		expect(screen.getByText("Showing 2 of 13.")).toBeInTheDocument();
 	});
 
+	it("sizes the Elements card's deferred replay by the tested responses (#3127)", () => {
+		renderOverview(
+			makeReport({
+				testValidation: {
+					samplesTested: 1_000,
+					testsPassed: 900,
+					testsFailed: 100,
+					successRate: 90,
+				},
+				elements: [
+					{
+						id: "el_1",
+						kind: "script.post",
+						passed: 0,
+						failed: 0,
+						skipped: 0,
+						deferred: 5_000,
+					},
+				],
+			})
+		);
+
+		expect(
+			screen.getByText(
+				"5,000 requests deferred to a post-run replay over 1,000 sampled responses - results in Test validation"
+			)
+		).toBeInTheDocument();
+	});
+
 	it("says nothing about tests for a run that asserted nothing", () => {
 		// Absent, never zeros: a run without scripts must read exactly as it did
 		// before this block existed.

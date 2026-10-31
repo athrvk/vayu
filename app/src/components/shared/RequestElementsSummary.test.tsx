@@ -255,3 +255,97 @@ describe("two levels sharing an element id (issue #3101)", () => {
 		expect(keyWarnings).toEqual([]);
 	});
 });
+
+/**
+ * Issue #3127: an inline script row says what the script threw, failed and
+ * logged, and a deferred row names the size of the replay that judged it.
+ * `ScenarioStepsTab.test.tsx` drives the same cases through the other parent.
+ */
+describe("what a script said and how many responses its replay ran over (issue #3127)", () => {
+	const script = (overrides: Partial<RunScenarioStepElementTally> = {}) =>
+		tally({ kind: "script.post", passed: 0, error: 480, ...overrides });
+
+	it("lists the thrown error, the failing test and the console beside the tally", () => {
+		render(
+			<RequestElementsSummary
+				elements={[
+					script({
+						messages: [
+							{ kind: "error", text: "Error: boom" },
+							{ kind: "test", text: "status is 201: expected 200 to equal 201" },
+						],
+						console: [{ level: "warn", text: "saw 200" }],
+					}),
+				]}
+			/>
+		);
+
+		expect(screen.getByText("480 error")).toBeTruthy();
+		expect(screen.getByText("Error: boom")).toBeTruthy();
+		expect(screen.getByText("status is 201: expected 200 to equal 201")).toBeTruthy();
+		expect(screen.getByText("saw 200")).toHaveClass("text-status-warning-text");
+	});
+
+	it("cues what a full list turned away", () => {
+		render(
+			<RequestElementsSummary
+				elements={[
+					script({
+						messages: [{ kind: "error", text: "Error: boom" }],
+						messagesDropped: 4,
+						console: [{ level: "log", text: "hello" }],
+						consoleDropped: 37,
+					}),
+				]}
+			/>
+		);
+
+		expect(screen.getByText("4 more messages not shown")).toBeTruthy();
+		expect(screen.getByText("37 more console lines not shown")).toBeTruthy();
+	});
+
+	it("renders a row stored before the fields with no message block", () => {
+		render(<RequestElementsSummary elements={[script()]} />);
+
+		expect(screen.getByText("480 error")).toBeTruthy();
+		expect(screen.queryByText(/not shown/)).toBeNull();
+		expect(screen.getAllByRole("list")).toHaveLength(1);
+	});
+
+	it("names the replay's sample size on a deferred row", () => {
+		render(
+			<RequestElementsSummary
+				elements={[tally({ kind: "script.post", passed: 0, deferred: 235_690 })]}
+				replaySamples={1_000}
+			/>
+		);
+
+		expect(
+			screen.getByText(
+				"235,690 requests deferred to a post-run replay over 1,000 sampled responses - results in Test validation"
+			)
+		).toBeTruthy();
+	});
+
+	it("uses the singular for a replay over one response", () => {
+		render(
+			<RequestElementsSummary
+				elements={[tally({ kind: "script.post", passed: 0, deferred: 9 })]}
+				replaySamples={1}
+			/>
+		);
+
+		expect(screen.getByText(/replay over 1 sampled response - results in/)).toBeTruthy();
+	});
+
+	it("names no size when the report does not carry one", () => {
+		render(
+			<RequestElementsSummary
+				elements={[tally({ kind: "script.post", passed: 0, deferred: 9 })]}
+			/>
+		);
+
+		expect(screen.getByText(/replay of sampled responses - results in/)).toBeTruthy();
+		expect(screen.queryByText(/replay over/)).toBeNull();
+	});
+});

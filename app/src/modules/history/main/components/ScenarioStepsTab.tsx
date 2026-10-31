@@ -223,6 +223,7 @@ export default function ScenarioStepsTab({
 											<ElementTally
 												element={element}
 												replayCard={replayCard}
+												replaySamples={step.tests?.sampled}
 												className="text-xs"
 											/>
 										</TableCell>

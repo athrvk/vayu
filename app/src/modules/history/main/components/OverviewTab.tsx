@@ -167,7 +167,10 @@ export default function OverviewTab({
 			    outcomes (issue #1594/#1641) - a scenario run reports its
 			    per-step elements in the Steps tab instead, so this is absent
 			    there. */}
-			<RequestElementsSummary elements={report.elements} />
+			<RequestElementsSummary
+				elements={report.elements}
+				replaySamples={report.testValidation?.samplesTested}
+			/>
 
 			{/* A scenario load run's assertions counted on every response
 			    (#2820), ahead of the sampled replay below: it is the exact

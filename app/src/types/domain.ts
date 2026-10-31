@@ -2843,6 +2843,30 @@ export interface RunScenarioStepElementTally {
 	error?: number;
 	skipped: number;
 	deferred?: number;
+	/**
+	 * What an inline script element threw and each failing `pm.test` (#3127): the
+	 * first 10 distinct entries, each cut at 500 bytes. Absent, never `[]`, when
+	 * there were none, and on a row from an engine before the field.
+	 */
+	messages?: ElementTallyMessage[];
+	/** Entries a full {@link messages} list turned away; absent when none were. */
+	messagesDropped?: number;
+	/** The script's console lines, bounded like {@link messages} and absent the same way. */
+	console?: ElementTallyConsoleLine[];
+	/** Entries a full {@link console} list turned away; absent when none were. */
+	consoleDropped?: number;
+}
+
+/** One thing an inline script element reported: the error it threw, or a failing test as `name: message`. */
+export interface ElementTallyMessage {
+	kind: "error" | "test";
+	text: string;
+}
+
+/** One console line an inline script element logged, with the `console.*` method that wrote it. */
+export interface ElementTallyConsoleLine {
+	level: ConsoleLevel;
+	text: string;
 }
 
 /**

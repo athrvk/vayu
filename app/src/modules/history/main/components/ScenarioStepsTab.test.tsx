@@ -563,6 +563,73 @@ describe("the per-step extractor misses", () => {
 	});
 });
 
+/**
+ * Issue #3127: the step's inline script row lists what the script said, and its
+ * deferred row names the step's own sampled-response count. Mutation check:
+ * drop `replaySamples` from the `ElementTally` call and the sized cases fail.
+ */
+describe("what a step's script said and how many responses its replay ran over (issue #3127)", () => {
+	const rowOf = (step: Partial<RunScenarioStepStat>) => {
+		render(<ScenarioStepsTab steps={[{ ...STEPS[0], ...step }]} virtualUsers={8} />);
+		return screen.getAllByRole("row").slice(1)[1];
+	};
+	const script: RunScenarioStepElementTally = {
+		id: "el_4",
+		kind: "script.post",
+		passed: 0,
+		failed: 0,
+		error: 480,
+		skipped: 0,
+	};
+
+	it("lists the thrown error, the failing test and the console under the step", () => {
+		const row = rowOf({
+			elements: [
+				{
+					...script,
+					messages: [
+						{ kind: "error", text: "Error: boom" },
+						{ kind: "test", text: "status is 201: expected 200 to equal 201" },
+					],
+					console: [{ level: "error", text: "saw 500" }],
+					consoleDropped: 12,
+				},
+			],
+		});
+
+		expect(within(row).getByText("Error: boom")).toBeTruthy();
+		expect(within(row).getByText("status is 201: expected 200 to equal 201")).toBeTruthy();
+		expect(within(row).getByText("saw 500")).toHaveClass("text-status-error-text");
+		expect(within(row).getByText("12 more console lines not shown")).toBeTruthy();
+	});
+
+	it("adds nothing under a row stored before the fields", () => {
+		const row = rowOf({ elements: [script] });
+
+		expect(within(row).queryByRole("list")).toBeNull();
+		expect(within(row).queryByText(/not shown/)).toBeNull();
+	});
+
+	it("sizes a deferred row by this step's sampled responses", () => {
+		const row = rowOf({
+			tests: { sampled: 500, passed: 480, failed: 20 },
+			elements: [{ ...script, error: 0, deferred: 2_270 }],
+		});
+
+		expect(
+			within(row).getByText(
+				"2,270 requests deferred to a post-run replay over 500 sampled responses - results in Test validation"
+			)
+		).toBeTruthy();
+	});
+
+	it("names no size for a step whose replay got no response", () => {
+		const row = rowOf({ elements: [{ ...script, error: 0, deferred: 40 }] });
+
+		expect(within(row).getByText(/replay of sampled responses - results in/)).toBeTruthy();
+	});
+});
+
 describe("the run summary line", () => {
 	it("groups thousands in the virtual-user and iteration counts", () => {
 		// Mutation check: put a raw `{virtualUsers}` / `{iterationsCompleted}` /
