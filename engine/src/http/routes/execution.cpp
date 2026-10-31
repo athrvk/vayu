@@ -2692,6 +2692,27 @@ const nlohmann::json& json) {
         std::string (vayu::http::INVALID_HEADER_NAME_CODE) };
 }
 
+/// A single-request run's own required fields, and its header names.
+std::optional<RouteError> refuse_incomplete_single_request (const nlohmann::json& json) {
+    if (!json.contains ("method") || !json.contains ("url")) {
+        vayu::utils::log_warning ("http", "POST /runs - Missing required fields: method, url");
+        return RouteError{ 400, error_body (400, "Missing required fields: method, url") };
+    }
+
+    if (!json.contains ("mode") && !json.contains ("duration") &&
+    !json.contains ("iterations")) {
+        vayu::utils::log_warning ("http", "POST /runs - Missing mode/duration/iterations config");
+        return RouteError{ 400,
+            error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
+    }
+
+    if (auto refusal = refuse_invalid_header_name (json)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
+        return RouteError{ 400, error_body (400, refusal->first, refusal->second) };
+    }
+    return std::nullopt;
+}
+
 /**
  * POST /runs
  * Starts a load test run (Vayu Mode).
@@ -2797,24 +2818,9 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
     }
     target_policy = std::move (*policy);
 
-    // Validate required fields
     if (!is_scenario) {
-        if (!json.contains ("method") || !json.contains ("url")) {
-            vayu::utils::log_warning ("http", "POST /runs - Missing required fields: method, url");
-            return RouteError{ 400, error_body (400, "Missing required fields: method, url") };
-        }
-
-        if (!json.contains ("mode") && !json.contains ("duration") &&
-        !json.contains ("iterations")) {
-            vayu::utils::log_warning (
-            "http", "POST /runs - Missing mode/duration/iterations config");
-            return RouteError{ 400,
-                error_body (400, "Must specify either 'mode' with 'duration' or 'iterations'") };
-        }
-
-        if (auto refusal = refuse_invalid_header_name (json)) {
-            vayu::utils::log_warning ("http", "POST /runs - " + refusal->first);
-            return RouteError{ 400, error_body (400, refusal->first, refusal->second) };
+        if (auto refusal = refuse_incomplete_single_request (json)) {
+            return refusal;
         }
     }
 
