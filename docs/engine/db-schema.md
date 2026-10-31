@@ -2471,7 +2471,7 @@ What a [webhook inbox](api-reference.md#webhook-inbox) listener captured. Struct
 | `inbox_id`       | TEXT       | The inbox that recorded it - **not** an FK; inboxes are in memory |
 | `received_at`    | INTEGER    | Unix ms                                                          |
 | `method`         | TEXT       | Any verb cpp-httplib routes (GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS) |
-| `path`           | TEXT       | Decoded path, no query                                            |
+| `path`           | TEXT       | Raw path as received (percent-escapes kept), no query            |
 | `query`          | TEXT       | Raw query string, without the `?`                                 |
 | `headers`        | TEXT       | JSON object; a repeated name is joined with `, `                  |
 | `body`           | TEXT       | Stored bytes, truncated to the `inboxMaxBodyBytes` setting (default 64 KiB) |

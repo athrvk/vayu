@@ -6086,7 +6086,10 @@ size as received in both cases, never the length of the encoded string. A body
 the byte cap cut is first trimmed back to a character boundary, so a cut inside
 a multi-byte character leaves `utf8` text rather than turning the whole prefix
 into `base64`; `bodyTruncated` still says it was cut. `path` and `query` are
-not classified: a byte in either that is not UTF-8 is answered as U+FFFD.
+recorded raw, exactly as the sender spelled them: percent-escapes such as `%2F`
+and `%20` are kept, so a signature over the path or a copied capture URL still
+matches the request received. Neither is classified: a byte in either that is
+not UTF-8 is answered as U+FFFD.
 
 ### DELETE /inbox/:inboxId/requests
 

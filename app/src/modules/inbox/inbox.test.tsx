@@ -50,6 +50,15 @@ describe("captureUrl", () => {
 			"http://127.0.0.1:4100/hooks/order"
 		);
 	});
+
+	it("keeps the percent-escapes the sender spelled, so the copied URL is the one requested", () => {
+		expect(
+			captureUrl(
+				capture({ path: "/enc/%2F/%E2%9C%93/a%2Fb", query: "x=%2F" }),
+				"http://127.0.0.1:4100"
+			)
+		).toBe("http://127.0.0.1:4100/enc/%2F/%E2%9C%93/a%2Fb?x=%2F");
+	});
 });
 
 describe("CaptureDetail", () => {

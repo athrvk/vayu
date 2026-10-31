@@ -479,22 +479,23 @@ TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndC
     EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
 }
 
-TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
-    // The path is read off the target now that routing rewrites `req.path`, so
-    // it has to stay the *decoded* path cpp-httplib put there before - the
-    // column, the wire and the URL the app rebuilds from it all mean that.
+TEST_F (InboxListenerTest, RecordsThePathRawAsTheSenderSpelledIt) {
+    // %2F and %20 survive: decoding them would make the stored path, and the URL
+    // the app rebuilds from it, a different request from the one received.
     auto started = start ();
     auto client  = client_for (started.info);
 
+    ASSERT_TRUE (client.Post ("/enc/%2F/%E2%9C%93/a%2Fb?x=%2F", "{}", "application/json"));
     ASSERT_TRUE (client.Post ("/hooks/a%20b/caf%C3%A9?q=1%202", "{}", "application/json"));
 
-    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 1, 0);
-    ASSERT_EQ (captures.size (), 1u);
-    EXPECT_EQ (captures.front ().path, "/hooks/a b/caf\xC3\xA9");
-    // The query is still the raw string off the wire, undecoded, as it always
-    // was - httplib's own client re-spells the space as '+' on the way out, and
-    // a capture shows what arrived rather than a reading of it.
-    EXPECT_EQ (captures.front ().query, "q=1+2");
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 2, 0);
+    ASSERT_EQ (captures.size (), 2u);
+    // Newest first.
+    EXPECT_EQ (captures[0].path, "/hooks/a%20b/caf%C3%A9");
+    EXPECT_EQ (captures[1].path, "/enc/%2F/%E2%9C%93/a%2Fb");
+    // The query is the raw string off the wire too - httplib's own client
+    // re-spells the space as '+' on the way out.
+    EXPECT_EQ (captures[0].query, "q=1+2");
 }
 
 TEST_F (InboxListenerTest, ServesTheCannedResponseIncludingItsDelay) {

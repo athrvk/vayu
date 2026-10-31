@@ -1394,6 +1394,7 @@ export interface InboxCapture {
 	inboxId: string;
 	receivedAt: number;
 	method: string;
+	/** Raw path as received, percent-escapes kept, without the query. */
 	path: string;
 	/** Raw query string, without the `?`. */
 	query: string;
