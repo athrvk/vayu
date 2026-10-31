@@ -64,11 +64,11 @@ describe("CodeEditor long lines", () => {
 		expect(lastOptions?.stopRenderingLineAfter).toBeUndefined();
 	});
 
-	it("lets a caller's options override either", async () => {
-		await renderEditor({ readOnly: true, options: { stopRenderingLineAfter: 500 } });
-		expect(lastOptions?.stopRenderingLineAfter).toBe(500);
-
-		await renderEditor({ readOnly: false, options: { stopRenderingLineAfter: -1 } });
-		expect(lastOptions?.stopRenderingLineAfter).toBe(-1);
+	it.each([
+		["a read-only editor", true, 500],
+		["an editable editor", false, -1],
+	])("lets a caller's options override %s", async (_name, readOnly, limit) => {
+		await renderEditor({ readOnly, options: { stopRenderingLineAfter: limit } });
+		expect(lastOptions?.stopRenderingLineAfter).toBe(limit);
 	});
 });
