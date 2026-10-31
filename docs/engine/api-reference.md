@@ -2451,6 +2451,9 @@ example served as if it were whole when it is not is worse than a refused write
 tombstoned or trashed example does not, which is why restoring one into a full
 request is refused (see [Trash](#trash)).
 
+A zero byte in a `body` (`"ab\u0000cd"`) is preserved: it is stored, listed and served by a
+mock server whole, never cut at the zero.
+
 **`origin` says who wrote the row** (issue #588): `"import"` for everything an
 importer or a spec sync produced, `"user"` for one a person saved from a live
 response. It defaults to `"import"`, which is honest for every row written

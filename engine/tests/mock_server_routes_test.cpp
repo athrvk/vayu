@@ -1034,6 +1034,32 @@ TEST_F (MockServerTest, AStaleContentEncodingFromTheCapturedResponseIsDroppedNot
     EXPECT_EQ (listed->get_header_value ("X-Custom"), "kept");
 }
 
+// A zero byte in a stored body is served, not the text up to it (#3112): the
+// body and its Content-Length both say five.
+TEST_F (MockServerTest, AnExampleBodyWithAZeroByteIsServedWhole) {
+    const std::string whole ("ab\0cd", 5);
+    seed_request ("req_list", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/pets");
+    seed_example ("exa_list", "req_list", 200, whole, "application/octet-stream");
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    // Identity so a compressing server cannot change the length under test.
+    const httplib::Headers no_compression = { { "Accept-Encoding", "identity" } };
+    const auto served                     = client.Get ("/pets", no_compression);
+    ASSERT_TRUE (served);
+    EXPECT_EQ (served->status, 200);
+    EXPECT_EQ (served->body, whole);
+    EXPECT_EQ (served->get_header_value ("Content-Length"), "5");
+}
+
 // ---------------------------------------------------------------------------
 // CORS: a mock server answers a browser page on another origin, not only
 // curl. A preflight on a path with no stored OPTIONS route is synthesized

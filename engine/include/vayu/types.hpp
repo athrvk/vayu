@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -1620,6 +1621,29 @@ inline std::optional<RunStatus> parse_run_status (const std::string& str) {
  * unset field means rather than each picking its own answer.
  */
 namespace db {
+
+/**
+ * @brief A stored body: bytes the client chose, a zero byte included (#3112).
+ *
+ * A `std::string` member is read back by sqlite_orm through `strlen`, so a
+ * body holding a 0x00 byte came back cut at it though the write stored it
+ * whole. This type is a `std::string` for every caller; what differs is the
+ * mapping in `database_impl.hpp`, whose `row_extractor` takes the length from
+ * `sqlite3_column_bytes`. Use it for a column whose bytes are not text the
+ * engine wrote: `inbox_requests.body` and `request_examples.body`.
+ */
+struct BodyBytes : std::string {
+    using std::string::string;
+    using std::string::operator=;
+
+    BodyBytes () = default;
+    // Implicit on purpose: a handler assigns a `std::string` it built straight
+    // into a row, and the type exists only to pick the column's mapping.
+    // NOLINTNEXTLINE(google-explicit-constructor, hicpp-explicit-conversions)
+    BodyBytes (std::string value) : std::string (std::move (value)) {
+    }
+};
+
 struct Collection {
     std::string id;
     std::optional<std::string> parent_id;
@@ -1812,7 +1836,7 @@ struct RequestExample {
     std::string name;
     int status = 200;    // HTTP status the example represents
     std::string headers; // JSON array of KeyValueEntry
-    std::string body;    // Response body, verbatim
+    BodyBytes body;      // Response body, verbatim
     std::string content_type; // Denormalized from `headers` by the client that wrote it
     /**
      * Position among the request's examples, exactly like `Request::order`
@@ -2241,7 +2265,7 @@ struct InboxRequest {
     std::string path;
     std::string query;   // raw query string, without the '?'
     std::string headers; // JSON object
-    std::string body;    // stored bytes, already truncated to the cap
+    BodyBytes body;      // stored bytes, already truncated to the cap
     int64_t body_bytes  = 0;
     bool body_truncated = false;
     std::string remote_addr;

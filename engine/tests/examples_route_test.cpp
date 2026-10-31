@@ -328,6 +328,44 @@ TEST_F (ExamplesRouteTest, ListCarriesBodyTruncatedPerRow) {
     EXPECT_EQ (body[1]["bodyTruncated"], true);
 }
 
+// A JSON string may carry U+0000, and an example body is the author's bytes, so
+// the read must not stop at it: sqlite_orm's std::string extractor used to, and
+// the example came back as "ab" with no error anywhere (#3112).
+TEST_F (ExamplesRouteTest, ABodyWithAZeroByteIsReadBackWholeAndEchoesAsU0000) {
+    const std::string wire = R"({"name":"nul","body":"ab\u0000cd"})";
+    const std::string whole ("ab\0cd", 5);
+
+    auto [status, created] =
+    routes::create_request_example_response (*db_, "req_1", json::parse (wire));
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["body"].get<std::string> (), whole);
+
+    auto [list_status, listed] = routes::list_request_examples_response (*db_, "req_1");
+    ASSERT_EQ (list_status, 200) << listed.dump ();
+    ASSERT_EQ (listed.size (), 1u);
+    EXPECT_EQ (listed[0]["body"].get<std::string> (), whole);
+    // The wire text is what a client reads; the zero byte is escaped there.
+    EXPECT_NE (listed.dump ().find (R"("body":"ab\u0000cd")"), std::string::npos);
+
+    const auto stored = db_->get_request_example (created["id"]);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->body, whole);
+}
+
+TEST_F (ExamplesRouteTest, ABodyBeginningWithAZeroByteSurvivesAnUpdate) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "x" }, { "body", "plain" } });
+    const std::string leading ("\0tail", 5);
+
+    auto [status, updated] = routes::update_request_example_response (
+    *db_, "req_1", id, json::parse (R"({"body":"\u0000tail"})"));
+    ASSERT_EQ (status, 200) << updated.dump ();
+
+    const auto stored = db_->get_request_examples ("req_1");
+    ASSERT_EQ (stored.size (), 1u);
+    EXPECT_EQ (stored[0].body, leading);
+}
+
 // Absent keeps, null resets - the same null-vs-absent rule every other
 // defaulted field follows. Absent-keeps is the load-bearing half: renaming a
 // truncated example must not quietly promote it to a complete one, which is
