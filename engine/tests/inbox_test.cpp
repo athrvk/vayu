@@ -460,9 +460,11 @@ TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndC
     std::string body = "k=";
     body.append (size_t{ 100 } * 1024, 'v');
 
+    const std::string content_type = "application/x-www-form-urlencoded";
+
     auto started = start ();
     auto client  = client_for (started.info);
-    auto posted  = client.Post ("/form", body, "application/x-www-form-urlencoded");
+    auto posted  = client.Post ("/form", body, content_type);
     ASSERT_TRUE (posted) << "POST to the inbox failed";
     EXPECT_EQ (posted->status, 200);
 
@@ -474,7 +476,7 @@ TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndC
     EXPECT_EQ (capture.body, body.substr (0, capture.body.size ()));
     EXPECT_FALSE (capture.body.empty ());
     const auto stored_headers = json::parse (capture.headers);
-    EXPECT_EQ (stored_headers.value ("Content-Type", ""), "application/x-www-form-urlencoded");
+    EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
 }
 
 TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
