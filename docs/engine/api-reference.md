@@ -7668,7 +7668,9 @@ changing per request, and rides on the payload rather than in config.
   before any token is read from the cache or fetched, the host of an OAuth 2.0
   config's `accessTokenUrl` and `refreshTokenUrl` (whichever are set, both
   whether or not this send would reach the refresh one, so the answer does not
-  depend on what the cache holds). A script can set an `accessTokenUrl` as
+  depend on what the cache holds), each also as the token request will dial it
+  (#3162), so `http://evil.example\@idp.example/token` is judged as
+  `evil.example`. A script can set an `accessTokenUrl` as
   easily as the request's URL, and the token request carries the client secret;
   a refused target fetches no token.
 - **The match** is the MCP server's: the hostname as a WHATWG URL parser

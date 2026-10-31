@@ -228,6 +228,25 @@ TEST (TargetPolicyTokenEndpoints, AllowAllAdmitsAnyEndpointButNotAnUnknownHost) 
     EXPECT_EQ (unknown->code, vayu::http::TARGET_HOST_UNKNOWN_CODE);
 }
 
+// The token POST dials the encoded URL, where `\` is a `/`: typed, this names
+// the listed host after the userinfo; dialled, it names the host before it
+// (#3162). Mutation check: judge the raw string and the first case is allowed.
+TEST (TargetPolicyTokenEndpoints, TheHostIsJudgedAsTheTokenRequestWillDialIt) {
+    const auto policy = allowing ({ "idp.example.com" });
+    for (const char* member : { "accessTokenUrl", "refreshTokenUrl" }) {
+        const auto refused = refuse_token_endpoints (policy,
+        json{ { member, "https://evil.example.com\\@idp.example.com/token" } });
+        ASSERT_HAS_VALUE (refused) << member;
+        EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE) << member;
+        EXPECT_NE (refused->message.find (member), std::string::npos) << refused->message;
+        EXPECT_NE (refused->message.find ("\"evil.example.com\""), std::string::npos)
+        << refused->message;
+    }
+
+    EXPECT_FALSE (refuse_token_endpoints (allowing ({ "evil.example.com" }),
+    json{ { "accessTokenUrl", "https://evil.example.com\\@idp.example.com/token" } }));
+}
+
 TEST (TargetPolicyMonitorEndpoint, TheScrapedHostIsJudgedAndNamedAsTheMonitorUrl) {
     const auto policy = allowing ({ "api.example.com", "metrics.example.com" });
     EXPECT_FALSE (refuse_monitor_endpoint (
@@ -742,6 +761,30 @@ TEST_F (TargetPolicyRouteTest, AScriptSteeringTheTokenUrlOffTheListIsRefusedBefo
     EXPECT_EQ (tokens.hits (), 0) << "the steered token request went out";
     EXPECT_EQ (echo.requests_seen (), 0);
     EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump ();
+    EXPECT_EQ (answer.value ("refusalCode", ""), "target_not_allowed") << answer.dump ();
+    const std::string message = answer.value ("errorMessage", "");
+    EXPECT_NE (message.find ("accessTokenUrl"), std::string::npos) << message;
+    EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
+}
+
+// The token request dials `localhost` where the typed URL names the listed
+// 127.0.0.1 after the userinfo (#3162). Mutation check: judge the raw
+// `accessTokenUrl` and the token server is reached.
+TEST_F (TargetPolicyRouteTest, ATokenUrlThatDialsADifferentHostThanItIsTypedWithIsRefused) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    // `127.0.0.1:<port>/token`, then `localhost:<port>` ahead of it.
+    const std::string listed =
+    tokens.url ("/token").substr (std::string ("http://").size ());
+    const std::string port =
+    listed.substr (listed.find (':'), listed.find ('/') - listed.find (':'));
+    const std::string url = "http://localhost" + port + "\\@" + listed;
+    seed_request (echo.url (), "", false, client_credentials (url));
+
+    const json answer = execute (policy_allowing ({ "127.0.0.1" }));
+
+    EXPECT_EQ (tokens.hits (), 0) << "the token request went out";
+    EXPECT_EQ (echo.requests_seen (), 0);
     EXPECT_EQ (answer.value ("refusalCode", ""), "target_not_allowed") << answer.dump ();
     const std::string message = answer.value ("errorMessage", "");
     EXPECT_NE (message.find ("accessTokenUrl"), std::string::npos) << message;
