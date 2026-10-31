@@ -109,8 +109,9 @@ refuse_token_endpoints (const TargetPolicy& policy, const nlohmann::json& config
 
 /**
  * Whether @p policy refuses a load run's `monitor` block: the host of its
- * `url`, which the run scrapes as written for as long as it runs (#3121),
- * judged by the rule @ref refuse_target applies, under the same codes. Nothing
+ * `url`, which the run scrapes for as long as it runs (#3121), judged as the
+ * scrape will dial it (`wire_url` of a GET to it) by the rule
+ * @ref refuse_target applies, under the same codes. Nothing
  * when the host is allowed, or when @p monitor holds no string `url`, a block
  * `validate_monitor_config` refuses on its own.
  */

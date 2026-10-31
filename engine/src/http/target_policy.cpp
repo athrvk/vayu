@@ -174,6 +174,10 @@ const nlohmann::json& config) {
     return std::nullopt;
 }
 
+// Judged as `wire_url` writes it, not as typed: `collect_monitor` hands the
+// scrape's `Request` (default encoding on) to the client, and the encoding pass
+// turns `\` into `/`, so `http://a:1\@b:1/` is typed as host `b` and dialled as
+// `a` (#2465, the same constraint `validate_transferable` documents).
 std::optional<TargetRefusal> refuse_monitor_endpoint (const TargetPolicy& policy,
 const nlohmann::json& monitor) {
     if (!monitor.is_object ()) {
@@ -183,7 +187,10 @@ const nlohmann::json& monitor) {
     if (url == monitor.end () || !url->is_string ()) {
         return std::nullopt;
     }
-    return refuse_url (policy, url->get_ref<const std::string&> (), "the run's monitor.url");
+    vayu::Request scrape;
+    scrape.method = vayu::HttpMethod::GET;
+    scrape.url    = url->get_ref<const std::string&> ();
+    return refuse_url (policy, wire_url (scrape), "the run's monitor.url");
 }
 
 } // namespace vayu::http

@@ -256,6 +256,22 @@ TEST (TargetPolicyMonitorEndpoint, AllowAllAdmitsAnyScrapeButNotAnUnknownHost) {
     << unknown->message;
 }
 
+// The scrape dials the encoded URL, where `\` is a `/`: typed, this names
+// 127.0.0.1 after the userinfo; dialled, it names localhost (#2465).
+// Mutation check: judge the raw string and the first case is allowed.
+TEST (TargetPolicyMonitorEndpoint, TheHostIsJudgedAsTheScrapeWillDialIt) {
+    const auto policy  = allowing ({ "127.0.0.1" });
+    const auto refused = refuse_monitor_endpoint (
+    policy, json{ { "url", "http://localhost:9100\\@127.0.0.1:9100/metrics" } });
+    ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE);
+    EXPECT_NE (refused->message.find ("\"localhost\""), std::string::npos)
+    << refused->message;
+
+    EXPECT_FALSE (refuse_monitor_endpoint (allowing ({ "localhost" }),
+    json{ { "url", "http://localhost:9100\\@127.0.0.1:9100/metrics" } }));
+}
+
 // A block with no string URL is the config validation's to refuse, by name.
 TEST (TargetPolicyMonitorEndpoint, ABlockWithoutAStringUrlIsLeftToTheConfigCheck) {
     for (const json& monitor :
@@ -661,6 +677,26 @@ TEST_F (TargetPolicyRouteTest, AMonitorHostOffTheListRefusesTheRunBeforeAnyRow) 
         EXPECT_NE (message.find ("monitor.url"), std::string::npos) << message;
         EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
     }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// The scrape dials the encoded URL, where `\` is a `/`: this one is typed with
+// the listed 127.0.0.1 after the userinfo and dialled at localhost. Mutation
+// check: judge the raw monitor.url and the run answers 202.
+TEST_F (TargetPolicyRouteTest, AMonitorUrlThatDialsADifferentHostThanItIsTypedWithIsRefused) {
+    const vayu::tests::EchoServer echo;
+    const std::string port = std::to_string (echo.port ());
+    const json monitor{ { "url", "http://localhost:" + port + "\\@127.0.0.1:" + port + "/metrics" },
+        { "series", json::array ({ "up" }) } };
+
+    const auto [status, answer] =
+    post ("/runs", monitored_run (echo, monitor, policy_allowing ({ "127.0.0.1" })));
+
+    EXPECT_EQ (status, 400) << answer.dump ();
+    EXPECT_EQ (error_code (answer), "target_not_allowed") << answer.dump ();
+    const std::string message = vayu::http::routes::error_message_of (answer);
+    EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
     EXPECT_TRUE (db_->get_all_runs ().empty ());
     EXPECT_EQ (echo.requests_seen (), 0);
 }

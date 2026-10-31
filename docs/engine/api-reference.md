@@ -8539,7 +8539,9 @@ verdict is made:
 - **A load run's `monitor.url`** (either shape) is a second host the run
   contacts, once per scrape for as long as it runs, and the scrape loop sends
   with no policy of its own, so its host is judged when the run is validated,
-  by the same match (#3121): a host the policy does not list, or one it cannot
+  by the same match (#3121), on the URL as the scrape will send it (after the
+  encoding pass that turns a `\` into a `/`, as for a send's final URL): a host
+  the policy does not list, or one it cannot
   determine (a `{{template}}`, which the scrape would send as written), is a
   `400` under `target_not_allowed` or `target_host_unknown` whose message names
   `monitor.url`, before the run row exists and before anything is sent. A
