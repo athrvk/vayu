@@ -458,7 +458,7 @@ TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndC
     // set_payload_max_length says (#3111). Leave the Content-Type unmasked and
     // this is a 413 with nothing recorded.
     std::string body = "k=";
-    body.append (100 * 1024, 'v');
+    body.append (size_t{ 100 } * 1024, 'v');
 
     auto started = start ();
     auto client  = client_for (started.info);
