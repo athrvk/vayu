@@ -1481,7 +1481,9 @@ also travels with the send:
 What `targetPolicy` does not cover: a redirect hop a server answers with, and a
 script's `pm.sendRequest`, which is refused for MCP-started runs instead (below).
 A tool call that forwards a `preRequestScript` is still not sending the composed
-bytes untouched, but it can no longer reach a host the allowlist did not list.
+bytes untouched, but it can no longer reach a host the allowlist did not list,
+bar the exempt monitor host above, which a script can also steer the run's own
+requests to.
 
 Scripts: the by-id compose path attaches the collection chain's, then the
 request's own, `script.pre` / `script.post` elements under `elements`

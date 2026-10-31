@@ -473,7 +473,7 @@ Key endpoints:
 |--------|------|-------------|
 | POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521) |
 | POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521) |
-| POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute` (#2521) |
+| POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
@@ -1313,8 +1313,8 @@ or still-templated host is refused). The engine judges the final URL after the
 pre-request script and the residual pass, and the host of an OAuth 2.0
 `accessTokenUrl` / `refreshTokenUrl` before the token cache is read or anything
 is posted, so a refused target fetches no token. A load run's `monitor.url` is
-judged once, when `POST /runs` validates the run (`refuse_monitor_endpoint`,
-#3121), because the scrape loop sends with no policy of its own; a refused
+judged once, as the scrape will dial it (`wire_url`), when `POST /runs`
+validates the run (`refuse_monitor_endpoint`, #3121), because the scrape loop sends with no policy of its own; a refused
 host is a `400` under the policy's code naming `monitor.url`, with no run row,
 and a loopback monitor host gets no exemption. A buffered send answers
 status 0 with `refusalCode` `target_not_allowed` / `target_host_unknown`; a

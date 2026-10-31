@@ -129,7 +129,9 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
  * move it, and only the engine sees where it moved.
  *
  * Applied at the send, after every argument has been folded in, so nothing a
- * caller passes can claim another origin or a wider policy. The client name
+ * caller passes can claim another origin or a wider policy; the one entry
+ * beyond the session's allowlist is the exempt monitor host `mcpTargetPolicy`
+ * adds from the run's own `monitor` block. The client name
  * goes as the client sent it; the engine trims and caps it. Every
  * `executeRequest` / `startRun` call in this server goes through here, which
  * `tools.test.ts` checks by scanning for one that does not.

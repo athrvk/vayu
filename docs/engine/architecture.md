@@ -816,8 +816,9 @@ copy, which is why compose-by-id alone would not do); MCP composes saved
 requests by id and checks its allowlist early against the *composed* URL, then
 attaches the same rule to every send as `targetPolicy` (issue #2521), which the
 engine applies to the URL it is about to send - after the pre-request script
-and the residual pass - and to the host of an OAuth 2.0 token endpoint, before
-the token is requested. It does not cover a redirect hop or a script's
+and the residual pass - to the host of an OAuth 2.0 token endpoint, before
+the token is requested, and to a load run's `monitor.url`, as the scrape will
+dial it, when the run is validated (#3121). It does not cover a redirect hop or a script's
 `pm.sendRequest`. The renderer
 keeps a preview-only copy of the substitution rules
 (`app/src/lib/variable-resolution.ts`) for tab titles, previews and the

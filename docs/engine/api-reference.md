@@ -9156,8 +9156,10 @@ empty or not a string) is likewise a `400` `invalid_run_config` naming
 A run carrying a [`targetPolicy`](#post-runs) is held to it here too: the
 `url`'s host must be one the policy allows, or the run is a `400` under
 `target_not_allowed` / `target_host_unknown` naming `monitor.url`, before the
-run row exists (#3121). Loopback and private hosts get no exemption from a
-policy; without one, the paragraph above is the whole rule.
+run row exists (#3121). The URL is judged as the scrape will send it, so a `\`
+in it counts as the `/` it is sent as. Loopback and private hosts get no
+exemption from a policy; without one, "Loopback and private addresses are
+deliberately allowed" above is the whole rule.
 
 #### The `scenario` block (collection runs)
 
