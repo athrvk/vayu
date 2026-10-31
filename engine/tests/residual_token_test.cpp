@@ -1134,6 +1134,19 @@ TEST (LateAuth, AnAuthorizationTheRequestCarriesWins) {
     EXPECT_EQ (request.headers["Authorization"], "Custom from-the-script");
 }
 
+/// A script that assigned `pm.request.auth` replaced the block (#3131): not
+/// even a credential under a name the script's auth left free goes on.
+TEST (LateAuth, NothingIsAppliedOverAScriptAssignedAuth) {
+    vayu::Request request;
+    request.auth_from_script = true;
+    const auto refusal       = apply_late_auth (request,
+    vayu::http::ApiKeyAuth{ "X-Api-Key", "{{key}}", false },
+    environment_with ("key", "k"));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_FALSE (request.headers.contains ("X-Api-Key"));
+}
+
 /// Nothing answered the name: encoded as written, which is what the build did
 /// with it before #2473 - a typo stays visible rather than becoming empty.
 TEST (LateAuth, ANameNothingAnswersIsEncodedAsWritten) {

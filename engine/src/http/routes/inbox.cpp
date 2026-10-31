@@ -19,6 +19,7 @@
 #include "vayu/http/managed_listener.hpp"
 #include "vayu/http/request_log.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/platform/platform.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "vayu/utils/encoding.hpp"
@@ -168,6 +169,38 @@ class AnyPathServer final : public httplib::Server {
     /// already spells.
     static constexpr const char* ROUTE = "/";
 
+    /// Prefixed to a multipart Content-Type by `mask_multipart`, so the media
+    /// type is no longer multipart/form-data and cpp-httplib leaves the body
+    /// alone.
+    static constexpr std::string_view MASK = "x-vayu-raw+";
+
+    /**
+     * Keep a multipart body whole (#3110). cpp-httplib parses a request whose
+     * Content-Type is multipart/form-data into `Request::form` and leaves
+     * `body` empty, so a capture would record the headers and no bytes. The
+     * parse is chosen from the Content-Type as `setup_request` leaves it, so the
+     * media type is masked here and `sender_headers` strips the mask again for
+     * the capture. (A sender that itself opens its Content-Type with the mask
+     * sees it removed from the stored header; nothing else reads it.)
+     */
+    static void mask_multipart (httplib::Request& req) {
+        if (!req.is_multipart_form_data ()) {
+            return;
+        }
+        const auto it = req.headers.find ("Content-Type");
+        it->second.insert (0, MASK);
+    }
+
+    /// The request's headers as the sender wrote them.
+    static httplib::Headers sender_headers (const httplib::Request& req) {
+        httplib::Headers headers = req.headers;
+        const auto it            = headers.find ("Content-Type");
+        if (it != headers.end () && it->second.starts_with (MASK)) {
+            it->second.erase (0, MASK.size ());
+        }
+        return headers;
+    }
+
     private:
     bool process_and_close_socket (::socket_t sock) override {
         // Mirrors httplib::Server::process_and_close_socket. The one difference
@@ -207,7 +240,11 @@ class AnyPathServer final : public httplib::Server {
                 return process_request (
                 strm, remote_addr, remote_port, local_addr, local_port,
                 close_connection, connection_closed,
-                [] (httplib::Request& req) { req.path = ROUTE; }, &websocket_upgraded);
+                [] (httplib::Request& req) {
+                    req.path = ROUTE;
+                    mask_multipart (req);
+                },
+                &websocket_upgraded);
             });
         });
 
@@ -301,6 +338,13 @@ bool is_loopback_bind (const std::string& bind) {
     // The whole of 127.0.0.0/8 is loopback, not just the canonical address.
     const auto first = ipv4_first_octet (bind);
     return first.has_value () && *first == 127;
+}
+
+bool is_wildcard_bind (const std::string& bind) {
+    if (bind == "::" || bind == "[::]") {
+        return true;
+    }
+    return ipv4_first_octet (bind) == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +521,11 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     out["captureCount"]   = info.capture_count;
     out["allowedOrigins"] = info.allowed_origins;
     out["response"]       = std::move (response);
+    // A key only a wildcard bind has any use for; elsewhere it would be an
+    // always-empty list.
+    if (is_wildcard_bind (info.bind)) {
+        out["reachableAt"] = info.reachable_at;
+    }
     return out;
 }
 
@@ -535,6 +584,44 @@ nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture) {
 // The listener
 // ---------------------------------------------------------------------------
 
+namespace {
+
+std::string inbox_url (const std::string& host, int port) {
+    return "http://" + host + ":" + std::to_string (port) + "/";
+}
+
+/// An address a sender elsewhere could be given: an IPv4 literal that is
+/// neither loopback nor in 0.0.0.0/8. The platform lists IPv4 only; the check
+/// keeps that true for an injected list.
+bool is_sender_ipv4 (const std::string& address) {
+    const auto first = ipv4_first_octet (address);
+    return first.has_value () && *first != 0 && *first != 127;
+}
+
+/**
+ * Replace the unusable `0.0.0.0` URL of a wildcard-bound @p info with where
+ * the inbox can be reached (#3114): `reachable_at` lists every sender address
+ * of this machine and `url` is the first. A machine with none (no network, a
+ * sandbox) falls back to its own loopback, which still reaches the listener
+ * from the same machine, instead of leaving the wildcard.
+ */
+void report_wildcard_reachability (InboxInfo& info,
+const std::vector<std::string>& local_addresses) {
+    for (const std::string& address : local_addresses) {
+        if (!is_sender_ipv4 (address)) {
+            continue;
+        }
+        std::string url = inbox_url (address, info.port);
+        if (std::ranges::find (info.reachable_at, url) == info.reachable_at.end ()) {
+            info.reachable_at.push_back (std::move (url));
+        }
+    }
+    info.url = info.reachable_at.empty () ? inbox_url ("127.0.0.1", info.port) :
+                                            info.reachable_at.front ();
+}
+
+} // namespace
+
 struct InboxManager::Inbox {
     std::string id;
     std::string bind;
@@ -561,21 +648,29 @@ struct InboxManager::Inbox {
     /// its record, so there is nothing else for `running` to mean.
     ManagedListener listener{ std::make_unique<AnyPathServer> () };
 
-    InboxInfo info_locked () const {
+    InboxInfo info_locked (const LocalAddressSource& local_addresses) const {
         InboxInfo info;
-        info.inbox_id = id;
-        info.bind     = bind;
-        info.port     = port;
-        info.url      = "http://" + bind + ":" + std::to_string (port) + "/";
-        info.running  = listener.is_listening ();
-        info.loopback = is_loopback_bind (bind);
-        info.response = response;
+        info.inbox_id        = id;
+        info.bind            = bind;
+        info.port            = port;
+        info.url             = inbox_url (bind, port);
+        info.running         = listener.is_listening ();
+        info.loopback        = is_loopback_bind (bind);
+        info.response        = response;
         info.allowed_origins = cors.allowed_origins;
+        if (is_wildcard_bind (bind)) {
+            report_wildcard_reachability (info, local_addresses ());
+        }
         return info;
     }
 };
 
-InboxManager::InboxManager () = default;
+InboxManager::InboxManager (LocalAddressSource local_addresses)
+: local_addresses_ (std::move (local_addresses)) {
+    if (!local_addresses_) {
+        local_addresses_ = &vayu::platform::local_ipv4_addresses;
+    }
+}
 
 InboxManager::~InboxManager () {
     std::lock_guard<std::mutex> lock (mutex_);
@@ -631,9 +726,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         // Not `req.path`: the listener routes every request as one literal path
         // so that no path length can miss the handler, so what arrived is only
         // still on the target. See AnyPathServer.
-        capture_row.path       = path_of (req.target);
-        capture_row.query      = query_of (req.target);
-        capture_row.headers    = headers_json_text (req.headers);
+        capture_row.path  = path_of (req.target);
+        capture_row.query = query_of (req.target);
+        capture_row.headers = headers_json_text (AnyPathServer::sender_headers (req));
         capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body = stored_body (req.body, raw->limits.max_body_bytes);
@@ -722,7 +817,7 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
             // The listener is already accepting, so a capture handler may be
             // reading `response` while this snapshot is taken.
             std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
-            out.info = inbox->info_locked ();
+            out.info = inbox->info_locked (local_addresses_);
         }
         inboxes_[inbox->id] = std::move (inbox);
     }
@@ -769,7 +864,7 @@ std::optional<InboxInfo> InboxManager::get (const std::string& inbox_id) {
         return std::nullopt;
     }
     std::lock_guard<std::mutex> response_lock (it->second->response_mutex);
-    return it->second->info_locked ();
+    return it->second->info_locked (local_addresses_);
 }
 
 std::vector<InboxInfo> InboxManager::list () {
@@ -778,7 +873,7 @@ std::vector<InboxInfo> InboxManager::list () {
     out.reserve (inboxes_.size ());
     for (const auto& [id, inbox] : inboxes_) {
         std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
-        out.push_back (inbox->info_locked ());
+        out.push_back (inbox->info_locked (local_addresses_));
     }
     return out;
 }
@@ -813,7 +908,7 @@ const std::function<void ()>& before_write) {
         before_write ();
     }
     it->second->response = std::move (*merged);
-    out.info             = it->second->info_locked ();
+    out.info             = it->second->info_locked (local_addresses_);
     return out;
 }
 

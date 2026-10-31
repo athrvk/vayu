@@ -345,4 +345,110 @@ TEST_F (ExecuteAuthProvenanceTest, AStreamingSendAppliesLateAuthToo) {
     EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "user:s3cret");
 }
 
+// --- auth a pre-request script assigns (#3131) -------------------------------
+
+constexpr const char* ASSIGN_BASIC =
+"pm.request.auth = { type: 'basic', basic: [{ key: 'username', value: 'ada' }, "
+"{ key: 'password', value: 'pw' }] };";
+
+/// The request's own auth, applied in the build, gives way on the wire and in
+/// both records.
+TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedAuthReplacesTheRequestsOwn) {
+    const vayu::tests::EchoServer echo;
+    const auto answer = post_execute (
+    scripted_payload (echo,
+    { { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", TOKEN }, { "in", "header" } },
+    ASSIGN_BASIC),
+    200);
+
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "ada:pw");
+    EXPECT_FALSE (echo.has_header ("X-Api-Key"));
+    EXPECT_FALSE (answer.contains ("authHeaders")) << answer.dump ();
+}
+
+const json& no_auth () {
+    static const json auth{ { "mode", "none" } };
+    return auth;
+}
+
+TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedBearerReachesTheWire) {
+    const vayu::tests::EchoServer echo;
+    post_execute (scripted_payload (echo, no_auth (),
+                  "pm.request.auth = { type: 'bearer', bearer: "
+                  "[{ key: 'token', value: 'mine' }] };"),
+    200);
+
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer mine");
+}
+
+/// An api key the script places is named for the reader that masks it, as
+/// the request's own would be.
+TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedHeaderApiKeyReachesTheWireAndIsNamed) {
+    const vayu::tests::EchoServer echo;
+    const auto answer =
+    post_execute (scripted_payload (echo, no_auth (),
+                  "pm.request.auth = { type: 'apikey', apikey: "
+                  "{ key: 'X-Api-Key', value: 'script-key' } };"),
+    200);
+
+    EXPECT_EQ (echo.header ("X-Api-Key"), "script-key");
+    EXPECT_EQ (answer.value ("authHeaders", json::array ()), (json::array ({ "X-Api-Key" })))
+    << answer.dump ();
+}
+
+TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedQueryApiKeyReplacesTheRequestsOwn) {
+    const vayu::tests::EchoServer echo;
+    const auto answer = post_execute (
+    scripted_payload (echo,
+    { { "mode", "apikey" }, { "key", "access_token" }, { "value", TOKEN }, { "in", "query" } },
+    "pm.request.auth = { type: 'apikey', apikey: { key: 'api_key', value: "
+    "'script-key', in: 'query' } };"),
+    200);
+
+    EXPECT_NE (echo.target ().find ("api_key=script-key"), std::string::npos)
+    << echo.target ();
+    EXPECT_EQ (echo.target ().find ("access_token="), std::string::npos)
+    << echo.target ();
+    EXPECT_EQ (answer.value ("authQueryParam", ""), "api_key") << answer.dump ();
+}
+
+TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedNoauthSendsNoCredential) {
+    const vayu::tests::EchoServer echo;
+    post_execute (scripted_payload (echo, { { "mode", "bearer" }, { "token", TOKEN } },
+                  "pm.request.auth = { type: 'noauth' };"),
+    200);
+
+    EXPECT_FALSE (echo.has_header ("Authorization"));
+}
+
+/// Deferred auth is applied after the script and skips a header the request
+/// carries, so the script's Authorization would win anyway; an api key under
+/// another name would not, which is what this pins. Mutation check: drop the
+/// `auth_from_script` return from `apply_late_auth` and `X-Api-Key` is sent
+/// beside the script's credential.
+TEST_F (ExecuteAuthProvenanceTest, DeferredAuthAppliesNothingOverAScriptAssignedAuth) {
+    const vayu::tests::EchoServer echo;
+    post_execute (
+    scripted_payload (echo,
+    { { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "{{key}}" }, { "in", "header" } },
+    std::string ("pm.environment.set(\"key\", \"late-key\");") + ASSIGN_BASIC),
+    200);
+
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "ada:pw");
+    EXPECT_FALSE (echo.has_header ("X-Api-Key")) << echo.header ("X-Api-Key");
+}
+
+/// The streaming send runs its own pre-request script and its own late auth.
+TEST_F (ExecuteAuthProvenanceTest, AStreamingSendCarriesAScriptAssignedAuth) {
+    const vayu::tests::EchoServer echo;
+    auto payload      = scripted_payload (echo, basic_with_password_token (),
+    std::string (SET_PASSWORD) + ASSIGN_BASIC);
+    payload["stream"] = true;
+    post_execute (payload, 202);
+
+    ASSERT_TRUE (vayu::tests::wait_until ([&] { return !echo.path ().empty (); }))
+    << "the stream never reached the server";
+    EXPECT_EQ (basic_pair_of (echo.header ("Authorization")), "ada:pw");
+}
+
 } // namespace

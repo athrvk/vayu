@@ -687,5 +687,23 @@ TEST (DaemonShutdown, RefreshesTheRecoveryBackupAfterTheLastWriter) {
     EXPECT_FALSE (refreshes_the_backup_after_the_last_writer (missing));
 }
 
+// What the OS lists depends on the machine (a sandbox may have no interface
+// at all), so this asserts the shape of whatever comes back, never its content.
+TEST (LocalIpv4Addresses, EveryEntryIsADottedQuadOfOctets) {
+    for (const std::string& address : local_ipv4_addresses ()) {
+        std::istringstream parts (address);
+        std::string octet;
+        int count = 0;
+        while (std::getline (parts, octet, '.')) {
+            ++count;
+            ASSERT_FALSE (octet.empty ()) << address;
+            ASSERT_LE (octet.size (), 3u) << address;
+            EXPECT_EQ (octet.find_first_not_of ("0123456789"), std::string::npos) << address;
+            EXPECT_LE (std::stoi (octet), 255) << address;
+        }
+        EXPECT_EQ (count, 4) << address;
+    }
+}
+
 } // namespace
 } // namespace vayu::platform

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <set>
 #include <string_view>
+#include <utility>
 
 #include "vayu/db/database.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -99,7 +100,20 @@ MonitorConfig& out) {
         if (!entry.is_string () || entry.get<std::string> ().empty ()) {
             return "'monitor.series' entries must be non-empty metric names";
         }
-        out.series.push_back (entry.get<std::string> ());
+        const auto& name = entry.get_ref<const std::string&> ();
+        // The exposition parser reads a sample's name up to its first '{' or
+        // space, so a name holding either can never match and the run would
+        // scrape a healthy endpoint for nothing (#3120). A JSON key may hold
+        // both legally, which is why the rule is the Prometheus format's alone;
+        // `read_monitor_format` has already run.
+        if (out.format == MonitorFormat::Prometheus &&
+        name.find_first_of ("{ \t\r\n\f\v") != std::string::npos) {
+            return "'monitor.series' entry \"" + name +
+            "\" is not a metric name: series are matched by name alone and the "
+            "samples of every label set are summed, so write the bare name "
+            "with no '{...}' label filter and no spaces";
+        }
+        out.series.push_back (name);
     }
 
     return std::nullopt;
@@ -374,6 +388,40 @@ const std::vector<std::string>& series) {
                                            parse_prometheus_exposition (body, series);
 }
 
+namespace {
+
+/// The phrase for a transfer that produced no response line.
+const char* transport_failure_cause (vayu::ErrorCode code) {
+    switch (code) {
+    case vayu::ErrorCode::Timeout: return "timed out";
+    case vayu::ErrorCode::ConnectionFailed: return "unreachable";
+    case vayu::ErrorCode::DnsError: return "host not found";
+    case vayu::ErrorCode::SslError: return "TLS handshake failed";
+    case vayu::ErrorCode::ProxyError: return "proxy failed";
+    case vayu::ErrorCode::InvalidUrl: return "URL refused";
+    case vayu::ErrorCode::TooManyRedirects: return "too many redirects";
+    case vayu::ErrorCode::BadContentEncoding: return "undecodable body";
+    case vayu::ErrorCode::ResponseTooLarge: return "response too large";
+    default: return "transport error";
+    }
+}
+
+} // namespace
+
+std::optional<std::string> scrape_failure_cause (const vayu::Result<vayu::Response>& sent) {
+    if (!sent.is_ok ()) {
+        return transport_failure_cause (sent.error ().code);
+    }
+    const auto& response = sent.value ();
+    if (response.has_error ()) {
+        return transport_failure_cause (response.error_code);
+    }
+    if (!response.is_success ()) {
+        return "HTTP " + std::to_string (response.status_code);
+    }
+    return std::nullopt;
+}
+
 nlohmann::json build_monitor_sample_payload (int64_t timestamp,
 const std::map<std::string, double>& values) {
     nlohmann::json series = nlohmann::json::object ();
@@ -402,8 +450,13 @@ void MonitorTotals::add (const std::map<std::string, double>& values) {
     }
 }
 
-void MonitorTotals::record_failure () {
+void MonitorTotals::record_failure (std::string cause) {
     ++failures_;
+    last_error_ = std::move (cause);
+}
+
+void MonitorTotals::record_no_match () {
+    ++no_match_scrapes_;
 }
 
 nlohmann::json MonitorTotals::to_summary () const {
@@ -416,9 +469,13 @@ nlohmann::json MonitorTotals::to_summary () const {
             { "avg", acc.sum / static_cast<double> (acc.count) }, { "count", acc.count } };
     }
     nlohmann::json summary;
-    summary["samples"]  = samples_;
-    summary["failures"] = failures_;
-    summary["series"]   = series;
+    summary["samples"]        = samples_;
+    summary["failures"]       = failures_;
+    summary["noMatchScrapes"] = no_match_scrapes_;
+    if (!last_error_.empty ()) {
+        summary["lastError"] = last_error_;
+    }
+    summary["series"] = series;
     return summary;
 }
 

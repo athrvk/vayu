@@ -45,15 +45,23 @@ function reportWith(monitor?: RunReport["monitor"]): RunReport {
 	} as unknown as RunReport;
 }
 
-function renderTab(monitor?: RunReport["monitor"]) {
+function renderTab(monitor?: RunReport["monitor"], monitorSeries?: string[]) {
 	return render(
 		<PerformanceTab
 			report={reportWith(monitor)}
 			derived={DERIVED}
 			timeSeries={[]}
 			monitorSamples={[]}
+			monitorSeries={monitorSeries}
 		/>
 	);
+}
+
+/** The blocking Callout's box, told apart the same way as the warning's. */
+function blockingCalloutAround(text: RegExp): HTMLElement {
+	const callout = screen.getByText(text).closest<HTMLElement>("[class*='border-destructive/40']");
+	if (!callout) throw new Error(`no blocking Callout around ${String(text)}`);
+	return callout;
 }
 
 /**
@@ -95,37 +103,109 @@ describe("the Server Vitals summary on a stored run", () => {
 		expect(screen.queryByText("Server vitals summary")).toBeNull();
 	});
 
-	it("says every scrape failed rather than showing an empty panel", () => {
+	it("says every scrape failed, and why, rather than showing an empty panel", () => {
+		renderTab({
+			samples: 0,
+			failures: 12,
+			noMatchScrapes: 0,
+			lastError: "HTTP 503",
+			series: {},
+		});
+
+		const callout = blockingCalloutAround(/12 of 12/);
+		expect(callout).toHaveTextContent("Every scrape failed");
+		expect(callout).toHaveTextContent("(last cause: HTTP 503)");
+		expect(callout).toHaveTextContent(/monitor URL was reachable/);
+		// The advice for a run that counted no-matches apart names the URL alone.
+		expect(callout).not.toHaveTextContent(/requested metrics/);
+	});
+
+	it("names both causes on a run recorded before no-matches were counted apart", () => {
+		// No `noMatchScrapes`: that engine folded a no-match into `failures`, so
+		// "check the URL" alone could be the wrong advice.
 		renderTab({ samples: 0, failures: 12, series: {} });
 
-		expect(screen.getByText(/every scrape failed/i)).toBeTruthy();
-		expect(screen.getByText(/12 of 12/)).toBeTruthy();
+		const callout = blockingCalloutAround(/12 of 12/);
+		expect(callout).toHaveTextContent("Every scrape failed");
+		expect(callout).toHaveTextContent(/carried the requested metrics/);
+		expect(callout).not.toHaveTextContent(/last cause/);
 	});
 
 	it("counts the failures beside the readings when only some scrapes failed", () => {
 		renderTab({
 			samples: 8,
 			failures: 2,
+			noMatchScrapes: 0,
+			lastError: "timed out",
 			series: { cpu_percent: { min: 1, max: 2, avg: 1.5, count: 8 } },
 		});
 
 		expect(screen.getByText(/2 of 10 scrapes failed/i)).toBeTruthy();
 		expect(screen.getByText("cpu_percent")).toBeTruthy();
 		const callout = warningCalloutAround(/2 of 10 scrapes failed/i);
+		expect(callout).toHaveTextContent("(last cause: timed out) - the gaps in the chart");
 		expect(callout.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
 	});
 
-	it("names the case where scrapes succeeded but carried none of the metrics", () => {
-		// `samples > 0` with no series is a live endpoint whose body never held
-		// the requested names - which is a typo in the metric name, not an outage,
-		// and reads identically to one on the chart.
-		renderTab({ samples: 30, failures: 0, series: {} });
+	// The case #3120 is about: a healthy endpoint answering every scrape with
+	// none of the requested names. It must never read as an unreachable URL.
+	// Mutation check: route `noMatchScrapes` into `FailureCallout` (count it
+	// with `failures`) and "Every scrape failed" is back.
+	it("says the endpoint answered but carried none of the requested names", () => {
+		renderTab({ samples: 0, failures: 0, noMatchScrapes: 7, series: {} }, [
+			"vayu_cpu",
+			"rss_bytes",
+		]);
 
-		expect(screen.getByText(/none carried the metrics this run asked for/i)).toBeTruthy();
-		const callout = warningCalloutAround(/none carried the metrics this run asked for/i);
-		expect(callout).toHaveTextContent("Scrapes carried no metrics");
-		expect(callout.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+		const callout = blockingCalloutAround(/carried none of/);
+		expect(callout).toHaveTextContent("No scrape carried the requested metrics");
+		expect(callout).toHaveTextContent(
+			"The endpoint answered 7 of 7 scrapes but carried none of: vayu_cpu, rss_bytes."
+		);
+		expect(callout).toHaveTextContent(/format the monitor was set to read/);
 		expect(screen.queryByText(/every scrape failed/i)).toBeNull();
+		expect(screen.queryByText(/reachable/i)).toBeNull();
+	});
+
+	it("says it without the list while the run's own names are unknown", () => {
+		renderTab({ samples: 0, failures: 0, noMatchScrapes: 3, series: {} });
+
+		expect(blockingCalloutAround(/carried none of/)).toHaveTextContent(
+			"carried none of the requested metrics."
+		);
+	});
+
+	it("states both causes apart when some scrapes failed and the rest matched nothing", () => {
+		renderTab(
+			{ samples: 0, failures: 3, noMatchScrapes: 7, lastError: "unreachable", series: {} },
+			["vayu_cpu"]
+		);
+
+		// Not "every scrape failed": seven were answered.
+		expect(screen.queryByText(/every scrape failed/i)).toBeNull();
+		expect(blockingCalloutAround(/scrapes failed/)).toHaveTextContent(
+			"3 of 10 scrapes failed (last cause: unreachable)."
+		);
+		expect(blockingCalloutAround(/carried none of/)).toHaveTextContent(
+			"The endpoint answered 7 of 10 scrapes but carried none of: vayu_cpu."
+		);
+	});
+
+	it("counts the no-match scrapes beside the readings when only some matched nothing", () => {
+		renderTab(
+			{
+				samples: 8,
+				failures: 0,
+				noMatchScrapes: 2,
+				series: { cpu_percent: { min: 1, max: 2, avg: 1.5, count: 8 } },
+			},
+			["cpu_percent"]
+		);
+
+		expect(warningCalloutAround(/were answered but carried/)).toHaveTextContent(
+			"2 of 10 scrapes were answered but carried none of: cpu_percent - the chart has gaps there too."
+		);
+		expect(screen.getByText(/over 8 scrapes/i)).toBeTruthy();
 	});
 
 	it("shows a series' own reading count only when it lags the run's", () => {

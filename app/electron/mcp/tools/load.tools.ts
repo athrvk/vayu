@@ -302,7 +302,7 @@ export const LOAD_TOOLS: McpTool[] = [
 				})
 				.optional()
 				.describe(
-					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus the sample and failed-scrape counts. Omit for a run that measures only the client side."
+					"Scrape the target's own metrics endpoint for the life of the run, so its CPU or memory can be read on the same timeline as p99 and throughput. The report comes back with a `monitor` section: per-series min/max/avg plus `samples`, `failures`, `lastError` and `noMatchScrapes`. Omit for a run that measures only the client side."
 				),
 			// The redirect policy of the request being load-tested. A saved
 			// request carries its own (composed in, never elided), so these are

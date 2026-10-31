@@ -406,6 +406,7 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 									isLoadingSeries={isLoadingSeries}
 									ticksPerBucket={ticksPerBucket}
 									monitorTicksPerBucket={monitorTicksPerBucket}
+									monitorSeries={run?.configSnapshot?.monitor?.series}
 								/>
 								{/* Not part of PerformanceTab: that is a view of this run's report
 								    and renders without a QueryClient in tests; this reads the request's other runs. */}

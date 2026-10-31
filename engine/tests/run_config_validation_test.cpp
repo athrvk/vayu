@@ -1252,6 +1252,26 @@ TEST_F (RunConfigValidationRouteTest, AMonitorBesideACollectionRunIsRefusedBefor
     EXPECT_TRUE (db_->get_all_runs ().empty ());
 }
 
+// A label filter in a Prometheus series name never matches (series are matched
+// by name, #3120), so it is a `400` before any row, never a run that scrapes a
+// healthy endpoint for nothing. Mutation check: drop the Prometheus name rule
+// in `read_monitor_series` and this answers 202.
+TEST_F (RunConfigValidationRouteTest, ALabelFilterInAMonitorSeriesIsRefusedBeforeAnyRow) {
+    const vayu::tests::EchoServer echo;
+    json payload       = iterations_run (echo);
+    payload["monitor"] = { { "url", "http://127.0.0.1:9100/metrics" },
+        { "series", json::array ({ "http_requests_total{code=\"500\"}" }) } };
+
+    const auto [status, body] = post_run (payload);
+    ASSERT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (body["error"]["code"], "invalid_run_config") << body.dump ();
+    const auto message = vayu::http::routes::error_message_of (body);
+    EXPECT_NE (message.find ("monitor.series"), std::string::npos) << message;
+    EXPECT_NE (message.find ("matched by name"), std::string::npos) << message;
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_TRUE (echo.method ().empty ()) << "the run was started";
+}
+
 // The refusal is the collection-run shape's alone: a `null` monitor is "no
 // block", and a real load mode beside `scenario` moves on to resolving the
 // collection, which this database does not hold.

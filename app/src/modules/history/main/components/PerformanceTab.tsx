@@ -52,6 +52,7 @@ export default function PerformanceTab({
 	isLoadingSeries,
 	ticksPerBucket,
 	monitorTicksPerBucket,
+	monitorSeries,
 }: PerformanceTabProps) {
 	// The run's own record of the host sleeping under it (#1357), read here by
 	// run id rather than drilled from `LoadTestDetail`: Overview states them and
@@ -169,7 +170,7 @@ export default function PerformanceTab({
 						<CardTitle>Server vitals summary</CardTitle>
 					</CardHeader>
 					<CardContent>
-						<MonitorSummary monitor={report.monitor} />
+						<MonitorSummary monitor={report.monitor} requestedSeries={monitorSeries} />
 					</CardContent>
 				</Card>
 			)}

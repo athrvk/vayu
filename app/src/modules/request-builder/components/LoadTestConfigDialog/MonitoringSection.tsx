@@ -104,8 +104,9 @@ export function MonitoringSection({ monitor, onMonitorChange, maxSeries }: Monit
 					className="font-mono text-xs"
 				/>
 				<p className="text-label text-muted-foreground">
-					A Prometheus name is matched across its labels and the values summed, so a whole
-					family charts as one line.
+					Names only: a Prometheus name is matched across all its labels and the values
+					summed, so a whole family charts as one line and a label filter such as{" "}
+					<span className="font-mono">{'{code="500"}'}</span> is not accepted.
 				</p>
 			</div>
 		</DisclosureCard>

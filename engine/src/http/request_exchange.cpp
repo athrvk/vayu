@@ -822,6 +822,12 @@ std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
 const vayu::http::VariableValues& vars,
 LateTokenAcquisition* acquisition) {
+    // The script's `pm.request.auth` replaced this block, so nothing of it
+    // goes on - not even a credential under a header name the script's own
+    // auth does not write - and no OAuth 2.0 token is fetched for it.
+    if (request.auth_from_script) {
+        return std::nullopt;
+    }
     // Resolved raw: `apply_auth` encodes what each destination needs (base64
     // for a basic pair, the query rule for an api key in the query).
     vayu::http::walk_auth_credentials (

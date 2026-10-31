@@ -2182,7 +2182,9 @@ is the `GET /runs/:runId/metrics` contract, pinned by `stats_route_test.cpp`;
 and a scrape lands on the user's own cadence (250-60000ms), which does not line
 up row for row with the 1/s tick. A scrape that read nothing writes no row at
 all - a stored sample with no readings would draw a line through a hole in the
-data - so gaps are counted in the run summary's `monitor.failures` instead.
+data - so gaps are counted in the run summary instead, under
+`monitor.failures` (no 2xx answer) or `monitor.noMatchScrapes` (a 2xx answer
+carrying none of the requested names).
 
 Deleted with the run by the same cascade (`remove_run_cascade_locked`).
 
