@@ -14,6 +14,7 @@
  * what actually negotiated - the last hardcoded protocol claim in the app
  * (Task 14). This renders the component the way `ResponseViewer` does and
  * asserts the negotiated protocol - not a hardcoded guess - is what shows.
+ * It also covers the large-body cap and the memoised build (#3138).
  */
 
 import { describe, it, expect, vi } from "vitest";

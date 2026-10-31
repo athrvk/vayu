@@ -2024,9 +2024,9 @@ and shows the first 2MB of the raw body under its own notice. The request
 builder's Raw tab applies the same cap to the received text it prints (decided
 from that one string's length) and shows the same notice, since building the
 exchange and handing Monaco a multi-megabyte model is the same freeze (#3138).
-Copy and Download still take the whole received text. Both limits are about *rendering* cost, not
-about what arrived, and both count the decoded text below, never base64
-characters.
+Copy and Download still take the whole received text. Both limits are about
+*rendering* cost, not about what arrived, and both count the decoded text
+below, never base64 characters.
 
 `bodyEncoding` says how to read `bodyRaw` (issue #2458): `"utf8"` is the text
 itself, `"base64"` is a body that is not UTF-8 text (an image, a PDF, Latin-1,
