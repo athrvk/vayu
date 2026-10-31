@@ -129,7 +129,7 @@ Both lists go through the walk's `parameters` guard (`openapi_drafts.cpp`) first
 
 | OpenAPI (`op.responses[code]`) | Vayu `ExampleDraft` | Notes |
 |--------------------------------|---------------------|-------|
-| the key | `status` | must be a three-digit `100`-`599` code; see below |
+| the key | `status` | must be a three-digit `200`-`599` code; see below |
 | `description` | `name` | `"{code} - {description}"`, or the bare code when the response describes nothing |
 | the JSON media type's `example` → first `examples[*].value` → `sampleSchema(schema)` | `body` | the same precedence `buildBody` uses for a request body; a string is stored as-is, anything else is `JSON.stringify(value, null, 2)` |
 | the JSON media type key | `contentType`, and a single `Content-Type` header | `application/json`, an `application/json;…` variant or a `+json` suffix, by the same rule request bodies use |

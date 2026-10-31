@@ -2600,9 +2600,10 @@ and the same `404` when it exists under a different request. Merge-patch body:
 absent keeps, `null` resets to the field's default (`name` has none, so `null`
 is a `400`). A `status` outside `200`-`599` is a `400` as on create; only a body
 that names `status` is judged, so an example stored with a `1xx` before create
-began refusing them can still be renamed. `postmanResponse` accepts only `null`, which clears it; any other
-value is a `400` - it records what a file said, and the export already
-regenerates each part of it an edit to `status` or `headers` makes stale.
+began refusing them can still be renamed. `postmanResponse` accepts only
+`null`, which clears it; any other value is a `400` - it records what a file
+said, and the export already regenerates each part of it an edit to `status` or
+`headers` makes stale.
 
 **Headers:** `If-Match` (optional), see
 [Conditional updates](#conditional-updates-with-if-match).

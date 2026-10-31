@@ -998,7 +998,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `id`           | TEXT PK | `exa_` + UUID                                     |
 | `request_id`   | TEXT    | FK → `requests.id` (not enforced by SQLite FK)   |
 | `name`         | TEXT    | Required on write; no default                     |
-| `status`       | INTEGER | HTTP status, `100`-`599`; default 200             |
+| `status`       | INTEGER | HTTP status, `200`-`599`; default 200             |
 | `headers`      | TEXT    | JSON array of `KeyValueEntry[]`                   |
 | `body`         | TEXT    | Response body, verbatim; capped (see below)       |
 | `content_type` | TEXT    | Denormalized from `headers`; `""` when unstated   |

@@ -137,7 +137,7 @@ Saved example responses (issue #481), from the half of the spec that says what c
 
 | Swagger (`op.responses[code]`) | Vayu `ExampleDraft` | Notes |
 |--------------------------------|---------------------|-------|
-| the key | `status` | must be a three-digit `100`-`599` code |
+| the key | `status` | must be a three-digit `200`-`599` code |
 | `description` | `name` | `"{code} - {description}"`, or the bare code |
 | `examples[<media type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
 | `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json` |
