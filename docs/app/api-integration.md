@@ -1273,6 +1273,16 @@ for budget / binary) and `CapturedDataWarning` (the run stored responses
 verbatim, including anything credential-shaped). Both notices live in
 `components/shared`, beside the shell they annotate.
 
+**A sample's `response.body` is text only when `response.bodyEncoding` is absent
+or `"utf8"`** (#3159). A body that is not valid UTF-8, or holds a zero byte, comes
+as `"base64"` of the stored bytes, the spelling `/execute` and the inbox use, and
+`SampleRequestCard` reads it through `capturedBody` (`history/main/sample-body.ts`)
+into `decodeResponseBody` with the sample's headers: a text type reads as text
+through its declared charset, any other type reaches the viewer as `rawBytes` and
+shows as binary rather than as base64. A body marked base64 that does not decode
+draws a "Couldn't read the body" notice, and the headers stay. This is separate from
+`binary: true`, which stores no bytes at all.
+
 **A sample carries the response side only, so its request headers are the
 composed ones.** `GET /runs/:id/samples` returns response headers and body; what
 a sample viewer shows for the request comes from the run's composed request, not

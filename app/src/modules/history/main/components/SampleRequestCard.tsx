@@ -35,6 +35,7 @@ import { Callout } from "@/components/shared";
 import { runSampleReference } from "@/lib/agent-reference";
 import { formatLatency } from "@/lib/format-number";
 import { isSlowSample } from "../sample-filter";
+import { capturedBody } from "../sample-body";
 import type { SampleResult } from "../../types";
 import type { RunSample } from "@/types/domain";
 import { SampleTraceDetails } from "./SampleTraceDetails";
@@ -76,6 +77,8 @@ export default function SampleRequestCard({
 	const trace = sample.trace;
 	const phases = phasesFromTrace(trace);
 	const isSlow = isSlowSample(sample);
+
+	const response = captured ? capturedBody(captured.response) : undefined;
 
 	return (
 		<SampledExchange
@@ -120,12 +123,18 @@ export default function SampleRequestCard({
 			    Rendering nothing (not an empty heading) when it did not is
 			    deliberate: most samples in a healthy run carry no body, and a
 			    "Response" heading over nothing reads as a bug in the engine. */}
-			{captured && (
+			{captured && response && (
 				<div className="space-y-2">
 					<CapturedResponseNotice response={captured.response} />
+					{response.unreadable !== undefined && (
+						<Callout severity="warning" title="Couldn't read the body">
+							{response.unreadable}
+						</Callout>
+					)}
 					<UnifiedResponseViewer
 						response={{
-							body: captured.response.body ?? "",
+							body: response.body,
+							rawBytes: response.rawBytes,
 							headers: captured.response.headers,
 							status: sample.statusCode,
 						}}
