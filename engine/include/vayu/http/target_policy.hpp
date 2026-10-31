@@ -99,8 +99,9 @@ refuse_target (const TargetPolicy& policy, const vayu::Request& request);
 /**
  * Whether @p policy refuses acquiring a token for the OAuth 2.0 @p config: the
  * host of each URL `oauth::acquire_token` may post to
- * (`oauth::TOKEN_ENDPOINT_MEMBERS`, an empty one skipped), judged by the rule
- * @ref refuse_target applies, under the same codes. Both members are judged
+ * (`oauth::TOKEN_ENDPOINT_MEMBERS`, an empty one skipped), judged as the token
+ * POST will dial it (`wire_url`, #3162) by the rule @ref refuse_target applies,
+ * under the same codes. Both members are judged
  * whether or not this acquisition would reach them, so the verdict does not
  * depend on what the token cache holds. Nothing when every host is allowed.
  */

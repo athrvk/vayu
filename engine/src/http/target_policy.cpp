@@ -112,6 +112,19 @@ refuse_url (const TargetPolicy& policy, std::string_view url, std::string_view s
     return TargetRefusal{ std::move (message), TARGET_NOT_ALLOWED_CODE };
 }
 
+/// @p policy's verdict on the host a @p method to @p url dials: the wire URL,
+/// where the encoding pass has turned `\` into `/`, not the text as typed. Typed,
+/// `http://a\@b/` names `b`; dialled, it names `a` (#2465).
+std::optional<TargetRefusal> refuse_dialled_url (const TargetPolicy& policy,
+const std::string& url,
+vayu::HttpMethod method,
+std::string_view subject) {
+    vayu::Request request;
+    request.method = method;
+    request.url    = url;
+    return refuse_url (policy, wire_url (request), subject);
+}
+
 } // namespace
 
 std::expected<std::optional<TargetPolicy>, std::string> read_target_policy (
@@ -157,7 +170,9 @@ const nlohmann::json& config) {
     }
     for (const std::string_view member : oauth::TOKEN_ENDPOINT_MEMBERS) {
         // An empty or non-string member posts nothing: `acquire_token` refuses
-        // the config, or the refresh falls back to the token URL.
+        // the config, or the refresh falls back to the token URL. A member that
+        // posts goes through `Client::post` (default encoding on), so it is
+        // judged as dialled (#3162).
         const auto url = config.find (member);
         if (url == config.end () || !url->is_string ()) {
             continue;
@@ -167,17 +182,16 @@ const nlohmann::json& config) {
             continue;
         }
         const std::string subject = "the OAuth 2.0 " + std::string (member);
-        if (auto refusal = refuse_url (policy, text, subject)) {
+        if (auto refusal =
+            refuse_dialled_url (policy, text, vayu::HttpMethod::POST, subject)) {
             return refusal;
         }
     }
     return std::nullopt;
 }
 
-// Judged as `wire_url` writes it, not as typed: `collect_monitor` hands the
-// scrape's `Request` (default encoding on) to the client, and the encoding pass
-// turns `\` into `/`, so `http://a:1\@b:1/` is typed as host `b` and dialled as
-// `a` (#2465, the same constraint `validate_transferable` documents).
+// `collect_monitor` hands the scrape's `Request` (default encoding on) to the
+// client, so it is judged as `wire_url` writes it (`refuse_dialled_url`).
 std::optional<TargetRefusal> refuse_monitor_endpoint (const TargetPolicy& policy,
 const nlohmann::json& monitor) {
     if (!monitor.is_object ()) {
@@ -187,10 +201,8 @@ const nlohmann::json& monitor) {
     if (url == monitor.end () || !url->is_string ()) {
         return std::nullopt;
     }
-    vayu::Request scrape;
-    scrape.method = vayu::HttpMethod::GET;
-    scrape.url    = url->get_ref<const std::string&> ();
-    return refuse_url (policy, wire_url (scrape), "the run's monitor.url");
+    return refuse_dialled_url (policy, url->get_ref<const std::string&> (),
+    vayu::HttpMethod::GET, "the run's monitor.url");
 }
 
 } // namespace vayu::http
