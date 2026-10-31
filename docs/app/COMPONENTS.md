@@ -3515,6 +3515,12 @@ Monaco's own canvas rather than a declared app surface, so it carries
 inherit, and neither theme's `--popover` separates from the editor background on
 its own.
 
+**A read-only editor draws every column** (#3140). It passes
+`stopRenderingLineAfter: -1`; Monaco's default of 10,000 columns leaves the rest
+of a line undrawn, which cut a minified response off mid-token. An editable
+editor keeps the default, and a caller's `options` override either.
+`code-editor.long-lines.test.tsx`.
+
 ⌘K is not bound here at all. It belongs to `CommandPalette`, on the capture
 phase, which both prevents **and stops** it: preventing alone left the event in
 flight, and Monaco - which treats ⌘K as a chord *leader* - entered chord mode
