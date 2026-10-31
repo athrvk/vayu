@@ -452,6 +452,31 @@ TEST_F (InboxListenerTest, ACapturedMultipartBodyIsKeptWholeWithItsBoundaries) {
     EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
 }
 
+TEST_F (InboxListenerTest, AFormEncodedBodyOverTheHttplibFormLimitIsCapturedAndCut) {
+    // cpp-httplib refuses an application/x-www-form-urlencoded body over 8192
+    // bytes with a bare 413 before the handler runs, whatever
+    // set_payload_max_length says (#3111). Leave the Content-Type unmasked and
+    // this is a 413 with nothing recorded.
+    std::string body = "k=";
+    body.append (100 * 1024, 'v');
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    auto posted  = client.Post ("/form", body, "application/x-www-form-urlencoded");
+    ASSERT_TRUE (posted) << "POST to the inbox failed";
+    EXPECT_EQ (posted->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto& capture = captures.front ();
+    EXPECT_EQ (capture.body_bytes, static_cast<int64_t> (body.size ()));
+    EXPECT_TRUE (capture.body_truncated);
+    EXPECT_EQ (capture.body, body.substr (0, capture.body.size ()));
+    EXPECT_FALSE (capture.body.empty ());
+    const auto stored_headers = json::parse (capture.headers);
+    EXPECT_EQ (stored_headers.value ("Content-Type", ""), "application/x-www-form-urlencoded");
+}
+
 TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
     // The path is read off the target now that routing rewrites `req.path`, so
     // it has to stay the *decoded* path cpp-httplib put there before - the
