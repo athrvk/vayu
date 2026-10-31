@@ -206,7 +206,6 @@ function ExampleRow({
 							body={example.body}
 							headers={headerMap(example)}
 							showModeToggle={false}
-							compact
 						/>
 					</div>
 				</div>

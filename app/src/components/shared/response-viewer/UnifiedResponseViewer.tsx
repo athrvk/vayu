@@ -105,7 +105,6 @@ export default function UnifiedResponseViewer({
 							bodyRaw={response.bodyRaw}
 							rawBytes={response.rawBytes}
 							headers={response.headers || {}}
-							compact
 							showModeToggle
 						/>
 					) : (
