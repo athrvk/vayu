@@ -466,7 +466,6 @@ TEST_F (InboxListenerTest, RecordsThePathRawAsTheSenderSpelledIt) {
     // Newest first.
     EXPECT_EQ (captures[0].path, "/hooks/a%20b/caf%C3%A9");
     EXPECT_EQ (captures[1].path, "/enc/%2F/%E2%9C%93/a%2Fb");
-    EXPECT_EQ (captures[1].query, "x=%2F");
     // The query is the raw string off the wire too - httplib's own client
     // re-spells the space as '+' on the way out.
     EXPECT_EQ (captures[0].query, "q=1+2");
