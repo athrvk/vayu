@@ -2445,6 +2445,13 @@ One row per **distinct** captured body within a run - the dedup table. Struct is
 | `hash`    | TEXT       | Lowercase hex SHA-256 of `content` (`vayu::core::body_digest`)   |
 | `content` | TEXT       | The stored bytes, already truncated to `maxSampleBodyBytes`      |
 
+**`content` is read back whole.** Capture classes a body as text from its first 1024 bytes alone,
+so a body with a zero byte further in is stored here as text, with all its bytes, and reads back
+with all of them through the same `db::BodyBytes` mapping `inbox_requests.body` uses (#3159). The
+column is still `TEXT` and the write always bound the full length, so rows stored before the
+mapping read whole too. `GET /runs/:id/samples` lists such a body as base64
+([`bodyEncoding`](api-reference.md#get-runsrunidsamples)).
+
 Load-test responses are overwhelmingly identical, so 1000 samples of one 2 KiB body store 2 KiB,
 not 2 MB. The digest is taken over the **stored** (already truncated) bytes: two bodies that
 differ only past the truncation point are byte-identical as stored, and storing them twice would

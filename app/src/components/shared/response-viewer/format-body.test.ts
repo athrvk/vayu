@@ -87,4 +87,19 @@ describe("formatBody", () => {
 		expect(formatBody("", "xml")).toBe("");
 		expect(formatBody(undefined, "xml")).toBe("");
 	});
+
+	// A BOM stays in `bodyRaw`, which Raw, Copy and Download read, but Pretty
+	// must not show it as a stray character ahead of the first brace (#3140).
+	it.each(["json", undefined] as const)(
+		"indents a BOM-prefixed JSON body typed %s",
+		(bodyType) => {
+			const raw = '\uFEFF{"a":1}';
+			expect(formatBody(raw, bodyType)).toBe('{\n  "a": 1\n}');
+		}
+	);
+
+	it("returns a BOM-prefixed malformed body as it arrived, mark included", () => {
+		const broken = '\uFEFF{"a":1';
+		expect(formatBody(broken, "json")).toBe(broken);
+	});
 });

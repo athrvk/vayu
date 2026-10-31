@@ -88,6 +88,7 @@ import { graphqlOperationReference } from "@/lib/agent-reference";
 import { useRequestQuery } from "@/queries";
 import type { GraphQLBodyProps } from "./body/GraphQLBody";
 import { BODY_MODES } from "./body/body-modes";
+import { mountBodyDiagnostics } from "./body/body-diagnostics";
 import { switchContentType, withoutContentType } from "./body/content-type";
 import { switchGraphQLMethod } from "./body/graphql-method";
 import { ContentTypeNotice } from "./body/ContentTypeNotice";
@@ -462,6 +463,7 @@ export default function BodyPanel() {
 							path={requestModelPath(request.id, "body")}
 							value={request.body || ""}
 							onChange={(v) => updateField("body", v ?? "")}
+							onMount={mountBodyDiagnostics}
 						/>
 					)}
 				</div>

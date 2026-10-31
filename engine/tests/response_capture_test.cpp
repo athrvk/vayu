@@ -22,8 +22,10 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <nlohmann/json.hpp>
@@ -33,6 +35,7 @@
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/encoding.hpp"
 
 namespace vayu::http::routes {
 // Defined in runs.cpp; returns {http_status, json_body}.
@@ -69,6 +72,14 @@ MetricsCollectorConfig capture_config () {
     return config;
 }
 
+/// A `text/plain` body of @p size bytes of `a` with @p bytes written at
+/// @p at: past `SNIFF_BYTES`, so capture classes it as text whatever they are.
+std::string text_body_with (size_t size, size_t at, std::string_view bytes) {
+    std::string body (size, 'a');
+    body.replace (at, bytes.size (), bytes);
+    return body;
+}
+
 class ResponseCaptureTest : public ::testing::Test {
     protected:
     static constexpr const char* DB_PATH = "test_response_capture.db";
@@ -97,6 +108,32 @@ class ResponseCaptureTest : public ::testing::Test {
         run.start_time      = 100;
         run.end_time        = 200;
         db_->create_run (run);
+    }
+
+    /// Captures @p body as one errored sample of a fresh run and flushes it.
+    void capture_one (const std::string& run_id,
+    const std::string& body,
+    std::optional<size_t> max_body_bytes = std::nullopt) {
+        seed_run (run_id);
+        MetricsCollectorConfig config = capture_config ();
+        if (max_body_bytes) {
+            config.max_sample_body_bytes = *max_body_bytes;
+        }
+        MetricsCollector collector (run_id, config);
+        auto response = make_response (500, body, "text/plain");
+        collector.record_error (vayu::ErrorCode::ConnectionFailed, "boom", "{}", &response);
+        collector.flush_to_database (*db_);
+    }
+
+    /// The one sample GET /runs/:id/samples lists for @p run_id, after proving
+    /// the whole answer serializes under the default strict UTF-8 handler.
+    nlohmann::json only_sample (const std::string& run_id) {
+        auto [status, body] =
+        vayu::http::routes::run_samples_response (*db_, run_id, 50, 0);
+        EXPECT_EQ (status, 200);
+        EXPECT_NO_THROW (static_cast<void> (body.dump ()));
+        EXPECT_EQ (body["data"].size (), 1u);
+        return body["data"][0]["response"];
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -293,6 +330,21 @@ TEST_F (ResponseCaptureTest, IdenticalBodiesAreStoredOnce) {
     }
 }
 
+// A NUL past the sniff window leaves the body classed as text, so it reaches
+// `body_blobs` and must come back whole (#3159). Mutation check: map
+// `BodyBlob::content` as a `std::string` again and the read stops at byte 1050.
+TEST_F (ResponseCaptureTest, StoredBodyReadsBackWholePastAZeroByte) {
+    const std::string body = text_body_with (1100, 1050, std::string_view ("\0", 1));
+    capture_one ("run_nul_blob", body);
+
+    auto rows = db_->get_result_bodies_paginated ("run_nul_blob", 100, 0);
+    ASSERT_EQ (rows.size (), 1u);
+    ASSERT_FALSE (rows[0].is_binary) << "the NUL is past the sniff window";
+    const std::string stored = db_->get_body_blob_content (rows[0].blob_id);
+    EXPECT_EQ (stored.size (), 1100u);
+    EXPECT_EQ (stored, body);
+}
+
 TEST_F (ResponseCaptureTest, BinaryBodyIsStoredAsADescriptor) {
     seed_run ("run_binary");
     MetricsCollector collector ("run_binary", capture_config ());
@@ -411,10 +463,52 @@ TEST_F (ResponseCaptureTest, SamplesEndpointReturnsTheCapturedExchange) {
     EXPECT_EQ (sample["response"]["headers"]["Content-Type"].get<std::string> (),
     "application/json");
     EXPECT_EQ (sample["response"]["contentType"].get<std::string> (), "application/json");
+    EXPECT_EQ (sample["response"]["bodyEncoding"], "utf8");
     EXPECT_FALSE (sample["response"].contains ("bodyTruncated"));
 
     EXPECT_EQ (body["pagination"]["total"].get<int64_t> (), 1);
     EXPECT_FALSE (body["pagination"]["hasMore"].get<bool> ());
+}
+
+// The sniff window passed this body as text, but a NUL is never text
+// (`is_valid_utf8_text`), so it lists as base64 of all 1100 bytes rather than
+// a string cut at byte 1050 beside a `bodyBytes` of 1100 (#3159).
+TEST_F (ResponseCaptureTest, SampleWithAZeroBytePastTheSniffWindowListsWhole) {
+    const std::string body = text_body_with (1100, 1050, std::string_view ("\0", 1));
+    capture_one ("run_nul_sample", body);
+
+    auto sample = only_sample ("run_nul_sample");
+    EXPECT_EQ (sample["bodyBytes"].get<int64_t> (), 1100);
+    EXPECT_FALSE (sample.contains ("bodyTruncated"));
+    EXPECT_EQ (sample["bodyEncoding"], "base64");
+    EXPECT_EQ (vayu::utils::base64_decode (sample["body"].get<std::string> ()), body);
+}
+
+// A byte past the sniff window that is not UTF-8 would make the serializer
+// throw on the whole page. Mutation check: emit the stored bytes as `body`
+// whatever they are and the strict `dump ()` in `only_sample` throws.
+TEST_F (ResponseCaptureTest, InvalidUtf8PastTheSniffWindowListsAsBase64) {
+    const std::string body = text_body_with (1100, 1050, "\xFF");
+    capture_one ("run_invalid_utf8", body);
+
+    auto sample = only_sample ("run_invalid_utf8");
+    EXPECT_EQ (sample["bodyBytes"].get<int64_t> (), 1100);
+    EXPECT_EQ (sample["bodyEncoding"], "base64");
+    EXPECT_EQ (vayu::utils::base64_decode (sample["body"].get<std::string> ()), body);
+}
+
+// The per-body cap cuts at a byte count, here inside a two-byte character. The
+// incomplete tail is the cap's doing, not the body's, so the prefix stays text
+// without it rather than turning the whole slice into base64.
+TEST_F (ResponseCaptureTest, BodyCutInsideACharacterStaysText) {
+    const std::string prefix (1099, 'a');
+    capture_one ("run_cut_char", prefix + "\xC3\xA9" + "tail", 1100);
+
+    auto sample = only_sample ("run_cut_char");
+    EXPECT_TRUE (sample.value ("bodyTruncated", false));
+    EXPECT_EQ (sample["bodyBytes"].get<int64_t> (), 1105);
+    EXPECT_EQ (sample["bodyEncoding"], "utf8");
+    EXPECT_EQ (sample["body"].get<std::string> (), prefix);
 }
 
 // The result id is the join key between the report's `results[]` and this

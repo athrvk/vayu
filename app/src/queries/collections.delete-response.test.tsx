@@ -57,7 +57,6 @@ const storeResponse = (requestId: string) =>
 		statusText: "OK",
 		headers: {},
 		body: "{}",
-		bodyType: "json",
 		size: 2,
 		time: 1,
 	});

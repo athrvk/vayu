@@ -134,11 +134,16 @@
  * 217,409 / 213,012 B, and the four caps went to 147,900 / 145,200 / 217,700 /
  * 213,300.
  *
+ * #3159's `bodyEncoding` sentence in `get_run_samples` is paid once per row. The
+ * rows measure 147,998 / 145,272 / 217,760 / 213,363 B, and the four caps went
+ * to 148,300 / 145,600 / 218,100 / 213,700.
+ *
  * #3127's two `get_run_report` sentences (an inline script element row's
  * `messages` / `console`, and the sampled-replay `failures` with their
- * `failureCounts`), each paid once, took the rows from 147,899 / 145,173 /
- * 217,661 / 213,264 B to 148,155 / 145,429 / 217,917 / 213,520 B, and the four
- * caps went to 148,400 / 145,700 / 218,200 / 213,800.
+ * `failureCounts`), each paid once, added 256 B to every row (measured on the
+ * tree before #3159 landed, so the rows after both are 148,254 / 145,528 /
+ * 218,016 / 213,619 B), and the four caps went to 148,400 / 145,700 / 218,200 /
+ * 213,800.
  */
 
 import { describe, it, expect } from "vitest";

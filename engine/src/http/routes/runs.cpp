@@ -16,6 +16,7 @@
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/metrics_helper.hpp"
@@ -1311,6 +1312,53 @@ const std::optional<std::string>& before) {
     return { 200, response };
 }
 
+namespace {
+
+/// A stored sample body as GET /runs/:id/samples answers it: the stored bytes,
+/// and the `body` / `bodyEncoding` pair they travel as.
+struct SampleBody {
+    std::string bytes;
+    std::string body;
+    std::string_view encoding;
+};
+
+/// Capture classes a body as text from its first `SNIFF_BYTES` alone, and a
+/// JSON string holds only UTF-8, so a byte past that window that is not text
+/// sends the whole body as base64, as an inbox capture does (#3159). A body
+/// the per-body cap cut can end inside a character; that tail is left off the
+/// text rather than sending the prefix as base64 (`response_body_text`).
+SampleBody classify_sample_body (std::string bytes, bool truncated) {
+    const std::string_view text = truncated ?
+    vayu::utils::without_incomplete_utf8_tail (bytes) :
+    std::string_view (bytes);
+    if (vayu::utils::is_valid_utf8_text (text)) {
+        std::string body (text);
+        return { std::move (bytes), std::move (body), vayu::json::BODY_ENCODING_UTF8 };
+    }
+    std::string body = vayu::utils::base64_encode (bytes);
+    return { std::move (bytes), std::move (body), vayu::json::BODY_ENCODING_BASE64 };
+}
+
+/// Keyed by truncation as well as blob: only a truncated row's tail is trimmed,
+/// so one blob can read differently under two rows.
+using SampleBodyCache = std::map<std::pair<int, bool>, SampleBody>;
+
+/// Bodies are deduplicated in storage, so a page of 50 samples of the same
+/// response points at one blob: it is read and classified once, not 50 times.
+const SampleBody& cached_sample_body (vayu::db::Database& db,
+SampleBodyCache& cache,
+const vayu::db::ResultBody& row) {
+    const auto key = std::pair{ row.blob_id, row.truncated };
+    if (const auto cached = cache.find (key); cached != cache.end ()) {
+        return cached->second;
+    }
+    SampleBody classified =
+    classify_sample_body (db.get_body_blob_content (row.blob_id), row.truncated);
+    return cache.emplace (key, std::move (classified)).first->second;
+}
+
+} // namespace
+
 /**
  * Testable core of GET /runs/:id/samples, returning {http_status, json_body}.
  * A missing run is a 404 in the shared error shape; a run that captured
@@ -1344,9 +1392,7 @@ int64_t offset) {
     // different rules would be a page nobody could describe.
     const vayu::http::SseLimits sse_limits = vayu::http::read_sse_limits (db);
 
-    // Bodies are deduplicated in storage, so a page of 50 samples of the same
-    // response points at one blob. Read it once rather than 50 times.
-    std::map<int, std::string> blob_cache;
+    SampleBodyCache body_cache;
 
     nlohmann::json data = nlohmann::json::array ();
     for (const auto& row : rows) {
@@ -1371,13 +1417,9 @@ int64_t offset) {
             // alternative is a mojibake that reads like a real response.
             response["binary"] = true;
         } else {
-            auto cached = blob_cache.find (row.blob_id);
-            if (cached == blob_cache.end ()) {
-                cached = blob_cache
-                         .emplace (row.blob_id, db.get_body_blob_content (row.blob_id))
-                         .first;
-            }
-            response["body"] = cached->second;
+            const SampleBody& stored = cached_sample_body (db, body_cache, row);
+            response["body"]         = stored.body;
+            response["bodyEncoding"] = stored.encoding;
             if (row.truncated) {
                 // Same convention design-mode traces use (cap_trace_bodies), so
                 // a reader has one rule for "this is a slice".
@@ -1391,7 +1433,7 @@ int64_t offset) {
             // the event list, and two copies of one fact drift.
             if (row.stream_events) {
                 response["events"] = vayu::http::buffered_stream_events_node (
-                cached->second, sse_limits, *row.stream_events, !row.truncated);
+                stored.bytes, sse_limits, *row.stream_events, !row.truncated);
             }
             // No blob and not binary means the run's capture budget was spent
             // before this sample: headers were kept, the body was not. Said
@@ -2639,7 +2681,10 @@ httplib::Response& res) {
             "run", "GET /runs/:id/samples - Run not found: " + run_id);
         }
         res.status = status;
-        res.set_content (body.dump (), "application/json");
+        // `replace`: a stream's events are parsed from the stored bytes, which
+        // `bodyEncoding` does not cover and which need not be UTF-8 (#3159).
+        res.set_content (body.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "GET /runs/:id/samples - Error for run " + run_id + ": " + e.what ());

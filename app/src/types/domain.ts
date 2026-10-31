@@ -3808,6 +3808,13 @@ export interface RunSample {
 		 * that reads like a response and is not one.
 		 */
 		body?: string;
+		/**
+		 * How `body` is spelled. `"base64"` is the standard base64 of the stored
+		 * bytes, sent when they are not valid UTF-8 text or hold a zero byte;
+		 * absent or `"utf8"` is `body` as text. Read it through
+		 * `decodeResponseBody`, never print `body` of a base64 sample.
+		 */
+		bodyEncoding?: "utf8" | "base64";
 		/** Size of the body as received, before any truncation. */
 		bodyBytes: number;
 		/** `body` is a prefix; the response was larger than `maxSampleBodyBytes`. */

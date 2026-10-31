@@ -66,7 +66,6 @@ function previousResponse(): ResponseState {
 		headers: { "content-type": "application/json" },
 		body: BODY,
 		bodyRaw: BODY,
-		bodyType: "json",
 		size: BODY.length,
 		time: 34,
 	};

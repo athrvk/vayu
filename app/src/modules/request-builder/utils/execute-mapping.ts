@@ -37,7 +37,7 @@ import { wireRequestHeadersField } from "@/components/shared/response-viewer/wir
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
-import { decodeResponseBody, responseBodyType } from "./response-bytes";
+import { decodeResponseBody } from "./response-bytes";
 
 /** The body shape `POST /request` and `POST /run` accept. */
 export interface ExecBody {
@@ -363,7 +363,6 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// Absent for a `"utf8"` body, the same normalisation as `bodyCapped`: the
 		// stored trace marks only a base64 one.
 		...(decoded.bytes && { rawBytes: decoded.bytes }),
-		bodyType: responseBodyType(result.headers, decoded.bytes),
 		// When it arrived, as opposed to how long it took. The status bar shows
 		// it as an age, which is the only thing distinguishing a fresh response
 		// from one sent before the request beside it was edited.

@@ -59,7 +59,6 @@ function aResponse(): ResponseState {
 		statusText: "OK",
 		headers: { "content-type": "application/json" },
 		body: "the-response-body",
-		bodyType: "json",
 		size: 18,
 		time: 12,
 	};

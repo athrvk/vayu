@@ -54,7 +54,6 @@ function bodyFacts(r: ReturnType<typeof responseFromExecuteResult> | null) {
 	return {
 		body: r?.body,
 		bodyRaw: r?.bodyRaw,
-		bodyType: r?.bodyType,
 		size: r?.size,
 		bytes: r?.rawBytes && Array.from(r.rawBytes.data),
 		isText: r?.rawBytes?.isText,
@@ -93,14 +92,13 @@ describe("what each body becomes", () => {
 			live({ "content-type": "text/html; charset=iso-8859-1" }, LATIN1)
 		);
 		expect(r.body).toBe("café");
-		expect(r.bodyType).toBe("html");
 		expect(r.rawBytes?.isText).toBe(true);
 	});
 
-	it("gives an image no text, and the binary body type", () => {
+	it("gives an image no text", () => {
 		const r = responseFromRunResult(stored({ "content-type": "image/png" }, PNG));
 		expect(r?.body).toBe("");
-		expect(r?.bodyType).toBe("binary");
+		expect(r?.rawBytes?.isText).toBe(false);
 	});
 
 	it("counts a truncated stored body by its bytes, and the original by bodyBytes", () => {

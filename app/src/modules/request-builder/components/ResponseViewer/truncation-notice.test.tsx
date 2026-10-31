@@ -48,7 +48,6 @@ function baseResponse(overrides: Partial<ResponseState> = {}): ResponseState {
 		statusText: "OK",
 		headers: { "content-type": "application/json" },
 		body: '{"ok":true}',
-		bodyType: "json",
 		size: 11,
 		time: 12,
 		...overrides,
@@ -81,7 +80,6 @@ describe("response body truncation notice", () => {
 		response = baseResponse({
 			headers: { "content-type": "image/png" },
 			body: "",
-			bodyType: "binary",
 			rawBytes: { data: new Uint8Array(2048), isText: false },
 			bodyTruncated: true,
 			bodyBytes: 5_242_880,

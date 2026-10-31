@@ -51,7 +51,7 @@ const stored = (body: string): RunResultSample =>
 
 /** What the two funnels must agree on for one body. */
 function paneFacts(r: ReturnType<typeof responseFromExecuteResult> | null) {
-	return { body: r?.body, bodyRaw: r?.bodyRaw, bodyType: r?.bodyType, size: r?.size };
+	return { body: r?.body, bodyRaw: r?.bodyRaw, size: r?.size };
 }
 
 const bigPad = "x".repeat(LARGE_BODY_BYTES + 16);

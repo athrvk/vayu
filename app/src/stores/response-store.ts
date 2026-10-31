@@ -54,7 +54,6 @@ export interface StoredResponse {
 	bodyRaw?: string;
 	/** Named only so `estimateResponseBytes` can read it; see the note above. */
 	rawBytes?: { data: Uint8Array };
-	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	time: number;
 	/** Set when the response was rebuilt from a stored run - see `ResponseState`. */

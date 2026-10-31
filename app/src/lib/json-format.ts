@@ -21,10 +21,15 @@
  * **Malformed input comes back unchanged**, by the same contract as the XML and
  * GraphQL formatters: a truncated or non-JSON body renders as what arrived. The
  * grammar is RFC 8259's and is checked as strictly as `JSON.parse` checks it -
- * a UTF-8 BOM, a leading `+` or zero, a trailing comma, a raw control character
- * in a string and trailing text all leave the input as received. Only the four
- * JSON whitespace characters are skipped between tokens, and they are dropped
- * rather than kept, so the result has no leading or trailing whitespace.
+ * a leading `+` or zero, a trailing comma, a raw control character in a string
+ * and trailing text all leave the input as received. Only the four JSON
+ * whitespace characters are skipped between tokens, and they are dropped rather
+ * than kept, so the result has no leading or trailing whitespace.
+ *
+ * One leading U+FEFF is the exception (#3140): RFC 8259 section 8.1 lets a
+ * parser ignore a BOM, and servers that emit one are common, so it is skipped
+ * for scanning and left out of the result. A document that then fails to scan
+ * still comes back whole, BOM included.
  */
 
 /** Two spaces, matching the `JSON.stringify(value, null, 2)` beside it. */
@@ -38,6 +43,7 @@ const INDENT = "  ";
  */
 const MAX_DEPTH = 1024;
 
+const BYTE_ORDER_MARK = 0xfeff;
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
 const COMMA = 0x2c;
@@ -74,7 +80,8 @@ interface Scan {
 }
 
 export function formatJson(text: string): string {
-	const scan: Scan = { text, out: [], stack: [], state: Expect.value, pos: 0 };
+	const start = text.charCodeAt(0) === BYTE_ORDER_MARK ? 1 : 0;
+	const scan: Scan = { text, out: [], stack: [], state: Expect.value, pos: start };
 
 	while (scan.pos < text.length) {
 		const code = text.charCodeAt(scan.pos);

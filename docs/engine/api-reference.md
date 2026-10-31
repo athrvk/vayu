@@ -12707,6 +12707,7 @@ no body by design.
       "response": {
         "headers": { "content-type": "application/json", "server": "nginx" },
         "body": "{\"error\":\"upstream timeout\"}",
+        "bodyEncoding": "utf8",
         "bodyBytes": 28,
         "contentType": "application/json"
       }
@@ -12734,12 +12735,24 @@ something the bytes alone cannot say:
 
 | Key             | When present | Meaning                                                                 |
 |-----------------|--------------|-------------------------------------------------------------------------|
-| `body`          | Not binary   | The stored bytes. `""` when the response had none, or when the body was dropped |
+| `body`          | Not binary   | The stored bytes, as `bodyEncoding` says. `""` when the response had none, or when the body was dropped |
+| `bodyEncoding`  | Not binary   | `"utf8"`: `body` is the stored text. `"base64"`: the stored bytes are not valid UTF-8 text (or hold a NUL) and `body` is their standard, padded base64 |
 | `bodyTruncated` | `true` only  | `body` is a prefix; the response was larger than `maxSampleBodyBytes`. Same convention design-mode traces use |
 | `bodyDropped`   | `true` only  | The run's `maxSampleBytes` budget was spent before this sample: headers kept, body not. **Distinct from an empty response body** |
 | `binary`        | `true` only  | Stored as a descriptor - `bodyBytes` and `contentType`, no bytes. See [`result_bodies`](db-schema.md#result_bodies) for why a binary body is never stored as text |
 | `contentType`   | Non-empty    | The response's `Content-Type`                                           |
 | `events`        | Streams only | What the stream delivered, in the trace's `events` shape (see below). Absent for every sample that did not stream |
+
+**`bodyEncoding: "base64"` is not `binary: true`** (issue #3159). `binary`
+is decided when the sample is captured, from the `Content-Type` and the first
+1024 bytes, and such a body is never stored. A body that passed that sniff is
+stored as text, and `bodyEncoding` is decided when the sample is read, over
+every stored byte, because a JSON string holds only UTF-8: a NUL or a byte
+that is not UTF-8 past the first 1024 lists the whole body as base64, with
+`bodyBytes` still the size as received, never the encoded length. A body the
+`maxSampleBodyBytes` cap cut inside a multi-byte character is first trimmed
+back to a character boundary, so it stays `utf8` with `bodyTruncated` set
+rather than turning the whole prefix into base64.
 
 **A streamed sample carries its events** (0.17.2). `events` is
 `{items, totalEvents, eventsTruncated}` - the same node a streaming design run
@@ -12749,7 +12762,9 @@ per sample records which, so no reason is named rather than one invented. The
 list is parsed out of the stored body on read, bounded by `sseMaxStoredEvents`,
 and `totalEvents` is the count taken **on the wire** - so a capture the
 `maxSampleBodyBytes` cap cut still reports the whole stream's length, with
-`eventsTruncated` covering both that cut and the stored-events cap. See
+`eventsTruncated` covering both that cut and the stored-events cap. The events
+are parsed from the stored bytes whatever `bodyEncoding` says, and a byte in
+an event that is not UTF-8 is answered as U+FFFD. See
 [`result_bodies`](db-schema.md#result_bodies) for why the count is stored and
 the list is not.
 

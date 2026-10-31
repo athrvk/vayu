@@ -49,7 +49,6 @@ function failedResponse(overrides: Partial<ResponseState> = {}): ResponseState {
 		statusText: "",
 		headers: {},
 		body: "",
-		bodyType: "text",
 		size: 0,
 		time: 1,
 		errorCode: "TIMEOUT",

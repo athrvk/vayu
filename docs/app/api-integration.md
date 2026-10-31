@@ -1273,6 +1273,16 @@ for budget / binary) and `CapturedDataWarning` (the run stored responses
 verbatim, including anything credential-shaped). Both notices live in
 `components/shared`, beside the shell they annotate.
 
+**A sample's `response.body` is text only when `response.bodyEncoding` is absent
+or `"utf8"`** (#3159). A body that is not valid UTF-8, or holds a zero byte, comes
+as `"base64"` of the stored bytes, the spelling `/execute` and the inbox use, and
+`SampleRequestCard` reads it through `capturedBody` (`history/main/sample-body.ts`)
+into `decodeResponseBody` with the sample's headers: a text type reads as text
+through its declared charset, any other type reaches the viewer as `rawBytes` and
+shows as binary rather than as base64. A body marked base64 that does not decode
+draws a "Couldn't read the body" notice, and the headers stay. This is separate from
+`binary: true`, which stores no bytes at all.
+
 **A sample carries the response side only, so its request headers are the
 composed ones.** `GET /runs/:id/samples` returns response headers and body; what
 a sample viewer shows for the request comes from the run's composed request, not
@@ -2038,18 +2048,20 @@ text, as on every older row. Both funnels hand the body to one decoder,
 and the restored pane hold the same state: the bytes go to
 `ResponseState.rawBytes`, and `body` / `bodyRaw` get their decoding - by the
 byte-order mark, else the declared `charset`, else UTF-8, through
-`TextDecoder` - for a text Content-Type, and nothing for any other. A text type
+`TextDecoder` - for a text Content-Type, and nothing for any other. A BOM on a
+`"utf8"` body is part of the text, so it stays in `bodyRaw` (Raw, Copy and
+Download keep it); Pretty skips one leading BOM when it indents JSON, and a
+body that then fails to scan comes back whole, BOM included (#3140). A text type
 is `text/*`, a declared `charset`, or a subtype whose name (after any `x-`) or
 `+suffix` is one of the text syntaxes (`json`, `xml`, `yaml`, `javascript`,
 `graphql` and their kin), compared as whole tokens by `mediaTypeOf`: an Office
 document's `vnd.openxmlformats-...` subtype holds `xml` and is still a zip. The
-pane's `detectBodyType` and `bodyType` read the type through the same parts. A
-label the
+pane's `detectBodyType` reads the type through the same parts. A label the
 platform does not know, or bytes the charset cannot read, put a notice in
-`rawBytes.notice` that `ResponseBody` shows over the text. A non-text body sets
-`bodyType: "binary"`; the pane draws an image from its bytes through a Blob
-object URL, names a PDF or other bytes with their size, and Download writes the
-bytes as a Blob under the response's own Content-Type. Copy is off for such a
+`rawBytes.notice` that `ResponseBody` shows over the text. A non-text body has
+`rawBytes.isText` false and no text; the pane draws an image from its bytes
+through a Blob object URL, names a PDF or other bytes with their size, and
+Download writes the bytes as a Blob under the response's own Content-Type. Copy is off for such a
 body and the Raw tab prints one line in place of it; Save as example is off for
 any base64 body, since an example's body is UTF-8 text. Both disabled controls
 carry their reason. `binary-body-funnels.test.ts` holds the two funnels together.

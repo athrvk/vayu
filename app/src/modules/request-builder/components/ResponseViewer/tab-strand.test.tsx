@@ -64,7 +64,6 @@ function fullResponse(): ResponseState {
 		rawRequest: "GET / HTTP/1.1",
 		body: BODY,
 		bodyRaw: BODY,
-		bodyType: "json",
 		size: BODY.length,
 		time: 34,
 		timing: { totalMs: 34, dnsMs: 1, connectMs: 2, tlsMs: 3, firstByteMs: 20, downloadMs: 8 },

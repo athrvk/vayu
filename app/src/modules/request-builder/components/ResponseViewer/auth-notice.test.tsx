@@ -49,7 +49,6 @@ function renderWith(overrides: Partial<ResponseState> = {}) {
 		statusText: "Unauthorized",
 		headers: { "content-type": "application/json" },
 		body: '{"error":"unauthorized"}',
-		bodyType: "json",
 		size: 24,
 		time: 12,
 		...overrides,

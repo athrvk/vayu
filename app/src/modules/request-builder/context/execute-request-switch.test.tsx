@@ -71,7 +71,6 @@ function makeResponse(tag: string): ResponseState {
 		statusText: "OK",
 		headers: {},
 		body: tag,
-		bodyType: "text",
 		size: tag.length,
 		time: 1,
 	};
