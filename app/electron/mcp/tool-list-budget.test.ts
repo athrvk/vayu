@@ -133,6 +133,12 @@
  * the key in `diff_spec`'s output schema) took the rows to 147,636 / 144,910 /
  * 217,409 / 213,012 B, and the four caps went to 147,900 / 145,200 / 217,700 /
  * 213,300.
+ *
+ * #3127's two `get_run_report` sentences (an inline script element row's
+ * `messages` / `console`, and the sampled-replay `failures` with their
+ * `failureCounts`), each paid once, took the rows from 147,899 / 145,173 /
+ * 217,661 / 213,264 B to 148,155 / 145,429 / 217,917 / 213,520 B, and the four
+ * caps went to 148,400 / 145,700 / 218,200 / 213,800.
  */
 
 import { describe, it, expect } from "vitest";
@@ -152,10 +158,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 217_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_300 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_700 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 218_200 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_800 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
