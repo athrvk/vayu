@@ -275,6 +275,21 @@ describe("a single-scope list is what that scope defines, not what it wins", () 
 		expect(item?.documentation).toContain("environment - Staging holds the value");
 	});
 
+	it("points a scoped replaceIn at the merged replaceIn, not at a get", () => {
+		defs.collection = { shop_domain: { value: "", sourceName: "Acme" } };
+		defs.environment = { shop_domain: { value: "staging.shop.test", sourceName: "Staging" } };
+
+		const item = suggestionsFor(
+			() => useScriptVariableCompletionProvider(),
+			'pm.collectionVariables.replaceIn("{{'
+		).find((s) => s.label === "shop_domain");
+		expect(item?.detail).toBe('Empty at collection scope - this replaceIn substitutes ""');
+		expect(item?.documentation).toContain(
+			'pm.variables.replaceIn("{{shop_domain}}") reads that'
+		);
+		expect(item?.documentation).not.toContain(".get(");
+	});
+
 	it("stays quiet where the scope's own answer is the one that resolves", () => {
 		defs.collection = { shop_domain: { value: "shop.test", sourceName: "Acme" } };
 		defs.global = { shop_domain: { value: "global.shop.test" } };

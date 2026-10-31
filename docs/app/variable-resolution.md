@@ -1240,12 +1240,13 @@ These rules make the offered set match what the call can actually read:
   column is distinguishable from a variable at a glance, and a name that is
   both is offered twice on purpose: the row wins while one is bound and the
   scope answers when none is. The single-scope `get` / `has` never see the row,
-  so no column is offered there (the scoped `replaceIn` does, see below). **The prefixed `{{data.column}}` spelling is
-  offered to `replaceIn` and to nothing else** (issue #1077): `replaceIn`
-  resolves both spellings from the same row, so withholding one of two that
-  work would be the same gap, while `pm.variables.get("data.email")` reads no
-  column at all - the namespace is disjoint from the scopes there - and
-  offering it in a name argument would teach a call that returns `undefined`.
+  so no column is offered there (the scoped `replaceIn` does, see below).
+  **The prefixed `{{data.column}}` spelling is offered to `replaceIn` and to
+  nothing else** (issue #1077): `replaceIn` resolves both spellings from the
+  same row, so withholding one of two that work would be the same gap, while
+  `pm.variables.get("data.email")` reads no column at all - the namespace is
+  disjoint from the scopes there - and offering it in a name argument would
+  teach a call that returns `undefined`.
   The bare entry says `(bare)` only where the prefixed one sits beside it,
   since that word exists to tell two adjacent spellings apart.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a

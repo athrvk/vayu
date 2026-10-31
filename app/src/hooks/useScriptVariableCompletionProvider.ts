@@ -211,7 +211,8 @@ export function useScriptVariableCompletionProvider() {
 					const shadowed = scope
 						? describeScopedRead(
 								{ name, via: "pm", reads: "scope", scope },
-								getVariableOrigins(name)
+								getVariableOrigins(name),
+								context.mode
 							)
 						: null;
 					return {

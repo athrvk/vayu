@@ -43,7 +43,6 @@
 
 import { VARIABLE_PATTERN } from "@/constants/variables";
 import { PM_ACCESSORS } from "./referenced-variables";
-import { isDataVariableName } from "./variable-resolution";
 import type { VariableScope } from "@/types";
 import type { ScriptTokenHint } from "./variable-token-kind";
 import type { ScannableModel, VariableTokenRange } from "./monaco-variable-tokens";
@@ -173,13 +172,13 @@ function hintForAccessor(accessor: string): ScriptTokenHint {
 /**
  * The hint for one `{{name}}` inside `pm.<accessor>.replaceIn(...)`. A scoped
  * call resolves a scope variable against its own scope alone, but the names that
- * are not scope variables - generators, the iteration identity, `data.*` -
- * answer as the merged form's do (`pm_scopes.cpp`, `js_pm_scope_replace_in`), so
- * reading them from the scope would paint a working `{{$guid}}` as undefined.
+ * are not scope variables - generators, the iteration identity, `data.*`, a
+ * bound row's columns - answer as the merged form's do (`pm_scopes.cpp`,
+ * `js_pm_scope_replace_in`). `template` says so, and the classifier asks the
+ * scope first and falls through to those; a `get` never sets it.
  */
-function templateHint(accessorHint: ScriptTokenHint, name: string): ScriptTokenHint {
-	if (accessorHint.via !== "scope") return accessorHint;
-	return name.startsWith("$") || isDataVariableName(name) ? { via: "merged" } : accessorHint;
+function templateHint(accessorHint: ScriptTokenHint): ScriptTokenHint {
+	return accessorHint.via === "scope" ? { ...accessorHint, template: true } : accessorHint;
 }
 
 export function scriptVariableTokenRanges(
@@ -258,7 +257,7 @@ export function scriptVariableTokenRanges(
 					name,
 					tokenStart,
 					tokenStart + inner[0].length,
-					templateHint(accessorHint, name)
+					templateHint(accessorHint)
 				);
 			}
 		}
