@@ -92,7 +92,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				.min(200)
 				.max(599)
 				.optional()
-				.describe("Final HTTP status the example answers with, 200-599 (default 200)."),
+				.describe("Final status, 200-599 (default 200)."),
 			headers: z
 				.record(z.string(), z.string())
 				.optional()
@@ -146,13 +146,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			requestId: z.string().describe("Request that owns the example."),
 			exampleId: z.string().describe("Example ID to update."),
 			name: z.string().optional().describe("New display name."),
-			status: z
-				.number()
-				.int()
-				.min(200)
-				.max(599)
-				.optional()
-				.describe("New final HTTP status, 200-599."),
+			status: z.number().int().min(200).max(599).optional().describe("New status, 200-599."),
 			headers: z
 				.record(z.string(), z.string())
 				.optional()
