@@ -257,6 +257,13 @@ describe("extensionForContentType", () => {
 		["image/svg+xml", "svg"],
 		["application/x-tar", "tar"],
 		["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "bin"],
+		// A structured-syntax suffix names the format when the subtype is no extension.
+		["application/problem+json", "json"],
+		["application/vnd.api+json; charset=utf-8", "json"],
+		["application/ld+json", "json"],
+		["application/atom+xml", "xml"],
+		["application/xhtml+xml", "xml"],
+		["application/vnd.foo+cbor", "cbor"],
 		["", "bin"],
 	])("%s -> %s", (contentType, extension) => {
 		expect(extensionForContentType(contentType)).toBe(extension);

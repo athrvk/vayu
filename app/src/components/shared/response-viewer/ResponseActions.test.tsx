@@ -103,6 +103,11 @@ describe("Download", () => {
 		["text/html", "html"],
 		["text/plain", "txt"],
 		["", "txt"],
+		["application/problem+json", "json"],
+		["application/vnd.api+json", "json"],
+		["application/ld+json", "json"],
+		["application/atom+xml", "xml"],
+		["application/xhtml+xml", "xml"],
 		// No usable subtype: `bin` is for bytes, so a readable body falls back to `.txt`.
 		["application/vnd.ms-excel", "txt"],
 	])("names a text body of type %j .%s", (contentType, extension) => {
