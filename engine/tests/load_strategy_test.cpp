@@ -3364,6 +3364,29 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreSetsAPasswordThatReachesTheWireThroug
     << summary.dump ();
 }
 
+// #3131 on the single-request path: an inline `script.pre` that assigns
+// `pm.request.auth` replaces the run's own credential on every submission,
+// through the write-back every run kind shares.
+TEST_F (LoadStrategyTest, AnInlineScriptPreAssignedAuthReplacesTheRunsOwn) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config    = request_elements_payload (echo.url (), 2, 1,
+    nlohmann::json::array ({ vayu::tests::script_element_json ("el_pre",
+    "script.pre", "pm.request.auth = { type: 'basic', basic: { username: 'ada', password: 'pw' } };",
+    /*inline_script=*/true) }));
+    config["auth"] = { { "mode", "bearer" }, { "token", "run-token" } };
+
+    const auto summary = run_single_request_summary (db, "run-script-auth", config);
+
+    const auto sent = echo.header_per_request ("Authorization");
+    ASSERT_EQ (sent.size (), 2u) << summary.dump ();
+    for (const auto& authorization : sent) {
+        EXPECT_EQ (vayu::tests::basic_pair_of (authorization), "ada:pw")
+        << summary.dump ();
+    }
+}
+
 // Mixed credentials on the same path: the submission's row answers one half at
 // the bind and the script the other after it.
 TEST_F (LoadStrategyTest, ARowAndAScriptEachAnswerHalfOfABasicPairThroughLateAuth) {

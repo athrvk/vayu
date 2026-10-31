@@ -659,8 +659,8 @@ bool is_string_literal_union (const std::string& base) {
  * so by spelling the member's type `string & object`.
  *
  * The member is emitted as an accessor pair, because that is what it *is* at
- * run time: the getter answers the object, and the setter takes the string a
- * script assigns.
+ * run time: the getter answers the object, and the setter takes what a script
+ * assigns (`assigned_type`).
  */
 std::string intersection_base (const std::string& detail) {
     std::string base = trim (detail);
@@ -784,6 +784,30 @@ std::string function_return_type (const TypeNode& node, const Signature& sig) {
     return "void";
 }
 
+/**
+ * @brief What assigning an intersection member takes: what its `update ()`
+ *        takes, else @p base.
+ *
+ * Assigning the member and calling its `update ()` are one write at run time
+ * - `pm.request.url = x` is `url.update (x)`, and `pm.request.body` takes the
+ * description `body.update ()` does (#3131) - so the table states the type
+ * once, on `update`, and the setter reads it there.
+ */
+std::string assigned_type (const TypeNode& node, const std::string& base) {
+    const auto update = node.children.find ("update");
+    if (update == node.children.end () || update->second.kind != KIND_FUNCTION) {
+        return base;
+    }
+    const Signature sig = parse_signature (update->second.detail, "update");
+    const auto params =
+    sig.parsed ? split_params (sig.params) : std::vector<std::string>{};
+    if (params.size () != 1 || !is_typed_param (params.front ())) {
+        return base;
+    }
+    const std::string& param = params.front ();
+    return trim (param.substr (param.find (':') + 1));
+}
+
 std::string
 render_member (const TypeNode& node, const std::string& name, const std::string& indent);
 
@@ -845,7 +869,7 @@ render_member (const TypeNode& node, const std::string& name, const std::string&
             out += indent + "get " + name + "(): " + base + " & {\n";
             out += render_body (node, indent + "\t");
             out += indent + "};\n";
-            out += indent + "set " + name + "(value: " + base + ");\n";
+            out += indent + "set " + name + "(value: " + assigned_type (node, base) + ");\n";
             return out;
         }
         // `pm.iterationData?: {...}` - the surface is undefined outside a

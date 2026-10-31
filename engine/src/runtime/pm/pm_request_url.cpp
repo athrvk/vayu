@@ -10,13 +10,17 @@
  * @brief `pm.request`, its `Url` object, `pm.info` and the pre-request write-back.
  */
 
+#include "pm_auth.hpp"
 #include "pm_internal.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <expected>
+#include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -1645,6 +1649,20 @@ JSValue body_file_view (JSContext* ctx, const FileRef& file) {
 }
 
 /**
+ * The urlencoded pairs the body carries now: the composed fields while `text`
+ * is still their view, else `text` parsed back the way the write-back will
+ * parse it. So the list follows a `.raw` or `update ()` write instead of
+ * describing the body it replaced - the rule `.graphql` follows by reading
+ * `text` too.
+ */
+std::vector<FormField> current_form_fields (const RequestBodyState& state) {
+    if (state.text == script_body_view (state.body)) {
+        return state.body.fields;
+    }
+    return vayu::http::parse_urlencoded (state.text);
+}
+
+/**
  * The body as a string, and the single answer behind every string context.
  *
  * `toString`, `valueOf`, `toJSON` and `@@toPrimitive` all land here, for the
@@ -1687,7 +1705,7 @@ JSValue* func_data) {
         return JS_NewStringLen (ctx, state->text.data (), state->text.size ());
     case BODY_URLENCODED:
         return state->body.mode == BodyMode::Form ?
-        body_field_list (ctx, state->body.fields, /*multipart=*/false) :
+        body_field_list (ctx, current_form_fields (*state), /*multipart=*/false) :
         JS_UNDEFINED;
     case BODY_FORMDATA:
         return state->body.mode == BodyMode::FormData ?
@@ -1750,6 +1768,198 @@ JSValue* func_data) {
     return JS_UNDEFINED;
 }
 
+// ---------------------------------------------------------------------------
+// Postman's body description - `{mode: 'raw', raw}` and
+// `{mode: 'urlencoded', urlencoded}` (#3131)
+// ---------------------------------------------------------------------------
+
+/// The string view a description stands for, or why it was refused.
+using BodyText = std::expected<std::string, std::string>;
+
+/// A mode a description may name and a script still cannot set, with what to
+/// do instead. No string view carries a multipart part or a file, and a
+/// GraphQL body is one string that `.raw` already takes as its envelope.
+struct UnsettableBodyMode {
+    const char* mode;
+    const char* instead;
+};
+constexpr auto UNSETTABLE_BODY_MODES = std::to_array<UnsettableBodyMode> ({
+{ "formdata", "a multipart part is not a string; edit the request's form fields" },
+{ "file", "a script never chooses the file a request sends; choose it in the request" },
+{ "graphql", "assign pm.request.body.raw the {\"query\": ...} envelope instead" },
+});
+
+/**
+ * Whether @p mode may describe a body whose mode is @p current.
+ *
+ * The write-back keeps a request's body mode (`apply_pm_request_writeback`),
+ * so a description naming another mode would be sent as the one the request
+ * already has: `{mode: 'raw'}` on a urlencoded body would be parsed back into
+ * form fields. Refused instead. A request with no body takes `raw`, which it
+ * sends as text - the rule a string assignment follows.
+ */
+std::expected<void, std::string>
+check_settable_body_mode (const std::string& mode, BodyMode current, const char* label) {
+    for (const auto& unsettable : UNSETTABLE_BODY_MODES) {
+        if (mode == unsettable.mode) {
+            return std::unexpected (std::string (label) + ": { mode: '" + mode +
+            "' } cannot be set from a script - " + unsettable.instead);
+        }
+    }
+    if (mode != "raw" && mode != "urlencoded") {
+        return std::unexpected (std::string (label) + ": unknown body mode '" + mode +
+        "' - Postman's modes are raw, urlencoded, formdata, file and graphql");
+    }
+    const std::string held =
+    current == BodyMode::None ? "raw" : postman_body_mode (current);
+    if (mode == held) {
+        return {};
+    }
+    const std::string what = current == BodyMode::None ?
+    "this request has no body, and a body a script adds is raw text" :
+    "this request's body is '" + held + "'";
+    // A GraphQL body is one string, so its rewrite has a spelling that keeps
+    // the mode, which `update ('...')` - Postman's `{ mode: 'raw' }` - is not.
+    const std::string instead = current == BodyMode::GraphQL ?
+    "Assign pm.request.body.raw the {\"query\": ...} envelope instead" :
+    "Change the body type in the request instead";
+    return std::unexpected (std::string (label) + ": { mode: '" + mode + "' } cannot be applied - " +
+    what + ", and a script cannot change a body's mode. " + instead);
+}
+
+BodyText raw_description_text (JSContext* ctx, JSValueConst description, const char* label) {
+    ScopedValue raw (ctx, JS_GetPropertyStr (ctx, description, "raw"));
+    if (!JS_IsString (raw.get ())) {
+        return std::unexpected (std::string (label) + ": { mode: 'raw' } needs raw to be a string, got " +
+        js_type_name (ctx, raw.get ()));
+    }
+    return js_to_string (ctx, raw.get ());
+}
+
+/// One `{ key, value?, disabled? }` pair. A missing or null value is the empty
+/// string Postman sends for it; a value that is not a primitive has no wire
+/// form and is refused, as a header value is.
+std::expected<FormField, std::string>
+urlencoded_description_field (JSContext* ctx, JSValueConst entry, int64_t index, const char* label) {
+    const std::string at =
+    std::string (label) + ": urlencoded[" + std::to_string (index) + "]";
+    if (!JS_IsObject (entry) || JS_IsArray (entry) || JS_IsFunction (ctx, entry)) {
+        return std::unexpected (
+        at + " must be a { key, value } object, got " + js_type_name (ctx, entry));
+    }
+    ScopedValue key (ctx, JS_GetPropertyStr (ctx, entry, "key"));
+    ScopedValue value (ctx, JS_GetPropertyStr (ctx, entry, "value"));
+    ScopedValue disabled (ctx, JS_GetPropertyStr (ctx, entry, "disabled"));
+    if (!JS_IsString (key.get ()) || js_to_string (ctx, key.get ()).empty ()) {
+        return std::unexpected (at + ".key must be a non-empty string, got " +
+        js_type_name (ctx, key.get ()));
+    }
+    const bool absent = JS_IsUndefined (value.get ()) || JS_IsNull (value.get ());
+    if (!absent && !JS_IsString (value.get ()) && !JS_IsNumber (value.get ()) &&
+    !JS_IsBool (value.get ())) {
+        return std::unexpected (at + ".value must be a string, number or boolean, got " +
+        js_type_name (ctx, value.get ()));
+    }
+    return FormField{ js_to_string (ctx, key.get ()),
+        absent ? std::string{} : js_to_string (ctx, value.get ()),
+        JS_ToBool (ctx, disabled.get ()) != 1 };
+}
+
+/// The pairs encoded as the wire body - the string view a urlencoded body
+/// reads as, so the write-back parses it straight back into these fields.
+BodyText urlencoded_description_text (JSContext* ctx, JSValueConst description, const char* label) {
+    ScopedValue list (ctx, JS_GetPropertyStr (ctx, description, "urlencoded"));
+    if (!JS_IsArray (list.get ())) {
+        return std::unexpected (std::string (label) + ": { mode: 'urlencoded' } needs urlencoded to be an array of { key, value }, got " +
+        js_type_name (ctx, list.get ()));
+    }
+    int64_t length = 0;
+    if (JS_GetLength (ctx, list.get (), &length) < 0) {
+        JS_FreeValue (ctx, JS_GetException (ctx));
+        return std::unexpected (std::string (label) + ": urlencoded could not be read");
+    }
+    std::vector<FormField> fields;
+    fields.reserve (static_cast<size_t> (length < 0 ? 0 : length));
+    for (int64_t i = 0; i < length; i++) {
+        ScopedValue entry (ctx, JS_GetPropertyInt64 (ctx, list.get (), i));
+        auto field = urlencoded_description_field (ctx, entry.get (), i, label);
+        if (!field) {
+            return std::unexpected (std::move (field.error ()));
+        }
+        fields.push_back (std::move (*field));
+    }
+    return vayu::http::encode_urlencoded (fields);
+}
+
+/**
+ * @brief The string view Postman's body description means for a body of mode
+ *        @p current.
+ *
+ * `body.update ()` takes the description and a lifted script assigns one to
+ * `pm.request.body`. Both land on the string view (`RequestBodyState::text`)
+ * the write-back already reads, so a description means exactly what assigning
+ * its string would, and there is still one definition of what writing a body
+ * means. @p label names the surface in every refusal.
+ */
+BodyText body_description_text (JSContext* ctx,
+JSValueConst description,
+BodyMode current,
+const char* label) {
+    ScopedValue js_mode (ctx, JS_GetPropertyStr (ctx, description, "mode"));
+    if (!JS_IsString (js_mode.get ())) {
+        return std::unexpected (std::string (label) +
+        ": a body description needs a mode - { mode: 'raw', raw: '...' } or "
+        "{ mode: 'urlencoded', urlencoded: [...] } - got mode " +
+        js_type_name (ctx, js_mode.get ()));
+    }
+    const std::string mode = js_to_string (ctx, js_mode.get ());
+    if (auto settable = check_settable_body_mode (mode, current, label); !settable) {
+        return std::unexpected (std::move (settable.error ()));
+    }
+    return mode == "raw" ? raw_description_text (ctx, description, label) :
+                           urlencoded_description_text (ctx, description, label);
+}
+
+/// What `update`'s argument means: a string is `{mode: 'raw', raw}`, as in
+/// Postman, so it is held to the same mode rule as the description it stands
+/// for.
+BodyText
+update_argument_text (JSContext* ctx, JSValueConst value, BodyMode current, const char* label) {
+    if (!JS_IsString (value)) {
+        return body_description_text (ctx, value, current, label);
+    }
+    if (auto settable = check_settable_body_mode ("raw", current, label); !settable) {
+        return std::unexpected (std::move (settable.error ()));
+    }
+    return js_to_string (ctx, value);
+}
+
+/// `body.update (body)` - Postman's setter. Only the view moves, as for a
+/// `.raw` assignment.
+JSValue js_body_update (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    constexpr const char* label = "pm.request.body.update";
+    auto* state                 = request_body_state (this_val);
+    if (!state) {
+        return JS_ThrowTypeError (ctx,
+        "%s must be called on the request body object, not detached from it", label);
+    }
+    const bool takes = argc >= 1 &&
+    (JS_IsString (argv[0]) ||
+    (JS_IsObject (argv[0]) && !JS_IsArray (argv[0]) && !JS_IsFunction (ctx, argv[0])));
+    if (!takes) {
+        return JS_ThrowTypeError (ctx,
+        "%s takes a string or { mode: 'raw', raw } / { mode: 'urlencoded', "
+        "urlencoded }, got %s",
+        label, argc > 0 ? js_type_name (ctx, argv[0]) : "no value");
+    }
+    BodyText text = update_argument_text (ctx, argv[0], state->body.mode, label);
+    if (!text) {
+        return JS_ThrowTypeError (ctx, "%s", text.error ().c_str ());
+    }
+    state->text = std::move (*text);
+    return JS_UNDEFINED;
+}
+
 /**
  * @brief A RequestBody object over @p body, with the Postman members on it.
  *
@@ -1783,6 +1993,7 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     define ("toString", JS_NewCFunction (ctx, js_body_to_string, "toString", 0));
     define ("valueOf", JS_NewCFunction (ctx, js_body_to_string, "valueOf", 0));
     define ("toJSON", JS_NewCFunction (ctx, js_body_to_string, "toJSON", 0));
+    define ("update", JS_NewCFunction (ctx, js_body_update, "update", 1));
     JSAtom to_primitive = well_known_symbol_atom (ctx, "toPrimitive");
     JS_DefinePropertyValue (ctx, object, to_primitive,
     JS_NewCFunction (ctx, js_body_to_string, "[Symbol.toPrimitive]", 1),
@@ -1811,25 +2022,372 @@ JSValue new_request_body (JSContext* ctx, const Body& body) {
     return object;
 }
 
+/// A plain object naming a `mode` - the one object shape, besides the
+/// RequestBody itself, that an assignment to `pm.request.body` reads.
+bool is_body_description (JSContext* ctx, JSValueConst value) {
+    if (!JS_IsObject (value) || JS_IsArray (value) || JS_IsFunction (ctx, value)) {
+        return false;
+    }
+    JSAtom mode    = JS_NewAtom (ctx, "mode");
+    const int held = JS_HasProperty (ctx, value, mode);
+    JS_FreeAtom (ctx, mode);
+    return held == 1;
+}
+
 /**
- * @brief The body text a value carries, the sibling of `script_url_text`.
+ * @brief The body text a value carries, the sibling of `script_url_text`, for a
+ *        request whose body mode is @p current.
  *
  * A JS string is itself; a RequestBody object is the string view it holds, which
- * a `.raw` assignment has already moved. Anything else is `nullopt`, and the
- * caller says so in its own words.
+ * a `.raw` assignment has already moved; Postman's `{mode, raw}` description is
+ * the view it stands for (`body_description_text`). Anything else is refused.
  *
  * Deliberately *not* "any object, via toString": `pm.request.body = {}` would
  * then become the string `[object Object]` and reach the wire, which is exactly
- * the silent-wrong-request class this program exists to close.
+ * the silent-wrong-request class this program exists to close. A description is
+ * an explicit shape, recognised by its `mode`, and read member by member.
  */
-std::optional<std::string> script_body_text (JSContext* ctx, JSValueConst value) {
+BodyText script_body_text (JSContext* ctx, JSValueConst value, BodyMode current) {
     if (JS_IsString (value)) {
         return js_to_string (ctx, value);
     }
     if (auto* state = request_body_state (value)) {
         return state->text;
     }
-    return std::nullopt;
+    if (is_body_description (ctx, value)) {
+        return body_description_text (ctx, value, current, "pm.request.body");
+    }
+    return std::unexpected (
+    "pm.request.body must be a string, the request body object or a Postman "
+    "body description such as { mode: 'raw', raw: '...' }, got " +
+    std::string (js_type_name (ctx, value)));
+}
+
+// ---------------------------------------------------------------------------
+// pm.request's own methods - Postman's Request API (#3131)
+// ---------------------------------------------------------------------------
+
+/// `this` is the request a method was reached through; detached, it is not.
+bool request_this_is_usable (JSContext* ctx, JSValueConst this_val, const char* method) {
+    if (JS_IsObject (this_val) && !JS_IsFunction (ctx, this_val)) {
+        return true;
+    }
+    JS_ThrowTypeError (ctx,
+    "pm.request.%s must be called on pm.request (got %s), not detached from it",
+    method, js_type_name (ctx, this_val));
+    return false;
+}
+
+/**
+ * `this.<member>.<method> (...args)`, for a Request method that is its
+ * member's method under Postman's other name.
+ *
+ * Looked up at call time rather than bound at setup, so a script that replaced
+ * `pm.request.headers` with an object of its own is told so, rather than
+ * writing to the object it replaced - which the write-back no longer reads.
+ */
+JSValue call_member_method (JSContext* ctx,
+JSValueConst request,
+const char* caller,
+const char* member,
+const char* method,
+int argc,
+JSValueConst* argv) {
+    if (!request_this_is_usable (ctx, request, caller)) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue target (ctx, JS_GetPropertyStr (ctx, request, member));
+    if (JS_IsException (target.get ())) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue fn (ctx,
+    JS_IsObject (target.get ()) ? JS_GetPropertyStr (ctx, target.get (), method) : JS_UNDEFINED);
+    if (JS_IsException (fn.get ())) {
+        return JS_EXCEPTION;
+    }
+    if (!JS_IsFunction (ctx, fn.get ())) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.%s() calls pm.request.%s.%s(), and pm.request.%s (%s) has "
+        "no such method - it was replaced by something other than the object "
+        "pm.request.%s started as",
+        caller, member, method, member, js_type_name (ctx, target.get ()), member);
+    }
+    return JS_Call (ctx, fn.get (), target.get (), argc, argv);
+}
+
+/// A Request method that is one of its members' methods by another name.
+/// `addHeader` is `upsert`, not `add` (#3131): a lifted script calls it on a
+/// header the request may already carry, and Postman's appended duplicate has
+/// nowhere to live in a request that holds one value per name.
+struct RequestAlias {
+    const char* name;
+    const char* member;
+    const char* method;
+};
+constexpr auto REQUEST_ALIASES = std::to_array<RequestAlias> ({
+{ "addHeader", "headers", "upsert" },
+{ "upsertHeader", "headers", "upsert" },
+{ "removeHeader", "headers", "remove" },
+{ "forEachHeader", "headers", "each" },
+{ "addQueryParams", "url", "addQueryParams" },
+{ "removeQueryParams", "url", "removeQueryParams" },
+});
+
+JSValue
+js_request_alias (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    const auto& alias = REQUEST_ALIASES.at (static_cast<size_t> (magic));
+    return call_member_method (
+    ctx, this_val, alias.name, alias.member, alias.method, argc, argv);
+}
+
+/// `getHeaders (options?)` - Postman's is `headers.toObject` with the case
+/// switch inverted: names keep their spelling unless `ignoreCase` lower-cases
+/// them. Its other options (`enabled`, `multiValue`, `sanitizeKeys`) decide
+/// nothing here, for the reasons `toObject` gives.
+JSValue js_request_get_headers (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    bool ignore_case = false;
+    if (argc >= 1 && JS_IsObject (argv[0])) {
+        ScopedValue flag (ctx, JS_GetPropertyStr (ctx, argv[0], "ignoreCase"));
+        ignore_case = JS_ToBool (ctx, flag.get ()) == 1;
+    }
+    JSValueConst args[2]{ JS_NewBool (ctx, 0), JS_NewBool (ctx, ignore_case ? 0 : 1) };
+    return call_member_method (ctx, this_val, "getHeaders", "headers", "toObject", 2, args);
+}
+
+/// The header object as Postman's `header` list, `[{ key, value }]` in the
+/// object's own key order.
+JSValue request_json_header (JSContext* ctx, JSValueConst headers) {
+    std::vector<std::string> keys;
+    if (!JS_IsObject (headers) || JS_IsArray (headers) || JS_IsFunction (ctx, headers)) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.toJSON: pm.request.headers must be an object, got %s",
+        js_type_name (ctx, headers));
+    }
+    if (!js_own_enumerable_keys (ctx, headers, keys)) {
+        return JS_EXCEPTION;
+    }
+    JSValue list  = JS_NewArray (ctx);
+    uint32_t next = 0;
+    for (const auto& key : keys) {
+        JSValue member = JS_NewObject (ctx);
+        JS_SetPropertyStr (
+        ctx, member, "key", JS_NewStringLen (ctx, key.data (), key.size ()));
+        JS_SetPropertyStr (
+        ctx, member, "value", JS_GetPropertyStr (ctx, headers, key.c_str ()));
+        JS_SetPropertyUint32 (ctx, list, next++, member);
+    }
+    return list;
+}
+
+/**
+ * The body as Postman's description: `{mode, <mode>: ...}` read off the
+ * RequestBody's own members, so it says what those members say. A string is
+ * the raw body it is sent as; a description the script assigned is already the
+ * shape and is handed back as it stands.
+ */
+JSValue request_json_body (JSContext* ctx, JSValueConst body) {
+    if (JS_IsString (body)) {
+        JSValue out = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, out, "mode", JS_NewString (ctx, "raw"));
+        JS_SetPropertyStr (ctx, out, "raw", JS_DupValue (ctx, body));
+        return out;
+    }
+    auto* state = request_body_state (body);
+    if (!state) {
+        return JS_DupValue (ctx, body);
+    }
+    // Postman's mode names are the names of the members that carry each mode.
+    const char* mode = postman_body_mode (state->body.mode);
+    JSValue out      = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "mode", JS_NewString (ctx, mode));
+    JS_SetPropertyStr (ctx, out, mode, JS_GetPropertyStr (ctx, body, mode));
+    return out;
+}
+
+/**
+ * `toJSON ()` - the request as a plain object: `url`, `method`, `header`,
+ * `body` (absent when there is none) and the `auth` the script assigned
+ * (absent when it assigned none), read from `pm.request` as it stands, so
+ * it describes what the write-back would send. `url` is the string, the answer
+ * `pm.request.url.toJSON ()` gives, where Postman's is its Url object's parts.
+ * Being `toJSON`, it is also what `JSON.stringify (pm.request)` writes.
+ */
+JSValue js_request_to_json (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    (void)argc;
+    (void)argv;
+    if (!request_this_is_usable (ctx, this_val, "toJSON")) {
+        return JS_EXCEPTION;
+    }
+    ScopedValue url (ctx, JS_GetPropertyStr (ctx, this_val, "url"));
+    std::string url_error;
+    auto url_text = script_url_text (ctx, url.get (), &url_error);
+    if (!url_text) {
+        if (url_error.empty ()) {
+            url_error =
+            "pm.request.url must be a string or a URL object, got " +
+            std::string (js_type_name (ctx, url.get ()));
+        }
+        return JS_ThrowTypeError (ctx, "pm.request.toJSON: %s", url_error.c_str ());
+    }
+    ScopedValue headers (ctx, JS_GetPropertyStr (ctx, this_val, "headers"));
+    JSValue header = request_json_header (ctx, headers.get ());
+    if (JS_IsException (header)) {
+        return header;
+    }
+    JSValue out = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "url",
+    JS_NewStringLen (ctx, url_text->data (), url_text->size ()));
+    JS_SetPropertyStr (ctx, out, "method", JS_GetPropertyStr (ctx, this_val, "method"));
+    JS_SetPropertyStr (ctx, out, "header", header);
+    ScopedValue body (ctx, JS_GetPropertyStr (ctx, this_val, "body"));
+    if (!JS_IsUndefined (body.get ()) && !JS_IsNull (body.get ())) {
+        JS_SetPropertyStr (ctx, out, "body", request_json_body (ctx, body.get ()));
+    }
+    ScopedValue auth (ctx, JS_GetPropertyStr (ctx, this_val, "auth"));
+    if (!JS_IsUndefined (auth.get ()) && !JS_IsNull (auth.get ())) {
+        JS_SetPropertyStr (ctx, out, "auth", JS_DupValue (ctx, auth.get ()));
+    }
+    return out;
+}
+
+constexpr ScriptAuthSlot PM_REQUEST_AUTH{ "pm.request.auth", "pm.request.auth" };
+
+/**
+ * `{ type, <type>: params }` from what `authorizeUsing` was handed: a type and
+ * its parameters, Postman's `{ type, ...params }`, or that shape already.
+ * Throws, answering JS_EXCEPTION, for anything else.
+ */
+JSValue authorize_using_description (JSContext* ctx, JSValueConst type, JSValueConst options) {
+    const bool has_options = !JS_IsUndefined (options) && !JS_IsNull (options);
+    if (JS_IsString (type)) {
+        JSValue out = JS_NewObject (ctx);
+        JS_SetPropertyStr (ctx, out, "type", JS_DupValue (ctx, type));
+        if (has_options) {
+            const std::string name = js_to_string (ctx, type);
+            JS_SetPropertyStr (ctx, out, name.c_str (), JS_DupValue (ctx, options));
+        }
+        return out;
+    }
+    if (!JS_IsObject (type) || JS_IsArray (type) || JS_IsFunction (ctx, type) || has_options) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.authorizeUsing takes (type, options?), "
+        "({ type, ...options }) or null, got %s",
+        js_type_name (ctx, type));
+    }
+    ScopedValue named (ctx, JS_GetPropertyStr (ctx, type, "type"));
+    if (!JS_IsString (named.get ())) {
+        return JS_ThrowTypeError (ctx,
+        "pm.request.authorizeUsing needs a string 'type' (basic, bearer, "
+        "apikey or noauth), got %s",
+        js_type_name (ctx, named.get ()));
+    }
+    const std::string name = js_to_string (ctx, named.get ());
+    ScopedValue block (ctx, JS_GetPropertyStr (ctx, type, name.c_str ()));
+    if (!JS_IsUndefined (block.get ())) {
+        // Already `{ type, <type>: params }`, the shape pm.request.auth takes.
+        return JS_DupValue (ctx, type);
+    }
+    // Postman's `{ type, ...params }`: every other member is a parameter.
+    std::vector<std::string> keys;
+    if (!js_own_enumerable_keys (ctx, type, keys)) {
+        return JS_EXCEPTION;
+    }
+    JSValue params = JS_NewObject (ctx);
+    for (const auto& key : keys) {
+        if (key != "type") {
+            JS_SetPropertyStr (ctx, params, key.c_str (),
+            JS_GetPropertyStr (ctx, type, key.c_str ()));
+        }
+    }
+    JSValue out = JS_NewObject (ctx);
+    JS_SetPropertyStr (ctx, out, "type", JS_DupValue (ctx, named.get ()));
+    JS_SetPropertyStr (ctx, out, name.c_str (), params);
+    return out;
+}
+
+/**
+ * `authorizeUsing (type, options?)` - Postman's setter for the request's auth,
+ * which assigns `pm.request.auth`. `null` removes an assigned one, so the
+ * request's own auth applies again. Read here by the reader the write-back
+ * uses, so a type it would refuse throws at the call, naming itself, where
+ * Postman ignores the call and sends the request unauthenticated.
+ */
+JSValue js_request_authorize_using (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv) {
+    if (!request_this_is_usable (ctx, this_val, "authorizeUsing")) {
+        return JS_EXCEPTION;
+    }
+    JSValueConst type    = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JSValueConst options = argc >= 2 ? argv[1] : JS_UNDEFINED;
+    if (JS_IsNull (type)) {
+        const JSAtom auth = JS_NewAtom (ctx, "auth");
+        const int deleted = JS_DeleteProperty (ctx, this_val, auth, 0);
+        JS_FreeAtom (ctx, auth);
+        return deleted < 0 ? JS_EXCEPTION : JS_UNDEFINED;
+    }
+    ScopedValue description (ctx, authorize_using_description (ctx, type, options));
+    if (JS_IsException (description.get ())) {
+        return JS_EXCEPTION;
+    }
+    vayu::http::Auth checked = vayu::http::NoAuth{};
+    if (auto reason = read_script_auth (ctx, description.get (), PM_REQUEST_AUTH, checked)) {
+        return JS_ThrowTypeError (ctx, "pm.request.authorizeUsing: %s", reason->c_str ());
+    }
+    if (JS_SetPropertyStr (
+        ctx, this_val, "auth", JS_DupValue (ctx, description.get ())) < 0) {
+        return JS_EXCEPTION;
+    }
+    return JS_UNDEFINED;
+}
+
+/// Postman Request methods with no Vayu meaning, bound only to refuse by name:
+/// unbound, a lifted call would die on a bare "not a function".
+struct UnsupportedRequestMethod {
+    const char* name;
+    const char* instead;
+};
+constexpr auto UNSUPPORTED_REQUEST_METHODS = std::to_array<UnsupportedRequestMethod> ({
+{ "clone", "pm.request.toJSON() returns a plain copy" },
+{ "size", "read pm.request.body.length for the body's size" },
+{ "update", "assign pm.request.url, .method, .headers or .body instead" },
+});
+
+JSValue
+js_request_unsupported (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    const auto& method = UNSUPPORTED_REQUEST_METHODS.at (static_cast<size_t> (magic));
+    return JS_ThrowTypeError (ctx,
+    "pm.request.%s() is not supported in Vayu - %s", method.name, method.instead);
+}
+
+/**
+ * Postman's Request methods on `pm.request`. Non-enumerable, as the header
+ * methods are, so `Object.keys (pm.request)` still lists the request's own
+ * four members and nothing a script would mistake for one.
+ */
+void install_request_methods (JSContext* ctx, JSValue request) {
+    constexpr int flags = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+    for (size_t i = 0; i < REQUEST_ALIASES.size (); i++) {
+        const char* name = REQUEST_ALIASES.at (i).name;
+        JS_DefinePropertyValueStr (ctx, request, name,
+        JS_NewCFunctionMagic (ctx, js_request_alias, name, 1,
+        JS_CFUNC_generic_magic, static_cast<int> (i)),
+        flags);
+    }
+    JS_DefinePropertyValueStr (ctx, request, "getHeaders",
+    JS_NewCFunction (ctx, js_request_get_headers, "getHeaders", 0), flags);
+    JS_DefinePropertyValueStr (ctx, request, "toJSON",
+    JS_NewCFunction (ctx, js_request_to_json, "toJSON", 0), flags);
+    JS_DefinePropertyValueStr (ctx, request, "authorizeUsing",
+    JS_NewCFunction (ctx, js_request_authorize_using, "authorizeUsing", 2), flags);
+    for (size_t i = 0; i < UNSUPPORTED_REQUEST_METHODS.size (); i++) {
+        const char* name = UNSUPPORTED_REQUEST_METHODS.at (i).name;
+        JS_DefinePropertyValueStr (ctx, request, name,
+        JS_NewCFunctionMagic (ctx, js_request_unsupported, name, 0,
+        JS_CFUNC_generic_magic, static_cast<int> (i)),
+        flags);
+    }
 }
 
 } // namespace
@@ -1882,6 +2440,8 @@ void setup_pm_request (JSContext* ctx, JSValue pm) {
                 JS_SetPropertyStr (ctx, request, "body", body);
             }
         }
+
+        install_request_methods (ctx, request);
     }
 
     JS_SetPropertyStr (ctx, pm, "request", request);
@@ -2075,6 +2635,142 @@ HeaderList apply_script_headers (const HeaderList& lines, const Headers& written
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// pm.request.auth (#3131)
+// ---------------------------------------------------------------------------
+
+/// A URL cut around its query: what precedes the `?`, the parsed pairs, and
+/// the fragment, `#` included. `query` is nullopt for a URL with no `?`.
+struct UrlQuerySplit {
+    std::string head;
+    std::optional<std::vector<vayu::http::UrlQueryParam>> query;
+    std::string fragment;
+};
+
+UrlQuerySplit split_url_query (const std::string& url) {
+    UrlQuerySplit out;
+    const auto hash = url.find ('#');
+    out.head        = url.substr (0, hash);
+    if (hash != std::string::npos) {
+        out.fragment = url.substr (hash);
+    }
+    if (const auto mark = out.head.find ('?'); mark != std::string::npos) {
+        out.query = vayu::http::parse_query_params (
+        std::string_view (out.head).substr (mark + 1));
+        out.head.erase (mark);
+    }
+    return out;
+}
+
+/// The pair `apply_auth` appended for @p request's query credential: the last
+/// one under its name, as typed or as the query rule encodes it.
+std::optional<vayu::http::UrlQueryParam> engine_query_credential (const Request& request) {
+    if (request.auth_query_param.empty ()) {
+        return std::nullopt;
+    }
+    const std::string& raw = request.auth_query_param;
+    const std::string encoded =
+    vayu::core::encode_query_component (raw, vayu::core::QueryPart::Key);
+    const auto split = split_url_query (request.url);
+    if (!split.query) {
+        return std::nullopt;
+    }
+    const auto& pairs = *split.query;
+    const auto found  = std::find_if (
+    pairs.rbegin (), pairs.rend (), [&] (const vayu::http::UrlQueryParam& pair) {
+        return pair.key == raw || pair.key == encoded;
+    });
+    if (found == pairs.rend ()) {
+        return std::nullopt;
+    }
+    return *found;
+}
+
+/// @p url without the last pair equal to @p pair, the rest of it kept; false
+/// when it holds none.
+bool remove_last_query_pair (std::string& url, const vayu::http::UrlQueryParam& pair) {
+    auto split = split_url_query (url);
+    if (!split.query) {
+        return false;
+    }
+    auto& pairs      = *split.query;
+    const auto found = std::find_if (
+    pairs.rbegin (), pairs.rend (), [&] (const vayu::http::UrlQueryParam& p) {
+        return p.key == pair.key && p.value == pair.value;
+    });
+    if (found == pairs.rend ()) {
+        return false;
+    }
+    pairs.erase (std::next (found).base ());
+    const std::string query = vayu::http::compose_query (pairs);
+    url = split.head + (query.empty () ? "" : "?" + query) + split.fragment;
+    return true;
+}
+
+/**
+ * Take off @p staged the credential the engine applied to @p before, so the
+ * script's own auth replaces it rather than landing beside it.
+ *
+ * Only what the engine wrote, and only while the script left it as it read
+ * it: `Request::auth_header` names the header and `auth_query_param` the query
+ * pair. A value the script wrote itself under either is the script's, and a
+ * header the engine did not write - typed on the request, or skipped by
+ * `apply_auth` because one was there - is not touched, so it still wins over
+ * the assigned auth as it wins over the request's own (#2475).
+ */
+void drop_engine_credential (const Request& before, const Headers& written, Request& staged) {
+    if (!before.auth_header.empty ()) {
+        const Headers shown = before.headers.folded ();
+        const auto was      = shown.find (before.auth_header);
+        const auto now      = written.find (before.auth_header);
+        if (was != shown.end () && now != written.end () && now->second == was->second) {
+            staged.headers.erase (before.auth_header);
+            std::erase_if (staged.secret_header_names, [&] (const std::string& name) {
+                return CaseInsensitiveLess::equal (name, before.auth_header);
+            });
+        }
+    }
+    if (const auto pair = engine_query_credential (before)) {
+        if (remove_last_query_pair (staged.url, *pair)) {
+            staged.auth_query_param.clear ();
+        }
+    }
+    // It described the engine's auth, which no longer applies.
+    staged.auth_notice.clear ();
+}
+
+/**
+ * A `pm.request.auth` the script assigned, composed onto @p staged in place of
+ * the engine's: read by `pm.sendRequest`'s reader, resolved against the
+ * scopes as the script left them, then applied by `apply_auth`. Undefined or
+ * null - never assigned, deleted, or `authorizeUsing (null)` - leaves the
+ * request's own auth as it is, which is what an absent auth means in Postman.
+ */
+std::optional<std::string> apply_script_auth (JSContext* ctx,
+JSValueConst js_auth,
+const Request& before,
+const Headers& written,
+Request& staged) {
+    if (JS_IsUndefined (js_auth) || JS_IsNull (js_auth)) {
+        return std::nullopt;
+    }
+    vayu::http::Auth auth = vayu::http::NoAuth{};
+    if (auto reason = read_script_auth (ctx, js_auth, PM_REQUEST_AUTH, auth)) {
+        return reason;
+    }
+    if (auto reason = resolve_script_auth (ctx, auth, PM_REQUEST_AUTH.label)) {
+        return reason;
+    }
+    drop_engine_credential (before, written, staged);
+    // `db` is null because no type the reader accepts needs one.
+    if (const auto applied = vayu::http::apply_auth (staged, auth, nullptr);
+    !applied.ok) {
+        return "pm.request.auth could not be applied: " + applied.message;
+    }
+    staged.auth_from_script = true;
+    return std::nullopt;
+}
+
 } // namespace
 
 /**
@@ -2093,7 +2789,8 @@ HeaderList apply_script_headers (const HeaderList& lines, const Headers& written
  * simply later. Auth that waits on the script (`apply_late_auth`: a credential
  * naming a variable, or any `{{name}}` of a request a pre-request script runs
  * before, #2521) is applied after it, so the script's set lacks that header and
- * a header the script sets still wins.
+ * a header the script sets still wins. An assigned `pm.request.auth` replaces
+ * the engine's credential and stops the deferred one (`apply_script_auth`).
  *
  * All-or-nothing. Every field is staged and validated before anything is
  * committed, so a script that sets a good header and a bad method sends
@@ -2163,10 +2860,15 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
     ScopedValue js_body (ctx, JS_GetPropertyStr (ctx, js_request.get (), "body"));
     if (JS_IsUndefined (js_body.get ()) || JS_IsNull (js_body.get ())) {
         staged.body = Body{};
-    } else if (auto staged_text = script_body_text (ctx, js_body.get ())) {
-        // Either shape: the RequestBody object `pm.request.body` normally holds,
-        // or a plain string, which is what an assignment leaves there. Both are
-        // the body as a string, and both mean the same thing from here on.
+    } else if (auto staged_text =
+               script_body_text (ctx, js_body.get (), staged.body.mode);
+    !staged_text) {
+        return std::move (staged_text.error ());
+    } else {
+        // Any shape: the RequestBody object `pm.request.body` normally holds, a
+        // plain string or a Postman description, which is what an assignment
+        // leaves there. Each is the body as a string, and all three mean the
+        // same thing from here on.
         std::string body_text = std::move (*staged_text);
         // Every other member of pm.request is authoritative rather than a diff:
         // whatever the object holds is what is sent. `body` cannot be read that
@@ -2216,10 +2918,12 @@ std::optional<std::string> apply_pm_request_writeback (JSContext* ctx, Request& 
                 staged.body.mode = BodyMode::Text;
             }
         }
-    } else {
-        return "pm.request.body must be a string or a request body object, "
-               "got " +
-        std::string (js_type_name (ctx, js_body.get ()));
+    }
+
+    // Last, because it writes into the URL and headers staged above.
+    ScopedValue js_auth (ctx, JS_GetPropertyStr (ctx, js_request.get (), "auth"));
+    if (auto reason = apply_script_auth (ctx, js_auth.get (), request, written, staged)) {
+        return reason;
     }
 
     request = std::move (staged);

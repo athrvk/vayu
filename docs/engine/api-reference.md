@@ -5871,6 +5871,10 @@ literally: an inbox routes every request to its capture without matching the
 path against anything, so a signed callback URL, a per-delivery token in the
 path or a deeply nested tenant route is recorded like any other (issue #1140).
 
+A `multipart/form-data` body (a file upload, `curl -F`) is captured raw, as
+sent, with its boundaries and parts, and is cut at `inboxMaxBodyBytes` like any
+other body (issue #3110). The capture's `Content-Type` header is the sender's.
+
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
 sender can read the canned response:
@@ -5928,7 +5932,7 @@ inbox on a free port that answers `200` with no body.
 | Field | Meaning |
 |-------|---------|
 | `port` | `0` (default) picks a free port |
-| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback`. Loopback is decided by parsing the *address*, so a hostname that merely starts `127.` (or `localhost.example.com`) is not loopback and needs the confirmation |
+| `bind` | Default `127.0.0.1`; anything outside 127.0.0.0/8 and `::1` needs `confirmNonLoopback`. Loopback is decided by parsing the *address*, so a hostname that merely starts `127.` (or `localhost.example.com`) is not loopback and needs the confirmation. `0.0.0.0`, `::` and `[::]` bind every interface; the response then names where to send (`reachableAt`, below) |
 | `response.status` | 100-599 |
 | `response.headers` | String values only; a `Content-Type` here is used verbatim |
 | `response.delayMs` | 0-30000, applied before every reply |
@@ -5971,6 +5975,26 @@ hand out a port it is already using.
 `captureCount` is how many captures the inbox is holding right now - what a
 `DELETE /inbox/:inboxId` would destroy with it. Every route that returns an
 inbox fills it, so a client can word a confirmation without a second round trip.
+
+`url` is where a sender sends, which is the bind address unless the inbox is
+bound to every address (`0.0.0.0`, `::` or `[::]`, each needing
+`confirmNonLoopback`): that is no address a sender can use, so `url` is the
+first non-loopback IPv4 address of the machine, and `reachableAt` lists a URL
+for every one (the machine has several; `url` is only the first the OS names):
+
+```json
+{
+  "url": "http://192.168.1.20:41235/",
+  "bind": "0.0.0.0",
+  "reachableAt": ["http://192.168.1.20:41235/", "http://10.0.0.7:41235/"]
+}
+```
+
+`reachableAt` is on the wire for a wildcard bind only, and lists IPv4
+addresses only. A
+machine with no non-loopback IPv4 address reports `reachableAt: []` and a
+`url` on `127.0.0.1`. It is read from the interfaces each time the inbox is
+read, not fixed at start, so it follows a change of network.
 
 ### GET /inbox
 
@@ -6112,6 +6136,11 @@ its headers are kept. The same holds for a `1xx` example stored before create
 began refusing them (#3117). A real preflight's synthesized `204` carries no
 `Content-Length` either.
 
+**Example bodies are served literally.** A `{{variable}}` or a dynamic value such
+as `{{$guid}}` in a stored body or header is sent as those characters: the mock
+resolves no variables, unlike Postman's mock servers, which a collection moving
+from Postman may expect. Resolving them would be a feature, not a docs fix.
+
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
@@ -6154,6 +6183,11 @@ same first one, and the new row is only reachable once the mock is restarted.
 
 - The stored URL is reduced to a path: scheme and host - or the `{{baseUrl}}`
   variable standing in for them - the query and the fragment are all dropped.
+  A leading variable goes whole and is never resolved, so a path carried inside
+  its *value* is lost: with `baseUrl` set to `https://x/v1`, a request stored as
+  `{{baseUrl}}/pets` is mocked at `/pets`, not `/v1/pets`, and a caller that
+  keeps `/v1` in its URL matches no route. Put the prefix in the stored URL
+  (`{{baseUrl}}/v1/pets`) to have the mock serve it.
 - All three template spellings are one wildcard segment: `{{petId}}` (Vayu and
   Postman), `{petId}` (OpenAPI) and `:petId` (Postman's other form). A wildcard
   matches exactly one non-empty segment. The normalization is pinned to the
@@ -6176,6 +6210,10 @@ same first one, and the new row is only reachable once the mock is restarted.
   shadowed. The start response counts the shadowed requests (`duplicateRoutes`)
   and `GET /mock/:mockId/routes` marks each one and names the request that
   answers in its place.
+- **A `HEAD` is answered by the `GET` route of that path** (#3118) when no
+  `HEAD` request is stored for it: the GET's status and headers (its
+  `Content-Length` included) and no body, so `curl -I` on a mocked path works.
+  A stored `HEAD` request still wins.
 
 **What a miss says.** The message is most of the debugging value, so the three
 outcomes are distinct rather than one blanket 404:
@@ -6399,7 +6437,10 @@ so `pm.environment.set("password", …)` reaches a basic pair before it is
 base64-encoded. That is Postman's order; the script then does not see the header
 in `pm.request.headers`, and an `Authorization` it sets wins by the rule below.
 A data column or the identity in the same credential is bound first. A name
-nothing answers is encoded as written.
+nothing answers is encoded as written. A script that assigns `pm.request.auth`
+replaces this block in either case: the credential applied before it is taken
+off, a waiting one is never applied (#3131, see
+[Mutating the request](scripting.md#mutating-the-request-pre-request-scripts)).
 
 **`oauth2` follows the same order on a single send and a collection run's step
 (#2521).** A config in a request that a pre-request script runs before (on a
@@ -9059,18 +9100,31 @@ than accepted and never scraped; add a `mode` beside `scenario` to scrape.
 
 - **`prometheus`** - the text exposition format. Comment and blank lines are
   skipped, a trailing exposition timestamp is ignored, and a value that is not a
-  finite number (`NaN`, `+Inf`) is dropped. **Samples sharing a name across
-  label sets are summed**, so `node_cpu_seconds_total{cpu="0"}` and
-  `{cpu="1"}` chart as one series.
+  finite number (`NaN`, `+Inf`) is dropped. **Series are matched by name, and
+  samples sharing a name across label sets are summed**, so
+  `node_cpu_seconds_total{cpu="0"}` and `{cpu="1"}` chart as one series. A
+  `series` entry is therefore a bare name: one holding a `{` (a label filter
+  such as `http_requests_total{code="500"}`) or whitespace could never match,
+  and is refused (below).
 - **`json`** - a flat object of numbers, where `series` lists the keys to read.
-  A key that is absent or non-numeric is skipped.
+  A key that is absent or non-numeric is skipped. A key may hold any
+  character, `{` and spaces included.
 
-A name the body does not carry is **absent** from that sample rather than zero,
-and a scrape that reads nothing at all - a transport failure, an unreadable
-body, or a body carrying none of the requested names - stores no row and is
-counted as a gap in the report's `monitor.failures`. A failing scrape never
-fails the run; after five consecutive failures the engine logs once and backs
-off to twice the configured interval until one succeeds.
+A name the body does not carry is **absent** from that sample rather than zero.
+A scrape that reads nothing at all stores no row and sends no live frame, and
+the report counts it under one of two causes, because they need different
+fixes:
+
+- **a failure** (`monitor.failures`) - no 2xx answer: a transport error, a
+  timeout, or a status outside 2xx. `monitor.lastError` names the most recent
+  one's cause.
+- **a no-match** (`monitor.noMatchScrapes`) - a 2xx answer whose body carried
+  none of the requested names (a mistyped name, or a body in the other
+  `format`). The endpoint answered; what it was asked for is wrong.
+
+Neither fails the run. After five consecutive failures the engine logs once
+and backs off to twice the configured interval until a scrape is answered; a
+no-match is an answer, so it ends the backoff rather than extending it.
 
 Three of the limits are settings rather than constants: `intervalMs` defaults to
 **`monitorIntervalMs`** when the block omits it, the `series` ceiling is
@@ -9091,8 +9145,9 @@ scraping the user's own infrastructure. The one exception is every outbound
 path's: the engine's own port and the MCP port are refused
 ([Reserved local ports](#reserved-local-ports)). An unusable block (no `url`, a
 non-http(s) scheme, no `series`, more than `monitorMaxSeries`, an out-of-range
-`intervalMs`, an unknown `format`) is a `400` `invalid_run_config` naming the
-field, before the run row is created.
+`intervalMs`, an unknown `format`, or under `prometheus` a `series` name holding
+a `{` or whitespace) is a `400` `invalid_run_config` naming the field, before
+the run row is created.
 
 A `monitor` block beside a `scenario` that carries no load `mode` (absent,
 empty or not a string) is likewise a `400` `invalid_run_config` naming
@@ -11905,9 +11960,9 @@ are HTTP-only, the same rule a failed assertion follows
     "responseBodiesCaptured": 23, "responseSampleBudgetSpent": false
   },
   "monitor": {
-    "samples": 60, "failures": 0,
+    "samples": 58, "failures": 2, "noMatchScrapes": 0, "lastError": "timed out",
     "series": {
-      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 60 }
+      "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 58 }
     }
   },
   "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
@@ -12491,11 +12546,21 @@ recorded before 0.15.0.
 
 `monitor` is present only for a run that declared a
 [`monitor` block](#the-monitor-block-server-vitals) - absent is "this run
-scraped nothing", never "the target reported zeros". `samples` counts successful
-scrapes and `failures` counts the ones that read nothing, so a section with
-`samples: 0` and a non-zero `failures` says the endpoint was unreachable for the
-whole run rather than that the run was not monitored. A series that never
-produced a reading is absent from `series` for the same reason. The per-sample
+scraped nothing", never "the target reported zeros". `samples` counts scrapes
+that read at least one requested name; the others are split by cause.
+`failures` counts the scrapes that got no 2xx answer, and `lastError`, present
+once one has, names the most recent one's cause: `HTTP <status>`, or one of
+`timed out`, `unreachable`, `host not found`, `TLS handshake failed`,
+`proxy failed`, `URL refused`, `too many redirects`, `undecodable body`,
+`response too large` and `transport error`. It is never the transport's own
+message, which can quote the URL. `noMatchScrapes` counts the 2xx answers that
+carried none of the requested names. So `samples: 0` with a non-zero `failures`
+says the endpoint was unreachable or erroring for the whole run, and `samples:
+0` with a non-zero `noMatchScrapes` says it answered every time but the names
+matched nothing. A series that never produced a reading is absent from `series`
+for the same reason. `noMatchScrapes` and `lastError` are absent on a run
+recorded by an engine that predates them, whose `failures` count no-matches
+too. The per-sample
 readings are served separately by
 [`GET /runs/:runId/monitor`](#get-runsrunidmonitor).
 

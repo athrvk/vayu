@@ -211,6 +211,22 @@ TEST (InboxParseStart, ALoopbackLookingHostnameIsNotLoopback) {
     EXPECT_TRUE (vayu::http::is_loopback_bind ("127.000.000.001"));
 }
 
+// Every "listen on all interfaces" spelling is a wildcard, none of them is
+// loopback, and each needs the same confirmation as any other wide bind (#3114).
+TEST (InboxParseStart, EveryWildcardSpellingIsNonLoopbackAndNeedsConfirmation) {
+    for (const char* host : { "0.0.0.0", "000.000.000.000", "::", "[::]" }) {
+        EXPECT_TRUE (vayu::http::is_wildcard_bind (host)) << host;
+        EXPECT_FALSE (vayu::http::is_loopback_bind (host)) << host;
+        const auto refused = vayu::http::parse_inbox_start (json{ { "bind", host } });
+        ASSERT_FALSE (refused.has_value ()) << host;
+        EXPECT_EQ (refused.error ().code, "inbox_non_loopback_bind") << host;
+    }
+    for (const char* host : { "127.0.0.1", "::1", "[::1]", "localhost", "192.168.1.4",
+         "0.example.com", "0", "0.0.0", "0.0.0.0.0", ":::", "[::", "" }) {
+        EXPECT_FALSE (vayu::http::is_wildcard_bind (host)) << host;
+    }
+}
+
 TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValueAndInvalidStatusIsRejected) {
     InboxCannedResponse current;
     current.status   = 500;
@@ -312,6 +328,17 @@ class InboxListenerTest : public ::testing::Test {
         return httplib::Client ("127.0.0.1", info.port);
     }
 
+    /// Replace the manager with one that sees @p addresses as this machine's
+    /// interfaces and counts how often it is asked, so a wildcard bind's answer
+    /// does not depend on the NICs of the host the suite runs on.
+    void use_local_addresses (const std::vector<std::string>& addresses) {
+        address_lookups_ = 0;
+        manager_ = std::make_unique<InboxManager> ([this, addresses] () {
+            ++address_lookups_;
+            return addresses;
+        });
+    }
+
     /// Edit a seeded config row the way a user would through POST /config.
     void set_config (const char* key, int64_t value) {
         auto entry = db_->get_config_entry (key);
@@ -322,6 +349,7 @@ class InboxListenerTest : public ::testing::Test {
 
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<InboxManager> manager_;
+    int address_lookups_ = 0;
 };
 
 TEST_F (InboxListenerTest, RecordsWhatArrivedOnAnyMethodAndPath) {
@@ -389,6 +417,39 @@ TEST_F (InboxListenerTest, RecordsAPathPastTheRegexRouteLimitWithItsBody) {
     // A body-less method on the same path is routed the same way.
     ASSERT_TRUE (client.Get (long_path));
     EXPECT_EQ (db_->count_inbox_requests (started.info.inbox_id), 2);
+}
+
+TEST_F (InboxListenerTest, ACapturedMultipartBodyIsKeptWholeWithItsBoundaries) {
+    // cpp-httplib parses multipart/form-data into its form members and leaves
+    // `body` empty, so the capture used to record bodyBytes 0 (#3110). Read
+    // req.body without masking the Content-Type and body_bytes is 0.
+    const std::string boundary  = "----vayuBoundary7";
+    const std::string delimiter = "--" + boundary + "\r\n";
+    const std::string body      = delimiter +
+    "Content-Disposition: form-data; name=\"a\"\r\n\r\n"
+    "b\r\n" +
+    delimiter +
+    "Content-Disposition: form-data; name=\"note\"; filename=\"n.txt\"\r\n"
+    "Content-Type: text/plain\r\n\r\n"
+    "hello\r\n--" +
+    boundary + "--\r\n";
+    const std::string content_type = "multipart/form-data; boundary=" + boundary;
+
+    auto started = start ();
+    auto client  = client_for (started.info);
+    auto posted  = client.Post ("/mp", body, content_type);
+    ASSERT_TRUE (posted) << "POST to the inbox failed";
+    EXPECT_EQ (posted->status, 200);
+
+    auto captures = db_->get_inbox_requests_paginated (started.info.inbox_id, 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    const auto& capture = captures.front ();
+    EXPECT_EQ (capture.body, body);
+    EXPECT_EQ (capture.body_bytes, static_cast<int64_t> (body.size ()));
+    EXPECT_FALSE (capture.body_truncated);
+    // The sender's header is stored, not the placeholder the parse is steered by.
+    const auto stored_headers = json::parse (capture.headers);
+    EXPECT_EQ (stored_headers.value ("Content-Type", ""), content_type);
 }
 
 TEST_F (InboxListenerTest, RecordsThePathDecodedAsHttplibItselfWould) {
@@ -718,6 +779,71 @@ TEST_F (InboxListenerTest, StartAndListEchoTheAllowedOrigins) {
         vayu::http::routes::inbox_json (*db_, info)["allowedOrigins"], expected)
         << info.inbox_id;
     }
+}
+
+/*
+ * A listener bound to every address has no address a sender can use, so the
+ * start response, the list and an update all report this machine's first
+ * non-loopback IPv4 address as `url` and every one as `reachableAt` (#3114).
+ *
+ * Mutation check: make `info_locked` report `inbox_url (bind, port)` again and
+ * the first two tests fail.
+ */
+TEST_F (InboxListenerTest, AWildcardBindReportsTheFirstNonLoopbackAddressAndAllOfThem) {
+    use_local_addresses ({ "127.0.0.1", "10.1.2.3", "192.168.5.6", "10.1.2.3", "0.0.0.0" });
+    InboxStartRequest request;
+    request.bind           = "0.0.0.0";
+    auto started           = start (request);
+    const std::string port = std::to_string (started.info.port);
+
+    EXPECT_EQ (started.info.url, "http://10.1.2.3:" + port + "/");
+    EXPECT_EQ (started.info.reachable_at,
+    (std::vector<std::string>{
+    "http://10.1.2.3:" + port + "/", "http://192.168.5.6:" + port + "/" }));
+
+    const json wire = vayu::http::routes::inbox_json (*db_, started.info);
+    EXPECT_EQ (wire["url"], "http://10.1.2.3:" + port + "/");
+    EXPECT_EQ (wire["bind"], "0.0.0.0");
+    EXPECT_EQ (wire["reachableAt"],
+    json::array ({ "http://10.1.2.3:" + port + "/", "http://192.168.5.6:" + port + "/" }));
+
+    // GET /inbox answers from the same record, so the list agrees.
+    const auto listed = manager_->list ();
+    ASSERT_EQ (listed.size (), 1u);
+    EXPECT_EQ (listed.front ().url, started.info.url);
+    EXPECT_EQ (listed.front ().reachable_at, started.info.reachable_at);
+}
+
+TEST_F (InboxListenerTest, AWildcardBindWithNoUsableAddressFallsBackToLoopback) {
+    // No interface at all, and only loopback and IPv6 text: both mean the
+    // machine has nothing to give a sender, which still reaches itself.
+    for (const auto& addresses : std::vector<std::vector<std::string>>{
+         {}, { "127.0.0.1", "127.0.1.1", "fe80::1" } }) {
+        use_local_addresses (addresses);
+        InboxStartRequest request;
+        request.bind = "0.0.0.0";
+        auto started = start (request);
+        const std::string url =
+        "http://127.0.0.1:" + std::to_string (started.info.port) + "/";
+
+        EXPECT_EQ (started.info.url, url);
+        EXPECT_TRUE (started.info.reachable_at.empty ());
+        // The key is still on the wire, as an empty list: it marks the bind.
+        EXPECT_EQ (vayu::http::inbox_info_json (started.info)["reachableAt"],
+        json::array ());
+    }
+}
+
+TEST_F (InboxListenerTest, ALoopbackBindKeepsItsBindAddressAndAsksNoOneForInterfaces) {
+    use_local_addresses ({ "10.1.2.3" });
+    auto started           = start ();
+    const std::string port = std::to_string (started.info.port);
+
+    EXPECT_EQ (started.info.url, "http://127.0.0.1:" + port + "/");
+    EXPECT_TRUE (started.info.reachable_at.empty ());
+    EXPECT_FALSE (vayu::http::inbox_info_json (started.info).contains ("reachableAt"));
+    manager_->list ();
+    EXPECT_EQ (address_lookups_, 0);
 }
 
 TEST_F (InboxListenerTest, UpdatingTheCannedResponseTakesEffectOnTheNextCall) {
@@ -1306,16 +1432,18 @@ TEST (InboxWireShape, CaptureAndInfoCarryEveryFieldTheUiReads) {
 
     vayu::http::InboxInfo info;
     info.inbox_id        = "inbox_x";
-    info.bind            = "0.0.0.0";
+    info.bind            = "192.168.1.4";
     info.port            = 4100;
-    info.url             = "http://0.0.0.0:4100/";
+    info.url             = "http://192.168.1.4:4100/";
     info.running         = true;
     info.loopback        = false;
     info.response.status = 204;
 
     const auto info_wire = vayu::http::inbox_info_json (info);
     EXPECT_EQ (info_wire["inboxId"], "inbox_x");
-    EXPECT_EQ (info_wire["url"], "http://0.0.0.0:4100/");
+    EXPECT_EQ (info_wire["url"], "http://192.168.1.4:4100/");
+    // A bind to one address has nothing further to list.
+    EXPECT_FALSE (info_wire.contains ("reachableAt"));
     EXPECT_EQ (info_wire["port"], 4100);
     EXPECT_FALSE (info_wire["loopback"].get<bool> ());
     EXPECT_TRUE (info_wire["running"].get<bool> ());

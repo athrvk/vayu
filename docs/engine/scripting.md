@@ -955,6 +955,7 @@ pm.request.method            // HTTP method (string)
 pm.request.url               // Full URL (Postman Url object - see below)
 pm.request.headers           // Request headers (object, with the methods below)
 pm.request.body              // Request body (Postman RequestBody object, if any - see below)
+pm.request.auth              // The auth the script assigned, else undefined - see below
 ```
 
 **`headers` is a different set in each hook, and that is the point.** A
@@ -1109,8 +1110,11 @@ Both lists are **read-only**, and so are `.mode`, `.graphql`, `.file` and
 frozen. Writing to a field *inside* an entry is the one edit that does not throw
 - a frozen object drops a write silently in non-strict code, which is
 JavaScript's own rule rather than one this surface adds - and it reaches nothing
-either way. Assign `pm.request.body` or `.raw` to change what is sent, or edit
-the request's form fields directly.
+either way. Assign `pm.request.body` or `.raw`, or call `.update()`, to change
+what is sent, or edit the request's form fields directly. After such a write
+`.urlencoded` reads the pairs the new string carries, the way `.graphql` reads
+the pair a new `.raw` carries, rather than the fields the request was composed
+with.
 
 Reading a form body never rewrites it. The write-back reads `body` off the
 script's object whether or not the script assigned it, so an **unchanged**
@@ -1153,8 +1157,9 @@ plausible wrong number is worse than a break you can see.
 
 ### Mutating the request (pre-request scripts)
 
-In a **pre-request** script these four fields are writable, and what they hold
-when the script returns is what goes on the wire. In a **test** script they are
+In a **pre-request** script these five fields are writable, directly or through
+the Request methods that write them, and what they hold when the script returns
+is what goes on the wire. In a **test** script they are
 a read-only record of what was already sent - writes there are discarded.
 
 ```javascript
@@ -1162,9 +1167,20 @@ pm.request.headers['X-Signature'] = 'abc123';   // add or replace a header
 delete pm.request.headers['Authorization'];     // remove one
 pm.request.url = 'https://api.example.com/v2';  // retarget
 pm.request.method = 'POST';                     // case-insensitive
+pm.request.body.update('{"n":3}');              // Postman's setter, in place
 pm.request.body = JSON.stringify({ n: 2 });     // replace the body
+pm.request.body = { mode: 'raw', raw: '{}' };   // Postman's description of one
 delete pm.request.body;                         // send no body
+pm.request.auth = { type: 'basic', basic: [     // replace the request's auth
+  { key: 'username', value: 'alice' },
+  { key: 'password', value: '{{password}}' },
+] };
+pm.request.authorizeUsing('bearer', { token: 'abc' }); // Postman's setter for it
+pm.request.auth = { type: 'noauth' };           // send no credential
 ```
+
+The [Request methods](#request-methods-pmrequestaddheader-and-the-rest) are
+Postman's other spelling of the same writes.
 
 Rules worth knowing before you rely on them:
 
@@ -1187,12 +1203,60 @@ Rules worth knowing before you rely on them:
   never replaces one the request already carries. The order is the same on a
   Send, on every step of a collection run, and under load after an `inline`
   `script.pre` (a single-request load run's through `requestElements`).
+- **An assigned `pm.request.auth` replaces the request's own auth** (#3131).
+  It takes Postman's block, `{ type, <type>: params }`, the params as
+  `[{ key, value }]` (an exported collection's shape) or `{ name: value }`:
+  `basic` (`username`, `password`), `bearer` (`token`), `apikey` (`key`,
+  `value`, `in: 'header' | 'query'`) and `noauth`, which sends no credential.
+  A parameter name the type does not take, or a block with no credential in
+  it, fails naming the accepted ones, as in
+  [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest); a block Postman
+  exported reads as it is.
+  Any other type, `oauth2` included, fails the write-back naming it, since
+  acquiring a token needs state the sandbox does not hold - build that header
+  yourself. A `{{name}}` in a credential resolves against the scopes as the
+  script left them, as in `pm.sendRequest`, and the engine's own composer
+  (`apply_auth`) writes the credential, so an api key in the query is encoded
+  by the same rule. The credential the engine applied before the script - the
+  header it wrote, or the query pair - is taken off first, unless the script
+  rewrote it, in which case the script's value is its own and stays. A header
+  the engine did not write (typed on the Headers tab, or one the script added)
+  is never removed and still wins over the assigned auth, exactly as it wins
+  over the Auth tab; delete it to let the assigned auth through. Auth that
+  waits on the script is not applied at all once the script assigns one, so
+  no deferred credential lands beside the script's and no OAuth 2.0 token is
+  fetched. `pm.request.auth` reads `undefined` until the script assigns it
+  (the engine's credential is visible as the header it wrote), so a lifted
+  read of the request's own auth - `pm.request.auth.type`,
+  `pm.request.auth.bearer.get('token')` - throws an ordinary `TypeError`
+  before an assignment. The assignment reads back as the plain object
+  written, not Postman's `RequestAuth`, so its blocks have no `get()` either.
+  `delete pm.request.auth` or `null` leaves the request's own auth in force.
+  `pm.request.authorizeUsing(type,
+  options)` is Postman's setter for it: `('basic', { username, password })`,
+  `({ type: 'bearer', token })` or the block itself; `null` removes an
+  assigned auth, and a type `pm.request.auth` would refuse throws at the
+  call, where Postman ignores it and sends the request bare.
+- **A refused `pm.request.auth` still sends the request, with its own
+  credential.** When the write-back refuses the assignment - an `oauth2` type,
+  a parameter the type does not take, or a `{{name}}` naming a column the
+  bound data row does not carry - nothing the script wrote to `pm.request` is
+  applied, and the request goes out with the Auth tab's credential exactly as
+  it would have without the script (applied before it, or after it when it
+  waits on the script). The reason is the pre-request script error, in the
+  Console. `authorizeUsing` throws at the call for the same refusals, so its
+  assignment never happens and the request keeps its own credential the same
+  way. This is unlike `pm.sendRequest`, which refuses to send a request
+  whose `auth` it cannot compose, because that block is the only credential
+  the request has.
 - **A bad value is refused, not coerced.** `method` must be a string (one of the
   seven HTTP verbs), `url` a URL string (assigning anything else throws at the
   assignment), header values must be strings, numbers or booleans, and `body`
-  must be a string or the `RequestBody` object `pm.request.body` itself holds -
+  must be a string, the `RequestBody` object `pm.request.body` itself holds -
   handing the object straight back (`pm.request.body = pm.request.body`)
-  changes nothing. Anything else fails the whole write-back - the request is
+  changes nothing - or a Postman body description (below); an object without a
+  `mode`, `{}` included, is never sent as `[object Object]`. Anything else
+  fails the whole write-back - the request is
   sent unchanged and the reason is reported as the pre-request script error,
   visible in the response pane's Console tab. Assigning a string to a
   `form-data` body fails the same way, for the same reason: a value the engine
@@ -1207,6 +1271,29 @@ Rules worth knowing before you rely on them:
   signs, hashes, measures or re-parses the body it just wrote - the
   `hmacSha256(secret, pm.request.body.raw)` shape most webhook signing needs -
   must use `pm.request.body.raw = …`, not `pm.request.body = …`.
+  `pm.request.body.update(…)` is the third spelling and the Postman one; it too
+  updates the object in place, but it takes Postman's body description, so it
+  is held to the mode rule below: on a urlencoded or GraphQL body a string
+  `update('…')` is refused by name, where `.raw` takes the same string.
+- **A Postman body description names the body's own mode** (#3131).
+  `body.update()` and an assignment to `pm.request.body` both take
+  `{ mode: 'raw', raw: '…' }` and
+  `{ mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }`, and
+  `update()` takes a string as `{ mode: 'raw', raw: string }`, as Postman does.
+  Each means exactly what assigning its string to `.raw` would: the pairs are
+  encoded as the wire body, a disabled pair left out. Every other member of
+  the description is ignored, Postman's `options` included: nothing is derived
+  from `options.raw.language`, so the `Content-Type` is the one the request's
+  own body type implies (`text/plain` for a body added to a request that had
+  none) unless the script sets the header. The mode has to be the
+  one the body already has - a `raw` body (json, text, xml, jsonrpc) takes
+  `raw`, a urlencoded body `urlencoded`, a request with no body `raw`, which it
+  sends as text - because the write-back keeps a request's body mode, and
+  `{ mode: 'raw' }` on a urlencoded body would otherwise be parsed back into
+  form fields. Another mode is refused by name, and so are `formdata`, `file`
+  and `graphql`. A GraphQL body therefore refuses every `update()`, a string
+  included (it is `{ mode: 'raw' }`), and the refusal says to assign the
+  envelope to `.raw`, which keeps the mode.
 - **Setting a variable re-renders the URL of a scripted request.** A request
   a pre-request script runs before (its own, a folder's or the collection's)
   keeps every `{{placeholder}}` a scope answers written when `POST /compose`
@@ -1296,6 +1383,57 @@ throws if its first argument is not a function. Detaching a method from its
 object (`const get = pm.request.headers.get`) throws rather than answering as
 though the header were missing. A throw out of an `each` callback propagates as
 the script's own error.
+
+### Request methods (`pm.request.addHeader` and the rest)
+
+A script lifted from Postman calls some writes on the request itself rather
+than on its members (#3131). Each is the member method it names, so it reaches
+the wire the same way and refuses bad input with that method's own error:
+
+```javascript
+pm.request.addHeader({ key: 'X-Trace', value: 't-1' }); // headers.upsert, or ('X-Trace', 't-1')
+pm.request.upsertHeader('X-Trace', 't-2');              // headers.upsert
+pm.request.removeHeader('Authorization');               // headers.remove
+pm.request.forEachHeader(function (header, index) {     // headers.each
+  console.log(index, header.key, header.value);
+});
+pm.request.getHeaders();                    // { 'Content-Type': ... }, spelling kept
+pm.request.getHeaders({ ignoreCase: true }); // { 'content-type': ... }
+pm.request.addQueryParams('page=2');        // url.addQueryParams
+pm.request.removeQueryParams(['sort']);     // url.removeQueryParams
+var copy = pm.request.toJSON();             // { url, method, header: [...], body? }
+console.log(copy.header.length, JSON.stringify(pm.request) === JSON.stringify(copy));
+```
+
+- **`addHeader` replaces a header the request already carries**, whatever its
+  casing, because it is `headers.upsert`. Postman's appends a second line; a
+  request here holds one value per name, and a lifted `addHeader` is usually
+  called on a header the Headers tab may already set. `headers.add` keeps its
+  refusal - the two are different calls.
+- **`removeHeader` matches case-insensitively**, as every header method here
+  does; Postman's matches the case unless told to ignore it.
+- **`getHeaders` keeps each name's spelling** and lower-cases only with
+  `{ ignoreCase: true }` - Postman's default, which is `toObject`'s the other
+  way round.
+- **`toJSON` describes `pm.request` as the script has left it**: `url` (the
+  string, as `url.toJSON()` answers - Postman's is its Url object's parts),
+  `method`, `header` as `[{ key, value }]` in the object's own key order, and
+  `body` as Postman's `{ mode, raw | urlencoded | formdata | graphql | file }`,
+  absent for a request with no body, and `auth` when the script assigned one.
+  It is what `JSON.stringify(pm.request)` writes. The result is a copy;
+  writing to it sends nothing.
+- **`authorizeUsing` assigns `pm.request.auth`** - see
+  [Mutating the request](#mutating-the-request-pre-request-scripts).
+- **Each method is looked up on its member when it is called**, so after
+  `pm.request.headers = { ... }` a call to `addHeader` throws saying the
+  object it reached for is gone, rather than writing to one nothing sends.
+- **`clone()`, `size()` and `update()` throw by name**, each with what to use
+  instead. They are Postman Request methods with no Vayu meaning, and a bare
+  `not a function` would not say which call failed.
+
+The methods are non-enumerable, so `Object.keys(pm.request)` still lists
+`url`, `method`, `headers` and `body` and nothing else, until the script
+assigns `auth`.
 
 ### URL parts (`pm.request.url`)
 
@@ -2151,9 +2289,15 @@ or the percent-encoded query parameter is the one every other send would have
 written, and an `Authorization` header the script set itself still wins. Every
 other type throws naming it - `oauth2` included, because acquiring its token
 needs the database this path deliberately does not carry. So does a type whose
-block is not there: `{ type: 'basic' }` with no `basic` beside it, or the key
-misspelled, is refused rather than composed as the empty credential `basic`'s two
-optional halves would otherwise make of it. Dropping the option would send an
+block is not there (`{ type: 'basic' }` with no `basic` beside it, or the key
+misspelled), a parameter the type does not take, and a block with no credential
+in it. Each type takes the names Postman's own auth helper reads: `basic`
+`username` and `password` (either may be empty, not both), `bearer` `token`
+(not empty), `apikey` `key` (required), `value` and `in`. The refusal names the
+parameter and lists those, so `basic: { user, pass }` fails saying so rather
+than composing `Basic Og==`. What Postman's export writes beside the
+credential still reads: an entry's own `type` member, and the basic helper's
+`showPassword`, which sends nothing. Dropping the option would send an
 unauthenticated request that looks like the script's own mistake, which is the
 reason the body modes it cannot send whole (`file`, `graphql`, a file part) are
 refused too.
@@ -2883,6 +3027,13 @@ name - set one rather than delete it.)
 ```javascript
 delete pm.request.headers['Authorization'];
 pm.request.headers['X-Api-Key'] = pm.environment.get('apiKey');
+```
+
+For a scheme the engine composes, assigning `pm.request.auth` does the swap
+in one write, a waiting credential included:
+
+```javascript
+pm.request.auth = { type: 'apikey', apikey: { key: 'X-Api-Key', value: '{{apiKey}}' } };
 ```
 
 **Use the exact name, capitals included.** `pm.request.headers` is a plain JS

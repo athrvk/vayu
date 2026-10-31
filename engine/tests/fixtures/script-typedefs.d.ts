@@ -1279,13 +1279,29 @@ declare const pm: {
 	/**
 	 * Access the HTTP request data including URL, method, headers, and body.
 	 * 
-	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. An Auth tab credential still holding a {{variable}} nothing defined is applied after the script instead, so its header is not in pm.request yet and a variable this script sets reaches it. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
+	 * In a **pre-request** script these are writable: whatever pm.request holds when the script ends is what is sent, and a script-set header overrides the one the Auth tab applied. An Auth tab credential still holding a {{variable}} nothing defined is applied after the script instead, so its header is not in pm.request yet and a variable this script sets reaches it. Assigning pm.request.auth replaces the Auth tab's credential, deferred or not. A value the engine cannot send - an empty URL, an unrecognised method - rejects the whole edit rather than part of it: the request goes out exactly as it was before the script ran, and the reason is reported in the Console tab. In a **test** script it is a read-only record of what was already sent - a write to it does nothing, the script's own copy changes but nothing carries it back to the request that was sent.
 	 */
 	request: {
 		/**
+		 * Postman's Request.addHeader: pm.request.headers.upsert() under its Request name, taking ({ key, value }) or (name, value). A header the request already carries is replaced, whatever its casing - Postman appends a second line, and a request here holds one value per name.
+		 */
+		addHeader(header: { key: string, value: string | number | boolean } | string, value?: string | number | boolean): void;
+		/**
+		 * Postman's Request.addQueryParams: pm.request.url.addQueryParams() under its Request name.
+		 */
+		addQueryParams(params: string | { key: string, value?: string | number | boolean | null } | ReadonlyArray<string | { key: string, value?: string | number | boolean | null }>): void;
+		/**
+		 * The request's auth as Postman's block: { type, <type>: params }, the params as [{ key, value }] or { name: value }. basic, bearer, apikey and noauth are composed; any other type, oauth2 included, is refused by name. Assigning one replaces the credential the Auth tab applied - noauth sends none - and a {{variable}} in it resolves against what this script set. A header the Auth tab did not write still wins. undefined until the script assigns one: the Auth tab's credential is visible as the header it wrote, and delete pm.request.auth puts it back.
+		 */
+		auth: { [key: string]: any } | undefined;
+		/**
+		 * Postman's Request.authorizeUsing: assigns pm.request.auth from a type and its parameters - ('basic', { username, password }), ({ type: 'bearer', token }) or the { type, bearer: ... } block itself. null removes the assigned auth. A type pm.request.auth refuses throws here, at the call.
+		 */
+		authorizeUsing(type: string | { [key: string]: any } | null, options?: { [key: string]: any } | { key: string, value: string }[]): void;
+		/**
 		 * The request body (if any), as Postman's RequestBody object: mode, raw, the urlencoded/formdata field lists, the graphql pair and the file.
 		 * 
-		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as text/plain unless the script sets a Content-Type. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused. A binary body reads as @ and its file name, and an assignment is refused: a script never chooses the file.
+		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the body - so `===` and `typeof` are two of the three things that changed; the third is that assigning it straight to a header value is refused, like pm.request.url. Assign a string - or Postman's { mode: 'raw', raw } description, which body.update() takes too - to replace the body, or delete it to send none - both reach the wire correctly, but assigning here replaces this object outright, so a later pm.request.body.raw in the same script reads undefined, not the string you just set. Assign body.raw or call body.update() instead (same wire result) when something later in the script - a hash, a length, a re-parse - needs to read the new body back. A body set on a request that had none is sent as text/plain unless the script sets a Content-Type. A form body reads as its fields encoded `key=value&...`: for x-www-form-urlencoded that is the exact wire body and an assignment parses back into the fields, while for form-data it is a rendering of the parts (the multipart bytes carry a boundary that does not exist until the send) and an assignment is refused. A binary body reads as @ and its file name, and an assignment is refused: a script never chooses the file.
 		 */
 		get body(): string & {
 			/**
@@ -1331,6 +1347,10 @@ declare const pm: {
 			 */
 			toString(): string;
 			/**
+			 * Postman's body setter: a string, or a description - { mode: 'raw', raw } or { mode: 'urlencoded', urlencoded: [{ key, value, disabled? }] }. It reaches the wire exactly as assigning that string to body.raw does, and updates this object in place, so body.raw reads the new body afterwards. The mode has to be the body's own - a raw body takes raw, a urlencoded body urlencoded, a request with no body raw - because a script cannot change a body's type; formdata, file and graphql descriptions are refused by name, and so is a string on a urlencoded or GraphQL body, where body.raw takes it.
+			 */
+			update(body: string | { mode: string, raw?: string, urlencoded?: { key: string, value?: string | number | boolean | null, disabled?: boolean }[] }): void;
+			/**
 			 * { key, value, disabled } for each x-www-form-urlencoded pair, or undefined in any other mode. Values are as the user wrote them, not percent-encoded - the encoding is what body.raw answers. Disabled rows are listed with disabled: true rather than omitted, so a script can see the row it would otherwise re-add.
 			 * 
 			 * Read-only: edit the request's form fields, or assign body.raw.
@@ -1341,7 +1361,15 @@ declare const pm: {
 			 */
 			valueOf(): string;
 		};
-		set body(value: string);
+		set body(value: string | { mode: string, raw?: string, urlencoded?: { key: string, value?: string | number | boolean | null, disabled?: boolean }[] });
+		/**
+		 * Postman's Request.forEachHeader: pm.request.headers.each() under its Request name.
+		 */
+		forEachHeader(fn: (header: { key: string; value: string }, index: number, all: { key: string; value: string }[]) => void, thisArg?: any): void;
+		/**
+		 * Postman's Request.getHeaders: the outgoing headers as a plain { name: value } copy, each name spelled as the request holds it; { ignoreCase: true } lower-cases them. Writing to the copy sends nothing.
+		 */
+		getHeaders(options?: { ignoreCase?: boolean }): Record<string, string>;
 		/**
 		 * Request headers as key-value pairs. The object is authoritative: the set it holds at the end is the set that is sent, so delete removes a header. Names are case-sensitive here (use 'Authorization', not 'authorization'), and values must be a string, number or boolean.
 		 */
@@ -1399,6 +1427,22 @@ declare const pm: {
 		 * The HTTP method (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS). Assign to change the verb; case does not matter. A HEAD request carrying a body is refused, so delete pm.request.body when switching to HEAD.
 		 */
 		method: string;
+		/**
+		 * Postman's Request.removeHeader: pm.request.headers.remove() under its Request name. Case-insensitive always, where Postman's matches the case unless told to ignore it; removing an absent header is a no-op.
+		 */
+		removeHeader(name: string): void;
+		/**
+		 * Postman's Request.removeQueryParams: pm.request.url.removeQueryParams() under its Request name.
+		 */
+		removeQueryParams(params: string | ReadonlyArray<string | { key: string }>): void;
+		/**
+		 * The request as a plain object, as the script has left it: url (the string - Postman's is its Url object's parts), method, header as [{ key, value }], and body as Postman's { mode, raw | urlencoded | formdata | graphql | file }, absent when there is none. It is what JSON.stringify(pm.request) writes. A copy: writing to it sends nothing.
+		 */
+		toJSON(): { url: string, method: string, header: { key: string, value: string }[], body?: { [key: string]: any } };
+		/**
+		 * Postman's Request.upsertHeader: pm.request.headers.upsert() under its Request name. Adds the header, replacing any of that name whatever its casing.
+		 */
+		upsertHeader(header: { key: string, value: string | number | boolean } | string, value?: string | number | boolean): void;
 		/**
 		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
 		 * 

@@ -1353,8 +1353,19 @@ export interface InboxCannedResponse {
 
 export interface Inbox {
 	inboxId: string;
-	/** `http://<bind>:<port>/` - what a webhook source is pointed at. */
+	/**
+	 * What a webhook source is pointed at: `http://<bind>:<port>/`, except for
+	 * a wildcard bind (`0.0.0.0`, `::`), where it is the machine's first
+	 * non-loopback IPv4 address, since the wildcard is no address a sender can
+	 * use (#3114).
+	 */
 	url: string;
+	/**
+	 * Every non-loopback IPv4 address of the machine as an inbox URL. Present
+	 * for a wildcard bind only (empty when the machine has none), absent
+	 * otherwise.
+	 */
+	reachableAt?: string[];
 	bind: string;
 	port: number;
 	/** False once stopped; the record and its captures stay readable. */

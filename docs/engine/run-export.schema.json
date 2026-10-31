@@ -374,6 +374,8 @@
           "properties": {
             "samples": {"type": "number"},
             "failures": {"type": "number"},
+            "noMatchScrapes": {"type": "number"},
+            "lastError": {"type": "string"},
             "series": {
               "type": "object",
               "additionalProperties": {

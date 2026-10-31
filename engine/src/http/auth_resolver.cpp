@@ -77,6 +77,7 @@ AuthApplyResult apply_api_key (vayu::Request& req, const ApiKeyAuth& auth) {
     if (req.headers.count (key) == 0) {
         req.headers[key] = value;
         req.secret_header_names.push_back (key);
+        req.auth_header = key;
     }
     return {};
 }
@@ -161,6 +162,7 @@ const std::atomic<bool>* cancel) {
             req->auth_query_param = param;
         } else if (req->headers.count ("Authorization") == 0) {
             req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
+            req->auth_header = "Authorization";
         }
     }
     AuthApplyResult applied;
@@ -279,12 +281,14 @@ const std::atomic<bool>* cancel) {
             // Headers is case-insensitive, so this covers "authorization" too.
             if (req.headers.count ("Authorization") == 0) {
                 req.headers["Authorization"] = "Bearer " + trimmed_credential (a.token);
+                req.auth_header = "Authorization";
             }
             return {};
         } else if constexpr (std::is_same_v<T, BasicAuth>) {
             if (req.headers.count ("Authorization") == 0) {
                 req.headers["Authorization"] = "Basic " +
                 vayu::utils::base64_encode (a.username + ":" + a.password);
+                req.auth_header = "Authorization";
             }
             return {};
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {

@@ -1257,6 +1257,12 @@ export interface RunConfigSnapshot {
 	 */
 	thresholds?: RunThresholds;
 	/**
+	 * The server-vitals block the run scraped with, as sent. `MonitorSummary`
+	 * reads its `series` to name what a no-match scrape did not carry; absent on
+	 * a run that monitored nothing.
+	 */
+	monitor?: RunMonitorConfig;
+	/**
 	 * Requested protocol the run executed with - `build_run_report_config` in
 	 * `engine/src/http/routes/runs.cpp` normalizes an absent or explicit-`null`
 	 * key to `"auto"` before this ever reaches the client, so it is always
@@ -3314,12 +3320,25 @@ export interface RunReport {
 	 * `undefined` is a run that monitored nothing - not a target that reported
 	 * zeros - so a report without it renders exactly as it did before the
 	 * monitor existed. `samples` is what the history view gates its
-	 * `GET /runs/:id/monitor` fetch on: a run whose every scrape failed has a
-	 * section, a `failures` count, and no series to draw.
+	 * `GET /runs/:id/monitor` fetch on: a run whose every scrape missed has a
+	 * section, a miss count, and no series to draw.
 	 */
 	monitor?: {
 		samples: number;
+		/** Scrapes that got no 2xx answer: the URL or the endpoint is at fault. */
 		failures: number;
+		/**
+		 * 2xx answers that carried none of the requested names: the names are at
+		 * fault (#3120). Absent on a run recorded before the engine counted them
+		 * apart, whose `failures` include them.
+		 */
+		noMatchScrapes?: number;
+		/**
+		 * The most recent failure's cause, `HTTP <status>` or a fixed phrase
+		 * ("timed out", "unreachable", ...); absent until a scrape fails, and on
+		 * runs recorded before the engine kept it.
+		 */
+		lastError?: string;
 		series: Record<string, { min: number; max: number; avg: number; count: number }>;
 	};
 	/**

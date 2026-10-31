@@ -37,6 +37,7 @@ using vayu::core::MonitorTotals;
 using vayu::core::parse_json_metrics;
 using vayu::core::parse_prometheus_exposition;
 using vayu::core::resolve_scrape_timeout_ms;
+using vayu::core::scrape_failure_cause;
 using vayu::core::validate_monitor_config;
 using vayu::tests::SlowMockServer;
 using Clock = std::chrono::steady_clock;
@@ -104,6 +105,33 @@ TEST (MonitorConfigValidation, RejectsAnUnusableBlock) {
         EXPECT_FALSE (monitor_config_from (config).has_value ())
         << "would have run a block with " << c.what;
     }
+}
+
+// The exposition parser matches a sample by its bare name, so a label filter
+// or a space in a requested name never matches anything and the run scraped a
+// healthy endpoint for nothing (#3120). Mutation check: drop the Prometheus
+// name rule in `read_monitor_series` and every case here is accepted.
+TEST (MonitorConfigValidation, APrometheusSeriesWithALabelFilterOrASpaceIsRejected) {
+    for (const char* name : { "http_requests_total{code=\"500\"}", "node_cpu{",
+         "process cpu", " up", "up\t" }) {
+        auto config = monitor_config (
+        json{ { "url", "http://x/m" }, { "series", json::array ({ name }) } });
+        const auto reason = validate_monitor_config (config);
+        ASSERT_HAS_VALUE (reason) << "accepted the series name '" << name << "'";
+        EXPECT_NE (reason->find ("matched by name"), std::string::npos) << *reason;
+        EXPECT_FALSE (monitor_config_from (config).has_value ()) << name;
+    }
+}
+
+// A flat JSON object's key may legally hold either character, so the rule is
+// the Prometheus format's alone.
+TEST (MonitorConfigValidation, AJsonSeriesMayHoldABraceOrASpace) {
+    auto config = monitor_config (json{ { "url", "http://x/m" }, { "format", "json" },
+    { "series", json::array ({ "requests{500}", "queue depth" }) } });
+    EXPECT_FALSE (validate_monitor_config (config).has_value ());
+    const auto parsed = monitor_config_from (config);
+    ASSERT_HAS_VALUE (parsed);
+    EXPECT_EQ (parsed->series.size (), 2u);
 }
 
 TEST (MonitorConfigValidation, LoopbackAndPrivateTargetsAreAllowed) {
@@ -341,6 +369,56 @@ TEST (JsonMetricsParser, AnUnparseableOrNonObjectBodyYieldsNothing) {
 }
 
 // ---------------------------------------------------------------------------
+// Why a scrape failed (the report's `monitor.lastError`)
+// ---------------------------------------------------------------------------
+
+vayu::Response response_with (int status, vayu::ErrorCode code = vayu::ErrorCode::None) {
+    vayu::Response response;
+    response.status_code = status;
+    response.error_code  = code;
+    return response;
+}
+
+TEST (ScrapeFailureCause, A2xxAnswerIsNoFailure) {
+    EXPECT_FALSE (scrape_failure_cause (response_with (200)).has_value ());
+    EXPECT_FALSE (scrape_failure_cause (response_with (204)).has_value ());
+}
+
+TEST (ScrapeFailureCause, AnAnswerOutside2xxIsItsStatus) {
+    EXPECT_EQ (scrape_failure_cause (response_with (503)), "HTTP 503");
+    EXPECT_EQ (scrape_failure_cause (response_with (404)), "HTTP 404");
+    EXPECT_EQ (scrape_failure_cause (response_with (302)), "HTTP 302");
+}
+
+// Both shapes a transport failure arrives in: no response at all, and a
+// response carrying the error code.
+TEST (ScrapeFailureCause, ATransportFailureIsAFixedPhrase) {
+    const vayu::Result<vayu::Response> timed_out (
+    vayu::Error{ vayu::ErrorCode::Timeout, "Operation timed out after 750 ms" });
+    EXPECT_EQ (scrape_failure_cause (timed_out), "timed out");
+    EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::ConnectionFailed)),
+    "unreachable");
+    EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::DnsError)),
+    "host not found");
+    EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::SslError)),
+    "TLS handshake failed");
+    EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::InternalError)),
+    "transport error");
+}
+
+// The report is exported and shared, and libcurl's message can quote a URL
+// whose userinfo holds a password. Mutation check: return the transport's
+// `message` from `scrape_failure_cause` and this fails.
+TEST (ScrapeFailureCause, NeverCarriesTheTransportMessage) {
+    const vayu::Result<vayu::Response> refused (vayu::Error{ vayu::ErrorCode::ConnectionFailed,
+    "Failed to connect to http://admin:hunter2@10.0.0.5:9100/metrics" });
+    const auto cause = scrape_failure_cause (refused);
+    ASSERT_HAS_VALUE (cause);
+    EXPECT_EQ (cause->find ("hunter2"), std::string::npos) << *cause;
+    EXPECT_EQ (*cause, "unreachable");
+}
+
+// ---------------------------------------------------------------------------
 // Whole-run totals (the report's `monitor` section)
 // ---------------------------------------------------------------------------
 
@@ -348,11 +426,13 @@ TEST (MonitorTotalsTest, SummarisesEachSeriesAndCountsGaps) {
     MonitorTotals totals;
     totals.add ({ { "cpu", 1.0 }, { "rss", 100.0 } });
     totals.add ({ { "cpu", 3.0 } }); // rss missing this scrape
-    totals.record_failure ();
+    totals.record_failure ("timed out");
 
     auto summary = totals.to_summary ();
     EXPECT_EQ (summary["samples"], 2u);
     EXPECT_EQ (summary["failures"], 1u);
+    EXPECT_EQ (summary["noMatchScrapes"], 0u);
+    EXPECT_EQ (summary["lastError"], "timed out");
 
     const auto& cpu = summary["series"]["cpu"];
     EXPECT_DOUBLE_EQ (cpu["min"].get<double> (), 1.0);
@@ -369,10 +449,30 @@ TEST (MonitorTotalsTest, SummarisesEachSeriesAndCountsGaps) {
 
 TEST (MonitorTotalsTest, ASeriesThatNeverReadIsAbsentFromTheSummary) {
     MonitorTotals totals;
-    totals.record_failure ();
+    totals.record_failure ("unreachable");
     auto summary = totals.to_summary ();
     EXPECT_EQ (summary["samples"], 0u);
     EXPECT_TRUE (summary["series"].empty ());
+}
+
+// A no-match is not a failure: the two need different fixes, so they are
+// counted apart, and `lastError` names the most recent real failure only.
+TEST (MonitorTotalsTest, CountsANoMatchApartFromAFailure) {
+    MonitorTotals totals;
+    totals.record_no_match ();
+    totals.record_no_match ();
+    auto clean = totals.to_summary ();
+    EXPECT_EQ (clean["noMatchScrapes"], 2u);
+    EXPECT_EQ (clean["failures"], 0u);
+    EXPECT_FALSE (clean.contains ("lastError")) << clean.dump ();
+
+    totals.record_failure ("HTTP 500");
+    totals.record_failure ("HTTP 503");
+    totals.record_no_match ();
+    auto mixed = totals.to_summary ();
+    EXPECT_EQ (mixed["noMatchScrapes"], 3u);
+    EXPECT_EQ (mixed["failures"], 2u);
+    EXPECT_EQ (mixed["lastError"], "HTTP 503");
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +654,65 @@ TEST_F (MonitorRunTest, AHangingEndpointStallsNeitherTheRunNorTheTicks) {
     ASSERT_TRUE (summary.contains ("monitor"));
     EXPECT_EQ (summary["monitor"]["samples"].get<size_t> (), 0u);
     EXPECT_GT (summary["monitor"]["failures"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["monitor"]["lastError"], "timed out") << stored->summary;
+}
+
+// The case #3120 is about: a healthy endpoint answering 200 on every scrape
+// with none of the requested names. It is a no-match, never a failure, so the
+// report cannot read as an unreachable URL; and like a failure it stores no
+// row and publishes no frame. Mutation check: call `note_monitor_failure` for
+// an empty parse in `collect_monitor` and `failures` is non-zero here.
+TEST_F (MonitorRunTest, AHealthyEndpointWithoutTheRequestedNamesIsANoMatchNotAFailure) {
+    const std::string run_id = "run-monitor-no-match";
+    create_run_row (run_id);
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id,
+    run_config (json{ { "url", server->vitals_url () }, { "intervalMs", 250 },
+    { "series", json::array ({ "vayu_test_not_exported" }) } }),
+    *db));
+    wait_for_terminal (run_id, 20000);
+    manager.shutdown (std::chrono::milliseconds (15000));
+
+    EXPECT_EQ (db->count_monitor_samples (run_id), 0);
+    auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    auto summary = json::parse (stored->summary);
+    ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
+    const auto& monitor = summary["monitor"];
+    EXPECT_EQ (monitor["samples"].get<size_t> (), 0u);
+    EXPECT_EQ (monitor["failures"].get<size_t> (), 0u) << stored->summary;
+    EXPECT_GT (monitor["noMatchScrapes"].get<size_t> (), 0u) << stored->summary;
+    EXPECT_FALSE (monitor.contains ("lastError")) << stored->summary;
+
+    auto context = manager.get_run_or_retained (run_id);
+    ASSERT_NE (context, nullptr);
+    auto batch = context->ticks_since (0);
+    for (const auto& frame : batch.payloads) {
+        EXPECT_NE (frame.rfind ("event: monitor\n", 0), 0u)
+        << "a no-match published " << frame;
+    }
+}
+
+// An endpoint answering 503 is a failure, and the report says so by status.
+TEST_F (MonitorRunTest, AnEndpointAnsweringAnErrorStatusReportsThatStatus) {
+    const std::string run_id = "run-monitor-503";
+    create_run_row (run_id);
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id,
+    run_config (json{ { "url", server->error_url () }, { "intervalMs", 250 },
+    { "series", json::array ({ "vayu_test_cpu" }) } }),
+    *db));
+    wait_for_terminal (run_id, 20000);
+    manager.shutdown (std::chrono::milliseconds (15000));
+
+    auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    const auto monitor = json::parse (stored->summary)["monitor"];
+    EXPECT_GT (monitor["failures"].get<size_t> (), 0u) << stored->summary;
+    EXPECT_EQ (monitor["noMatchScrapes"].get<size_t> (), 0u) << stored->summary;
+    EXPECT_EQ (monitor["lastError"], "HTTP 503") << stored->summary;
 }
 
 // The failure the setting exists for, both halves of it. An exposition that

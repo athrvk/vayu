@@ -378,6 +378,28 @@ std::string route_shape_key (const MockRoute& route) {
     return key;
 }
 
+/// The route that answers @p method among the ones whose path already matched.
+///
+/// Specificity decides, not registration order: `/pets/mine` must beat
+/// `/pets/{{petId}}`, otherwise which one answers depends on the order an
+/// import happened to write the two requests in. Among equally specific
+/// routes the query is not part of the route, so `/q?kind=a` and
+/// `/q?kind=b` collide and the one with an example answers (#3115).
+std::optional<std::size_t> best_route_for_method (const std::vector<MockRoute>& routes,
+const std::vector<std::size_t>& path_matches,
+const std::string& method) {
+    std::optional<std::size_t> best;
+    for (const auto index : path_matches) {
+        if (routes[index].method != method) {
+            continue;
+        }
+        if (!best || outranks (routes[index], routes[*best])) {
+            best = index;
+        }
+    }
+    return best;
+}
+
 } // namespace
 
 std::size_t mark_shadowed_routes (std::vector<MockRoute>& routes) {
@@ -432,19 +454,11 @@ const std::string& path) {
         return match;
     }
 
-    // Specificity decides, not registration order: `/pets/mine` must beat
-    // `/pets/{{petId}}`, otherwise which one answers depends on the order an
-    // import happened to write the two requests in. Among equally specific
-    // routes the query is not part of the route, so `/q?kind=a` and
-    // `/q?kind=b` collide and the one with an example answers (#3115).
-    std::optional<std::size_t> best;
-    for (const auto index : path_matches) {
-        if (routes[index].method != method) {
-            continue;
-        }
-        if (!best || outranks (routes[index], routes[*best])) {
-            best = index;
-        }
+    auto best = best_route_for_method (routes, path_matches, method);
+    // HEAD is GET without the body (RFC 9110 9.3.2), so a mocked GET answers
+    // `curl -I` too; a stored HEAD route, example-less or not, still wins (#3118).
+    if (!best && method == "HEAD") {
+        best = best_route_for_method (routes, path_matches, "GET");
     }
 
     if (!best) {
