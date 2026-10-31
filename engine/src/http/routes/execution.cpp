@@ -2657,6 +2657,20 @@ std::optional<std::string> refuse_monitor_on_collection_run (const nlohmann::jso
 }
 
 /**
+ * The run's `monitor.url` as @p policy judges it (#3121). Judged here, before
+ * the run exists, because `collect_monitor` scrapes with no policy of its own.
+ */
+std::optional<vayu::http::TargetRefusal> refuse_monitor_outside_policy (
+const nlohmann::json& json,
+const std::optional<vayu::http::TargetPolicy>& policy) {
+    const auto monitor = json.find ("monitor");
+    if (!policy || monitor == json.end ()) {
+        return std::nullopt;
+    }
+    return vayu::http::refuse_monitor_endpoint (*policy, *monitor);
+}
+
+/**
  * `failOnSchemaError: true` outside a collection run (#3039). Only the
  * sequential collection runner reads the flag (`read_fail_on_schema_error`).
  * `false` is the default and stays accepted; a non-boolean is left to
@@ -2831,6 +2845,13 @@ std::optional<vayu::http::TargetPolicy>& target_policy) {
         validate_run_config (json, vayu::core::read_monitor_limits (ctx.db))) {
         vayu::utils::log_warning ("http", "POST /runs - Invalid run config: " + *invalid);
         return RouteError{ 400, error_body (400, *invalid, "invalid_run_config") };
+    }
+
+    // After the config check, so a `monitor` block without a string URL is
+    // refused as malformed rather than passed over here.
+    if (auto refusal = refuse_monitor_outside_policy (json, target_policy)) {
+        vayu::utils::log_warning ("http", "POST /runs - " + refusal->message);
+        return RouteError{ 400, error_body (400, refusal->message, refusal->code) };
     }
 
     // Validate/normalize the body's httpVersion, beside the config check

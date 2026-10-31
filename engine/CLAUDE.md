@@ -1312,7 +1312,11 @@ case-insensitive; `allowAll` passes any host that can be determined; an empty
 or still-templated host is refused). The engine judges the final URL after the
 pre-request script and the residual pass, and the host of an OAuth 2.0
 `accessTokenUrl` / `refreshTokenUrl` before the token cache is read or anything
-is posted, so a refused target fetches no token. A buffered send answers
+is posted, so a refused target fetches no token. A load run's `monitor.url` is
+judged once, when `POST /runs` validates the run (`refuse_monitor_endpoint`,
+#3121), because the scrape loop sends with no policy of its own; a refused
+host is a `400` under the policy's code naming `monitor.url`, with no run row,
+and a loopback monitor host gets no exemption. A buffered send answers
 status 0 with `refusalCode` `target_not_allowed` / `target_host_unknown`; a
 stream and the `POST /runs` pre-flight or plan answer `400` under that code; a
 load run refuses each submission as an `invalid_url` error naming the host

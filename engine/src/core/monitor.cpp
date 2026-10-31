@@ -145,8 +145,9 @@ MonitorConfig& out) {
     out.url = monitor["url"].get<std::string> ();
     if (!starts_with_ci (out.url, "http://") && !starts_with_ci (out.url, "https://")) {
         // Loopback and private addresses are deliberately allowed: this is a
-        // local tool scraping the user's own infrastructure, so the only thing
-        // worth rejecting is a scheme the client cannot fetch at all.
+        // local tool scraping the user's own infrastructure, so the block's own
+        // rule rejects only a scheme the client cannot fetch at all. A caller's
+        // `targetPolicy` is judged apart (`refuse_monitor_endpoint`, #3121).
         return "'monitor.url' must be an http:// or https:// URL (got \"" + out.url + "\")";
     }
 

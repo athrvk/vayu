@@ -174,4 +174,16 @@ const nlohmann::json& config) {
     return std::nullopt;
 }
 
+std::optional<TargetRefusal> refuse_monitor_endpoint (const TargetPolicy& policy,
+const nlohmann::json& monitor) {
+    if (!monitor.is_object ()) {
+        return std::nullopt;
+    }
+    const auto url = monitor.find ("url");
+    if (url == monitor.end () || !url->is_string ()) {
+        return std::nullopt;
+    }
+    return refuse_url (policy, url->get_ref<const std::string&> (), "the run's monitor.url");
+}
+
 } // namespace vayu::http
