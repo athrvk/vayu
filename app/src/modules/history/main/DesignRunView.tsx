@@ -317,7 +317,6 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					statusText: "Error",
 					headers: {},
 					body: errorMsg,
-					bodyType: "text",
 					time: 0,
 					size: 0,
 					errorCode: error instanceof ApiError ? error.errorCode : "ENGINE_ERROR",

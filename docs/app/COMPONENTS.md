@@ -2640,7 +2640,7 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 - `StatusCodeBadge.tsx` - the status chip
 - `TestsChip.tsx` - what a step's assertions came to, as one line (issue #724). Two states and an absent third: a step that asserted nothing is given no tally and renders no chip, because `0 passed` reads as a result where the truth is that nothing was claimed. Here rather than in the step list because it summarises a *response*, and because the live half (the `step` event's two numbers) and the restored half (the stored list, tallied) must not word it two ways
 - `ResponseStatusBar.tsx` - status chip + elapsed time + payload size (hover: `RESPONSE_SIZE_TIP`, "decoded body bytes", plus the compressed length when the `headers` prop shows a Content-Encoding, #2787). Beside the elapsed time, when the response carries `timing.engineMs`, a muted "in Vayu" figure: Vayu's own cost for the send (#2132), with `ENGINE_COST_TIP` (`utils.ts`) as its hover and the Timing tab's tip. Drawn only for a finite figure of zero or more; a stream, an auth failure and an older stored row show none
-- `ResponseActions.tsx` - the copy/download pair. Given `rawBytes`, Download writes those exact bytes as a Blob under the response's Content-Type (`downloadBlob`, `lib/download-text-file.ts`) with an extension from that type, and Copy is disabled behind a `DisabledHint` for a body with no text
+- `ResponseActions.tsx` - the copy/download pair. Given `rawBytes`, Download writes those exact bytes as a Blob under the response's Content-Type (`downloadBlob`, `lib/download-text-file.ts`) with an extension from that type, and Copy is disabled behind a `DisabledHint` for a body with no text. A text body is named the same way (`extensionForContentType`: `text/javascript` saves as `.js`, `application/problem+json` as `.json`), with `.txt` where that gives `bin`, so there is no per-caller extension prop (#3140)
 - `tab-trigger.ts` - `RESPONSE_TAB_TRIGGER`, the underline-on-active class
 - `phase-tips.ts` - `PHASE_TIPS`, the five per-phase timing tooltips (DNS -> Connect -> TLS -> TTFB -> Download), shared so every renderer of those numbers reads one string
 - `timing-phases.ts` - `TIMING_PHASES`, the same five phases as one descriptor list (label, hue, tooltip, and the trace/average field each reads), plus the `phasesFromTrace` / `phasesFromAverages` selectors
@@ -3514,6 +3514,12 @@ Monaco's own canvas rather than a declared app surface, so it carries
 `border-border-strong` explicitly: there is no `--rule` for `border-rule` to
 inherit, and neither theme's `--popover` separates from the editor background on
 its own.
+
+**A read-only editor draws every column** (#3140). It passes
+`stopRenderingLineAfter: -1`; Monaco's default of 10,000 columns leaves the rest
+of a line undrawn, which cut a minified response off mid-token. An editable
+editor keeps the default, and a caller's `options` override either.
+`code-editor.long-lines.test.tsx`.
 
 ⌘K is not bound here at all. It belongs to `CommandPalette`, on the capture
 phase, which both prevents **and stops** it: preventing alone left the event in

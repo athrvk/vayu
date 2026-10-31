@@ -9,15 +9,16 @@
  * Copy and download, the pair that sits at the right of a response tab strip.
  *
  * Only the request builder's response pane mounts it; the history viewer has no
- * copy or download. What differs per caller is two props, not decisions made
- * here:
+ * copy or download. The caller passes the body as received (`receivedBody`),
+ * never the indented copy the Pretty view reads: Copy and Download hand back
+ * what the server sent (issue #2459).
  *
- *   - **What gets copied.** The caller passes the body as received
- *     (`receivedBody`), never the indented copy the Pretty view reads: Copy and
- *     Download hand back what the server sent (issue #2459).
- *   - **What the file is called.** The request builder names it after the
- *     detected body type; a caller with no type gets `.txt`, never
- *     `response-1234.undefined`.
+ * The file is named after the response's own Content-Type
+ * (`extensionForContentType`), the same rule for a text and a byte body, so a
+ * `text/javascript` body saves as `.js` and a type with no usable subtype
+ * (absent, or an `application/vnd...` label) saves a text body as `.txt`,
+ * never `response-1234.undefined` and never `.bin` for something readable
+ * (issue #3140).
  *
  * The tick-for-a-moment feedback is `useCopy`'s (`TIMING.COPY_RESET_MS`) for the
  * whole app.
@@ -50,24 +51,23 @@ export interface ResponseActionsProps {
 	/** The text to copy and to download: the body as received, not its indented copy. */
 	content: string;
 	/**
-	 * Extension for the downloaded file, without the dot. Defaults to `txt`
-	 * because that is what a caller with no detected type should get - never
-	 * `undefined`.
-	 */
-	fileExtension?: string;
-	/**
 	 * The body's exact bytes, when the engine sent it as base64. Download then
 	 * writes them, typed and named by `contentType`.
 	 */
 	rawBytes?: ResponseBytes;
-	/** The response's Content-Type, for a `rawBytes` download. */
+	/** The response's Content-Type: names the file, and types a `rawBytes` download. */
 	contentType?: string;
 	className?: string;
 }
 
+/** `bin` is right for unreadable bytes, not for text the user can open. */
+function textExtension(contentType: string): string {
+	const extension = extensionForContentType(contentType);
+	return extension === "bin" ? "txt" : extension;
+}
+
 export function ResponseActions({
 	content,
-	fileExtension,
 	rawBytes,
 	contentType = "",
 	className,
@@ -84,7 +84,7 @@ export function ResponseActions({
 			downloadBlob(blob, `${stamp}.${extensionForContentType(type)}`);
 			return;
 		}
-		downloadTextFile(content, `${stamp}.${fileExtension || "txt"}`, "text/plain");
+		downloadTextFile(content, `${stamp}.${textExtension(contentType)}`, "text/plain");
 	};
 
 	const copyButton = (

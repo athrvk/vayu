@@ -63,7 +63,6 @@ vi.mock("@/modules/request-builder/context", () => ({
 			size: 11,
 			body: '{"ok":true}',
 			bodyRaw: '{"ok":true}',
-			bodyType: "json",
 			headers: { "content-type": "application/json" },
 			requestHeaders: { "user-agent": "Vayu/0.9.0" },
 			errorCode: "CONNECTION_FAILED",

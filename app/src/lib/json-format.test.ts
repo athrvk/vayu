@@ -112,6 +112,17 @@ describe("formatJson", () => {
 	});
 });
 
+describe("formatJson on a body with a byte-order mark", () => {
+	it("indents the document and leaves the mark out", () => {
+		expect(formatJson('\uFEFF{"a":[1,2]}')).toBe('{\n  "a": [\n    1,\n    2\n  ]\n}');
+	});
+
+	it("matches the same document without the mark", () => {
+		const doc = '{"a":{"b":[true,null]},"c":"d"}';
+		expect(formatJson(`\uFEFF${doc}`)).toBe(formatJson(doc));
+	});
+});
+
 describe("formatJson on input that is not well-formed JSON", () => {
 	const malformed = [
 		"",
@@ -149,7 +160,11 @@ describe("formatJson on input that is not well-formed JSON", () => {
 		'{"a":[1}',
 		"]",
 		"<html></html>",
-		"﻿{}",
+		// Only one BOM is skipped, and a BOM alone or ahead of garbage is no document.
+		"\uFEFF",
+		"\uFEFF{",
+		"\uFEFF\uFEFF{}",
+		"\uFEFFnot json",
 		'{"a":1}\u0000',
 	];
 

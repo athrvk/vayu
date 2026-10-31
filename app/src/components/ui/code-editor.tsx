@@ -316,6 +316,15 @@ export function CodeEditor({
 					 * editors keep Tab and get `LEAVE_EDITOR_CHORD` plus the hint above.
 					 */
 					tabFocusMode: readOnly,
+					/*
+					 * Monaco stops painting a line after 10,000 columns (the rest is
+					 * simply not drawn) which, in a viewer, hides part of the one thing
+					 * the user opened it to read: a minified response is a single line.
+					 * -1 draws all of it. An editable model keeps the default, since
+					 * painting a very long line while typing in it is the cost the
+					 * limit exists to cap. `options` below can still override either.
+					 */
+					stopRenderingLineAfter: readOnly ? -1 : undefined,
 					...options,
 					// `scrollbar` is a nested object, so a caller passing one of its keys
 					// would otherwise replace the whole thing and silently drop the

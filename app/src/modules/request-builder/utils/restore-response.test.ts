@@ -81,7 +81,6 @@ describe("responseFromRunResult", () => {
 		// `body` is the Pretty copy; `bodyRaw` is what the trace held.
 		expect(restored?.body).toBe('{\n  "ok": true\n}');
 		expect(restored?.bodyRaw).toBe('{"ok":true}');
-		expect(restored?.bodyType).toBe("json");
 		expect(restored?.time).toBe(254.5);
 		expect(restored?.requestHeaders).toEqual({ Accept: "application/json" });
 	});
@@ -290,7 +289,6 @@ describe("responseFromRunResult", () => {
 		const restored = responseFromRunResult(sample({ trace: { response: { headers: {} } } }));
 
 		expect(restored?.body).toBe("");
-		expect(restored?.bodyType).toBe("text");
 	});
 
 	/**

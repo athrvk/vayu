@@ -67,7 +67,6 @@ function response(overrides: Partial<ResponseState> = {}): ResponseState {
 		headerLines: LINES,
 		body: "hi",
 		bodyRaw: "hi",
-		bodyType: "text",
 		size: 2,
 		time: 5,
 		...overrides,

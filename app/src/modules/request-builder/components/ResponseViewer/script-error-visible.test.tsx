@@ -52,7 +52,6 @@ function errorNoLogsResponse(): ResponseState {
 		headers: { "content-type": "application/json" },
 		body: '{"ok":true}',
 		bodyRaw: '{"ok":true}',
-		bodyType: "json",
 		size: 11,
 		time: 12,
 		// No consoleLogs at all - the throw-before-log case.

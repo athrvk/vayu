@@ -209,22 +209,6 @@ export function decodeResponseBody({
 }
 
 /**
- * `ResponseState.bodyType`, the same answer from either funnel: `binary` for a
- * base64 body with no text view, otherwise read off the Content-Type.
- */
-export function responseBodyType(
-	headers: Record<string, string> | undefined,
-	bytes: ResponseBytes | undefined
-): ResponseState["bodyType"] {
-	if (bytes && !bytes.isText) return "binary";
-	const { name, suffix } = mediaTypeOf(contentTypeOf(headers));
-	if (name === "json" || suffix === "json") return "json";
-	if (name === "html" || name === "xhtml") return "html";
-	if (name === "xml" || suffix === "xml") return "xml";
-	return "text";
-}
-
-/**
  * The body text exactly as it was received, for everything that takes the body
  * out of the pane: Copy, Download, Save as example and the Raw tab.
  *
@@ -246,6 +230,8 @@ export function heldBodySize(
 	return response.rawBytes?.data.length ?? receivedBody(response).length;
 }
 
+const PLAUSIBLE_EXTENSION = /^[a-z0-9]{1,8}$/;
+
 const EXTENSION_BY_SUBTYPE: Record<string, string> = {
 	"octet-stream": "bin",
 	plain: "txt",
@@ -259,10 +245,11 @@ const EXTENSION_BY_SUBTYPE: Record<string, string> = {
 /**
  * A file extension for a downloaded body of this type: the subtype when it is
  * a plausible extension (`png`, `pdf`, `zip`), the few that are not mapped,
- * and `bin` for anything else.
+ * then the structured-syntax suffix (`problem+json` saves as `json`), and
+ * `bin` for anything else.
  */
 export function extensionForContentType(contentType: string): string {
-	const { subtype } = mediaTypeOf(contentType);
-	const mapped = EXTENSION_BY_SUBTYPE[subtype] ?? subtype.replace(/^x-/, "");
-	return /^[a-z0-9]{1,8}$/.test(mapped) ? mapped : "bin";
+	const { subtype, suffix } = mediaTypeOf(contentType);
+	const candidates = [EXTENSION_BY_SUBTYPE[subtype] ?? subtype.replace(/^x-/, ""), suffix];
+	return candidates.find((candidate) => PLAUSIBLE_EXTENSION.test(candidate)) ?? "bin";
 }

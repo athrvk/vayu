@@ -278,7 +278,6 @@ describe("withLeftOut", () => {
 		statusText: "OK",
 		headers: {},
 		body: "",
-		bodyType: "text",
 		time: 1,
 		size: 0,
 	};
