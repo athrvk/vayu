@@ -600,7 +600,7 @@ describe("what a step's script said and how many responses its replay ran over (
 		expect(within(row).getByText("Error: boom")).toBeTruthy();
 		expect(within(row).getByText("status is 201: expected 200 to equal 201")).toBeTruthy();
 		expect(within(row).getByText("saw 500")).toHaveClass("text-status-error-text");
-		expect(within(row).getByText("12 more console lines not shown")).toBeTruthy();
+		expect(within(row).getByText("12 more console line occurrences not shown")).toBeTruthy();
 	});
 
 	it("adds nothing under a row stored before the fields", () => {

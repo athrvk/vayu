@@ -300,8 +300,8 @@ describe("what a script said and how many responses its replay ran over (issue #
 			/>
 		);
 
-		expect(screen.getByText("4 more messages not shown")).toBeTruthy();
-		expect(screen.getByText("37 more console lines not shown")).toBeTruthy();
+		expect(screen.getByText("4 more message occurrences not shown")).toBeTruthy();
+		expect(screen.getByText("37 more console line occurrences not shown")).toBeTruthy();
 	});
 
 	it("renders a row stored before the fields with no message block", () => {

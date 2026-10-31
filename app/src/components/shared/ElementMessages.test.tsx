@@ -107,7 +107,18 @@ describe("ElementMessages", () => {
 				messages: [{ kind: "error", text: "Error: boom" }],
 				messagesDropped: 1_204,
 			});
-			expect(screen.getByText("1,204 more messages not shown")).toBeInTheDocument();
+			expect(
+				screen.getByText("1,204 more message occurrences not shown")
+			).toBeInTheDocument();
+		});
+
+		it("counts occurrences, so one extra error thrown 480 times is not 480 messages", () => {
+			renderMessages({
+				messages: [{ kind: "error", text: "Error: boom" }],
+				messagesDropped: 480,
+			});
+			expect(screen.getByText("480 more message occurrences not shown")).toBeInTheDocument();
+			expect(screen.queryByText(/more messages/)).toBeNull();
 		});
 
 		it("says how many console lines a full list turned away, in the singular for one", () => {
@@ -115,7 +126,9 @@ describe("ElementMessages", () => {
 				console: [{ level: "log", text: "hello" }],
 				consoleDropped: 1,
 			});
-			expect(screen.getByText("1 more console line not shown")).toBeInTheDocument();
+			expect(
+				screen.getByText("1 more console line occurrence not shown")
+			).toBeInTheDocument();
 		});
 
 		it("keeps the two counts apart", () => {
@@ -125,8 +138,10 @@ describe("ElementMessages", () => {
 				console: [{ level: "log", text: "hello" }],
 				consoleDropped: 40,
 			});
-			expect(screen.getByText("3 more messages not shown")).toBeInTheDocument();
-			expect(screen.getByText("40 more console lines not shown")).toBeInTheDocument();
+			expect(screen.getByText("3 more message occurrences not shown")).toBeInTheDocument();
+			expect(
+				screen.getByText("40 more console line occurrences not shown")
+			).toBeInTheDocument();
 		});
 
 		it("makes no claim of a cut when a list is whole", () => {

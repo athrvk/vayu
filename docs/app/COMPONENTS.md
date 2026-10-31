@@ -2045,8 +2045,10 @@ the first 10 distinct entries of each with every text cut at 500 bytes, and `mes
 / `consoleDropped` counting what a full list turned away. Message lines are error text with
 their kind in the gutter; console lines take their `console.*` level's tone from the table
 the Console tab shares (`console-level.ts`), `warn` and `error` in their status colours and
-`log` / `info` plain. A dropped count reads "N more messages not shown" / "N more console
-lines not shown" under its list, so ten lines never pass for the whole set. All four keys
+`log` / `info` plain. A dropped count reads "N more message occurrences not shown" / "N more
+console line occurrences not shown" under its list, so ten lines never pass for the whole set;
+it counts occurrences (the engine counts every repeat of a dropped entry), so one extra error
+thrown on 480 iterations reads 480, not "480 more messages". All four keys
 are absent when empty and on a row from before #3127, which renders no block at all. The
 run export stays counts-only.
 

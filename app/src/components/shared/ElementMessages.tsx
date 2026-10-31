@@ -12,9 +12,11 @@
  *
  * The engine keeps a bounded, distinct sample: the first 10 entries of each
  * list, with a count of what a full list turned away. The count is said out
- * loud ("37 more console lines not shown") for the reason the failure list
- * under Test validation says "Showing 10 of 14": ten lines read as the whole
- * set unless they say otherwise. All four keys are absent when empty, and on a
+ * loud ("37 more console line occurrences not shown") for the reason the failure
+ * list under Test validation says "Showing 10 of 14": ten lines read as the
+ * whole set unless they say otherwise. The count is occurrences, not distinct
+ * entries: one extra error thrown on 480 iterations is 480, so the cue must not
+ * read as 480 more messages. All four keys are absent when empty, and on a
  * row from an engine before the field, so a row with none renders nothing.
  */
 
@@ -95,7 +97,7 @@ export function ElementMessages({
 					{message.text}
 				</Line>
 			))}
-			<DroppedCue count={element.messagesDropped} noun="message" />
+			<DroppedCue count={element.messagesDropped} noun="message occurrence" />
 			{consoleLines.map((line, i) => {
 				// A level the table does not know reads as a plain `log` line rather than throwing.
 				const tone = LEVEL_TONE[line.level] ?? LEVEL_TONE.log;
@@ -110,7 +112,7 @@ export function ElementMessages({
 					</Line>
 				);
 			})}
-			<DroppedCue count={element.consoleDropped} noun="console line" />
+			<DroppedCue count={element.consoleDropped} noun="console line occurrence" />
 		</ul>
 	);
 }
