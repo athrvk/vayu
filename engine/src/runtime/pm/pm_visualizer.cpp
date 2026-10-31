@@ -29,10 +29,10 @@ void warn_not_rendered (JSContext* ctx, const char* call) {
     if (!data) {
         return;
     }
-    data->console_output.push_back ({ ConsoleLevel::Warn,
+    data->add_console_entry (ConsoleLevel::Warn,
     std::string ("visualizer not rendered: pm.visualizer.") + call +
     "() is accepted so the script keeps running, but Vayu has no Visualize "
-    "tab to draw it in" });
+    "tab to draw it in");
 }
 
 // pm.visualizer.set(template, data?, options?) - `template` is required and a

@@ -2874,6 +2874,27 @@ non-`log` line in a gutter. `level` is the console method; which collection,
 folder or request script wrote the line is `scope` (#2522), absent on a line
 stored before the field.
 
+**Console output is bounded per script execution** (#3134), because the lines
+outlive the script: they ride the result, are folded across the collection,
+folder and request levels and are stored on the run's trace, so the memory limit
+that bounds the script does not bound them. Three caps, the constants
+`CONSOLE_LINE_MAX_BYTES` (64 KiB), `CONSOLE_TOTAL_MAX_BYTES` (1 MiB) and
+`CONSOLE_MAX_ENTRIES` (1000) in `script_engine` (`core/constants.hpp`):
+
+- A line over 64 KiB is cut there, never inside a UTF-8 character, and ends in
+  `...[truncated: console line limit]`.
+- A line that would take the kept text past 1 MiB, or the kept lines past 1000,
+  is dropped, as is every line after it. Exactly one final `warn` entry,
+  `[console output limit reached: further output of this script is dropped]`,
+  says so; a script that stops at a cap without exceeding it gets none.
+- The warnings the engine writes for a script (`pm.cookies.jar()` refusals,
+  `pm.visualizer`) count against the same caps. Nothing is thrown into the
+  script.
+
+The caps are per execution: each level's script has its own, so a request with
+a collection, a folder and a request script can show up to three times as much,
+plus a marker each.
+
 ## Examples
 
 ### Validate JSON Response
@@ -3958,6 +3979,9 @@ The **language** is current; what is missing is the **host environment**:
   response byte bound its path reads, and refused outright for agent-started
   runs.
 - **Memory limit**: 64MB per script execution
+- **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
+  execution; the rest is dropped behind one warning line
+  ([Console Output](#console-output)).
 - **Stack size**: 256KB per script execution (default), configurable through
   `scriptStackSize` from 64KB to 256KB, so it can only be lowered. QuickJS
   measures its ceiling from where the runtime is created, already some frames

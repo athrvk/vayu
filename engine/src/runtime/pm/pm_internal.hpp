@@ -160,6 +160,22 @@ void free_script_timer (JSContext* ctx, ScriptTimer& timer);
 struct ContextData {
     std::vector<TestResult> tests;
     std::vector<ConsoleEntry> console_output;
+
+    /**
+     * The one way a console line is recorded: `console.*`, the cookie jar's and
+     * the visualizer's warnings all come through here, never through
+     * `console_output.push_back` (#3134). Cuts @p message at
+     * `CONSOLE_LINE_MAX_BYTES` on a character boundary, and once the entry or
+     * total-bytes cap is reached drops every further line, keeping one final
+     * warning that says so. Never throws into the script.
+     */
+    void add_console_entry (ConsoleLevel level, std::string message);
+
+    /// Bytes of `console_output` messages kept so far (the limit marker aside).
+    std::size_t console_bytes = 0;
+    /// Set when the limit marker has been written; nothing is kept after it.
+    bool console_capped = false;
+
     const Request* request                              = nullptr;
     const Response* response                            = nullptr;
     Environment* environment                            = nullptr;
