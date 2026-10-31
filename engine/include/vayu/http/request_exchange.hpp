@@ -765,7 +765,9 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * It is Postman's order, with what follows from it: the script's
  * `pm.request.headers` does not hold the engine-applied header, and a header
  * the script set still wins, by `apply_auth`'s own rule (#2475). A name
- * nothing answers is encoded as written, as it was before.
+ * nothing answers is encoded as written, as it was before. A script that
+ * assigned `pm.request.auth` (`Request::auth_from_script`, #3131) replaced
+ * the block outright, so nothing of it is applied and no token is fetched.
  *
  * An OAuth 2.0 config (#2521) has every string resolved the same way, and only
  * then is its token acquired through @p acquisition's cache, so the cache key

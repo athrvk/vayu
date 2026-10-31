@@ -905,11 +905,12 @@ All three passes are best-effort: a failure is logged and never blocks startup.
 3. Create Run record (type: Design)
    ↓
 4. Execute pre-request script (if provided). Its pm.request edits - method, url,
-   headers, body - are written back into the request, so they override the auth
-   resolved in step 2
+   headers, body, auth - are written back into the request, so they override the
+   auth resolved in step 2 (an assigned pm.request.auth takes that credential off)
    ↓
 4b. Resolve the tokens compose left against the scopes the script wrote, then
-   apply any auth that waited (a header the request carries still wins)
+   apply any auth that waited (a header the request carries still wins, and a
+   script-assigned pm.request.auth means none is applied)
    ↓
 5. Send HTTP request via libcurl, through the environment's cookie jar - stored
    cookies go out, Set-Cookie comes back in (see Cookie Jar below)

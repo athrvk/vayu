@@ -6389,7 +6389,10 @@ so `pm.environment.set("password", …)` reaches a basic pair before it is
 base64-encoded. That is Postman's order; the script then does not see the header
 in `pm.request.headers`, and an `Authorization` it sets wins by the rule below.
 A data column or the identity in the same credential is bound first. A name
-nothing answers is encoded as written.
+nothing answers is encoded as written. A script that assigns `pm.request.auth`
+replaces this block in either case: the credential applied before it is taken
+off, a waiting one is never applied (#3131, see
+[Mutating the request](scripting.md#mutating-the-request-pre-request-scripts)).
 
 **`oauth2` follows the same order on a single send and a collection run's step
 (#2521).** A config in a request that a pre-request script runs before (on a

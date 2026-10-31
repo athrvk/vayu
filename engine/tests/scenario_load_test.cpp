@@ -3658,6 +3658,28 @@ TEST_F (ScenarioLoadTest, AnInlineScriptPreSetsAPasswordThatReachesTheWireThroug
     }
 }
 
+// #3131 on a scenario load: an inline `script.pre` that assigns
+// `pm.request.auth` replaces the step's own credential on every submission.
+TEST_F (ScenarioLoadTest, AnInlineScriptPreAssignedAuthReplacesTheStepsOwn) {
+    ScenarioMockServer server;
+    const auto execution = resolve_one_step (server.url ("/echo"),
+    json{ { "mode", "bearer" }, { "token", "step-token" } },
+    json::array ({ vayu::tests::script_element_json ("el_pre",
+    "script.pre", "pm.request.auth = { type: 'basic', basic: { username: 'ada', password: 'pw' } };",
+    /*inline_script=*/true) }));
+    ASSERT_EQ (execution.plan.steps.size (), 1u);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 2 },
+        { "concurrency", 1 } };
+    run (config, execution);
+
+    const auto echoes = server.hits_for ("/echo");
+    ASSERT_EQ (echoes.size (), 2u);
+    for (const auto& echo : echoes) {
+        EXPECT_EQ (vayu::tests::basic_pair_of (echo.authorization), "ada:pw");
+    }
+}
+
 // The count-only rule (#1503) holds for a credential that waited: nothing
 // answered it, so it is encoded as written and sent, never refused.
 TEST_F (ScenarioLoadTest, ACredentialNothingAnswersIsSentAsWrittenThroughLateAuth) {

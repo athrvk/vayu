@@ -1943,7 +1943,7 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
     only). Each would otherwise be an argument an agent believes shaped the run
     that nothing on this path reads.
 - **Request mutation** - a pre-request script's `pm.request` edits (url, method,
-  headers, body) are applied to the request that is sent, so an agent can sign a
+  headers, body, auth) are applied to the request that is sent, so an agent can sign a
   request or override the engine-applied auth from `run_request` (with reveal
   on; the script itself is refused while it is off), and a saved
   request's stored pre-request script does the same under

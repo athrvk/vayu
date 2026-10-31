@@ -152,7 +152,8 @@ struct AuthApplyResult {
  * @brief Apply typed auth to a request (mutates headers and/or url).
  *
  * A user-supplied header always wins (injection is skipped when the target
- * header already exists - matched case-insensitively). `db` is reserved for
+ * header already exists - matched case-insensitively); a header it does write
+ * is named in `Request::auth_header`. `db` is reserved for
  * oauth2 token lookup and may be null; `cancel` is the token request's
  * `ClientConfig::cancel` (issue #2683), set only inside a management-API
  * handler. The token request is bounded by `req.timeout_ms`, so set the
