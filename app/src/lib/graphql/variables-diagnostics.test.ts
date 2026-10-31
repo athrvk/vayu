@@ -24,7 +24,7 @@ import {
 	markersOutsideTemplates,
 	templateTwinUri,
 } from "./variables-diagnostics";
-import { maskJsonTemplatesInPlace } from "./templates";
+import { maskJsonTemplatesInPlace, rangesOverlap } from "./templates";
 import { buildVariablesJsonSchema } from "./variables-schema";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 
@@ -299,6 +299,20 @@ describe("what Monaco's JSON worker makes of the masked text", () => {
 		// nothing after it was checked at all.
 		const markers = await paneMarkers('{"id": "u1", "first": {{n}}, "extra" 1}', jsonSchema);
 		expect(markers.map((m) => m.message)).toContain("Colon expected");
+	});
+
+	it("marks the real error after a token in a request body, and nothing on the token", async () => {
+		// The request body has no schema (#3137): a token outside a string used to
+		// draw the squiggles above and stop the parse, hiding the `}` that follows.
+		const text = '{"limit": {{n}}, "x": }';
+		const { spans } = maskJsonTemplatesInPlace(text);
+		expect(spans).toHaveLength(1);
+
+		const markers = await paneMarkers(text, {});
+
+		expect(markers.some((m) => rangesOverlap(m, spans[0]))).toBe(false);
+		// Columns are 1-based: the stray `}` is the 23rd character.
+		expect(markers.map((m) => [m.message, m.startColumn])).toEqual([["Value expected", 23]]);
 	});
 
 	it("still reports a variable whose value has the wrong type", async () => {
