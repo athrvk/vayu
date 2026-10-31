@@ -2038,7 +2038,10 @@ text, as on every older row. Both funnels hand the body to one decoder,
 and the restored pane hold the same state: the bytes go to
 `ResponseState.rawBytes`, and `body` / `bodyRaw` get their decoding - by the
 byte-order mark, else the declared `charset`, else UTF-8, through
-`TextDecoder` - for a text Content-Type, and nothing for any other. A text type
+`TextDecoder` - for a text Content-Type, and nothing for any other. A BOM on a
+`"utf8"` body is part of the text, so it stays in `bodyRaw` (Raw, Copy and
+Download keep it); Pretty skips one leading BOM when it indents JSON, and a
+body that then fails to scan comes back whole, BOM included (#3140). A text type
 is `text/*`, a declared `charset`, or a subtype whose name (after any `x-`) or
 `+suffix` is one of the text syntaxes (`json`, `xml`, `yaml`, `javascript`,
 `graphql` and their kin), compared as whole tokens by `mediaTypeOf`: an Office

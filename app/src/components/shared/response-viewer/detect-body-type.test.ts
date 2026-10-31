@@ -47,4 +47,10 @@ describe("detectBodyType", () => {
 		expect(detectBodyType(typed("text/plain; charset=utf-8"), '{"a":1}')).toBe("json");
 		expect(detectBodyType(typed("text/csv"), '{"a":1}')).toBe("text");
 	});
+
+	it("sniffs JSON behind a byte-order mark when the type is missing or text/plain", () => {
+		const body = '\uFEFF{"a":1}';
+		expect(detectBodyType({}, body)).toBe("json");
+		expect(detectBodyType(typed("text/plain"), body)).toBe("json");
+	});
 });
