@@ -420,6 +420,10 @@ paths its requests describe (issue #481 phase 2). `collectionId` is the only
 required field; `latencyMs` and `errorRatePct` are the injection knobs, and an
 out-of-range value is a `400` rather than a clamp.
 
+The mock is literal: it resolves no variables, so a `{{variable}}` in an example body
+is served as written, and it drops a leading `{{baseUrl}}` whole, so a path inside the
+variable's value is not part of any route ([the engine's Mock Server section](../engine/api-reference.md#mock-server)).
+
 Two surfaces, deliberately split. `CollectionDetail/MockServerControl` is the
 only one that can **start** one, because a mock needs a collection and the
 Services drawer has none selected; the drawer's Mock servers group lists and

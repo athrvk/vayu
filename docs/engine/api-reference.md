@@ -6122,6 +6122,11 @@ flag deliberately does not change what is served. It is disclosure, not
 behaviour: the app paints a "Partial body" chip on the row so the choice to serve
 it is a made one (issue #659).
 
+**Example bodies are served literally.** A `{{variable}}` or a dynamic value such
+as `{{$guid}}` in a stored body or header is sent as those characters: the mock
+resolves no variables, unlike Postman's mock servers, which a collection moving
+from Postman may expect. Resolving them would be a feature, not a docs fix.
+
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
@@ -6164,6 +6169,11 @@ same first one, and the new row is only reachable once the mock is restarted.
 
 - The stored URL is reduced to a path: scheme and host - or the `{{baseUrl}}`
   variable standing in for them - the query and the fragment are all dropped.
+  A leading variable goes whole and is never resolved, so a path carried inside
+  its *value* is lost: with `baseUrl` set to `https://x/v1`, a request stored as
+  `{{baseUrl}}/pets` is mocked at `/pets`, not `/v1/pets`, and a caller that
+  keeps `/v1` in its URL matches no route. Put the prefix in the stored URL
+  (`{{baseUrl}}/v1/pets`) to have the mock serve it.
 - All three template spellings are one wildcard segment: `{{petId}}` (Vayu and
   Postman), `{petId}` (OpenAPI) and `:petId` (Postman's other form). A wildcard
   matches exactly one non-empty segment. The normalization is pinned to the
