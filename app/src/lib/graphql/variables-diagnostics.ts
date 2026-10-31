@@ -40,8 +40,8 @@
  * The cost of this shape is that the worker still validates the visible model
  * too, ~500ms after each edit, and writes its own markers there. That write
  * fires `onDidChangeMarkers`, which is what this listens to, so the correction
- * lands in the same turn - the wrong markers exist between two synchronous
- * statements, never across a paint.
+ * lands in a microtask of the same task - the wrong markers never survive to a
+ * paint.
  */
 
 import type * as Monaco from "monaco-editor";
@@ -125,7 +125,13 @@ export function attachVariablesDiagnostics(
 	const listeners: Monaco.IDisposable[] = [
 		model.onDidChangeContent(pushText),
 		monaco.editor.onDidChangeMarkers((resources) => {
-			if (resources.some((resource) => watched.has(resource.toString()))) pullMarkers();
+			if (!resources.some((resource) => watched.has(resource.toString()))) return;
+			// Not from inside this delivery: Monaco's marker event is a
+			// MicrotaskEmitter, and a write made while it delivers joins the batch
+			// already going out and is dropped with it. The markers would change and
+			// the decoration service, which paints the squiggles and has already been
+			// handed this batch, would never hear of it.
+			queueMicrotask(pullMarkers);
 		}),
 		model.onWillDispose(() => dispose()),
 	];
