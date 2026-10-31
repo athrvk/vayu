@@ -10,14 +10,13 @@
 
 /**
  * The Pretty/Raw/Preview toggle sits on the toolbar's `h-band` row (32px,
- * every density) whether or not the pane is `compact` - `toggle-group.tsx`'s
- * own doc comment says so ("the response toolbar sits an `xs` control on a
- * 32px `band`"). The code used to say otherwise: `size={compact ? "xs" :
- * "sm"}` gave the non-compact case (the request builder's own response pane,
- * which never passes `compact`) a `sm` track - `h-control` (28px) plus the
- * track's own `p-1` padding, 34px total - two pixels taller than the band it
- * sits in, overflowing the row's own border. `xs`'s track (`h-control-sm`
- * 24px plus `p-0.5`, 27px) is the one size that actually clears it.
+ * every density) - `toggle-group.tsx`'s own doc comment says so ("the
+ * response toolbar sits an `xs` control on a 32px `band`"). The code used to
+ * pick `sm` for the pane that was not `compact`: a `sm` track is `h-control`
+ * (28px) plus the track's own `p-1` padding, 34px total - two pixels taller
+ * than the band it sits in, overflowing the row's own border. `xs`'s track
+ * (`h-control-sm` 24px plus `p-0.5`, 27px) is the one size that actually
+ * clears it.
  *
  * Rendered, not a source scan: the prop is a runtime value passed down
  * through `ToggleGroup`, not a class string this file writes out directly.
@@ -32,16 +31,12 @@ vi.mock("@/components/ui/code-editor", () => ({
 }));
 
 describe("the body toolbar's view-mode toggle", () => {
-	it.each([
-		["default (not compact)", {}],
-		["compact", { compact: true }],
-	])("fits the 32px band at %s", (_label, extraProps) => {
+	it("fits the 32px band", () => {
 		render(
 			<ResponseBody
 				body='{"a":1}'
 				bodyRaw='{"a":1}'
 				headers={{ "content-type": "application/json" }}
-				{...extraProps}
 			/>
 		);
 		const pretty = screen.getByRole("radio", { name: /pretty/i });
