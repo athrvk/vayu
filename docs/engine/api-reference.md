@@ -5876,7 +5876,10 @@ path or a deeply nested tenant route is recorded like any other (issue #1140).
 
 A `multipart/form-data` body (a file upload, `curl -F`) is captured raw, as
 sent, with its boundaries and parts, and is cut at `inboxMaxBodyBytes` like any
-other body (issue #3110). The capture's `Content-Type` header is the sender's.
+other body (issue #3110). An `application/x-www-form-urlencoded` body is captured
+the same way up to the 8 MiB transport ceiling rather than refused at 8192 bytes
+with an empty `413` (issue #3111). The capture's `Content-Type` header is the
+sender's.
 
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted

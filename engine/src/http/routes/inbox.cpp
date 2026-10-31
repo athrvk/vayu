@@ -169,25 +169,32 @@ class AnyPathServer final : public httplib::Server {
     /// already spells.
     static constexpr const char* ROUTE = "/";
 
-    /// Prefixed to a multipart Content-Type by `mask_multipart`, so the media
-    /// type is no longer multipart/form-data and cpp-httplib leaves the body
-    /// alone.
+    /// Prefixed to a form Content-Type by `mask_form_body`, so the media type is
+    /// no longer one cpp-httplib parses and it leaves the body alone.
     static constexpr std::string_view MASK = "x-vayu-raw+";
 
     /**
-     * Keep a multipart body whole (#3110). cpp-httplib parses a request whose
+     * Keep a form body whole (#3110, #3111). cpp-httplib parses a request whose
      * Content-Type is multipart/form-data into `Request::form` and leaves
-     * `body` empty, so a capture would record the headers and no bytes. The
-     * parse is chosen from the Content-Type as `setup_request` leaves it, so the
-     * media type is masked here and `sender_headers` strips the mask again for
-     * the capture. (A sender that itself opens its Content-Type with the mask
-     * sees it removed from the stored header; nothing else reads it.)
+     * `body` empty, so a capture would record the headers and no bytes; for
+     * application/x-www-form-urlencoded it keeps the body but refuses one over
+     * `CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH` (8192) with a bare 413,
+     * which `set_payload_max_length` does not lift. Both are chosen from the
+     * Content-Type as `setup_request` leaves it, so the media type is masked
+     * here and `sender_headers` strips the mask again for the capture. (A
+     * sender that itself opens its Content-Type with the mask sees it removed
+     * from the stored header; nothing else reads it.)
      */
-    static void mask_multipart (httplib::Request& req) {
-        if (!req.is_multipart_form_data ()) {
+    static void mask_form_body (httplib::Request& req) {
+        const auto it = req.headers.find ("Content-Type");
+        if (it == req.headers.end ()) {
             return;
         }
-        const auto it = req.headers.find ("Content-Type");
+        const auto media_type = httplib::detail::extract_media_type (it->second);
+        if (media_type != "multipart/form-data" &&
+        media_type != "application/x-www-form-urlencoded") {
+            return;
+        }
         it->second.insert (0, MASK);
     }
 
@@ -242,7 +249,7 @@ class AnyPathServer final : public httplib::Server {
                 close_connection, connection_closed,
                 [] (httplib::Request& req) {
                     req.path = ROUTE;
-                    mask_multipart (req);
+                    mask_form_body (req);
                 },
                 &websocket_upgraded);
             });
