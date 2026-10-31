@@ -1307,7 +1307,7 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
     vayu::core::build_scenario_load_summary (*state, execution.plan);
 
     const auto& row = summary.at ("steps").at (0).at ("elements").at (0);
-    EXPECT_EQ (row.value ("error", 0), 4) << row.dump ();
+    EXPECT_EQ (row.at ("error").get<int> (), 4) << row.dump ();
     EXPECT_EQ (row.value ("console", json ()),
     (json::array ({ { { "level", "log" }, { "text", "saw 200" } } })))
     << row.dump ();

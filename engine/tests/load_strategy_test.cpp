@@ -3552,7 +3552,7 @@ TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
 
     const auto post = element_entry (summary, "el_post");
     ASSERT_FALSE (post.is_null ()) << summary.dump ();
-    EXPECT_EQ (post.value ("error", 0u), ITERATIONS) << post.dump ();
+    EXPECT_EQ (post.at ("error").get<size_t> (), ITERATIONS) << post.dump ();
     EXPECT_EQ (post.value ("console", nlohmann::json ()),
     (nlohmann::json::array ({ { { "level", "log" }, { "text", "saw 200" } } })))
     << post.dump ();

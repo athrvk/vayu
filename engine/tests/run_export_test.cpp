@@ -263,7 +263,7 @@ TEST_F (RunExportTest, AScriptElementRowIsExportedWithoutItsMessages) {
     ASSERT_TRUE (report.contains ("scenario")) << report.dump ();
     for (const json* row : { &report.at ("elements").at (0),
          &report.at ("scenario").at ("steps").at (0).at ("elements").at (0) }) {
-        EXPECT_EQ (row->value ("error", -1), 6)
+        EXPECT_EQ (row->at ("error").get<int> (), 6)
         << "the row itself is exported: " << row->dump ();
         for (const char* key : { "messages", "messagesDropped", "console", "consoleDropped" }) {
             EXPECT_FALSE (row->contains (key)) << key << " in " << row->dump ();
