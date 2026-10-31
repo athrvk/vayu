@@ -62,6 +62,7 @@ import {
 	formatSize,
 	type ExchangeState,
 } from "@/components/shared/response-viewer";
+import ConsoleOutput from "@/modules/request-builder/components/ResponseViewer/ConsoleOutput";
 import ElementOutcomes from "@/modules/request-builder/components/ResponseViewer/ElementOutcomes";
 import SchemaValidation from "@/modules/request-builder/components/ResponseViewer/SchemaValidation";
 import TestResults from "@/modules/request-builder/components/ResponseViewer/TestResults";
@@ -144,6 +145,13 @@ function ScenarioStepCard({
 	// all a run being watched has.
 	const testResults = response?.testResults;
 	const tests = tallyTests(testResults) ?? step.tests;
+
+	// What the step's scripts printed and the errors that stopped them, from the
+	// same restored response. Absent on a live row, like the list above.
+	const consoleLogs = response?.consoleLogs ?? [];
+	const preScriptError = response?.preScriptError;
+	const postScriptError = response?.postScriptError;
+	const hasConsole = consoleLogs.length > 0 || !!preScriptError || !!postScriptError;
 
 	// The step's own failure text: a test assertion that did not hold, or the
 	// error that stopped the step. A live row has none until its stored row
@@ -312,6 +320,25 @@ function ScenarioStepCard({
 			 */}
 			{response?.elements && response.elements.length > 0 && (
 				<ElementOutcomes outcomes={response.elements} inset={false} />
+			)}
+
+			{/*
+			 * The step's console lines and script errors (issue #3126), under the
+			 * Tests they belong with. The response pane's own `ConsoleOutput`, so
+			 * the level labels, the filter and the progressive window are the one
+			 * implementation. It fills a parent of definite height in the Console
+			 * tab; here the expansion has none, so the box is bounded to the
+			 * response viewer's own 400px and scrolls inside it. Rendered only when
+			 * there is something to show, so a scriptless step gains no "No
+			 * console output" block per row.
+			 */}
+			{hasConsole && (
+				<div className="max-h-[400px] overflow-auto">
+					<ConsoleOutput
+						logs={consoleLogs}
+						errors={{ pre: preScriptError, post: postScriptError }}
+					/>
+				</div>
 			)}
 
 			{sentFile && <SentBodyFileNote file={sentFile} />}
