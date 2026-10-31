@@ -137,6 +137,48 @@ template <> struct row_extractor<vayu::RunStatus> {
     }
 };
 
+// BodyBytes: a body read back whole past a zero byte (#3112). sqlite_orm's own
+// std::string extractor builds the value with strlen, so it would cut at the
+// first 0x00 a client sent; the length comes from sqlite3_column_bytes here.
+// Both specialisations are full ones so they win over the library's partial
+// ones, which match any class derived from std::string. The column stays TEXT
+// and the write already bound the full length, so no stored row changes.
+template <> struct type_printer<vayu::db::BodyBytes> {
+    const std::string& print () {
+        static const std::string res = "TEXT";
+        return res;
+    }
+};
+template <> struct statement_binder<vayu::db::BodyBytes> {
+    int bind (sqlite3_stmt* stmt, int index, const vayu::db::BodyBytes& value) {
+        return sqlite3_bind_text64 (stmt, index, value.data (), value.size (),
+        SQLITE_TRANSIENT, SQLITE_UTF8);
+    }
+};
+template <> struct field_printer<vayu::db::BodyBytes> {
+    std::string operator() (const vayu::db::BodyBytes& t) const {
+        return t;
+    }
+};
+template <> struct row_extractor<vayu::db::BodyBytes> {
+    // Only sqlite_orm's scalar/pragma reads use this overload; a mapped column
+    // goes through the sqlite3_stmt* one below.
+    vayu::db::BodyBytes extract (const char* row_value) const {
+        return row_value ? vayu::db::BodyBytes (row_value) : vayu::db::BodyBytes ();
+    }
+    vayu::db::BodyBytes extract (sqlite3_stmt* stmt, int columnIndex) const {
+        // Text first, then its length: sqlite3_column_bytes is only defined
+        // after the conversion sqlite3_column_text performs.
+        const char* text = vayu::db::column_text (stmt, columnIndex);
+        if (text == nullptr) {
+            return {};
+        }
+        const auto size =
+        static_cast<std::size_t> (sqlite3_column_bytes (stmt, columnIndex));
+        return vayu::db::BodyBytes (std::string (text, size));
+    }
+};
+
 } // namespace sqlite_orm
 
 namespace vayu::db {

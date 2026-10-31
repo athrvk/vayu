@@ -66,6 +66,7 @@ namespace {
 
 using nlohmann::json;
 using vayu::http::read_target_policy;
+using vayu::http::refuse_monitor_endpoint;
 using vayu::http::refuse_target;
 using vayu::http::refuse_token_endpoints;
 using vayu::http::TargetPolicy;
@@ -225,6 +226,59 @@ TEST (TargetPolicyTokenEndpoints, AllowAllAdmitsAnyEndpointButNotAnUnknownHost) 
     all, json{ { "accessTokenUrl", "https://{{idp}}/token" } });
     ASSERT_HAS_VALUE (unknown);
     EXPECT_EQ (unknown->code, vayu::http::TARGET_HOST_UNKNOWN_CODE);
+}
+
+TEST (TargetPolicyMonitorEndpoint, TheScrapedHostIsJudgedAndNamedAsTheMonitorUrl) {
+    const auto policy = allowing ({ "api.example.com", "metrics.example.com" });
+    EXPECT_FALSE (refuse_monitor_endpoint (
+    policy, json{ { "url", "http://METRICS.example.com:9100/metrics" } }));
+
+    const auto refused = refuse_monitor_endpoint (
+    allowing ({ "api.example.com" }), json{ { "url", "http://metrics.example.com/m" } });
+    ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE);
+    EXPECT_NE (refused->message.find ("monitor.url"), std::string::npos)
+    << refused->message;
+    EXPECT_NE (refused->message.find ("\"metrics.example.com\""), std::string::npos)
+    << refused->message;
+}
+
+TEST (TargetPolicyMonitorEndpoint, AllowAllAdmitsAnyScrapeButNotAnUnknownHost) {
+    const TargetPolicy all{ .allow_all = true, .allowed_hosts = {} };
+    EXPECT_FALSE (refuse_monitor_endpoint (
+    all, json{ { "url", "http://anything.example/metrics" } }));
+
+    const auto unknown = refuse_monitor_endpoint (
+    all, json{ { "url", "http://{{metricsHost}}/metrics" } });
+    ASSERT_HAS_VALUE (unknown);
+    EXPECT_EQ (unknown->code, vayu::http::TARGET_HOST_UNKNOWN_CODE);
+    EXPECT_NE (unknown->message.find ("monitor.url"), std::string::npos)
+    << unknown->message;
+}
+
+// The scrape dials the encoded URL, where `\` is a `/`: typed, this names
+// 127.0.0.1 after the userinfo; dialled, it names localhost (#2465).
+// Mutation check: judge the raw string and the first case is allowed.
+TEST (TargetPolicyMonitorEndpoint, TheHostIsJudgedAsTheScrapeWillDialIt) {
+    const auto policy  = allowing ({ "127.0.0.1" });
+    const auto refused = refuse_monitor_endpoint (
+    policy, json{ { "url", "http://localhost:9100\\@127.0.0.1:9100/metrics" } });
+    ASSERT_HAS_VALUE (refused);
+    EXPECT_EQ (refused->code, vayu::http::TARGET_NOT_ALLOWED_CODE);
+    EXPECT_NE (refused->message.find ("\"localhost\""), std::string::npos)
+    << refused->message;
+
+    EXPECT_FALSE (refuse_monitor_endpoint (allowing ({ "localhost" }),
+    json{ { "url", "http://localhost:9100\\@127.0.0.1:9100/metrics" } }));
+}
+
+// A block with no string URL is the config validation's to refuse, by name.
+TEST (TargetPolicyMonitorEndpoint, ABlockWithoutAStringUrlIsLeftToTheConfigCheck) {
+    for (const json& monitor :
+    { json (), json ("http://x/"), json::object (), json{ { "url", 7 } } }) {
+        EXPECT_FALSE (refuse_monitor_endpoint (allowing ({}), monitor))
+        << monitor.dump ();
+    }
 }
 
 // --- Through the routes ------------------------------------------------------
@@ -578,6 +632,98 @@ TEST_F (TargetPolicyRouteTest, AScenarioLoadStepSteeredOffTheListIsRefused) {
     seed_request (echo.url (), steer_to (echo, "127.0.0.1"), /*inline_script=*/true);
     run_to_the_end (collection_run (policy_allowing ({ "127.0.0.1" }), true));
     EXPECT_EQ (echo.requests_seen (), 1);
+}
+
+// --- The monitor endpoint -----------------------------------------------------
+
+namespace {
+
+/// A `monitor` block scraping @p echo under the name @p host.
+json monitor_of (const vayu::tests::EchoServer& echo, const std::string& host) {
+    return { { "url", "http://" + host + ":" + std::to_string (echo.port ()) + "/metrics" },
+        { "series", json::array ({ "up" }) } };
+}
+
+/// A one-request load run of @p echo, with no policy unless @p policy is one.
+json monitored_run (const vayu::tests::EchoServer& echo, const json& monitor, const json& policy) {
+    json payload{ { "method", "GET" }, { "url", echo.url () }, { "mode", "iterations" },
+        { "iterations", 1 }, { "concurrency", 1 }, { "monitor", monitor } };
+    if (!policy.is_null ()) {
+        payload["targetPolicy"] = policy;
+    }
+    return payload;
+}
+
+} // namespace
+
+// The scrape is a second host the run contacts, once per interval for as long
+// as it runs, and nothing judges it once the run has started: a policy that
+// leaves it out refuses the run on both load shapes, before any row or send
+// (#3121). Mutation check: make `refuse_monitor_outside_policy`
+// (execution.cpp) answer nothing and both shapes answer 202.
+TEST_F (TargetPolicyRouteTest, AMonitorHostOffTheListRefusesTheRunBeforeAnyRow) {
+    const vayu::tests::EchoServer echo;
+    seed_request (echo.url (), "");
+    const json policy        = policy_allowing ({ "127.0.0.1" });
+    const json monitor       = monitor_of (echo, "localhost");
+    json scenario_load       = collection_run (policy, true);
+    scenario_load["monitor"] = monitor;
+
+    for (const json& payload : { monitored_run (echo, monitor, policy), scenario_load }) {
+        const auto [status, answer] = post ("/runs", payload);
+        EXPECT_EQ (status, 400) << answer.dump ();
+        EXPECT_EQ (error_code (answer), "target_not_allowed") << answer.dump ();
+        const std::string message = vayu::http::routes::error_message_of (answer);
+        EXPECT_NE (message.find ("monitor.url"), std::string::npos) << message;
+        EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
+    }
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// The scrape dials the encoded URL, where `\` is a `/`: this one is typed with
+// the listed 127.0.0.1 after the userinfo and dialled at localhost. Mutation
+// check: judge the raw monitor.url and the run answers 202.
+TEST_F (TargetPolicyRouteTest, AMonitorUrlThatDialsADifferentHostThanItIsTypedWithIsRefused) {
+    const vayu::tests::EchoServer echo;
+    const std::string port = std::to_string (echo.port ());
+    const json monitor{ { "url", "http://localhost:" + port + "\\@127.0.0.1:" + port + "/metrics" },
+        { "series", json::array ({ "up" }) } };
+
+    const auto [status, answer] =
+    post ("/runs", monitored_run (echo, monitor, policy_allowing ({ "127.0.0.1" })));
+
+    EXPECT_EQ (status, 400) << answer.dump ();
+    EXPECT_EQ (error_code (answer), "target_not_allowed") << answer.dump ();
+    const std::string message = vayu::http::routes::error_message_of (answer);
+    EXPECT_NE (message.find ("\"localhost\""), std::string::npos) << message;
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// A templated monitor host names nothing a policy could allow; the scrape
+// sends its URL as written, so it would never be resolved either.
+TEST_F (TargetPolicyRouteTest, AMonitorHostThatCannotBeDeterminedIsRefusedUnderAllowAll) {
+    const vayu::tests::EchoServer echo;
+    const auto [status, answer] = post ("/runs",
+    monitored_run (echo, monitor_of (echo, "{{metricsHost}}"), json{ { "allowAll", true } }));
+    EXPECT_EQ (status, 400) << answer.dump ();
+    EXPECT_EQ (error_code (answer), "target_host_unknown") << answer.dump ();
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
+// A listed monitor host, `allowAll`, and no policy at all each run as before.
+TEST_F (TargetPolicyRouteTest, AListedMonitorHostRunsAndSoDoesOneUnderNoPolicy) {
+    const vayu::tests::EchoServer echo;
+    const json monitor = monitor_of (echo, "localhost");
+    for (const json& policy : { policy_allowing ({ "127.0.0.1", "LocalHost" }),
+         json{ { "allowAll", true } }, json () }) {
+        const std::string run_id = run_to_the_end (monitored_run (echo, monitor, policy));
+        const auto run = db_->get_run (run_id);
+        ASSERT_HAS_VALUE (run) << policy.dump ();
+        EXPECT_EQ (run->status, vayu::RunStatus::Completed) << policy.dump ();
+    }
 }
 
 // --- The OAuth 2.0 token endpoint ---------------------------------------------

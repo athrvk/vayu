@@ -648,8 +648,11 @@ Notes:
   schema would refuse blocks the engine accepts the moment a user raises it.
   **The monitor endpoint is a second host**, and it takes the allowlist
   decision described under [Safety](#safety-model) rather than the target's
-  check by extension. The scrape needs no cap of its own: the monitor thread is
-  joined when the run ends, so whatever bounds the run bounds it.
+  check by extension. The engine holds `monitor.url` to the run's `targetPolicy`
+  too (#3121), so a loopback or private host that decision exempts travels in
+  the `allowedHosts` the run carries. The scrape needs no cap of its own: the
+  monitor thread is joined when the run ends, so whatever bounds the run bounds
+  it.
 - **`compare_runs`** takes `baseRunId` optionally. Omitted, it resolves the run
   pinned as the **baseline** for whatever saved request the target ran -
   `GET /runs/:id` for the `requestId`, then
@@ -1445,6 +1448,16 @@ also travels with the send:
   [`targetPolicy`](api-reference.md#post-execute). A test drives every sending
   tool by name, and a scan fails on an `executeRequest` or `startRun` call that
   does not go through the helper.
+- **A monitored run's policy lists its exempt monitor host.** The engine judges
+  a load run's `monitor.url` against the same `targetPolicy` (#3121) and
+  exempts nothing, so when `start_load_run` carries a `monitor` block whose
+  host the monitor gate passes without an entry (loopback or private,
+  link-local and metadata addresses aside; see [Safety](#safety-model)),
+  `asMcpSend` adds that host to `allowedHosts` (`exemptMonitorHost` in
+  `safety.ts`, the gate's own predicate). Nothing the gate refuses is ever
+  added. The entry also admits the run's own requests to that host if a
+  pre-request script steers them there, which is the one place the engine's
+  list is wider than the gate on each composed target.
 - **The early gate stays, for the unscripted case.** `checkComposedTarget`
   refuses off-list hosts before any traffic, exactly as before. The one
   difference: a URL whose authority holds
@@ -1468,7 +1481,9 @@ also travels with the send:
 What `targetPolicy` does not cover: a redirect hop a server answers with, and a
 script's `pm.sendRequest`, which is refused for MCP-started runs instead (below).
 A tool call that forwards a `preRequestScript` is still not sending the composed
-bytes untouched, but it can no longer reach a host the allowlist did not list.
+bytes untouched, but it can no longer reach a host the allowlist did not list,
+bar the exempt monitor host above, which a script can also steer the run's own
+requests to.
 
 Scripts: the by-id compose path attaches the collection chain's, then the
 request's own, `script.pre` / `script.post` elements under `elements`
@@ -2388,8 +2403,9 @@ no error (issue #2136); the sentence says so in a clause of its own and names
 
 Enforced in the MCP layer (`safety.ts`, `config.ts`), with two exceptions noted
 below: the engine applies the allowlist again to the URL a send is about to
-dial and to OAuth 2.0 token endpoints (`targetPolicy`, #2521), and
-script-issued requests are refused engine-side, because this layer cannot see
+dial, to OAuth 2.0 token endpoints and to a load run's `monitor.url`
+(`targetPolicy`, #2521, #3121), and script-issued requests are refused
+engine-side, because this layer cannot see
 them. Nothing here changes engine *behaviour* for other clients: a payload
 without a `targetPolicy` is unrestricted. All
 configurable in **Settings → MCP** and persisted (in the stdio CLI, through the
@@ -2421,6 +2437,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   test is textual, like the allowlist itself:
   a DNS name that *resolves* to a private address still needs an entry, because
   resolving it here would make the answer depend on the network it was asked on.
+  The engine holds `monitor.url` to the run's `targetPolicy` with no exemption
+  of its own (#3121), so the exempt host is added to the run's `allowedHosts`
+  (see [Request composition](#request-composition)).
   The renderer's load-test dialog uses the same classification to tell a local
   target from a remote one (`isLocalHost` in `src/lib/host-locality.ts`, a mirror
   of `isPrivateHost` that the main process cannot share);

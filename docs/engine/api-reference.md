@@ -2451,6 +2451,9 @@ example served as if it were whole when it is not is worse than a refused write
 tombstoned or trashed example does not, which is why restoring one into a full
 request is refused (see [Trash](#trash)).
 
+A zero byte in a `body` (`"ab\u0000cd"`) is preserved: it is stored, listed and served by a
+mock server whole, never cut at the zero.
+
 **`origin` says who wrote the row** (issue #588): `"import"` for everything an
 importer or a spec sync produced, `"user"` for one a person saved from a live
 response. It defaults to `"import"`, which is honest for every row written
@@ -5873,7 +5876,10 @@ path or a deeply nested tenant route is recorded like any other (issue #1140).
 
 A `multipart/form-data` body (a file upload, `curl -F`) is captured raw, as
 sent, with its boundaries and parts, and is cut at `inboxMaxBodyBytes` like any
-other body (issue #3110). The capture's `Content-Type` header is the sender's.
+other body (issue #3110). An `application/x-www-form-urlencoded` body is captured
+the same way up to the 8 MiB transport ceiling rather than refused at 8192 bytes
+with an empty `413` (issue #3111). The capture's `Content-Type` header is the
+sender's.
 
 **CORS follows the inbox's `allowedOrigins`** (issue #2367), the same policy a
 mock server applies (see [Mock Server](#mock-server)), so a browser-hosted
@@ -8549,6 +8555,16 @@ verdict is made:
   buffered send does (and a config that waited for the script, at its step),
   and a collection load run judges each submission as a single-request load run
   does.
+- **A load run's `monitor.url`** (either shape) is a second host the run
+  contacts, once per scrape for as long as it runs, and the scrape loop sends
+  with no policy of its own, so its host is judged when the run is validated,
+  by the same match (#3121), on the URL as the scrape will send it (after the
+  encoding pass that turns a `\` into a `/`, as for a send's final URL): a host
+  the policy does not list, or one it cannot
+  determine (a `{{template}}`, which the scrape would send as written), is a
+  `400` under `target_not_allowed` or `target_host_unknown` whose message names
+  `monitor.url`, before the run row exists and before anything is sent. A
+  caller that wants a monitor on another host lists that host too.
 
 An omitted `targetPolicy` restricts nothing. Redirect hops and `pm.sendRequest`
 are outside it.
@@ -9155,6 +9171,14 @@ the run row is created.
 A `monitor` block beside a `scenario` that carries no load `mode` (absent,
 empty or not a string) is likewise a `400` `invalid_run_config` naming
 `'monitor'`.
+
+A run carrying a [`targetPolicy`](#post-runs) is held to it here too: the
+`url`'s host must be one the policy allows, or the run is a `400` under
+`target_not_allowed` / `target_host_unknown` naming `monitor.url`, before the
+run row exists (#3121). The URL is judged as the scrape will send it, so a `\`
+in it counts as the `/` it is sent as. Loopback and private hosts get no
+exemption from a policy; without one, "Loopback and private addresses are
+deliberately allowed" above is the whole rule.
 
 #### The `scenario` block (collection runs)
 

@@ -377,7 +377,9 @@ database below version `6`, after the fold:
   values whose text contains `"file"` are parsed; one that is not JSON is left byte-identical and
   logged at warning level, never dropped. `request_examples.body` is a response's text and
   `inbox_requests.body` the bytes a listener received: neither is ever parsed as a request body,
-  so neither is visited. `collections` and the other tables store no request body.
+  so neither is visited (both are stored and read back byte-exact, a zero byte included, see
+  [`request_examples`](#request_examples) and [`inbox_requests`](#inbox_requests)).
+  `collections` and the other tables store no request body.
 - **Removes the allowed folders the root rule refuses**, as version `4` did.
 
 `file_grants` is created by this step (`CREATE TABLE IF NOT EXISTS`, `FILE_GRANTS_DDL` in
@@ -1011,6 +1013,12 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 | `created_at`   | INTEGER | Unix ms                                           |
 | `updated_at`   | INTEGER | Unix ms                                           |
 | `deleted_at`   | INTEGER | Nullable, Unix ms. NULL while live; the delete's instant once a `user` example is in the trash (#2971) |
+
+**body** is stored and read back byte-exact, a zero byte included (#3112). sqlite_orm reads a
+`std::string` column through `strlen`, so the mapping uses `db::BodyBytes`
+(declared in `types.hpp`, adapted in `database_impl.hpp`), a `std::string` whose extractor takes the length from
+`sqlite3_column_bytes`. The column is still `TEXT`, so no schema version moved and a row written
+before the fix reads whole: the write always bound its full length.
 
 **headers** is the same `KeyValueEntry[]` shape a request's headers use, not the
 JSON object [`result_bodies`](#result_bodies) and [`inbox_requests`](#inbox_requests)
@@ -2470,6 +2478,10 @@ What a [webhook inbox](api-reference.md#webhook-inbox) listener captured. Struct
 | `body_bytes`     | INTEGER    | Size **as received**, which exceeds `length(body)` when truncated |
 | `body_truncated` | INTEGER    | 1 when `body` is a prefix                                         |
 | `remote_addr`    | TEXT       | Peer address the request arrived from                             |
+
+**`body` is read back whole.** A capture holding a zero byte (`abc\0def`) is stored with all its
+bytes and lists with all of them - as base64, since NUL is never text - through the same
+`db::BodyBytes` mapping `request_examples.body` uses (#3112).
 
 **Bounded as it is written.** `add_inbox_request` inserts and trims in one transaction, keeping the
 newest `inboxMaxCaptures` rows per inbox (default 500, settable 1-10000) and deleting the oldest by
