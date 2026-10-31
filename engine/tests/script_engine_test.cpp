@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -21,6 +22,7 @@
 #include "echo_server.hpp"
 #include "library_call_config.hpp"
 #include "step_elements_test_helper.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/form_body.hpp"
@@ -29,6 +31,7 @@
 #include "vayu/http/script_parts.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/diagnostics.hpp"
+#include "vayu/utils/encoding.hpp"
 
 using namespace vayu;
 using namespace vayu::runtime;
@@ -3133,6 +3136,130 @@ TEST_F (ScriptEngineTest, ConsoleLevelWireSpellings) {
     EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Info), "info");
     EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Warn), "warn");
     EXPECT_STREQ (vayu::to_string (vayu::ConsoleLevel::Error), "error");
+}
+
+// What one script execution may leave in its console (#3134). The caps are the
+// constants themselves, so the tests move with them.
+namespace console_limits = vayu::core::constants::script_engine;
+
+namespace {
+
+bool is_console_limit_marker (const vayu::ConsoleEntry& entry) {
+    return entry.level == vayu::ConsoleLevel::Warn &&
+    entry.message.find ("console output limit reached") != std::string::npos;
+}
+
+std::size_t console_limit_markers (const vayu::ScriptResult& result) {
+    return static_cast<std::size_t> (
+    std::ranges::count_if (result.console_output, is_console_limit_marker));
+}
+
+} // namespace
+
+TEST_F (ScriptEngineTest, ConsoleEntryCapKeepsTheCapAndOneMarker) {
+    const auto result = engine.execute_test ("for (let i = 0; i < " +
+    std::to_string (console_limits::CONSOLE_MAX_ENTRIES + 500) + "; i++) console.log ('line ' + i);",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), console_limits::CONSOLE_MAX_ENTRIES + 1);
+    EXPECT_EQ (result.console_output[console_limits::CONSOLE_MAX_ENTRIES - 1].message,
+    "line " + std::to_string (console_limits::CONSOLE_MAX_ENTRIES - 1));
+    EXPECT_TRUE (is_console_limit_marker (result.console_output.back ()));
+    EXPECT_EQ (console_limit_markers (result), 1u);
+}
+
+// The marker is for output that was dropped: a script that stops exactly at
+// the cap lost nothing and gets none.
+TEST_F (ScriptEngineTest, ConsoleAtExactlyTheEntryCapEmitsNoMarker) {
+    const auto result = engine.execute_test ("for (let i = 0; i < " +
+    std::to_string (console_limits::CONSOLE_MAX_ENTRIES) + "; i++) console.log ('line ' + i);",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.console_output.size (), console_limits::CONSOLE_MAX_ENTRIES);
+    EXPECT_EQ (console_limit_markers (result), 0u);
+}
+
+// Lines each under the line cap, so only the total can stop them.
+TEST_F (ScriptEngineTest, ConsoleTotalByteCapDropsWholeLinesAndEmitsOneMarker) {
+    constexpr std::size_t line_bytes = 60000;
+    static_assert (line_bytes < console_limits::CONSOLE_LINE_MAX_BYTES);
+    const std::size_t lines_that_fit = console_limits::CONSOLE_TOTAL_MAX_BYTES / line_bytes;
+
+    const auto result =
+    engine.execute_test ("const line = 'x'.repeat (" + std::to_string (line_bytes) +
+    ");"
+    "for (let i = 0; i < " +
+    std::to_string (lines_that_fit + 5) + "; i++) console.log (line);",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), lines_that_fit + 1);
+    EXPECT_TRUE (is_console_limit_marker (result.console_output.back ()));
+    EXPECT_EQ (console_limit_markers (result), 1u);
+
+    std::size_t kept = 0;
+    for (std::size_t i = 0; i < lines_that_fit; ++i) {
+        EXPECT_EQ (result.console_output[i].message.size (), line_bytes);
+        kept += result.console_output[i].message.size ();
+    }
+    EXPECT_LE (kept, console_limits::CONSOLE_TOTAL_MAX_BYTES);
+}
+
+TEST_F (ScriptEngineTest, ConsoleLineOverTheCapIsTruncatedWithAMarker) {
+    const std::string over =
+    std::to_string (console_limits::CONSOLE_LINE_MAX_BYTES + 1000);
+    const auto result = engine.execute_test (
+    "console.log ('x'.repeat (" + over + "));", request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), 1u);
+    const std::string& message = result.console_output[0].message;
+    EXPECT_EQ (message.substr (0, console_limits::CONSOLE_LINE_MAX_BYTES),
+    std::string (console_limits::CONSOLE_LINE_MAX_BYTES, 'x'));
+    EXPECT_NE (message.find ("[truncated"), std::string::npos);
+    EXPECT_LT (message.size (), console_limits::CONSOLE_LINE_MAX_BYTES + 100);
+}
+
+TEST_F (ScriptEngineTest, ConsoleLineExactlyAtTheCapIsKeptWhole) {
+    const auto result = engine.execute_test ("console.log ('x'.repeat (" +
+    std::to_string (console_limits::CONSOLE_LINE_MAX_BYTES) + "));",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), 1u);
+    EXPECT_EQ (result.console_output[0].message,
+    std::string (console_limits::CONSOLE_LINE_MAX_BYTES, 'x'));
+}
+
+// A cut that lands inside a character must back up to the one before it, for
+// each width UTF-8 has (2, 3 and 4 bytes).
+TEST_F (ScriptEngineTest, ConsoleTruncationNeverSplitsAMultiByteCharacter) {
+    struct Wide {
+        const char* js;
+        std::size_t bytes;
+    };
+    const std::array<Wide, 3> widths{ Wide{ "\\u00e9", 2 },
+        Wide{ "\\u20ac", 3 }, Wide{ "\\ud83d\\ude00", 4 } };
+
+    for (const auto& wide : widths) {
+        // The character starts one byte short of the cap, so the cap falls
+        // inside it for every width above 1.
+        const std::size_t prefix = console_limits::CONSOLE_LINE_MAX_BYTES - 1;
+        const auto result = engine.execute_test ("console.log ('a'.repeat (" +
+        std::to_string (prefix) + ") + '" + wide.js + "' + 'tail');",
+        request, response, env);
+
+        ASSERT_TRUE (result.success) << result.error_message;
+        ASSERT_EQ (result.console_output.size (), 1u);
+        const std::string& message = result.console_output[0].message;
+        EXPECT_TRUE (vayu::utils::is_valid_utf8_text (message))
+        << wide.bytes << "-byte character";
+        EXPECT_EQ (message.substr (0, prefix), std::string (prefix, 'a'));
+        EXPECT_EQ (message.find ("tail"), std::string::npos);
+        EXPECT_NE (message.find ("[truncated"), std::string::npos);
+    }
 }
 
 // JSON.stringify flattens an Error, a Map and a Set to "{}" and quotes a Date;
@@ -8516,6 +8643,23 @@ TEST_F (ScriptEngineTest, VisualizerSetAcceptsPostmansArgumentShapes) {
 
     ASSERT_TRUE (result.success) << result.error_message;
     EXPECT_EQ (warnings_of (result).size (), 4u);
+}
+
+// The visualizer's warning goes through the same console bound as `console.*`
+// (#3134): lines already at the cap leave no room for it.
+TEST_F (ScriptEngineTest, VisualizerWarningRespectsTheConsoleEntryCap) {
+    const auto result = engine.execute_test ("for (let i = 0; i < " +
+    std::to_string (console_limits::CONSOLE_MAX_ENTRIES) +
+    "; i++) console.log ('line ' + i);"
+    "pm.visualizer.clear ();"
+    "pm.visualizer.clear ();",
+    request, response, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), console_limits::CONSOLE_MAX_ENTRIES + 1);
+    EXPECT_TRUE (is_console_limit_marker (result.console_output.back ()));
+    EXPECT_EQ (console_limit_markers (result), 1u);
+    EXPECT_EQ (warnings_of (result).size (), 1u);
 }
 
 TEST_F (ScriptEngineTest, VisualizerClearDoesNotThrowAndWarns) {

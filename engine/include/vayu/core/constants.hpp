@@ -637,6 +637,26 @@ constexpr size_t MAX_ASYNC_JOBS_WITHOUT_TIMEOUT = 100000;
  * deadline. A script that waits on a few sends holds a handful.
  */
 constexpr size_t MAX_PENDING_TIMERS = 10000;
+/**
+ * @brief The most bytes one console line keeps (#3134); a longer line is cut
+ *        on a UTF-8 character boundary and ends in a truncation marker.
+ *
+ * A cap rather than a knob because the output outlives the script: it is held
+ * in the `ScriptResult`, folded across levels and stored on the run's trace, so
+ * the QuickJS memory limit that bounds the script does not bound what it leaves
+ * behind. 64 KiB is a whole pretty-printed response body and then some.
+ */
+constexpr size_t CONSOLE_LINE_MAX_BYTES = size_t{ 64 } * 1024;
+/**
+ * @brief The most bytes of console text one script execution keeps, summed
+ *        over its lines (#3134). A line that would pass it is dropped whole.
+ */
+constexpr size_t CONSOLE_TOTAL_MAX_BYTES = size_t{ 1024 } * 1024;
+/**
+ * @brief The most console lines one script execution keeps (#3134), so a loop
+ *        of short `console.log` calls is bounded as well as a few huge ones.
+ */
+constexpr size_t CONSOLE_MAX_ENTRIES = 1000;
 } // namespace script_engine
 
 /**

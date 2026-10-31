@@ -8316,8 +8316,10 @@ a flat `string[]` with the source encoded as a `"[pre] "` text prefix and no
 level at all, which was indistinguishable from a script logging that string
 itself; a client that may talk to an older engine should read a bare string as
 `{"source": "test", "level": "log"}`, or `"pre"` when the prefix is present. The
-field is omitted entirely when neither script logged anything. See
-[scripting.md](scripting.md#console-output).
+field is omitted entirely when neither script logged anything. Each script
+execution keeps at most 1000 lines and 1 MiB (64 KiB a line); a script that
+passes either ends its entries with one `warn` line saying output was dropped.
+See [scripting.md](scripting.md#console-output).
 
 **`httpVersion` on the response** is the protocol actually **negotiated**
 (`CURLINFO_HTTP_VERSION` after the transfer), e.g. `"HTTP/1.1"` or `"HTTP/2"` -

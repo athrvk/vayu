@@ -825,11 +825,11 @@ ContextData& data,
 const char* access,
 const std::string& outcome) {
     const auto request_host = jar_request_host (ctx, data);
-    data.console_output.push_back ({ ConsoleLevel::Warn,
+    data.add_console_entry (ConsoleLevel::Warn,
     outcome + ": a jar " + access + " is limited to the request's own site" +
     (request_host ? " (" + *request_host + ")" : std::string{}) +
     " and to hosts this script has called through pm.sendRequest. See "
-    "docs/engine/scripting.md." });
+    "docs/engine/scripting.md.");
 }
 
 // Whether a jar read of @p url stays inside the scope. A URL libcurl reads no
@@ -897,11 +897,11 @@ const std::string& domain) {
     const std::string outcome =
     std::string ("pm.cookies.") + member + " wrote nothing for the domain " + host;
     if (suffix_like) {
-        data.console_output.push_back ({ ConsoleLevel::Warn,
+        data.add_console_entry (ConsoleLevel::Warn,
         outcome +
         ": a single-label domain is refused unless it is the request's "
         "own host, as it would reach every site under it. See "
-        "docs/engine/scripting.md." });
+        "docs/engine/scripting.md.");
     } else {
         warn_out_of_jar_scope (ctx, data, "write", outcome);
     }

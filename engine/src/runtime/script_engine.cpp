@@ -221,7 +221,7 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
         }
     }
 
-    data->console_output.push_back ({ static_cast<ConsoleLevel> (magic), ss.str () });
+    data->add_console_entry (static_cast<ConsoleLevel> (magic), ss.str ());
     return JS_UNDEFINED;
 }
 
@@ -785,6 +785,35 @@ void TimerQueue::clear (JSContext* ctx) {
     }
     timers_.clear ();
     order_.clear ();
+}
+
+namespace {
+constexpr std::string_view CONSOLE_LINE_TRUNCATED =
+"...[truncated: console line limit]";
+constexpr std::string_view CONSOLE_OUTPUT_LIMIT =
+"[console output limit reached: further output of this script is dropped]";
+} // namespace
+
+void ContextData::add_console_entry (ConsoleLevel level, std::string message) {
+    namespace limits = vayu::core::constants::script_engine;
+    if (console_capped) {
+        return;
+    }
+    if (message.size () > limits::CONSOLE_LINE_MAX_BYTES) {
+        const std::string_view head = vayu::utils::without_incomplete_utf8_tail (
+        std::string_view (message).substr (0, limits::CONSOLE_LINE_MAX_BYTES));
+        message.resize (head.size ());
+        message += CONSOLE_LINE_TRUNCATED;
+    }
+    if (console_output.size () >= limits::CONSOLE_MAX_ENTRIES ||
+    console_bytes + message.size () > limits::CONSOLE_TOTAL_MAX_BYTES) {
+        console_capped = true;
+        console_output.push_back (
+        { ConsoleLevel::Warn, std::string (CONSOLE_OUTPUT_LIMIT) });
+        return;
+    }
+    console_bytes += message.size ();
+    console_output.push_back ({ level, std::move (message) });
 }
 
 } // namespace pm_detail
