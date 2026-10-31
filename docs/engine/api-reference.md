@@ -12204,6 +12204,15 @@ more than one assertion. `successRate` is `testsPassed` as a percentage of asser
 `samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
 (`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
 
+The failing assertions are named on one synthetic row of `results[]`, the one whose `trace`
+carries `failures` (no captured request has it): `failures` (each distinct message once, at most
+10, a scenario step's name prefixing it), `failureCounts` (how many times each failed),
+`failuresDistinct` (every distinct message, so `failuresDistinct - failures.length` were turned
+away), `totalFailed` and `totalPassed` (assertions, each occurrence counted). A script failing
+the same way on every sampled response is one entry with a count, not one entry per sample
+(#3127). `failureCounts` and `failuresDistinct` are absent on a row from an older engine; see
+[`results`](db-schema.md#results) for the stored shape.
+
 **`thresholdValidation`** is one check per declared
 [budget](#the-thresholds-block-passfail-budgets) with the run's verdict. A
 `maxAssertionFailureRatePct` check also names the two populations it judged

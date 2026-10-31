@@ -4101,6 +4101,19 @@ The **language** is current; what is missing is the **host environment**:
   the sample to one opaque failure. Only a script that threw before any
   `pm.test` ran reports a single script-level failure, carrying the thrown
   message (issue #1502)
+- The failing assertions are also stored by name, **once each**: a script that
+  fails the same way on every sampled response is one failure that happened N
+  times, not N failures (issue #3127). The run's validation result row
+  (`results[]`, the one whose `trace` carries `failures`) holds `failures`
+  (distinct messages in first-seen order, at most 10), `failureCounts` (the same
+  length: how many times each failed), `failuresDistinct` (every distinct
+  message, kept or not, so `failuresDistinct - failures.length` were turned
+  away), and `totalFailed` / `totalPassed`, which count every occurrence - the
+  `failureCounts` always sum to `totalFailed` when nothing was turned away. A
+  scenario step's name prefixes its messages (`step name: assertion: ...`) and
+  is part of a message's identity, so the same assertion failing in two steps
+  is two entries. The number of responses replayed is `testValidation`'s
+  `samplesTested`, not a field of the row
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
   `requestId` / `requestName` are the run's linked request when it has one. It
   also reports `iteration` - the index the sampled submission claimed before it
