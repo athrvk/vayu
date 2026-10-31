@@ -558,7 +558,14 @@ histograms and the `slow_threshold_ms` decision.
 **Per-step tallies.** `scenario.steps[i].elements[] = { id, kind, name?, origin?, required?,
 passed, failed, missing, error, skipped, deferred }` beside the existing `tests` node, one row per
 element that ran at least once this run - `StepElementTallies`, sized once from the plan's
-compiled elements so recording on the completion path is a lookup, never a lock or an allocation.
+compiled elements so recording a count on the completion path is a lookup, never a lock or an
+allocation. An inline `script.*` row adds `messages` and `console` (#3127), what the script threw,
+failed and logged: `script.pre` / `script.post` copy them onto the outcome
+(`ElementOutcome::messages`, never serialised on a trace), and each list
+(`DistinctMessageSample`) keeps the first 10 distinct entries and counts what it turned away. Its
+slots are written once and published through an atomic size, so a repeat or a full list is a few
+lock-free compares; only keeping a new entry takes the list's mutex. The wire shape is in
+[api-reference.md](api-reference.md#scenario-load-runs).
 Ids are unique within one level's list, not across the chain (a duplicated collection keeps its
 elements' ids), so a step's composed list can hold one id twice; each still gets its own row,
 counts and label, told apart by its `origin` kind, scope and id (`ElementSlotIndex`).

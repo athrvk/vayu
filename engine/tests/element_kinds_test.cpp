@@ -28,12 +28,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -1317,6 +1319,157 @@ TEST_F (ElementKindsTest, AnOutcomeRowOmitsWhatItsElementDoesNotHave) {
     EXPECT_FALSE (rows[0].contains ("origin"));
     EXPECT_FALSE (rows[0].contains ("required"));
     EXPECT_EQ (rows[0]["missing"], 1);
+    for (const char* key : { "messages", "messagesDropped", "console", "consoleDropped" }) {
+        EXPECT_FALSE (rows[0].contains (key)) << key << " on a row that said nothing";
+    }
+}
+
+namespace {
+
+using vayu::core::ElementMessage;
+
+ElementMessage error_message (const std::string& text) {
+    return { ElementMessage::Kind::Error, vayu::ConsoleLevel::Log, text };
+}
+
+ElementMessage console_line (vayu::ConsoleLevel level, const std::string& text) {
+    return { ElementMessage::Kind::Console, level, text };
+}
+
+/// An errored `script.post` outcome that said @p messages.
+ElementOutcome script_outcome (std::vector<ElementMessage> messages) {
+    ElementOutcome out;
+    out.id       = "el_script";
+    out.kind     = "script.post";
+    out.status   = "error";
+    out.messages = std::move (messages);
+    return out;
+}
+
+/// The report row @p counts writes for a `script.post` element.
+nlohmann::json script_row (const vayu::core::ElementOutcomeCounts& counts) {
+    const auto elements = vayu::core::compile_elements (nlohmann::json::array (
+    { nlohmann::json{ { "id", "el_script" }, { "kind", "script.post" },
+    { "config", { { "script", "throw new Error('boom');" } } } } }));
+    nlohmann::json rows = nlohmann::json::array ();
+    counts.append_report_row (rows, elements.at (0));
+    if (rows.size () != 1) {
+        ADD_FAILURE () << "no row: " << rows.dump ();
+        return nlohmann::json::object ();
+    }
+    return rows[0];
+}
+
+constexpr size_t MAX_ELEMENT_MESSAGES =
+vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGES;
+
+} // namespace
+
+// #3127: a script element's row says why it failed and what it logged, each
+// distinct message once however many iterations said it, a test failure
+// beside the throw and a console line in its own list with its level.
+// Mutation check: drop the offer loop from `ElementOutcomeCounts::record`
+// (pipeline.cpp) and the row carries neither list.
+TEST_F (ElementKindsTest, AScriptRowKeepsEachDistinctMessageOnce) {
+    vayu::core::ElementOutcomeCounts counts;
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        counts.record (script_outcome ({ error_message ("Error: boom"),
+        { ElementMessage::Kind::Test, vayu::ConsoleLevel::Log, "status is 201: expected 200 to equal 201" },
+        console_line (vayu::ConsoleLevel::Log, "saw 200"),
+        console_line (vayu::ConsoleLevel::Error, "saw 200") }));
+    }
+
+    auto row = script_row (counts);
+    EXPECT_EQ (row["error"], 3);
+    EXPECT_EQ (row["messages"],
+    (nlohmann::json::array ({ { { "kind", "error" }, { "text", "Error: boom" } },
+    { { "kind", "test" }, { "text", "status is 201: expected 200 to equal 201" } } })))
+    << row.dump ();
+    EXPECT_EQ (row["console"],
+    (nlohmann::json::array ({ { { "level", "log" }, { "text", "saw 200" } },
+    { { "level", "error" }, { "text", "saw 200" } } })))
+    << "the same text at another level is another line: " << row.dump ();
+    EXPECT_FALSE (row.contains ("messagesDropped")) << "a repeat is not a drop";
+    EXPECT_FALSE (row.contains ("consoleDropped")) << row.dump ();
+}
+
+// Each list keeps the first `MAX_ELEMENT_MESSAGES` distinct messages and
+// counts what it turned away, and a console that filled its own list leaves
+// the error list room for the throws. Mutation check: drop the `fetch_add`
+// from `DistinctMessageSample::settled` (pipeline.cpp) and both dropped counts
+// are absent.
+TEST_F (ElementKindsTest, AScriptRowsListsAreCappedAndSayWhatTheyDropped) {
+    vayu::core::ElementOutcomeCounts counts;
+    constexpr size_t LINES = MAX_ELEMENT_MESSAGES + 5;
+    std::vector<ElementMessage> chatter;
+    chatter.reserve (LINES);
+    for (size_t line = 0; line < LINES; ++line) {
+        chatter.push_back (
+        console_line (vayu::ConsoleLevel::Log, "line " + std::to_string (line)));
+    }
+    counts.record (script_outcome (chatter));
+    for (size_t error = 0; error < MAX_ELEMENT_MESSAGES + 3; ++error) {
+        counts.record (
+        script_outcome ({ error_message ("error " + std::to_string (error)) }));
+    }
+    // A repeat of a dropped message is dropped again; of a kept one, not.
+    counts.record (script_outcome ({ error_message ("error 0"),
+    error_message ("error " + std::to_string (MAX_ELEMENT_MESSAGES)) }));
+
+    auto row = script_row (counts);
+    ASSERT_EQ (row["console"].size (), MAX_ELEMENT_MESSAGES) << row.dump ();
+    EXPECT_EQ (row["console"].back ()["text"],
+    "line " + std::to_string (MAX_ELEMENT_MESSAGES - 1));
+    EXPECT_EQ (row["consoleDropped"], 5);
+    ASSERT_EQ (row["messages"].size (), MAX_ELEMENT_MESSAGES) << row.dump ();
+    EXPECT_EQ (row["messages"].front ()["text"], "error 0")
+    << "the console's overflow did not cost the error list a slot";
+    EXPECT_EQ (row["messagesDropped"], 4);
+}
+
+// Offered from many workers at once, every distinct message is kept at most
+// once, the list never passes its cap, and every offer of a message the list
+// could not keep is counted: a message that is not kept was offered only
+// while the list was full. Run under the TSan leg, this is also the data-race
+// check on the lock-free read.
+TEST_F (ElementKindsTest, AScriptRowsSampleIsSafeUnderConcurrentOffers) {
+    constexpr size_t DISTINCT = MAX_ELEMENT_MESSAGES + 5;
+    constexpr size_t THREADS  = 8;
+    constexpr size_t ROUNDS   = 50;
+    vayu::core::ElementOutcomeCounts counts;
+    std::vector<std::thread> workers;
+    workers.reserve (THREADS);
+    for (size_t thread = 0; thread < THREADS; ++thread) {
+        workers.emplace_back ([&counts, thread] {
+            for (size_t round = 0; round < ROUNDS; ++round) {
+                // Each worker walks the messages from its own start, so which
+                // ten win the race differs run to run.
+                const size_t which = (thread + round) % DISTINCT;
+                counts.record (script_outcome (
+                { error_message ("error " + std::to_string (which)) }));
+            }
+        });
+    }
+    for (auto& worker : workers) {
+        worker.join ();
+    }
+
+    const auto kept = counts.messages.kept ();
+    ASSERT_EQ (kept.size (), MAX_ELEMENT_MESSAGES);
+    std::vector<std::string> texts;
+    for (const auto& message : kept) {
+        EXPECT_EQ (std::ranges::count (texts, message.text), 0) << message.text;
+        texts.push_back (message.text);
+    }
+    size_t offers_of_dropped = 0;
+    for (size_t thread = 0; thread < THREADS; ++thread) {
+        for (size_t round = 0; round < ROUNDS; ++round) {
+            const auto text = "error " + std::to_string ((thread + round) % DISTINCT);
+            offers_of_dropped += std::ranges::count (texts, text) == 0 ? 1 : 0;
+        }
+    }
+    EXPECT_EQ (counts.messages.dropped (), offers_of_dropped);
+    EXPECT_EQ (counts.error.load (), THREADS * ROUNDS);
 }
 
 // A single-request run's `requestElements` may hold one id at two levels

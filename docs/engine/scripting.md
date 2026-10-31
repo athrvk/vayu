@@ -2895,6 +2895,21 @@ The caps are per execution: each level's script has its own, so a request with
 a collection, a folder and a request script can show up to three times as much,
 plus a marker each.
 
+**Under a load test, a script that runs inline keeps a sample instead** (#3127).
+A load run stores no trace per request, so an inline `script.pre` or
+`script.post` reports on its element row of the report (a scenario step's
+`elements`, or a single-request run's `summary.elements`): a `console` list of
+`{ level, text }` beside a `messages` list of `{ kind: "error" | "test", text }`
+(the error it threw, and each failing `pm.test` as `name: message`). Each list
+keeps the first 10 distinct entries the run produced, however many iterations
+repeated one, each cut to 500 bytes (`MAX_ELEMENT_MESSAGES` and
+`MAX_ELEMENT_MESSAGE_BYTES` in `script_validation`, `core/constants.hpp`).
+What a full list turned away is counted in `consoleDropped` /
+`messagesDropped`. The lists are apart so a script that logs on every iteration
+cannot crowd out why it failed. A script left to the deferred replay keeps none
+of this; see [Load Test Scripts](#load-test-scripts) and the
+[API reference](api-reference.md#post-runs).
+
 ## Examples
 
 ### Validate JSON Response
@@ -4109,6 +4124,11 @@ The **language** is current; what is missing is the **host environment**:
   during the run instead (see
   [Script elements](#script-elements-design-send-and-the-sequential-run)
   below)
+- An inline script's console lines, the error it threw and each failing
+  `pm.test` reach the report as a bounded sample on its element row: the first
+  10 distinct of each, with a count of what did not fit (see
+  [Console Output](#console-output), #3127). The deferred replay's console
+  output is not kept; its failures are the report's `testValidation`
 - For a pre-request script that is **not** inlined, a value it would have set -
   a token fetched and written with `pm.environment.set` - never reaches a
   later step or request under load, because the script that would set it never

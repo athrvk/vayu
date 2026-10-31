@@ -4880,8 +4880,10 @@ is absent here until it is added on purpose:
    parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts
    only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
-   `lifecycle` outcome drops its `message`, and the report's `auth` section
-   (whose `lastError` is a token endpoint's words) is left out.
+   `lifecycle` outcome drops its `message`, an element row (a step's or the
+   run's `elements`) drops `messages`, `console` and their dropped counts
+   (#3127), and the report's `auth` section (whose `lastError` is a token
+   endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
    display name, step, transaction, metric and series names) is carried as
    written.
@@ -10021,6 +10023,35 @@ outcome: a disabled element, an un-inlined `script.pre` (no replay to go to), a
 controller's skip, and an optional `extract.json` over a body it could not
 read.
 
+A `script.pre` or `script.post` that ran inline also says why it failed and
+what it logged (#3127), since a load run keeps no trace to read it from:
+
+```json
+{ "id": "el_4", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0,
+  "error": 480, "skipped": 0, "deferred": 0,
+  "messages": [
+    { "kind": "error", "text": "Error: boom" },
+    { "kind": "test", "text": "status is 201: expected 200 to equal 201" }
+  ],
+  "console": [ { "level": "log", "text": "saw 200" } ],
+  "consoleDropped": 37 }
+```
+
+`messages` lists the errors the script threw (`kind: "error"`, a timeout
+included) and each failing `pm.test` as `name: message` (`kind: "test"`);
+`console` lists its console lines with their `level` (`log`, `info`, `warn`,
+`error`). Each list holds the first 10 distinct entries the run produced, in
+the order first seen, however many executions repeated one, and each `text` is
+cut to 500 bytes on a character boundary, ending in `...[truncated]`. The two
+lists fill apart, so a script that logs on every iteration cannot crowd out why
+it failed. `messagesDropped` / `consoleDropped` count the executions' entries a
+full list turned away (a repeat of a dropped entry counted each time, a repeat
+of a kept one not at all), so a list without its dropped count is the whole set
+of distinct entries. Every one of the four keys is **absent** when it would be
+empty or 0, so a row from an earlier engine reads the same. A single-request
+run's `summary.elements` rows carry the same keys. The run export
+(`POST /export/run-report`) leaves all four out.
+
 **`transactions`** (issue #1515), a sibling of `steps` rather than a member of
 it - a `control.transaction` spans a folder, not one step:
 
@@ -12150,7 +12181,10 @@ past the cap), and the section is absent when none of its traces was slow.
 outcomes - `extract.*` / `assert.*` / `timer.*` / `script.*`, tallied across every
 submission in the row shape a scenario step's `elements` uses (`{id, kind, name?, origin?,
 required?, passed, failed, missing, error, skipped, deferred}`, one count per outcome word,
-#3051; see [Scenario load runs](#scenario-load-runs)). There is one row per element,
+#3051; see [Scenario load runs](#scenario-load-runs)), and an inline `script.*` row's
+`messages?`, `messagesDropped?`, `console?` and `consoleDropped?`: what it threw, each
+failing test and its console lines, a bounded distinct sample (#3127, described there).
+There is one row per element,
 in `requestElements` order, so a collection's element and the request's own that share an
 id (#3101) are two rows, each with its own counts and `origin`. `deferred` (issue #2144)
 counts the submissions an un-inlined `script.post` was left to the completion replay on:

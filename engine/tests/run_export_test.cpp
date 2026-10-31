@@ -57,6 +57,18 @@ json leak_snapshot () {
         { "duration", "60s" }, { "concurrency", 10 } };
 }
 
+/// A script element's report row carrying what its script threw and logged
+/// (#3127), which the export leaves behind.
+json leak_script_row () {
+    return json{ { "id", "el_post" }, { "kind", "script.post" },
+        { "passed", 0 }, { "failed", 0 }, { "missing", 0 }, { "error", 6 },
+        { "skipped", 0 }, { "deferred", 0 },
+        { "messages", json::array ({ { { "kind", "error" }, { "text", "LEAKTHROWN" } } }) },
+        { "messagesDropped", 2 },
+        { "console", json::array ({ { { "level", "log" }, { "text", "LEAKCONSOLE" } } }) },
+        { "consoleDropped", 3 } };
+}
+
 json leak_summary () {
     return json{ { "total_requests", 6 }, { "rps", 0.1 }, { "test_duration", 60.0 },
         { "status_codes", { { "200", 5 }, { "500", 1 } } },
@@ -78,9 +90,12 @@ json leak_summary () {
         { { "teardown",
         json::array ({ { { "id", "el_t" }, { "kind", "script.teardown" }, { "origin", json::object () },
         { "outcome", "error" }, { "message", "LEAKSCRIPT" } } }) } } },
-        { "auth",
-        { { "refreshes", json::array () }, { "refreshFailures", 1 },
-        { "lastError", "LEAKAUTH" } } } };
+        { "auth", { { "refreshes", json::array () }, { "refreshFailures", 1 }, { "lastError", "LEAKAUTH" } } },
+        { "elements", json::array ({ leak_script_row () }) },
+        { "scenario",
+        { { "steps",
+        json::array ({ { { "index", 0 }, { "name", "Checkout" },
+        { "elements", json::array ({ leak_script_row () }) } } }) } } } };
 }
 
 /// Every key name anywhere under @p node.
@@ -225,13 +240,35 @@ TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheFile) {
     auto [envelope, document] = export_ok (json{ { "runId", "run_leak" } });
     const std::string text    = envelope["text"].get<std::string> ();
     ASSERT_FALSE (text.empty ());
-    for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY", "LEAKTRACE",
-         "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+    for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY", "LEAKTRACE", "LEAKSAMPLE",
+         "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH", "LEAKTHROWN", "LEAKCONSOLE" }) {
         EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
                                                           << text;
     }
     EXPECT_EQ (document["config"]["url"], "https://u@h/x?api_key=&page=2");
     EXPECT_EQ (envelope["notes"]["urlCredentialsOmitted"], 2);
+}
+
+// #3127: a script element's row is exported counts-only, on a single-request
+// run and a scenario step alike: what its script threw and logged is a
+// script's own text, and the lists' dropped counts mean nothing without them.
+// Mutation check: add "consoleDropped" to ELEMENT_TALLY_KEYS (run_export.cpp)
+// and this fails. Adding "messages" alone does not: `pick` copies no list of
+// objects, so the lists would need a picker of their own to leak.
+TEST_F (RunExportTest, AScriptElementRowIsExportedWithoutItsMessages) {
+    seed_leak_run ("run_leak");
+    auto [envelope, document] = export_ok (json{ { "runId", "run_leak" } });
+    const auto& report        = document.at ("report");
+    ASSERT_TRUE (report.contains ("elements")) << report.dump ();
+    ASSERT_TRUE (report.contains ("scenario")) << report.dump ();
+    for (const json* row : { &report.at ("elements").at (0),
+         &report.at ("scenario").at ("steps").at (0).at ("elements").at (0) }) {
+        EXPECT_EQ (row->value ("error", -1), 6)
+        << "the row itself is exported: " << row->dump ();
+        for (const char* key : { "messages", "messagesDropped", "console", "consoleDropped" }) {
+            EXPECT_FALSE (row->contains (key)) << key << " in " << row->dump ();
+        }
+    }
 }
 
 TEST_F (RunExportTest, NoTraceResultOrSampleKeyAnywhere) {
