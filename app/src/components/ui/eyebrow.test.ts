@@ -105,8 +105,7 @@ const EXEMPT: Record<string, string> = {
 	// marker ("LOG", "ERR"), the `off` / `not defined` markers a variable row
 	// carries beside a name, and the response pane's detected content type,
 	// which sits inline in a 32px band and is deliberately unweighted.
-	"modules/request-builder/components/ResponseViewer/console/ScriptSection.tsx":
-		"console gutter tone marker, one text node per output row",
+	"components/shared/LogGutter.tsx": "console gutter tone marker, one text node per output row",
 	"components/layout/context-bar/VariablesSection.tsx": "`not defined` marker beside a value",
 	"components/layout/context-bar/CollectionVariablesSection.tsx": "`off` marker beside a value",
 	"components/shared/response-viewer/ResponseBody.tsx":

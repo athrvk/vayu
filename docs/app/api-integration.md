@@ -2113,8 +2113,19 @@ elements ("Replayed N of the M responses that carried a test script (1 step)", #
 because most requests of a sequence have no script to replay; `samplesTested` counts responses and
 `testsPassed` / `testsFailed` count assertions, and the card's labels say so
 (issue #2144). A report's `elements[]` row may carry `deferred` (absent from older
-reports): a post-request script left to the post-run replay, rendered as "replayed
-on N sampled responses" rather than "0 passed".
+reports): a post-request script left to the post-run replay, rendered as "N requests
+deferred to a post-run replay over M sampled responses" rather than "0 passed", where M is
+`testValidation.samplesTested` (a scenario step's `tests.sampled`; a row whose report does
+not carry one reads "replay of sampled responses"). An inline `script.*` row may also carry
+`messages` (the error it threw and each failing `pm.test`, `{kind: "error" | "test", text}`),
+`console` (`{level, text}`) and the `messagesDropped` / `consoleDropped` counts of what a
+full list turned away (#3127); each key is absent when empty, and the Elements card and the
+Steps tab list them under the row. The deferred replay's failures arrive on the synthetic
+`results[]` row as `failures` (each distinct message once), `failureCounts` (how often each
+failed), `failuresDistinct` and the occurrence totals `totalFailed` / `totalPassed`; the
+Test validation card shows each message once with `x3` beside a repeat and says "Showing N
+of M distinct" when the engine kept fewer than it saw. A row from before #3127 has no
+`failureCounts` or `failuresDistinct`, and each of its entries counts as one.
 
 An **absent** `sampling` is a run whose stored summary predates the counts, not
 a run that dropped nothing, so the note stays out rather than asserting a

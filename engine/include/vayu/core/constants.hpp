@@ -981,6 +981,17 @@ constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 namespace script_validation {
 /// Maximum failure messages to store in validation results
 constexpr size_t MAX_FAILURE_MESSAGES = 10;
+/// Distinct messages a load report's script element row keeps in each of its
+/// two lists (#3127): `messages` (a thrown error, a failing `pm.test`) and
+/// `console`. Two lists, so a script that logs on every iteration cannot crowd
+/// out why it failed. What a full list turns away is counted beside it
+/// (`messagesDropped`, `consoleDropped`), so a bounded list never reads as
+/// complete.
+constexpr size_t MAX_ELEMENT_MESSAGES = 10;
+/// Bytes one of those messages keeps, cut on a UTF-8 character boundary
+/// (`utils::bounded_text`): a script can throw or log a megabyte, and the
+/// report is stored on the run row. The `schema_validation` figure.
+constexpr size_t MAX_ELEMENT_MESSAGE_BYTES = 500;
 } // namespace script_validation
 
 /**

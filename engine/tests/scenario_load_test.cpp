@@ -1286,6 +1286,43 @@ TEST_F (ScenarioLoadTest, ALoadRunAndACollectionRunCountAThrownScriptTheSame) {
     EXPECT_EQ (load.at ("iterationsAbandoned"), 0) << load.dump ();
 }
 
+// #3127: a load run says why an inline script failed and what it logged, on
+// the step's element row: the throw, the failing test by name and the console
+// line, each once however many iterations said it. Mutation check: drop the
+// `outcome_messages` assignment from `run_step_script` (script_kinds.cpp) and
+// the row carries neither `messages` nor `console`.
+TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheStepsRow) {
+    ScenarioMockServer server;
+    auto execution = plan_over ({ server.url ("/s0") });
+    execution.plan.steps[0].elements =
+    vayu::tests::compiled_elements ({ one_inline_script ("script.post",
+    "console.log('saw ' + pm.response.code);\n"
+    "pm.test('status is 201', function () {"
+    " pm.expect(pm.response.code).to.equal(201); });\n"
+    "throw new Error('boom');") });
+
+    auto state = run (
+    json{ { "mode", "iterations" }, { "iterations", 4 }, { "concurrency", 2 } }, execution);
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+
+    const auto& row = summary.at ("steps").at (0).at ("elements").at (0);
+    EXPECT_EQ (row.at ("error").get<int> (), 4) << row.dump ();
+    EXPECT_EQ (row.value ("console", json ()),
+    (json::array ({ { { "level", "log" }, { "text", "saw 200" } } })))
+    << row.dump ();
+    const auto messages = row.value ("messages", json::array ());
+    ASSERT_EQ (messages.size (), 2u) << row.dump ();
+    EXPECT_EQ (messages[0].at ("kind").get<std::string> (), "error");
+    EXPECT_NE (messages[0].at ("text").get<std::string> ().find ("boom"), std::string::npos)
+    << row.dump ();
+    EXPECT_EQ (messages[1].at ("kind").get<std::string> (), "test");
+    EXPECT_TRUE (
+    messages[1].at ("text").get<std::string> ().starts_with ("status is 201: "))
+    << row.dump ();
+    EXPECT_FALSE (row.contains ("messagesDropped")) << row.dump ();
+}
+
 // ============================================================================
 // Flow control is read the same on both run kinds (#2974)
 // ============================================================================

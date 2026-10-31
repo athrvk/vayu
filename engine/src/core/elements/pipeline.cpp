@@ -216,6 +216,81 @@ void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
         bucket = &deferred;
     }
     bucket->fetch_add (1, std::memory_order_relaxed);
+    for (const auto& message : outcome.messages) {
+        auto& sample = message.kind == ElementMessage::Kind::Console ? console : messages;
+        sample.offer (message);
+    }
+}
+
+namespace {
+
+bool holds (std::span<const ElementMessage> kept, const ElementMessage& message) {
+    return std::ranges::find (kept, message) != kept.end ();
+}
+
+const char* message_kind_name (ElementMessage::Kind kind) {
+    return kind == ElementMessage::Kind::Test ? "test" : "error";
+}
+
+nlohmann::json message_entry (const ElementMessage& message) {
+    if (message.kind == ElementMessage::Kind::Console) {
+        return { { "level", vayu::to_string (message.level) }, { "text", message.text } };
+    }
+    return { { "kind", message_kind_name (message.kind) }, { "text", message.text } };
+}
+
+/// Writes @p sample under @p key and its dropped count under @p dropped_key,
+/// each only when there is something to say.
+void write_message_sample (nlohmann::json& row,
+const char* key,
+const char* dropped_key,
+const DistinctMessageSample& sample) {
+    const auto kept = sample.kept ();
+    if (kept.empty ()) {
+        return;
+    }
+    nlohmann::json list = nlohmann::json::array ();
+    for (const auto& message : kept) {
+        list.push_back (message_entry (message));
+    }
+    row[key] = std::move (list);
+    if (const size_t dropped = sample.dropped (); dropped > 0) {
+        row[dropped_key] = dropped;
+    }
+}
+
+} // namespace
+
+bool DistinctMessageSample::settled (const ElementMessage& message, size_t published) {
+    if (holds (std::span (slots_).first (published), message)) {
+        return true;
+    }
+    if (published < slots_.size ()) {
+        return false;
+    }
+    dropped_.fetch_add (1, std::memory_order_relaxed);
+    return true;
+}
+
+void DistinctMessageSample::offer (const ElementMessage& message) {
+    if (settled (message, size_.load (std::memory_order_acquire))) {
+        return;
+    }
+    const std::lock_guard lock (write_mutex_);
+    const size_t current = size_.load (std::memory_order_relaxed);
+    if (settled (message, current)) {
+        return;
+    }
+    slots_.at (current) = message;
+    size_.store (current + 1, std::memory_order_release);
+}
+
+std::span<const ElementMessage> DistinctMessageSample::kept () const {
+    return std::span (slots_).first (size_.load (std::memory_order_acquire));
+}
+
+size_t DistinctMessageSample::dropped () const {
+    return dropped_.load (std::memory_order_relaxed);
 }
 
 void ElementOutcomeCounts::append_report_row (nlohmann::json& rows,
@@ -247,6 +322,8 @@ const CompiledElement& element) const {
     row["error"]    = error_count;
     row["skipped"]  = skipped_count;
     row["deferred"] = deferred_count;
+    write_message_sample (row, "messages", "messagesDropped", messages);
+    write_message_sample (row, "console", "consoleDropped", console);
     rows.push_back (std::move (row));
 }
 
@@ -491,6 +568,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_message.reset ();
         ctx.outcome_waited_ms.reset ();
         ctx.outcome_duration_us.reset ();
+        ctx.outcome_messages.clear ();
         ctx.element_id    = compiled.id;
         ctx.element_scope = compiled.scope;
 
@@ -528,6 +606,7 @@ const std::function<std::optional<ElementSkip> (const CompiledElement&)>& skip_r
         ctx.outcome_waited_ms,
         deferred,
         ctx.outcome_duration_us,
+        std::move (ctx.outcome_messages),
         });
     }
 }

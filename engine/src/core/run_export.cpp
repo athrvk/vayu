@@ -195,6 +195,8 @@ constexpr auto STEP_KEYS     = std::to_array<std::string_view> (
 "noResponse", "unresolvedTokens", "extractorMisses", "preRequestScript" });
 constexpr auto STEP_LATENCY_KEYS =
 std::to_array<std::string_view> ({ "min", "p50", "p95", "p99", "max" });
+// `messages` and `console` are left behind, with their dropped counts: they
+// are what a script threw and logged (#3127).
 constexpr auto ELEMENT_TALLY_KEYS = std::to_array<std::string_view> ({ "id", "kind",
 "name", "required", "passed", "failed", "missing", "error", "skipped", "deferred" });
 constexpr auto ELEMENT_ORIGIN_KEYS =

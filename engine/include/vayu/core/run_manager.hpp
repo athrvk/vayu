@@ -223,7 +223,8 @@ struct EngineDefaults {
  * separate rows under a shared id. Sized once, from
  * `RunContext::step_elements`, at construction - so `record` below is a
  * lookup into existing atomics, never an insert, and safe for the concurrent
- * event-loop worker threads that call it.
+ * event-loop worker threads that call it (a script's message sample locks
+ * only to keep a new entry, `DistinctMessageSample`).
  */
 class RequestElementTallies {
     public:
