@@ -24,7 +24,7 @@ import {
 	markersOutsideTemplates,
 	templateTwinUri,
 } from "./variables-diagnostics";
-import { maskJsonTemplatesInPlace } from "./templates";
+import { maskJsonTemplatesInPlace, rangesOverlap } from "./templates";
 import { buildVariablesJsonSchema } from "./variables-schema";
 import { fixtureSchema } from "@/test/graphql-schema-fixture";
 
@@ -77,14 +77,33 @@ function stubModel(uri: string, value: string, languageId = "json"): StubModel {
 
 type StubMarker = Monaco.editor.IMarkerData & { owner?: string };
 
-/** Monaco's marker bookkeeping, down to the parts this module touches. */
+type StubUri = { toString: () => string };
+
+/**
+ * Monaco's marker bookkeeping, down to the parts this module touches.
+ *
+ * The event is delivered the way Monaco's `MicrotaskEmitter` delivers it: fires
+ * are queued and handed out together in one microtask, and a fire made while
+ * that batch is being delivered joins it and is dropped with it.
+ */
 function stubMonaco() {
 	const models = new Map<string, StubModel>();
 	const markers = new Map<string, StubMarker[]>();
-	const markerListeners: ((uris: { toString: () => string }[]) => void)[] = [];
+	const markerListeners: ((uris: StubUri[]) => void)[] = [];
+	let queued: StubUri[][] = [];
+	const fireMarkersChanged = (uris: StubUri[]) => {
+		if (markerListeners.length === 0) return;
+		queued.push(uris);
+		if (queued.length !== 1) return;
+		queueMicrotask(() => {
+			const batch = queued.flat();
+			[...markerListeners].forEach((fn) => fn(batch));
+			queued = [];
+		});
+	};
 	const setModelMarkers = vi.fn((model: StubModel, owner: string, next: StubMarker[]) => {
 		markers.set(`${model.uri.toString()}|${owner}`, next);
-		markerListeners.forEach((fn) => fn([model.uri]));
+		fireMarkersChanged([model.uri]);
 	});
 	const monaco = {
 		Uri: { parse: (uri: string) => ({ toString: () => uri }) },
@@ -95,10 +114,10 @@ function stubMonaco() {
 				return model;
 			},
 			getModel: (uri: { toString: () => string }) => models.get(uri.toString()) ?? null,
-			getModelMarkers: (filter: { resource?: { toString: () => string }; owner?: string }) =>
+			getModelMarkers: (filter: { resource?: StubUri; owner?: string }) =>
 				markers.get(`${filter.resource?.toString() ?? ""}|${filter.owner ?? ""}`) ?? [],
 			setModelMarkers,
-			onDidChangeMarkers: (fn: (uris: { toString: () => string }[]) => void) => {
+			onDidChangeMarkers: (fn: (uris: StubUri[]) => void) => {
 				markerListeners.push(fn);
 				return { dispose: () => markerListeners.splice(markerListeners.indexOf(fn), 1) };
 			},
@@ -111,10 +130,13 @@ function stubMonaco() {
 		/** Publish markers the way the JSON worker does, event and all. */
 		publish(uri: string, next: StubMarker[]) {
 			markers.set(`${uri}|json`, next);
-			markerListeners.forEach((fn) => fn([{ toString: () => uri }]));
+			fireMarkersChanged([{ toString: () => uri }]);
 		},
 	};
 }
+
+/** A macrotask runs only once every queued microtask, and each one they queue, has. */
+const deliverMarkerEvents = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 /** The most recent `setModelMarkers` call, which is the state the pane is in. */
 function lastCall<T extends unknown[]>(spy: { mock: { calls: T[] } }): T {
@@ -141,7 +163,7 @@ describe("attachVariablesDiagnostics", () => {
 		expect(twin()?.getValue()).toBe('{"limit": "VVV", "name": "x"}');
 	});
 
-	it("publishes the twin's markers on the pane, minus the ones a token earned", () => {
+	it("publishes the twin's markers on the pane, minus the ones a token earned", async () => {
 		const { monaco, setModelMarkers, publish } = stubMonaco();
 		const model = stubModel(MODEL_URI, '{"limit": {{n}}, "name": 5}');
 		attachVariablesDiagnostics(monaco, model as unknown as Monaco.editor.ITextModel);
@@ -151,6 +173,7 @@ describe("attachVariablesDiagnostics", () => {
 			marker('Incorrect type. Expected "number".', 11, 16),
 			marker('Incorrect type. Expected "string".', 26, 27),
 		]);
+		await deliverMarkerEvents();
 
 		const [target, owner, published] = lastCall(setModelMarkers);
 		expect(target.uri.toString()).toBe(MODEL_URI);
@@ -159,7 +182,7 @@ describe("attachVariablesDiagnostics", () => {
 		expect(published.map((m) => m.message)).toEqual(['Incorrect type. Expected "string".']);
 	});
 
-	it("corrects the markers the worker writes on the pane itself", () => {
+	it("corrects the markers the worker writes on the pane itself", async () => {
 		const { monaco, setModelMarkers, publish } = stubMonaco();
 		const model = stubModel(MODEL_URI, '{"limit": {{n}}}');
 		attachVariablesDiagnostics(monaco, model as unknown as Monaco.editor.ITextModel);
@@ -167,26 +190,51 @@ describe("attachVariablesDiagnostics", () => {
 		// The worker validates the visible model too, and its verdict on the
 		// unmasked text is the squiggle this whole module exists to remove.
 		publish(MODEL_URI, [marker("End of file expected.", 16, 17)]);
+		await deliverMarkerEvents();
 
 		expect(lastCall(setModelMarkers)[2]).toEqual([]);
 	});
 
-	it("does not rewrite markers it has already written", () => {
+	it("tells the listeners that paint the markers about the corrected set", async () => {
+		const { monaco, publish } = stubMonaco();
+		const model = stubModel(
+			MODEL_URI,
+			'{"limit": {{n}}}'
+		) as unknown as Monaco.editor.ITextModel;
+		// Monaco's decoration service, which draws the squiggles, subscribes
+		// before any editor exists, so it hears every batch ahead of this module.
+		let painted: Monaco.editor.IMarker[] = [];
+		monaco.editor.onDidChangeMarkers(() => {
+			painted = monaco.editor.getModelMarkers({ resource: model.uri, owner: "json" });
+		});
+		attachVariablesDiagnostics(monaco, model);
+
+		publish(MODEL_URI, [marker("End of file expected.", 16, 17)]);
+		await deliverMarkerEvents();
+
+		// A correction written inside the worker's batch is dropped with it, and
+		// the painter keeps the worker's squiggle over a token.
+		expect(painted).toEqual([]);
+	});
+
+	it("does not rewrite markers it has already written", async () => {
 		const { monaco, setModelMarkers, publish } = stubMonaco();
 		const model = stubModel(MODEL_URI, '{"name": 5}');
 		attachVariablesDiagnostics(monaco, model as unknown as Monaco.editor.ITextModel);
 
 		publish(templateTwinUri(MODEL_URI), [marker('Incorrect type. Expected "string".', 10, 11)]);
+		await deliverMarkerEvents();
 		const afterFirst = setModelMarkers.mock.calls.length;
 		// Writing markers fires the event that got us here; an unconditional write
 		// would be an endless loop rather than a settled state.
 		expect(afterFirst).toBe(1);
 
 		publish(templateTwinUri(MODEL_URI), [marker('Incorrect type. Expected "string".', 10, 11)]);
+		await deliverMarkerEvents();
 		expect(setModelMarkers.mock.calls.length).toBe(afterFirst);
 	});
 
-	it("takes the twin and the listeners with it when disposed", () => {
+	it("takes the twin and the listeners with it when disposed", async () => {
 		const { monaco, setModelMarkers, twin, publish } = stubMonaco();
 		const model = stubModel(MODEL_URI, '{"limit": {{n}}}');
 		const attached = attachVariablesDiagnostics(
@@ -199,6 +247,24 @@ describe("attachVariablesDiagnostics", () => {
 
 		const before = setModelMarkers.mock.calls.length;
 		publish(templateTwinUri(MODEL_URI), [marker("Value expected", 1, 2)]);
+		await deliverMarkerEvents();
+		expect(setModelMarkers.mock.calls.length).toBe(before);
+	});
+
+	it("writes nothing when disposed between the event and the correction", async () => {
+		const { monaco, setModelMarkers, publish } = stubMonaco();
+		const model = stubModel(MODEL_URI, '{"limit": {{n}}}');
+		const attached = attachVariablesDiagnostics(
+			monaco,
+			model as unknown as Monaco.editor.ITextModel
+		);
+		// Heard after this module's listener, inside the same batch.
+		monaco.editor.onDidChangeMarkers(() => attached.dispose());
+		const before = setModelMarkers.mock.calls.length;
+
+		publish(MODEL_URI, [marker("End of file expected.", 16, 17)]);
+		await deliverMarkerEvents();
+
 		expect(setModelMarkers.mock.calls.length).toBe(before);
 	});
 
@@ -299,6 +365,20 @@ describe("what Monaco's JSON worker makes of the masked text", () => {
 		// nothing after it was checked at all.
 		const markers = await paneMarkers('{"id": "u1", "first": {{n}}, "extra" 1}', jsonSchema);
 		expect(markers.map((m) => m.message)).toContain("Colon expected");
+	});
+
+	it("marks the real error after a token in a request body, and nothing on the token", async () => {
+		// The request body has no schema (#3137): a token outside a string used to
+		// draw the squiggles above and stop the parse, hiding the `}` that follows.
+		const text = '{"limit": {{n}}, "x": }';
+		const { spans } = maskJsonTemplatesInPlace(text);
+		expect(spans).toHaveLength(1);
+
+		const markers = await paneMarkers(text, {});
+
+		expect(markers.some((m) => rangesOverlap(m, spans[0]))).toBe(false);
+		// Columns are 1-based: the stray `}` is the 23rd character.
+		expect(markers.map((m) => [m.message, m.startColumn])).toEqual([["Value expected", 23]]);
 	});
 
 	it("still reports a variable whose value has the wrong type", async () => {
