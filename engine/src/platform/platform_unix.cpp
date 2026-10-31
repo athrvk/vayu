@@ -14,10 +14,15 @@
 
 #if !VAYU_PLATFORM_WINDOWS
 
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <pwd.h>
 #include <sys/file.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -37,6 +42,7 @@
 #include <malloc.h>
 #endif
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -45,8 +51,10 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -461,6 +469,32 @@ std::string home_directory () {
         return {};
     }
     return found->pw_dir;
+}
+
+std::vector<std::string> local_ipv4_addresses () {
+    ifaddrs* head = nullptr;
+    if (getifaddrs (&head) != 0) {
+        return {};
+    }
+    const std::unique_ptr<ifaddrs, decltype (&freeifaddrs)> owner (head, &freeifaddrs);
+
+    std::vector<std::string> addresses;
+    for (const ifaddrs* entry = head; entry != nullptr; entry = entry->ifa_next) {
+        // A down interface keeps its address but receives nothing; an entry
+        // with no address is a link-layer or tunnel record.
+        const bool is_up = (entry->ifa_flags & static_cast<unsigned int> (IFF_UP)) != 0;
+        if (!is_up || entry->ifa_addr == nullptr || entry->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        // The family was just checked, so the generic sockaddr is a sockaddr_in.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+        const auto* inet = reinterpret_cast<const sockaddr_in*> (entry->ifa_addr);
+        std::array<char, INET_ADDRSTRLEN> text{};
+        if (inet_ntop (AF_INET, &inet->sin_addr, text.data (), text.size ()) != nullptr) {
+            addresses.emplace_back (text.data ());
+        }
+    }
+    return addresses;
 }
 
 // ============================================================================
