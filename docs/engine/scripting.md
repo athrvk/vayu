@@ -3183,7 +3183,7 @@ and the rest of the ES2020 built-ins, plus:
 | `atob(base64)` | decode to a binary string; throws on invalid base64 |
 | `setTimeout(fn, delay?, ...args)` / `setInterval(...)` | queue `fn`, run before the script ends - see [Timers](#timers-settimeout-and-setinterval) |
 | `clearTimeout(id)` / `clearInterval(id)` | cancel one; the two share their ids |
-| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')`, `require('xml2js')` and `require('chai')` answer the library, any other name throws |
+| `require(name)` | The [shelf](#the-require-shelf): `require('crypto-js')`, `require('uuid')`, `require('lodash')`, `require('moment')`, `require('csv-parse/lib/sync')`, `require('xml2js')`, `require('chai')`, `require('ajv')` and `require('tv4')` answer the library, any other name throws |
 | `CryptoJS` | The same `crypto-js` module as a global, loaded on first read |
 | `_` | The same `lodash` module as a global, loaded on first read |
 | `xml2Json(xml)` | Postman's synchronous XML parse over the shelf's `xml2js`, loaded on first read - see [`xml2js`](#xml2js) |
@@ -3949,7 +3949,8 @@ The **language** is current; what is missing is the **host environment**:
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
 - **No Node.js APIs**: `require()` answers only the
-  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`, `moment`); `fs`, `http`, `crypto`
+  [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`, `moment`,
+  `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`); `fs`, `http`, `crypto`
   and every other module throw `Cannot find module`.
 - **Sandboxed**: No filesystem access. The only network access is
   [`pm.sendRequest`](#sending-a-request-from-a-script-pmsendrequest) - capped at
