@@ -17,6 +17,7 @@ import { type EngineClient, EngineRequestError } from "../engine-client.js";
 import {
 	ENGINE_LOAD_DEFAULTS,
 	engineLoadMode,
+	exemptMonitorHost,
 	type LoadDefaultsTable,
 	type LoadMode,
 	type LoadRunParams,
@@ -144,8 +145,26 @@ export function asMcpSend(
 	return {
 		...sendable,
 		origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client },
-		targetPolicy: { allowAll: ctx.config.allowAll, allowedHosts: [...ctx.config.allowlist] },
+		targetPolicy: mcpTargetPolicy(sendable.monitor, ctx.config),
 	};
+}
+
+/**
+ * The session's allowlist as the engine reads it, plus the host of a run's
+ * @p monitor block when `checkMonitorHost` exempts it: the engine judges
+ * `monitor.url` against this policy too (#3121), with no exemption of its own.
+ * The entry also admits the run's own requests to that host if a pre-request
+ * script steers them there; the gate on each composed target still refuses the
+ * host before the run starts.
+ */
+function mcpTargetPolicy(
+	monitor: unknown,
+	config: McpSafetyConfig
+): { allowAll: boolean; allowedHosts: string[] } {
+	const allowedHosts = [...config.allowlist];
+	const monitorHost = config.allowAll ? undefined : exemptMonitorHost(monitor);
+	if (monitorHost !== undefined) allowedHosts.push(monitorHost);
+	return { allowAll: config.allowAll, allowedHosts };
 }
 
 /**

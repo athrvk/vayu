@@ -208,7 +208,10 @@ ships with safe-by-default guardrails. See `docs/engine/mcp.md` for the design.
   [Network behaviour](#network-behaviour)). A run's `monitor.url` is a second
   host with its own check: a loopback or private-network endpoint needs no
   entry, but link-local (`169.254.0.0/16`, `fe80::/10`) and cloud-metadata
-  addresses (`169.254.169.254`, `fd00:ec2::254`) do, like any public host. So an
+  addresses (`169.254.169.254`, `fd00:ec2::254`) do, like any public host. The
+  engine holds `monitor.url` to the run's `targetPolicy` as well (#3121), and
+  the MCP server adds an exempt monitor host to that policy's hosts, so a
+  script can steer the run's own requests to that host too. So an
   agent can make Vayu fetch any private-network address and read the metric text
   back; matching is textual, so a name that resolves to a private address needs
   an entry too.

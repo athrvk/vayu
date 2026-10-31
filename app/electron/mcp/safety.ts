@@ -354,13 +354,15 @@ export function isLinkLocalHost(host: string): boolean {
  * **The exception (#2370):** link-local addresses (169.254.0.0/16, fe80::/10)
  * and `fd00:ec2::254` are not exempt. They are where cloud metadata services
  * answer, so a scrape of one is a credential read, not the user's exporter.
- * They go through the allowlist like a public host. The engine's own monitor
- * validation (`read_monitor_block`, `engine/src/core/monitor.cpp`) is
- * unchanged; this gate is the MCP layer's.
+ * They go through the allowlist like a public host.
  *
  * A public monitor host is a request to some third party at one GET per scrape
  * for the life of the run, which is exactly what the allowlist is for, so it
  * goes through the same check the target URL does.
+ *
+ * The engine holds `monitor.url` to the run's `targetPolicy` as well (#3121)
+ * and knows no exemption, so `asMcpSend` lists an exempt host there
+ * ({@link exemptMonitorHost}); a host this gate refuses is never added.
  */
 export function checkMonitorHost(url: string, config: McpSafetyConfig, host: McpHost): GuardResult {
 	const monitorHost = extractHost(url);
@@ -369,13 +371,31 @@ export function checkMonitorHost(url: string, config: McpSafetyConfig, host: Mcp
 			"Could not determine the host of `monitor.url` (it may be empty or contain unresolved {{variables}}). Resolve it before retrying."
 		);
 	}
-	if (isPrivateHost(monitorHost) && !isLinkLocalHost(monitorHost)) return OK;
+	if (isExemptMonitorHost(monitorHost)) return OK;
 	const gate = checkAllowlist(url, config, host);
 	if (gate.ok) return OK;
 	return {
 		...gate,
 		error: `The monitor endpoint is a second host this run would contact, once per scrape: ${gate.error} (A loopback or private-network monitor URL needs no allowlist entry, except link-local and cloud-metadata addresses, which do.)`,
 	};
+}
+
+/** The one exemption {@link checkMonitorHost} makes, on a canonical host. */
+function isExemptMonitorHost(host: string): boolean {
+	return isPrivateHost(host) && !isLinkLocalHost(host);
+}
+
+/**
+ * The host of a run's @p monitor block when {@link checkMonitorHost} lets it
+ * through without an allowlist entry, else undefined: what `asMcpSend` adds to
+ * the run's `targetPolicy`, which the engine judges `monitor.url` against too.
+ */
+export function exemptMonitorHost(monitor: unknown): string | undefined {
+	if (monitor === null || typeof monitor !== "object") return undefined;
+	const url = (monitor as Record<string, unknown>).url;
+	if (typeof url !== "string") return undefined;
+	const host = extractHost(url);
+	return host !== null && isExemptMonitorHost(host) ? host : undefined;
 }
 
 /**

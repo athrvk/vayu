@@ -13004,6 +13004,42 @@ describe("every MCP send carries the session's target policy", () => {
 		).toStrictEqual({ allowAll: false, allowedHosts: ["api.example.com"] });
 	});
 
+	// The engine judges `monitor.url` against the policy too (#3121) and exempts
+	// nothing, so a loopback monitor `checkMonitorHost` passed without an entry
+	// travels in it; a host the gate checks is already listed or was refused.
+	const monitoredCases = cases.filter(([, sender]) => sender.tool === "start_load_run");
+	const monitored = (sender: McpSender, url: string): McpSender => ({
+		...sender,
+		args: { ...sender.args, monitor: { url, series: ["up"] } },
+	});
+
+	test.each(monitoredCases)(
+		"%s lists the loopback monitor host it exempted",
+		async (_, sender) => {
+			expect(
+				await policySent(monitored(sender, "http://localhost:9100/metrics"), {
+					allowlist: ["api.example.com"],
+				})
+			).toStrictEqual({ allowAll: false, allowedHosts: ["api.example.com", "localhost"] });
+		}
+	);
+
+	test.each(monitoredCases)(
+		"%s adds nothing for an allowlisted monitor host",
+		async (_, sender) => {
+			const allowlist = ["api.example.com", "metrics.example.com"];
+			expect(
+				await policySent(monitored(sender, "https://metrics.example.com/m"), { allowlist })
+			).toStrictEqual({ allowAll: false, allowedHosts: allowlist });
+		}
+	);
+
+	test.each(monitoredCases)("%s adds nothing under Allow all hosts", async (_, sender) => {
+		expect(
+			await policySent(monitored(sender, "http://localhost:9100/metrics"), { allowAll: true })
+		).toStrictEqual({ allowAll: true, allowedHosts: [] });
+	});
+
 	test("no executeRequest or startRun call in the server skips asMcpSend", () => {
 		const here = path.dirname(fileURLToPath(import.meta.url));
 		const sources = readdirSync(here, { recursive: true, encoding: "utf8" }).filter(
