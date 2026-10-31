@@ -1646,7 +1646,8 @@ namespace db {
  * whole. This type is a `std::string` for every caller; what differs is the
  * mapping in `database_impl.hpp`, whose `row_extractor` takes the length from
  * `sqlite3_column_bytes`. Use it for a column whose bytes are not text the
- * engine wrote: `inbox_requests.body` and `request_examples.body`.
+ * engine wrote: `inbox_requests.body`, `request_examples.body` and
+ * `body_blobs.content` (#3159).
  */
 struct BodyBytes : std::string {
     using std::string::string;
@@ -2202,7 +2203,7 @@ struct BodyBlob {
     int id = 0;
     std::string run_id;
     std::string hash; // lowercase hex SHA-256 of `content` (vayu::core::body_digest)
-    std::string content; // the stored bytes, already truncated to the per-body cap
+    BodyBytes content; // the stored bytes, already truncated to the per-body cap
 };
 
 /**

@@ -133,6 +133,10 @@
  * the key in `diff_spec`'s output schema) took the rows to 147,636 / 144,910 /
  * 217,409 / 213,012 B, and the four caps went to 147,900 / 145,200 / 217,700 /
  * 213,300.
+ *
+ * #3159's `bodyEncoding` sentence in `get_run_samples` is paid once per row. The
+ * rows measure 147,998 / 145,272 / 217,760 / 213,363 B, and the four caps went
+ * to 148,300 / 145,600 / 218,100 / 213,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -152,10 +156,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 147_900 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_200 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 217_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_300 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_300 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 218_100 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_700 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

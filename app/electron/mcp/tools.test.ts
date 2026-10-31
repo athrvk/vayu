@@ -11589,6 +11589,12 @@ describe("run housekeeping tools", () => {
 			]);
 		});
 
+		test("get_run_samples tells the agent a base64 body is to be decoded", () => {
+			const description = descriptionOf(TOOLS.find((t) => t.name === "get_run_samples"));
+			expect(description).toContain('bodyEncoding: "base64"');
+			expect(description).toMatch(/base64 in `body`: decode it/);
+		});
+
 		test("stated pagination is forwarded", async () => {
 			const client = fakeClient();
 			await dispatchTool(
@@ -17067,6 +17073,31 @@ describe("secret withholding", () => {
 		});
 		const revealed = await read("get_inbox_captures", client, REVEAL, { inboxId: "inbox_1" });
 		expect(revealed.body).toEqual(lastPageAnswer(captures));
+	});
+
+	test("get_run_samples masks a secret inside a base64 sample body and keeps it base64", async () => {
+		const bytes = Buffer.concat([Buffer.from([0xff, 0x00]), Buffer.from(`key=${RUN_SECRET}`)]);
+		const samples = page([
+			{
+				resultId: 1,
+				response: {
+					headers: {},
+					body: bytes.toString("base64"),
+					bodyEncoding: "base64",
+					bodyBytes: bytes.length,
+				},
+			},
+		]);
+		const client = runClient({ getRunSamples: vi.fn().mockResolvedValue(samples) });
+		const withheld = await read("get_run_samples", client, undefined, { runId: "run_1" });
+		const { response } = withheld.body.data[0];
+		expect(response.bodyEncoding).toBe("base64");
+		expect(response.bodyBytes).toBe(bytes.length);
+		const decoded = Buffer.from(response.body, "base64").toString("latin1");
+		expect(decoded).not.toContain(RUN_SECRET);
+		expect(decoded).toContain("key=<redacted>");
+		const revealed = await read("get_run_samples", client, REVEAL, { runId: "run_1" });
+		expect(revealed.body).toEqual(lastPageAnswer(samples));
 	});
 
 	test("get_inbox_captures masks a secret inside a base64 capture body and keeps it base64", async () => {
