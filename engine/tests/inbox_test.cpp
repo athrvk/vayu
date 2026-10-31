@@ -1233,7 +1233,7 @@ TEST_F (InboxStorageTest, ABodyWithAZeroByteIsReadBackWholeByBothReaders) {
     EXPECT_EQ (in_arrival_order[2].body, trailing);
 }
 
-TEST_F (InboxStorageTest, AnEmptyBodyStaysEmptyAndNotAbsent) {
+TEST_F (InboxStorageTest, AnEmptyBodyReadsBackEmpty) {
     append ("inbox_a", "", 100);
     const auto captures = db_->get_inbox_requests_paginated ("inbox_a", 10, 0);
     ASSERT_EQ (captures.size (), 1u);

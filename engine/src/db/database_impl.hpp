@@ -161,6 +161,8 @@ template <> struct field_printer<vayu::db::BodyBytes> {
     }
 };
 template <> struct row_extractor<vayu::db::BodyBytes> {
+    // Only sqlite_orm's scalar/pragma reads use this overload; a mapped column
+    // goes through the sqlite3_stmt* one below.
     vayu::db::BodyBytes extract (const char* row_value) const {
         return row_value ? vayu::db::BodyBytes (row_value) : vayu::db::BodyBytes ();
     }

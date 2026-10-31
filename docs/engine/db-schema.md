@@ -1016,7 +1016,7 @@ found next to it (Postman's `item.response[]`, an OpenAPI operation's
 
 **body** is stored and read back byte-exact, a zero byte included (#3112). sqlite_orm reads a
 `std::string` column through `strlen`, so the mapping uses `db::BodyBytes`
-(`database_impl.hpp`), a `std::string` whose extractor takes the length from
+(declared in `types.hpp`, adapted in `database_impl.hpp`), a `std::string` whose extractor takes the length from
 `sqlite3_column_bytes`. The column is still `TEXT`, so no schema version moved and a row written
 before the fix reads whole: the write always bound its full length.
 
