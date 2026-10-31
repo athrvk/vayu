@@ -12,7 +12,7 @@ import type { InboxCannedResponse, InboxCapture } from "@/types";
 /**
  * The absolute URL a capture arrived at.
  *
- * The engine records the path and the raw query separately - that is what the
+ * The engine records the raw path and the raw query separately - that is what the
  * capture *is* - so the URL the viewer and the raw HTTP text need is rebuilt
  * here rather than stored twice.
  */

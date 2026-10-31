@@ -104,18 +104,17 @@ std::string query_of (const std::string& target) {
 }
 
 /**
- * The decoded path of a request target, without the query string.
+ * The raw path of a request target, without the query string.
  *
- * Exactly what cpp-httplib's own request-line parser puts in `Request::path` -
- * `decode_path_component` of everything before the first '?', the fragment
- * having already been cut from the target. A capture derives the path here
- * rather than reading `req.path`, because the inbox listener routes every
- * request as one literal path; see `AnyPathServer`.
+ * Kept as the sender spelled it, percent-escapes included, like the query:
+ * decoding turns `%2F` into a path separator and `%20` into a space, so a
+ * signature over the path or a copied capture URL would no longer match what
+ * was sent (issue #3113). A capture derives the path here rather than reading
+ * `req.path`, because the inbox listener routes every request as one literal
+ * path; see `AnyPathServer`.
  */
 std::string path_of (const std::string& target) {
-    const auto pos = target.find ('?');
-    return httplib::decode_path_component (
-    pos == std::string::npos ? target : target.substr (0, pos));
+    return target.substr (0, target.find ('?'));
 }
 
 /**
