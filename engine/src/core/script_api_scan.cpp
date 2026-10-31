@@ -510,12 +510,41 @@ constexpr auto API_RULES = std::to_array<ApiRule> ({
 { "Backbone", Anchor::Bare, "Backbone", "" },
 // The host environment a sandbox does not have.
 { "Buffer", Anchor::Bare, "Buffer", "" },
+// Browser and Node globals the sandbox lacks (#3132). `process`, `window`,
+// `document` and `alert` are left out on purpose: they are common identifiers
+// in a script's own code, so naming them would send people to look at a notice
+// that is wrong more often than right.
+{ "fetch", Anchor::Bare, "fetch", "" },
+{ "XMLHttpRequest", Anchor::Bare, "XMLHttpRequest", "" },
+{ "URL", Anchor::Bare, "URL", "" },
+{ "URLSearchParams", Anchor::Bare, "URLSearchParams", "" },
+{ "TextEncoder", Anchor::Bare, "TextEncoder", "" },
+{ "TextDecoder", Anchor::Bare, "TextDecoder", "" },
+{ "structuredClone", Anchor::Bare, "structuredClone", "" },
+{ "localStorage", Anchor::Bare, "localStorage", "" },
+{ "sessionStorage", Anchor::Bare, "sessionStorage", "" },
 // Only the members the crypto-js shim lacks (#2578), read off the global, an
 // alias of it or a destructure of it (#2628); the ones it has are exempt.
 { "CryptoJS", Anchor::Bare, "CryptoJS", "", Exemption::CryptoJsMember },
-// `pm.*` members Vayu does not have.
+// `pm.*` members Vayu does not have. `pm.cookies.jar().set` is the jar's and
+// runs; only the flat writers on `pm.cookies` itself are rows, one each so the
+// notice says which was used.
 { "pm.test.skip", Anchor::Bare, "pm.test.skip", "" },
+{ "pm.test.index", Anchor::Bare, "pm.test.index", "" },
 { "pm.execution.runRequest", Anchor::Bare, "pm.execution.runRequest", "" },
+{ "pm.execution.location", Anchor::Bare, "pm.execution.location", "" },
+{ "pm.response.dataURI", Anchor::Bare, "pm.response.dataURI", "" },
+{ "pm.response.headers.map", Anchor::Bare, "pm.response.headers.map", "" },
+{ "pm.request.headers.map", Anchor::Bare, "pm.request.headers.map", "" },
+{ "pm.cookies.set", Anchor::Bare, "pm.cookies.set", "" },
+{ "pm.cookies.unset", Anchor::Bare, "pm.cookies.unset", "" },
+{ "pm.cookies.clear", Anchor::Bare, "pm.cookies.clear", "" },
+// The console methods beyond `log`, `info`, `warn` and `error`; the others
+// (`trace`, `assert`, `group`, `count`, ...) are not scanned.
+{ "console.debug", Anchor::Bare, "console.debug", "" },
+{ "console.table", Anchor::Bare, "console.table", "" },
+{ "console.dir", Anchor::Bare, "console.dir", "" },
+{ "console.time", Anchor::Bare, "console.time", "" },
 // chai-postman members `pm.expect` still refuses by name (#2528); every
 // other member of chai and chai-postman runs (`chai-conformance.json`).
 { ".postmanRequest / .postmanResponse / .postmanRequestOrResponse",

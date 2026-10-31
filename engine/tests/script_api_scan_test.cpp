@@ -527,6 +527,139 @@ TEST (ScriptApiScan, NamesThePmMembersVayuDoesNotHave) {
     EXPECT_EQ (names_in ("pm.variables.get('a'); pm.test('t', f);"), Names{});
 }
 
+/// One script per name: each uses only that name, so the case that fails when a
+/// row is removed is the row's own.
+struct NamedUse {
+    const char* script;
+    const char* name;
+};
+
+void expect_each_named_alone (const std::vector<NamedUse>& uses) {
+    for (const auto& use : uses) {
+        EXPECT_EQ (names_in (use.script), Names{ use.name }) << use.script;
+    }
+}
+
+// Each of these is undefined at run time, so the call or read throws (#3132).
+TEST (ScriptApiScan, NamesEachPmMemberThatIsUndefinedAtRunTime) {
+    expect_each_named_alone ({
+    { "const i = pm.test.index;", "pm.test.index" },
+    { "const where = pm.execution.location;", "pm.execution.location" },
+    { "const uri = pm.response.dataURI();", "pm.response.dataURI" },
+    { "pm.response.headers.map(h => h.key);", "pm.response.headers.map" },
+    { "pm.request.headers.map(h => h.key);", "pm.request.headers.map" },
+    { "pm\n  .response\n  .headers\n  ?.map(f);", "pm.response.headers.map" },
+    });
+}
+
+TEST (ScriptApiScan, NamesEachFlatCookieWriterByItsOwnName) {
+    expect_each_named_alone ({
+    { "pm.cookies.set('a', 'b');", "pm.cookies.set" },
+    { "pm.cookies.unset('a');", "pm.cookies.unset" },
+    { "pm.cookies.clear();", "pm.cookies.clear" },
+    });
+    EXPECT_EQ (names_in ("pm.cookies.clear(); pm.cookies.set('a', 'b');"),
+    (Names{ "pm.cookies.set", "pm.cookies.clear" }));
+}
+
+// `pm.cookies.jar()` ships whole; only the flat writers on `pm.cookies` do not.
+TEST (ScriptApiScan, TheCookieJarAndTheFlatReadersAreNotNamed) {
+    EXPECT_EQ (names_in (R"(
+        pm.cookies.jar().set('https://x.test', 'a', 'b', cb);
+        pm.cookies.jar().unset('https://x.test', 'a');
+        pm.cookies.jar().clear('https://x.test');
+        const jar = pm.cookies.jar(); jar.set(u, 'a', 'b'); jar.clear(u);
+        pm.cookies.get('a'); pm.cookies.has('a'); pm.cookies.toObject();
+        pm.cookies.each(f); pm.cookies.all(); pm.cookies.count();
+        pm.response.cookies.set;
+    )"),
+    Names{});
+}
+
+TEST (ScriptApiScan, NamesEachConsoleMethodTheSandboxLacks) {
+    expect_each_named_alone ({
+    { "console.debug('x');", "console.debug" },
+    { "console.table(rows);", "console.table" },
+    { "console.dir(obj);", "console.dir" },
+    { "console.time('t');", "console.time" },
+    });
+}
+
+TEST (ScriptApiScan, TheConsoleMethodsThatRunAreNotNamed) {
+    EXPECT_EQ (names_in ("console.log(1); console.info(2); console.warn(3); "
+                         "console.error(4);"),
+    Names{});
+    // A property of something else, or a longer word, is not the method.
+    EXPECT_EQ (
+    names_in ("logger.console.debug(1); myconsole.debug(2); "
+              "console.debugger; console.tablet; console.directory;"),
+    Names{});
+}
+
+TEST (ScriptApiScan, NamesEachHostGlobalTheSandboxLacks) {
+    expect_each_named_alone ({
+    { "const r = await fetch(url);", "fetch" },
+    { "const x = new XMLHttpRequest();", "XMLHttpRequest" },
+    { "const u = new URL(raw).hostname;", "URL" },
+    { "const q = new URLSearchParams(s);", "URLSearchParams" },
+    { "const b = new TextEncoder().encode(s);", "TextEncoder" },
+    { "const s = new TextDecoder().decode(b);", "TextDecoder" },
+    { "const copy = structuredClone(obj);", "structuredClone" },
+    { "localStorage.setItem('k', v);", "localStorage" },
+    { "sessionStorage.getItem('k');", "sessionStorage" },
+    });
+}
+
+// The names a script is likely to declare itself or mean otherwise are left to
+// it (#3132): `process`, `window`, `document` and `alert` are not rows.
+TEST (ScriptApiScan, TheCommonIdentifiersAreNotScanned) {
+    EXPECT_EQ (
+    names_in ("process.env.X; window.name; document.title; alert(1);"), Names{});
+}
+
+TEST (ScriptApiScan, AHostGlobalTheScriptDeclaresItselfIsNotTheGlobal) {
+    EXPECT_EQ (names_in ("const fetch = (u) => pm.sendRequest(u); fetch(url);"), Names{});
+    EXPECT_EQ (names_in ("function fetch(u) { return u; } fetch(url);"), Names{});
+    EXPECT_EQ (names_in ("function get(URL) { return URL.length; }"), Names{});
+    EXPECT_EQ (names_in ("const { structuredClone } = _; structuredClone(o);"), Names{});
+    EXPECT_EQ (names_in ("let localStorage = {}; localStorage.k = 1;"), Names{});
+    // Declaring one does not hide another.
+    EXPECT_EQ (names_in ("const fetch = f; fetch(a); new URL(b);"), Names{ "URL" });
+}
+
+TEST (ScriptApiScan, ANearMissOfANewRowIsNotNamed) {
+    EXPECT_EQ (names_in (R"(
+        [1, 2].map(f); Array.prototype.map.call(a, f);
+        pm.response.headers.get('map'); pm.response.headers.each(f);
+        pm.response.json().headers.map(f); pm.response.headers.mapper;
+        const m = new Map(); const i = pm.test.indexOf;
+        pm.test('index', f); pm.execution.setNextRequest('x');
+        pm.execution.locations; pm.response.dataURIs; pm.response.text();
+        pm.request.url.toString(); pm.request.headers.get('a');
+        o.fetch(u); o.URL; this.structuredClone; a?.TextEncoder;
+        fetchData(); refetch; myURL; URLs; urlSearchParams; url; textEncoder;
+        const s = "fetch URL localStorage"; // new XMLHttpRequest()
+        pm.environment.get("URL"); pm.variables.get("fetch");
+    )"),
+    Names{});
+}
+
+TEST (ScriptApiScan, ReportsTheNewRowsInTableOrder) {
+    EXPECT_EQ (names_in (R"(
+        console.dir(x);
+        pm.cookies.clear();
+        structuredClone(o);
+        pm.test.index;
+        fetch(u);
+        Buffer.from(b);
+        pm.test.skip('s', f);
+        pm.cookies.set('a', 'b');
+        console.debug(x);
+    )"),
+    (Names{ "Buffer", "fetch", "structuredClone", "pm.test.skip", "pm.test.index",
+    "pm.cookies.set", "pm.cookies.clear", "console.debug", "console.dir" }));
+}
+
 TEST (ScriptApiScan, ASendRequestFormBodyIsNotNamed) {
     EXPECT_EQ (
     names_in ("pm.sendRequest({url: u, method: 'POST', body: {mode: "

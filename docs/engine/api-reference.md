@@ -4131,8 +4131,9 @@ those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 each request, folder or collection (by its name) whose imported scripts use a
 Postman script API Vayu does not run, and which ones - `require()` of a module
 off the `crypto-js` / `uuid` / `lodash` / `moment` / `csv-parse/lib/sync` / `xml2js` / `chai` / `ajv` / `tv4` shelf, `script.packages`, a bundled library such as
-`cheerio`, and the other rows of the table in
-`engine/src/core/script_api_scan.cpp`. It is **absent when empty** and for every
+`cheerio`, a host global such as `fetch` or `URL`, an undefined `pm.*` member such as `pm.cookies.set`, a
+console method such as `console.debug`, and the other rows of the table in
+`engine/src/core/script_api_scan.cpp` (it does not scan `process`, `window`, `document` or `alert`). It is **absent when empty** and for every
 other format, is not a `meta.skipped` kind, and never changes what is imported;
 `docs/app/import-collections/postman.md#scripts` has the rules.
 
