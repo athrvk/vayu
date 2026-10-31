@@ -395,15 +395,16 @@ TEST_F (InboxListenerTest, ACapturedMultipartBodyIsKeptWholeWithItsBoundaries) {
     // cpp-httplib parses multipart/form-data into its form members and leaves
     // `body` empty, so the capture used to record bodyBytes 0 (#3110). Read
     // req.body without masking the Content-Type and body_bytes is 0.
-    const std::string boundary = "----vayuBoundary7";
-    const std::string body     = "--" + boundary + "\r\n"
-                                 "Content-Disposition: form-data; name=\"a\"\r\n\r\n"
-                                 "b\r\n"
-                                 "--" + boundary + "\r\n"
-                                 "Content-Disposition: form-data; name=\"note\"; filename=\"n.txt\"\r\n"
-                                 "Content-Type: text/plain\r\n\r\n"
-                                 "hello\r\n"
-                                 "--" + boundary + "--\r\n";
+    const std::string boundary  = "----vayuBoundary7";
+    const std::string delimiter = "--" + boundary + "\r\n";
+    const std::string body      = delimiter +
+    "Content-Disposition: form-data; name=\"a\"\r\n\r\n"
+    "b\r\n" +
+    delimiter +
+    "Content-Disposition: form-data; name=\"note\"; filename=\"n.txt\"\r\n"
+    "Content-Type: text/plain\r\n\r\n"
+    "hello\r\n--" +
+    boundary + "--\r\n";
     const std::string content_type = "multipart/form-data; boundary=" + boundary;
 
     auto started = start ();

@@ -667,9 +667,9 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
         // Not `req.path`: the listener routes every request as one literal path
         // so that no path length can miss the handler, so what arrived is only
         // still on the target. See AnyPathServer.
-        capture_row.path       = path_of (req.target);
-        capture_row.query      = query_of (req.target);
-        capture_row.headers    = headers_json_text (AnyPathServer::sender_headers (req));
+        capture_row.path  = path_of (req.target);
+        capture_row.query = query_of (req.target);
+        capture_row.headers = headers_json_text (AnyPathServer::sender_headers (req));
         capture_row.body_bytes = static_cast<int64_t> (req.body.size ());
         capture_row.body_truncated = capture_row.body_bytes > raw->limits.max_body_bytes;
         capture_row.body = stored_body (req.body, raw->limits.max_body_bytes);
