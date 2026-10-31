@@ -1336,6 +1336,36 @@ TEST_F (InboxStorageTest, CapturesSinceAnIdFeedTheLiveStreamInArrivalOrder) {
     EXPECT_EQ (db_->get_inbox_requests_since ("inbox_a", 0).size (), 2u);
 }
 
+// sqlite_orm reads a std::string column through strlen, so a body was cut at
+// its first zero byte on the way back out though it was stored whole (#3112).
+TEST_F (InboxStorageTest, ABodyWithAZeroByteIsReadBackWholeByBothReaders) {
+    const std::string embedded ("a\0b", 3);
+    const std::string leading ("\0lead", 5);
+    const std::string trailing ("tail\0", 5);
+    append ("inbox_a", embedded, 100);
+    append ("inbox_a", leading, 100);
+    append ("inbox_a", trailing, 100);
+
+    const auto newest_first = db_->get_inbox_requests_paginated ("inbox_a", 10, 0);
+    ASSERT_EQ (newest_first.size (), 3u);
+    EXPECT_EQ (newest_first[0].body, trailing);
+    EXPECT_EQ (newest_first[1].body, leading);
+    EXPECT_EQ (newest_first[2].body, embedded);
+
+    const auto in_arrival_order = db_->get_inbox_requests_since ("inbox_a", 0);
+    ASSERT_EQ (in_arrival_order.size (), 3u);
+    EXPECT_EQ (in_arrival_order[0].body, embedded);
+    EXPECT_EQ (in_arrival_order[1].body, leading);
+    EXPECT_EQ (in_arrival_order[2].body, trailing);
+}
+
+TEST_F (InboxStorageTest, AnEmptyBodyReadsBackEmpty) {
+    append ("inbox_a", "", 100);
+    const auto captures = db_->get_inbox_requests_paginated ("inbox_a", 10, 0);
+    ASSERT_EQ (captures.size (), 1u);
+    EXPECT_TRUE (captures.front ().body.empty ());
+}
+
 TEST_F (InboxStorageTest, ClearingIsPerInboxAndStartupClearsEverything) {
     append ("inbox_a", "a", 100);
     append ("inbox_a", "a", 100);
@@ -1606,6 +1636,25 @@ TEST_F (InboxRouteTest, ABinaryCaptureListsWith200AndAGoodOneBesideItIsUntouched
     EXPECT_EQ (data[1]["body"], "wP8=");
     EXPECT_EQ (data[1]["bodyEncoding"], "base64");
     EXPECT_EQ (data[1]["bodyBytes"], 2);
+}
+
+TEST_F (InboxRouteTest, ABodyWithAZeroByteListsAsAllItsBytes) {
+    const std::string sent ("abc\0def", 7);
+    deliver (sent);
+
+    auto listed = management ().Get ("/inbox/" + inbox_id_ + "/requests");
+    ASSERT_TRUE (listed);
+    ASSERT_EQ (listed->status, 200) << listed->body;
+    const auto data = json::parse (listed->body).at ("data");
+    ASSERT_EQ (data.size (), 1u);
+    // NUL is valid UTF-8 and never text, so the bytes travel as base64.
+    EXPECT_EQ (data[0]["bodyEncoding"], "base64");
+    const auto decoded =
+    vayu::utils::base64_decode (data[0]["body"].get<std::string> ());
+    ASSERT_HAS_VALUE (decoded);
+    EXPECT_EQ (*decoded, sent);
+    EXPECT_EQ (data[0]["bodyBytes"], 7);
+    EXPECT_FALSE (data[0]["bodyTruncated"].get<bool> ());
 }
 
 TEST_F (InboxRouteTest, ABinaryCaptureDoesNotStallTheLiveStreamBehindIt) {
