@@ -249,5 +249,10 @@ describe("classifyScriptToken", () => {
 		expect(kind.tone).toBe("muted");
 		expect(kind.description).toMatch(/not interpolated/i);
 		expect(kind.note).toContain("pm.variables.replaceIn");
+		// A scoped call interpolates too, so the hint must not send the reader to
+		// the merged form alone.
+		for (const accessor of ["pm.environment", "pm.globals", "pm.collectionVariables"]) {
+			expect(kind.note).toContain(accessor);
+		}
 	});
 });

@@ -7,7 +7,7 @@
 
 /**
  * The javascript span-finder for `useEditorVariableTokens` (issue #1220 script
- * support): what a script's `pm.<accessor>.get(...)`, `pm.variables.replaceIn(...)`
+ * support): what a script's `pm.<accessor>.get(...)`, `pm.<accessor>.replaceIn(...)`
  * and bare `{{name}}` spans are, in Monaco's line/column space.
  *
  * Pure and Monaco-free, like `monaco-variable-tokens.test.ts` beside it - a
@@ -67,6 +67,45 @@ describe("scriptVariableTokenRanges", () => {
 		);
 		const names = ranges.filter((r) => r.scriptHint?.via === "merged").map((r) => r.name);
 		expect(names).toEqual(["host", "path"]);
+	});
+
+	it.each([
+		["environment", "environment"],
+		["globals", "global"],
+		["collectionVariables", "collection"],
+	])("reads a {{name}} in pm.%s.replaceIn(...) from that scope alone", (accessor, scope) => {
+		const ranges = scriptVariableTokenRanges(
+			model([`const u = pm.${accessor}.replaceIn("{{host}}/{{path}}");`])
+		);
+		expect(ranges.map((r) => [r.name, r.scriptHint])).toEqual([
+			["host", { via: "scope", scope }],
+			["path", { via: "scope", scope }],
+		]);
+	});
+
+	it("reads the names a scoped replaceIn does not take from a scope as merged", () => {
+		const ranges = scriptVariableTokenRanges(
+			model(['pm.environment.replaceIn("{{$guid}}/{{data.id}}/{{host}}");'])
+		);
+		expect(ranges.map((r) => [r.name, r.scriptHint])).toEqual([
+			["$guid", { via: "merged" }],
+			["data.id", { via: "merged" }],
+			["host", { via: "scope", scope: "environment" }],
+		]);
+	});
+
+	it("finds a scoped replaceIn through the optional-chained spelling", () => {
+		const ranges = scriptVariableTokenRanges(model(['pm?.globals?.replaceIn("{{host}}");']));
+		expect(ranges).toHaveLength(1);
+		expect(ranges[0].scriptHint).toEqual({ via: "scope", scope: "global" });
+	});
+
+	it("has no replaceIn on pm.iterationData, so its template stays a bare mention", () => {
+		const ranges = scriptVariableTokenRanges(
+			model(['pm.iterationData.replaceIn("{{host}}");'])
+		);
+		expect(ranges).toHaveLength(1);
+		expect(ranges[0].scriptHint).toEqual({ via: "bare" });
 	});
 
 	it("matches a bare {{name}} outside replaceIn as muted and informational", () => {

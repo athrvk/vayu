@@ -238,12 +238,12 @@ export function useScriptVariableCompletionProvider() {
 				 * the one such name the list never offered, which makes it a
 				 * column you have to already know to use.
 				 *
-				 * The single-scope accessors never see the row, and
+				 * The single-scope `get`/`has` never see the row, and
 				 * `pm.iterationData` answered from the branch above, so neither
-				 * reaches here. `replaceIn` does, and belongs:
-				 * `resolve_template_with_data` resolves a bare `{{email}}` from
-				 * the row for it too, so leaving it out would take a condition
-				 * written only to preserve the gap.
+				 * reaches here. Every `replaceIn` does, a scoped one included
+				 * (issue #3147), and belongs: `resolve_template_with_data`
+				 * resolves a bare `{{email}}` from the row for it too, so leaving
+				 * it out would take a condition written only to preserve the gap.
 				 *
 				 * The columns come from the contract rather than from `variables`
 				 * because the namespace is disjoint from the scopes - no variable
@@ -261,7 +261,7 @@ export function useScriptVariableCompletionProvider() {
 				 * offering it in a name argument would teach a call that returns
 				 * `undefined`.
 				 */
-				if (context.scope === "all") {
+				if (context.scope === "all" || template) {
 					for (const column of dataColumns?.columns ?? []) {
 						if (template) {
 							const prefixed = `${DATA_NAMESPACE_PREFIX}${column}`;

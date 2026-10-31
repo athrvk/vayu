@@ -119,16 +119,18 @@ export interface VariableTokenContext {
  * `referenced-variables.ts`):
  *
  * - `"scope"` - one scope's own answer (`pm.environment.get`,
- *   `pm.globals.get`, `pm.collectionVariables.get`), independent of whether a
- *   higher scope also defines the name.
+ *   `pm.globals.get`, `pm.collectionVariables.get`, and the `replaceIn(...)`
+ *   template of each), independent of whether a higher scope also defines the
+ *   name.
  * - `"row"` - the bound data row and nothing else (`pm.iterationData.get`),
  *   so the answer is a column state, never a scope's.
  * - `"merged"` - the whole ladder, as a body-language token reads it
- *   (`pm.variables.get`, a `replaceIn(...)` template), except that a name the
- *   engine defers is not deferred here: the pre-request script is the thing
- *   that sets it, and a post-request script reads it after that has run.
+ *   (`pm.variables.get`, a `pm.variables.replaceIn(...)` template), except
+ *   that a name the engine defers is not deferred here: the pre-request script
+ *   is the thing that sets it, and a post-request script reads it after that
+ *   has run.
  * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
- *   any `pm.variables.replaceIn(...)` call, which the engine sends verbatim
+ *   any `pm.<accessor>.replaceIn(...)` call, which the engine sends verbatim
  *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
  *   what the name would otherwise resolve to.
  *
@@ -148,7 +150,7 @@ const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
 	state: "runtime",
 	tone: "muted",
 	description: TEMPLATE_IN_SCRIPT_NOTE,
-	note: 'Wrap it in pm.variables.replaceIn("...") to interpolate it.',
+	note: 'Pass it to pm.variables.replaceIn("...") - or replaceIn on pm.environment, pm.globals or pm.collectionVariables for one scope - to interpolate it.',
 };
 
 /**

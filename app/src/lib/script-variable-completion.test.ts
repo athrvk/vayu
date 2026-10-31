@@ -107,6 +107,22 @@ describe("scriptVariableCompletionContext", () => {
 		expect(context).toMatchObject({ scope: "all", mode: "template", query: "ba" });
 	});
 
+	it.each([
+		["environment", "environment"],
+		["globals", "global"],
+		["collectionVariables", "collection"],
+	])("takes pm.%s.replaceIn's braces from that scope, not the merged list", (accessor, scope) => {
+		const line = `pm.${accessor}.replaceIn("a {{ba`;
+		const context = scriptVariableCompletionContext(line);
+		expect(context).toMatchObject({ scope, mode: "template", query: "ba" });
+		expect(context?.startIndex).toBe(line.indexOf("{{"));
+		expect(scriptVariableCompletionContext(`pm.${accessor}.replaceIn("`)).toBeNull();
+	});
+
+	it("offers nothing in pm.iterationData.replaceIn, which the row does not have", () => {
+		expect(scriptVariableCompletionContext('pm.iterationData.replaceIn("{{')).toBeNull();
+	});
+
 	it("offers nothing in replaceIn until the braces are open", () => {
 		expect(scriptVariableCompletionContext('pm.variables.replaceIn("')).toBeNull();
 	});

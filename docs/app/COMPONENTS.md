@@ -2993,12 +2993,17 @@ list's own list and does not offer brace completion in a script):
   excluded by the same scan that finds the accessor calls.
 - Every `{{name}}` inside a `pm.variables.replaceIn(...)` call's template
   argument - the one place a script really is interpolated - gets the full
-  body-language treatment: the merged ladder, no accessor to narrow it.
+  body-language treatment: the merged ladder, no accessor to narrow it. The
+  scoped `pm.environment` / `pm.globals` / `pm.collectionVariables`
+  `.replaceIn(...)` calls (issue #3147) read that one scope instead, as their
+  `get` does, except that a generator, the iteration identity and
+  `{{data.*}}` paint merged, because the engine resolves those the same way in
+  every `replaceIn`. `pm.iterationData` has no `replaceIn`.
 - A **bare** `{{name}}` anywhere else in a script is muted
   (`vayu-variable-token-runtime`) and read-only: hovering explains that the
   script never interpolates it (the same sentence the "Names mentioned" chip
   row already gives it, `TEMPLATE_IN_SCRIPT_NOTE` in
-  `lib/referenced-variables.ts`) and names `pm.variables.replaceIn` as the
+  `lib/referenced-variables.ts`) and names `pm.variables.replaceIn` (or the same call on one scope) as the
   fix, but there is no popover - editing a value the script will never read
   at runtime would be actively misleading.
 
