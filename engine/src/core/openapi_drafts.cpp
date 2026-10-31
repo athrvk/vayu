@@ -876,8 +876,8 @@ struct ExamplePayload {
  * Shared by the two dialects, which disagree only about where the payload lives
  * - @p payload is that half. A key that is not a final numeric status
  * (`default`, `2XX`, or a 1xx interim response) has no status line to be served
- * under and is skipped rather than guessed at; the renderer counts those for its import preview, and a draft has
- * no preview to report to.
+ * under and is skipped rather than guessed at; the renderer counts those for
+ * its import preview, and a draft has no preview to report to.
  */
 template <typename Payload>
 std::optional<DraftExample>
