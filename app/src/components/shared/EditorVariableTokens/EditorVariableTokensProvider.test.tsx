@@ -395,6 +395,27 @@ describe("EditorVariableTokensProvider", () => {
 			expect(cardText()).not.toContain("Bound row");
 		});
 
+		it("shows the bound row for a scoped replaceIn template, which binds the row", () => {
+			const origins: VariableOrigin[] = [
+				{ scope: "row", value: "grace@example.com", enabled: true, winner: true },
+			];
+			const tokens = mountProvider({
+				getVariableOrigins: () => origins,
+				dataColumns: { collectionId: "c1", collectionName: "Checkout", columns: ["email"] },
+			});
+			// pm.environment.replaceIn("{{email}}") - no environment definition, so the
+			// row answers; the same name in a get would carry no row to show.
+			act(() =>
+				tokens.setHoveredToken({
+					name: "email",
+					rect,
+					scriptHint: { via: "scope", scope: "environment", template: true },
+				})
+			);
+			expect(cardText()).toContain("grace@example.com");
+			expect(cardText()).toContain("Bound row");
+		});
+
 		it("answers pm.iterationData.get from the declared contract, when no row is bound yet", () => {
 			// "phone" carries no origins in the shared fixture (no scope defines it,
 			// no row bound to it), so this is the "not previewing a row" case.

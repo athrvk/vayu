@@ -164,6 +164,15 @@ describe("`{{data.` in a request body", () => {
 		expect(bare!.filterText).toBe("{{email");
 	});
 
+	it.each(["environment", "globals", "collectionVariables"])(
+		"offers both spellings inside pm.%s.replaceIn too, which binds the row the same way",
+		(accessor) => {
+			contract.current = declared;
+			const labels = inScript(`pm.${accessor}.replaceIn("{{`).map((s) => s.label);
+			expect(labels).toEqual(expect.arrayContaining(["email", "data.email"]));
+		}
+	);
+
 	it("labels the two spellings so picking one is deliberate", () => {
 		contract.current = declared;
 		const suggestions = inBody("{{");
@@ -286,6 +295,11 @@ describe("the two column spellings, per accessor mode", () => {
 		const bare = suggestions.find((s) => s.label === "email")!;
 		expect(prefixed.detail).not.toBe(bare.detail);
 		expect(bare.detail).toMatch(/bare/i);
+	});
+
+	it("keeps the columns out of a scoped name argument, which never sees the row", () => {
+		contract.current = declared;
+		expect(inScript('pm.environment.get("').map((s) => s.label)).not.toContain("email");
 	});
 
 	it("withholds the prefixed spelling from a name argument, which cannot read it", () => {

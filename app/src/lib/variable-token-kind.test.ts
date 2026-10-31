@@ -17,6 +17,7 @@
 
 import { describe, it, expect } from "vitest";
 import { classifyScriptToken, classifyVariableToken } from "./variable-token-kind";
+import { describeBareColumnToken, describeDataToken } from "./data-contract";
 import type { DataContractScope, ResolvedVariable, VariableOrigin } from "@/types";
 
 const contract: DataContractScope = {
@@ -238,6 +239,105 @@ describe("classifyScriptToken", () => {
 		expect(kind.note).toContain("Checkout");
 	});
 
+	describe("a scoped replaceIn template", () => {
+		const scoped = { via: "scope", scope: "environment", template: true } as const;
+		const getVariableOrigins = (name: string): VariableOrigin[] =>
+			name === "defined"
+				? [{ scope: "environment", value: "v", enabled: true, winner: true }]
+				: [];
+
+		it("paints a bare declared column as the column - the engine binds it from the row", () => {
+			const kind = classifyScriptToken("email", scoped, {
+				variables: {},
+				dataColumns: contract,
+				getVariableOrigins,
+			});
+			expect(kind).toEqual({
+				state: "runtime",
+				...describeBareColumnToken(contract),
+			});
+		});
+
+		it("leaves the same name undefined for a get, which never reads the row", () => {
+			const kind = classifyScriptToken(
+				"email",
+				{ via: "scope", scope: "environment" },
+				{ variables: {}, dataColumns: contract, getVariableOrigins }
+			);
+			expect(kind.state).toBe("undefined");
+		});
+
+		it("leaves a name that is neither defined in the scope nor a column undefined", () => {
+			const kind = classifyScriptToken("nope", scoped, {
+				variables: {},
+				dataColumns: contract,
+				getVariableOrigins,
+			});
+			expect(kind.state).toBe("undefined");
+		});
+
+		it("keeps the scope's own definition of a name when the scope has one", () => {
+			const kind = classifyScriptToken("defined", scoped, {
+				variables: {},
+				getVariableOrigins,
+			});
+			expect(kind.state).toBe("resolved");
+		});
+
+		it("paints a generator as generated where the scope does not define it", () => {
+			const kind = classifyScriptToken("$guid", scoped, {
+				variables: {},
+				getVariableOrigins,
+			});
+			expect(kind.state).toBe("runtime");
+			if (kind.state !== "runtime") return;
+			expect(kind.note).toBe("generated per use");
+		});
+
+		it("lets the scope's own definition of a generator name win", () => {
+			const kind = classifyScriptToken("$guid", scoped, {
+				variables: {},
+				getVariableOrigins: () => [
+					{ scope: "environment", value: "pinned", enabled: true, winner: true },
+				],
+			});
+			expect(kind.state).toBe("resolved");
+		});
+
+		it("does not let another scope's definition of a generator name hide the generator", () => {
+			// The merged ladder holds a global `$guid`; this call reads the environment alone.
+			const kind = classifyScriptToken("$guid", scoped, {
+				variables: { $guid: variable("pinned", { scope: "global" }) },
+				getVariableOrigins: () => [
+					{ scope: "global", value: "pinned", enabled: true, winner: true },
+				],
+			});
+			expect(kind.state).toBe("runtime");
+		});
+
+		it("reads data.* and the iteration identity ahead of a scope variable of the same name", () => {
+			const shadowing = (): VariableOrigin[] => [
+				{ scope: "environment", value: "x", enabled: true, winner: true },
+			];
+			const data = classifyScriptToken("data.email", scoped, {
+				variables: {},
+				dataColumns: contract,
+				getVariableOrigins: shadowing,
+			});
+			expect(data).toEqual({
+				state: "runtime",
+				...describeDataToken("data.email", contract),
+			});
+			const identity = classifyScriptToken("$vu", scoped, {
+				variables: {},
+				getVariableOrigins: shadowing,
+			});
+			expect(identity.state).toBe("runtime");
+			if (identity.state !== "runtime") return;
+			expect(identity.note).toBe("not generated here");
+		});
+	});
+
 	it("a bare script template is always muted and informational, whatever the name resolves to", () => {
 		const kind = classifyScriptToken(
 			"baseUrl",
@@ -249,5 +349,10 @@ describe("classifyScriptToken", () => {
 		expect(kind.tone).toBe("muted");
 		expect(kind.description).toMatch(/not interpolated/i);
 		expect(kind.note).toContain("pm.variables.replaceIn");
+		// A scoped call interpolates too, so the hint must not send the reader to
+		// the merged form alone.
+		for (const accessor of ["pm.environment", "pm.globals", "pm.collectionVariables"]) {
+			expect(kind.note).toContain(accessor);
+		}
 	});
 });

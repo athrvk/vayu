@@ -327,6 +327,30 @@ describe("a single-scope read whose own scope answers emptily", () => {
 		expect(result?.note).toContain('pm.variables.get("shop_domain")');
 	});
 
+	it.each([
+		[
+			"empty",
+			[
+				origin({ scope: "collection", value: "" }),
+				origin({ scope: "environment", value: "v", winner: true }),
+			],
+			'Empty at collection scope - this replaceIn substitutes ""',
+		],
+		[
+			"undefined",
+			[origin({ scope: "environment", value: "v", winner: true })],
+			"Not defined at collection scope - this replaceIn leaves it written",
+		],
+	])(
+		"words a replaceIn template's %s case for the template, not for a get",
+		(_case, origins, description) => {
+			const result = describeScopedRead(scopedRead(COLLECTION_GET), origins, "template");
+			expect(result?.description).toBe(description);
+			expect(result?.note).toContain('pm.variables.replaceIn("{{shop_domain}}") reads that');
+			expect(result?.note).not.toContain(".get(");
+		}
+	);
+
 	it("says undefined, not empty, when the scope defines the name nowhere", () => {
 		const result = describeScopedRead(scopedRead(COLLECTION_GET), [
 			origin({ scope: "environment", sourceName: "Staging", value: "shop.example.com" }),

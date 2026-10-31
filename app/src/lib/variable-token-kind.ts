@@ -32,7 +32,7 @@
  */
 
 import { DYNAMIC_VARIABLES } from "./dynamic-variables";
-import { iterationVariable } from "./iteration-variables";
+import { isIterationVariableName, iterationVariable } from "./iteration-variables";
 import { isDataVariableName } from "./variable-resolution";
 import { castByType } from "./variable-cast";
 import {
@@ -119,16 +119,22 @@ export interface VariableTokenContext {
  * `referenced-variables.ts`):
  *
  * - `"scope"` - one scope's own answer (`pm.environment.get`,
- *   `pm.globals.get`, `pm.collectionVariables.get`), independent of whether a
- *   higher scope also defines the name.
+ *   `pm.globals.get`, `pm.collectionVariables.get`, and the `replaceIn(...)`
+ *   template of each), independent of whether a higher scope also defines the
+ *   name. `template` marks a `{{name}}` inside that `replaceIn`: the scope is
+ *   still asked first, but a name it does not define falls through to what the
+ *   engine resolves outside the scopes - the bound row's columns, the `$`
+ *   generators, the iteration identity, `data.*`. A `get` never carries it,
+ *   because `get` reads the scope and nothing else.
  * - `"row"` - the bound data row and nothing else (`pm.iterationData.get`),
  *   so the answer is a column state, never a scope's.
  * - `"merged"` - the whole ladder, as a body-language token reads it
- *   (`pm.variables.get`, a `replaceIn(...)` template), except that a name the
- *   engine defers is not deferred here: the pre-request script is the thing
- *   that sets it, and a post-request script reads it after that has run.
+ *   (`pm.variables.get`, a `pm.variables.replaceIn(...)` template), except
+ *   that a name the engine defers is not deferred here: the pre-request script
+ *   is the thing that sets it, and a post-request script reads it after that
+ *   has run.
  * - `"bare"` - not a read at all: a `{{name}}` written into a script outside
- *   any `pm.variables.replaceIn(...)` call, which the engine sends verbatim
+ *   any `pm.<accessor>.replaceIn(...)` call, which the engine sends verbatim
  *   (D16, `docs/engine/scripting.md`). Muted and informational regardless of
  *   what the name would otherwise resolve to.
  *
@@ -136,7 +142,10 @@ export interface VariableTokenContext {
  * a body-language token and nothing else.
  */
 export type ScriptTokenHint =
-	{ via: "scope"; scope: VariableScope } | { via: "row" } | { via: "merged" } | { via: "bare" };
+	| { via: "scope"; scope: VariableScope; template?: true }
+	| { via: "row" }
+	| { via: "merged" }
+	| { via: "bare" };
 
 /**
  * The muted, no-edit answer for a script's bare `{{name}}` (issue #1220 script
@@ -148,7 +157,7 @@ const BARE_SCRIPT_TEMPLATE_KIND: RuntimeToken = {
 	state: "runtime",
 	tone: "muted",
 	description: TEMPLATE_IN_SCRIPT_NOTE,
-	note: 'Wrap it in pm.variables.replaceIn("...") to interpolate it.',
+	note: 'Pass it to pm.variables.replaceIn("...") - or replaceIn on pm.environment, pm.globals or pm.collectionVariables for one scope - to interpolate it.',
 };
 
 /**
@@ -168,6 +177,22 @@ function resolvedFromOrigin(origin: ScopeVariableOrigin): ResolvedVariable {
 		type: origin.type,
 		typedValue: castByType(origin.value, origin.type),
 	};
+}
+
+/** `data.*` and the iteration identity are disjoint from the scopes: no scope variable answers for them. */
+function isResolvedOutsideScopes(name: string): boolean {
+	return isDataVariableName(name) || isIterationVariableName(name);
+}
+
+/**
+ * A scoped `replaceIn` template name its scope does not define: what the
+ * engine resolves beside the scopes (`js_pm_scope_replace_in`). The merged
+ * classification with no scope variables in it is exactly that - the reserved
+ * namespaces, then the bound row's columns, then a `$` generator - and a name
+ * none of them answers is left written, which paints as undefined.
+ */
+function classifyOutsideScopes(name: string, context: VariableTokenContext): VariableTokenKind {
+	return classifyVariableToken(name, { ...context, variables: {}, deferredVariables: undefined });
 }
 
 /**
@@ -195,6 +220,9 @@ export function classifyScriptToken(
 	// hint.via === "scope": this accessor's own rung, never the ladder's winner.
 	const origins = context.getVariableOrigins?.(name) ?? [];
 	const own = scopeAnswer(origins, hint.scope);
+	if (hint.template && (!own || isResolvedOutsideScopes(name))) {
+		return classifyOutsideScopes(name, context);
+	}
 	if (!own) return { state: "undefined", info: null };
 	// `scopeAnswer` only ever returns an origin whose `scope` equals the
 	// `VariableScope` it was asked for, so it can never be the `"row"` tier

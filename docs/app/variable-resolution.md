@@ -1153,7 +1153,8 @@ The collection scope a script reads is the **whole chain**, the same one
 `execution.cpp` builds it from `collection_chain`). A variable defined on an
 ancestor collection therefore reads the same in `pm.collectionVariables.get`,
 `pm.variables.get` and `pm.variables.replaceIn("{{name}}")` as it substitutes
-in the URL.
+in the URL (and `pm.collectionVariables.replaceIn`, which reads that scope
+alone).
 
 **Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
 only ever touch the request's own collection - the one
@@ -1238,19 +1239,29 @@ These rules make the offered set match what the call can actually read:
   row. They carry the field icon and name their declaring collection, so a
   column is distinguishable from a variable at a glance, and a name that is
   both is offered twice on purpose: the row wins while one is bound and the
-  scope answers when none is. The single-scope accessors never see the row, so
-  no column is offered there. **The prefixed `{{data.column}}` spelling is
-  offered to `replaceIn` and to nothing else** (issue #1077): `replaceIn`
-  resolves both spellings from the same row, so withholding one of two that
-  work would be the same gap, while `pm.variables.get("data.email")` reads no
-  column at all - the namespace is disjoint from the scopes there - and
-  offering it in a name argument would teach a call that returns `undefined`.
+  scope answers when none is. The single-scope `get` / `has` never see the row,
+  so no column is offered there (the scoped `replaceIn` does, see below).
+  **The prefixed `{{data.column}}` spelling is offered to `replaceIn` and to
+  nothing else** (issue #1077): `replaceIn` resolves both spellings from the
+  same row, so withholding one of two that work would be the same gap, while
+  `pm.variables.get("data.email")` reads no column at all - the namespace is
+  disjoint from the scopes there - and offering it in a name argument would
+  teach a call that returns `undefined`.
   The bare entry says `(bare)` only where the prefixed one sits beside it,
   since that word exists to tell two adjacent spellings apart.
 - **Generators belong to `replaceIn` alone.** `pm.variables.replaceIn` takes a
   template and interpolates it, so it gets brace-style completion including
   `{{$guid}}`; `pm.variables.get("$guid")` is not a lookup that resolves, so no
   generator is offered there.
+- **The scoped `replaceIn` calls complete the same braces, narrowed to their
+  scope** (issue #3147). `pm.environment.replaceIn`, `pm.globals.replaceIn` and
+  `pm.collectionVariables.replaceIn` (issue #3133) resolve against that scope
+  alone, so `{{` inside them offers that scope's variables, as their `get("…")`
+  does, plus the generators and the identity that every `replaceIn` resolves.
+  A bound row's columns are offered there too, in both spellings, because the
+  scoped call resolves them from the same row; only the `get("…")` / `has("…")`
+  of a single scope withhold them. `pm.iterationData` has no `replaceIn`, so it
+  offers nothing.
 - **So does the identity** (issue #1057). `{{$vu}}` and `{{$iteration}}` are
   offered inside `replaceIn`, from the same `ITERATION_VARIABLES` table the URL
   and body editors read, because that is where they resolve - the script

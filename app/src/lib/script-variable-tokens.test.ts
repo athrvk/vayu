@@ -7,7 +7,7 @@
 
 /**
  * The javascript span-finder for `useEditorVariableTokens` (issue #1220 script
- * support): what a script's `pm.<accessor>.get(...)`, `pm.variables.replaceIn(...)`
+ * support): what a script's `pm.<accessor>.get(...)`, `pm.<accessor>.replaceIn(...)`
  * and bare `{{name}}` spans are, in Monaco's line/column space.
  *
  * Pure and Monaco-free, like `monaco-variable-tokens.test.ts` beside it - a
@@ -67,6 +67,55 @@ describe("scriptVariableTokenRanges", () => {
 		);
 		const names = ranges.filter((r) => r.scriptHint?.via === "merged").map((r) => r.name);
 		expect(names).toEqual(["host", "path"]);
+	});
+
+	it.each([
+		["environment", "environment"],
+		["globals", "global"],
+		["collectionVariables", "collection"],
+	])("reads a {{name}} in pm.%s.replaceIn(...) from that scope first", (accessor, scope) => {
+		const ranges = scriptVariableTokenRanges(
+			model([`const u = pm.${accessor}.replaceIn("{{host}}/{{path}}");`])
+		);
+		expect(ranges.map((r) => [r.name, r.scriptHint])).toEqual([
+			["host", { via: "scope", scope, template: true }],
+			["path", { via: "scope", scope, template: true }],
+		]);
+	});
+
+	it("marks only a replaceIn template, never a get, as one that may fall through", () => {
+		const ranges = scriptVariableTokenRanges(
+			model(['pm.environment.get("host");', 'pm.environment.replaceIn("{{host}}");'])
+		);
+		expect(ranges.map((r) => r.scriptHint)).toEqual([
+			{ via: "scope", scope: "environment" },
+			{ via: "scope", scope: "environment", template: true },
+		]);
+	});
+
+	it("flags the names a scope may not define - generators, data.*, columns - the same way", () => {
+		const ranges = scriptVariableTokenRanges(
+			model(['pm.environment.replaceIn("{{$guid}}/{{data.id}}/{{email}}");'])
+		);
+		expect(ranges.map((r) => [r.name, r.scriptHint])).toEqual([
+			["$guid", { via: "scope", scope: "environment", template: true }],
+			["data.id", { via: "scope", scope: "environment", template: true }],
+			["email", { via: "scope", scope: "environment", template: true }],
+		]);
+	});
+
+	it("finds a scoped replaceIn through the optional-chained spelling", () => {
+		const ranges = scriptVariableTokenRanges(model(['pm?.globals?.replaceIn("{{host}}");']));
+		expect(ranges).toHaveLength(1);
+		expect(ranges[0].scriptHint).toEqual({ via: "scope", scope: "global", template: true });
+	});
+
+	it("has no replaceIn on pm.iterationData, so its template stays a bare mention", () => {
+		const ranges = scriptVariableTokenRanges(
+			model(['pm.iterationData.replaceIn("{{host}}");'])
+		);
+		expect(ranges).toHaveLength(1);
+		expect(ranges[0].scriptHint).toEqual({ via: "bare" });
 	});
 
 	it("matches a bare {{name}} outside replaceIn as muted and informational", () => {

@@ -51,12 +51,13 @@ import { TokenHoverCard } from "./TokenHoverCard";
 
 /**
  * The origins a script's span should be judged against - the accessor's own
- * scope only for a `"scope"` read (never a bound row, which that accessor
- * cannot see), the row alone for a `"row"` read, none at all for a `"bare"`
- * mention (it is not a read, so nothing shadows it), and everything for a
- * `"merged"` read (`pm.variables.get`, a `replaceIn(...)` template) or a
- * caller with no hint (a body-language token), all of which answer from the
- * whole ladder.
+ * scope only for a `"scope"` read (never a bound row, which a `get` cannot see;
+ * a `replaceIn` template can, so a template-flagged hint keeps the row too),
+ * the row alone for a `"row"` read, none at all for a `"bare"` mention (it is
+ * not a read, so nothing shadows it), and everything for a `"merged"` read
+ * (`pm.variables.get`, a `pm.variables.replaceIn(...)` template) or a caller
+ * with no hint (a body-language token), all of which answer from the whole
+ * ladder.
  *
  * Filtering matters beyond tidiness: `TokenHoverCard`'s `HoverAnswer` checks
  * `origins` for a `"row"` entry *before* looking at `kind` at all, so an
@@ -72,7 +73,9 @@ function originsForHint(
 	if (scriptHint.via === "bare") return [];
 	if (scriptHint.via === "row") return origins.filter((o) => o.scope === "row");
 	if (scriptHint.via === "merged") return origins;
-	return origins.filter((o) => o.scope === scriptHint.scope);
+	// A scoped replaceIn template also reads the bound row (`{{email}}`).
+	const keepRow = scriptHint.template === true;
+	return origins.filter((o) => o.scope === scriptHint.scope || (keepRow && o.scope === "row"));
 }
 
 /**

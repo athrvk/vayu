@@ -320,6 +320,20 @@ export function sourceLabel(origin: { scope: VariableOriginScope; sourceName?: s
 	return origin.sourceName ? `${origin.scope} - ${origin.sourceName}` : origin.scope;
 }
 
+/** How `describeScopedRead` words the same trap for a `get("name")` and for a `replaceIn` template. */
+const SCOPED_READ_WORDS = {
+	name: (name: string) => ({
+		empty: 'read returns ""',
+		missing: "read returns undefined",
+		merged: `pm.variables.get("${name}")`,
+	}),
+	template: (name: string) => ({
+		empty: 'replaceIn substitutes ""',
+		missing: "replaceIn leaves it written",
+		merged: `pm.variables.replaceIn("{{${name}}}")`,
+	}),
+};
+
 /**
  * What a **single-scope read** says about itself when its own scope answers
  * emptily and another scope does not (issue #1196), or null when there is
@@ -352,13 +366,18 @@ export function sourceLabel(origin: { scope: VariableOriginScope; sourceName?: s
  * first, by the same equal-claim rule that orders the row - so the second
  * accessor's read of that name carries no chip of its own.
  *
+ * `mode` is how the caller spells the read: a `replaceIn` template substitutes
+ * or leaves `{{name}}` written rather than returning, and names the merged form
+ * to reach for as `pm.variables.replaceIn("{{name}}")`, not `get`.
+ *
  * Takes the origins rather than the resolver so it stays a pure join of "what
  * did the script write" and "what is defined", the way `describeColumnReference`
  * takes a predicate rather than the map.
  */
 export function describeScopedRead(
 	reference: VariableReference,
-	origins: readonly VariableOrigin[]
+	origins: readonly VariableOrigin[],
+	mode: "name" | "template" = "name"
 ): DataTokenDescription | null {
 	const { name, scope } = reference;
 	if (scope === null) return null;
@@ -377,11 +396,12 @@ export function describeScopedRead(
 	const winner = ladderWinner(origins);
 	if (!winner || winner.value === "" || winner.scope === scope) return null;
 
+	const words = SCOPED_READ_WORDS[mode](name);
 	return {
 		tone: "warning",
 		description: own
-			? `Empty at ${scope} scope - this read returns ""`
-			: `Not defined at ${scope} scope - this read returns undefined`,
-		note: `${sourceLabel(winner)} holds the value; pm.variables.get("${name}") reads that`,
+			? `Empty at ${scope} scope - this ${words.empty}`
+			: `Not defined at ${scope} scope - this ${words.missing}`,
+		note: `${sourceLabel(winner)} holds the value; ${words.merged} reads that`,
 	};
 }

@@ -18,9 +18,12 @@
  *    ladder. Which slice is `PM_ACCESSORS` in `referenced-variables.ts`
  *    (issue #1063) - the one table this module reads rather than duplicates,
  *    per that file's own warning about a second copy drifting.
- *  - `pm.variables.replaceIn("...{{name}}...")` - the one place `{{name}}`
+ *  - `pm.<accessor>.replaceIn("...{{name}}...")` - the one place `{{name}}`
  *    inside a script *is* interpolated, so every token in the template
- *    argument gets the same full treatment a body language's does.
+ *    argument gets the same full treatment a body language's does. The merged
+ *    `pm.variables` form reads the whole ladder; `pm.environment`,
+ *    `pm.globals` and `pm.collectionVariables` read their own scope alone
+ *    (#3133, #3147). `pm.iterationData` has no `replaceIn`.
  *  - a bare `{{name}}` anywhere else - never interpolated (D16,
  *    `docs/engine/scripting.md`), so it is muted and informational only.
  *
@@ -166,6 +169,18 @@ function hintForAccessor(accessor: string): ScriptTokenHint {
 	return { via: "merged" };
 }
 
+/**
+ * The hint for one `{{name}}` inside `pm.<accessor>.replaceIn(...)`. A scoped
+ * call resolves a scope variable against its own scope alone, but the names that
+ * are not scope variables - generators, the iteration identity, `data.*`, a
+ * bound row's columns - answer as the merged form's do (`pm_scopes.cpp`,
+ * `js_pm_scope_replace_in`). `template` says so, and the classifier asks the
+ * scope first and falls through to those; a `get` never sets it.
+ */
+function templateHint(accessorHint: ScriptTokenHint): ScriptTokenHint {
+	return accessorHint.via === "scope" ? { ...accessorHint, template: true } : accessorHint;
+}
+
 export function scriptVariableTokenRanges(
 	model: ScannableModel,
 	maxLines = DEFAULT_MAX_LINES
@@ -219,21 +234,32 @@ export function scriptVariableTokenRanges(
 		}
 	}
 
-	// 2. `pm.variables.replaceIn("...{{name}}...")` - every `{{name}}` inside the
-	// argument, read from the merged ladder like `pm.variables.get`.
-	const replaceInPrefix = /pm\??\.variables\??\.replaceIn\s*\(\s*(['"])/g;
-	for (const match of masked.matchAll(replaceInPrefix)) {
-		const quote = match[1];
-		const start = match.index + match[0].length;
-		const end = findClosingQuote(masked, start, quote);
-		if (end === -1) continue;
-		claimed.push([start, end]);
-		const argument = masked.slice(start, end);
-		for (const inner of argument.matchAll(VARIABLE_PATTERN)) {
-			const name = inner[1].trim();
-			if (!name) continue;
-			const tokenStart = start + inner.index;
-			pushRange(name, tokenStart, tokenStart + inner[0].length, { via: "merged" });
+	// 2. `pm.<accessor>.replaceIn("...{{name}}...")` - every `{{name}}` inside the
+	// argument, read as the accessor's own `get` would: `pm.variables` from the
+	// merged ladder, a scoped accessor from its scope. `pm.iterationData` has no
+	// `replaceIn`, so it is not scanned.
+	for (const accessor of Object.keys(PM_ACCESSORS)) {
+		if (PM_ACCESSORS[accessor].reads === "row") continue;
+		const accessorHint = hintForAccessor(accessor);
+		const prefix = new RegExp(`pm\\??\\.${accessor}\\??\\.replaceIn\\s*\\(\\s*(['"])`, "g");
+		for (const match of masked.matchAll(prefix)) {
+			const quote = match[1];
+			const start = match.index + match[0].length;
+			const end = findClosingQuote(masked, start, quote);
+			if (end === -1) continue;
+			claimed.push([start, end]);
+			const argument = masked.slice(start, end);
+			for (const inner of argument.matchAll(VARIABLE_PATTERN)) {
+				const name = inner[1].trim();
+				if (!name) continue;
+				const tokenStart = start + inner.index;
+				pushRange(
+					name,
+					tokenStart,
+					tokenStart + inner[0].length,
+					templateHint(accessorHint)
+				);
+			}
 		}
 	}
 

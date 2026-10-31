@@ -42,9 +42,11 @@ export interface ScriptVariableCompletionContext {
 	scope: ScriptVariableScope;
 	/**
 	 * `name` - a bare variable name, the argument to `get`/`set`/`has`/`unset`.
-	 * `template` - `{{name}}` inside `pm.variables.replaceIn`, which interpolates
+	 * `template` - `{{name}}` inside `pm.<accessor>.replaceIn`, which interpolates
 	 * its argument exactly as a URL or body is interpolated, so the braces *are*
-	 * the syntax there and generators (`{{$guid}}`) resolve too.
+	 * the syntax there and generators (`{{$guid}}`) resolve too. The scope is the
+	 * accessor's, as for `name`: `pm.environment.replaceIn` resolves against the
+	 * environment alone. `pm.iterationData` has no `replaceIn`.
 	 */
 	mode: "name" | "template";
 	/** 0-based index in the line where the replacement starts. */
@@ -157,13 +159,15 @@ export function scriptVariableCompletionContext(
 	/*
 	 * `replaceIn` takes a template, not a name, so its list is the brace one -
 	 * and the same rule the body editors use decides whether the caret is inside
-	 * an open `{{`. Reusing it keeps one definition of "inside a marker".
+	 * an open `{{`. Reusing it keeps one definition of "inside a marker". The data
+	 * row has no `replaceIn`, so it falls through to `NAME_METHODS` and offers
+	 * nothing.
 	 */
-	if (accessor === "variables" && method === "replaceIn") {
+	if (method === "replaceIn" && scope !== "data") {
 		const braces = variableCompletionContext(contents);
 		if (!braces) return null;
 		return {
-			scope: "all",
+			scope,
 			mode: "template",
 			startIndex: open.index + 1 + braces.openIndex,
 			query: braces.query,
