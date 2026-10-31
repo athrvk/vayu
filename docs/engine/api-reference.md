@@ -8549,6 +8549,16 @@ verdict is made:
   buffered send does (and a config that waited for the script, at its step),
   and a collection load run judges each submission as a single-request load run
   does.
+- **A load run's `monitor.url`** (either shape) is a second host the run
+  contacts, once per scrape for as long as it runs, and the scrape loop sends
+  with no policy of its own, so its host is judged when the run is validated,
+  by the same match (#3121), on the URL as the scrape will send it (after the
+  encoding pass that turns a `\` into a `/`, as for a send's final URL): a host
+  the policy does not list, or one it cannot
+  determine (a `{{template}}`, which the scrape would send as written), is a
+  `400` under `target_not_allowed` or `target_host_unknown` whose message names
+  `monitor.url`, before the run row exists and before anything is sent. A
+  caller that wants a monitor on another host lists that host too.
 
 An omitted `targetPolicy` restricts nothing. Redirect hops and `pm.sendRequest`
 are outside it.
@@ -9155,6 +9165,14 @@ the run row is created.
 A `monitor` block beside a `scenario` that carries no load `mode` (absent,
 empty or not a string) is likewise a `400` `invalid_run_config` naming
 `'monitor'`.
+
+A run carrying a [`targetPolicy`](#post-runs) is held to it here too: the
+`url`'s host must be one the policy allows, or the run is a `400` under
+`target_not_allowed` / `target_host_unknown` naming `monitor.url`, before the
+run row exists (#3121). The URL is judged as the scrape will send it, so a `\`
+in it counts as the `/` it is sent as. Loopback and private hosts get no
+exemption from a policy; without one, "Loopback and private addresses are
+deliberately allowed" above is the whole rule.
 
 #### The `scenario` block (collection runs)
 

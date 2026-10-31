@@ -13,6 +13,7 @@ import {
 	checkAllowlist,
 	checkComposedTarget,
 	checkMonitorHost,
+	exemptMonitorHost,
 	parseDurationSeconds,
 	checkLoadCaps,
 	checkSampleCap,
@@ -355,6 +356,46 @@ describe("checkMonitorHost", () => {
 		const config = resolveSafetyConfig({ allowAll: true });
 		expect(checkMonitorHost("https://metrics.example.com/m", config, "app").ok).toBe(true);
 	});
+});
+
+/**
+ * The host `asMcpSend` adds to a run's `targetPolicy`, because the engine
+ * judges `monitor.url` against it with no exemption of its own (#3121). It must
+ * be exactly the host `checkMonitorHost` exempts: one more would widen the
+ * engine's policy past the gate, one fewer would refuse a run the gate passed.
+ */
+describe("exemptMonitorHost", () => {
+	const empty = DEFAULT_MCP_SAFETY_CONFIG;
+
+	test.each([
+		["http://localhost:9100/metrics", "localhost"],
+		["http://[::1]:9100/metrics", "[::1]"],
+		["http://192.168.1.50:9100/metrics", "192.168.1.50"],
+		["http://2130706433:9100/metrics", "127.0.0.1"],
+	])("names the exempt host of %s as the engine compares it", (url, host) => {
+		expect(exemptMonitorHost({ url, series: ["up"] })).toBe(host);
+		expect(checkMonitorHost(url, empty, "app").ok).toBe(true);
+	});
+
+	test.each([
+		"https://metrics.example.com/metrics",
+		"http://prometheus.internal/metrics",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://[fe80::1]:9100/metrics",
+		"http://[fd00:ec2::254]/latest/meta-data/",
+		"http://{{metricsHost}}/metrics",
+		"",
+	])("names nothing for %s, which the gate does not exempt", (url) => {
+		expect(exemptMonitorHost({ url, series: ["up"] })).toBeUndefined();
+		expect(checkMonitorHost(url, empty, "app").ok).toBe(false);
+	});
+
+	test.each([undefined, null, "http://localhost:9100/", {}, { url: 9100 }])(
+		"names nothing for the block %j, which holds no URL",
+		(monitor) => {
+			expect(exemptMonitorHost(monitor)).toBeUndefined();
+		}
+	);
 });
 
 describe("parseDurationSeconds", () => {

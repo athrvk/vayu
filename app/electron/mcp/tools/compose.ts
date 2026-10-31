@@ -17,6 +17,7 @@ import { type EngineClient, EngineRequestError } from "../engine-client.js";
 import {
 	ENGINE_LOAD_DEFAULTS,
 	engineLoadMode,
+	exemptMonitorHost,
 	type LoadDefaultsTable,
 	type LoadMode,
 	type LoadRunParams,
@@ -128,7 +129,9 @@ export function readRequestOverrides(args: Record<string, unknown>): Record<stri
  * move it, and only the engine sees where it moved.
  *
  * Applied at the send, after every argument has been folded in, so nothing a
- * caller passes can claim another origin or a wider policy. The client name
+ * caller passes can claim another origin or a wider policy; the one entry
+ * beyond the session's allowlist is the exempt monitor host `mcpTargetPolicy`
+ * adds from the run's own `monitor` block. The client name
  * goes as the client sent it; the engine trims and caps it. Every
  * `executeRequest` / `startRun` call in this server goes through here, which
  * `tools.test.ts` checks by scanning for one that does not.
@@ -144,8 +147,26 @@ export function asMcpSend(
 	return {
 		...sendable,
 		origin: client === undefined ? { kind: "mcp" } : { kind: "mcp", client },
-		targetPolicy: { allowAll: ctx.config.allowAll, allowedHosts: [...ctx.config.allowlist] },
+		targetPolicy: mcpTargetPolicy(sendable.monitor, ctx.config),
 	};
+}
+
+/**
+ * The session's allowlist as the engine reads it, plus the host of a run's
+ * @p monitor block when `checkMonitorHost` exempts it: the engine judges
+ * `monitor.url` against this policy too (#3121), with no exemption of its own.
+ * The entry also admits the run's own requests to that host if a pre-request
+ * script steers them there; the gate on each composed target still refuses the
+ * host before the run starts.
+ */
+function mcpTargetPolicy(
+	monitor: unknown,
+	config: McpSafetyConfig
+): { allowAll: boolean; allowedHosts: string[] } {
+	const allowedHosts = [...config.allowlist];
+	const monitorHost = config.allowAll ? undefined : exemptMonitorHost(monitor);
+	if (monitorHost !== undefined) allowedHosts.push(monitorHost);
+	return { allowAll: config.allowAll, allowedHosts };
 }
 
 /**

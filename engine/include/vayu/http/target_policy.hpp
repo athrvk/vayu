@@ -26,10 +26,12 @@
  * with each entry trimmed and lower-cased; `allowAll` admits any host that can
  * be determined; a host that cannot be determined is refused either way.
  *
- * It covers the request about to be sent and every endpoint an OAuth 2.0
- * token for it is acquired from (`refuse_token_endpoints`), whose URL a script
- * can set as easily as the request's; not a redirect hop a server answers
- * with, and not a `pm.sendRequest` a script makes.
+ * It covers the request about to be sent, every endpoint an OAuth 2.0 token
+ * for it is acquired from (`refuse_token_endpoints`), whose URL a script can
+ * set as easily as the request's, and a load run's `monitor.url`
+ * (`refuse_monitor_endpoint`), judged once when `POST /runs` validates the run
+ * because the scrape loop sends with no policy of its own; not a redirect hop
+ * a server answers with, and not a `pm.sendRequest` a script makes.
  */
 
 #include <expected>
@@ -104,5 +106,16 @@ refuse_target (const TargetPolicy& policy, const vayu::Request& request);
  */
 [[nodiscard]] std::optional<TargetRefusal>
 refuse_token_endpoints (const TargetPolicy& policy, const nlohmann::json& config);
+
+/**
+ * Whether @p policy refuses a load run's `monitor` block: the host of its
+ * `url`, which the run scrapes for as long as it runs (#3121), judged as the
+ * scrape will dial it (`wire_url` of a GET to it) by the rule
+ * @ref refuse_target applies, under the same codes. Nothing
+ * when the host is allowed, or when @p monitor holds no string `url`, a block
+ * `validate_monitor_config` refuses on its own.
+ */
+[[nodiscard]] std::optional<TargetRefusal>
+refuse_monitor_endpoint (const TargetPolicy& policy, const nlohmann::json& monitor);
 
 } // namespace vayu::http
