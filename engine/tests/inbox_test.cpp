@@ -1649,7 +1649,8 @@ TEST_F (InboxRouteTest, ABodyWithAZeroByteListsAsAllItsBytes) {
     ASSERT_EQ (data.size (), 1u);
     // NUL is valid UTF-8 and never text, so the bytes travel as base64.
     EXPECT_EQ (data[0]["bodyEncoding"], "base64");
-    const auto decoded = vayu::utils::base64_decode (data[0]["body"].get<std::string> ());
+    const auto decoded =
+    vayu::utils::base64_decode (data[0]["body"].get<std::string> ());
     ASSERT_HAS_VALUE (decoded);
     EXPECT_EQ (*decoded, sent);
     EXPECT_EQ (data[0]["bodyBytes"], 7);

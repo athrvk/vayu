@@ -1140,7 +1140,7 @@ TEST_F (MockServerTest, AnExampleBodyWithAZeroByteIsServedWhole) {
 
     // Identity so a compressing server cannot change the length under test.
     const httplib::Headers no_compression = { { "Accept-Encoding", "identity" } };
-    const auto served                     = client.Get ("/pets", no_compression);
+    const auto served = client.Get ("/pets", no_compression);
     ASSERT_TRUE (served);
     EXPECT_EQ (served->status, 200);
     EXPECT_EQ (served->body, whole);
