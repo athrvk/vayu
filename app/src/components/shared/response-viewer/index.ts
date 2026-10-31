@@ -49,6 +49,11 @@ export type { ValidationChipProps } from "./ValidationChip";
 export { TestsChip } from "./TestsChip";
 export type { TestsChipProps } from "./TestsChip";
 
+// The "Large response" callout, shared by the two panes that cap a body at
+// `LARGE_BODY_BYTES`: the Body tab here and the request builder's Raw tab.
+export { LargeBodyNotice } from "./LargeBodyNotice";
+export type { LargeBodyNoticeProps } from "./LargeBodyNotice";
+
 // Pieces shared by the two response viewers. They are two different shells -
 // seven tabs from live context, three from a stored run - so these are the
 // parts that were genuinely identical, not an attempt to merge the shells.
@@ -100,6 +105,7 @@ export {
 	// Where the pane stops formatting a body and shows a raw prefix. Exported
 	// because the mapping that builds `ResponseState` reads it too: above this
 	// size the indented copy it used to build is one nothing will ever render.
+	// The Raw tab reads it for its own prefix.
 	LARGE_BODY_BYTES,
 	// The response pane's own latency wording ("34 ms", "5.00 s"). Exported so a
 	// surface outside the viewer - the context bar's Recent sends rows - states
