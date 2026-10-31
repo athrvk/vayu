@@ -1819,6 +1819,17 @@ std::optional<std::string> pm_stored_response (const json& saved) {
     return std::make_optional (std::move (text));
 }
 
+/// A saved response coded 1xx. An example is a final answer a mock serves, so
+/// `POST /import/apply` refuses one (#3117) and the import leaves it out rather
+/// than failing the whole document over it.
+bool is_interim_response_code (const json* code) {
+    if (code == nullptr || !code->is_number ()) {
+        return false;
+    }
+    const double value = code->get<double> ();
+    return value >= 100 && value < vayu::core::constants::request_example::MIN_STATUS;
+}
+
 /**
  * `pmExamples(item)`: Postman's saved responses (`item.response[]`).
  *
@@ -1841,8 +1852,12 @@ json pm_examples (const json* item, PostmanCounts& counts) {
             counts.skipped_malformed += 1;
             continue;
         }
-        json headers     = map_header_rows (prop (saved, "header"));
         const json* code = prop (saved, "code");
+        if (is_interim_response_code (code)) {
+            counts.skipped_malformed += 1;
+            continue;
+        }
+        json headers     = map_header_rows (prop (saved, "header"));
         const json* name = prop (saved, "name");
         std::string content_type;
         for (const json& header : headers) {

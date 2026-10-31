@@ -1079,6 +1079,7 @@ TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteAnswersWhatWasAsked) {
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Origin"), "*");
     EXPECT_FALSE (preflight->has_header ("Access-Control-Allow-Credentials"));
     EXPECT_FALSE (preflight->has_header ("Vary"));
+    EXPECT_FALSE (preflight->has_header ("Content-Length"));
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Methods"), "POST");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Allow-Headers"), "X-Custom-Header");
     EXPECT_EQ (preflight->get_header_value ("Access-Control-Max-Age"), "600");
@@ -1094,6 +1095,72 @@ TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteAnswersWhatWasAsked) {
             EXPECT_EQ ((*hits)[i], 0u);
         }
     }
+}
+
+// RFC 9110 §6.4.1: a 204 or 304 has no content, and §8.6 forbids Content-Length
+// on a 204. cpp-httplib adds `Content-Length: 0` to any empty response, so this
+// reads the answer off a real socket. A stored 100 is served the same way, as
+// bodyless; create refuses one, so a row can only predate that.
+TEST_F (MockServerTest, ABodylessStatusIsServedWithNoBodyAndNoFraming) {
+    for (const int status_code : { 204, 304, 101 }) {
+        SCOPED_TRACE (status_code);
+        const std::string request_id = "req_" + std::to_string (status_code);
+        seed_request (request_id, "col_root", vayu::HttpMethod::GET,
+        "{{baseUrl}}/s" + std::to_string (status_code));
+        seed_example ("exa_" + std::to_string (status_code), request_id,
+        status_code, R"({"ignored":true})", "application/json",
+        json::array ({ json{ { "key", "ETag" }, { "value", "\"v1\"" }, { "enabled", true } } }));
+    }
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    for (const int status_code : { 204, 304, 101 }) {
+        SCOPED_TRACE (status_code);
+        const auto answer = client.Get ("/s" + std::to_string (status_code));
+        ASSERT_TRUE (answer)
+        << "no response from the mock " << httplib::to_string (answer.error ());
+        EXPECT_EQ (answer->status, status_code);
+        EXPECT_TRUE (answer->body.empty ());
+        EXPECT_FALSE (answer->has_header ("Content-Length"));
+        EXPECT_FALSE (answer->has_header ("Content-Type"));
+        EXPECT_EQ (answer->get_header_value ("ETag"), "\"v1\"");
+    }
+}
+
+TEST_F (MockServerTest, AStatusThatMayCarryContentStillGetsItsBodyAndLength) {
+    seed_request ("req_ok", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/ok");
+    seed_example ("exa_ok", "req_ok", 200, R"({"ok":true})");
+    seed_request ("req_empty", "col_root", vayu::HttpMethod::GET, "{{baseUrl}}/empty");
+    seed_example ("exa_empty", "req_empty", 200, "");
+
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (2);
+    client.set_read_timeout (5);
+
+    const auto with_body = client.Get ("/ok");
+    ASSERT_TRUE (with_body);
+    EXPECT_EQ (with_body->body, R"({"ok":true})");
+    EXPECT_EQ (with_body->get_header_value ("Content-Length"), "11");
+    EXPECT_EQ (with_body->get_header_value ("Content-Type"), "application/json");
+
+    const auto empty = client.Get ("/empty");
+    ASSERT_TRUE (empty);
+    EXPECT_EQ (empty->status, 200);
+    EXPECT_EQ (empty->get_header_value ("Content-Length"), "0");
 }
 
 TEST_F (MockServerTest, AServedResponseWithNoOriginGetsTheWildcard) {

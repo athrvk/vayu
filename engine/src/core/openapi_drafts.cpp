@@ -37,6 +37,7 @@
 #include "js_json.hpp"
 #include "openapi_walk.hpp"
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
@@ -873,9 +874,9 @@ struct ExamplePayload {
  * `responses` as a saved example, or absent when it cannot be stored as one.
  *
  * Shared by the two dialects, which disagree only about where the payload lives
- * - @p payload is that half. A key that is not a numeric status (`default`,
- * `2XX`) has no status line to be served under and is skipped rather than
- * guessed at; the renderer counts those for its import preview, and a draft has
+ * - @p payload is that half. A key that is not a final numeric status
+ * (`default`, `2XX`, or a 1xx interim response) has no status line to be served
+ * under and is skipped rather than guessed at; the renderer counts those for its import preview, and a draft has
  * no preview to report to.
  */
 template <typename Payload>
@@ -900,7 +901,8 @@ response_example (const std::string& code, const json* response, ImportTally* ta
         return std::nullopt;
     }
     const int status = std::stoi (code);
-    if (status < 100 || status > 599) {
+    if (status < constants::request_example::MIN_STATUS ||
+    status > constants::request_example::MAX_STATUS) {
         tally_add (tally, "example_no_status");
         return std::nullopt;
     }

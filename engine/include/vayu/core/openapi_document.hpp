@@ -316,8 +316,9 @@ struct DraftField {
 struct DraftExample {
     /// `"200 - A user"` when the response is described, `"200"` when it is not.
     std::string name;
-    /// The status the example documents. Only a numeric 100-599 key becomes one:
-    /// `default` and `2XX` have no status line to be served under.
+    /// The status the example documents. Only a numeric 200-599 key becomes one:
+    /// `default`, `2XX` and a 1xx interim response have no status line to be
+    /// served under.
     int status = 200;
     /**
      * Whether the document states a payload for this response.

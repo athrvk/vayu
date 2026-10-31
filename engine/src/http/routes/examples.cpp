@@ -40,10 +40,6 @@ namespace vayu::http::routes {
 
 namespace {
 
-/** The lowest and highest values an HTTP status line can carry (RFC 9110 §15). */
-constexpr int MIN_HTTP_STATUS = 100;
-constexpr int MAX_HTTP_STATUS = 599;
-
 /**
  * 404 for "no such request", shared by every route here.
  *
@@ -412,8 +408,10 @@ void record_saved_response (vayu::db::RequestExample& x, const SavedFrom& saved)
  * `name` has no default and so rejects absent-on-create and null on either
  * verb, matching every other resource's required fields. `status` is validated
  * rather than clamped: a stored 0 or 700 would be re-served verbatim by a mock
- * server, and a status nobody can send is a payload bug worth naming. The body
- * cap is a 400 for the same reason - see `request_example::MAX_BODY_BYTES`.
+ * server, and a status nobody can send is a payload bug worth naming. A 1xx is
+ * refused too (#3117): it is an interim response, never the final one a mock
+ * answers with. The body cap is a 400 for the same reason - see
+ * `request_example::MAX_BODY_BYTES`.
  * `origin` is validated against its two values by `apply_origin_field` above,
  * and defaults to `import` on create - the honest answer for every caller that
  * does not claim otherwise, since import wrote every row until #588.
@@ -434,10 +432,15 @@ bool is_create) {
     }
 
     apply_int_field (json, "status", x.status, 200, is_create);
-    if (x.status < MIN_HTTP_STATUS || x.status > MAX_HTTP_STATUS) {
+    // Only a write that names the status is judged, so an example stored with a
+    // 1xx before this refusal can still be renamed or reordered.
+    namespace limits        = vayu::core::constants::request_example;
+    const bool names_status = is_create || json.contains ("status");
+    if (names_status && (x.status < limits::MIN_STATUS || x.status > limits::MAX_STATUS)) {
         return route_error (400,
-        "Invalid 'status': " + std::to_string (x.status) + " is not an HTTP status code (" +
-        std::to_string (MIN_HTTP_STATUS) + "-" + std::to_string (MAX_HTTP_STATUS) + ")");
+        "Invalid 'status': " + std::to_string (x.status) +
+        " is not a final HTTP status code (" + std::to_string (limits::MIN_STATUS) +
+        "-" + std::to_string (limits::MAX_STATUS) + ")");
     }
 
     if (auto outcome = apply_key_value_field (json, "headers", x.headers, is_create); !outcome) {
@@ -709,7 +712,7 @@ void register_request_example_routes (RouteContext& ctx) {
      * Creates one saved example response on a request. Create only - the engine
      * assigns the id, so a body `id` is a 400 (#97) and the 409 guards only an
      * id collision or the per-request cap.
-     * Body params: name (required), status (default 200, must be 100-599),
+     * Body params: name (required), status (default 200, must be 200-599),
      * headers (array of KeyValueEntry), body, contentType, order (absent or
      * null appends after the request's current examples), origin ("import" |
      * "user", default "import" - the app's save-as-example sends "user"),

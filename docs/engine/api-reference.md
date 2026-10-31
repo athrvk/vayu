@@ -2506,7 +2506,7 @@ Create one example. **Create only**, and the engine owns the id - see
 ```json
 {
   "name": "200 - A user",   // Required, no default (null is a 400)
-  "status": 200,             // Optional, must be 100-599. Default 200
+  "status": 200,             // Optional, must be 200-599. Default 200
   "headers": [],             // Optional, array of {key, value, enabled}
   "body": "",                // Optional. Default ""
   "contentType": "",         // Optional. Default ""
@@ -2576,9 +2576,10 @@ to survive.
 **Response:** the created example object.
 
 **Errors:** `404` if the request does not exist. `400` if the body carries an
-`id`, if `name` is missing or `null`, on a `status` outside `100`-`599` (rejected
+`id`, if `name` is missing or `null`, on a `status` outside `200`-`599` (rejected
 rather than clamped - a stored `700` would be re-served as a status line nobody
-can send), on a malformed `headers` entry, on an `origin` that is neither
+can send, and a `1xx` is an interim response a mock cannot serve as its final
+answer), on a malformed `headers` entry, on an `origin` that is neither
 `"import"` nor `"user"`, on a `body` over the cap, or on a `postmanResponse` that
 is not a string holding a JSON object or is over its cap. `400` naming the field
 on a `savedFrom` that is not an object, whose `request` is not an object, whose
@@ -2597,7 +2598,9 @@ A storage failure answers `507`, `503` or `500`, never `400` - see
 Update one example. **Update only** - a `404` when the example does not exist,
 and the same `404` when it exists under a different request. Merge-patch body:
 absent keeps, `null` resets to the field's default (`name` has none, so `null`
-is a `400`). `postmanResponse` accepts only `null`, which clears it; any other
+is a `400`). A `status` outside `200`-`599` is a `400` as on create; only a body
+that names `status` is judged, so an example stored with a `1xx` before create
+began refusing them can still be renamed. `postmanResponse` accepts only `null`, which clears it; any other
 value is a `400` - it records what a file said, and the export already
 regenerates each part of it an edit to `status` or `headers` makes stale.
 
@@ -4173,7 +4176,7 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `malformed_item` | A Postman `item[]` or `event[]` entry that is not an object |
 | `unsupported_method` | A Postman custom HTTP verb (imported as `GET`), or an OpenAPI `trace` operation (dropped; `HttpMethod` has no `TRACE`) |
 | `malformed_spec` | An OpenAPI path item, `parameters` list or response whose shape the specification does not allow, stepped over so the rest of the file still imports |
-| `example_no_status` | An OpenAPI response key that is neither `default` nor a status from 100 to 599 (a `2XX` wildcard, junk) |
+| `example_no_status` | An OpenAPI response key that is neither `default` nor a status from 200 to 599 (a `2XX` wildcard, a `1xx` interim response, junk) |
 | `default_response` | An OpenAPI response keyed `default` - conformant, and counted as information rather than as a loss |
 | `external_ref` | A `$ref` into another file that a bundling pass could not reach (the request's `unresolvedRefs`) |
 | `duplicate_operation_id` | An OpenAPI `operationId` that an earlier operation already declared; the first keeps the id |
@@ -6101,6 +6104,12 @@ though they were a whole response - nothing on the wire says otherwise, and the
 flag deliberately does not change what is served. It is disclosure, not
 behaviour: the app paints a "Partial body" chip on the row so the choice to serve
 it is a made one (issue #659).
+
+**A `204` or `304` example is served with no body, no `Content-Length` and no
+`Content-Type`** (RFC 9110 §6.4.1), whatever its stored body says; the rest of
+its headers are kept. The same holds for a `1xx` example stored before create
+began refusing them (#3117). A real preflight's synthesized `204` carries no
+`Content-Length` either.
 
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one

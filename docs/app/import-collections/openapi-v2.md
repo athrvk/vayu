@@ -142,7 +142,7 @@ Saved example responses (issue #481), from the half of the spec that says what c
 | `examples[<media type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
 | `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json` |
 
-A response that documents no body still imports (`204` is a real answer), and a key that is not a numeric status is skipped and counted: `default` as `default_response`, a wildcard or junk key as `example_no_status` - counted apart for the reason [OpenAPI 3.0](./openapi-v3.md#documented-responses) gives.
+A response that documents no body still imports (`204` is a real answer), and a key that is not a final numeric status (200-599) is skipped and counted: `default` as `default_response`, a wildcard, `1xx` or junk key as `example_no_status` - counted apart for the reason [OpenAPI 3.0](./openapi-v3.md#documented-responses) gives.
 
 ## Base URL construction
 

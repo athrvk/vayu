@@ -257,6 +257,28 @@ bool header_is_stale_transfer_encoding (const std::string& name) {
     header_is (name, "content-length") || header_is (name, "transfer-encoding");
 }
 
+/**
+ * RFC 9110 §6.4.1: a 1xx, 204 or 304 response has no content. A stored 1xx can
+ * only predate the refusal at example create; it is served as bodyless rather
+ * than as an interim response that never gets a final one.
+ */
+bool status_forbids_body (int status) {
+    return status < 200 || status == 204 || status == 304;
+}
+
+/**
+ * cpp-httplib adds `Content-Length: 0` to any response that has no body, which
+ * RFC 9110 §8.6 forbids on a 1xx or 204 and which a 304 would read as a
+ * validator for an empty representation. It adds it after the handler has
+ * answered, so the only place to take it back is a post-routing handler.
+ */
+void drop_framing_from_bodyless_status (const httplib::Request& /*req*/,
+httplib::Response& res) {
+    if (status_forbids_body (res.status)) {
+        res.headers.erase ("Content-Length");
+    }
+}
+
 } // namespace
 
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
@@ -784,6 +806,11 @@ httplib::Response& res) {
             res.headers.emplace (name, value);
         }
     }
+    if (status_forbids_body (example.status)) {
+        // Neither the body nor its Content-Type: there is no content to type.
+        routes::finalize_cors_expose_headers (res);
+        return;
+    }
     if (!example.body.empty ()) {
         res.set_content (example.body, content_type);
     } else {
@@ -888,6 +915,7 @@ const MockStartRequest& request) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });
+    svr.set_post_routing_handler (drop_framing_from_bodyless_status);
 
     const auto started =
     server->listener.start ("127.0.0.1", request.port, "mock server " + server->id);
