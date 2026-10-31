@@ -241,6 +241,9 @@ std::size_t mark_shadowed_routes (std::vector<MockRoute>& routes);
  * happened to write first, and a literal route could be permanently shadowed.
  * Between routes of equal specificity one with a saved example beats one
  * without (#3115), else the earlier in the table wins.
+ *
+ * A HEAD that no stored HEAD route matches resolves to the GET route of that
+ * path, so the mock answers it with the GET's status and headers (#3118).
  */
 MockMatch resolve_mock_route (const std::vector<MockRoute>& routes,
 const std::string& method,
