@@ -773,8 +773,9 @@ TEST_F (ExamplesRouteTest, UpdateRejectsAnInterimStatusAndKeepsTheRow) {
         body["error"]["message"].get<std::string> ().find ("Invalid 'status'"),
         std::string::npos);
     }
-    ASSERT_HAS_VALUE (db_->get_request_example (id));
-    EXPECT_EQ (db_->get_request_example (id)->status, 201);
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, 201);
 }
 
 // A row stored before 1xx was refused must stay editable: only a write that
