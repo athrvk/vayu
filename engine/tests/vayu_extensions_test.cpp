@@ -191,7 +191,13 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     const auto timed = ext::settings_of (Json::parse (R"({"timeout":2500})"));
     ASSERT_HAS_VALUE (timed);
     EXPECT_EQ ((*timed)["timeout"], 2500);
-    EXPECT_FALSE (ext::examples_of (Json::parse (R"([{"name":"x","status":42}])")));
+    // An interim status is refused at create (#3117), so the reader drops the
+    // piece instead of handing the applier a row it would reject.
+    for (const char* bad : { R"([{"name":"x","status":42}])",
+         R"([{"name":"x","status":100}])", R"([{"name":"x","status":199}])" }) {
+        EXPECT_FALSE (ext::examples_of (Json::parse (bad))) << bad;
+    }
+    EXPECT_TRUE (ext::examples_of (Json::parse (R"([{"name":"x","status":200}])")));
     EXPECT_FALSE (ext::data_schema_of (Json::parse (R"({"columns":["a","a"]})")));
     EXPECT_FALSE (ext::folder_path_of (Json::parse (R"(["a",""])")));
     EXPECT_FALSE (ext::variables_of (Json::parse (R"({"v":{"value":1}})")));

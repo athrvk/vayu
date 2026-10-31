@@ -198,7 +198,7 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 | Postman (`item.response[]` entry) | Vayu `ExampleDraft` | Notes |
 |-----------------------------------|---------------------|-------|
 | `name` | `name` | fallback `"Example"` |
-| `code` | `status` | only when it is a finite number; otherwise `200`, which is what Postman shows for a saved response with no code |
+| `code` | `status` | only when it is a finite number; otherwise `200`, which is what Postman shows for a saved response with no code. A `1xx` code is an interim response a mock cannot serve as its answer, so that saved response is left out and counted as `malformed_item` |
 | `header[]` | `headers` | via `map_key_values` - source order and duplicates (`Set-Cookie`) preserved |
 | `body` | `body` | stored verbatim |
 | `header[]` `Content-Type` | `contentType` | `""` when the recorded response carried none |

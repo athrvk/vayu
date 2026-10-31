@@ -816,7 +816,8 @@ std::optional<Json> example_of (const Json& example) {
     }
     const auto status = example.find ("status");
     if (status == example.end () || !status->is_number_integer () ||
-    status->get<int> () < 100 || status->get<int> () > 599) {
+    status->get<int> () < constants::request_example::MIN_STATUS ||
+    status->get<int> () > constants::request_example::MAX_STATUS) {
         return std::nullopt;
     }
     Json kept{ { "name", example.at ("name") }, { "status", *status } };

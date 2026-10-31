@@ -129,7 +129,7 @@ Both lists go through the walk's `parameters` guard (`openapi_drafts.cpp`) first
 
 | OpenAPI (`op.responses[code]`) | Vayu `ExampleDraft` | Notes |
 |--------------------------------|---------------------|-------|
-| the key | `status` | must be a three-digit `100`-`599` code; see below |
+| the key | `status` | must be a three-digit `200`-`599` code; see below |
 | `description` | `name` | `"{code} - {description}"`, or the bare code when the response describes nothing |
 | the JSON media type's `example` → first `examples[*].value` → `sampleSchema(schema)` | `body` | the same precedence `buildBody` uses for a request body; a string is stored as-is, anything else is `JSON.stringify(value, null, 2)` |
 | the JSON media type key | `contentType`, and a single `Content-Type` header | `application/json`, an `application/json;…` variant or a `+json` suffix, by the same rule request bodies use |
@@ -138,7 +138,7 @@ A response `$ref` is resolved (single hop, like the parser's other refs). An `ex
 
 A response that documents **no body** still imports: `204 No Content` is a real answer and a mock server has to be able to give it.
 
-A key that is not a numeric status is **skipped and counted**: `default` as `default_response`, anything else (a `2XX` wildcard, junk) as `example_no_status`. Both document a real response, but an example is served under one status line and there is no honest value to pick. They are counted apart because `default` is conformant and near-universal - every one of Stripe's 568 operations declares one - so the preview does not show it at all, while a malformed key is a muted note (issue #710).
+A key that is not a final numeric status (200-599) is **skipped and counted**: `default` as `default_response`, anything else (a `2XX` wildcard, a `1xx` such as `101`, junk) as `example_no_status`. Both document a real response, but an example is served under one status line and there is no honest value to pick. They are counted apart because `default` is conformant and near-universal - every one of Stripe's 568 operations declares one - so the preview does not show it at all, while a malformed key is a muted note (issue #710).
 | tag and path groups | `children` | `folders.children()` |
 | operations with neither | `requests` | |
 
@@ -325,7 +325,7 @@ Dropped / not represented:
 |--------------------|--------------|
 | `unsupported_method` | a path item carries a `trace` operation |
 | `malformed_spec` | a path item is not an object / its `$ref` does not resolve; or a `parameters` value is present but not an array |
-| `example_no_status` | a response key is neither a three-digit status nor `default` - a `2XX` wildcard, or junk |
+| `example_no_status` | a response key is neither a status from 200 to 599 nor `default` - a `2XX` wildcard, a `1xx` interim response, or junk |
 | `default_response` | a response keyed `default` - conformant, and reported as information rather than as a loss |
 | `duplicate_operation_id` | an `operationId` another operation in this document already declared (see [Operation identity](#operation-identity)) |
 | `cookie_param` | a parameter declared `in: "cookie"` - one per distinct cookie parameter per operation |

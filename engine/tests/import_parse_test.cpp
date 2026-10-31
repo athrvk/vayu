@@ -2950,6 +2950,54 @@ TEST (PostmanImport, ReadsAStringHeaderOnASavedResponse) {
     EXPECT_EQ (example.at ("contentType"), "application/json");
 }
 
+namespace {
+
+/// How many times an import's `meta.skipped` reports @p kind.
+int skipped_count (const json& meta, const std::string& kind) {
+    for (const json& entry : meta.at ("skipped")) {
+        if (entry.at ("kind") == kind) {
+            return entry.at ("count").get<int> ();
+        }
+    }
+    return 0;
+}
+
+} // namespace
+
+/// A saved response coded 1xx is an interim answer `POST /import/apply` refuses
+/// as an example (#3117), so the import leaves it out and counts it rather than
+/// failing the document. Mutation check: dropping the skip keeps the 100 row.
+TEST (PostmanImport, LeavesOutASavedResponseCoded1xx) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
+         "response":[{"name":"continue","code":100,"body":""},
+                     {"name":"upgrade","code":101,"body":""},
+                     {"name":"ok","code":200,"body":"{}"}]})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& examples =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
+    ASSERT_EQ (examples.size (), 1u);
+    EXPECT_EQ (examples[0].at ("status"), 200);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 2);
+}
+
+/// An OpenAPI `101` (a WebSocket upgrade) documents a response no mock can
+/// serve, so it is counted with the keys that have no status line instead of
+/// becoming an example the apply would refuse. Mutation check: a lower bound of
+/// 100 imports it as an example.
+TEST (OpenApiImport, SkipsAnInterimResponseAndCountsIt) {
+    const ImportParse parsed = parse_import (R"j({"openapi":"3.0.0",
+        "info":{"title":"T","version":"1"},
+        "paths":{"/ws":{"get":{"operationId":"connect","responses":{
+            "101":{"description":"Switching protocols"},
+            "200":{"description":"ok"}}}}}})j",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("exampleCount"), 1);
+    EXPECT_EQ (skipped_count (meta, "example_no_status"), 1);
+}
+
 /// The fragment is the URL's, never a query value's: it is cut at the first
 /// `#` before the query is looked for, kept on the url, and the query joined
 /// before it. `url.hash` supplies it when `raw` has none. Mutation check:

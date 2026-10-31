@@ -2803,6 +2803,23 @@ describe("document CRUD parity", () => {
 			expect(client.updateRequestExample).not.toHaveBeenCalled();
 		});
 
+		test("the example tools' schemas refuse an interim 1xx status and take the final range", () => {
+			// dispatchTool runs after the SDK has validated the input, so the bound
+			// is read off the schema the SDK validates with.
+			for (const name of ["create_request_example", "update_request_example"]) {
+				const tool = TOOLS.find((t) => t.name === name);
+				expect(tool, name).toBeDefined();
+				const status = tool!.inputSchema.status as z.ZodType;
+				for (const interim of [100, 199]) {
+					expect(status.safeParse(interim).success, `${name} ${interim}`).toBe(false);
+				}
+				for (const final of [200, 204, 599]) {
+					expect(status.safeParse(final).success, `${name} ${final}`).toBe(true);
+				}
+				expect(status.safeParse(600).success, `${name} 600`).toBe(false);
+			}
+		});
+
 		test("list_request_examples clips one oversized body and says so", async () => {
 			const body = "x".repeat(MAX_INLINE_BODY_BYTES + 500);
 			const client = fakeClient({

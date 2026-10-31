@@ -1021,6 +1021,10 @@ constexpr size_t MAX_BODY_BYTES = size_t{ 1024 } * 1024;
 /// Examples one request may hold. Bounds the list read and the per-request
 /// slice of a bulk import.
 constexpr size_t MAX_PER_REQUEST = 100;
+/// The statuses an example may carry. A 1xx is an interim response, which a
+/// mock cannot serve as the final answer, so the range starts at 200.
+constexpr int MIN_STATUS = 200;
+constexpr int MAX_STATUS = 599;
 /// Bytes of one stored Postman saved response (`postman_response`, schema
 /// version 2): the recorded request, its body included, rides in it, so it
 /// gets the body's own bound. The importer leaves a larger one out (the

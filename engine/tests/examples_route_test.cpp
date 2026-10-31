@@ -183,18 +183,27 @@ TEST_F (ExamplesRouteTest, CreateRequiresName) {
     EXPECT_EQ (body["error"]["message"], "Missing required field: name");
 }
 
-// A status outside the wire's range is refused rather than clamped: a mock
-// server would re-serve whatever is stored, and there is no status line for 700.
+// A status outside the final range is refused rather than clamped: a mock
+// server would re-serve whatever is stored, there is no status line for 700, and
+// a 1xx is an interim response a mock cannot serve as its answer (#3117).
 TEST_F (ExamplesRouteTest, CreateRejectsImpossibleStatus) {
-    for (const int status_code : { 99, 600 }) {
+    for (const int status_code : { 99, 100, 101, 199, 600 }) {
         auto [status, body] = routes::create_request_example_response (
         *db_, "req_1", json{ { "name", "x" }, { "status", status_code } });
         EXPECT_EQ (status, 400) << status_code;
         EXPECT_NE (body["error"]["message"].get<std::string> ().find (
-                   "not an HTTP status code"),
+                   "Invalid 'status': " + std::to_string (status_code)),
         std::string::npos);
     }
     EXPECT_EQ (db_->count_request_examples ("req_1"), 0);
+}
+
+TEST_F (ExamplesRouteTest, CreateAcceptsTheEdgesOfTheFinalRange) {
+    for (const int status_code : { 200, 204, 304, 599 }) {
+        auto [status, body] = routes::create_request_example_response (
+        *db_, "req_1", json{ { "name", "x" }, { "status", status_code } });
+        EXPECT_EQ (status, 200) << status_code << " " << body.dump ();
+    }
 }
 
 TEST_F (ExamplesRouteTest, CreateRejectsMalformedHeaders) {
@@ -752,6 +761,42 @@ TEST_F (ExamplesRouteTest, UpdateIsMergePatch) {
     EXPECT_EQ (reset_body["body"], "");
 }
 
+TEST_F (ExamplesRouteTest, UpdateRejectsAnInterimStatusAndKeepsTheRow) {
+    const std::string id =
+    create_example ("req_1", json{ { "name", "Original" }, { "status", 201 } });
+
+    for (const int status_code : { 100, 199 }) {
+        auto [status, body] = routes::update_request_example_response (
+        *db_, "req_1", id, json{ { "status", status_code } });
+        EXPECT_EQ (status, 400) << status_code;
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("Invalid 'status'"),
+        std::string::npos);
+    }
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, 201);
+}
+
+// A row stored before 1xx was refused must stay editable: only a write that
+// names the status is judged, or a rename would fail on a field it never sent.
+TEST_F (ExamplesRouteTest, UpdateNotNamingTheStatusLeavesAStoredInterimStatusAlone) {
+    const std::string id = create_example ("req_1", json{ { "name", "Legacy" } });
+    auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    stored->status = 100;
+    db_->save_request_example (*stored);
+
+    auto [status, body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "name", "Renamed" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["status"], 100);
+
+    auto [naming_status, naming_body] = routes::update_request_example_response (
+    *db_, "req_1", id, json{ { "status", 100 } });
+    EXPECT_EQ (naming_status, 400) << naming_body.dump ();
+}
+
 TEST_F (ExamplesRouteTest, UpdateMissingExampleIs404NotACreate) {
     auto [status, body] = routes::update_request_example_response (
     *db_, "req_1", "exa_nope", json{ { "name", "x" } });
@@ -994,6 +1039,21 @@ TEST_F (ExamplesRouteTest, ImportApplyRejectsABadExampleAndWritesNothing) {
     const auto collections = db_->get_collections ();
     ASSERT_EQ (collections.size (), 1u);
     EXPECT_EQ (collections[0].id, "col_1");
+}
+
+// A bulk import goes through the same applier, so a 1xx example fails the whole
+// payload at the item rather than landing a row a mock cannot serve.
+TEST_F (ExamplesRouteTest, ImportApplyRejectsAnInterimStatusAndWritesNothing) {
+    auto [status, body] = routes::import_apply_response (*db_,
+    json{ { "collections", json::array ({ json{ { "tempId", "c1" }, { "name", "Imported" } } }) },
+    { "requests",
+    json::array ({ json{ { "tempId", "r1" }, { "collectionTempId", "c1" },
+    { "name", "Get user" }, { "method", "GET" }, { "url", "https://example.test/user" },
+    { "examples", json::array ({ json{ { "name", "Continue" }, { "status", 100 } } }) } } }) } });
+
+    EXPECT_EQ (status, 400);
+    EXPECT_EQ (body["error"]["item"], "r1");
+    EXPECT_EQ (db_->get_collections ().size (), 1u);
 }
 
 /**
