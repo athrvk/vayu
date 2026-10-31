@@ -20,40 +20,21 @@
  * `-text` token for text and the bare token for tints, per the three-token rule.
  *
  * A *line* carries the other axis - which `console.*` method wrote it - and that
- * one is state, so it takes the status tokens for real. See `LEVEL_TONE`.
+ * one is state, so it takes the status tokens for real. See `LEVEL_TONE` in
+ * `components/shared/console-level.ts`.
  */
 
 import { useState } from "react";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Callout } from "@/components/shared";
+import { LEVEL_TONE } from "@/components/shared/console-level";
+import { LogGutter } from "@/components/shared/LogGutter";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { ConsoleLevel } from "@/types";
 import type { ParsedLog } from "./parse-logs";
 import { SCRIPT_SECTIONS, type ScriptKey } from "./script-sections";
 import ScopeTag from "../ScopeTag";
-
-/**
- * How each `console.*` level is drawn.
- *
- * `log` and `info` share the plain foreground on purpose - that is Chrome's
- * behaviour, and a fourth saturated tone inside a slab that already carries a
- * section colour would compete with it rather than inform. What separates them
- * is the gutter label, which is also what keeps this from being a colour-only
- * distinction: `warn` against `error` in a desaturated accent scheme is the
- * same failure the tab indicator exists to avoid.
- *
- * A blank gutter for `log` rather than the word "log": every ordinary line
- * would carry it, a column of noise saying what the absence of a marker already
- * says. The column is still reserved, so messages stay aligned.
- */
-const LEVEL_TONE: Record<ConsoleLevel, { gutter: string; text: string; label: string }> = {
-	log: { gutter: "", text: "text-foreground", label: "text-muted-foreground" },
-	info: { gutter: "info", text: "text-foreground", label: "text-muted-foreground" },
-	warn: { gutter: "warn", text: "text-status-warning-text", label: "text-status-warning-text" },
-	error: { gutter: "error", text: "text-status-error-text", label: "text-status-error-text" },
-};
 
 /**
  * A script error.
@@ -150,20 +131,7 @@ export function ScriptLogs({ which, logs }: { which: ScriptKey; logs: ParsedLog[
 						const tone = LEVEL_TONE[log.level];
 						return (
 							<div key={i} className="skip-offscreen flex gap-2 py-px">
-								{/*
-								 * A span, not an icon - see the note above about what a
-								 * per-row SVG costs on unbounded output. One text node, and
-								 * it says more than a shape would.
-								 */}
-								<span
-									aria-hidden={tone.gutter === "" ? true : undefined}
-									className={cn(
-										"w-9 shrink-0 select-none text-right text-micro uppercase leading-5 tracking-wide",
-										tone.label
-									)}
-								>
-									{tone.gutter}
-								</span>
+								<LogGutter label={tone.gutter} labelClassName={tone.label} />
 								<ScopeTag scope={log.scope} className="leading-5" />
 								<pre
 									className={cn(
