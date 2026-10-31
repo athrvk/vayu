@@ -638,8 +638,11 @@ Notes:
   endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
   and the `series` names to read), so an agent asked why a target slowed down
   can read its CPU on the same timeline as p99 - the report comes back with a
-  `monitor` section carrying per-series min/max/avg plus the sample and
-  failed-scrape counts. The block is forwarded verbatim: its value ranges are
+  `monitor` section carrying per-series min/max/avg, the sample count, and the
+  missed scrapes split by cause: `failures` (no 2xx answer, the latest cause in
+  `lastError`) and `noMatchScrapes` (answered, but none of the names matched;
+  a Prometheus name is matched bare, so a `{label="..."}` filter is a `400`).
+  The block is forwarded verbatim: its value ranges are
   the engine's (`validate_run_config`), and `monitor.series`' ceiling is the
   `monitorMaxSeries` **setting**, so a second copy of those bounds in the tool
   schema would refuse blocks the engine accepts the moment a user raises it.

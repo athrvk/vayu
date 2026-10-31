@@ -2535,7 +2535,8 @@ TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
     vayu::core::MonitorTotals totals;
     totals.add ({ { "node_cpu", 1.0 } });
     totals.add ({ { "node_cpu", 3.0 } });
-    totals.record_failure ();
+    totals.record_failure ("HTTP 503");
+    totals.record_no_match ();
     inputs.monitor = totals.to_summary ();
     db_->update_run_summary (
     "run_monitor", vayu::core::build_run_summary_payload (inputs).dump ());
@@ -2545,6 +2546,8 @@ TEST_F (RunsRouteTest, ReportCarriesTheMonitorSummary) {
     ASSERT_TRUE (body.contains ("monitor"));
     EXPECT_EQ (body["monitor"]["samples"].get<size_t> (), 2u);
     EXPECT_EQ (body["monitor"]["failures"].get<size_t> (), 1u);
+    EXPECT_EQ (body["monitor"]["noMatchScrapes"].get<size_t> (), 1u);
+    EXPECT_EQ (body["monitor"]["lastError"], "HTTP 503");
     EXPECT_DOUBLE_EQ (body["monitor"]["series"]["node_cpu"]["avg"].get<double> (), 2.0);
 }
 

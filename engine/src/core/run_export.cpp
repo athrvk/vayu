@@ -203,7 +203,10 @@ constexpr auto TRANSACTION_KEYS =
 std::to_array<std::string_view> ({ "name", "count", "errors" });
 constexpr auto TRANSACTION_LATENCY_KEYS =
 std::to_array<std::string_view> ({ "min", "p50", "p90", "p95", "p99", "max" });
-constexpr auto MONITOR_KEYS = std::to_array<std::string_view> ({ "samples", "failures" });
+// `lastError` is a fixed phrase or `HTTP <status>` (`scrape_failure_cause`),
+// never transport text that could quote the monitor URL.
+constexpr auto MONITOR_KEYS = std::to_array<std::string_view> (
+{ "samples", "failures", "noMatchScrapes", "lastError" });
 constexpr auto MONITOR_SERIES_KEYS =
 std::to_array<std::string_view> ({ "min", "max", "avg", "count" });
 constexpr auto TEST_VALIDATION_KEYS = std::to_array<std::string_view> (
