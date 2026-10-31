@@ -3558,8 +3558,8 @@ TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
     << post.dump ();
     const auto messages = post.value ("messages", nlohmann::json::array ());
     ASSERT_EQ (messages.size (), 1u) << post.dump ();
-    EXPECT_EQ (messages[0].value ("kind", ""), "error");
-    EXPECT_NE (messages[0].value ("text", "").find ("boom"), std::string::npos)
+    EXPECT_EQ (messages[0].at ("kind").get<std::string> (), "error");
+    EXPECT_NE (messages[0].at ("text").get<std::string> ().find ("boom"), std::string::npos)
     << post.dump ();
 }
 

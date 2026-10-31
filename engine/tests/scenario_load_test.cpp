@@ -1313,11 +1313,12 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
     << row.dump ();
     const auto messages = row.value ("messages", json::array ());
     ASSERT_EQ (messages.size (), 2u) << row.dump ();
-    EXPECT_EQ (messages[0].value ("kind", ""), "error");
-    EXPECT_NE (messages[0].value ("text", "").find ("boom"), std::string::npos)
+    EXPECT_EQ (messages[0].at ("kind").get<std::string> (), "error");
+    EXPECT_NE (messages[0].at ("text").get<std::string> ().find ("boom"), std::string::npos)
     << row.dump ();
-    EXPECT_EQ (messages[1].value ("kind", ""), "test");
-    EXPECT_TRUE (messages[1].value ("text", "").starts_with ("status is 201: "))
+    EXPECT_EQ (messages[1].at ("kind").get<std::string> (), "test");
+    EXPECT_TRUE (
+    messages[1].at ("text").get<std::string> ().starts_with ("status is 201: "))
     << row.dump ();
     EXPECT_FALSE (row.contains ("messagesDropped")) << row.dump ();
 }
