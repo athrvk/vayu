@@ -10,7 +10,7 @@
 /**
  * @file utils/log_text.hpp
  * @brief A bounded copy of caller-authored text, for a `LogRecord` field
- *        (issue #2359).
+ *        (issue #2359) and a load report's script messages (#3127).
  *
  * A record's `msg` is never redacted - only `fields` are, by key
  * (`utils/log_redact.hpp`) - so text a user's script chose (`throw new
@@ -36,21 +36,27 @@ inline constexpr std::string_view kLoggedTextTruncationMarker =
 "...[truncated]";
 
 /**
- * @brief @p text as a log field carries it: unchanged up to
- *        @ref kLoggedTextMaxBytes, otherwise cut there on a UTF-8 character
- *        boundary and followed by @ref kLoggedTextTruncationMarker.
+ * @brief @p text unchanged up to @p max_bytes, otherwise cut there on a UTF-8
+ *        character boundary and followed by @ref kLoggedTextTruncationMarker.
+ */
+inline std::string bounded_text (std::string_view text, std::size_t max_bytes) {
+    if (text.size () <= max_bytes) {
+        return std::string (text);
+    }
+    std::string bounded (without_incomplete_utf8_tail (text.substr (0, max_bytes)));
+    bounded += kLoggedTextTruncationMarker;
+    return bounded;
+}
+
+/**
+ * @brief @p text as a log field carries it: @ref bounded_text at
+ *        @ref kLoggedTextMaxBytes.
  *
  * Only the copy a log call is handed is bounded; the caller keeps, stores and
  * answers with the full text.
  */
 inline std::string bounded_log_text (std::string_view text) {
-    if (text.size () <= kLoggedTextMaxBytes) {
-        return std::string (text);
-    }
-    std::string bounded (
-    without_incomplete_utf8_tail (text.substr (0, kLoggedTextMaxBytes)));
-    bounded += kLoggedTextTruncationMarker;
-    return bounded;
+    return bounded_text (text, kLoggedTextMaxBytes);
 }
 
 } // namespace vayu::utils
