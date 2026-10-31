@@ -1694,8 +1694,8 @@ accepted and warns:
   draw nothing, and each call logs one `console.warn`, as
   [above](#visualizer-pmvisualizer); there is no Visualize tab to show the
   template in. The script keeps running
-- `pm.test.skip`, `pm.test.index`, `pm.require`, `pm.execution.runRequest` and
-  `pm.execution.location`
+- `pm.test.skip`, `pm.test.index`, `pm.require`, `pm.execution.runRequest`,
+  `pm.execution.location` and `pm.response.dataURI()`
 - `console.debug` and every other console method beyond `log`, `info`, `warn` and
   `error` (`console.table`, `console.dir`, `console.time`, ...) - use
   `console.log`
@@ -1729,11 +1729,33 @@ The editor underlines a use of any of the names above that the sandbox lacks
 (see [Type declarations](#type-declarations-hover-signature-help)) and its hover
 gives the replacement Postman itself names.
 
-A collection imported from Postman lists the requests whose scripts use any of these,
+A collection imported from Postman lists the requests whose scripts use these
 under `meta.unsupportedScriptApis` (see
-[Postman import](./import-collections/postman.md#scripts)). Postman's pre-`pm.*`
-globals and the `postman.*` methods are not among them: they run (see
-[above](#postmans-legacy-globals)).
+[Postman import](./import-collections/postman.md#scripts)), but only the names in
+the scan table (`API_RULES` in `engine/src/core/script_api_scan.cpp`), and only
+when written out: `pm.test.skip`, `pm.test.index`, `pm.require`,
+`pm.execution.runRequest`, `pm.execution.location`, `pm.response.dataURI`,
+`pm.response.headers.map`, `pm.request.headers.map`, `pm.cookies.set`,
+`pm.cookies.unset` and `pm.cookies.clear` (each its own name; `pm.cookies.jar()`
+is not among them), `console.debug`, `console.table`, `console.dir` and
+`console.time`, `fetch`, `XMLHttpRequest`, `URL`, `URLSearchParams`,
+`TextEncoder`, `TextDecoder`, `structuredClone`, `localStorage` and
+`sessionStorage`, `Buffer`, the `require` and `CryptoJS` cases above, `cheerio`,
+`Backbone` and chai-postman's three members. A host global the script declares
+itself (`const fetch = ...`) is not named. These are **not scanned**, so a script
+that uses them imports with no notice and throws at first run:
+
+- `process`, `window`, `document` and `alert`, left out on purpose: they are
+  common identifiers in a script's own code, and a notice that is wrong more
+  often than right trains people to ignore it
+- console methods other than the four above (`console.trace`, `console.assert`,
+  `console.group`, `console.count`, `console.timeEnd`, ...)
+- `pm.environment.name`, `pm.request.clone()` / `.size()` / `.update()`, the
+  `PropertyList` methods of a header object other than `map`, and a name read
+  through an alias (`const h = pm.response.headers; h.map(f)`)
+
+Postman's pre-`pm.*` globals and the `postman.*` methods are not named either:
+they run (see [above](#postmans-legacy-globals)).
 
 ---
 
