@@ -2046,13 +2046,12 @@ is `text/*`, a declared `charset`, or a subtype whose name (after any `x-`) or
 `+suffix` is one of the text syntaxes (`json`, `xml`, `yaml`, `javascript`,
 `graphql` and their kin), compared as whole tokens by `mediaTypeOf`: an Office
 document's `vnd.openxmlformats-...` subtype holds `xml` and is still a zip. The
-pane's `detectBodyType` and `bodyType` read the type through the same parts. A
-label the
+pane's `detectBodyType` reads the type through the same parts. A label the
 platform does not know, or bytes the charset cannot read, put a notice in
-`rawBytes.notice` that `ResponseBody` shows over the text. A non-text body sets
-`bodyType: "binary"`; the pane draws an image from its bytes through a Blob
-object URL, names a PDF or other bytes with their size, and Download writes the
-bytes as a Blob under the response's own Content-Type. Copy is off for such a
+`rawBytes.notice` that `ResponseBody` shows over the text. A non-text body has
+`rawBytes.isText` false and no text; the pane draws an image from its bytes
+through a Blob object URL, names a PDF or other bytes with their size, and
+Download writes the bytes as a Blob under the response's own Content-Type. Copy is off for such a
 body and the Raw tab prints one line in place of it; Save as example is off for
 any base64 body, since an example's body is UTF-8 text. Both disabled controls
 carry their reason. `binary-body-funnels.test.ts` holds the two funnels together.

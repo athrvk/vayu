@@ -24,7 +24,7 @@ import { buildRawRequest } from "@/components/shared/response-viewer";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { paneBody } from "./execute-mapping";
-import { decodeResponseBody, heldBodySize, responseBodyType } from "./response-bytes";
+import { decodeResponseBody, heldBodySize } from "./response-bytes";
 
 /** One element of `RunReport.results` - the shape `GET /runs/:id/report` returns. */
 export type RunResultSample = NonNullable<RunReport["results"]>[number];
@@ -269,7 +269,6 @@ export function responseFromRunResult(
 			headers: {},
 			...sentSide(trace),
 			body: errorMessage || "",
-			bodyType: "text",
 			size: 0,
 			time: result.latencyMs || 0,
 			timing: timingFromTrace(trace, result.latencyMs),
@@ -327,7 +326,6 @@ export function responseFromRunResult(
 		body,
 		bodyRaw,
 		...(rawBytes && { rawBytes }),
-		bodyType: responseBodyType(headers, rawBytes),
 		// `size` is what the pane's byte count shows. When the body was truncated
 		// for storage the stored slice is not the real size, so prefer the
 		// original `bodyBytes` the engine recorded and fall back to the slice.

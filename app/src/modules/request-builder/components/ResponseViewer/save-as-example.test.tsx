@@ -77,7 +77,6 @@ const okResponse = (overrides: Partial<ResponseState> = {}): ResponseState => ({
 	headers: { "Content-Type": "application/json", "X-Request-Id": "abc" },
 	body: '{"id":1}',
 	bodyRaw: '{"id":1}',
-	bodyType: "json",
 	size: 8,
 	time: 12,
 	...overrides,
@@ -143,7 +142,6 @@ describe("save response as example", () => {
 			headers: { "Content-Type": "text/plain; charset=iso-8859-1" },
 			body: "café",
 			bodyRaw: "café",
-			bodyType: "text",
 			rawBytes: { data: new Uint8Array([0x63, 0x61, 0x66, 0xe9]), isText: true },
 		});
 		renderViewer();

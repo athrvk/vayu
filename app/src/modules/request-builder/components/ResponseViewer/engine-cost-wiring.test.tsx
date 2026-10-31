@@ -44,7 +44,6 @@ const response = (engineMs?: number): ResponseState => ({
 	headers: {},
 	body: "{}",
 	bodyRaw: "{}",
-	bodyType: "json",
 	size: 2,
 	time: 120,
 	timing: {

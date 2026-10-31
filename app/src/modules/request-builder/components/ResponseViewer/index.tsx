@@ -277,7 +277,6 @@ export default function ResponseViewer() {
 			// No `headerLines`: the `open` frame carries the folded map alone, and
 			// absence is what the tabs read as "show the map" (`resolveHeaderLines`).
 			body: "",
-			bodyType: "text" as const,
 			size: 0,
 			time: 0,
 			...(liveLeftOut.length > 0 ? { leftOutElements: liveLeftOut } : {}),

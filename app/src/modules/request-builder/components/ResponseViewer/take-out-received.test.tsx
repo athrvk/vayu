@@ -45,7 +45,6 @@ function respond(overrides: Partial<ResponseState> = {}): ResponseState {
 		headers: { "content-type": "application/json" },
 		body: PANE_COPY,
 		bodyRaw: RECEIVED,
-		bodyType: "json",
 		size: RECEIVED.length,
 		time: 5,
 		...overrides,

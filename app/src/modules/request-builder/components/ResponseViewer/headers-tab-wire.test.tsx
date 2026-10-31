@@ -41,7 +41,6 @@ const response = (overrides: Partial<ResponseState> = {}): ResponseState => ({
 	headers: { server: "nginx" },
 	requestHeaders: { "User-Agent": "vayu/1" },
 	body: "",
-	bodyType: "text",
 	size: 0,
 	time: 1,
 	...overrides,

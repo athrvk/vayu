@@ -315,7 +315,6 @@ export interface ResponseState {
 	wireRequestHeaders?: WireHeaderLine[];
 	body: string;
 	bodyRaw?: string;
-	bodyType: "json" | "html" | "xml" | "text" | "binary";
 	size: number;
 	/**
 	 * Set when this response was restored from a stored run whose body the engine

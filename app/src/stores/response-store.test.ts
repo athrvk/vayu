@@ -49,7 +49,6 @@ function aResponse(body = "x".repeat(1024)): StoredResponse {
 		statusText: "OK",
 		headers: {},
 		body,
-		bodyType: "text",
 		size: body.length,
 		time: 12,
 	};

@@ -18,7 +18,6 @@ import {
 	extensionForContentType,
 	heldBodySize,
 	receivedBody,
-	responseBodyType,
 } from "./response-bytes";
 
 const base64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
@@ -160,7 +159,6 @@ describe("decodeResponseBody", () => {
 		expect(decoded.text).toBe("");
 		expect(decoded.bytes?.isText).toBe(false);
 		expect(Array.from(decoded.bytes?.data ?? [])).toEqual(ZIP);
-		expect(responseBodyType(typed(contentType), decoded.bytes)).toBe("binary");
 	});
 
 	it.each([
@@ -192,33 +190,6 @@ describe("decodeResponseBody", () => {
 		);
 		expect(() => decodeResponseBody({ bodyRaw: "x", bodyEncoding: "gzip" })).toThrow(
 			/unknown encoding: gzip/
-		);
-	});
-});
-
-describe("responseBodyType", () => {
-	it("is binary for bytes with no text, and the header's type otherwise", () => {
-		const data = new Uint8Array([1]);
-		expect(responseBodyType(typed("image/png"), { data, isText: false })).toBe("binary");
-		expect(responseBodyType(typed("text/html; charset=latin1"), { data, isText: true })).toBe(
-			"html"
-		);
-		expect(responseBodyType({ "Content-Type": "application/json" }, undefined)).toBe("json");
-		expect(responseBodyType(undefined, undefined)).toBe("text");
-	});
-
-	it("reads the type by whole token, never by a substring of it", () => {
-		const data = new Uint8Array([1]);
-		const asText = (contentType: string) =>
-			responseBodyType(typed(contentType), { data, isText: true });
-
-		expect(asText("application/problem+json")).toBe("json");
-		expect(asText("application/xhtml+xml")).toBe("html");
-		expect(asText("application/atom+xml")).toBe("xml");
-		expect(asText("text/xml; charset=latin1")).toBe("xml");
-		expect(asText("text/plain; charset=x-json-ish")).toBe("text");
-		expect(asText("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")).toBe(
-			"text"
 		);
 	});
 });

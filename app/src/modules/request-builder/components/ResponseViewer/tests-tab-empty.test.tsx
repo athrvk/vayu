@@ -45,7 +45,6 @@ const response = (overrides: Partial<ResponseState> = {}): ResponseState => ({
 	headers: { "content-type": "application/json" },
 	body: "{}",
 	bodyRaw: "{}",
-	bodyType: "json",
 	size: 2,
 	time: 10,
 	...overrides,

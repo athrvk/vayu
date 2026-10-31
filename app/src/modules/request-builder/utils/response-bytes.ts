@@ -209,22 +209,6 @@ export function decodeResponseBody({
 }
 
 /**
- * `ResponseState.bodyType`, the same answer from either funnel: `binary` for a
- * base64 body with no text view, otherwise read off the Content-Type.
- */
-export function responseBodyType(
-	headers: Record<string, string> | undefined,
-	bytes: ResponseBytes | undefined
-): ResponseState["bodyType"] {
-	if (bytes && !bytes.isText) return "binary";
-	const { name, suffix } = mediaTypeOf(contentTypeOf(headers));
-	if (name === "json" || suffix === "json") return "json";
-	if (name === "html" || name === "xhtml") return "html";
-	if (name === "xml" || suffix === "xml") return "xml";
-	return "text";
-}
-
-/**
  * The body text exactly as it was received, for everything that takes the body
  * out of the pane: Copy, Download, Save as example and the Raw tab.
  *

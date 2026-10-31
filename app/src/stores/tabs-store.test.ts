@@ -449,7 +449,6 @@ describe("closeTabsForEntities evicts stored responses", () => {
 			statusText: "OK",
 			headers: {},
 			body: "{}",
-			bodyType: "json",
 			size: 2,
 			time: 1,
 		});

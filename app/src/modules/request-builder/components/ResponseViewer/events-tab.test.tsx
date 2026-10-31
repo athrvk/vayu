@@ -56,7 +56,6 @@ const okResponse = (overrides: Partial<ResponseState> = {}): ResponseState => ({
 	headers: { "content-type": "text/event-stream" },
 	body: "",
 	bodyRaw: "",
-	bodyType: "text",
 	size: 0,
 	time: 12,
 	...overrides,
@@ -94,7 +93,7 @@ describe("the Events tab", () => {
 	});
 
 	it("renders on an ordinary response, and says it was not a stream", () => {
-		state.response = okResponse({ body: '{"ok":true}', bodyType: "json" });
+		state.response = okResponse({ body: '{"ok":true}' });
 		renderViewer();
 
 		// Present, not absent: the constant tab set is what stops issue #59

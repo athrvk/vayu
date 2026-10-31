@@ -30,7 +30,6 @@ function makeResponse(overrides: Partial<ResponseState> = {}): ResponseState {
 		statusText: "OK",
 		headers: {},
 		body: "",
-		bodyType: "json",
 		size: 1024,
 		time: 340,
 		...overrides,
