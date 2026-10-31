@@ -1109,7 +1109,8 @@ TEST_F (MockServerTest, ABodylessStatusIsServedWithNoBodyAndNoFraming) {
         "{{baseUrl}}/s" + std::to_string (status_code));
         seed_example ("exa_" + std::to_string (status_code), request_id,
         status_code, R"({"ignored":true})", "application/json",
-        json::array ({ json{ { "key", "ETag" }, { "value", "\"v1\"" }, { "enabled", true } } }));
+        json::array (
+        { json{ { "key", "ETag" }, { "value", "\"v1\"" }, { "enabled", true } } }));
     }
 
     MockServerManager manager;
