@@ -18,6 +18,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer";
+import { markLines } from "@/lib/http-language";
 import RawRequestResponse from "./RawRequestResponse";
 
 // Monaco does not run under jsdom - render the raw text plainly so the
@@ -26,6 +28,13 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
 	CodeEditor: ({ value }: { value?: string }) => <div data-testid="raw-content">{value}</div>,
 }));
+
+// Wrapped, not replaced: `markLines` runs once per build, which is how the
+// memo test below counts builds.
+vi.mock("@/lib/http-language", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/lib/http-language")>();
+	return { ...actual, markLines: vi.fn(actual.markLines) };
+});
 
 function response(overrides: Partial<Parameters<typeof RawRequestResponse>[0]["response"]> = {}) {
 	return {
@@ -140,5 +149,89 @@ describe("RawRequestResponse", () => {
 		);
 
 		expect(screen.getByTestId("raw-content").textContent).toContain("< set-cookie: a=1, b=2");
+	});
+
+	describe("a large body (#3138)", () => {
+		const tail = "TAIL";
+		const big = "a".repeat(LARGE_BODY_BYTES) + tail;
+
+		it("prints only the first LARGE_BODY_BYTES of it and says so", () => {
+			render(<RawRequestResponse rawRequest="" response={response({ body: big })} />);
+
+			const text = screen.getByTestId("raw-content").textContent ?? "";
+			expect(text).toContain("< " + "a".repeat(LARGE_BODY_BYTES));
+			expect(text).not.toContain(tail);
+			// The status line and header are small; the body is the cap, no more.
+			expect(text.length).toBeLessThan(LARGE_BODY_BYTES + 1024);
+			expect(screen.getByText("Large response")).toBeInTheDocument();
+			expect(screen.getByText(/Only the first 2\.0 MB is shown here/)).toBeInTheDocument();
+			expect(screen.queryByText(/Formatting is off/)).toBeNull();
+		});
+
+		it("caps bodyRaw, the string Raw prints, whatever the pane copy holds", () => {
+			render(
+				<RawRequestResponse
+					rawRequest=""
+					response={response({ body: "short", bodyRaw: big })}
+				/>
+			);
+
+			expect(screen.getByTestId("raw-content").textContent).not.toContain(tail);
+			expect(screen.getByText("Large response")).toBeInTheDocument();
+		});
+
+		it("shows no notice and the whole body at exactly the limit", () => {
+			const atLimit = "a".repeat(LARGE_BODY_BYTES);
+			render(<RawRequestResponse rawRequest="" response={response({ body: atLimit })} />);
+
+			expect(screen.getByTestId("raw-content").textContent).toContain("< " + atLimit);
+			expect(screen.queryByText("Large response")).toBeNull();
+		});
+
+		it("does not cut or announce a binary body, which prints as one line", () => {
+			render(
+				<RawRequestResponse
+					rawRequest=""
+					response={response({
+						body: big,
+						rawBytes: { data: new Uint8Array(3), isText: false },
+					})}
+				/>
+			);
+
+			expect(screen.queryByText("Large response")).toBeNull();
+			expect(screen.getByTestId("raw-content").textContent).toContain("binary data");
+		});
+	});
+
+	describe("rebuilding", () => {
+		const builds = () => vi.mocked(markLines).mock.calls.length;
+
+		it("does not rebuild for a re-render with the same inputs", () => {
+			const headers = { "content-type": "text/plain" };
+			const first = response({ headers, body: "a".repeat(64) });
+			const { rerender } = render(<RawRequestResponse rawRequest="" response={first} />);
+			const before = builds();
+
+			// A new response object, the same fields: what the parent hands over.
+			rerender(<RawRequestResponse rawRequest="" response={{ ...first }} />);
+
+			expect(builds()).toBe(before);
+		});
+
+		it("rebuilds when the body changes", () => {
+			const headers = { "content-type": "text/plain" };
+			const { rerender } = render(
+				<RawRequestResponse rawRequest="" response={response({ headers, body: "one" })} />
+			);
+			const before = builds();
+
+			rerender(
+				<RawRequestResponse rawRequest="" response={response({ headers, body: "two" })} />
+			);
+
+			expect(builds()).toBeGreaterThan(before);
+			expect(screen.getByTestId("raw-content").textContent).toContain("< two");
+		});
 	});
 });

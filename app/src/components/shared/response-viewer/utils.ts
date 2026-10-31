@@ -126,6 +126,11 @@ export function getMonacoLanguage(bodyType: BodyType): string {
  * *keeping* bytes is cheap where *formatting* them is not - the two numbers
  * answer different questions and are deliberately not the same.
  *
+ * The Raw tab (`RawRequestResponse`) caps its copy of the body at the same
+ * number: it does not format, but it hands Monaco the whole exchange as one
+ * model plus `markLines` and `buildRawResponse` passes over it, which is the
+ * same freeze. It shows the prefix and the same notice.
+ *
  * Characters, not bytes, because that is what the editor and `String.slice`
  * count; for anything but a body of astral-plane text the two agree closely
  * enough for a display threshold.

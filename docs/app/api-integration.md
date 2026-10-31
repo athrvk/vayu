@@ -2020,8 +2020,11 @@ A third limit is the renderer's alone and reaches no wire field:
 `LARGE_BODY_BYTES` (2MB, `shared/response-viewer/utils.ts`). Above it
 `paneBody` stops indenting - it hands back `bodyRaw`, which is what would be
 displayed anyway - and `ResponseBody` stops formatting, hides the view toggle
-and shows the first 2MB of the raw body under its own notice. Copy and Download
-still take the whole received text. Both limits are about *rendering* cost, not
+and shows the first 2MB of the raw body under its own notice. The request
+builder's Raw tab applies the same cap to the received text it prints (decided
+from that one string's length) and shows the same notice, since building the
+exchange and handing Monaco a multi-megabyte model is the same freeze (#3138).
+Copy and Download still take the whole received text. Both limits are about *rendering* cost, not
 about what arrived, and both count the decoded text below, never base64
 characters.
 

@@ -23,7 +23,8 @@
  * saying so. Everything this component does to a body it does synchronously
  * during render, so a multi-megabyte response used to freeze the window between
  * Send and the pane painting. See the constant in `utils.ts` for the passes and
- * why 2MB.
+ * why 2MB. The request builder's Raw tab applies the same cap to its own copy
+ * of the body (`RawRequestResponse`) and shows the same notice.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -38,6 +39,7 @@ import {
 	formatSize,
 	LARGE_BODY_BYTES,
 } from "./utils";
+import { LargeBodyNotice } from "./LargeBodyNotice";
 import { buildPreviewDocument } from "./preview-document";
 import type { BodyType, ResponseBodyProps, ViewMode } from "./types";
 import {
@@ -189,23 +191,15 @@ export default function ResponseBody({
 			</BodyToolbar>
 
 			{/*
-			 * Said here rather than in either viewer, because this is the
-			 * component that made the decision: it is the pane's own limit, not
-			 * something the engine or the store did to the response. The
-			 * separate "the engine only read this much" notice lives in the
-			 * request builder's viewer and both can be on screen at once.
-			 *
 			 * Download is promised only when there is a Download button - the
 			 * history viewer mounts this with no `actions` slot.
 			 */}
 			{isLargeBody && (
-				<div className="shrink-0 px-4 pt-3">
-					<Callout severity="info" title="Large response">
-						This body is {formatSize(bodyLength)}. Formatting is off and only the first{" "}
-						{formatSize(LARGE_BODY_BYTES)} is shown here, so the pane stays responsive.
-						{actions ? " Download saves the body the app received." : ""}
-					</Callout>
-				</div>
+				<LargeBodyNotice
+					bodyLength={bodyLength}
+					formattingOff
+					downloadNote={actions ? "Download saves the body the app received." : undefined}
+				/>
 			)}
 			{rawBytes?.notice && (
 				<div className="shrink-0 px-4 pt-3">
