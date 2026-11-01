@@ -15,9 +15,7 @@
  *
  * **A warning marker, not a declaration.** The editor's TypeScript worker
  * resolves `Intl` against the stock `lib.es*.d.ts` and so reports nothing. The
- * marker is written under an owner of our own, never the worker's
- * `"javascript"`: markers replace per owner, so writing there would be erased
- * by the worker's next pass.
+ * marker is written under an owner of our own (see `INTL_MARKER_OWNER`).
  *
  * **Not an AST parse.** `findIntlReferences` is one pass of a small tokenizer
  * that knows exactly the things that make a regex over the raw text wrong:
@@ -37,10 +35,7 @@
 import type * as Monaco from "monaco-editor";
 import type { MonacoApi } from "./monaco-api";
 
-/**
- * Monaco's own marker owners replace per owner, so this must not be
- * `"javascript"`, which the TypeScript worker writes.
- */
+/** Markers replace per owner: `"javascript"` is the TypeScript worker's, and its next pass would erase ours. */
 export const INTL_MARKER_OWNER = "vayu-script-intl";
 
 export const INTL_MESSAGE =
@@ -76,7 +71,7 @@ const REGEX_PRECEDING_KEYWORDS = new Set([
 const OPERAND_END_PUNCTUATION = new Set([")", "]"]);
 
 const IDENTIFIER_START = /[\p{ID_Start}$_]/u;
-const IDENTIFIER_PART = /[\p{ID_Continue}$‌‍]/u;
+const IDENTIFIER_PART = /[\p{ID_Continue}$\u200c\u200d]/u;
 const DIGIT = /[0-9]/;
 const WHITESPACE = /\s/;
 
@@ -240,16 +235,17 @@ export function attachIntlDiagnostics(
 ): Monaco.IDisposable {
 	let model: Monaco.editor.ITextModel | null = null;
 	let contentListener: Monaco.IDisposable | null = null;
-	// Where the markers last written to `model` sit; "" is none written. A
-	// write that changes nothing would still make Monaco repaint the squiggles.
-	let written = "";
+	// Whether markers are on `model`. A clean script stays unwritten; a script
+	// with a reference is rewritten on every edit, because a whole-text replace
+	// (the editor wrapper's external `value` update) collapses a marker's
+	// decoration and Monaco re-syncs decorations only on a marker write.
+	let written = false;
 
 	const refresh = () => {
 		if (!model || model.isDisposed()) return;
 		const references = findIntlReferences(model.getValue());
-		const key = references.map((reference) => reference.start).join(",");
-		if (key === written) return;
-		written = key;
+		if (references.length === 0 && !written) return;
+		written = references.length > 0;
 		const shown = model;
 		monaco.editor.setModelMarkers(
 			shown,
@@ -277,11 +273,11 @@ export function attachIntlDiagnostics(
 	const release = () => {
 		contentListener?.dispose();
 		contentListener = null;
-		if (model && written !== "" && !model.isDisposed()) {
+		if (model && written && !model.isDisposed()) {
 			monaco.editor.setModelMarkers(model, INTL_MARKER_OWNER, []);
 		}
 		model = null;
-		written = "";
+		written = false;
 	};
 
 	const follow = () => {

@@ -3232,8 +3232,8 @@ silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
 `URLSearchParams`, `fetch`, `Intl` (the `toLocale*` methods ignore their locale
-and options, see [Limitations](#limitations)), and any module other than the shelf's. The practical
-consequences: no general URL constructor - the request's own URL is already
+and options, see [Limitations](#limitations)), and any module other than the
+shelf's. The practical consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no asymmetric
 algorithm and no cipher (the digests are `pm.crypto.sha256` and the
 [`crypto-js` hashers](#the-require-shelf)), and no host I/O:

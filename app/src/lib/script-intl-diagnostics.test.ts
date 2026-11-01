@@ -241,14 +241,14 @@ describe("attachIntlDiagnostics", () => {
 		expect(setModelMarkers).toHaveBeenCalledTimes(3);
 	});
 
-	it("does not write when an edit leaves the warnings where they were", () => {
+	it("rewrites on every edit of a script that has a warning, even at the same offsets", () => {
 		const model = fakeModel("Intl.x");
 		const { setModelMarkers } = setup(model);
 		expect(setModelMarkers).toHaveBeenCalledTimes(1);
 
 		edit(model, "Intl.y");
 		edit(model, "Intl.yz");
-		expect(setModelMarkers).toHaveBeenCalledTimes(1);
+		expect(setModelMarkers).toHaveBeenCalledTimes(3);
 	});
 
 	it("does not write when an edit leaves a clean script clean", () => {

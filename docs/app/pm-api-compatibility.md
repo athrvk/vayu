@@ -2175,8 +2175,8 @@ its first run.
 **`Intl` is flagged without being declared absent** (#3129). The worker resolves it
 against the stock `esnext` lib and reports nothing, and `ABSENT_GLOBALS` is left as it
 is, so the warning comes from the script editor instead: `ScriptElementForm` attaches
-`attachIntlDiagnostics` (`app/src/lib/script-intl-diagnostics.ts`), which scans the model's text and writes a
-warning marker on every bare `Intl` under an owner of its own (`"vayu-script-intl"`,
+`attachIntlDiagnostics` (`app/src/lib/script-intl-diagnostics.ts`), which scans the
+model's text and writes a warning marker on every bare `Intl` under an owner of its own (`"vayu-script-intl"`,
 never the worker's `"javascript"`, whose markers the worker replaces). The message
 points at `require('moment')` and says the `toLocale*` methods ignore their options. The
 scan skips strings, template text (not its `${...}` expressions), comments and regex
