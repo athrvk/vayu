@@ -69,10 +69,12 @@ description: Cut a Vayu release - version bump, curated release notes, tagging, 
    build until the mirror is re-read against the new source and the assert
    updated (#1283 tracks retiring it; check first whether the release finally
    carries a public hook that can rewrite `Request::path` before routing). And
-   `sanitizers/tsan.supp`'s `race:std::ctype<char>::narrow` entry is re-measured
-   on every cpp-httplib move, not carried forward - 10 runs of
-   `TransportPolicyPaths.LoadRunTraversesManualProxy` with the line and 10
-   without, recorded in that file and in `docs/engine/building.md`.
+   a `sanitizers/tsan.supp` entry whose stack runs through a dependency the
+   bump moves is re-measured, not carried forward: delete it, run the test that
+   reproduced it 10 times and the `linux-tsan` suite once, and record the
+   result beside the entry and in `docs/engine/building.md`. That is how the
+   `std::ctype<char>::narrow` entry was retired on the move to cpp-httplib
+   0.63.0 (#967).
    Also check for an open Dependabot Electron pull request (`build: Bump
    electron`, #2373): Electron patch releases carry Chromium security backports,
    and merging it before tagging is what keeps a release off a stale runtime.

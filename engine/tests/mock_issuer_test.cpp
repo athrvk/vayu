@@ -10,6 +10,9 @@
  * `acquire_token` cannot drive would be a mock of the wrong thing.
  */
 
+// First, before anything that includes <httplib.h>: see the header.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <gtest/gtest.h>
 #include <httplib.h>
 

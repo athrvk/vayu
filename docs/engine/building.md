@@ -301,17 +301,16 @@ difference is worth keeping straight:
   uninstrumented, so TSan cannot observe the synchronization inside OpenSSL and
   reports a happens-before edge that is really there. `tsan.supp`'s
   `crypto/hashtable/hashtable.c` entry is this kind.
-- **A real race in code that is not ours.** `std::ctype<char>::narrow` fills a
-  mutable cache on the process-wide locale without synchronization, and
-  cpp-httplib reaches it by constructing a `std::regex` to parse a status line.
-  That is a genuine race; it simply has no engine frame anywhere in the stack
-  and cannot be fixed from here. Tracked in #967.
+- **A real race in code that is not ours.** A genuine race with no engine
+  frame anywhere in its stack, so nothing here can fix it. `tsan.supp` carried
+  one, libstdc++'s locale narrowing cache reached through cpp-httplib (#967),
+  until the library stopped reaching it; it carries none today.
 
 **Never suppress engine code.** A finding in `engine/src` or `engine/include` is
 the thing the run exists to surface. Every entry must carry the report it
 silences, why the frame cannot be fixed here, and the issue tracking its
 removal - the same discipline #897 put on `// NOLINT`. `asan.supp` ships empty
-but present; `tsan.supp` carries the two entries above, each with its trace.
+but present; `tsan.supp` carries the one entry above, with its trace.
 
 ### The weekly run, and the issues it files
 
@@ -367,8 +366,8 @@ A cancelled leg (a superseded run) is not a `failure` and files nothing.
 
 ### What the matrix found, and where it stands
 
-The first runs turned up four things. Three are fixed; one is suppressed with a
-tracking issue. A later scheduled run added a fifth, #2684, last in the list.
+The first runs turned up four things. Three were fixed here; the fourth was
+suppressed until an upstream change removed it. A later scheduled run added a fifth, #2684, last in the list.
 
 - **#956** - a real data race: `RunContext`'s event loop was read by the metrics
   thread while the run thread constructed it. 13 of the 14 race reports were
@@ -397,31 +396,19 @@ tracking issue. A later scheduled run added a fifth, #2684, last in the list.
   detecting the cycle where it closes instead of capping depth, and by
   propagating the exception. See [Cycle detection, not a depth
   cap](#cycle-detection-not-a-depth-cap) below.
-- **#967** - a data race in libstdc++'s locale narrowing cache, reached through
-  the `std::regex` cpp-httplib constructs in `parse_status_line`. No engine
-  frame anywhere in the stack, so it is **suppressed** in `tsan.supp` with its
-  trace and that issue number. It only became visible once #957 was fixed -
-  before that the crash masked it. **Still open, and re-measured at `3d2a6a7`
-  rather than assumed:** cpp-httplib 0.53.0 made that regex `thread_local`, so
-  the window is one construction per thread instead of one per response, but
-  deleting the entry and running `ctest --preset linux-tsan` still fails
-  `TransportPolicyPaths.LoadRunTraversesManualProxy` on the race - twice out of
-  two runs, both sides of the report being pool threads parsing their first
-  response - against 2796/2796 with the entry in place. That test alone
-  reproduces it 10 times out of 10, which is the cheap way to re-measure this
-  one, and the way it was re-measured at `dc25029` after the baseline moved to
-  cpp-httplib 0.53.1: 8 of 10 runs raced without the entry, 10 of 10 passed
-  with it. Re-measured the same way on the move to cpp-httplib 0.54.1
-  (2026-09-05): 10 of 10 raced without the entry, 10 of 10 passed with it, the
-  report frame for frame the same - that release rewrote
-  `process_and_close_socket` around a `serve_guarded` wrapper and left
-  `parse_status_line` alone. And again on the move to cpp-httplib 0.56.0
-  (2026-09-17): 9 of 10 raced without it, 10 of 10 passed with it, the same
-  stack once more - `parse_status_line` is byte-identical to 0.54.1's and its
-  regex is still `thread_local`, so nothing about the window moved. And on the
-  move to cpp-httplib 0.59.0 (2026-10-08): 5 of 10 raced without it, 10 of 10
-  passed with it, the same stack, with `parse_status_line` again
-  byte-identical. What is left is upstream in libstdc++.
+- **#967** - a data race in libstdc++'s locale narrowing cache
+  (`std::ctype<char>::narrow`), reached through the `std::regex` cpp-httplib
+  built in `parse_status_line`. No engine frame was in the stack, so it was
+  suppressed in `tsan.supp`. Every cpp-httplib move from 0.53.0 to 0.59.0 was
+  re-measured, and each time 5 to 10 of 10 runs of
+  `TransportPolicyPaths.LoadRunTraversesManualProxy` raced without the entry.
+  cpp-httplib 0.62.0 parses status lines without `std::regex`. On the move to
+  0.63.0 (2026-11-01) that test passed 10 of 10 without the entry, and a whole
+  `ctest --preset linux-tsan` run without it passed 6510/6510 with no report,
+  so the entry is **removed**. The cache in libstdc++ is unchanged: two engine
+  threads that each construct a `std::regex` for the first time can still race
+  on it. The weekly run reports that with an engine frame, and it is fixed here
+  (build the regex once, before the threads start), never suppressed.
 - **#2684** - `windows-asan` failed seven ajv and tv4 tests with
   `RangeError: Maximum call stack size exceeded`, QuickJS's soft stack check
   against the script's budget. Same family as #959: frame size, not the

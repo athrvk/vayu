@@ -850,7 +850,7 @@ jobs:
     # headroom is for that shape of change; nothing routine goes near it.
     timeout-minutes: 90
     env:
-      VCPKG_COMMIT: 'a5f736224e85b32e25a8ffc52562333180396642'
+      VCPKG_COMMIT: '9a5dfef5d1a0438a7d24856a85bd60f309d355e9'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 

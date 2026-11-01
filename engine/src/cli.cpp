@@ -15,6 +15,9 @@
  *   vayu-cli --help               - Show help
  */
 
+// First, before anything that includes <httplib.h>: see the header.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <httplib.h>
 
 #include "vayu/core/cli_args.hpp"
