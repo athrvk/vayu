@@ -1973,14 +1973,18 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
 
 // #3127: the deferred replay's console lines reach the report, on the run's
 // `testValidation` and on a scenario step's `tests`, each with its dropped
-// count. Mutation check: drop the `console` copy in
-// `apply_summary_observations` (runs.cpp) and the first block fails; drop the
-// `write_message_sample` call in `test_totals_payload` (run_manager.cpp) and
-// both do.
+// count, and a line logged more than once with its `count`. Mutation check:
+// drop the `console` copy in `apply_summary_observations` (runs.cpp) and the
+// first block fails; drop the `write_message_sample` call in
+// `test_totals_payload` (run_manager.cpp) and both do; drop the `count` write
+// in `message_entry` (pipeline.cpp) and both do.
 TEST_F (RunsRouteTest, ReportCarriesTheReplaysConsoleLines) {
     using vayu::core::ElementMessage;
     vayu::core::ScriptValidationTotals replayed{ 3, 3, 0, {}, 0 };
-    replayed.console = { { ElementMessage::Kind::Console, vayu::ConsoleLevel::Warn, "slow body" } };
+    replayed.console = {
+        { { ElementMessage::Kind::Console, vayu::ConsoleLevel::Warn, "slow body" }, 3 },
+        { { ElementMessage::Kind::Console, vayu::ConsoleLevel::Log, "first token" }, 1 },
+    };
     replayed.console_dropped = 4;
 
     auto inputs     = summary_inputs ();
@@ -1995,8 +1999,10 @@ TEST_F (RunsRouteTest, ReportCarriesTheReplaysConsoleLines) {
 
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_console");
     ASSERT_EQ (status, 200) << body.dump ();
+    // A line logged once carries no `count`: absent means once.
     const json expected_console =
-    json::array ({ { { "level", "warn" }, { "text", "slow body" } } });
+    json::array ({ { { "level", "warn" }, { "text", "slow body" }, { "count", 3 } },
+    { { "level", "log" }, { "text", "first token" } } });
 
     ASSERT_TRUE (body.contains ("testValidation")) << body.dump ();
     const auto& validation = body.at ("testValidation");

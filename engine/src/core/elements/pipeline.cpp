@@ -224,19 +224,24 @@ void ElementOutcomeCounts::record (const ElementOutcome& outcome) {
 
 namespace {
 
-bool holds (std::span<const ElementMessage> kept, const ElementMessage& message) {
-    return std::ranges::find (kept, message) != kept.end ();
-}
-
 const char* message_kind_name (ElementMessage::Kind kind) {
     return kind == ElementMessage::Kind::Test ? "test" : "error";
 }
 
-nlohmann::json message_entry (const ElementMessage& message) {
+nlohmann::json message_entry (const CountedMessage& counted) {
+    const ElementMessage& message = counted.message;
+    nlohmann::json entry          = { { "text", message.text } };
     if (message.kind == ElementMessage::Kind::Console) {
-        return { { "level", vayu::to_string (message.level) }, { "text", message.text } };
+        entry["level"] = vayu::to_string (message.level);
+    } else {
+        entry["kind"] = message_kind_name (message.kind);
     }
-    return { { "kind", message_kind_name (message.kind) }, { "text", message.text } };
+    // Absent means once, so the common case and a row stored before counts
+    // existed read the same.
+    if (counted.count > 1) {
+        entry["count"] = counted.count;
+    }
+    return entry;
 }
 
 } // namespace
@@ -244,14 +249,14 @@ nlohmann::json message_entry (const ElementMessage& message) {
 void write_message_sample (nlohmann::json& row,
 const char* key,
 const char* dropped_key,
-std::span<const ElementMessage> kept,
+std::span<const CountedMessage> kept,
 size_t dropped) {
     if (kept.empty ()) {
         return;
     }
     nlohmann::json list = nlohmann::json::array ();
-    for (const auto& message : kept) {
-        list.push_back (message_entry (message));
+    for (const auto& counted : kept) {
+        list.push_back (message_entry (counted));
     }
     row[key] = std::move (list);
     if (dropped > 0) {
@@ -260,7 +265,12 @@ size_t dropped) {
 }
 
 bool DistinctMessageSample::settled (const ElementMessage& message, size_t published) {
-    if (holds (std::span (slots_).first (published), message)) {
+    const auto kept  = std::span (slots_).first (published);
+    const auto found = std::ranges::find (kept, message);
+    if (found != kept.end ()) {
+        const auto index =
+        static_cast<size_t> (std::ranges::distance (kept.begin (), found));
+        counts_.at (index).fetch_add (1, std::memory_order_relaxed);
         return true;
     }
     if (published < slots_.size ()) {
@@ -280,11 +290,19 @@ void DistinctMessageSample::offer (const ElementMessage& message) {
         return;
     }
     slots_.at (current) = message;
+    counts_.at (current).store (1, std::memory_order_relaxed);
     size_.store (current + 1, std::memory_order_release);
 }
 
-std::span<const ElementMessage> DistinctMessageSample::kept () const {
-    return std::span (slots_).first (size_.load (std::memory_order_acquire));
+std::vector<CountedMessage> DistinctMessageSample::kept () const {
+    const size_t published = size_.load (std::memory_order_acquire);
+    std::vector<CountedMessage> counted;
+    counted.reserve (published);
+    for (size_t i = 0; i < published; ++i) {
+        counted.push_back (
+        { slots_.at (i), counts_.at (i).load (std::memory_order_relaxed) });
+    }
+    return counted;
 }
 
 size_t DistinctMessageSample::dropped () const {

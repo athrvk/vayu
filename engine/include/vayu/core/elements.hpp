@@ -285,6 +285,15 @@ struct ElementMessage {
     bool operator== (const ElementMessage&) const = default;
 };
 
+/// A kept message and how many times it was offered, the first offer
+/// included: what a `DistinctMessageSample` reports once a run is done.
+struct CountedMessage {
+    ElementMessage message;
+    size_t count = 0;
+
+    bool operator== (const CountedMessage&) const = default;
+};
+
 /**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
  *
@@ -756,30 +765,34 @@ struct CompiledElement;
 
 /**
  * The first `MAX_ELEMENT_MESSAGES` distinct messages offered, in the order
- * first seen, and how many offers the full list turned away (#3127).
+ * first seen, each with how many times it was offered, and how many offers
+ * the full list turned away (#3127).
  *
  * Offered from every event-loop worker at once. A slot is written once, under
  * `write_mutex_`, before `size_` publishes it, and never again, so a reader
- * takes no lock. An offer locks only for a message not yet kept while there
- * is room, so a list that is full, or that sees the same few messages every
- * iteration, costs a few string compares and no lock.
+ * takes no lock. Its count is an atomic beside it, set to one before the
+ * publication and only ever incremented after. An offer locks only for a
+ * message not yet kept while there is room, so a list that is full, or that
+ * sees the same few messages every iteration, costs a few string compares, an
+ * atomic increment and no lock.
  */
 class DistinctMessageSample {
     public:
     void offer (const ElementMessage& message);
-    /// The kept messages, in the order first offered.
-    [[nodiscard]] std::span<const ElementMessage> kept () const;
+    /// The kept messages, in the order first offered, each with its count.
+    [[nodiscard]] std::vector<CountedMessage> kept () const;
     /// Offers a full list turned away, a repeat of a turned-away message
-    /// counted each time; a repeat of a kept one is not counted.
+    /// counted each time; a repeat of a kept one counts on its entry instead.
     [[nodiscard]] size_t dropped () const;
 
     private:
     /// Whether @p message needs no slot, judged against the first
-    /// @p published: kept already, or turned away (and counted) because the
-    /// list is full.
+    /// @p published: kept already (and counted on its entry), or turned away
+    /// (and counted as dropped) because the list is full.
     bool settled (const ElementMessage& message, size_t published);
 
     std::array<ElementMessage, constants::script_validation::MAX_ELEMENT_MESSAGES> slots_{};
+    std::array<std::atomic<size_t>, constants::script_validation::MAX_ELEMENT_MESSAGES> counts_{};
     std::atomic<size_t> size_{ 0 };
     std::atomic<size_t> dropped_{ 0 };
     std::mutex write_mutex_;
@@ -793,13 +806,15 @@ class DistinctMessageSample {
 /**
  * Writes @p kept under @p key and @p dropped under @p dropped_key, each only
  * when there is something to say. A console line is `{level, text}`, any other
- * message `{kind, text}` with `kind` `"error"` or `"test"`: the one report shape
- * of a message sample, on an element row and on the replay's `tests` alike.
+ * message `{kind, text}` with `kind` `"error"` or `"test"`, either one with
+ * `count` beside it only when it was offered more than once: the one report
+ * shape of a message sample, on an element row and on the replay's `tests`
+ * alike.
  */
 void write_message_sample (nlohmann::json& row,
 const char* key,
 const char* dropped_key,
-std::span<const ElementMessage> kept,
+std::span<const CountedMessage> kept,
 size_t dropped);
 
 /**

@@ -1366,10 +1366,12 @@ vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGES;
 } // namespace
 
 // #3127: a script element's row says why it failed and what it logged, each
-// distinct message once however many iterations said it, a test failure
-// beside the throw and a console line in its own list with its level.
-// Mutation check: drop the offer loop from `ElementOutcomeCounts::record`
-// (pipeline.cpp) and the row carries neither list.
+// distinct message once however many iterations said it, with that number as
+// its `count`, a test failure beside the throw and a console line in its own
+// list with its level. Mutation check: drop the offer loop from
+// `ElementOutcomeCounts::record` (pipeline.cpp) and the row carries neither
+// list; drop the kept entry's `fetch_add` from `DistinctMessageSample::settled`
+// and no entry carries a count.
 TEST_F (ElementKindsTest, AScriptRowKeepsEachDistinctMessageOnce) {
     vayu::core::ElementOutcomeCounts counts;
     for (int iteration = 0; iteration < 3; ++iteration) {
@@ -1382,12 +1384,13 @@ TEST_F (ElementKindsTest, AScriptRowKeepsEachDistinctMessageOnce) {
     auto row = script_row (counts);
     EXPECT_EQ (row["error"], 3);
     EXPECT_EQ (row["messages"],
-    (nlohmann::json::array ({ { { "kind", "error" }, { "text", "Error: boom" } },
-    { { "kind", "test" }, { "text", "status is 201: expected 200 to equal 201" } } })))
+    (nlohmann::json::array ({ { { "kind", "error" }, { "text", "Error: boom" }, { "count", 3 } },
+    { { "kind", "test" },
+    { "text", "status is 201: expected 200 to equal 201" }, { "count", 3 } } })))
     << row.dump ();
     EXPECT_EQ (row["console"],
-    (nlohmann::json::array ({ { { "level", "log" }, { "text", "saw 200" } },
-    { { "level", "error" }, { "text", "saw 200" } } })))
+    (nlohmann::json::array ({ { { "level", "log" }, { "text", "saw 200" }, { "count", 3 } },
+    { { "level", "error" }, { "text", "saw 200" }, { "count", 3 } } })))
     << "the same text at another level is another line: " << row.dump ();
     EXPECT_FALSE (row.contains ("messagesDropped")) << "a repeat is not a drop";
     EXPECT_FALSE (row.contains ("consoleDropped")) << row.dump ();
@@ -1395,9 +1398,11 @@ TEST_F (ElementKindsTest, AScriptRowKeepsEachDistinctMessageOnce) {
 
 // Each list keeps the first `MAX_ELEMENT_MESSAGES` distinct messages and
 // counts what it turned away, and a console that filled its own list leaves
-// the error list room for the throws. Mutation check: drop the `fetch_add`
-// from `DistinctMessageSample::settled` (pipeline.cpp) and both dropped counts
-// are absent.
+// the error list room for the throws. A repeat of a kept message counts on its
+// entry, never as a drop, and a message offered once carries no `count`.
+// Mutation check: drop the `dropped_` `fetch_add` from
+// `DistinctMessageSample::settled` (pipeline.cpp) and both dropped counts are
+// absent; drop the kept entry's and "error 0" reads once.
 TEST_F (ElementKindsTest, AScriptRowsListsAreCappedAndSayWhatTheyDropped) {
     vayu::core::ElementOutcomeCounts counts;
     constexpr size_t LINES = MAX_ELEMENT_MESSAGES + 5;
@@ -1412,26 +1417,32 @@ TEST_F (ElementKindsTest, AScriptRowsListsAreCappedAndSayWhatTheyDropped) {
         counts.record (
         script_outcome ({ error_message ("error " + std::to_string (error)) }));
     }
-    // A repeat of a dropped message is dropped again; of a kept one, not.
+    // A repeat of a dropped message is dropped again; of a kept one, counted
+    // on its entry.
     counts.record (script_outcome ({ error_message ("error 0"),
     error_message ("error " + std::to_string (MAX_ELEMENT_MESSAGES)) }));
 
     auto row = script_row (counts);
     ASSERT_EQ (row["console"].size (), MAX_ELEMENT_MESSAGES) << row.dump ();
-    EXPECT_EQ (row["console"].back ()["text"],
+    EXPECT_EQ (row["console"].back ().at ("text").get<std::string> (),
     "line " + std::to_string (MAX_ELEMENT_MESSAGES - 1));
+    EXPECT_FALSE (row["console"].back ().contains ("count"))
+    << "a line offered once carries no count: " << row.dump ();
     EXPECT_EQ (row["consoleDropped"], 5);
     ASSERT_EQ (row["messages"].size (), MAX_ELEMENT_MESSAGES) << row.dump ();
-    EXPECT_EQ (row["messages"].front ()["text"], "error 0")
+    EXPECT_EQ (row["messages"].front ().at ("text").get<std::string> (), "error 0")
     << "the console's overflow did not cost the error list a slot";
+    EXPECT_EQ (row["messages"].front ().at ("count").get<size_t> (), 2u) << row.dump ();
+    EXPECT_FALSE (row["messages"].at (1).contains ("count")) << row.dump ();
     EXPECT_EQ (row["messagesDropped"], 4);
 }
 
 // Offered from many workers at once, every distinct message is kept at most
-// once, the list never passes its cap, and every offer of a message the list
-// could not keep is counted: a message that is not kept was offered only
-// while the list was full. Run under the TSan leg, this is also the data-race
-// check on the lock-free read.
+// once, the list never passes its cap, every offer of a kept message is
+// counted on its entry, and every offer of a message the list could not keep
+// is counted as dropped: a message that is not kept was offered only while the
+// list was full. Run under the TSan leg, this is also the data-race check on
+// the lock-free read and the lock-free count.
 TEST_F (ElementKindsTest, AScriptRowsSampleIsSafeUnderConcurrentOffers) {
     constexpr size_t DISTINCT = MAX_ELEMENT_MESSAGES + 5;
     constexpr size_t THREADS  = 8;
@@ -1454,20 +1465,25 @@ TEST_F (ElementKindsTest, AScriptRowsSampleIsSafeUnderConcurrentOffers) {
         worker.join ();
     }
 
+    std::map<std::string, size_t> offers;
+    for (size_t thread = 0; thread < THREADS; ++thread) {
+        for (size_t round = 0; round < ROUNDS; ++round) {
+            ++offers["error " + std::to_string ((thread + round) % DISTINCT)];
+        }
+    }
+
     const auto kept = counts.messages.kept ();
     ASSERT_EQ (kept.size (), MAX_ELEMENT_MESSAGES);
     std::vector<std::string> texts;
-    for (const auto& message : kept) {
+    for (const auto& [message, count] : kept) {
         EXPECT_EQ (std::ranges::count (texts, message.text), 0) << message.text;
         texts.push_back (message.text);
+        EXPECT_EQ (count, offers.at (message.text)) << message.text;
     }
     size_t offers_of_dropped = 0;
-    for (size_t thread = 0; thread < THREADS; ++thread) {
-        for (size_t round = 0; round < ROUNDS; ++round) {
-            const auto text = "error " + std::to_string ((thread + round) % DISTINCT);
-            offers_of_dropped +=
-            std::ranges::count (texts, text) == 0 ? size_t{ 1 } : size_t{ 0 };
-        }
+    for (const auto& [text, offered] : offers) {
+        offers_of_dropped +=
+        std::ranges::count (texts, text) == 0 ? offered : size_t{ 0 };
     }
     EXPECT_EQ (counts.messages.dropped (), offers_of_dropped);
     EXPECT_EQ (counts.error.load (), THREADS * ROUNDS);

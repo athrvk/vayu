@@ -321,8 +321,7 @@ ReplayFailures& failures) {
         }
     }
 
-    const auto kept = console.kept ();
-    totals.console.assign (kept.begin (), kept.end ());
+    totals.console         = console.kept ();
     totals.console_dropped = console.dropped ();
     return totals;
 }

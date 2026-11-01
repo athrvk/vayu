@@ -19,6 +19,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -252,23 +253,26 @@ TEST_F (LoadFailureDedupTest, APassingRunStoresNoRow) {
 // ============================================================================
 // The replay's console output (#3127): one bounded, distinct sample per run
 // for a single-request run and per step for a scenario run, offered whatever
-// the script's verdict.
+// the script's verdict, each line with how many times it was logged.
 //
 // Mutation check: drop the `console.offer` loop in `replay_sample`
-// (run_manager.cpp) and every test below fails.
+// (run_manager.cpp) and every test below fails; drop the kept entry's
+// `fetch_add` in `DistinctMessageSample::settled` (pipeline.cpp) and the
+// repeat counts read one.
 // ============================================================================
 
 constexpr size_t CONSOLE_CAP = vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGES;
 
+using vayu::core::CountedMessage;
 using vayu::core::ElementMessage;
 
-ElementMessage console_line (vayu::ConsoleLevel level, const std::string& text) {
-    return { ElementMessage::Kind::Console, level, text };
+CountedMessage console_line (vayu::ConsoleLevel level, const std::string& text, size_t count) {
+    return { { ElementMessage::Kind::Console, level, text }, count };
 }
 
-// The same line logged on three samples is one line, not three, and a repeat
-// of a kept line is not counted as dropped.
-TEST_F (LoadFailureDedupTest, ALineLoggedOnThreeSamplesIsReportedOnce) {
+// The same line logged on three samples is one line, not three, counted three
+// times, and a repeat of a kept line is not counted as dropped.
+TEST_F (LoadFailureDedupTest, ALineLoggedOnThreeSamplesIsReportedOnceWithItsCount) {
     auto context = single_request_run (
     "console.log('checked'); pm.test('ok', function () { });");
     for (int i = 0; i < 3; ++i) {
@@ -279,7 +283,7 @@ TEST_F (LoadFailureDedupTest, ALineLoggedOnThreeSamplesIsReportedOnce) {
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->console,
-    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Log, "checked") }));
+    (std::vector<CountedMessage>{ console_line (vayu::ConsoleLevel::Log, "checked", 3) }));
     EXPECT_EQ (validation.run->console_dropped, 0u);
 }
 
@@ -296,7 +300,7 @@ TEST_F (LoadFailureDedupTest, APassingRunStillReportsItsConsoleLines) {
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 0u);
     EXPECT_EQ (validation.run->console,
-    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Info, "status 200") }));
+    (std::vector<CountedMessage>{ console_line (vayu::ConsoleLevel::Info, "status 200", 1) }));
 }
 
 // What a script logged before it threw is kept: the line is most useful
@@ -311,11 +315,13 @@ TEST_F (LoadFailureDedupTest, ALineLoggedBeforeAThrowIsKept) {
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->failed, 1u);
     EXPECT_EQ (validation.run->console,
-    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Warn, "about to fail") }));
+    (std::vector<CountedMessage>{
+    console_line (vayu::ConsoleLevel::Warn, "about to fail", 1) }));
 }
 
-// Past the cap a new line is counted, not kept; a kept line logged again is
-// neither. A long line is cut to MAX_ELEMENT_MESSAGE_BYTES.
+// Past the cap a new line is counted as dropped, not kept; a kept line logged
+// again counts on its own entry instead. A long line is cut to
+// MAX_ELEMENT_MESSAGE_BYTES.
 TEST_F (LoadFailureDedupTest, PastTheCapConsoleLinesAreCountedAsDropped) {
     constexpr size_t EXTRA = 3;
     auto context           = single_request_run (
@@ -331,19 +337,23 @@ TEST_F (LoadFailureDedupTest, PastTheCapConsoleLinesAreCountedAsDropped) {
     const auto& console = validation.run->console;
     ASSERT_EQ (console.size (), CONSOLE_CAP);
     EXPECT_EQ (validation.run->console_dropped, EXTRA);
-    EXPECT_EQ (console.front ().text.rfind ("row 0 ", 0), 0u)
-    << console.front ().text;
-    EXPECT_EQ (console.back ().text.rfind ("row 9 ", 0), 0u) << console.back ().text;
+    EXPECT_EQ (console.front ().message.text.rfind ("row 0 ", 0), 0u)
+    << console.front ().message.text;
+    EXPECT_EQ (console.front ().count, 2u);
+    EXPECT_EQ (console.back ().message.text.rfind ("row 9 ", 0), 0u)
+    << console.back ().message.text;
+    EXPECT_EQ (console.back ().count, 1u);
     for (const auto& line : console) {
-        EXPECT_EQ (line.text.size (),
+        EXPECT_EQ (line.message.text.size (),
         vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES +
         vayu::utils::kLoggedTextTruncationMarker.size ());
-        EXPECT_TRUE (line.text.ends_with (vayu::utils::kLoggedTextTruncationMarker));
+        EXPECT_TRUE (line.message.text.ends_with (vayu::utils::kLoggedTextTruncationMarker));
     }
 }
 
 // A scenario run keeps one sample per step, so the same text from two steps is
-// reported under each, and the whole-run totals carry no merged list.
+// reported under each with that step's own count, and the whole-run totals
+// carry no merged list.
 TEST_F (LoadFailureDedupTest, AScenarioRunReportsEachStepsLinesOnThatStep) {
     auto context = scenario_run ("console.log('same text');", 2);
     sample_step (context, 0);
@@ -352,12 +362,15 @@ TEST_F (LoadFailureDedupTest, AScenarioRunReportsEachStepsLinesOnThatStep) {
 
     const auto validation = vayu::core::validate_scripts (context, *db_);
 
-    const std::vector<ElementMessage> expected{ console_line (
-    vayu::ConsoleLevel::Log, "same text") };
     ASSERT_EQ (validation.steps.size (), 2u);
-    for (const auto& step : validation.steps) {
+    const std::array<size_t, 2> step_counts{ 2, 1 };
+    for (size_t i = 0; i < step_counts.size (); ++i) {
+        const auto& step = validation.steps.at (i);
         ASSERT_HAS_VALUE (step);
-        EXPECT_EQ (step->console, expected);
+        EXPECT_EQ (step->console,
+        (std::vector<CountedMessage>{
+        console_line (vayu::ConsoleLevel::Log, "same text", step_counts.at (i)) }))
+        << "step " << i;
         EXPECT_EQ (step->console_dropped, 0u);
     }
     ASSERT_HAS_VALUE (validation.run);

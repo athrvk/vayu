@@ -10005,9 +10005,11 @@ this run - and is **absent** for a step whose script ran inline instead
 (its outcome is in `elements`), asserted nothing, or drew no sample - "no
 assertions" and "no failures" are different answers. Beside its
 `sampled`/`passed`/`failed` it carries `console?` and `consoleDropped?`
-(#3127): what that step's replayed scripts logged, as `[{level, text}]`, the
-first 10 distinct lines across the step's samples, each cut to 500 bytes and
-kept whatever the script's verdict, and how many lines a full list turned away.
+(#3127): what that step's replayed scripts logged, as `[{level, text, count?}]`,
+the first 10 distinct lines across the step's samples, each cut to 500 bytes,
+kept whatever the script's verdict and with `count` when it was logged more
+than once (absent means once), and how many occurrences a full list turned
+away.
 The list is the step's own, so a line two steps both log appears under each;
 both keys are absent when the step's replay logged nothing (`consoleDropped`
 also when nothing was turned away).
@@ -10038,10 +10040,11 @@ what it logged (#3127), since a load run keeps no trace to read it from:
 { "id": "el_4", "kind": "script.post", "passed": 0, "failed": 0, "missing": 0,
   "error": 480, "skipped": 0, "deferred": 0,
   "messages": [
-    { "kind": "error", "text": "Error: boom" },
-    { "kind": "test", "text": "status is 201: expected 200 to equal 201" }
+    { "kind": "error", "text": "Error: boom", "count": 480 },
+    { "kind": "test", "text": "status is 201: expected 200 to equal 201", "count": 480 }
   ],
-  "console": [ { "level": "log", "text": "saw 200" } ],
+  "console": [ { "level": "log", "text": "saw 200", "count": 470 },
+    { "level": "warn", "text": "slow body" } ],
   "consoleDropped": 37 }
 ```
 
@@ -10050,13 +10053,16 @@ included) and each failing `pm.test` as `name: message` (`kind: "test"`);
 `console` lists its console lines with their `level` (`log`, `info`, `warn`,
 `error`). Each list holds the first 10 distinct entries the run produced, in
 the order first seen, however many executions repeated one, and each `text` is
-cut to 500 bytes on a character boundary, ending in `...[truncated]`. The two
-lists fill apart, so a script that logs on every iteration cannot crowd out why
-it failed. `messagesDropped` / `consoleDropped` count the executions' entries a
-full list turned away (a repeat of a dropped entry counted each time, a repeat
-of a kept one not at all), so a list without its dropped count is the whole set
-of distinct entries. Every one of the four keys is **absent** when it would be
-empty or 0, so a row from an earlier engine reads the same. A single-request
+cut to 500 bytes on a character boundary, ending in `...[truncated]`. An entry
+produced more than once carries `count`, how many times (the first included);
+`count` is **absent** on an entry produced once, so the common case and a row
+from an earlier engine read the same. The two lists fill apart, so a script
+that logs on every iteration cannot crowd out why it failed.
+`messagesDropped` / `consoleDropped` count the occurrences a full list turned
+away (a repeat of a dropped entry counted each time; a repeat of a kept one
+counts on that entry's `count` instead), so a list without its dropped count is
+the whole set of distinct entries. Every one of the four keys is **absent**
+when it would be empty or 0, so a row from an earlier engine reads the same. A single-request
 run's `summary.elements` rows carry the same keys. The run export
 (`POST /export/run-report`) leaves all four out.
 
@@ -12038,7 +12044,8 @@ are HTTP-only, the same rule a failed assertion follows
   },
   "testValidation": {
     "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6,
-    "console": [ { "level": "warn", "text": "cache miss for /users" } ], "consoleDropped": 3
+    "console": [ { "level": "warn", "text": "cache miss for /users", "count": 412 } ],
+    "consoleDropped": 3
   },
   "thresholdValidation": {
     "checks": [
@@ -12215,9 +12222,10 @@ more than one assertion. `successRate` is `testsPassed` as a percentage of asser
 `samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
 (`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
 `console?` and `consoleDropped?` (#3127) are what the replayed scripts logged, in the element
-row's console shape (`[{level, text}]`): the first 10 distinct lines across every sample,
-each cut to 500 bytes, kept whatever the script's verdict, and the count of lines a full
-list turned away. Both are absent when the replay logged nothing (`consoleDropped` also when
+row's console shape (`[{level, text, count?}]`): the first 10 distinct lines across every
+sample, each cut to 500 bytes, kept whatever the script's verdict and with `count` when it
+was logged more than once (absent means once), and the count of occurrences a full list
+turned away. Both are absent when the replay logged nothing (`consoleDropped` also when
 nothing was turned away), and on a scenario load run, whose replay keeps one list per step
 on [`scenario.steps[].tests`](#scenario-load-runs) instead, so one step's line is never
 merged into another's.

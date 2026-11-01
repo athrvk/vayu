@@ -1239,12 +1239,12 @@ struct ScriptValidationTotals {
     size_t passed  = 0;
     size_t failed  = 0;
     /// What the replayed scripts logged (#3127): the first
-    /// `MAX_ELEMENT_MESSAGES` distinct lines, a `DistinctMessageSample`'s
-    /// `kept ()` and `dropped ()` copied out once the replay is done. Filled
-    /// for a single-request run's totals and for each scenario step's; a
-    /// scenario run's whole-run totals leave both empty, because the same text
-    /// from two steps is two lines.
-    std::vector<ElementMessage> console;
+    /// `MAX_ELEMENT_MESSAGES` distinct lines with how often each was logged,
+    /// a `DistinctMessageSample`'s `kept ()` and `dropped ()` copied out once
+    /// the replay is done. Filled for a single-request run's totals and for
+    /// each scenario step's; a scenario run's whole-run totals leave both
+    /// empty, because the same text from two steps is two lines.
+    std::vector<CountedMessage> console;
     size_t console_dropped = 0;
 };
 
