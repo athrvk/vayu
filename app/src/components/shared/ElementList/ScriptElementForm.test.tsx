@@ -33,6 +33,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ScriptElementForm } from "./ScriptElementForm";
 import { useLayoutStore } from "@/stores";
+import { INTL_MARKER_OWNER } from "@/lib/script-intl-diagnostics";
 import {
 	DEFAULT_SCRIPT_EDITOR_HEIGHT,
 	SCRIPT_EDITOR_HEIGHT_PAGE_STEP,
@@ -41,11 +42,22 @@ import {
 	SCRIPT_EDITOR_MIN_HEIGHT,
 } from "@/constants/layout";
 
+const mounts = vi.hoisted(() => ({
+	onMount: undefined as undefined | ((...args: never[]) => void),
+}));
+
 vi.mock("@/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/components/ui")>()),
-	CodeEditor: ({ ariaLabel }: { ariaLabel: string }) => (
-		<div data-testid={`code-editor-${ariaLabel}`} />
-	),
+	CodeEditor: ({
+		ariaLabel,
+		onMount,
+	}: {
+		ariaLabel: string;
+		onMount?: (...args: never[]) => void;
+	}) => {
+		mounts.onMount = onMount;
+		return <div data-testid={`code-editor-${ariaLabel}`} />;
+	},
 }));
 
 vi.mock("@/queries", async (importOriginal) => ({
@@ -476,5 +488,51 @@ describe("the Snippets disclosure, per row", () => {
 		fireEvent.click(screen.getByRole("button", { name: /snippets/i }));
 
 		expect(useLayoutStore.getState().scriptSnippetsCollapsed).toBe(false);
+	});
+});
+
+describe("the editor's Intl warning (#3129)", () => {
+	function mountEditor(script: string) {
+		const setModelMarkers = vi.fn();
+		const disposeListeners: (() => void)[] = [];
+		const model = {
+			getValue: () => script,
+			getPositionAt: (offset: number) => ({ lineNumber: 1, column: offset + 1 }),
+			isDisposed: () => false,
+			onDidChangeContent: () => ({ dispose: () => {} }),
+		};
+		const editor = {
+			getModel: () => model,
+			onDidChangeModel: () => ({ dispose: () => {} }),
+			onDidDispose: (listener: () => void) => {
+				disposeListeners.push(listener);
+				return { dispose: () => {} };
+			},
+		};
+		const monaco = { MarkerSeverity: { Warning: 4 }, editor: { setModelMarkers } };
+		renderForm();
+		(mounts.onMount as (...args: unknown[]) => void)(editor, monaco);
+		return {
+			setModelMarkers,
+			model,
+			disposeEditor: () => disposeListeners.forEach((l) => l()),
+		};
+	}
+
+	it("marks a bare Intl in the script it mounts with, and clears it with the editor", () => {
+		const { setModelMarkers, model, disposeEditor } = mountEditor("Intl.NumberFormat");
+
+		expect(setModelMarkers).toHaveBeenCalledWith(model, INTL_MARKER_OWNER, [
+			expect.objectContaining({ severity: 4, startColumn: 1, endColumn: 5 }),
+		]);
+
+		disposeEditor();
+		expect(setModelMarkers).toHaveBeenLastCalledWith(model, INTL_MARKER_OWNER, []);
+	});
+
+	it("marks nothing in a script without one", () => {
+		const { setModelMarkers } = mountEditor("pm.test('ok', () => {});");
+
+		expect(setModelMarkers).not.toHaveBeenCalled();
 	});
 });
