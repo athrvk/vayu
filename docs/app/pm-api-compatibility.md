@@ -1712,6 +1712,11 @@ accepted and warns:
   `URLSearchParams`, `TextEncoder`, `TextDecoder`, `structuredClone`,
   `localStorage`, `sessionStorage`, `window`, `document` and `alert` - the editor
   declares each as absent and names the replacement on hover
+- `Intl`, and the locale and options arguments of `toLocaleDateString`,
+  `toLocaleTimeString`, `toLocaleString` and `Number.prototype.toLocaleString`,
+  which run and ignore them. Unlike the globals above, `Intl` is not declared
+  absent: the editor marks each bare `Intl` with a warning and suggests
+  `require('moment')`, see [Editor autocomplete](#editor-autocomplete)
 - `Buffer` - the sandbox is not Node. Use `btoa` / `atob` for base64 and
   [`pm.crypto`](#hashing-pmcrypto-is-vayus-own-name-and-it-is-synchronous) for
   hashing
@@ -2166,6 +2171,19 @@ An entry leaves `ABSENT_GLOBALS` in the commit that makes the runtime provide th
 and a test that executes `typeof <name>` in the real script engine for every entry holds
 the list to the sandbox: it caught `queueMicrotask`, which quickjs-ng does provide, on
 its first run.
+
+**`Intl` is flagged without being declared absent** (#3129). The worker resolves it
+against the stock `esnext` lib and reports nothing, and `ABSENT_GLOBALS` is left as it
+is, so the warning comes from the script editor instead: `ScriptElementForm` attaches
+`attachIntlDiagnostics` (`app/src/lib/script-intl-diagnostics.ts`), which scans the
+model's text and writes a warning marker on every bare `Intl` under an owner of its own (`"vayu-script-intl"`,
+never the worker's `"javascript"`, whose markers the worker replaces). The message
+points at `require('moment')` and says the `toLocale*` methods ignore their options. The
+scan skips strings, template text (not its `${...}` expressions), comments and regex
+literals, and leaves `obj.Intl`, `x?.Intl`, `MyIntl` and an object-literal key alone;
+a script that declares its own `Intl` is not marked at all. The runtime is unchanged and
+installs no `Intl`. Read-only JavaScript viewers do not get the marker: it is attached by
+the script form's `onMount`, not by `CodeEditor`.
 
 Narrow the suppression list rather than widening it: each code on it is a real mistake
 going unreported in exchange for not crying wolf on correct code.

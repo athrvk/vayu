@@ -3231,8 +3231,9 @@ and the rest of the ES2020 built-ins, plus:
 silently falling back to hex.
 
 **Not** available: `crypto` / `crypto.subtle`, `TextEncoder`, `URL`,
-`URLSearchParams`, `fetch`, and any module other than the shelf's. The practical
-consequences: no general URL constructor - the request's own URL is already
+`URLSearchParams`, `fetch`, `Intl` (the `toLocale*` methods ignore their locale
+and options, see [Limitations](#limitations)), and any module other than the
+shelf's. The practical consequences: no general URL constructor - the request's own URL is already
 parsed for you, see [URL parts](#url-parts-pmrequesturl) - no asymmetric
 algorithm and no cipher (the digests are `pm.crypto.sha256` and the
 [`crypto-js` hashers](#the-require-shelf)), and no host I/O:
@@ -3984,6 +3985,14 @@ The **language** is current; what is missing is the **host environment**:
   `structuredClone` or `crypto.subtle` - see the table above for what replaces
   the ones that have a replacement. The timers are there, and run before the
   script ends without waiting ([Timers](#timers-settimeout-and-setinterval)).
+- **No `Intl`**: the global does not exist, so `Intl.DateTimeFormat` and its
+  siblings throw a `ReferenceError`. `toLocaleDateString`, `toLocaleTimeString`,
+  `toLocaleString` and `Number.prototype.toLocaleString` run but ignore their
+  locale and options arguments, so `toLocaleDateString('en-US', { month: 'long' })`
+  does not format a month name. For dates use [`moment`](#the-require-shelf);
+  otherwise format by hand. The script editor marks a bare `Intl` with a warning
+  that says this
+  ([Editor autocomplete](../app/pm-api-compatibility.md#editor-autocomplete)).
 - **No Node.js APIs**: `require()` answers only the
   [shelf](#the-require-shelf) (`crypto-js`, `uuid`, `lodash`, `moment`,
   `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`); `fs`, `http`, `crypto`
