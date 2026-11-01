@@ -75,7 +75,7 @@ concurrency:
 
 jobs:
   sanitize:
-    name: ${{ matrix.sanitizer }} on ${{ matrix.os }}
+    name: ${{ matrix.sanitizer }} on ${{ matrix.os }}${{ matrix.shard && format(' (shard {0}/{1})', matrix.shard, matrix.shards) || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -90,9 +90,28 @@ jobs:
           - os: macos-latest
             sanitizer: asan
             preset: macos-asan
+          # macOS TSan runs as three shards, each its own runner. One runner
+          # took about 3 s a test at the preset's `-j2`: half of 6510 tests in
+          # 90 minutes, so the whole suite overran the 150-minute timeout below
+          # on master (26 Oct 2026, cancelled 130 minutes into the test step)
+          # as well as on #3181. `ctest -I <shard>,,<shards>` hands each shard
+          # every third test by number, so the three together run each test
+          # exactly once (6511 tests: 2171, 2170 and 2170).
           - os: macos-latest
             sanitizer: tsan
             preset: macos-tsan
+            shard: 1
+            shards: 3
+          - os: macos-latest
+            sanitizer: tsan
+            preset: macos-tsan
+            shard: 2
+            shards: 3
+          - os: macos-latest
+            sanitizer: tsan
+            preset: macos-tsan
+            shard: 3
+            shards: 3
           # No tsan leg: ThreadSanitizer has no Windows implementation. See the
           # header, and the FATAL_ERROR in engine/CMakeLists.txt that makes a
           # wrong invocation fail loudly.
@@ -101,11 +120,13 @@ jobs:
             preset: windows-asan
     # A runaway guard, not a budget. Measured cold on the first run in which
     # every leg reached its ctest summary, checkout to last test: ASan 20 min on
-    # Linux, 21 on macOS, 42 on Windows; TSan 20 on Linux and 71 on macOS.
-    # `macos-tsan` sets the ceiling, at TSan's documented 5-15x over a suite the
-    # other legs finish in a fifth of that. 150 keeps better than 2x headroom
-    # over it while still catching a genuine hang in one weekly run rather than
-    # three.
+    # Linux, 21 on macOS, 42 on Windows; TSan 20 on Linux and 71 on macOS, on a
+    # suite of 2368 tests. At 6510 tests (#3181) the slowest unsharded legs
+    # read Windows ASan 73 min and macOS ASan 49 min; one macOS TSan runner
+    # would need about 180 min of tests alone, which is why it is three shards
+    # of about 60 each (see the matrix). 150 keeps about 2x headroom over the
+    # slowest leg while still catching a genuine hang in one weekly run rather
+    # than three.
     timeout-minutes: 150
     env:
       # Byte-identical to pr-tests.yml, release.yml and cache-warm.yml on
@@ -229,6 +250,8 @@ jobs:
         env:
           SANITIZER: ${{ matrix.sanitizer }}
           PRESET: ${{ matrix.preset }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ matrix.shards }}
         run: |
           set -o pipefail
           supp="$PWD/sanitizers"
@@ -349,7 +372,12 @@ jobs:
           fi
           echo "Test binary loads and enumerates cleanly."
 
-          ctest --preset "$PRESET" --output-on-failure < /dev/null 2>&1 | tee ../sanitizer.log
+          shard_args=()
+          if [[ -n "$SHARD_INDEX" ]]; then
+            shard_args=(-I "$SHARD_INDEX,,$SHARD_COUNT")
+            echo "Running shard $SHARD_INDEX of $SHARD_COUNT: every ${SHARD_COUNT}th test from test $SHARD_INDEX"
+          fi
+          ctest --preset "$PRESET" --output-on-failure "${shard_args[@]}" < /dev/null 2>&1 | tee ../sanitizer.log
 
       # The leg's identity, carried inside its artifact: the `report` job finds
       # legs by this file and reads sanitizer, runner and `preset` from it, as a
@@ -361,9 +389,10 @@ jobs:
           SANITIZER: ${{ matrix.sanitizer }}
           PLATFORM: ${{ matrix.os }}
           PRESET: ${{ matrix.preset }}
+          SHARD: ${{ matrix.shard && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
         run: |
-          printf '{"sanitizer":"%s","os":"%s","preset":"%s"}\n' \
-            "$SANITIZER" "$PLATFORM" "$PRESET" > sanitizer-leg.json
+          printf '{"sanitizer":"%s","os":"%s","preset":"%s","shard":"%s"}\n' \
+            "$SANITIZER" "$PLATFORM" "$PRESET" "$SHARD" > sanitizer-leg.json
 
       # Uploaded on failure only, and that is load-bearing: the `report` job
       # files one issue per marker it finds, so a leg that passed must not
@@ -372,7 +401,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: sanitizer-${{ matrix.sanitizer }}-${{ matrix.os }}
+          name: sanitizer-${{ matrix.sanitizer }}-${{ matrix.os }}${{ matrix.shard && format('-shard{0}', matrix.shard) || '' }}
           path: |
             sanitizer.log
             sanitizer-leg.json
@@ -472,18 +501,22 @@ jobs:
               return { excerpt, excerptKind };
             }
 
-            function buildBody({ sanitizer, os, preset }, { excerpt, excerptKind }) {
+            function buildBody({ sanitizer, os, preset, shard }, { excerpt, excerptKind }) {
+              const leg = shard ? `${sanitizer} on ${os} (shard ${shard})` : `${sanitizer} on ${os}`;
+              const artifact = shard
+                ? `sanitizer-${sanitizer}-${os}-shard${shard.split('/')[0]}`
+                : `sanitizer-${sanitizer}-${os}`;
               return [
                 `**\`${preset}\` went red.**`,
                 '',
                 `- run: ${runUrl}`,
                 `- ref: \`${context.ref}\` (event \`${context.eventName}\`, commit \`${context.sha}\`)`,
-                `- job: \`${sanitizer} on ${os}\``,
+                `- job: \`${leg}\``,
                 '',
                 excerptKind === 'no log'
                   ? 'The job produced no test log at all - read the run itself.'
                   : `Below is ${excerptKind}; the full log is attached to the run` +
-                    ` as the \`sanitizer-${sanitizer}-${os}\` artifact.`,
+                    ` as the \`${artifact}\` artifact.`,
                 '',
                 '```',
                 excerpt,
@@ -556,6 +589,9 @@ jobs:
                   body,
                   labels: [label, 'component:engine', 'type:bug'],
                 });
+                // The shards of one leg share its title, so the next shard to
+                // fail in this run comments here instead of filing a second.
+                open.push(created.data);
                 core.notice(`Filed #${created.data.number}: ${title}`);
               }
             }
