@@ -1879,7 +1879,7 @@ vayu::core::RunSummaryInputs summary_inputs () {
     inputs.latency_avg_ms          = 12.5;
     inputs.http_version_downgraded = 4;
     inputs.connection_replays      = 6;
-    inputs.tests     = vayu::core::ScriptValidationTotals{ 10, 9, 1 };
+    inputs.tests     = vayu::core::ScriptValidationTotals{ 10, 9, 1, {}, 0 };
     inputs.retention = vayu::core::SamplingRetention{ 4, 300, 12, 900 };
     return inputs;
 }
@@ -1979,7 +1979,7 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
 // both do.
 TEST_F (RunsRouteTest, ReportCarriesTheReplaysConsoleLines) {
     using vayu::core::ElementMessage;
-    vayu::core::ScriptValidationTotals replayed{ 3, 3, 0 };
+    vayu::core::ScriptValidationTotals replayed{ 3, 3, 0, {}, 0 };
     replayed.console = { { ElementMessage::Kind::Console, vayu::ConsoleLevel::Warn, "slow body" } };
     replayed.console_dropped = 4;
 

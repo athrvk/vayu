@@ -1244,7 +1244,7 @@ struct ScriptValidationTotals {
     /// for a single-request run's totals and for each scenario step's; a
     /// scenario run's whole-run totals leave both empty, because the same text
     /// from two steps is two lines.
-    std::vector<ElementMessage> console{};
+    std::vector<ElementMessage> console;
     size_t console_dropped = 0;
 };
 
