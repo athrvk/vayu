@@ -508,7 +508,7 @@ of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/i
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
 | uuid | 8.3.2 | MIT | `engine/vendor/uuid/uuid.min.js` (`dist/umd/uuid.min.js`, 8,160 bytes) |
-| lodash | 4.17.21 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,015 bytes) |
+| lodash | 4.18.1 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,234 bytes) |
 | moment | 2.31.0 | MIT | `engine/vendor/moment/moment.min.js` (the package's `min/moment.min.js`, 60,887 bytes; English only, no locale files) |
 | csv-parse | 1.2.4 | BSD-3-Clause | `engine/vendor/csv-parse/csv-parse-sync.min.js` (the package's `lib/sync.js` and the `lib/index.js` it requires, bundled and minified by esbuild, 11,679 bytes; string input only), loaded as `require('csv-parse/lib/sync')` |
 | xml2js | 0.6.2, with sax 1.2.4 and xmlbuilder 11.0.1 | MIT (sax ISC) | `engine/vendor/xml2js/xml2js.min.js` (xml2js's `lib/`, sax's `lib/sax.js` and xmlbuilder's `lib/`, bundled and minified by esbuild, 98,939 bytes; string input only), loaded as `require('xml2js')` or the `xml2Json` global |
@@ -729,9 +729,16 @@ All platforms script with the same vendored engine: QuickJS-NG
 
 ### Vendored QuickJS-NG
 
-The vendored QuickJS-NG is **v0.16.1** (`QJS_VERSION_*` in
+The vendored QuickJS-NG is **v0.18.0** (`QJS_VERSION_*` in
 `engine/vendor/quickjs-ng/quickjs.h`), byte-identical to the upstream tag for
 every file the tree holds. It carries no local patch.
+
+Upstream no longer takes private security reports or issues CVEs
+(`SECURITY.md` since 0.18.0), so a fix that matters to a sandbox (a
+use-after-free a script can reach, an interrupt check a builtin lacked) shows
+up only in the release's commit list; read that list on every re-vendor. Since
+0.18.0 `JSInterruptHandler` takes the `JSContext` rather than the `JSRuntime`
+(`script_interrupt_handler` in `src/runtime/script_engine.cpp`).
 
 The parser once computed an identifier's column by scanning back to the start
 of its line, so a one-line (minified) script took time quadratic in its length

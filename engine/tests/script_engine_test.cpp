@@ -125,6 +125,43 @@ TEST_F (ScriptEngineTest, ExecuteSimpleExpression) {
     EXPECT_TRUE (result.success);
 }
 
+// quickjs-ng before 0.18.0 freed a WeakMap's records while walking them, so a
+// map whose values were symbols it also held as keys was a use-after-free in
+// the finalizer: a crash of the whole engine from plain script code, reached
+// when the function's locals die and again when the runtime is torn down
+// (upstream issue #1835, whose reproducer this is). The last map stays alive
+// until the execution's runtime is freed, which is the second path.
+TEST_F (ScriptEngineTest, AWeakMapHoldingItsOwnSymbolKeysIsFreedSafely) {
+    ScriptContext ctx;
+    const auto result = engine.execute (R"(
+        function chained() {
+            var o = {}, m = new WeakMap(), b = Symbol("b");
+            m.set(o, b);
+            m.set(b, 1);
+            b = undefined;
+            m = undefined;
+        }
+        function longer() {
+            var o = {}, m = new WeakMap();
+            var a = Symbol("a"), b = Symbol("b"), c = Symbol("c");
+            m.set(o, a);
+            m.set(a, b);
+            m.set(b, c);
+            m.set(c, 1);
+            a = b = c = undefined;
+            m = undefined;
+        }
+        chained();
+        longer();
+        const kept = new WeakMap(), x = Symbol("x"), y = Symbol("y");
+        kept.set(x, y);
+        kept.set(y, x);
+        if (kept.get(x) !== y || kept.get(y) !== x) throw new Error("lookup");
+    )",
+    ctx);
+    EXPECT_TRUE (result.success) << result.error_message;
+}
+
 // ============================================================================
 // pm.test() Tests
 // ============================================================================
@@ -9000,7 +9037,7 @@ TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
-// require('lodash') and the `_` global are npm's lodash 4.17.21, vendored (#2651).
+// require('lodash') and the `_` global are npm's lodash 4.18.1, vendored (#2651).
 
 TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
     ScriptEngine roomy{ library_call_config () };
@@ -9018,7 +9055,7 @@ TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
     "1,2,true" },
     { "_.map([1, 2, 3], function (n) { return n * 2; }).join()", "2,4,6" },
     { "_([1, 2, 3, 4]).filter(function (n) { return n % 2 === 0; }).sum()", "6" },
-    { "_.VERSION", "4.17.21" },
+    { "_.VERSION", "4.18.1" },
     });
     for (const auto& answer : ANSWERS) {
         EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)

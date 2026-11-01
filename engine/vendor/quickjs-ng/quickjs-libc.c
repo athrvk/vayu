@@ -66,6 +66,10 @@
 #include <grp.h>
 #endif
 
+#if defined(__COSMOPOLITAN__)
+#include <cosmo.h>
+#endif
+
 #if defined(__APPLE__)
 typedef sig_t sighandler_t;
 #include <crt_externs.h>
@@ -197,6 +201,8 @@ typedef struct JSThreadState {
 #endif // USE_WORKER
     JSClassID std_file_class_id;
     JSClassID worker_class_id;
+    JSInterruptHandler *prev_interrupt_handler;
+    void *prev_interrupt_opaque;
 } JSThreadState;
 
 static uint64_t os_pending_signals;
@@ -1083,9 +1089,15 @@ static JSValue js_std_gc(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static int interrupt_handler(JSRuntime *rt, void *opaque)
+static int interrupt_handler(JSContext *ctx, void *opaque)
 {
-    return (os_pending_signals >> SIGINT) & 1;
+    JSThreadState *ts = opaque;
+
+    if (1 & (os_pending_signals >> SIGINT))
+        return 1;
+    if (ts->prev_interrupt_handler)
+        return ts->prev_interrupt_handler(ctx, ts->prev_interrupt_opaque);
+    return 0;
 }
 
 static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
@@ -1148,7 +1160,14 @@ static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
     }
     if (!ts->recv_pipe && ++ts->eval_script_recurse == 1) {
         /* install the interrupt handler */
-        JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, NULL);
+        ts->prev_interrupt_handler =
+            (JSInterruptHandler *)js_std_cmd(/*GetInterruptHandler*/5, rt);
+        ts->prev_interrupt_opaque =
+            (void *)js_std_cmd(/*GetInterruptOpaque*/6, rt);
+        // FIXME(bnoordhuis) Questionable hack to make the REPL interruptible.
+        // Ideally qjs installs a signal handler + interrupt handler but then
+        // scripts can intercept it with os.signal(SIGINT).
+        JS_SetInterruptHandler(JS_GetRuntime(ctx), interrupt_handler, ts);
     }
     flags = compile_module ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
     if (backtrace_barrier)
@@ -1166,7 +1185,11 @@ static JSValue js_evalScript(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, str);
     if (!ts->recv_pipe && --ts->eval_script_recurse == 0) {
         /* remove the interrupt handler */
-        JS_SetInterruptHandler(JS_GetRuntime(ctx), NULL, NULL);
+        JS_SetInterruptHandler(JS_GetRuntime(ctx),
+                               ts->prev_interrupt_handler,
+                               ts->prev_interrupt_opaque);
+        ts->prev_interrupt_handler = NULL;
+        ts->prev_interrupt_opaque = NULL;
         os_pending_signals &= ~((uint64_t)1 << SIGINT);
         /* convert the uncatchable "interrupted" error into a normal error
            so that it can be caught by the REPL */
@@ -1920,7 +1943,7 @@ static const JSCFunctionListEntry js_std_funcs[] = {
     JS_CFUNC_DEF("evalScript", 1, js_evalScript ),
     JS_CFUNC_DEF("loadScript", 1, js_loadScript ),
     JS_CFUNC_DEF("getenv", 1, js_std_getenv ),
-    JS_CFUNC_DEF("setenv", 1, js_std_setenv ),
+    JS_CFUNC_DEF("setenv", 2, js_std_setenv ),
     JS_CFUNC_DEF("unsetenv", 1, js_std_unsetenv ),
     JS_CFUNC_DEF("getenviron", 1, js_std_getenviron ),
 #if !defined(__wasi__)
@@ -2834,7 +2857,7 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSThreadState *ts = js_get_thread_state(rt);
-    int r, w, ret, nfds, min_delay;
+    int r, w, ret, nfds, min_delay, poll_nfds;
     JSOSRWHandler *rh;
     struct list_head *el;
     struct pollfd *pfd, *pfds, pfds_local[64];
@@ -2928,12 +2951,14 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
     // linear-ish in practice because we bail out on the first hit,
     // i.e., it's probably good enough for now
     ret = 0;
+    /* poll() returns the number of ready descriptors, not the array length. */
+    poll_nfds = nfds;
     nfds = poll(pfds, nfds, min_delay);
     if (nfds < 0) {
         ret = -1;
         goto done;
     }
-    for (pfd = pfds; nfds-- > 0; pfd++) {
+    for (pfd = pfds; poll_nfds-- > 0; pfd++) {
         rh = find_rh(ts, pfd->fd);
         if (rh) {
             r = (POLLERR|POLLHUP|POLLNVAL|POLLIN) * !JS_IsNull(rh->rw_func[0]);
@@ -4098,7 +4123,7 @@ static void worker_func(void *opaque)
 
     js_std_add_helpers(ctx, -1, NULL);
 
-    val = JS_LoadModule(ctx, args->basename, args->filename);
+    val = JS_LoadModule(ctx, args->basename, args->filename, JS_UNDEFINED);
     free(args->filename);
     free(args->basename);
     free(args);
@@ -4449,7 +4474,7 @@ static const JSCFunctionListEntry js_os_funcs[] = {
     JS_CFUNC_DEF("sleepAsync", 1, js_os_sleepAsync ),
     JS_PROP_STRING_DEF("platform", OS_PLATFORM, 0 ),
     JS_CFUNC_DEF("getcwd", 0, js_os_getcwd ),
-    JS_CFUNC_DEF("chdir", 0, js_os_chdir ),
+    JS_CFUNC_DEF("chdir", 1, js_os_chdir ),
     JS_CFUNC_DEF("mkdir", 1, js_os_mkdir ),
     JS_CFUNC_DEF("readdir", 1, js_os_readdir ),
 #if !defined(_WIN32) && !defined(__wasi__)
@@ -4523,7 +4548,29 @@ static int js_os_init(JSContext *ctx, JSModuleDef *m)
     }
 #endif /* USE_WORKER */
 
-    return JS_SetModuleExportList(ctx, m, js_os_funcs, countof(js_os_funcs));
+    if (JS_SetModuleExportList(ctx, m, js_os_funcs, countof(js_os_funcs)))
+        return -1;
+
+#ifdef __COSMOPOLITAN__
+    const char *platform;
+    if (IsLinux()) {
+        platform = "linux";
+    } else if (IsNetbsd()) {
+        platform = "netbsd";
+    } else if (IsOpenbsd()) {
+        platform = "openbsd";
+    } else if (IsWindows()) {
+        platform = "win32";
+    } else if (IsXnu()) {
+        platform = "darwin";
+    } else {
+        platform = "unknown";
+    }
+    if (JS_SetModuleExport(ctx, m, "platform", JS_NewString(ctx, platform)))
+        return -1;
+#endif /* __COSMOPOLITAN__ */
+
+    return 0;
 }
 
 JSModuleDef *js_init_module_os(JSContext *ctx, const char *module_name)

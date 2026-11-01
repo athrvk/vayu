@@ -16,10 +16,10 @@ libraries" in `docs/engine/building.md`.
 | | |
 |---|---|
 | Upstream | <https://github.com/quickjs-ng/quickjs> |
-| Version | v0.16.1 (`QJS_VERSION_*` in `quickjs.h`) |
-| Upstream commit | `954dc53628e36891f93c359aa60895c2ae3dac6b` (the `v0.16.1` tag, 2026-08-04) |
+| Version | v0.18.0 (`QJS_VERSION_*` in `quickjs.h`) |
+| Upstream commit | `d7215b0ad3fc2c562e8317fd9bca058fd4863804` (the `v0.18.0` tag, 2026-11-01) |
 | First vendored | 2026-01-14 (`fee2e89b1`) |
-| Current version since | 2026-10-21 (`a42225c`; 0.16.0 from 2026-07-31, `f97fddb34`) |
+| Current version since | 2026-11-01 (0.16.1 from 2026-10-21, `a42225c`; 0.16.0 from 2026-07-31, `f97fddb34`) |
 | Local patches | none |
 
 The tree is byte-identical to the upstream tag for every file it holds. Left

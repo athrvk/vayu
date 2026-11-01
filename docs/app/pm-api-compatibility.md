@@ -510,7 +510,7 @@ nothing until a script requires it. The import's notice does not name a
 `require('uuid')`. The engine-side detail is in
 [scripting.md](../engine/scripting.md#the-require-shelf).
 
-**`lodash`** is npm's `lodash` package (4.17.21), the whole library vendored
+**`lodash`** is npm's `lodash` package (4.18.1), the whole library vendored
 unmodified, and the `_` global is the same object as `require('lodash')`:
 
 ```javascript
