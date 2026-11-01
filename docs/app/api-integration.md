@@ -2125,7 +2125,12 @@ Steps tab list them under the row. The deferred replay's failures arrive on the 
 failed), `failuresDistinct` and the occurrence totals `totalFailed` / `totalPassed`; the
 Test validation card shows each message once with `x3` beside a repeat and says "Showing N
 of M distinct" when the engine kept fewer than it saw. A row from before #3127 has no
-`failureCounts` or `failuresDistinct`, and each of its entries counts as one.
+`failureCounts` or `failuresDistinct`, and each of its entries counts as one. The replay's
+console lines ride on the aggregate instead: `testValidation.console` and `consoleDropped` on a
+single-request run, `scenario.steps[].tests.console` and `consoleDropped` per step on a scenario
+run (same `{level, text}` lines and occurrence count as an inline row, each key absent when
+nothing was logged and on a report from before the field), drawn under "Console from the
+post-run replay over N sampled responses" by `ReplayConsole`.
 
 An **absent** `sampling` is a run whose stored summary predates the counts, not
 a run that dropped nothing, so the note stays out rather than asserting a
