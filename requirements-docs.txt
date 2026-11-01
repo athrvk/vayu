@@ -5,4 +5,4 @@
 #   pip install -r requirements-docs.txt
 #   mkdocs serve -f .github/mkdocs.yml          # preview on 127.0.0.1:8000/vayu/
 #   mkdocs build --strict -f .github/mkdocs.yml # what CI runs
-mkdocs-material==9.7.7
+mkdocs-material==9.8.0
