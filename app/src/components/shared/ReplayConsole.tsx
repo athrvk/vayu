@@ -18,16 +18,10 @@
  */
 
 import { ElementMessages } from "./ElementMessages";
-import { replayPhrase } from "./ElementTally";
+import { hasReplayConsole, replayPhrase } from "./run-assertions";
 import type { RunScenarioStepElementTally } from "@/types/domain";
 
 type ReplayConsoleSource = Pick<RunScenarioStepElementTally, "console" | "consoleDropped">;
-
-/** Whether the replay said anything: a line, or a count of lines a full list turned away. */
-export function hasReplayConsole(source: ReplayConsoleSource | undefined): boolean {
-	if (!source) return false;
-	return (source.console?.length ?? 0) > 0 || (source.consoleDropped ?? 0) > 0;
-}
 
 export function ReplayConsole({
 	source,

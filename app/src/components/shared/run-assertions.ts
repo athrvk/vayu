@@ -7,7 +7,7 @@
 
 import { formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
-import type { RunReport, RunScenarioStepStat } from "@/types";
+import type { RunReport, RunScenarioStepElementTally, RunScenarioStepStat } from "@/types";
 
 export type ExactAssertions = NonNullable<NonNullable<RunReport["scenario"]>["assertions"]>;
 
@@ -58,6 +58,20 @@ export function deferredResponsesOf(step: Pick<RunScenarioStepStat, "elements">)
 		if (element.kind.startsWith("script.")) total += element.deferred ?? 0;
 	}
 	return total;
+}
+
+/** `post-run replay over 1,000 sampled responses`, or the unsized phrase. */
+export function replayPhrase(samples: number | undefined): string {
+	if (samples === undefined) return "post-run replay of sampled responses";
+	return `post-run replay over ${formatNumber(samples)} sampled ${pluralize(samples, "response")}`;
+}
+
+/** Whether a replay said anything to the console: a line, or a count of lines a full list turned away (#3127). */
+export function hasReplayConsole(
+	source: Pick<RunScenarioStepElementTally, "console" | "consoleDropped"> | undefined
+): boolean {
+	if (!source) return false;
+	return (source.console?.length ?? 0) > 0 || (source.consoleDropped ?? 0) > 0;
 }
 
 /** The population the sampled replay was drawn from, in a scenario load run. */
