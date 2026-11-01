@@ -9000,7 +9000,7 @@ TEST_F (ScriptEngineTest, RequireShelfUuidEvaluatesOnlyOnFirstUse) {
     EXPECT_EQ (ScriptEngine::shelf_library_loads (), before + 1);
 }
 
-// require('lodash') and the `_` global are npm's lodash 4.17.21, vendored (#2651).
+// require('lodash') and the `_` global are npm's lodash 4.18.1, vendored (#2651).
 
 TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
     ScriptEngine roomy{ library_call_config () };
@@ -9018,7 +9018,7 @@ TEST_F (ScriptEngineTest, RequireShelfLodashAnswersKnownCalls) {
     "1,2,true" },
     { "_.map([1, 2, 3], function (n) { return n * 2; }).join()", "2,4,6" },
     { "_([1, 2, 3, 4]).filter(function (n) { return n % 2 === 0; }).sum()", "6" },
-    { "_.VERSION", "4.17.21" },
+    { "_.VERSION", "4.18.1" },
     });
     for (const auto& answer : ANSWERS) {
         EXPECT_EQ (shelf_answer (roomy, request, answer.expression), answer.expected)

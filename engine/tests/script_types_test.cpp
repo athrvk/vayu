@@ -733,7 +733,7 @@ TEST (ScriptTypesTest, LodashIsDeclaredAsTheGlobalAndTheModule) {
     const std::string lodash = "declare const _: any;\n";
     EXPECT_TRUE (contains (dts, lodash));
     const std::string doc = documentation_above (dts, lodash);
-    EXPECT_TRUE (contains (doc, "lodash 4.17.21")) << doc;
+    EXPECT_TRUE (contains (doc, "lodash 4.18.1")) << doc;
     EXPECT_FALSE (contains (doc, "Not available in the Vayu script sandbox."));
     EXPECT_FALSE (contains (dts, "declare const _: never;"));
     EXPECT_TRUE (contains (dts, "declare module 'lodash' {\n\texport = _;\n}\n"));
