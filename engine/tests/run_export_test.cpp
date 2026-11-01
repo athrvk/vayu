@@ -69,6 +69,14 @@ json leak_script_row () {
         { "consoleDropped", 3 } };
 }
 
+/// The deferred replay's tallies with what its scripts logged (#3127), which
+/// the export leaves behind.
+json leak_replay_tests (const char* marker) {
+    return json{ { "sampled", 6 }, { "passed", 5 }, { "failed", 1 },
+        { "console", json::array ({ { { "level", "log" }, { "text", marker } } }) },
+        { "consoleDropped", 2 } };
+}
+
 json leak_summary () {
     return json{ { "total_requests", 6 }, { "rps", 0.1 }, { "test_duration", 60.0 },
         { "status_codes", { { "200", 5 }, { "500", 1 } } },
@@ -92,10 +100,12 @@ json leak_summary () {
         { "outcome", "error" }, { "message", "LEAKSCRIPT" } } }) } } },
         { "auth", { { "refreshes", json::array () }, { "refreshFailures", 1 }, { "lastError", "LEAKAUTH" } } },
         { "elements", json::array ({ leak_script_row () }) },
+        { "tests", leak_replay_tests ("LEAKREPLAY") },
         { "scenario",
         { { "steps",
         json::array ({ { { "index", 0 }, { "name", "Checkout" },
-        { "elements", json::array ({ leak_script_row () }) } } }) } } } };
+        { "elements", json::array ({ leak_script_row () }) },
+        { "tests", leak_replay_tests ("LEAKSTEPREPLAY") } } }) } } } };
 }
 
 /// Every key name anywhere under @p node.
@@ -240,8 +250,9 @@ TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheFile) {
     auto [envelope, document] = export_ok (json{ { "runId", "run_leak" } });
     const std::string text    = envelope["text"].get<std::string> ();
     ASSERT_FALSE (text.empty ());
-    for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY", "LEAKTRACE", "LEAKSAMPLE",
-         "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH", "LEAKTHROWN", "LEAKCONSOLE" }) {
+    for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY", "LEAKTRACE",
+         "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH", "LEAKTHROWN",
+         "LEAKCONSOLE", "LEAKREPLAY", "LEAKSTEPREPLAY" }) {
         EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
                                                           << text;
     }
@@ -269,6 +280,32 @@ TEST_F (RunExportTest, AScriptElementRowIsExportedWithoutItsMessages) {
             EXPECT_FALSE (row->contains (key)) << key << " in " << row->dump ();
         }
     }
+}
+
+// #3127: the replay's tallies are exported counts-only, the run's
+// `testValidation` and a step alike: its console lines are a script's own
+// text. The report itself carries them, so the absence is the export's doing.
+// Mutation check: add "consoleDropped" to TEST_VALIDATION_KEYS (run_export.cpp)
+// and this fails.
+TEST_F (RunExportTest, TheReplaysConsoleLinesAreNotExported) {
+    seed_leak_run ("run_leak");
+    auto [status, report] = vayu::http::routes::run_report_response (*db_, "run_leak");
+    ASSERT_EQ (status, 200) << report.dump ();
+    ASSERT_TRUE (report.at ("testValidation").contains ("consoleDropped"))
+    << report.dump ();
+
+    auto [envelope, document] = export_ok (json{ { "runId", "run_leak" } });
+    const auto& exported      = document.at ("report");
+    ASSERT_TRUE (exported.contains ("testValidation")) << exported.dump ();
+    const auto& validation = exported.at ("testValidation");
+    EXPECT_EQ (validation.at ("samplesTested").get<int> (), 6) << validation.dump ();
+    const auto& step = exported.at ("scenario").at ("steps").at (0);
+    for (const json* section : { &validation, &step }) {
+        for (const char* key : { "console", "consoleDropped" }) {
+            EXPECT_FALSE (section->contains (key)) << key << " in " << section->dump ();
+        }
+    }
+    EXPECT_FALSE (step.contains ("tests")) << step.dump ();
 }
 
 TEST_F (RunExportTest, NoTraceResultOrSampleKeyAnywhere) {
@@ -678,7 +715,8 @@ TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheMarkdown) {
         const std::string text = envelope["text"].get<std::string> ();
         ASSERT_FALSE (text.empty ());
         for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY",
-             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH",
+             "LEAKTHROWN", "LEAKCONSOLE", "LEAKREPLAY", "LEAKSTEPREPLAY" }) {
             EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
                                                               << text;
         }
@@ -696,7 +734,8 @@ TEST_F (RunExportTest, NoMarkerFromTheLeakFixtureReachesTheHtml) {
         const std::string text = envelope["text"].get<std::string> ();
         ASSERT_FALSE (text.empty ());
         for (const char* marker : { "LIT", "p@", "LEAKHDR", "LEAKBODY",
-             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH" }) {
+             "LEAKTRACE", "LEAKSAMPLE", "LEAKSCHEMA", "LEAKSCRIPT", "LEAKAUTH",
+             "LEAKTHROWN", "LEAKCONSOLE", "LEAKREPLAY", "LEAKSTEPREPLAY" }) {
             EXPECT_EQ (text.find (marker), std::string::npos) << marker << " in:\n"
                                                               << text;
         }

@@ -1966,6 +1966,52 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_EQ (body["testValidation"]["samplesTested"].get<int> (), 10);
     EXPECT_EQ (body["testValidation"]["testsPassed"].get<int> (), 9);
     EXPECT_EQ (body["testValidation"]["testsFailed"].get<int> (), 1);
+    // A replay that logged nothing reports no console list (#3127).
+    EXPECT_FALSE (body["testValidation"].contains ("console"));
+    EXPECT_FALSE (body["testValidation"].contains ("consoleDropped"));
+}
+
+// #3127: the deferred replay's console lines reach the report, on the run's
+// `testValidation` and on a scenario step's `tests`, each with its dropped
+// count. Mutation check: drop the `console` copy in
+// `apply_summary_observations` (runs.cpp) and the first block fails; drop the
+// `write_message_sample` call in `test_totals_payload` (run_manager.cpp) and
+// both do.
+TEST_F (RunsRouteTest, ReportCarriesTheReplaysConsoleLines) {
+    using vayu::core::ElementMessage;
+    vayu::core::ScriptValidationTotals replayed{ 3, 3, 0 };
+    replayed.console = { { ElementMessage::Kind::Console, vayu::ConsoleLevel::Warn, "slow body" } };
+    replayed.console_dropped = 4;
+
+    auto inputs     = summary_inputs ();
+    inputs.tests    = replayed;
+    inputs.scenario = json{ { "steps",
+    json::array ({ { { "index", 0 }, { "name", "login" } },
+    { { "index", 1 }, { "name", "list" } } }) } };
+    vayu::core::attach_step_test_totals (*inputs.scenario, { replayed, std::nullopt });
+    seed ({ .id = "run_console", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_console", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_console");
+    ASSERT_EQ (status, 200) << body.dump ();
+    const json expected_console =
+    json::array ({ { { "level", "warn" }, { "text", "slow body" } } });
+
+    ASSERT_TRUE (body.contains ("testValidation")) << body.dump ();
+    const auto& validation = body.at ("testValidation");
+    EXPECT_EQ (validation.at ("samplesTested").get<int> (), 3);
+    ASSERT_TRUE (validation.contains ("console")) << validation.dump ();
+    EXPECT_EQ (validation.at ("console"), expected_console);
+    EXPECT_EQ (validation.at ("consoleDropped").get<size_t> (), 4u);
+
+    ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
+    const auto& steps = body.at ("scenario").at ("steps");
+    ASSERT_EQ (steps.size (), 2u) << steps.dump ();
+    ASSERT_TRUE (steps.at (0).contains ("tests")) << steps.dump ();
+    EXPECT_EQ (steps.at (0).at ("tests").at ("console"), expected_console);
+    EXPECT_EQ (steps.at (0).at ("tests").at ("consoleDropped").get<size_t> (), 4u);
+    EXPECT_FALSE (steps.at (1).contains ("tests")) << steps.dump ();
 }
 
 // Issue #2389: a collection run's report latency is the summary's sample (the

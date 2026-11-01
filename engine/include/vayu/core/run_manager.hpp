@@ -1238,6 +1238,14 @@ struct ScriptValidationTotals {
     size_t sampled = 0;
     size_t passed  = 0;
     size_t failed  = 0;
+    /// What the replayed scripts logged (#3127): the first
+    /// `MAX_ELEMENT_MESSAGES` distinct lines, a `DistinctMessageSample`'s
+    /// `kept ()` and `dropped ()` copied out once the replay is done. Filled
+    /// for a single-request run's totals and for each scenario step's; a
+    /// scenario run's whole-run totals leave both empty, because the same text
+    /// from two steps is two lines.
+    std::vector<ElementMessage> console{};
+    size_t console_dropped = 0;
 };
 
 /**
@@ -1325,7 +1333,9 @@ const std::shared_ptr<RunContext>& context);
  *
  * A step with no tallies keeps no `tests` key at all, so a reader can tell
  * "this step asserted nothing" from "this step's assertions all passed" - the
- * same distinction the whole-run section keeps by being absent.
+ * same distinction the whole-run section keeps by being absent. `tests` is
+ * `{sampled, passed, failed, console?, consoleDropped?}`, the two console keys
+ * written only when the step's replay logged something.
  */
 void attach_step_test_totals (nlohmann::json& scenario,
 const std::vector<std::optional<ScriptValidationTotals>>& per_step);

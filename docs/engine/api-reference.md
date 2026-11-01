@@ -9899,7 +9899,8 @@ knob.
         { "id": "el_2", "kind": "control.if", "passed": 462, "failed": 0, "missing": 0, "error": 0, "skipped": 12, "deferred": 0 },
         { "id": "el_3", "kind": "assert.status", "passed": 432, "failed": 30, "missing": 0, "error": 0, "skipped": 0, "deferred": 0 }
       ],
-      "tests": { "sampled": 20, "passed": 20, "failed": 0 } }
+      "tests": { "sampled": 20, "passed": 20, "failed": 0,
+                 "console": [ { "level": "log", "text": "user 42 loaded" } ] } }
   ]
 }
 ```
@@ -10002,7 +10003,14 @@ before the field existed.
 `tests` is the step's *deferred* validation - a script that did not run inline
 this run - and is **absent** for a step whose script ran inline instead
 (its outcome is in `elements`), asserted nothing, or drew no sample - "no
-assertions" and "no failures" are different answers.
+assertions" and "no failures" are different answers. Beside its
+`sampled`/`passed`/`failed` it carries `console?` and `consoleDropped?`
+(#3127): what that step's replayed scripts logged, as `[{level, text}]`, the
+first 10 distinct lines across the step's samples, each cut to 500 bytes and
+kept whatever the script's verdict, and how many lines a full list turned away.
+The list is the step's own, so a line two steps both log appears under each;
+both keys are absent when the step's replay logged nothing (`consoleDropped`
+also when nothing was turned away).
 
 `elements` (issue #1495) is the step's per-element tally,
 `{ id, kind, name?, origin?, required?, passed, failed, missing, error,
@@ -12028,7 +12036,10 @@ are HTTP-only, the same rule a failed assertion follows
       "node_cpu_seconds_total": { "min": 1.2, "max": 3.9, "avg": 2.6, "count": 58 }
     }
   },
-  "testValidation": { "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6 },
+  "testValidation": {
+    "samplesTested": 500, "testsPassed": 498, "testsFailed": 2, "successRate": 99.6,
+    "console": [ { "level": "warn", "text": "cache miss for /users" } ], "consoleDropped": 3
+  },
   "thresholdValidation": {
     "checks": [
       { "metric": "latencyP99Ms", "limit": 50, "actual": 47.2, "passed": true, "evaluated": true }
@@ -12203,6 +12214,13 @@ those responses, so `testsPassed + testsFailed` is not `samplesTested` once a sc
 more than one assertion. `successRate` is `testsPassed` as a percentage of assertions.
 `samplesTested` is also not `summary.totalRequests`: the replay buffer is bounded
 (`sampling.responseSamplesDropped`) and a request with no response has nothing to test.
+`console?` and `consoleDropped?` (#3127) are what the replayed scripts logged, in the element
+row's console shape (`[{level, text}]`): the first 10 distinct lines across every sample,
+each cut to 500 bytes, kept whatever the script's verdict, and the count of lines a full
+list turned away. Both are absent when the replay logged nothing (`consoleDropped` also when
+nothing was turned away), and on a scenario load run, whose replay keeps one list per step
+on [`scenario.steps[].tests`](#scenario-load-runs) instead, so one step's line is never
+merged into another's.
 
 The failing assertions are named on one synthetic row of `results[]`, the one whose `trace`
 carries `failures` (no captured request has it): `failures` (each distinct message once, at most

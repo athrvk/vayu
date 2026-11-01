@@ -1756,7 +1756,12 @@ ended, before the drain, so it is never above `total_requests`; the report's
 `completedWhileSending` out rather than reading it as `0`.
 
 `tests` is **omitted** when deferred script validation did not run, which is what keeps the
-report's `testValidation` section absent rather than reporting zero tests. `schemaValidation`
+report's `testValidation` section absent rather than reporting zero tests. Beside its counts it
+carries `console` (`[{level, text}]`, the first 10 distinct lines the replayed scripts logged,
+each cut to 500 bytes) and `consoleDropped` (lines a full list turned away), each written only
+when non-empty and non-zero (#3127). A scenario load run writes them on each step's own
+`scenario.steps[].tests` (the same object, built by the same `test_totals_payload`) and never on
+the run's `tests`. A summary stored before them has neither. `schemaValidation`
 follows the same rule (issue #682): omitted when the deferred pass over the run's sampled
 responses walked nothing, so an unbound collection's report carries no block rather than one
 saying its contract held. Written in camelCase because the report passes it through verbatim,

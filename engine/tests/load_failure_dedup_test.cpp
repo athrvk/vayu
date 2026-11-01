@@ -13,7 +13,8 @@
  * of ten was spent on one assertion. The row now holds each distinct message
  * once, with how often it failed. These tests drive `validate_scripts` against
  * a real database and read the stored row back, because the row is the
- * contract the report and the app read.
+ * contract the report and the app read. The replay's console lines are kept
+ * the same way, as a bounded distinct sample on the returned totals.
  */
 
 #include <gtest/gtest.h>
@@ -32,6 +33,7 @@
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/log_text.hpp"
 
 using json = nlohmann::json;
 
@@ -245,6 +247,121 @@ TEST_F (LoadFailureDedupTest, APassingRunStoresNoRow) {
     for (const auto& result : db_->get_results (RUN_ID)) {
         EXPECT_TRUE (result.trace_data.empty ()) << result.trace_data;
     }
+}
+
+// ============================================================================
+// The replay's console output (#3127): one bounded, distinct sample per run
+// for a single-request run and per step for a scenario run, offered whatever
+// the script's verdict.
+//
+// Mutation check: drop the `console.offer` loop in `replay_sample`
+// (run_manager.cpp) and every test below fails.
+// ============================================================================
+
+constexpr size_t CONSOLE_CAP = vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGES;
+
+using vayu::core::ElementMessage;
+
+ElementMessage console_line (vayu::ConsoleLevel level, const std::string& text) {
+    return { ElementMessage::Kind::Console, level, text };
+}
+
+// The same line logged on three samples is one line, not three, and a repeat
+// of a kept line is not counted as dropped.
+TEST_F (LoadFailureDedupTest, ALineLoggedOnThreeSamplesIsReportedOnce) {
+    auto context = single_request_run (
+    "console.log('checked'); pm.test('ok', function () { });");
+    for (int i = 0; i < 3; ++i) {
+        sample_single (context);
+    }
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->console,
+    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Log, "checked") }));
+    EXPECT_EQ (validation.run->console_dropped, 0u);
+}
+
+// A run whose scripts passed still reports what they logged: console output is
+// not a failure detail.
+TEST_F (LoadFailureDedupTest, APassingRunStillReportsItsConsoleLines) {
+    auto context = single_request_run (
+    "console.info('status ' + pm.response.code);"
+    "pm.test('ok', function () { pm.expect(pm.response.code).to.eql(200); });");
+    sample_single (context);
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 0u);
+    EXPECT_EQ (validation.run->console,
+    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Info, "status 200") }));
+}
+
+// What a script logged before it threw is kept: the line is most useful
+// exactly when the script failed.
+TEST_F (LoadFailureDedupTest, ALineLoggedBeforeAThrowIsKept) {
+    auto context = single_request_run (
+    "console.warn('about to fail'); throw new Error('boom');");
+    sample_single (context);
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_EQ (validation.run->failed, 1u);
+    EXPECT_EQ (validation.run->console,
+    (std::vector<ElementMessage>{ console_line (vayu::ConsoleLevel::Warn, "about to fail") }));
+}
+
+// Past the cap a new line is counted, not kept; a kept line logged again is
+// neither. A long line is cut to MAX_ELEMENT_MESSAGE_BYTES.
+TEST_F (LoadFailureDedupTest, PastTheCapConsoleLinesAreCountedAsDropped) {
+    constexpr size_t EXTRA = 3;
+    auto context           = single_request_run (
+    "console.log('row ' + pm.response.json().n + ' ' + 'x'.repeat(2000));");
+    for (size_t n = 0; n < CONSOLE_CAP + EXTRA; ++n) {
+        sample_single (context, R"({"n":)" + std::to_string (n) + "}");
+    }
+    sample_single (context, R"({"n":0})");
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_HAS_VALUE (validation.run);
+    const auto& console = validation.run->console;
+    ASSERT_EQ (console.size (), CONSOLE_CAP);
+    EXPECT_EQ (validation.run->console_dropped, EXTRA);
+    EXPECT_EQ (console.front ().text.rfind ("row 0 ", 0), 0u)
+    << console.front ().text;
+    EXPECT_EQ (console.back ().text.rfind ("row 9 ", 0), 0u) << console.back ().text;
+    for (const auto& line : console) {
+        EXPECT_EQ (line.text.size (),
+        vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES +
+        vayu::utils::kLoggedTextTruncationMarker.size ());
+        EXPECT_TRUE (line.text.ends_with (vayu::utils::kLoggedTextTruncationMarker));
+    }
+}
+
+// A scenario run keeps one sample per step, so the same text from two steps is
+// reported under each, and the whole-run totals carry no merged list.
+TEST_F (LoadFailureDedupTest, AScenarioRunReportsEachStepsLinesOnThatStep) {
+    auto context = scenario_run ("console.log('same text');", 2);
+    sample_step (context, 0);
+    sample_step (context, 0);
+    sample_step (context, 1);
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    const std::vector<ElementMessage> expected{ console_line (
+    vayu::ConsoleLevel::Log, "same text") };
+    ASSERT_EQ (validation.steps.size (), 2u);
+    for (const auto& step : validation.steps) {
+        ASSERT_HAS_VALUE (step);
+        EXPECT_EQ (step->console, expected);
+        EXPECT_EQ (step->console_dropped, 0u);
+    }
+    ASSERT_HAS_VALUE (validation.run);
+    EXPECT_TRUE (validation.run->console.empty ());
 }
 
 } // namespace

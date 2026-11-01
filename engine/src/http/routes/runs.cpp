@@ -283,6 +283,10 @@ struct ReportExtras {
     int tests_sampled = 0;
     int tests_passed  = 0;
     int tests_failed  = 0;
+    // What the replayed scripts logged (#3127), as stored: `[{level, text}]`.
+    // Empty leaves `console` out of the section.
+    nlohmann::json tests_console = nlohmann::json::array ();
+    size_t tests_console_dropped = 0;
     // The run's verdict against its declared budgets. Empty is a run that
     // declared none (or one recorded before budgets existed), which leaves
     // thresholdValidation out entirely - a run that declared nothing did not
@@ -881,6 +885,11 @@ void apply_summary_observations (const nlohmann::json& summary, ReportExtras& ex
         read_number (summary["tests"], "sampled", extras.tests_sampled);
         read_number (summary["tests"], "passed", extras.tests_passed);
         read_number (summary["tests"], "failed", extras.tests_failed);
+        if (const auto console = summary["tests"].find ("console");
+        console != summary["tests"].end () && console->is_array ()) {
+            extras.tests_console = *console;
+        }
+        read_number (summary["tests"], "consoleDropped", extras.tests_console_dropped);
     }
 
     if (summary.contains ("auth") && summary["auth"].is_object ()) {
@@ -1915,13 +1924,20 @@ void add_optional_report_sections (const ReportExtras& extras, nlohmann::json& j
     }
 
     if (extras.has_tests) {
-        json_report["testValidation"] = { { "samplesTested", extras.tests_sampled },
+        auto& section = json_report["testValidation"];
+        section       = { { "samplesTested", extras.tests_sampled },
             { "testsPassed", extras.tests_passed }, { "testsFailed", extras.tests_failed },
             { "successRate",
             extras.tests_sampled > 0 ?
             (static_cast<double> (extras.tests_passed) * 100.0 /
             static_cast<double> (extras.tests_passed + extras.tests_failed)) :
             0.0 } };
+        if (!extras.tests_console.empty ()) {
+            section["console"] = extras.tests_console;
+            if (extras.tests_console_dropped > 0) {
+                section["consoleDropped"] = extras.tests_console_dropped;
+            }
+        }
     }
 
     // What the capacity search found. Present only for a capacity run, so every
