@@ -239,13 +239,13 @@ nlohmann::json message_entry (const ElementMessage& message) {
     return { { "kind", message_kind_name (message.kind) }, { "text", message.text } };
 }
 
-/// Writes @p sample under @p key and its dropped count under @p dropped_key,
-/// each only when there is something to say.
+} // namespace
+
 void write_message_sample (nlohmann::json& row,
 const char* key,
 const char* dropped_key,
-const DistinctMessageSample& sample) {
-    const auto kept = sample.kept ();
+std::span<const ElementMessage> kept,
+size_t dropped) {
     if (kept.empty ()) {
         return;
     }
@@ -254,12 +254,10 @@ const DistinctMessageSample& sample) {
         list.push_back (message_entry (message));
     }
     row[key] = std::move (list);
-    if (const size_t dropped = sample.dropped (); dropped > 0) {
+    if (dropped > 0) {
         row[dropped_key] = dropped;
     }
 }
-
-} // namespace
 
 bool DistinctMessageSample::settled (const ElementMessage& message, size_t published) {
     if (holds (std::span (slots_).first (published), message)) {
@@ -322,8 +320,10 @@ const CompiledElement& element) const {
     row["error"]    = error_count;
     row["skipped"]  = skipped_count;
     row["deferred"] = deferred_count;
-    write_message_sample (row, "messages", "messagesDropped", messages);
-    write_message_sample (row, "console", "consoleDropped", console);
+    write_message_sample (
+    row, "messages", "messagesDropped", messages.kept (), messages.dropped ());
+    write_message_sample (
+    row, "console", "consoleDropped", console.kept (), console.dropped ());
     rows.push_back (std::move (row));
 }
 

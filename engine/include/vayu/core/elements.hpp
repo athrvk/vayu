@@ -785,6 +785,23 @@ class DistinctMessageSample {
     std::mutex write_mutex_;
 };
 
+/// @p line as a `Kind::Console` message, its text cut to
+/// `MAX_ELEMENT_MESSAGE_BYTES`: the one mapping an inline script's element
+/// sample and the deferred replay's console sample share (#3127).
+[[nodiscard]] ElementMessage console_message (const vayu::ConsoleEntry& line);
+
+/**
+ * Writes @p kept under @p key and @p dropped under @p dropped_key, each only
+ * when there is something to say. A console line is `{level, text}`, any other
+ * message `{kind, text}` with `kind` `"error"` or `"test"`: the one report shape
+ * of a message sample, on an element row and on the replay's `tests` alike.
+ */
+void write_message_sample (nlohmann::json& row,
+const char* key,
+const char* dropped_key,
+std::span<const ElementMessage> kept,
+size_t dropped);
+
 /**
  * One element's outcomes summed across a load run: the counters
  * `StepElementTallies` (per plan step) and `RequestElementTallies` (a

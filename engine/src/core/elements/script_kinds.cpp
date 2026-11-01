@@ -88,6 +88,12 @@ const vayu::ScriptResult& post) {
     return first_failed_test_text ({ &pre, &post });
 }
 
+ElementMessage console_message (const vayu::ConsoleEntry& line) {
+    return { ElementMessage::Kind::Console, line.level,
+        utils::bounded_text (
+        line.message, constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES) };
+}
+
 namespace {
 
 /**
@@ -139,8 +145,7 @@ std::vector<ElementMessage> script_messages (const vayu::ScriptResult& result) {
         }
     }
     for (const auto& line : result.console_output) {
-        messages.push_back (
-        { Kind::Console, line.level, utils::bounded_text (line.message, MAX_BYTES) });
+        messages.push_back (console_message (line));
     }
     return messages;
 }
