@@ -145,6 +145,101 @@ describe("TestValidationSummary", () => {
 		expect(screen.queryByText(/Showing/)).toBeNull();
 	});
 
+	describe("a failure that repeated across the sampled responses (#3127)", () => {
+		it("lists it once, with how often it failed", () => {
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["status is 200: expected 404 to equal 200"]}
+					failureCounts={[3]}
+					failuresTotal={3}
+					failuresDistinct={1}
+				/>
+			);
+
+			expect(screen.getAllByText("status is 200: expected 404 to equal 200")).toHaveLength(1);
+			expect(screen.getByText("x3")).toBeInTheDocument();
+		});
+
+		it("groups a large count with thousands separators", () => {
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["a: b"]}
+					failureCounts={[1_204]}
+					failuresTotal={1_204}
+					failuresDistinct={1}
+				/>
+			);
+
+			expect(screen.getByText("x1,204")).toBeInTheDocument();
+		});
+
+		it("puts no count beside a failure that happened once, or whose count is unknown", () => {
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["once", "unknown"]}
+					failureCounts={[1]}
+					failuresTotal={2}
+					failuresDistinct={2}
+				/>
+			);
+
+			expect(screen.getByText("once")).toBeInTheDocument();
+			expect(screen.getByText("unknown")).toBeInTheDocument();
+			expect(screen.queryByText(/^x\d/)).toBeNull();
+		});
+
+		it("says how many of the distinct failures it shows", () => {
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["a", "b"]}
+					failureCounts={[40, 2]}
+					failuresTotal={60}
+					failuresDistinct={14}
+				/>
+			);
+
+			expect(screen.getByText("Showing 2 of 14 distinct.")).toBeInTheDocument();
+		});
+
+		it("does not call the list a slice when every distinct failure is in it", () => {
+			// 60 occurrences of 2 messages: the total is no denominator for a list of 2.
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["a", "b"]}
+					failureCounts={[40, 20]}
+					failuresTotal={60}
+					failuresDistinct={2}
+				/>
+			);
+
+			expect(screen.queryByText(/Showing/)).toBeNull();
+		});
+
+		it("keeps counting a row from before the dedup by its total", () => {
+			render(
+				<TestValidationSummary
+					testValidation={TALLIES}
+					sampling={undefined}
+					failures={["a", "a"]}
+					failuresTotal={9}
+				/>
+			);
+
+			expect(screen.getByText("Showing 2 of 9.")).toBeInTheDocument();
+			expect(screen.queryByText(/distinct/)).toBeNull();
+		});
+	});
+
 	it("still names failures for a report too old to carry the tallies", () => {
 		// The failure row and the summary block are written by different engine
 		// paths; a report with one and not the other must not swallow what it has.

@@ -26,11 +26,18 @@
  * its `skipped` and `failed` keep what they counted then. The row names its
  * element (`name`, with the kind beside it as secondary text) and the level it
  * was composed from (`origin`); a row without a `name` prints the kind alone.
+ *
+ * **An inline script row carries what the script said (#3127)**: the error it
+ * threw, each failing test and its console lines, drawn under the tally line by
+ * {@link ElementMessages}. The deferred line names the replay's sample size
+ * when the caller knows it, because "deferred" alone does not say that the
+ * replay judged a few hundred responses, not all of them.
  */
 
 import { formatNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { ElementMessages } from "./ElementMessages";
 import { elementOriginLabel } from "./element-origin";
 import { TEST_VALIDATION_TITLE } from "./run-assertions";
 import type { RunScenarioStepElementTally } from "@/types/domain";
@@ -42,12 +49,25 @@ export interface ElementTallyProps {
 	element: RunScenarioStepElementTally;
 	/** The card a deferred row points at; `testValidationTitleOf` names it for a report. */
 	replayCard?: string;
+	/**
+	 * Responses the replay ran over (`testValidation.samplesTested`, or the step's
+	 * `tests.sampled`). Absent where the report does not say, and the deferred
+	 * line then names the replay without a size.
+	 */
+	replaySamples?: number;
 	className?: string;
+}
+
+/** `post-run replay over 1,000 sampled responses`, or the unsized phrase. */
+function replayPhrase(samples: number | undefined): string {
+	if (samples === undefined) return "post-run replay of sampled responses";
+	return `post-run replay over ${formatNumber(samples)} sampled ${pluralize(samples, "response")}`;
 }
 
 export function ElementTally({
 	element,
 	replayCard = TEST_VALIDATION_TITLE,
+	replaySamples,
 	className,
 }: ElementTallyProps) {
 	const deferred = element.deferred ?? 0;
@@ -59,53 +79,56 @@ export function ElementTally({
 	const showPassed = deferred === 0 || element.passed > 0;
 
 	return (
-		<div className={cn("flex flex-wrap items-center gap-x-2", className)}>
-			{element.name ? (
-				<>
-					<span className="font-medium text-foreground">{element.name}</span>
+		<div className={className}>
+			<div className="flex flex-wrap items-center gap-x-2">
+				{element.name ? (
+					<>
+						<span className="font-medium text-foreground">{element.name}</span>
+						<span className="text-muted-foreground font-mono">{element.kind}</span>
+					</>
+				) : (
 					<span className="text-muted-foreground font-mono">{element.kind}</span>
-				</>
-			) : (
-				<span className="text-muted-foreground font-mono">{element.kind}</span>
-			)}
-			{origin && <span className="text-muted-foreground">{origin}</span>}
-			{deferred > 0 && (
-				<span className="font-mono text-muted-foreground">
-					{formatNumber(deferred)} {pluralize(deferred, "request")} deferred to a post-run
-					replay of sampled responses - results in {replayCard}
-				</span>
-			)}
-			{showPassed && (
-				<span className="font-mono text-status-success-text">
-					{formatNumber(element.passed)} passed
-				</span>
-			)}
-			{element.failed > 0 && (
-				<span className="font-mono text-status-error-text">
-					{formatNumber(element.failed)} failed
-				</span>
-			)}
-			{missing > 0 && (
-				<span
-					className={cn(
-						"font-mono",
-						element.required ? "text-status-error-text" : "text-status-warning-text"
-					)}
-					title={element.required ? REQUIRED_MISS_HINT : undefined}
-				>
-					{formatNumber(missing)} missing{element.required ? " (required)" : ""}
-				</span>
-			)}
-			{error > 0 && (
-				<span className="font-mono text-status-error-text">
-					{formatNumber(error)} error
-				</span>
-			)}
-			{element.skipped > 0 && (
-				<span className="font-mono text-muted-foreground">
-					{formatNumber(element.skipped)} skipped
-				</span>
-			)}
+				)}
+				{origin && <span className="text-muted-foreground">{origin}</span>}
+				{deferred > 0 && (
+					<span className="font-mono text-muted-foreground">
+						{formatNumber(deferred)} {pluralize(deferred, "request")} deferred to a{" "}
+						{replayPhrase(replaySamples)} - results in {replayCard}
+					</span>
+				)}
+				{showPassed && (
+					<span className="font-mono text-status-success-text">
+						{formatNumber(element.passed)} passed
+					</span>
+				)}
+				{element.failed > 0 && (
+					<span className="font-mono text-status-error-text">
+						{formatNumber(element.failed)} failed
+					</span>
+				)}
+				{missing > 0 && (
+					<span
+						className={cn(
+							"font-mono",
+							element.required ? "text-status-error-text" : "text-status-warning-text"
+						)}
+						title={element.required ? REQUIRED_MISS_HINT : undefined}
+					>
+						{formatNumber(missing)} missing{element.required ? " (required)" : ""}
+					</span>
+				)}
+				{error > 0 && (
+					<span className="font-mono text-status-error-text">
+						{formatNumber(error)} error
+					</span>
+				)}
+				{element.skipped > 0 && (
+					<span className="font-mono text-muted-foreground">
+						{formatNumber(element.skipped)} skipped
+					</span>
+				)}
+			</div>
+			<ElementMessages element={element} />
 		</div>
 	);
 }

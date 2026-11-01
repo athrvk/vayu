@@ -46,6 +46,8 @@ const VALIDATION_ROW: SampleResult = {
 	error: "Script validation failures",
 	trace: {
 		failures: ["status is 200: expected 404 to equal 200"],
+		failureCounts: [13],
+		failuresDistinct: 1,
 		totalFailed: 13,
 		totalPassed: 87,
 	},
@@ -67,8 +69,29 @@ describe("extractTestFailures", () => {
 
 		expect(failures).toEqual({
 			messages: ["status is 200: expected 404 to equal 200"],
+			counts: [13],
 			total: 13,
+			distinct: 1,
 			passed: 87,
+		});
+	});
+
+	it("keeps how often each distinct message failed, and how many were turned away", () => {
+		const row: SampleResult = {
+			...VALIDATION_ROW,
+			trace: {
+				failures: ["a: expected 1 to equal 2", "b: expected 3 to equal 4"],
+				failureCounts: [7, 1],
+				failuresDistinct: 14,
+				totalFailed: 20,
+				totalPassed: 80,
+			},
+		};
+
+		expect(extractTestFailures([row])).toMatchObject({
+			counts: [7, 1],
+			distinct: 14,
+			total: 20,
 		});
 	});
 
@@ -88,9 +111,35 @@ describe("extractTestFailures", () => {
 
 		expect(extractTestFailures([row])).toEqual({
 			messages: ["a: expected 1 to equal 2", "b: expected 3 to equal 4"],
+			counts: [1, 1],
 			total: 2,
+			distinct: undefined,
 			passed: 0,
 		});
+	});
+
+	it("reads a row stored before the engine deduplicated as one occurrence per entry", () => {
+		// No `failureCounts` and no `failuresDistinct`: each entry stood for one
+		// failed sample, and nothing says how many distinct messages there were.
+		const row: SampleResult = {
+			...VALIDATION_ROW,
+			trace: { failures: ["a", "a", "b"], totalFailed: 40, totalPassed: 10 },
+		};
+
+		expect(extractTestFailures([row])).toMatchObject({
+			counts: [1, 1, 1],
+			total: 40,
+			distinct: undefined,
+		});
+	});
+
+	it("counts an entry a short failureCounts does not reach as one", () => {
+		const row: SampleResult = {
+			...VALIDATION_ROW,
+			trace: { failures: ["a", "b", "c"], failureCounts: [5], failuresDistinct: 3 },
+		};
+
+		expect(extractTestFailures([row])?.counts).toEqual([5, 1, 1]);
 	});
 });
 

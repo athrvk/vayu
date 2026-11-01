@@ -6308,6 +6308,46 @@ describe("inline body bounds", () => {
 		expect(out.scenario).toEqual(scenario);
 	});
 
+	// Mutation check (#3127): have boundRunReport or markPartialReport rebuild the
+	// report without its element rows' `messages` / `console`, or strip
+	// `failureCounts` off the validation row's trace, and this fails.
+	test("get_run_report hands an element row's messages and the replay's failure counts through", async () => {
+		const element = {
+			id: "el_4",
+			kind: "script.post",
+			passed: 0,
+			failed: 0,
+			error: 480,
+			skipped: 0,
+			messages: [{ kind: "test", text: "status is 201: expected 200 to equal 201" }],
+			messagesDropped: 3,
+			console: [{ level: "warn", text: "saw 200" }],
+			consoleDropped: 37,
+		};
+		const scenario = { steps: [{ index: 0, elements: [element] }] };
+		const validationRow = {
+			statusCode: 0,
+			trace: {
+				failures: ["status is 200: expected 404 to equal 200"],
+				failureCounts: [3],
+				failuresDistinct: 1,
+				totalFailed: 3,
+				totalPassed: 0,
+			},
+		};
+		const out = await runReport(
+			reported({
+				summary: { errorRate: 0, elements: [element] },
+				scenario,
+				results: [validationRow],
+			})
+		);
+
+		expect(out.scenario).toEqual(scenario);
+		expect((out.summary as { elements: unknown[] }).elements).toEqual([element]);
+		expect((out.results as unknown[])[0]).toEqual(validationRow);
+	});
+
 	test("get_run_report keeps the engine's own bodyBytes when it already truncated", async () => {
 		const out = await runReport(
 			reported({

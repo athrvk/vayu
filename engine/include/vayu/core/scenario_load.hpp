@@ -391,7 +391,8 @@ const ScenarioPlan& plan);
  * Sized once at construction from the plan's already-compiled `elements` per
  * step, so recording is an `ElementSlotIndex` lookup (by id, then by level,
  * so each of two levels sharing an id keeps its own row) into a fixed-size
- * atomic array - no lock and no allocation on the completion path. The
+ * atomic array - no lock and no allocation on the completion path, save a
+ * script's message sample keeping a new entry (`DistinctMessageSample`). The
  * buckets are `ElementOutcomeCounts::record`'s, shared with
  * `RequestElementTallies`: one per outcome word (#3051), with a `script.*`
  * element left to the post-run replay counted as `deferred`, not `skipped`

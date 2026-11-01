@@ -25,10 +25,16 @@ import type { RunReport } from "@/types/domain";
 
 export interface RequestElementsSummaryProps {
 	elements: RunReport["elements"];
+	/** Responses the deferred replay ran over (`testValidation.samplesTested`); see `ElementTally`. */
+	replaySamples?: number;
 	className?: string;
 }
 
-export function RequestElementsSummary({ elements, className }: RequestElementsSummaryProps) {
+export function RequestElementsSummary({
+	elements,
+	replaySamples,
+	className,
+}: RequestElementsSummaryProps) {
 	if (!elements?.length) return null;
 
 	return (
@@ -40,7 +46,11 @@ export function RequestElementsSummary({ elements, className }: RequestElementsS
 				<ul className="space-y-1.5">
 					{elements.map((element, i) => (
 						<li key={elementRowKey(element, i)}>
-							<ElementTally element={element} className="text-sm" />
+							<ElementTally
+								element={element}
+								replaySamples={replaySamples}
+								className="text-sm"
+							/>
 						</li>
 					))}
 				</ul>

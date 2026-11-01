@@ -34,6 +34,9 @@
 #include "vayu/core/elements.hpp"
 
 #include <initializer_list>
+#include <vector>
+
+#include "vayu/utils/log_text.hpp"
 
 namespace vayu::core {
 
@@ -42,6 +45,14 @@ bool script_threw (const vayu::ScriptResult& result) {
 }
 
 namespace {
+
+/// A failed test as `name: message`, or its name alone when it gave none.
+std::string failed_test_text (const vayu::TestResult& test) {
+    if (test.error_message.empty ()) {
+        return test.name;
+    }
+    return test.name + ": " + test.error_message;
+}
 
 std::string first_failed_test_text (std::initializer_list<const vayu::ScriptResult*> results) {
     size_t failures = 0;
@@ -53,10 +64,7 @@ std::string first_failed_test_text (std::initializer_list<const vayu::ScriptResu
             }
             ++failures;
             if (first.empty ()) {
-                first = test.name;
-                if (!test.error_message.empty ()) {
-                    first += ": " + test.error_message;
-                }
+                first = failed_test_text (test);
             }
         }
     }
@@ -113,6 +121,30 @@ const std::string& scope) {
     }
 }
 
+/// What @p result said, for a load run's per-element sample (#3127): the error
+/// it threw, each failing test, and every console line, each cut to
+/// `MAX_ELEMENT_MESSAGE_BYTES`.
+std::vector<ElementMessage> script_messages (const vayu::ScriptResult& result) {
+    using Kind = ElementMessage::Kind;
+    constexpr size_t MAX_BYTES = constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES;
+    std::vector<ElementMessage> messages;
+    if (script_threw (result)) {
+        messages.push_back ({ Kind::Error, vayu::ConsoleLevel::Log,
+        utils::bounded_text (result.error_message, MAX_BYTES) });
+    }
+    for (const auto& test : result.tests) {
+        if (!test.passed) {
+            messages.push_back ({ Kind::Test, vayu::ConsoleLevel::Log,
+            utils::bounded_text (failed_test_text (test), MAX_BYTES) });
+        }
+    }
+    for (const auto& line : result.console_output) {
+        messages.push_back (
+        { Kind::Console, line.level, utils::bounded_text (line.message, MAX_BYTES) });
+    }
+    return messages;
+}
+
 /// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
 /// is about this one script, the slot about the whole step. A thrown script is
 /// `error`; one that ran and failed only assertions is `failed`, with the
@@ -138,6 +170,7 @@ const char* unbound_message) {
     } else {
         ctx.outcome_status = "ok";
     }
+    ctx.outcome_messages = script_messages (result);
     fold_script_result (slot, std::move (result), ctx.element_scope);
 }
 

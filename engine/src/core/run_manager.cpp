@@ -11,6 +11,9 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/load_strategy.hpp"
@@ -115,6 +118,36 @@ struct ScriptReplay {
     /// against a recorded sample; a single-request run never had a virtual
     /// user or a cookie state to begin with.
     const char* cookie_read_refusal = nullptr;
+};
+
+/**
+ * @brief The failures a deferred pass saw, one entry per distinct message.
+ *
+ * A script that fails on every sampled response fails with the same text each
+ * time, so recording each occurrence would spend the whole cap on one
+ * assertion (#3127). The step prefix is part of a message's identity: the
+ * same text from two steps is two failures. Every distinct message is counted,
+ * kept or not, so `distinct ()` stays true past the cap and the occurrences
+ * of all of them sum to `totalFailed`.
+ */
+struct ReplayFailures {
+    /// First-seen order, at most MAX_FAILURE_MESSAGES.
+    std::vector<std::string> kept;
+    /// Every distinct message, kept or turned away, with how often it failed.
+    std::unordered_map<std::string, size_t> occurrences;
+
+    void record (std::string message) {
+        const auto [entry, first_seen] =
+        occurrences.try_emplace (std::move (message), 0);
+        ++entry->second;
+        if (first_seen && kept.size () < vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
+            kept.push_back (entry->first);
+        }
+    }
+
+    [[nodiscard]] size_t distinct () const {
+        return occurrences.size ();
+    }
 };
 
 /**
@@ -253,21 +286,19 @@ RecordFailure& record_failure) {
  * @param scopes The run's stored variable scopes, shared by every replay of the
  *        pass and mutated in place by any `set()` a script performs - see
  *        `validate_scripts` for why those writes are never persisted.
- * @param failure_messages Appended to, bounded by MAX_FAILURE_MESSAGES across
- *        the whole run - a forty-step plan must not multiply the cap by forty.
+ * @param failures Recorded into, and keeps at most MAX_FAILURE_MESSAGES
+ *        distinct messages across the whole run - a forty-step plan must not
+ *        multiply the cap by forty.
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
-std::vector<std::string>& failure_messages) {
+ReplayFailures& failures) {
     ScriptValidationTotals totals;
     totals.sampled = replay.samples->size ();
 
-    auto record_failure = [&failure_messages, &replay] (const std::string& message) {
-        if (failure_messages.size () <
-        vayu::core::constants::script_validation::MAX_FAILURE_MESSAGES) {
-            failure_messages.push_back (replay.failure_prefix + message);
-        }
+    auto record_failure = [&failures, &replay] (const std::string& message) {
+        failures.record (replay.failure_prefix + message);
     };
 
     for (const auto& sample : *replay.samples) {
@@ -437,7 +468,7 @@ const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 const vayu::runtime::ScriptSendInputs& send,
 ScriptValidation& validation,
-std::vector<std::string>& failure_messages) {
+ReplayFailures& failures) {
     ScriptValidationTotals run_totals;
     const auto& plan      = context->scenario->plan;
     const auto& data_rows = context->scenario->data_rows;
@@ -486,7 +517,7 @@ std::vector<std::string>& failure_messages) {
         replay.sse_limits = sse_limits;
         replay.send       = send;
 
-        const auto totals = run_replay (engine, scopes, replay, failure_messages);
+        const auto totals   = run_replay (engine, scopes, replay, failures);
         validation.steps[i] = totals;
         run_totals.sampled += totals.sampled;
         run_totals.passed += totals.passed;
@@ -496,30 +527,45 @@ std::vector<std::string>& failure_messages) {
     return run_totals;
 }
 
-/** The failure summary this pass leaves behind as a result row. */
+/**
+ * The failure summary this pass leaves behind as a result row. `trace_data`:
+ * `failures` (distinct messages, first-seen order, at most
+ * MAX_FAILURE_MESSAGES), `failureCounts` (the same length, how many times each
+ * failed), `failuresDistinct` (every distinct message, so past the cap
+ * `failuresDistinct - failures.size ()` were turned away), `totalFailed` and
+ * `totalPassed` (assertion tallies, each occurrence counted).
+ */
 void store_validation_failures (vayu::db::Database& db,
 const std::string& run_id,
-const std::vector<std::string>& failure_messages,
+const ReplayFailures& failures,
 size_t passed,
 size_t failed) {
-    // Store failure summary as a result record
-    auto timestamp = now_ms ();
-    if (!failure_messages.empty ()) {
-        nlohmann::json failure_json;
-        failure_json["failures"]    = failure_messages;
-        failure_json["totalFailed"] = failed;
-        failure_json["totalPassed"] = passed;
-
-        vayu::db::Result validation_result;
-        validation_result.run_id    = run_id;
-        validation_result.timestamp = timestamp;
-        validation_result.status_code = failed > 0 ? 0 : 200; // 0 indicates test failures
-        validation_result.latency_ms = 0;
-        validation_result.error = failed > 0 ? "Script validation failures" : "";
-        validation_result.trace_data = failure_json.dump ();
-
-        db.add_result (validation_result);
+    if (failures.kept.empty ()) {
+        return;
     }
+
+    std::vector<size_t> counts;
+    counts.reserve (failures.kept.size ());
+    for (const auto& message : failures.kept) {
+        counts.push_back (failures.occurrences.at (message));
+    }
+
+    nlohmann::json failure_json;
+    failure_json["failures"]         = failures.kept;
+    failure_json["failureCounts"]    = counts;
+    failure_json["failuresDistinct"] = failures.distinct ();
+    failure_json["totalFailed"]      = failed;
+    failure_json["totalPassed"]      = passed;
+
+    vayu::db::Result validation_result;
+    validation_result.run_id    = run_id;
+    validation_result.timestamp = now_ms ();
+    validation_result.status_code = failed > 0 ? 0 : 200; // 0 indicates test failures
+    validation_result.latency_ms = 0;
+    validation_result.error = failed > 0 ? "Script validation failures" : "";
+    validation_result.trace_data = failure_json.dump ();
+
+    db.add_result (validation_result);
 }
 
 ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
@@ -627,14 +673,14 @@ vayu::db::Database& db) {
     size_t passed  = 0;
     size_t failed  = 0;
     size_t sampled = 0;
-    std::vector<std::string> failure_messages;
+    ReplayFailures failures;
 
     if (per_step) {
-        const ScriptValidationTotals totals = replay_scenario_steps (engine,
-        scopes, context, sse_limits, script_send, validation, failure_messages);
-        sampled                             = totals.sampled;
-        passed                              = totals.passed;
-        failed                              = totals.failed;
+        const ScriptValidationTotals totals = replay_scenario_steps (
+        engine, scopes, context, sse_limits, script_send, validation, failures);
+        sampled = totals.sampled;
+        passed  = totals.passed;
+        failed  = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
         if (sampled == 0) {
             return validation;
@@ -665,13 +711,13 @@ vayu::db::Database& db) {
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
-        const auto totals = run_replay (engine, scopes, replay, failure_messages);
-        sampled = totals.sampled;
-        passed  = totals.passed;
-        failed  = totals.failed;
+        const auto totals = run_replay (engine, scopes, replay, failures);
+        sampled           = totals.sampled;
+        passed            = totals.passed;
+        failed            = totals.failed;
     }
 
-    store_validation_failures (db, context->run_id, failure_messages, passed, failed);
+    store_validation_failures (db, context->run_id, failures, passed, failed);
 
     vayu::utils::log_debug ("run", "Script validation",
     { { "runId", context->run_id }, { "passed", passed }, { "failed", failed } });

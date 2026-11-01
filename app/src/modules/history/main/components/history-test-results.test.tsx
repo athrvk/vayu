@@ -148,6 +148,65 @@ describe("History Overview - a load run's test outcomes", () => {
 		expect(screen.getByText("Showing 2 of 13.")).toBeInTheDocument();
 	});
 
+	it("lists a failure that repeated on every sampled response once, with its count (#3127)", () => {
+		renderOverview(
+			makeReport({
+				testValidation: {
+					samplesTested: 3,
+					testsPassed: 0,
+					testsFailed: 3,
+					successRate: 0,
+				},
+				results: [
+					CAPTURED_SAMPLE,
+					{
+						...VALIDATION_ROW,
+						trace: {
+							failures: ["status is 200: expected 404 to equal 200"],
+							failureCounts: [3],
+							failuresDistinct: 1,
+							totalFailed: 3,
+							totalPassed: 0,
+						},
+					},
+				],
+			})
+		);
+
+		expect(screen.getAllByText("status is 200: expected 404 to equal 200")).toHaveLength(1);
+		expect(screen.getByText("x3")).toBeInTheDocument();
+		expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+	});
+
+	it("sizes the Elements card's deferred replay by the tested responses (#3127)", () => {
+		renderOverview(
+			makeReport({
+				testValidation: {
+					samplesTested: 1_000,
+					testsPassed: 900,
+					testsFailed: 100,
+					successRate: 90,
+				},
+				elements: [
+					{
+						id: "el_1",
+						kind: "script.post",
+						passed: 0,
+						failed: 0,
+						skipped: 0,
+						deferred: 5_000,
+					},
+				],
+			})
+		);
+
+		expect(
+			screen.getByText(
+				"5,000 requests deferred to a post-run replay over 1,000 sampled responses - results in Test validation"
+			)
+		).toBeInTheDocument();
+	});
+
 	it("says nothing about tests for a run that asserted nothing", () => {
 		// Absent, never zeros: a run without scripts must read exactly as it did
 		// before this block existed.

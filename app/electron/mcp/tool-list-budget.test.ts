@@ -137,6 +137,13 @@
  * #3159's `bodyEncoding` sentence in `get_run_samples` is paid once per row. The
  * rows measure 147,998 / 145,272 / 217,760 / 213,363 B, and the four caps went
  * to 148,300 / 145,600 / 218,100 / 213,700.
+ *
+ * #3127's two `get_run_report` sentences (an inline script element row's
+ * `messages` / `console`, and the sampled-replay `failures` with their
+ * `failureCounts`), each paid once, added 256 B to every row (measured on the
+ * tree before #3159 landed, so the rows after both are 148,254 / 145,528 /
+ * 218,016 / 213,619 B), and the four caps went to 148,400 / 145,700 / 218,200 /
+ * 213,800.
  */
 
 import { describe, it, expect } from "vitest";
@@ -156,10 +163,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_300 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_600 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 218_100 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_700 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_400 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_700 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 218_200 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_800 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -51,6 +51,7 @@
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/log_text.hpp"
 
 namespace {
 
@@ -359,6 +360,72 @@ TEST_F (ScriptLevelFold, AnOriginWithoutScopeFallsBackToItsKind) {
     ASSERT_EQ (post.tests.size (), 2u);
     EXPECT_EQ (post.tests[0].scope, "collection");
     EXPECT_TRUE (post.tests[1].scope.empty ());
+}
+
+// #3127: an element's outcome carries what its own script said, for a load
+// run's per-element sample: the throw, every failing test (not only the first
+// the message names) and every console line with its level. Mutation check:
+// drop the `outcome_messages` assignment from `run_step_script` and every
+// expectation below fails.
+TEST_F (ScriptLevelFold, AnOutcomeCarriesTheThrowEveryFailingTestAndTheConsole) {
+    using Kind                = vayu::core::ElementMessage::Kind;
+    vayu::ScriptResult result = asserted ("first broken", false);
+    result.error_message      = "Error: boom";
+    result.tests.push_back (test_named ("second broken", false));
+    result.tests.push_back (test_named ("fine", true));
+    result.console_output.push_back ({ vayu::ConsoleLevel::Warn, "careful" });
+    answers["post"] = result;
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    const auto& messages = outcomes[0].messages;
+    ASSERT_EQ (messages.size (), 5u);
+    EXPECT_EQ (messages[0].kind, Kind::Error);
+    EXPECT_EQ (messages[0].text, "Error: boom");
+    EXPECT_EQ (messages[1].kind, Kind::Test);
+    EXPECT_EQ (messages[1].text, "first broken: expected 1 to deeply equal 2");
+    EXPECT_EQ (messages[2].kind, Kind::Test);
+    EXPECT_EQ (messages[2].text, "second broken: expected 1 to deeply equal 2");
+    EXPECT_EQ (messages[3].kind, Kind::Console);
+    EXPECT_EQ (messages[3].level, vayu::ConsoleLevel::Log);
+    EXPECT_EQ (messages[3].text, "ran first broken");
+    EXPECT_EQ (messages[4].level, vayu::ConsoleLevel::Warn);
+    EXPECT_EQ (messages[4].text, "careful");
+    EXPECT_FALSE (outcomes[0].to_json ().contains ("messages"))
+    << "the trace already carries the step's tests and console whole";
+}
+
+// Each message is its own script's, and a clean, silent script says nothing.
+TEST_F (ScriptLevelFold, AnOutcomesMessagesAreItsOwnScriptsAlone) {
+    answers["collection_post"] = threw ("collection threw");
+    answers["request_post"]    = vayu::ScriptResult{};
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "collection_post", "collection"),
+    script_element ("script.post", "request_post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 2u);
+    ASSERT_EQ (outcomes[0].messages.size (), 1u);
+    EXPECT_EQ (outcomes[0].messages[0].text, "collection threw");
+    EXPECT_TRUE (outcomes[1].messages.empty ());
+}
+
+// A message is cut to `MAX_ELEMENT_MESSAGE_BYTES` with the log's truncation
+// marker, so one megabyte thrown per iteration is not one stored per row.
+TEST_F (ScriptLevelFold, AnOutcomesLongMessageIsCut) {
+    constexpr size_t MAX_BYTES =
+    vayu::core::constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES;
+    answers["pre"] = threw (std::string (MAX_BYTES * 4, 'x'));
+
+    const auto outcomes = run (Phase::StepBefore,
+    json::array ({ script_element ("script.pre", "pre", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 1u);
+    ASSERT_EQ (outcomes[0].messages.size (), 1u);
+    EXPECT_EQ (outcomes[0].messages[0].text,
+    std::string (MAX_BYTES, 'x') + std::string (vayu::utils::kLoggedTextTruncationMarker));
 }
 
 // ============================================================================

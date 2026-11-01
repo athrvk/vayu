@@ -96,6 +96,7 @@ add_executable(vayu_tests
     globals_route_test.cpp
     script_variables_test.cpp
     load_script_scopes_test.cpp
+    load_failure_dedup_test.cpp
     script_info_test.cpp
     script_send_request_test.cpp
     script_send_request_cap_test.cpp
@@ -444,6 +445,7 @@ set(vayu_scratch_database_suites
     ScenarioIdentityTest
     LoadReplayEventsTest
     LoadScriptScopesTest
+    LoadFailureDedupTest
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest

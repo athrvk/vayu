@@ -28,6 +28,7 @@
  * never a glob" precedent `engine/tests/CMakeLists.txt` already uses.
  */
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -37,6 +38,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -269,6 +271,21 @@ struct TimersOverride {
 };
 
 /**
+ * One thing a script element said on one run of it (#3127): the error it
+ * threw, a failing `pm.test` as `name: message`, or a console line. Each text
+ * is already cut to `constants::script_validation::MAX_ELEMENT_MESSAGE_BYTES`.
+ */
+struct ElementMessage {
+    enum class Kind : std::uint8_t { Error, Test, Console };
+    Kind kind = Kind::Error;
+    /// The console method; meaningful only for `Kind::Console`.
+    vayu::ConsoleLevel level = vayu::ConsoleLevel::Log;
+    std::string text;
+
+    bool operator== (const ElementMessage&) const = default;
+};
+
+/**
  * Everything a compiled element's `apply` reads and writes (issue #1514).
  *
  * Deliberately decoupled from `vayu::runtime::ScriptEngine` and from
@@ -474,6 +491,9 @@ struct ElementContext {
     /// wait never sets it, so it, not `outcome_waited_ms`, marks a close.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> outcome_duration_us{};
+    /// Set only by `script.pre` / `script.post`: what this one script said.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::vector<ElementMessage> outcome_messages{};
 };
 
 /**
@@ -700,6 +720,10 @@ struct ElementOutcome {
     /// `control.transaction` close. Not serialised by `to_json`; the trace
     /// shows the same close as `waitedMs`, rounded to whole milliseconds.
     std::optional<int64_t> duration_us;
+    /// `ElementContext::outcome_messages`. Not serialised by `to_json`: a
+    /// trace already carries the step's tests and console lines whole, so a
+    /// load run's tallies are the only reader.
+    std::vector<ElementMessage> messages;
 
     [[nodiscard]] nlohmann::json to_json () const;
 };
@@ -731,11 +755,43 @@ struct ElementSkip {
 struct CompiledElement;
 
 /**
+ * The first `MAX_ELEMENT_MESSAGES` distinct messages offered, in the order
+ * first seen, and how many offers the full list turned away (#3127).
+ *
+ * Offered from every event-loop worker at once. A slot is written once, under
+ * `write_mutex_`, before `size_` publishes it, and never again, so a reader
+ * takes no lock. An offer locks only for a message not yet kept while there
+ * is room, so a list that is full, or that sees the same few messages every
+ * iteration, costs a few string compares and no lock.
+ */
+class DistinctMessageSample {
+    public:
+    void offer (const ElementMessage& message);
+    /// The kept messages, in the order first offered.
+    [[nodiscard]] std::span<const ElementMessage> kept () const;
+    /// Offers a full list turned away, a repeat of a turned-away message
+    /// counted each time; a repeat of a kept one is not counted.
+    [[nodiscard]] size_t dropped () const;
+
+    private:
+    /// Whether @p message needs no slot, judged against the first
+    /// @p published: kept already, or turned away (and counted) because the
+    /// list is full.
+    bool settled (const ElementMessage& message, size_t published);
+
+    std::array<ElementMessage, constants::script_validation::MAX_ELEMENT_MESSAGES> slots_{};
+    std::atomic<size_t> size_{ 0 };
+    std::atomic<size_t> dropped_{ 0 };
+    std::mutex write_mutex_;
+};
+
+/**
  * One element's outcomes summed across a load run: the counters
  * `StepElementTallies` (per plan step) and `RequestElementTallies` (a
  * single-request run) both keep per element, so the two report shapes
- * classify an outcome by one rule. Lock-free, because `record` runs on
- * event-loop workers inside the completion drain.
+ * classify an outcome by one rule. The counts are lock-free, because `record`
+ * runs on event-loop workers inside the completion drain; the two message
+ * samples lock only to keep a new message (`DistinctMessageSample`).
  */
 struct ElementOutcomeCounts {
     std::atomic<size_t> passed{ 0 };
@@ -744,19 +800,26 @@ struct ElementOutcomeCounts {
     std::atomic<size_t> error{ 0 };
     std::atomic<size_t> skipped{ 0 };
     std::atomic<size_t> deferred{ 0 };
+    /// A script element's thrown errors and failing tests, and apart from
+    /// them its console lines, so a chatty script cannot crowd out why it
+    /// failed.
+    DistinctMessageSample messages;
+    DistinctMessageSample console;
 
     /// One bucket per outcome word (#3051): `"ok"` is passed, `"failed"`,
     /// `"missing"` and `"error"` count under their own names, and a
     /// `"skipped"` is deferred when the element still runs later (#2144),
-    /// skipped otherwise.
+    /// skipped otherwise. The outcome's `messages` go to the two samples.
     void record (const ElementOutcome& outcome);
 
     /// Appends `{id, kind, name?, origin?, required?, passed, failed,
-    /// missing, error, skipped, deferred}` for @p element to @p rows, or
-    /// nothing when no outcome was recorded: an element that never ran is
-    /// omitted from the report, not a row of zeros. `required` is written
-    /// only as `true` (`CompiledElement::required`), because it turns a
-    /// `missing` into a failed step.
+    /// missing, error, skipped, deferred, messages?, messagesDropped?,
+    /// console?, consoleDropped?}` for @p element to @p rows, or nothing when
+    /// no outcome was recorded: an element that never ran is omitted from the
+    /// report, not a row of zeros. `required` is written only as `true`
+    /// (`CompiledElement::required`), because it turns a `missing` into a
+    /// failed step. Each message list and its dropped count is written only
+    /// when non-empty and non-zero.
     void append_report_row (nlohmann::json& rows, const CompiledElement& element) const;
 };
 
