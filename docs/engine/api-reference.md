@@ -62,6 +62,12 @@ request gate in `server.cpp` refuses, before any route runs, for every route:
 - any request carrying an `Origin` header, whatever its value (`null`
   included) - `403`, message saying the engine does not serve browser origins.
 
+A request cpp-httplib refuses to parse never reaches that gate: an HTTP/1.1
+request with no `Host`, any request with more than one, or a `Host` holding a
+byte outside `uri-host [ ":" port ]` (RFC 9112 §3.2) is answered `400` with an
+empty body and the connection closed. An HTTP/1.0 request with no `Host` still
+reaches the gate, and is refused there with the `403` above.
+
 An `OPTIONS` request that passes the Host check is answered `204` with no body
 and no CORS header, whatever its `Origin`: a preflight that grants nothing
 leaks nothing. Local tools (the CLI, curl, the MCP server's fetch) send no
@@ -5871,6 +5877,15 @@ user's preference to spend. The canned response's **`delayMs` is capped at
 that join, so it bounds how long a stop can be made to take. The **request
 target** - path and query together - is capped at **8192 bytes** by the
 transport, past which it answers `414`.
+
+The transport also answers `400`, closes the connection and records nothing for
+a request it cannot read unambiguously (RFC 9112 §3): a request line whose parts
+are not separated by single spaces, a request target holding a `#`, an
+HTTP/1.1 request with no `Host`, a request with more than one `Host` or with a
+byte outside `uri-host [ ":" port ]` in it. A request carrying both
+`Transfer-Encoding` and `Content-Length` is captured and answered, and then the
+connection is closed. The request line and headers together must arrive within
+5 seconds.
 
 Below that cap the path's length does not matter, and "any path" is meant
 literally: an inbox routes every request to its capture without matching the

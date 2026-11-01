@@ -23,7 +23,7 @@
 # `called_from_lib:<lib>` etc. per line; see
 # https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
 #
-# Two entries, below.
+# One entry, below.
 
 # WARNING: ThreadSanitizer: data race
 #   Read of size 8 by thread T11:
@@ -47,85 +47,3 @@
 # test alone did not reproduce it - so this entry is justified by the captured
 # trace above rather than by a repeatable before/after.
 race:crypto/hashtable/hashtable.c
-
-# WARNING: ThreadSanitizer: data race
-#   Read of size 1 by thread T5 (mutexes: write M0):
-#     #0 std::ctype<char>::narrow(char, char) const
-#          /usr/include/c++/13/bits/locale_facets.h:941
-#     #1 std::__detail::_Scanner<char>::_M_scan_normal()
-#          /usr/include/c++/13/bits/regex_scanner.tcc:100
-#     #6 std::basic_regex<char>::basic_regex(char const*, ...)
-#     #7 httplib::detail::parse_status_line(...)
-#     #8 httplib::ClientImpl::read_response_line(...) httplib.h:13856
-#   Previous write of size 1 by thread T7 (mutexes: write M1): the same
-#   stack, on another thread of the same httplib pool.
-#   SUMMARY: data race in std::ctype<char>::narrow(char, char) const
-#
-# libstdc++'s narrowing cache, not anything this repository wrote. `narrow`
-# memoises char conversions into a mutable table on the facet
-# (`_M_narrow[]` plus its `_M_narrow_ok` flag) and fills it without
-# synchronization; two threads that both construct a std::regex race on that
-# fill. The facet is the process-wide classic locale, so every thread shares
-# it. httplib constructs that regex in `parse_status_line`, which is why
-# concurrent HTTP clients reach it and nothing else does.
-#
-# Since cpp-httplib 0.53.0 that regex is `thread_local`, so the window is one
-# construction per thread rather than one per response. Narrower, not closed:
-# both sides of the report above are threads of one httplib pool parsing their
-# *first* response, which a suite that stands up mock servers produces readily.
-#
-# Cannot be fixed here on either side: the racing write is in libstdc++'s
-# headers, and the caller is header-only third-party code. No engine frame
-# appears anywhere in the stack - frame #7 is the first non-libstdc++ frame
-# and it is httplib's.
-#
-# Tracked in #967. It is a real report rather than an artifact of missing
-# instrumentation, so unlike the OpenSSL entry above it is worth an upstream
-# fix. One remedy is left and it is libstdc++'s: synchronise or eagerly fill
-# the cache. The other was httplib hoisting its regex out of the per-response
-# path, and upstream has landed it - see the paragraph above.
-#
-# Seen on: linux-tsan, TransportPolicyPaths.LoadRunTraversesManualProxy, gcc 13
-# / libtsan 2. Only became visible once #957 was fixed - before that every test
-# that opens a socket segfaulted inside the sanitizer runtime and never got far
-# enough to report anything.
-#
-# Whether it still fires is a measurement, not an argument: delete the line
-# below and run `ctest --preset linux-tsan`. Done at 3d2a6a7 (2026-08-29, gcc
-# 13.3.0 / libtsan 2, cpp-httplib 0.53.0) - 2795/2796 on both runs, failing
-# that one test both times, against 2796/2796 with the line in place. Unlike
-# the OpenSSL entry above, this one reproduces on the test alone: 10 of 10
-# `./vayu_tests --gtest_filter=TransportPolicyPaths.LoadRunTraversesManualProxy`
-# raced without the line, 10 of 10 passed with it. That is the cheap way to
-# re-measure it; the suite run is only needed to confirm nothing else moved.
-#
-# Re-measured that way at dc25029 (2026-09-03), because the vcpkg baseline has
-# since moved to cpp-httplib 0.53.1, which the inbox pins by `static_assert`.
-# `parse_status_line` is byte-identical on it and so is the outcome: 8 of 10
-# runs of that test raced without the line, 10 of 10 passed with it, and the
-# report was the stack above with the same libstdc++ and httplib frames. The
-# entry still earns its place on the version the engine now pins.
-#
-# Re-measured again on the move to cpp-httplib 0.54.1 (2026-09-05), the same
-# way and for the same reason: 10 of 10 runs raced without the line, 10 of 10
-# passed with it, and the report was again the stack above, frame for frame -
-# 0.54.1 rewrote `process_and_close_socket` around a `serve_guarded` wrapper
-# but left `parse_status_line` alone.
-#
-# Re-measured again on the move to cpp-httplib 0.56.0 (2026-09-17): 9 of 10
-# runs raced without the line, 10 of 10 passed with it, and the report was the
-# stack above - `narrow` under `_Scanner`, under the `basic_regex` constructor,
-# under `parse_status_line`. `parse_status_line` is byte-identical to 0.54.1's
-# and the regex is still `thread_local`, so the window is unchanged; 9 rather
-# than 10 is this race's ordinary spread, not a narrowing (0.53.1 read 8 of
-# 10).
-#
-# Re-measured again on the move to cpp-httplib 0.59.0 (2026-10-08): 5 of 10
-# runs raced without the line, 10 of 10 passed with it, and the report was the
-# same stack - `narrow` under `_Scanner`, under `basic_regex`, under
-# `parse_status_line`, reached from the test's `MockProxy::forward`.
-# `parse_status_line` and its `thread_local` regex are byte-identical to
-# 0.56.0's. This is the reading to repeat on the next baseline move; it is not
-# a standing pass, and the entry goes the day a run without it comes back
-# clean.
-race:std::ctype<char>::narrow

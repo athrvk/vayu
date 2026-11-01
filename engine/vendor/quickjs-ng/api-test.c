@@ -2,9 +2,11 @@
 #undef NDEBUG
 #endif
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "quickjs.h"
+#include "quickjs-libc.h"
 #include "cutils.h"
 
 static JSRuntime *new_runtime(void)
@@ -171,12 +173,10 @@ static void cfunctions(void)
 
 #define MAX_TIME 10
 
-static int timeout_interrupt_handler(JSRuntime *rt, void *opaque)
+static int timeout_interrupt_handler(JSContext *ctx, void *opaque)
 {
     int *time = (int *)opaque;
-    if (*time <= MAX_TIME)
-        *time += 1;
-    return *time > MAX_TIME;
+    return (*time)++ > MAX_TIME;
 }
 
 static void sync_call(void)
@@ -233,6 +233,38 @@ static void async_call(void)
     JSValue e = JS_GetException(ctx);
     assert(JS_IsUncatchableError(e));
     JS_FreeValue(ctx, e);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void std_eval_interrupt_handler(void)
+{
+    static const char code[] =
+        "import * as std from 'std'; std.evalScript('for(;;){}')";
+    JSRuntime *rt = new_runtime();
+    js_std_init_handlers(rt);
+    JSContext *ctx = JS_NewContext(rt);
+    js_init_module_std(ctx, "std");
+    int time = 0;
+    JS_SetInterruptHandler(rt, timeout_interrupt_handler, &time);
+    JSValue ret =
+        JS_Eval(ctx, code, strlen(code), "<input>", JS_EVAL_TYPE_MODULE);
+    ret = js_std_await(ctx, ret);
+    assert(time > MAX_TIME);
+    assert(JS_IsException(ret));
+    ret = JS_GetException(ctx);
+    assert(JS_IsError(ret));
+    // uncatchable "interrupted" exception is turned into a regular exception
+    assert(!JS_IsUncatchableError(ret));
+    const char *str = JS_ToCString(ctx, ret);
+    assert(str != NULL);
+    assert(strstr(str, "InternalError: interrupted"));
+    JS_FreeCString(ctx, str);
+    JS_FreeValue(ctx, ret);
+    uintptr_t interrupt_handler = js_std_cmd(/*GetInterruptHandler*/5, rt);
+    uintptr_t interrupt_opaque = js_std_cmd(/*GetInterruptOpaque*/6, rt);
+    assert(interrupt_handler == (uintptr_t)timeout_interrupt_handler);
+    assert(interrupt_opaque == (uintptr_t)&time);
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
 }
@@ -649,6 +681,19 @@ static void utf16_string(void)
         JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, e);
     }
+    {
+        // create wide char slice string, see JS_STRING_SLICE_LEN_MAX
+        JSValue v = eval(ctx, "`\\uD800\\uDC00`.repeat(8192).slice(0, -1)");
+        assert(!JS_IsException(v));
+        size_t n;
+        const uint16_t *u = JS_ToCStringLenUTF16(ctx, &n, v);
+        assert(u);
+        assert(n == 2*8192-1);
+        assert(u[0] == 0xD800);
+        assert(u[1] == 0xDC00);
+        JS_FreeCStringUTF16(ctx, u);
+        JS_FreeValue(ctx, v);
+    }
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
 }
@@ -928,6 +973,59 @@ static void new_errors(void)
     JS_FreeRuntime(rt);
 }
 
+// JS_NewContext() already installs DOMException by way of
+// JS_AddIntrinsicAToB(), so a host that also calls JS_AddIntrinsicDOMException()
+// explicitly installs it twice. The second install must release the prototype
+// the first one left in ctx->class_proto[] instead of overwriting the slot;
+// new_runtime() aborts at JS_FreeRuntime() if it does not.
+static void dom_exception_added_twice(void)
+{
+    JSValue ret;
+    const char *s;
+    int i;
+
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    // the implicit install left a working DOMException behind
+    ret = eval(ctx, "DOMException.prototype === "
+                    "Object.getPrototypeOf(new DOMException)");
+    assert(JS_ToBool(ctx, ret) == true);
+    JS_FreeValue(ctx, ret);
+
+    // installing it again, repeatedly, must not leak the previous prototype
+    for (i = 0; i < 3; i++)
+        assert(JS_AddIntrinsicDOMException(ctx) == 0);
+
+    // and the class prototype still matches the global constructor, i.e. the
+    // slot tracks the newest install rather than a freed or stale object
+    ret = eval(ctx, "DOMException.prototype === "
+                    "Object.getPrototypeOf(new DOMException)");
+    assert(JS_ToBool(ctx, ret) == true);
+    JS_FreeValue(ctx, ret);
+
+    ret = eval(ctx, "new DOMException('m', 'InvalidCharacterError').name");
+    assert(!JS_IsException(ret));
+    s = JS_ToCString(ctx, ret);
+    assert(s);
+    assert(!strcmp(s, "InvalidCharacterError"));
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, ret);
+
+    // the internally thrown DOMExceptions pick up the current prototype too
+    ret = eval(ctx, "try { atob('a') } catch (e) { "
+                    "  e instanceof DOMException && e.name } ");
+    assert(!JS_IsException(ret));
+    s = JS_ToCString(ctx, ret);
+    assert(s);
+    assert(!strcmp(s, "InvalidCharacterError"));
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, ret);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
 static void backtrace_oom_callsite_array(void)
 {
     static const char setup_code[] =
@@ -961,6 +1059,53 @@ static void backtrace_oom_callsite_array(void)
 
     JS_FreeValue(ctx, func);
     JS_FreeValue(ctx, global_object);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void large_allocation_accounting(void)
+{
+    static const size_t block_size = 1024 * 1024;
+    JSMemoryUsage before, after;
+    JSValue ret, exception;
+    JSRuntime *rt;
+    JSContext *ctx;
+    const char *str;
+
+    rt = new_runtime();
+    ctx = JS_NewContext(rt);
+
+    JS_ComputeMemoryUsage(rt, &before);
+    ret = eval(ctx, "globalThis.a = new Uint8Array(1024 * 1024)");
+    assert(!JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+    JS_ComputeMemoryUsage(rt, &after);
+    assert(after.malloc_size - before.malloc_size >= (int64_t)block_size);
+
+    JS_ComputeMemoryUsage(rt, &before);
+    JS_SetMemoryLimit(rt, (size_t)before.malloc_size + 4 * block_size);
+    ret = eval(ctx, "globalThis.a = [];\n"
+                    "for (let i = 0; i < 64; i++) {\n"
+                    "    // OOM exception should be uncatchable\n"
+                    "    try {\n"
+                    "        a.push(new Uint8Array(1024 * 1024));"
+                    "    } catch (e) {\n"
+                    "        throw 'unexpected exception';\n"
+                    "    }\n"
+                    "}");
+    assert(JS_IsException(ret));
+    JS_SetMemoryLimit(rt, 0);
+    JS_ComputeMemoryUsage(rt, &after);
+    assert(after.malloc_size - before.malloc_size < (int64_t)(8 * block_size));
+
+    exception = JS_GetException(ctx);
+    assert(JS_IsError(exception));
+    str = JS_ToCString(ctx, exception);
+    assert(str);
+    assert(!strcmp(str, "InternalError: out of memory"));
+    JS_FreeCString(ctx, str);
+    JS_FreeValue(ctx, exception);
+
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
 }
@@ -1822,6 +1967,483 @@ static void transfer_default_managed_array_buffer(void)
     JS_FreeRuntime(rt);
 }
 
+static void get_class_name(void)
+{
+    static const struct {
+        const char *code;
+        const char *name;
+    } builtins[] = {
+        { "({})",               "Object" },
+        { "[]",                 "Array" },
+        { "new Error()",        "Error" },
+        { "new Date()",         "Date" },
+        { "/re/",               "RegExp" },
+        { "new Map()",          "Map" },
+        { "new ArrayBuffer(0)", "ArrayBuffer" },
+        { "new Uint8Array(0)",  "Uint8Array" },
+        { "(function(){})",     "Function" },
+    };
+    JSClassDef def = (JSClassDef){ .class_name = "MyClass" };
+    JSClassID class_id, unregistered_class_id;
+    JSAtom atom, expected;
+    JSRuntime *rt;
+    JSContext *ctx;
+    const char *s;
+    JSValue obj;
+    size_t i;
+
+    rt = new_runtime();
+    class_id = 0;
+    JS_NewClassID(rt, &class_id);
+    assert(0 == JS_NewClass(rt, class_id, &def));
+
+    /* handed out by JS_NewClassID() but never passed to JS_NewClass() */
+    unregistered_class_id = 0;
+    JS_NewClassID(rt, &unregistered_class_id);
+
+    ctx = JS_NewContext(rt);
+
+    /* the name of a class registered from C, not its class id */
+    expected = JS_NewAtom(ctx, "MyClass");
+    atom = JS_GetClassName(rt, class_id);
+    assert(atom == expected);
+    s = JS_AtomToCString(ctx, atom);
+    assert(s);
+    assert(!strcmp(s, "MyClass"));
+    JS_FreeCString(ctx, s);
+    JS_FreeAtom(ctx, atom);
+    JS_FreeAtom(ctx, expected);
+
+    /* the names of the built-in classes */
+    for (i = 0; i < countof(builtins); i++) {
+        obj = eval(ctx, builtins[i].code);
+        assert(!JS_IsException(obj));
+        atom = JS_GetClassName(rt, JS_GetClassID(obj));
+        assert(atom != JS_ATOM_NULL);
+        s = JS_AtomToCString(ctx, atom);
+        assert(s);
+        assert(!strcmp(s, builtins[i].name));
+        JS_FreeCString(ctx, s);
+        JS_FreeAtom(ctx, atom);
+        JS_FreeValue(ctx, obj);
+    }
+
+    /* class ids without a registered class have no name */
+    assert(JS_ATOM_NULL == JS_GetClassName(rt, JS_INVALID_CLASS_ID));
+    assert(JS_ATOM_NULL == JS_GetClassName(rt, unregistered_class_id));
+    assert(JS_ATOM_NULL == JS_GetClassName(rt, class_id + 4096));
+
+    /* the caller owns the returned atom; the class keeps its own reference,
+       so releasing it repeatedly doesn't free the name out from under it */
+    for (i = 0; i < 64; i++)
+        JS_FreeAtom(ctx, JS_GetClassName(rt, class_id));
+    atom = JS_GetClassName(rt, class_id);
+    s = JS_AtomToCString(ctx, atom);
+    assert(s);
+    assert(!strcmp(s, "MyClass"));
+    JS_FreeCString(ctx, s);
+    JS_FreeAtom(ctx, atom);
+
+    /* every registered class has a name, and it is a name rather than a
+       number: returning the class id instead produced a valid-looking atom,
+       either an unrelated predefined one for a small id or the id spelled out
+       in decimal for a large one, so check the whole table rather than the
+       handful of classes spelled out above */
+    {
+        JSClassID id;
+        int registered = 0;
+
+        for (id = 1; id < class_id + 16; id++) {
+            char decimal[32];
+            if (!JS_IsRegisteredClass(rt, id))
+                continue;
+            registered++;
+            atom = JS_GetClassName(rt, id);
+            assert(atom != JS_ATOM_NULL);
+            s = JS_AtomToCString(ctx, atom);
+            assert(s);
+            // a few internal classes are deliberately unnamed, but none is
+            // named after a number
+            snprintf(decimal, sizeof(decimal), "%u", (unsigned)id);
+            assert(strcmp(s, decimal));
+            assert(s[0] < '0' || s[0] > '9');
+            JS_FreeCString(ctx, s);
+            JS_FreeAtom(ctx, atom);
+        }
+        /* the built-ins alone are far more than this */
+        assert(registered > 20);
+    }
+
+    /* two classes sharing a name share the interned atom, and the name does
+       not depend on which context asks */
+    {
+        JSClassDef def2 = (JSClassDef){ .class_name = "MyClass" };
+        JSClassID class_id2 = 0;
+        JSContext *ctx2;
+        JSAtom a1, a2;
+
+        JS_NewClassID(rt, &class_id2);
+        assert(0 == JS_NewClass(rt, class_id2, &def2));
+        assert(class_id2 != class_id);
+
+        a1 = JS_GetClassName(rt, class_id);
+        a2 = JS_GetClassName(rt, class_id2);
+        assert(a1 == a2);
+        JS_FreeAtom(ctx, a1);
+        JS_FreeAtom(ctx, a2);
+
+        ctx2 = JS_NewContext(rt);
+        a1 = JS_GetClassName(rt, class_id);
+        a2 = JS_GetClassName(rt, class_id);
+        assert(a1 == a2);
+        JS_FreeAtom(ctx2, a1);
+        JS_FreeAtom(ctx2, a2);
+        JS_FreeContext(ctx2);
+    }
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+void object_from(void)
+{
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue t0 = JS_NewObject(ctx);
+    assert(!JS_IsException(t0));
+    assert(JS_IsObject(t0));
+    JSAtom prop = JS_NewAtomLen(ctx, "prop", 4);
+    assert(prop != JS_ATOM_NULL);
+    JSValue val = JS_NULL;
+    JSValue t1 = JS_NewObjectFrom(ctx, 1, &prop, &val);
+    assert(!JS_IsException(t1));
+    assert(JS_IsObject(t1));
+    uint32_t old_shape_hash_count = js_std_cmd(/*GetShapeHashCount*/4, rt);
+    JSValue t2 = JS_NewObjectFrom(ctx, 1, &prop, &val);
+    assert(!JS_IsException(t2));
+    assert(JS_IsObject(t2));
+    uint32_t new_shape_hash_count = js_std_cmd(/*GetShapeHashCount*/4, rt);
+    assert(old_shape_hash_count == new_shape_hash_count);
+    JS_FreeAtom(ctx, prop);
+    JS_FreeValue(ctx, t2);
+    JS_FreeValue(ctx, t1);
+    JS_FreeValue(ctx, t0);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+void add_intrinsic_bigint(void)
+{
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContextRaw(rt);
+    JS_AddIntrinsicBaseObjects(ctx);
+    JS_AddIntrinsicBigInt(ctx);
+    assert(!JS_HasException(ctx));
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+void new_typed_array(void)
+{
+    JSValueConst argv[4];
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+    uint8_t *buf = js_malloc(ctx, 8);
+    JSValue ab = JS_NewArrayBuffer(ctx, buf, 8, /*max_len*/0, NULL, NULL, false);
+    assert(JS_IsArrayBuffer(ab));
+    for (int argc = 0; argc < (int)countof(argv); argc++) {
+        JSValue ret = JS_NewTypedArray(ctx, argc, argv, JS_TYPED_ARRAY_UINT8);
+        assert(!JS_IsException(ret));
+        assert(JS_IsObject(ret));
+        JS_FreeValue(ctx, ret);
+        argv[argc] = JS_UNDEFINED;
+        argv[0] = ab;
+    }
+    JS_FreeValue(ctx, ab);
+    js_free(ctx, buf);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+void private_symbols(void)
+{
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue pub = JS_NewSymbol(ctx, "public", /*is_global*/false);
+    JSValue priv = JS_NewPrivateSymbol(ctx, "private");
+    assert(JS_IsSymbol(pub));
+    assert(JS_IsSymbol(priv));
+    JSValue obj = JS_NewObject(ctx);
+    assert(JS_IsObject(obj));
+    assert(true == JS_SetPropertyValue(ctx, obj, pub, JS_TRUE, JS_PROP_C_W_E));
+    assert(true == JS_SetPropertyValue(ctx, obj, priv, JS_FALSE, JS_PROP_C_W_E));
+    JSValue global_object = JS_GetGlobalObject(ctx);
+    assert(true == JS_SetPropertyStr(ctx, global_object, "o", JS_DupValue(ctx, obj)));
+    JS_FreeValue(ctx, global_object);
+    JSValue result = eval(ctx, "Object.getOwnPropertySymbols(o)");
+    assert(JS_IsArray(result));
+    int64_t length = -1;
+    assert(0 == JS_GetLength(ctx, result, &length));
+    assert(length == 1);
+    JSValue item = JS_GetPropertyUint32(ctx, result, 0);
+    assert(JS_IsSymbol(item));
+    assert(JS_IsSameValue(ctx, item, pub));
+    JS_FreeValue(ctx, item);
+    JS_FreeValue(ctx, result);
+    result = JS_GetPropertyValue(ctx, obj, JS_DupValue(ctx, pub));
+    assert(JS_IsBool(result));
+    assert(JS_IsSameValue(ctx, result, JS_TRUE));
+    result = JS_GetPropertyValue(ctx, obj, JS_DupValue(ctx, priv));
+    assert(JS_IsBool(result));
+    assert(JS_IsSameValue(ctx, result, JS_FALSE));
+    JS_FreeValue(ctx, obj);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+// https://github.com/quickjs-ng/quickjs/issues/1181
+// JS_NewContext() must fail cleanly, not crash or leak, whichever of its
+// allocations runs out of memory.
+static void new_context_low_memory(void)
+{
+    JSMemoryUsage stats;
+    size_t base, headroom;
+    JSRuntime *rt;
+    JSContext *ctx;
+    int all, ok;
+
+    all = ok = 0;
+    rt = new_runtime();
+    JS_ComputeMemoryUsage(rt, &stats);
+    base = (size_t)stats.malloc_size;
+    // Small steps first, so that each of the first allocations gets its turn
+    // to fail, then bigger ones until a few contexts fit.
+    for (headroom = 0; ok < 4 && headroom < 4 * 1024 * 1024;
+         headroom += headroom < 8192 ? 8 : 1024) {
+        JS_SetMemoryLimit(rt, base + headroom);
+        ctx = JS_NewContext(rt); // expected to fail, not to crash
+        if (ctx) {
+            JS_FreeContext(ctx);
+            ok++;
+        }
+        all++;
+    }
+    JS_SetMemoryLimit(rt, 0);
+    JS_FreeRuntime(rt);
+    assert(ok > 0);     // expect some successes...
+    assert(ok < all);   // ...but not all
+}
+
+// running out of memory in JSON.stringify must not leak the array element
+// that was being converted
+static void json_stringify_oom(void)
+{
+    static const char setup_code[] =
+        "globalThis.f = () => JSON.stringify([{}]);\n"
+        "f();\n"; // JSON.stringify is set up on first access, do it now
+    JSValue global_object, func, ret;
+    JSMemoryUsage stats;
+    uint32_t headroom;
+    JSRuntime *rt;
+    JSContext *ctx;
+
+    rt = new_runtime();
+    ctx = JS_NewContext(rt);
+    global_object = JS_GetGlobalObject(ctx);
+
+    ret = eval(ctx, setup_code);
+    assert(!JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+
+    func = JS_GetPropertyStr(ctx, global_object, "f");
+    assert(JS_IsFunction(ctx, func));
+
+    for (headroom = 0; headroom < 2048; headroom++) {
+        JS_ComputeMemoryUsage(rt, &stats);
+        JS_SetMemoryLimit(rt, (size_t)stats.malloc_size + headroom);
+        ret = JS_Call(ctx, func, JS_UNDEFINED, 0, NULL);
+        JS_SetMemoryLimit(rt, 0);
+        JS_FreeValue(ctx, ret);
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+
+    JS_FreeValue(ctx, func);
+    JS_FreeValue(ctx, global_object);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+struct dynamic_import_state {
+    int import_calls;
+    int attribute_calls;
+    bool defer;
+    char *basename;
+    char *filename;
+    JSValue token;
+    JSValue attributes;
+};
+
+static JSModuleDef *dynamic_import_loader(JSContext *ctx, const char *name,
+                                          void *opaque, JSValueConst attributes)
+{
+    struct dynamic_import_state *s = opaque;
+    if (!strcmp(name, "missing")) {
+        JS_ThrowReferenceError(ctx, "no such module");
+        return NULL;
+    }
+    if (JS_IsObject(attributes)) {
+        JSValue type = JS_GetPropertyStr(ctx, attributes, "type");
+        const char *str = JS_ToCString(ctx, type);
+        assert(str);
+        assert(!strcmp(str, "x"));
+        JS_FreeCString(ctx, str);
+        JS_FreeValue(ctx, type);
+        s->attribute_calls++;
+    }
+    static const char code[] = "export const v = 42";
+    JSValue ret = JS_Eval(ctx, code, strlen(code), name,
+                          JS_EVAL_TYPE_MODULE|JS_EVAL_FLAG_COMPILE_ONLY);
+    assert(!JS_IsException(ret));
+    JSModuleDef *m = JS_VALUE_GET_PTR(ret);
+    JS_FreeValue(ctx, ret);
+    return m;
+}
+
+static void dynamic_import_func(JSContext *ctx, const char *basename,
+                                const char *filename, JSValue token,
+                                JSValueConst attributes, void *opaque)
+{
+    struct dynamic_import_state *s = opaque;
+    s->import_calls++;
+    if (s->defer) {
+        s->basename = strdup(basename);
+        s->filename = strdup(filename);
+        assert(s->basename);
+        assert(s->filename);
+        s->token = token;
+        s->attributes = JS_DupValue(ctx, attributes);
+        return;
+    }
+    JSValue exception = JS_UNDEFINED;
+    JSValue promise = JS_LoadModule(ctx, basename, filename, attributes);
+    if (JS_IsException(promise))
+        exception = JS_GetException(ctx);
+    assert(0 == JS_FinishDynamicImport(ctx, token, promise, exception));
+}
+
+static JSRuntime *dynamic_import_runtime(struct dynamic_import_state *s)
+{
+    JSRuntime *rt = new_runtime();
+    JS_SetModuleLoaderFunc2(rt, NULL, dynamic_import_loader, NULL, s);
+    JS_SetDynamicImportFunc(rt, dynamic_import_func, s);
+    return rt;
+}
+
+static void dynamic_import_drain_jobs(JSRuntime *rt)
+{
+    JSContext *ctx;
+    while (JS_ExecutePendingJob(rt, &ctx) > 0)
+        ;
+}
+
+static void dynamic_import_assert_namespace(JSContext *ctx, JSValueConst promise)
+{
+    assert(JS_PROMISE_FULFILLED == JS_PromiseState(ctx, promise));
+    JSValue ns = JS_PromiseResult(ctx, promise);
+    JSValue v = JS_GetPropertyStr(ctx, ns, "v");
+    assert(JS_IsNumber(v));
+    assert(42 == JS_VALUE_GET_INT(v));
+    JS_FreeValue(ctx, v);
+    JS_FreeValue(ctx, ns);
+}
+
+static void dynamic_import_sync_ok(void)
+{
+    struct dynamic_import_state s = {0};
+    JSRuntime *rt = dynamic_import_runtime(&s);
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue promise = eval(ctx, "import('dep', {with: {type: 'x'}})");
+    assert(JS_PROMISE_PENDING == JS_PromiseState(ctx, promise));
+    dynamic_import_drain_jobs(rt);
+    assert(1 == s.import_calls);
+    assert(1 == s.attribute_calls);
+    dynamic_import_assert_namespace(ctx, promise);
+    JS_FreeValue(ctx, promise);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void dynamic_import_sync_missing(void)
+{
+    struct dynamic_import_state s = {0};
+    JSRuntime *rt = dynamic_import_runtime(&s);
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue promise = eval(ctx, "import('missing')");
+    dynamic_import_drain_jobs(rt);
+    assert(1 == s.import_calls);
+    assert(JS_PROMISE_REJECTED == JS_PromiseState(ctx, promise));
+    JSValue reason = JS_PromiseResult(ctx, promise);
+    assert(JS_IsError(reason));
+    JS_FreeValue(ctx, reason);
+    JS_FreeValue(ctx, promise);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void dynamic_import_deferred(void)
+{
+    struct dynamic_import_state s = {.defer = true};
+    JSRuntime *rt = dynamic_import_runtime(&s);
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue promise = eval(ctx, "import('dep', {with: {type: 'x'}})");
+    dynamic_import_drain_jobs(rt);
+    assert(1 == s.import_calls);
+    assert(0 == s.attribute_calls);
+    assert(JS_PROMISE_PENDING == JS_PromiseState(ctx, promise));
+    // token and attributes must survive a collection while the import is parked
+    JS_RunGC(rt);
+    JSValue module_promise = JS_LoadModule(ctx, s.basename, s.filename,
+                                           s.attributes);
+    assert(!JS_IsException(module_promise));
+    assert(0 == JS_FinishDynamicImport(ctx, s.token, module_promise,
+                                       JS_UNDEFINED));
+    JS_FreeValue(ctx, s.attributes);
+    free(s.basename);
+    free(s.filename);
+    dynamic_import_drain_jobs(rt);
+    assert(1 == s.attribute_calls);
+    dynamic_import_assert_namespace(ctx, promise);
+    JS_FreeValue(ctx, promise);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void dynamic_import_deferred_reject(void)
+{
+    struct dynamic_import_state s = {.defer = true};
+    JSRuntime *rt = dynamic_import_runtime(&s);
+    JSContext *ctx = JS_NewContext(rt);
+    JSValue promise = eval(ctx, "import('dep')");
+    dynamic_import_drain_jobs(rt);
+    assert(JS_PROMISE_PENDING == JS_PromiseState(ctx, promise));
+    JSValue error = JS_NewError(ctx);
+    assert(1 == JS_SetPropertyStr(ctx, error, "tag", JS_NewInt32(ctx, 7)));
+    assert(0 == JS_FinishDynamicImport(ctx, s.token, JS_EXCEPTION, error));
+    JS_FreeValue(ctx, s.attributes);
+    free(s.basename);
+    free(s.filename);
+    dynamic_import_drain_jobs(rt);
+    assert(JS_PROMISE_REJECTED == JS_PromiseState(ctx, promise));
+    JSValue reason = JS_PromiseResult(ctx, promise);
+    JSValue tag = JS_GetPropertyStr(ctx, reason, "tag");
+    assert(7 == JS_VALUE_GET_INT(tag));
+    JS_FreeValue(ctx, tag);
+    JS_FreeValue(ctx, reason);
+    JS_FreeValue(ctx, promise);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
 int main(void)
 {
     cfunctions();
@@ -1832,6 +2454,10 @@ int main(void)
     is_array();
     module_serde();
     module_unhandled_rejection();
+    dynamic_import_sync_ok();
+    dynamic_import_sync_missing();
+    dynamic_import_deferred();
+    dynamic_import_deferred_reject();
     promise_mark_as_handled();
     promise_then();
     runtime_cstring_free();
@@ -1840,6 +2466,8 @@ int main(void)
     promise_hook();
     dump_memory_usage();
     new_errors();
+    dom_exception_added_twice();
+    large_allocation_accounting();
     backtrace_oom_current_exception();
     backtrace_oom_callsite_array();
     proxy_own_keys_huge_length();
@@ -1855,5 +2483,13 @@ int main(void)
     transfer_external_array_buffer();
     resize_external_array_buffer();
     transfer_default_managed_array_buffer();
+    get_class_name();
+    object_from();
+    add_intrinsic_bigint();
+    new_typed_array();
+    std_eval_interrupt_handler();
+    private_symbols();
+    new_context_low_memory();
+    json_stringify_oom();
     return 0;
 }

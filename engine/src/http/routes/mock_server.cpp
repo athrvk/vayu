@@ -266,19 +266,6 @@ bool status_forbids_body (int status) {
     return status < 200 || status == 204 || status == 304;
 }
 
-/**
- * cpp-httplib adds `Content-Length: 0` to any response that has no body, which
- * RFC 9110 §8.6 forbids on a 1xx or 204 and which a 304 would read as a
- * validator for an empty representation. It adds it after the handler has
- * answered, so the only place to take it back is a post-routing handler.
- */
-void drop_framing_from_bodyless_status (const httplib::Request& /*req*/,
-httplib::Response& res) {
-    if (status_forbids_body (res.status)) {
-        res.headers.erase ("Content-Length");
-    }
-}
-
 } // namespace
 
 std::vector<std::pair<std::string, std::string>> example_headers (const std::string& blob) {
@@ -929,7 +916,6 @@ const MockStartRequest& request) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });
-    svr.set_post_routing_handler (drop_framing_from_bodyless_status);
 
     const auto started =
     server->listener.start ("127.0.0.1", request.port, "mock server " + server->id);

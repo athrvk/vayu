@@ -2285,7 +2285,7 @@ nlohmann::json get_script_completions () {
     ". crypto-js answers the same object as the CryptoJS global. uuid is npm's "
     "uuid: v1, v3, v4, v5, validate, version, parse, stringify and NIL, and "
     "the module is itself callable, so uuid() is a v4. lodash is npm's lodash "
-    "4.17.21 and answers the same object as the _ global. moment is npm's "
+    "4.18.1 and answers the same object as the _ global. moment is npm's "
     "moment 2.31.0, English only, with no moment-timezone, and has no global. "
     "csv-parse/lib/sync is npm's csv-parse 1.2.4 sync parser, the version "
     "Postman bundles: the module is parse(input, options), input a string, "
@@ -2336,9 +2336,9 @@ nlohmann::json get_script_completions () {
     // `any`: lodash's few hundred members are not restated here, and a partial
     // list would flag the ones it left out on correct code.
     completions.push_back ({ { "label", "_" }, { "kind", KIND_VARIABLE },
-    { "insertText", "_" }, { "detail", "any (lodash 4.17.21)" },
+    { "insertText", "_" }, { "detail", "any (lodash 4.18.1)" },
     { "documentation",
-    "Postman's bundled lodash: npm's lodash 4.17.21, the whole library, and "
+    "Postman's bundled lodash: npm's lodash 4.18.1, the whole library, and "
     "the same object as require('lodash').\n\nLoaded the first time a script "
     "reads it.\n\nExample:\nconst id = _.get(pm.response.json(), "
     "'data.items[0].id');" },
