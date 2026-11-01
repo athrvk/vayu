@@ -268,7 +268,7 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   (`refresh_recovery_backup_on_shutdown`, #2421).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
-  later; the bundled one is 3.53), which runs before `init ()` and therefore
+  later; the bundled one is 3.54), which runs before `init ()` and therefore
   before any repair pass can read the column. Read the data out in a step
   that runs ahead of the probe - a `PRAGMA user_version`-gated migration - or
   keep the column mapped; a pass that runs after the probe reads a column

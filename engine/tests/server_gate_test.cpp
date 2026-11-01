@@ -211,18 +211,22 @@ TEST_F (ServerGateTest, AForeignHostIsRefusedEvenWithoutAnOrigin) {
 }
 
 // `httplib::Client` always writes exactly one `Host`, so these two go to the
-// socket by hand. Mutation check: drop the count clause in
-// `names_this_listener` and the duplicated pair, whose first value is this
-// listener, is served.
+// socket by hand. Since cpp-httplib 0.61.0 the library itself answers `400`,
+// before the gate runs, to an HTTP/1.1 request with no `Host` and to any
+// request with two (RFC 9112 §3.2). The gate's own `403` is what an HTTP/1.0
+// request with no `Host` meets, which the library still admits. Either way
+// nothing is routed. The count clause in `names_this_listener` stays, so the
+// gate states the whole rule itself rather than leaning on the library's parse.
 TEST_F (ServerGateTest, ARequestWithNoHostIsRefused) {
-    EXPECT_EQ (raw_status (port_, "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n"), 403);
+    EXPECT_EQ (raw_status (port_, "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n"), 400);
+    EXPECT_EQ (raw_status (port_, "GET /health HTTP/1.0\r\n\r\n"), 403);
 }
 
 TEST_F (ServerGateTest, ARequestWithTwoHostsIsRefused) {
     const std::string request = "GET /health HTTP/1.1\r\nHost: " + with_port ("127.0.0.1") +
     "\r\nHost: " + with_port ("evil.example") + "\r\nConnection: close\r\n\r\n";
-    EXPECT_EQ (raw_status (port_, request), 403);
-    // The same exchange with one Host is served, so the 403 above is the
+    EXPECT_EQ (raw_status (port_, request), 400);
+    // The same exchange with one Host is served, so the 400 above is the
     // duplicate's and not the hand-written request's.
     EXPECT_EQ (raw_status (port_,
                "GET /health HTTP/1.1\r\nHost: " + with_port ("127.0.0.1") + "\r\nConnection: close\r\n\r\n"),

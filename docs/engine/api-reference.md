@@ -62,6 +62,12 @@ request gate in `server.cpp` refuses, before any route runs, for every route:
 - any request carrying an `Origin` header, whatever its value (`null`
   included) - `403`, message saying the engine does not serve browser origins.
 
+A request cpp-httplib refuses to parse never reaches that gate: an HTTP/1.1
+request with no `Host`, any request with more than one, or a `Host` holding a
+byte outside `uri-host [ ":" port ]` (RFC 9112 §3.2) is answered `400` with an
+empty body and the connection closed. An HTTP/1.0 request with no `Host` still
+reaches the gate, and is refused there with the `403` above.
+
 An `OPTIONS` request that passes the Host check is answered `204` with no body
 and no CORS header, whatever its `Origin`: a preflight that grants nothing
 leaks nothing. Local tools (the CLI, curl, the MCP server's fetch) send no
