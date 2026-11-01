@@ -59,7 +59,7 @@ export interface ElementTallyProps {
 }
 
 /** `post-run replay over 1,000 sampled responses`, or the unsized phrase. */
-function replayPhrase(samples: number | undefined): string {
+export function replayPhrase(samples: number | undefined): string {
 	if (samples === undefined) return "post-run replay of sampled responses";
 	return `post-run replay over ${formatNumber(samples)} sampled ${pluralize(samples, "response")}`;
 }

@@ -2960,6 +2960,14 @@ export interface RunScenarioStepStat {
 		sampled: number;
 		passed: number;
 		failed: number;
+		/**
+		 * The console lines the replay saw, whatever its verdict (#3127): the first 10
+		 * distinct entries, shaped like an inline element row's {@link RunScenarioStepElementTally.console}.
+		 * Absent, never `[]`, when none were logged and on a report from an engine before the field.
+		 */
+		console?: ElementTallyConsoleLine[];
+		/** Occurrences a full {@link console} list turned away; absent when none were. */
+		consoleDropped?: number;
 	};
 	/**
 	 * This step's non-script elements - extractors, assertions, timers -
@@ -3350,6 +3358,14 @@ export interface RunReport {
 		testsPassed: number;
 		testsFailed: number;
 		successRate: number;
+		/**
+		 * The console lines the deferred replay saw, whatever its verdict (#3127), on a
+		 * single-request run only: a scenario run keeps them per step, under
+		 * {@link RunScenarioStepStat.tests}. Absent when none were logged.
+		 */
+		console?: ElementTallyConsoleLine[];
+		/** Occurrences a full {@link console} list turned away; absent when none were. */
+		consoleDropped?: number;
 	};
 	/**
 	 * What the run's server-vitals scrape recorded ({@link RunMonitorConfig}).
