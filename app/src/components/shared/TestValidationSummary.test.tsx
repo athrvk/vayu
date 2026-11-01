@@ -427,6 +427,26 @@ describe("TestValidationSummary", () => {
 			expect(screen.getByText("saw 500")).toHaveClass("text-status-error-text");
 		});
 
+		it("puts the count beside a line the replay logged more than once, as on a failure", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{
+						...TALLIES,
+						console: [
+							{ level: "log", text: "token refreshed", count: 1_204 },
+							{ level: "warn", text: "once" },
+						],
+					}}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("token refreshed").nextElementSibling?.textContent).toBe(
+				"x1,204"
+			);
+			expect(screen.getByText("once").nextElementSibling).toBeNull();
+		});
+
 		it("renders for a replay that logged and asserted nothing else", () => {
 			render(
 				<TestValidationSummary

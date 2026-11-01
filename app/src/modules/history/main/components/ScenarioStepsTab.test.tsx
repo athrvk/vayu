@@ -591,7 +591,7 @@ describe("what a step's script said and how many responses its replay ran over (
 						{ kind: "error", text: "Error: boom" },
 						{ kind: "test", text: "status is 201: expected 200 to equal 201" },
 					],
-					console: [{ level: "error", text: "saw 500" }],
+					console: [{ level: "error", text: "saw 500", count: 480 }],
 					consoleDropped: 12,
 				},
 			],
@@ -600,6 +600,7 @@ describe("what a step's script said and how many responses its replay ran over (
 		expect(within(row).getByText("Error: boom")).toBeTruthy();
 		expect(within(row).getByText("status is 201: expected 200 to equal 201")).toBeTruthy();
 		expect(within(row).getByText("saw 500")).toHaveClass("text-status-error-text");
+		expect(within(row).getByText("x480")).toBeTruthy();
 		expect(within(row).getByText("12 more console line occurrences not shown")).toBeTruthy();
 	});
 
@@ -642,7 +643,7 @@ describe("what a step's replayed script logged (issue #3127)", () => {
 		tests,
 	});
 
-	it("lists the console lines in a row under the step, headed by the replay's size", () => {
+	it("lists the console lines in a row under the step, headed by the replay's size, each with its count", () => {
 		render(
 			<ScenarioStepsTab
 				steps={[
@@ -652,7 +653,7 @@ describe("what a step's replayed script logged (issue #3127)", () => {
 						failed: 0,
 						console: [
 							{ level: "log", text: "token refreshed" },
-							{ level: "warn", text: "slow reply" },
+							{ level: "warn", text: "slow reply", count: 1_204 },
 						],
 					}),
 				]}
@@ -664,8 +665,8 @@ describe("what a step's replayed script logged (issue #3127)", () => {
 		expect(
 			within(row).getByText("Console from the post-run replay over 500 sampled responses")
 		).toBeTruthy();
-		expect(within(row).getByText("token refreshed")).toBeTruthy();
-		expect(within(row).getByText("slow reply")).toBeTruthy();
+		expect(within(row).getByText("token refreshed").nextElementSibling).toBeNull();
+		expect(within(row).getByText("slow reply").nextElementSibling?.textContent).toBe("x1,204");
 	});
 
 	it("says how many occurrences a full list turned away", () => {

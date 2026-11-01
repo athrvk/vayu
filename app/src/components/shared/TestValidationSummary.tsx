@@ -35,6 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { Callout } from "./Callout";
+import { OccurrenceCount } from "./OccurrenceCount";
 import { ReplayConsole } from "./ReplayConsole";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -136,9 +137,7 @@ function FailureLine({ message, count }: { message: string; count: number | unde
 			<pre className="min-w-0 flex-1 font-mono whitespace-pre-wrap break-words">
 				{message}
 			</pre>
-			{count !== undefined && count > 1 && (
-				<span className="shrink-0 font-mono tabular-nums">x{formatNumber(count)}</span>
-			)}
+			<OccurrenceCount count={count} />
 		</div>
 	);
 }

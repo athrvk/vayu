@@ -2874,12 +2874,16 @@ export interface RunScenarioStepElementTally {
 export interface ElementTallyMessage {
 	kind: "error" | "test";
 	text: string;
+	/** How many times it was reported; absent means once (and on a row from an engine before the field). */
+	count?: number;
 }
 
 /** One console line an inline script element logged, with the `console.*` method that wrote it. */
 export interface ElementTallyConsoleLine {
 	level: ConsoleLevel;
 	text: string;
+	/** How many times it was logged; absent means once (and on a row from an engine before the field). */
+	count?: number;
 }
 
 /**

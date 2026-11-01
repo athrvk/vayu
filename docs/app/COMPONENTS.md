@@ -1972,8 +1972,9 @@ it, and the status-0 code alone would also match a real connection failure.
 fails the same way on every sampled response is one entry, not one per sample:
 `failures` holds each distinct message (at most 10, first seen first), `failureCounts` is
 parallel to it, and `totalFailed` / `totalPassed` count every occurrence. A count above 1
-reads `x3` beside its message (`extractTestFailures` hands the component `counts`, which
-default to 1 each, so a row stored before the engine deduplicated renders as it did).
+reads `x3` beside its message (`OccurrenceCount.tsx`, the one spelling of that cue;
+`extractTestFailures` hands the component `counts`, which default to 1 each, so a row stored
+before the engine deduplicated renders as it did).
 The "Failed tests (N)" heading is `totalFailed`, occurrences, so it can exceed the number of
 lines under it. When `failuresDistinct` exceeds the list the card says "Showing N of M
 distinct."; a row without `failuresDistinct` keeps the older "Showing N of M." against
@@ -1983,11 +1984,12 @@ counts.
 
 **The replay's console lines close the card (#3127).** The replay runs every sampled
 response's scripts and the engine keeps what they logged, whatever the verdict, as one
-bounded distinct sample: `testValidation.console` (`{level, text}`, the first 10 distinct
-lines, each cut at 500 bytes) and `consoleDropped` (occurrences a full list turned away).
-`ReplayConsole` draws them under "Console from the post-run replay over N sampled
-responses", N being `samplesTested`, through `ElementMessages`, so the lines take the same
-level tones and the dropped cue reads the same, "N more console line occurrences not
+bounded distinct sample: `testValidation.console` (`{level, text, count?}`, the first 10
+distinct lines, each cut at 500 bytes, `count` present only on a line logged more than once)
+and `consoleDropped` (occurrences a full list turned away). `ReplayConsole` draws them under
+"Console from the post-run replay over N sampled responses", N being `samplesTested`, through
+`ElementMessages`, so the lines take the same level tones, a repeated line the same `x3` as a
+failure above it, and the dropped cue reads the same, "N more console line occurrences not
 shown", as under an inline script row. Both keys are absent when nothing was logged and on
 a report from before the field, which renders no block. They sit inside `testValidation`,
 so a replay that logged and asserted nothing else is still a card of zeros with its lines
@@ -2054,11 +2056,14 @@ reading; there is no fallback that guesses a script from its zeros.
 drawn under the tally line). A load run keeps no trace per request, so the engine keeps a
 bounded sample on the row itself: `messages` (`{kind: "error" | "test", text}` - what the
 script threw, and each failing `pm.test` as `name: message`) and `console` (`{level, text}`),
-the first 10 distinct entries of each with every text cut at 500 bytes, and `messagesDropped`
-/ `consoleDropped` counting what a full list turned away. Message lines are error text with
-their kind in the gutter; console lines take their `console.*` level's tone from the table
-the Console tab shares (`console-level.ts`), `warn` and `error` in their status colours and
-`log` / `info` plain. A dropped count reads "N more message occurrences not shown" / "N more
+the first 10 distinct entries of each with every text cut at 500 bytes, each with `count`
+when it was seen more than once (absent means once), and `messagesDropped` /
+`consoleDropped` counting the occurrences a full list turned away. Message lines are error
+text with their kind in the gutter; console lines take their `console.*` level's tone from
+the table the Console tab shares (`console-level.ts`), `warn` and `error` in their status
+colours and `log` / `info` plain. A `count` reads `x3` at the end of its line, through the
+`OccurrenceCount` the Test validation card's failures use; an entry without one shows
+nothing there. A dropped count reads "N more message occurrences not shown" / "N more
 console line occurrences not shown" under its list, so ten lines never pass for the whole set;
 it counts occurrences (the engine counts every repeat of a dropped entry), so one extra error
 thrown on 480 iterations reads 480, not "480 more messages". All four keys
