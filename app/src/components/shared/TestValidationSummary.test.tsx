@@ -459,6 +459,17 @@ describe("TestValidationSummary", () => {
 			expect(screen.getByText("1,204 more console line occurrences not shown")).toBeTruthy();
 		});
 
+		it("still says what was turned away when the list itself is empty", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, consoleDropped: 9 }}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("9 more console line occurrences not shown")).toBeTruthy();
+		});
+
 		it("adds nothing to a report stored before the field, or one whose replay logged nothing", () => {
 			const { rerender } = render(
 				<TestValidationSummary testValidation={TALLIES} sampling={undefined} />

@@ -690,6 +690,17 @@ describe("what a step's replayed script logged (issue #3127)", () => {
 		).toBeTruthy();
 	});
 
+	it("still says what was turned away when the list itself is empty", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[replayed({ sampled: 5, passed: 5, failed: 0, consoleDropped: 9 })]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getByText("9 more console line occurrences not shown")).toBeTruthy();
+	});
+
 	it("keeps each step's lines under that step", () => {
 		render(
 			<ScenarioStepsTab
