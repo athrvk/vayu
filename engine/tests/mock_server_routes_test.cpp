@@ -1211,9 +1211,10 @@ TEST_F (MockServerTest, APreflightWithNoStoredOptionsRouteAnswersWhatWasAsked) {
 }
 
 // RFC 9110 §6.4.1: a 204 or 304 has no content, and §8.6 forbids Content-Length
-// on a 204. cpp-httplib adds `Content-Length: 0` to any empty response, so this
-// reads the answer off a real socket. A stored 100 is served the same way, as
-// bodyless; create refuses one, so a row can only predate that.
+// on a 204. The framing is cpp-httplib's to write (since 0.62.0 it omits the
+// length on these statuses), so this reads the answer off a real socket. A
+// stored 100 is served the same way, as bodyless; create refuses one, so a row
+// can only predate that.
 TEST_F (MockServerTest, ABodylessStatusIsServedWithNoBodyAndNoFraming) {
     for (const int status_code : { 204, 304, 101 }) {
         SCOPED_TRACE (status_code);
