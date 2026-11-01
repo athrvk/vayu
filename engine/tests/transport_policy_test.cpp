@@ -22,6 +22,9 @@
 #define NOMINMAX
 #endif
 
+// First, before anything that includes <httplib.h>: see the header.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <curl/curl.h>
 #include <gtest/gtest.h>
 #include <httplib.h>

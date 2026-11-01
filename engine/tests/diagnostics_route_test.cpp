@@ -9,6 +9,9 @@
  * because a proxy failure is only real if a proxy really refused.
  */
 
+// First, before anything that includes <httplib.h>: see the header.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <gtest/gtest.h>
 #include <httplib.h>
 
