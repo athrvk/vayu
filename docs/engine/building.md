@@ -337,6 +337,17 @@ sanitizer report block from the log; the full log is attached to the run as an
 artifact for 14 days. The title is the dedup key, so a leg that stays red
 accumulates comments on one issue instead of filing a new one every Monday.
 
+**`macos-tsan` runs as three shards**, each on its own runner, named
+`tsan on macos-latest (shard N/3)`. One runner could no longer finish it: at
+about 3 seconds a test, 6510 tests need some 180 minutes against the job's
+150-minute timeout, and both the 26 Oct 2026 scheduled run and #3181 were
+cancelled at the limit, which files nothing because a cancelled leg is not a
+failure. `ctest -I N,,3` gives shard N every third test by number, so the
+three run each test exactly once (6511 tests split 2171, 2170 and 2170, with
+no test in two shards). The shards share their leg's title, so a run in which two
+of them fail files one issue and comments on it, and each shard uploads its
+own artifact (`sanitizer-tsan-macos-latest-shardN`).
+
 So: **if you are reading a `sanitizer-failure` issue, that is where it came
 from.** Closing it is a human act after the fix - the next failure comments
 again, or files fresh if it was closed. Getting it green by adding a
