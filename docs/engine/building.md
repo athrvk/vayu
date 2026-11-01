@@ -742,9 +742,16 @@ All platforms script with the same vendored engine: QuickJS-NG
 
 ### Vendored QuickJS-NG
 
-The vendored QuickJS-NG is **v0.16.1** (`QJS_VERSION_*` in
+The vendored QuickJS-NG is **v0.18.0** (`QJS_VERSION_*` in
 `engine/vendor/quickjs-ng/quickjs.h`), byte-identical to the upstream tag for
 every file the tree holds. It carries no local patch.
+
+Upstream no longer takes private security reports or issues CVEs
+(`SECURITY.md` since 0.18.0), so a fix that matters to a sandbox (a
+use-after-free a script can reach, an interrupt check a builtin lacked) shows
+up only in the release's commit list; read that list on every re-vendor. Since
+0.18.0 `JSInterruptHandler` takes the `JSContext` rather than the `JSRuntime`
+(`script_interrupt_handler` in `src/runtime/script_engine.cpp`).
 
 The parser once computed an identifier's column by scanning back to the start
 of its line, so a one-line (minified) script took time quadratic in its length

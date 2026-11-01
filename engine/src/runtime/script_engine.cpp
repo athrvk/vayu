@@ -828,7 +828,7 @@ using namespace pm_detail;
 // QuickJS calls this periodically during evaluation. Returning non-zero aborts
 // the current JS_Eval with an InternalError, which the execute() exception path
 // turns into result.error_message.
-extern "C" int script_interrupt_handler (JSRuntime* /*rt*/, void* opaque) {
+extern "C" int script_interrupt_handler (JSContext* /*ctx*/, void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
     if (!state || !state->enabled)
         return 0;

@@ -4012,7 +4012,9 @@ The **language** is current; what is missing is the **host environment**:
   10 requests per script, bounded by the script's own deadline and by the
   response byte bound its path reads, and refused outright for agent-started
   runs.
-- **Memory limit**: 64MB per script execution
+- **Memory limit**: 64MB per script execution. Running out ends the script:
+  since quickjs-ng 0.18.0 the out-of-memory error cannot be caught by the
+  script itself, so a `try` cannot swallow it and keep allocating.
 - **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
   execution; the rest is dropped behind one warning line
   ([Console Output](#console-output)).
@@ -4028,7 +4030,9 @@ The **language** is current; what is missing is the **host environment**:
   infinite-loop script is aborted and reported as an error rather than hanging the
   engine. Configurable via the `scriptTimeout` setting (milliseconds, 1 to 60000);
   there is no way to turn the limit off, and a `0` stored by an older engine
-  (it meant "no limit") is read as the 5s default. The deadline is checked *between bytecode operations*, so it cannot
+  (it meant "no limit") is read as the 5s default. The deadline is checked *between bytecode operations*, and since
+  quickjs-ng 0.16.2 inside the long-running `Array.prototype` builtins too
+  (`map`, `filter`, `forEach`, `reduce`, `indexOf` and their kin), but it cannot
   interrupt a blocking call - which is why `pm.sendRequest` clamps its own
   timeout to the budget that is left rather than relying on it. **A script is
   reported as timed out when the deadline actually stopped it**, not whenever
