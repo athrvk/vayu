@@ -119,6 +119,23 @@ function TestsCell({ step }: { step: RunScenarioStepStat }) {
 }
 
 /**
+ * What the step's replayed script logged (issue #3127), as a row under the
+ * deferred element row that points at the replay; nothing when it logged
+ * nothing.
+ */
+function StepReplayConsoleRow({ step }: { step: RunScenarioStepStat }) {
+	const { tests } = step;
+	if (!tests || !hasReplayConsole(tests)) return null;
+	return (
+		<TableRow className="bg-muted/20">
+			<TableCell colSpan={8} className="py-1.5 pl-9">
+				<ReplayConsole source={tests} sampled={tests.sampled} className="text-xs" />
+			</TableCell>
+		</TableRow>
+	);
+}
+
+/**
  * Iterations the deadline or a Stop cut off: started, and neither completed nor
  * abandoned by a step that got no response or set a jump the run could not honour. Derived, so there is no engine key to go stale;
  * clamped, so a report whose counts disagree reads as none rather than negative.
@@ -232,19 +249,7 @@ export default function ScenarioStepsTab({
 										</TableCell>
 									</TableRow>
 								))}
-								{/* What the step's replayed script logged (issue #3127),
-								    under the deferred element row that points at the replay. */}
-								{hasReplayConsole(step.tests) && (
-									<TableRow className="bg-muted/20">
-										<TableCell colSpan={8} className="py-1.5 pl-9">
-											<ReplayConsole
-												source={step.tests}
-												sampled={step.tests?.sampled}
-												className="text-xs"
-											/>
-										</TableCell>
-									</TableRow>
-								)}
+								<StepReplayConsoleRow step={step} />
 								{/* The step's extractor misses (issue #3053), after its element
 								    rows: each is one of an extractor row's `missing`, summed here
 								    because each also left a later step sending that name

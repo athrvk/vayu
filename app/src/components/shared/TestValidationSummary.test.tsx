@@ -404,6 +404,7 @@ describe("TestValidationSummary", () => {
 			expect(screen.queryByText(/counted under Assertions/)).toBeNull();
 		});
 	});
+
 	describe("the replay's console lines (issue #3127)", () => {
 		it("lists them under a heading naming the replay and its sample size", () => {
 			render(
