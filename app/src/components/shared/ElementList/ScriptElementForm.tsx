@@ -65,6 +65,7 @@ import type * as Monaco from "monaco-editor";
 import { CodeEditor } from "@/components/ui";
 import { ScriptSnippets } from "@/components/shared";
 import { insertSnippetAtCursor } from "@/lib/editor-snippet";
+import { attachIntlDiagnostics } from "@/lib/script-intl-diagnostics";
 import { useResizeGesture } from "@/lib/resize-gesture";
 import { useLayoutStore } from "@/stores";
 import {
@@ -185,8 +186,11 @@ export function ScriptElementForm({
 						ariaLabel={editorLabel}
 						value={script}
 						onChange={(value) => onChange({ ...config, script: value ?? "" })}
-						onMount={(instance) => {
+						onMount={(instance, monaco) => {
 							editorRef.current = instance;
+							// Here and not in `CodeEditor`: its read-only JavaScript viewers
+							// are not scripts a user is writing. Ends with the editor.
+							attachIntlDiagnostics(monaco, instance);
 						}}
 					/>
 				</div>
