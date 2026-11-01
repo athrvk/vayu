@@ -404,4 +404,107 @@ describe("TestValidationSummary", () => {
 			expect(screen.queryByText(/counted under Assertions/)).toBeNull();
 		});
 	});
+
+	describe("the replay's console lines (issue #3127)", () => {
+		it("lists them under a heading naming the replay and its sample size", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{
+						...TALLIES,
+						console: [
+							{ level: "log", text: "token refreshed" },
+							{ level: "error", text: "saw 500" },
+						],
+					}}
+					sampling={undefined}
+				/>
+			);
+
+			expect(
+				screen.getByText("Console from the post-run replay over 100 sampled responses")
+			).toBeTruthy();
+			expect(screen.getByText("token refreshed")).toBeTruthy();
+			expect(screen.getByText("saw 500")).toHaveClass("text-status-error-text");
+		});
+
+		it("puts the count beside a line the replay logged more than once, as on a failure", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{
+						...TALLIES,
+						console: [
+							{ level: "log", text: "token refreshed", count: 1_204 },
+							{ level: "warn", text: "once" },
+						],
+					}}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("token refreshed").nextElementSibling?.textContent).toBe(
+				"x1,204"
+			);
+			expect(screen.getByText("once").nextElementSibling).toBeNull();
+		});
+
+		it("renders for a replay that logged and asserted nothing else", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{
+						samplesTested: 40,
+						testsPassed: 0,
+						testsFailed: 0,
+						successRate: 0,
+						console: [{ level: "info", text: "ran" }],
+					}}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("ran")).toBeTruthy();
+			expect(screen.getByText("Test validation")).toBeTruthy();
+		});
+
+		it("says how many occurrences a full list turned away", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{
+						...TALLIES,
+						console: [{ level: "log", text: "hello" }],
+						consoleDropped: 1_204,
+					}}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("1,204 more console line occurrences not shown")).toBeTruthy();
+		});
+
+		it("still says what was turned away when the list itself is empty", () => {
+			render(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, consoleDropped: 9 }}
+					sampling={undefined}
+				/>
+			);
+
+			expect(screen.getByText("9 more console line occurrences not shown")).toBeTruthy();
+		});
+
+		it("adds nothing to a report stored before the field, or one whose replay logged nothing", () => {
+			const { rerender } = render(
+				<TestValidationSummary testValidation={TALLIES} sampling={undefined} />
+			);
+			expect(screen.queryByText(/^Console from/)).toBeNull();
+
+			rerender(
+				<TestValidationSummary
+					testValidation={{ ...TALLIES, console: [], consoleDropped: 0 }}
+					sampling={undefined}
+				/>
+			);
+			expect(screen.queryByText(/^Console from/)).toBeNull();
+			expect(screen.queryByRole("list")).toBeNull();
+		});
+	});
 });

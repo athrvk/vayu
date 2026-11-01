@@ -25,12 +25,18 @@
  * `test-validation.ts`), so this is the one place they reach the screen. Each
  * distinct message is listed once with how often it failed (#3127): a script
  * failing the same way on every sampled response is one line, `x1,000`.
+ *
+ * **The replay's console lines close the card** (#3127), under a heading that
+ * names the replay and its sample size. They ride inside `testValidation`, so a
+ * report from an engine before the field simply has none to draw.
  */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { formatNumber, formatPercent } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { Callout } from "./Callout";
+import { OccurrenceCount } from "./OccurrenceCount";
+import { ReplayConsole } from "./ReplayConsole";
 import { SampleRetentionNote } from "./SampleRetentionNote";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { TEST_VALIDATION_TITLE, type ReplayScope } from "./run-assertions";
@@ -131,9 +137,7 @@ function FailureLine({ message, count }: { message: string; count: number | unde
 			<pre className="min-w-0 flex-1 font-mono whitespace-pre-wrap break-words">
 				{message}
 			</pre>
-			{count !== undefined && count > 1 && (
-				<span className="shrink-0 font-mono tabular-nums">x{formatNumber(count)}</span>
-			)}
+			<OccurrenceCount count={count} />
 		</div>
 	);
 }
@@ -267,6 +271,14 @@ export function TestValidationSummary({
 						)}
 					</div>
 				)}
+
+				{/* The replay's console lines (#3127). They are a member of
+				    `testValidation`, so they never outlive the block above them. */}
+				<ReplayConsole
+					source={testValidation}
+					sampled={testValidation?.samplesTested}
+					className="mt-4"
+				/>
 			</CardContent>
 		</Card>
 	);

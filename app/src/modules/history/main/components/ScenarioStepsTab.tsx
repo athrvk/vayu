@@ -25,7 +25,8 @@
  * step's own post-request script replayed after the run against that step's
  * sampled responses. A step that asserted nothing shows a dash rather than a
  * zero - "no assertions" and "no failures" are different answers, and the
- * engine keeps them apart by omitting the object.
+ * engine keeps them apart by omitting the object. The console lines that replay
+ * logged sit in a row of their own under the step's elements (issue #3127).
  */
 
 import { Fragment } from "react";
@@ -43,10 +44,12 @@ import {
 	ErrorsCell,
 	ExecutedCell,
 	ExtractorMisses,
+	ReplayConsole,
 	ScenarioFacts,
 	StepLabelCell,
 	deferredResponsesOf,
 	elementRowKey,
+	hasReplayConsole,
 } from "@/components/shared";
 import { formatLatency, formatNumber } from "@/lib/format-number";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -112,6 +115,23 @@ function TestsCell({ step }: { step: RunScenarioStepStat }) {
 				</span>
 			)}
 		</span>
+	);
+}
+
+/**
+ * What the step's replayed script logged (issue #3127), as a row under the
+ * deferred element row that points at the replay; nothing when it logged
+ * nothing.
+ */
+function StepReplayConsoleRow({ step }: { step: RunScenarioStepStat }) {
+	const { tests } = step;
+	if (!tests || !hasReplayConsole(tests)) return null;
+	return (
+		<TableRow className="bg-muted/20">
+			<TableCell colSpan={8} className="py-1.5 pl-9">
+				<ReplayConsole source={tests} sampled={tests.sampled} className="text-xs" />
+			</TableCell>
+		</TableRow>
 	);
 }
 
@@ -229,6 +249,7 @@ export default function ScenarioStepsTab({
 										</TableCell>
 									</TableRow>
 								))}
+								<StepReplayConsoleRow step={step} />
 								{/* The step's extractor misses (issue #3053), after its element
 								    rows: each is one of an extractor row's `missing`, summed here
 								    because each also left a later step sending that name

@@ -1288,9 +1288,10 @@ TEST_F (ScenarioLoadTest, ALoadRunAndACollectionRunCountAThrownScriptTheSame) {
 
 // #3127: a load run says why an inline script failed and what it logged, on
 // the step's element row: the throw, the failing test by name and the console
-// line, each once however many iterations said it. Mutation check: drop the
-// `outcome_messages` assignment from `run_step_script` (script_kinds.cpp) and
-// the row carries neither `messages` nor `console`.
+// line, each once however many iterations said it, with that number as its
+// `count`. Mutation check: drop the `outcome_messages` assignment from
+// `run_step_script` (script_kinds.cpp) and the row carries neither `messages`
+// nor `console`.
 TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheStepsRow) {
     ScenarioMockServer server;
     auto execution = plan_over ({ server.url ("/s0") });
@@ -1309,7 +1310,7 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
     const auto& row = summary.at ("steps").at (0).at ("elements").at (0);
     EXPECT_EQ (row.at ("error").get<int> (), 4) << row.dump ();
     EXPECT_EQ (row.value ("console", json ()),
-    (json::array ({ { { "level", "log" }, { "text", "saw 200" } } })))
+    (json::array ({ { { "level", "log" }, { "text", "saw 200" }, { "count", 4 } } })))
     << row.dump ();
     const auto messages = row.value ("messages", json::array ());
     ASSERT_EQ (messages.size (), 2u) << row.dump ();
@@ -1320,6 +1321,9 @@ TEST_F (ScenarioLoadTest, AnInlineScriptsThrowTestFailureAndConsoleReachTheSteps
     EXPECT_TRUE (
     messages[1].at ("text").get<std::string> ().starts_with ("status is 201: "))
     << row.dump ();
+    for (const auto& message : messages) {
+        EXPECT_EQ (message.at ("count").get<int> (), 4) << row.dump ();
+    }
     EXPECT_FALSE (row.contains ("messagesDropped")) << row.dump ();
 }
 

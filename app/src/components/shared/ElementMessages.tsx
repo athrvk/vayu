@@ -11,13 +11,15 @@
  * per request, so the tally row is the only place this text can reach.
  *
  * The engine keeps a bounded, distinct sample: the first 10 entries of each
- * list, with a count of what a full list turned away. The count is said out
- * loud ("37 more console line occurrences not shown") for the reason the failure
- * list under Test validation says "Showing 10 of 14": ten lines read as the
- * whole set unless they say otherwise. The count is occurrences, not distinct
- * entries: one extra error thrown on 480 iterations is 480, so the cue must not
- * read as 480 more messages. All four keys are absent when empty, and on a
- * row from an engine before the field, so a row with none renders nothing.
+ * list, each with how many times it was seen (`x3` beside it, as on a failure
+ * under Test validation; no `count` means once), and a count of what a full
+ * list turned away. The dropped count is said out loud ("37 more console line
+ * occurrences not shown") for the reason the failure list under Test
+ * validation says "Showing 10 of 14": ten lines read as the whole set unless
+ * they say otherwise. It is occurrences, not distinct entries: one extra error
+ * thrown on 480 iterations is 480, so the cue must not read as 480 more
+ * messages. All four keys are absent when empty, and on a row from an engine
+ * before the field, so a row with none renders nothing.
  */
 
 import { formatNumber } from "@/lib/format-number";
@@ -25,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { LEVEL_TONE } from "./console-level";
 import { LogGutter } from "./LogGutter";
+import { OccurrenceCount } from "./OccurrenceCount";
 import type { RunScenarioStepElementTally } from "@/types/domain";
 
 type ElementMessagesSource = Pick<
@@ -32,16 +35,18 @@ type ElementMessagesSource = Pick<
 	"messages" | "messagesDropped" | "console" | "consoleDropped"
 >;
 
-/** One line: a reserved gutter naming what it is, then the text. */
+/** One line: a reserved gutter naming what it is, the text, then how often it was seen. */
 function Line({
 	label,
 	labelClassName,
 	textClassName,
+	count,
 	children,
 }: {
 	label: string;
 	labelClassName: string;
 	textClassName: string;
+	count: number | undefined;
 	children: string;
 }) {
 	return (
@@ -50,6 +55,7 @@ function Line({
 			<pre className={cn("min-w-0 flex-1 whitespace-pre-wrap break-words", textClassName)}>
 				{children}
 			</pre>
+			<OccurrenceCount count={count} />
 		</li>
 	);
 }
@@ -93,6 +99,7 @@ export function ElementMessages({
 					label={message.kind}
 					labelClassName="text-status-error-text"
 					textClassName="text-status-error-text"
+					count={message.count}
 				>
 					{message.text}
 				</Line>
@@ -107,6 +114,7 @@ export function ElementMessages({
 						label={tone.gutter}
 						labelClassName={tone.label}
 						textClassName={tone.text}
+						count={line.count}
 					>
 						{line.text}
 					</Line>

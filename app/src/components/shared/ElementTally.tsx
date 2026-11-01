@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { ElementMessages } from "./ElementMessages";
 import { elementOriginLabel } from "./element-origin";
-import { TEST_VALIDATION_TITLE } from "./run-assertions";
+import { TEST_VALIDATION_TITLE, replayPhrase } from "./run-assertions";
 import type { RunScenarioStepElementTally } from "@/types/domain";
 
 /** Why a required extractor's miss reads as a failure; the trace's outcome row says it too. */
@@ -56,12 +56,6 @@ export interface ElementTallyProps {
 	 */
 	replaySamples?: number;
 	className?: string;
-}
-
-/** `post-run replay over 1,000 sampled responses`, or the unsized phrase. */
-function replayPhrase(samples: number | undefined): string {
-	if (samples === undefined) return "post-run replay of sampled responses";
-	return `post-run replay over ${formatNumber(samples)} sampled ${pluralize(samples, "response")}`;
 }
 
 export function ElementTally({

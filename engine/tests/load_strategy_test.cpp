@@ -3526,8 +3526,9 @@ TEST_F (LoadStrategyTest, AnInlineScriptPostElementRunsPerSubmissionAndIsNotRepl
 // #3127: a single-request run's element row says why its inline scripts
 // failed and what they logged, the same `ElementOutcomeCounts` rule a
 // scenario step's row follows, and from the pre-request side as well as the
-// post-request one. Mutation check: drop the `outcome_messages` assignment
-// from `run_step_script` (script_kinds.cpp) and neither row carries a list.
+// post-request one, each entry with how many iterations produced it. Mutation
+// check: drop the `outcome_messages` assignment from `run_step_script`
+// (script_kinds.cpp) and neither row carries a list.
 TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
     const size_t ITERATIONS = 4;
     vayu::db::Database db (TEST_DB_PATH);
@@ -3545,7 +3546,8 @@ TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
     const auto pre = element_entry (summary, "el_pre");
     ASSERT_FALSE (pre.is_null ()) << summary.dump ();
     EXPECT_EQ (pre.value ("console", nlohmann::json ()),
-    (nlohmann::json::array ({ { { "level", "warn" }, { "text", "signing" } } })))
+    (nlohmann::json::array (
+    { { { "level", "warn" }, { "text", "signing" }, { "count", ITERATIONS } } })))
     << pre.dump ();
     EXPECT_FALSE (pre.contains ("messages"))
     << "a clean script said nothing wrong";
@@ -3554,13 +3556,15 @@ TEST_F (LoadStrategyTest, AnInlineScriptsThrowAndConsoleReachItsElementRow) {
     ASSERT_FALSE (post.is_null ()) << summary.dump ();
     EXPECT_EQ (post.at ("error").get<size_t> (), ITERATIONS) << post.dump ();
     EXPECT_EQ (post.value ("console", nlohmann::json ()),
-    (nlohmann::json::array ({ { { "level", "log" }, { "text", "saw 200" } } })))
+    (nlohmann::json::array (
+    { { { "level", "log" }, { "text", "saw 200" }, { "count", ITERATIONS } } })))
     << post.dump ();
     const auto messages = post.value ("messages", nlohmann::json::array ());
     ASSERT_EQ (messages.size (), 1u) << post.dump ();
     EXPECT_EQ (messages[0].at ("kind").get<std::string> (), "error");
     EXPECT_NE (messages[0].at ("text").get<std::string> ().find ("boom"), std::string::npos)
     << post.dump ();
+    EXPECT_EQ (messages[0].at ("count").get<size_t> (), ITERATIONS) << post.dump ();
 }
 
 // `timer.think` holds a completed submission's concurrency slot for its wait

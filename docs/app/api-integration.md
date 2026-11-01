@@ -2118,14 +2118,20 @@ deferred to a post-run replay over M sampled responses" rather than "0 passed", 
 `testValidation.samplesTested` (a scenario step's `tests.sampled`; a row whose report does
 not carry one reads "replay of sampled responses"). An inline `script.*` row may also carry
 `messages` (the error it threw and each failing `pm.test`, `{kind: "error" | "test", text}`),
-`console` (`{level, text}`) and the `messagesDropped` / `consoleDropped` counts of what a
-full list turned away (#3127); each key is absent when empty, and the Elements card and the
+`console` (`{level, text}`), each entry with `count` when it was seen more than once, and
+the `messagesDropped` / `consoleDropped` counts of the occurrences a full list turned away
+(#3127); each key is absent when empty (`count` when the entry was seen once), and the Elements card and the
 Steps tab list them under the row. The deferred replay's failures arrive on the synthetic
 `results[]` row as `failures` (each distinct message once), `failureCounts` (how often each
 failed), `failuresDistinct` and the occurrence totals `totalFailed` / `totalPassed`; the
 Test validation card shows each message once with `x3` beside a repeat and says "Showing N
 of M distinct" when the engine kept fewer than it saw. A row from before #3127 has no
-`failureCounts` or `failuresDistinct`, and each of its entries counts as one.
+`failureCounts` or `failuresDistinct`, and each of its entries counts as one. The replay's
+console lines ride on the aggregate instead: `testValidation.console` and `consoleDropped` on a
+single-request run, `scenario.steps[].tests.console` and `consoleDropped` per step on a scenario
+run (same `{level, text, count?}` lines and occurrence count as an inline row, each key absent when
+nothing was logged and on a report from before the field), drawn under "Console from the
+post-run replay over N sampled responses" by `ReplayConsole`.
 
 An **absent** `sampling` is a run whose stored summary predates the counts, not
 a run that dropped nothing, so the note stays out rather than asserting a

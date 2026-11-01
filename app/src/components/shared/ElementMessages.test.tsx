@@ -101,6 +101,35 @@ describe("ElementMessages", () => {
 		expect(screen.getByText("from a newer engine")).toBeInTheDocument();
 	});
 
+	describe("how often each entry was seen", () => {
+		it("shows x and the count beside a message and a console line seen more than once", () => {
+			renderMessages({
+				messages: [{ kind: "error", text: "Error: boom", count: 1_204 }],
+				console: [{ level: "warn", text: "slow body", count: 3 }],
+			});
+
+			// The count sits beside the text, in the same row.
+			expect(screen.getByText("Error: boom").nextElementSibling?.textContent).toBe("x1,204");
+			expect(screen.getByText("slow body").nextElementSibling?.textContent).toBe("x3");
+		});
+
+		it.each([
+			["absent", undefined],
+			["one", 1],
+		])("shows no count when it is %s", (_label, count) => {
+			// Absent means once: the engine writes `count` only past one, and a row from
+			// an engine before the field has none.
+			renderMessages({
+				messages: [{ kind: "test", text: "a: b", count }],
+				console: [{ level: "log", text: "hello", count }],
+			});
+
+			expect(screen.getByText("a: b").nextElementSibling).toBeNull();
+			expect(screen.getByText("hello").nextElementSibling).toBeNull();
+			expect(screen.queryByText(/^x\d/)).toBeNull();
+		});
+	});
+
 	describe("the dropped counts", () => {
 		it("says how many messages a full list turned away", () => {
 			renderMessages({

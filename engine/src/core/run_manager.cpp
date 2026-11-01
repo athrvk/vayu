@@ -259,6 +259,7 @@ nlohmann::json& stream_events) {
  *
  * A throw from one element is that element's failure; the elements after it
  * still run, the way a Send's pipeline runs the next level after one throws.
+ * Every line a script logged is offered to @p console, whatever its verdict.
  */
 template <typename RecordFailure>
 void replay_sample (vayu::runtime::ScriptEngine& engine,
@@ -266,13 +267,18 @@ vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 const ResponseSample& sample,
 ScriptValidationTotals& totals,
+DistinctMessageSample& console,
 RecordFailure& record_failure) {
     const vayu::Response response = sample_response (sample);
     nlohmann::json stream_events;
     const auto script_ctx = replay_context (replay, scopes, sample, response, stream_events);
     for (const auto& script : *replay.scripts) {
         try {
-            tally_replay_result (engine.execute (script, script_ctx), totals, record_failure);
+            const vayu::ScriptResult result = engine.execute (script, script_ctx);
+            for (const auto& line : result.console_output) {
+                console.offer (console_message (line));
+            }
+            tally_replay_result (result, totals, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
@@ -289,6 +295,8 @@ RecordFailure& record_failure) {
  * @param failures Recorded into, and keeps at most MAX_FAILURE_MESSAGES
  *        distinct messages across the whole run - a forty-step plan must not
  *        multiply the cap by forty.
+ * @return The tallies, and the console lines of this replay alone: a scenario
+ *         step's own, never merged with another step's.
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
@@ -296,6 +304,7 @@ const ScriptReplay& replay,
 ReplayFailures& failures) {
     ScriptValidationTotals totals;
     totals.sampled = replay.samples->size ();
+    DistinctMessageSample console;
 
     auto record_failure = [&failures, &replay] (const std::string& message) {
         failures.record (replay.failure_prefix + message);
@@ -305,13 +314,15 @@ ReplayFailures& failures) {
         // A sample whose context cannot be built runs none of its scripts and
         // fails once.
         try {
-            replay_sample (engine, scopes, replay, sample, totals, record_failure);
+            replay_sample (engine, scopes, replay, sample, totals, console, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
         }
     }
 
+    totals.console         = console.kept ();
+    totals.console_dropped = console.dropped ();
     return totals;
 }
 } // namespace
@@ -460,7 +471,8 @@ RunContext::ScriptsOverrideMode scripts_mode) {
  *
  * A step with no script, or one whose script never got a sample to run against,
  * reports nothing rather than a row of zeros - the same distinction the
- * whole-run section has always kept.
+ * whole-run section has always kept. Returns the steps' counts summed; each
+ * step's console lines stay on its own entry of `validation.steps`.
  */
 ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
@@ -517,11 +529,11 @@ ReplayFailures& failures) {
         replay.sse_limits = sse_limits;
         replay.send       = send;
 
-        const auto totals   = run_replay (engine, scopes, replay, failures);
-        validation.steps[i] = totals;
+        auto totals = run_replay (engine, scopes, replay, failures);
         run_totals.sampled += totals.sampled;
         run_totals.passed += totals.passed;
         run_totals.failed += totals.failed;
+        validation.steps[i] = std::move (totals);
     }
 
     return run_totals;
@@ -670,19 +682,14 @@ vayu::db::Database& db) {
     auto scopes = vayu::http::routes::load_script_variable_scopes (
     db, environment_id, collection_id);
 
-    size_t passed  = 0;
-    size_t failed  = 0;
-    size_t sampled = 0;
+    ScriptValidationTotals totals;
     ReplayFailures failures;
 
     if (per_step) {
-        const ScriptValidationTotals totals = replay_scenario_steps (
+        totals = replay_scenario_steps (
         engine, scopes, context, sse_limits, script_send, validation, failures);
-        sampled = totals.sampled;
-        passed  = totals.passed;
-        failed  = totals.failed;
         // Every scripted step drew a blank, so the run validated nothing.
-        if (sampled == 0) {
+        if (totals.sampled == 0) {
             return validation;
         }
     } else {
@@ -711,18 +718,17 @@ vayu::db::Database& db) {
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
-        const auto totals = run_replay (engine, scopes, replay, failures);
-        sampled           = totals.sampled;
-        passed            = totals.passed;
-        failed            = totals.failed;
+        totals = run_replay (engine, scopes, replay, failures);
     }
 
-    store_validation_failures (db, context->run_id, failures, passed, failed);
+    store_validation_failures (
+    db, context->run_id, failures, totals.passed, totals.failed);
 
     vayu::utils::log_debug ("run", "Script validation",
-    { { "runId", context->run_id }, { "passed", passed }, { "failed", failed } });
+    { { "runId", context->run_id }, { "passed", totals.passed },
+    { "failed", totals.failed } });
 
-    validation.run = ScriptValidationTotals{ sampled, passed, failed };
+    validation.run = std::move (totals);
     return validation;
 }
 
@@ -796,6 +802,20 @@ const std::shared_ptr<RunContext>& context) {
     return totals;
 }
 
+namespace {
+
+/// The stored `tests` object, the run's and a scenario step's alike:
+/// `{sampled, passed, failed, console?, consoleDropped?}`.
+nlohmann::json test_totals_payload (const ScriptValidationTotals& tests) {
+    nlohmann::json payload = { { "sampled", tests.sampled },
+        { "passed", tests.passed }, { "failed", tests.failed } };
+    write_message_sample (
+    payload, "console", "consoleDropped", tests.console, tests.console_dropped);
+    return payload;
+}
+
+} // namespace
+
 void attach_step_test_totals (nlohmann::json& scenario,
 const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     auto steps = scenario.find ("steps");
@@ -808,8 +828,7 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
         if (!tests) {
             continue;
         }
-        (*steps)[i]["tests"] = { { "sampled", tests->sampled },
-            { "passed", tests->passed }, { "failed", tests->failed } };
+        (*steps)[i]["tests"] = test_totals_payload (*tests);
     }
 }
 
@@ -2670,8 +2689,7 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // Omitted entirely when validation did not run, so the report keeps
     // distinguishing "no test script" from "a script that passed nothing".
     if (inputs.tests.has_value ()) {
-        summary["tests"] = { { "sampled", inputs.tests->sampled },
-            { "passed", inputs.tests->passed }, { "failed", inputs.tests->failed } };
+        summary["tests"] = test_totals_payload (*inputs.tests);
     }
     // The run's verdict against the budgets it declared. Omitted when it
     // declared none, for the same reason `tests` is: "no budget" and "a budget

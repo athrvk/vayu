@@ -591,7 +591,7 @@ describe("what a step's script said and how many responses its replay ran over (
 						{ kind: "error", text: "Error: boom" },
 						{ kind: "test", text: "status is 201: expected 200 to equal 201" },
 					],
-					console: [{ level: "error", text: "saw 500" }],
+					console: [{ level: "error", text: "saw 500", count: 480 }],
 					consoleDropped: 12,
 				},
 			],
@@ -600,6 +600,7 @@ describe("what a step's script said and how many responses its replay ran over (
 		expect(within(row).getByText("Error: boom")).toBeTruthy();
 		expect(within(row).getByText("status is 201: expected 200 to equal 201")).toBeTruthy();
 		expect(within(row).getByText("saw 500")).toHaveClass("text-status-error-text");
+		expect(within(row).getByText("x480")).toBeTruthy();
 		expect(within(row).getByText("12 more console line occurrences not shown")).toBeTruthy();
 	});
 
@@ -627,6 +628,120 @@ describe("what a step's script said and how many responses its replay ran over (
 		const row = rowOf({ elements: [{ ...script, error: 0, deferred: 40 }] });
 
 		expect(within(row).getByText(/replay of sampled responses - results in/)).toBeTruthy();
+	});
+});
+
+/**
+ * Issue #3127: a step's deferred replay keeps the console lines its script
+ * logged, and they are drawn in a row of their own under that step. Mutation
+ * check: drop the `ReplayConsole` row from `ScenarioStepsTab` and every case
+ * here but the two "nothing" ones fails.
+ */
+describe("what a step's replayed script logged (issue #3127)", () => {
+	const replayed = (tests: RunScenarioStepStat["tests"], index = 0): RunScenarioStepStat => ({
+		...STEPS[index],
+		tests,
+	});
+
+	it("lists the console lines in a row under the step, headed by the replay's size, each with its count", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					replayed({
+						sampled: 500,
+						passed: 10,
+						failed: 0,
+						console: [
+							{ level: "log", text: "token refreshed" },
+							{ level: "warn", text: "slow reply", count: 1_204 },
+						],
+					}),
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		const row = screen.getAllByRole("row").slice(1)[1];
+		expect(
+			within(row).getByText("Console from the post-run replay over 500 sampled responses")
+		).toBeTruthy();
+		expect(within(row).getByText("token refreshed").nextElementSibling).toBeNull();
+		expect(within(row).getByText("slow reply").nextElementSibling?.textContent).toBe("x1,204");
+	});
+
+	it("says how many occurrences a full list turned away", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					replayed({
+						sampled: 1,
+						passed: 1,
+						failed: 0,
+						console: [{ level: "log", text: "hello" }],
+						consoleDropped: 37,
+					}),
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getByText("37 more console line occurrences not shown")).toBeTruthy();
+		expect(
+			screen.getByText("Console from the post-run replay over 1 sampled response")
+		).toBeTruthy();
+	});
+
+	it("still says what was turned away when the list itself is empty", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[replayed({ sampled: 5, passed: 5, failed: 0, consoleDropped: 9 })]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getByText("9 more console line occurrences not shown")).toBeTruthy();
+	});
+
+	it("keeps each step's lines under that step", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					replayed({
+						sampled: 5,
+						passed: 5,
+						failed: 0,
+						console: [{ level: "log", text: "from login" }],
+					}),
+					replayed({ sampled: 7, passed: 7, failed: 0 }, 1),
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		const rows = screen.getAllByRole("row").slice(1);
+		// login, its console row, then list orders with none.
+		expect(rows).toHaveLength(3);
+		expect(within(rows[1]).getByText("from login")).toBeTruthy();
+		expect(within(rows[2]).getByText("List orders")).toBeTruthy();
+		expect(screen.queryByText(/over 7 sampled/)).toBeNull();
+	});
+
+	it("adds no row for a step stored before the fields, or one whose replay logged nothing", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[
+					replayed({ sampled: 5, passed: 5, failed: 0 }),
+					replayed(
+						{ sampled: 5, passed: 5, failed: 0, console: [], consoleDropped: 0 },
+						1
+					),
+				]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+		expect(screen.queryByText(/^Console from/)).toBeNull();
 	});
 });
 

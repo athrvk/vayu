@@ -2903,12 +2903,22 @@ A load run stores no trace per request, so an inline `script.pre` or
 (the error it threw, and each failing `pm.test` as `name: message`). Each list
 keeps the first 10 distinct entries the run produced, however many iterations
 repeated one, each cut to 500 bytes (`MAX_ELEMENT_MESSAGES` and
-`MAX_ELEMENT_MESSAGE_BYTES` in `script_validation`, `core/constants.hpp`).
-What a full list turned away is counted in `consoleDropped` /
-`messagesDropped`. The lists are apart so a script that logs on every iteration
-cannot crowd out why it failed. A script left to the deferred replay keeps none
-of this; see [Load Test Scripts](#load-test-scripts) and the
-[API reference](api-reference.md#post-runs).
+`MAX_ELEMENT_MESSAGE_BYTES` in `script_validation`, `core/constants.hpp`). An
+entry seen more than once carries `count`, how many times; one seen once has
+no `count`. What a full list turned away is counted, in occurrences, in
+`consoleDropped` / `messagesDropped`. The lists are apart so a script that logs
+on every iteration cannot crowd out why it failed.
+
+**A script left to the deferred replay keeps its console lines the same way.**
+Every line a replayed `script.post` logged, whatever its verdict (a script that
+threw keeps what it logged first), goes into one `console` list under the same
+caps and with the same `count`, with `consoleDropped` beside it: a single-request run keeps one list for
+the run, on the report's `testValidation`; a scenario load run keeps one per
+step, on that step's `tests` (`scenario.steps[].tests`), so the same line from
+two steps appears under each and the run's own `testValidation` carries none.
+The replay's failures are its validation row and `testValidation`'s counts; see
+[Load Test Scripts](#load-test-scripts) and the
+[API reference](api-reference.md#get-runsrunidreport).
 
 ## Examples
 
@@ -4148,9 +4158,11 @@ The **language** is current; what is missing is the **host environment**:
   below)
 - An inline script's console lines, the error it threw and each failing
   `pm.test` reach the report as a bounded sample on its element row: the first
-  10 distinct of each, with a count of what did not fit (see
-  [Console Output](#console-output), #3127). The deferred replay's console
-  output is not kept; its failures are the report's `testValidation`
+  10 distinct of each, each with how many times it was seen (`count`, absent
+  when once), and the occurrences that did not fit (see
+  [Console Output](#console-output), #3127). The deferred replay keeps the same
+  bounded sample of its console lines on the report's `testValidation`, or per
+  step on a scenario step's `tests`; its failures are the validation row above
 - For a pre-request script that is **not** inlined, a value it would have set -
   a token fetched and written with `pm.environment.set` - never reaches a
   later step or request under load, because the script that would set it never

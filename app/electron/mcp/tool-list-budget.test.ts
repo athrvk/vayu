@@ -144,6 +144,11 @@
  * tree before #3159 landed, so the rows after both are 148,254 / 145,528 /
  * 218,016 / 213,619 B), and the four caps went to 148,400 / 145,700 / 218,200 /
  * 213,800.
+ *
+ * #3127's clause naming where the sampled replay's console lines are
+ * (`testValidation.console`, a scenario step's `tests.console`) added 85 B to
+ * every row, taking them to 148,339 / 145,613 / 218,101 / 213,704 B: inside
+ * the four caps above, which stay.
  */
 
 import { describe, it, expect } from "vitest";
