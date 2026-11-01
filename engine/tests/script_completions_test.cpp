@@ -734,7 +734,7 @@ TEST (ScriptCompletions, TheLodashGlobalIsOfferedAndBound) {
     response.status_code = 200;
     const auto result =
     engine.execute_test ("if (typeof _ !== 'function' || _.VERSION !== "
-                         "'4.17.21') throw new Error('not lodash');",
+                         "'4.18.1') throw new Error('not lodash');",
     request, response, env);
     EXPECT_TRUE (result.success) << result.error_message;
 }

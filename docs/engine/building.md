@@ -521,7 +521,7 @@ of them, never when a context is built ([#2650](https://github.com/athrvk/vayu/i
 | Library | Version | Licence | Vendored file |
 |---------|---------|---------|---------------|
 | uuid | 8.3.2 | MIT | `engine/vendor/uuid/uuid.min.js` (`dist/umd/uuid.min.js`, 8,160 bytes) |
-| lodash | 4.17.21 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,015 bytes) |
+| lodash | 4.18.1 | MIT | `engine/vendor/lodash/lodash.min.js` (the package's `lodash.min.js`, 73,234 bytes) |
 | moment | 2.31.0 | MIT | `engine/vendor/moment/moment.min.js` (the package's `min/moment.min.js`, 60,887 bytes; English only, no locale files) |
 | csv-parse | 1.2.4 | BSD-3-Clause | `engine/vendor/csv-parse/csv-parse-sync.min.js` (the package's `lib/sync.js` and the `lib/index.js` it requires, bundled and minified by esbuild, 11,679 bytes; string input only), loaded as `require('csv-parse/lib/sync')` |
 | xml2js | 0.6.2, with sax 1.2.4 and xmlbuilder 11.0.1 | MIT (sax ISC) | `engine/vendor/xml2js/xml2js.min.js` (xml2js's `lib/`, sax's `lib/sax.js` and xmlbuilder's `lib/`, bundled and minified by esbuild, 98,939 bytes; string input only), loaded as `require('xml2js')` or the `xml2Json` global |

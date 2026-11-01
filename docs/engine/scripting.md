@@ -3370,7 +3370,7 @@ so a collection that uses it is not named in `meta.unsupportedScriptApis`.
 #### `lodash`
 
 `require('lodash')` and the `_` global are **the npm `lodash` package itself**,
-version 4.17.21, the full build (`lodash.min.js`, 73,015 bytes) vendored
+version 4.18.1, the full build (`lodash.min.js`, 73,234 bytes) vendored
 unmodified (`engine/vendor/lodash/`, MIT; see
 [Vendored JavaScript libraries](building.md#vendored-javascript-libraries)).
 It is the whole library, not a subset, so every lodash 4 function is there,
