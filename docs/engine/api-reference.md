@@ -7249,8 +7249,12 @@ with specific codes:
 - `400` `{"error": {"code": "invalid_compose_request", "message": "..."}}` -
   malformed JSON, neither `requestId` nor `request`, or a field of the wrong type.
 - `400` `{"error": {"code": "unsendable_header", "message": "..."}}` - a
-  variable substituted into a header name or value carries a byte no header line
-  can hold. This is the one payload composition rejects over a *value* rather
+  variable substituted into a header name or value, or into a credential the
+  engine writes into a header line as it stands (a bearer token, an api key
+  sent in a header), carries a byte no header line can hold. Basic auth's pair
+  and an api key sent in the query are encoded before they reach the wire, and
+  an OAuth 2.0 config is not a header, so a variable in those composes
+  unchanged. This is the one payload composition rejects over a *value* rather
   than over its shape, and it is deliberate: a header line ends at CRLF and has
   no escape for it, so `ok\r\nX-Admin: true` arriving from an environment
   variable does not sit in the header - it ends the line and makes the remainder
@@ -7260,17 +7264,19 @@ with specific codes:
   which reads to the first NUL, so the rest of the line would go out missing
   rather than refused. The same bytes remain ordinary text in a URL, a body and
   a form field's value, which compose unchanged. For a request a pre-request
-  script runs before, a variable written into a header is not substituted here
-  (see [`deferredVariables`](#deferredvariables)), so the same refusal, naming
-  the variable, is made after the script: `statusCode: 0` and `refusalCode:
+  script runs before, a variable written into a header or a header-line
+  credential is not substituted here (see
+  [`deferredVariables`](#deferredvariables)), so the same refusal, naming the
+  variable, is made after the script: `statusCode: 0` and `refusalCode:
   "unsendable_header"` on a buffered send, a `400` with that code on a streaming
-  one, and nothing is rewritten first.
+  one. A header row is refused with nothing rewritten first.
 
   A header carrying either byte from any *other* origin - a script's assignment
-  to `pm.request.headers`, an auth credential, an import, a payload posted
-  straight to `POST /execute` - is refused one step later, before any transfer
-  starts: the response carries `statusCode: 0` and an `errorCode` of
-  `INTERNAL_ERROR` whose message names the header instead of a variable. The
+  to `pm.request.headers`, a credential typed with the byte in it, an import,
+  a payload posted straight to `POST /execute` - is refused one step later,
+  before any transfer starts: the response carries `statusCode: 0` and an
+  `errorCode` of `INTERNAL_ERROR` whose message names the header instead of a
+  variable. The
   same refusal covers a multipart part's field name, declared filename and
   per-part content type, which libcurl writes into that part's own header block.
   A bound `{{data.column}}` is refused earlier still, at bind time, naming the
@@ -9580,9 +9586,10 @@ grammar to have stripped the newline - so this is an ordinary cell, not an
 exotic one.
 
 The cell is one of three origins the rule covers, and they share one definition
-of what a header may hold. A `{{variable}}` substituted into a header is refused
-by `POST /compose` with `unsendable_header`, naming the variable; every other
-origin - a script, an auth credential, an import, a raw `POST /execute` payload
+of what a header may hold. A `{{variable}}` substituted into a header, or into
+a credential written into a header line, is refused by `POST /compose` with
+`unsendable_header`, naming the variable; every other origin - a script, a
+credential typed with the byte in it, an import, a raw `POST /execute` payload
 - is refused before the transfer starts, naming the header. That last gate also
 covers a NUL (which truncates the line rather than forging one) and a multipart
 part's field name, filename and content type.

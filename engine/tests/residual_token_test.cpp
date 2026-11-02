@@ -1173,6 +1173,92 @@ TEST (LateAuth, AnOAuth2ConfigWithNoTokenCacheIsRefused) {
     EXPECT_EQ (request.headers.count ("Authorization"), 0u);
 }
 
+// A credential written into a header line as it stands is held to the header
+// rule here, as composition holds it (#3203): the variable is named under
+// `unsendable_header`, where the pre-send gate could only name `Authorization`
+// under INTERNAL_ERROR. Mutation check: resolve every credential with
+// `resolve_template` in `apply_late_auth` and every refusal case below fails;
+// `AnEncodedCredentialCarryingALineBreakIsNotRefused` must keep passing.
+
+TEST (LateAuth, ABearerTokenVariableCarryingALineBreakIsRefusedByName) {
+    for (const std::string& value :
+    { std::string ("ok\r\nX-Admin: true"), std::string ("a\0b", 3) }) {
+        vayu::Request request;
+        const auto refusal = apply_late_auth (request,
+        vayu::http::BearerAuth{ "{{token}}" }, environment_with ("token", value));
+
+        ASSERT_HAS_VALUE (refusal);
+        EXPECT_EQ (refusal->code, "unsendable_header");
+        EXPECT_NE (refusal->error.message.find ("{{token}}"), std::string::npos)
+        << refusal->error.message;
+    }
+}
+
+TEST (LateAuth, AHeaderApiKeyVariableCarryingALineBreakIsRefusedByName) {
+    for (const vayu::http::ApiKeyAuth& auth :
+    { vayu::http::ApiKeyAuth{ "X-Api-Key", "{{key}}", false },
+    vayu::http::ApiKeyAuth{ "{{key}}", "v", false } }) {
+        vayu::Request request;
+        const auto refusal = apply_late_auth (
+        request, auth, environment_with ("key", "k\r\nX-Admin: true"));
+
+        ASSERT_HAS_VALUE (refusal);
+        EXPECT_EQ (refusal->code, "unsendable_header");
+        EXPECT_NE (refusal->error.message.find ("{{key}}"), std::string::npos)
+        << refusal->error.message;
+    }
+}
+
+// Encoded before the wire, so the same value is no header's text.
+TEST (LateAuth, AnEncodedCredentialCarryingALineBreakIsNotRefused) {
+    const std::string line_break = "ok\r\nX-Admin: true";
+    vayu::Request basic;
+    EXPECT_FALSE (apply_late_auth (basic, vayu::http::BasicAuth{ "user", "{{secret}}" },
+    environment_with ("secret", line_break)));
+    EXPECT_EQ (basic_pair_of (basic.headers["Authorization"]), "user:" + line_break);
+
+    vayu::Request query;
+    query.url = "https://api.example/items";
+    EXPECT_FALSE (apply_late_auth (query,
+    vayu::http::ApiKeyAuth{ "api_key", "{{secret}}", /*in_query=*/true },
+    environment_with ("secret", line_break)));
+    EXPECT_NE (query.url.find ("api_key=ok%0D%0AX-Admin"), std::string::npos)
+    << query.url;
+}
+
+/// The refusal reaches the exchange's answer under its own code, and nothing
+/// is sent.
+TEST_F (ResidualTokenExchangeTest, ALateBearerTokenCarryingALineBreakIsNeverSentAndKeepsItsCode) {
+    vayu::Request request;
+    request.url = server_->url () + "/users";
+
+    ScriptVariableScopes scopes;
+    auto outcome = send (std::move (request), scopes,
+    "pm.environment.set('token', 'ok\\r\\nX-Admin: true');",
+    /*in_scenario=*/false, vayu::http::BearerAuth{ "{{token}}" });
+
+    EXPECT_EQ (server_->requests_seen (), 0) << "the forged line went out";
+    EXPECT_EQ (outcome.response.status_code, 0);
+    EXPECT_EQ (outcome.refusal_code, "unsendable_header");
+    EXPECT_NE (outcome.response.error_message.find ("{{token}}"), std::string::npos)
+    << outcome.response.error_message;
+}
+
+/// Under load nothing is refused, only counted (#1503): the auth still goes on,
+/// so the pre-send gate stops the line rather than the request going out with
+/// no credential at all, and the refusal is what the run counts.
+TEST (LateAuth, ALoadSubmissionStillCarriesTheCredentialAndCountsTheRefusal) {
+    vayu::Request request;
+    const auto unresolved = vayu::http::routes::resolve_load_residuals (request,
+    flatten_variable_scopes (environment_with ("token", "ok\r\nX-Admin: true")),
+    vayu::http::Auth{ vayu::http::BearerAuth{ "{{token}}" } });
+
+    ASSERT_EQ (unresolved.size (), 1u);
+    EXPECT_NE (unresolved.front ().find ("{{token}}"), std::string::npos)
+    << unresolved.front ();
+    EXPECT_EQ (request.headers["Authorization"], "Bearer ok\r\nX-Admin: true");
+}
+
 /// The exchange applies it after the pre-request script, on the wire.
 TEST_F (ResidualTokenExchangeTest, ABasicPasswordThePreRequestScriptSetsReachesTheWire) {
     vayu::Request request;

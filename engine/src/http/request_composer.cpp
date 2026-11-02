@@ -22,6 +22,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/core/url_encoding.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
 #include "vayu/http/header_text.hpp"
@@ -1668,6 +1669,38 @@ void resolve_compose_body (const ComposeLookup& lookup, nlohmann::json& payload)
 }
 
 /**
+ * The first variable in a `CredentialDestination::HeaderLine` credential (a
+ * bearer token, an api key sent in a header) whose value cannot be spelled in
+ * a header line, read from @p written, the block before resolution.
+ *
+ * @p substituted is what the resolution gave each name, so the check reads the
+ * values that went into the payload rather than resolving a second time. A
+ * name deferred past the pre-request script, or one nothing answers,
+ * substituted nothing and has nothing to check yet: `apply_late_auth` judges it.
+ */
+std::optional<HeaderTextRefusal> unspellable_header_credential (const nlohmann::json& written,
+const std::map<std::string, std::string>& substituted) {
+    const TokenResolver as_substituted =
+    [&substituted] (const std::string& name) -> std::optional<std::string> {
+        const auto found = substituted.find (name);
+        if (found == substituted.end ()) {
+            return std::nullopt;
+        }
+        return found->second;
+    };
+    std::optional<HeaderTextRefusal> refusal;
+    const vayu::http::Auth credentials = vayu::http::parse_auth (written);
+    vayu::http::walk_auth_credentials (credentials,
+    [&as_substituted, &refusal] (
+    const std::string& field, vayu::http::CredentialDestination destination) {
+        if (destination == vayu::http::CredentialDestination::HeaderLine) {
+            (void)resolve_header_text (field, as_substituted, refusal);
+        }
+    });
+    return refusal;
+}
+
+/**
  * Auth: `inherit` resolved through the chain first, then `{{vars}}` inside
  * whatever concrete block won - strictly before any OAuth 2.0 cache key can be
  * computed from it (D10). An empty result means "send nothing", which is an
@@ -1679,14 +1712,21 @@ void resolve_compose_body (const ComposeLookup& lookup, nlohmann::json& payload)
  * says its token is acquired before any script (`AtComposition`), when it
  * resolves here. Deferred, it is resolved by `apply_late_auth` before
  * `apply_auth` acquires, so D10 holds on both paths.
+ *
+ * A credential `apply_auth` writes into a header line as it stands is held to
+ * the header rule (`http/header_text.hpp`): a variable whose value would end
+ * or cut that line is refused by name, as a header row's is.
+ *
+ * @return the refusal, or nothing.
  */
-void resolve_compose_auth (const std::vector<vayu::db::Collection>& chain,
+std::optional<std::pair<int, nlohmann::json>> resolve_compose_auth (
+const std::vector<vayu::db::Collection>& chain,
 const ComposeLookup& lookup,
 OAuth2Resolution oauth2,
 nlohmann::json& payload) {
     auto it = payload.find ("auth");
     if (it == payload.end ()) {
-        return;
+        return std::nullopt;
     }
     nlohmann::json auth = *it;
     if (auth_mode (auth) == "inherit") {
@@ -1694,11 +1734,26 @@ nlohmann::json& payload) {
     }
     if (is_empty_auth (auth) || auth_mode (auth) == "inherit") {
         payload.erase ("auth");
-        return;
+        return std::nullopt;
     }
     const bool resolves_now =
     auth_mode (auth) == "oauth2" && oauth2 == OAuth2Resolution::AtComposition;
-    *it = resolve_json_strings_through (auth, resolves_now ? lookup.now () : lookup);
+    const ComposeLookup resolve = resolves_now ? lookup.now () : lookup;
+    std::map<std::string, std::string> substituted;
+    nlohmann::json resolved = resolve_json_strings_through (
+    auth, [&resolve, &substituted] (const std::string& name) {
+        auto value = resolve (name);
+        if (value) {
+            substituted.emplace (name, *value);
+        }
+        return value;
+    });
+    if (auto refusal = unspellable_header_credential (auth, substituted)) {
+        return compose_error (400, vayu::http::UNSENDABLE_HEADER_CODE,
+        describe_header_text_refusal (*refusal));
+    }
+    *it = std::move (resolved);
+    return std::nullopt;
 }
 
 /**
@@ -1863,9 +1918,11 @@ VariableDeferral deferral) {
     const OAuth2Resolution oauth2_resolution = oauth2.value_or (
     dynamic == DynamicResolution::Defer ? OAuth2Resolution::AtComposition :
                                           OAuth2Resolution::AfterTheScript);
-    resolve_compose_auth (chain,
-    ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into },
-    oauth2_resolution, payload);
+    if (auto refusal = resolve_compose_auth (chain,
+        ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into },
+        oauth2_resolution, payload)) {
+        return *refusal;
+    }
 
     // Scripts are never interpolated (D16): a `{{...}}` inside script text is
     // user JavaScript, and rewriting it cannot tell a string literal from

@@ -810,7 +810,8 @@ it reads every name for that rule as it does for the empty one, and a token
 nothing answered is left written while the text around it is judged. A header
 *value* a variable would end or cut is refused here too for a scripted request,
 whose variables composition no longer substitutes (`unsendable_header`, #738's
-rule, #2521); the buffered answer carries each refusal's code as
+rule, #2521), and so is a bearer token or header-placed api key the late auth
+resolves (`apply_late_auth`, #3203); the buffered answer carries each refusal's code as
 `refusalCode`. An unresolved `{"mode":"inherit"}` reaching an execution endpoint
 is treated as no auth and logged as a **warning** - it means a client skipped
 composition.

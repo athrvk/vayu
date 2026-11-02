@@ -775,8 +775,12 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * reaches the token endpoint. The endpoints it would post to are judged by
  * @p acquisition's target policy first, as resolved.
  *
- * @return why the send must not go out, in the residual pass's shape, when
- *         `apply_auth` fails: an api key name that is not a header name, an
+ * @return why the send must not go out, in the residual pass's shape: a
+ *         variable in a bearer token or a header-placed api key whose value
+ *         ends or cuts the header line (`UNSENDABLE_HEADER_CODE`, named as the
+ *         residual pass names a header row's, though the auth is applied
+ *         first so a load run sends what it always did); or, when
+ *         `apply_auth` fails, an api key name that is not a header name, an
  *         OAuth 2.0 token endpoint the target policy refuses (`InvalidUrl`,
  *         `target_not_allowed` or `target_host_unknown`), or an OAuth 2.0
  *         token not acquired (`oauth2_no_database` with no @p acquisition).
