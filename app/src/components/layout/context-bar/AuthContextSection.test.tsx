@@ -39,11 +39,10 @@ vi.mock("@/queries", () => ({
 // scopes; an unset name stays written, as the real resolver leaves it.
 let variables: Record<string, string> = {};
 vi.mock("@/hooks/useVariableResolver", async () => {
-	const { resolveStringsDeep } = await vi.importActual<
+	const { resolveStringsDeep, resolveTemplate } = await vi.importActual<
 		typeof import("@/lib/variable-resolution")
 	>("@/lib/variable-resolution");
-	const resolveString = (input: string) =>
-		input.replace(/\{\{(\w+)\}\}/g, (_, name: string) => variables[name] ?? `{{${name}}}`);
+	const resolveString = (input: string) => resolveTemplate(input, (name) => variables[name]);
 	return {
 		useVariableResolver: () => ({
 			resolveObject: <T,>(o: T) => resolveStringsDeep(o, resolveString),
