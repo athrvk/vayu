@@ -377,9 +377,7 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.completed_while_sending = inputs.total_requests;
     inputs.send_rate =
     elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
-    if (context.auth_refresh) {
-        inputs.auth = context.auth_refresh->summary ();
-    }
+    inputs.auth = AuthRefreshState::summarize (context.auth_refresh_states);
     return inputs;
 }
 
@@ -1042,8 +1040,10 @@ void RunContext::join_aux_threads () {
     if (monitor_thread.joinable ()) {
         monitor_thread.join ();
     }
-    if (auth_refresh_thread.joinable ()) {
-        auth_refresh_thread.join ();
+    for (auto& thread : auth_refresh_threads) {
+        if (thread.joinable ()) {
+            thread.join ();
+        }
     }
 }
 
@@ -1510,6 +1510,34 @@ int default_max_per_host) {
     context->publish_event_loop (std::move (event_loop));
 }
 
+namespace {
+
+/**
+ * Starts one refresh watchdog per credential in @p credentials, publishing into
+ * `context->auth_refresh_states` in the same order. Armed while the tokens the
+ * run just resolved are still the ones in the cache. The user's
+ * `oauth2Refresh*` settings are read once here, for every watchdog: a run's
+ * schedule must not change under it half way through.
+ */
+void arm_auth_refresh (vayu::db::Database& db,
+vayu::db::Database* db_ptr,
+const std::shared_ptr<RunContext>& context,
+std::vector<vayu::http::AuthRefreshPlan> credentials) {
+    if (credentials.empty ()) {
+        return;
+    }
+    const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
+    for (auto& credential : credentials) {
+        auto state = std::make_shared<AuthRefreshState> (std::move (credential));
+        context->auth_refresh_states.push_back (state);
+        context->auth_refresh_threads.emplace_back ([context, state, db_ptr, tuning] () {
+            run_auth_refresh (context, state, db_ptr, tuning);
+        });
+    }
+}
+
+} // namespace
+
 /**
  * The one request a single-request load run sends, built once - deserialize,
  * timeout, auth - because the event loop attaches its headers to every transfer.
@@ -1517,7 +1545,8 @@ int default_max_per_host) {
  * A scenario load run has none: every step was composed and auth-resolved at
  * plan time, before the run row existed, and a step that could not be authorized
  * already failed resolution with a 400. Building one here would compose the
- * payload's absent method and url.
+ * payload's absent method and url. What it arms here is the refresh of the
+ * OAuth 2.0 tokens its steps were planned with.
  *
  * @return false when the payload cannot be built - the caller fails the run.
  */
@@ -1527,18 +1556,16 @@ const nlohmann::json& config,
 const std::shared_ptr<RunContext>& context,
 int timeout_ms,
 vayu::Request& request) {
+    if (context->scenario) {
+        auto refresh = plan_scenario_auth_refresh (context->scenario->plan, db_ptr);
+        context->step_auth_refresh = std::move (refresh.step_credential);
+        arm_auth_refresh (db, db_ptr, context, std::move (refresh.credentials));
+        return true;
+    }
     // Build the request once: deserialize + timeout + auth. The event loop
     // attaches request.headers to every transfer, so resolving auth here
     // covers the whole run.
     //
-    // A scenario load run has no single request to build: every step was
-    // composed and auth-resolved at plan time, before the run row existed,
-    // and a step that could not be authorized already failed resolution
-    // with a 400. Building one here would compose the payload's absent
-    // method and url.
-    if (context->scenario) {
-        return true;
-    }
     // Credentials carrying a token are the one case the build leaves alone: the
     // value has to reach them before `apply_auth` base64s them out of reach
     // (issue #591), so a run whose credentials carry one tells the build to
@@ -1619,24 +1646,13 @@ vayu::Request& request) {
         }
     }
 
-    // A run that outlives its OAuth 2.0 token used to become a 401
-    // storm the report never explained. Armed here, while the token
-    // this run just resolved is still the one in the cache, and inert
-    // for every auth that cannot be refreshed mid-run - see
+    // Inert for every auth that cannot be refreshed mid-run - see
     // plan_auth_refresh for that list.
-    //
-    // A scenario load run is deliberately not covered: each of its
-    // steps resolved its own auth at plan time, before this run row
-    // existed, so there is no single credential to keep current.
     if (auto plan = vayu::http::plan_auth_refresh (
         request, config.value ("auth", nlohmann::json ()), db_ptr)) {
-        context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
-        // The user's oauth2Refresh* settings, read once here: a run's
-        // schedule must not change under it half way through.
-        const AuthRefreshTuning tuning = read_auth_refresh_tuning (db);
-        context->auth_refresh_thread = std::thread ([context, db_ptr, tuning] () {
-            run_auth_refresh (context, db_ptr, tuning);
-        });
+        std::vector<vayu::http::AuthRefreshPlan> credentials;
+        credentials.push_back (std::move (*plan));
+        arm_auth_refresh (db, db_ptr, context, std::move (credentials));
     }
     return true;
 }
@@ -1899,11 +1915,9 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // is about to store, or a report could print a p99 its own verdict
     // disagrees with. A run stopped early is judged on what it measured.
     inputs.thresholds = evaluate_thresholds (context->config, inputs);
-    // What the refresh watchdog did, for a run that had one. Read after
+    // What the refresh watchdogs did, for a run that had any. Read after
     // the join above, so the tallies are final.
-    if (context->auth_refresh) {
-        inputs.auth = context->auth_refresh->summary ();
-    }
+    inputs.auth = AuthRefreshState::summarize (context->auth_refresh_states);
     inputs.warnings = build_run_warnings (context);
     return inputs;
 }

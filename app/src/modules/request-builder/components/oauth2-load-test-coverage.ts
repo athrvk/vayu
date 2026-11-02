@@ -22,6 +22,9 @@ export function fmtDuration(ms: number): string {
 
 import type { OAuth2Config } from "@/types";
 
+/** Why Start/Run is disabled while a guard gates it - both dialogs say it alike. */
+export const OAUTH2_GATE_REASON = "The OAuth 2.0 token check above hasn't passed.";
+
 /** Minimal token shape the coverage decision needs. */
 export interface CoverageToken {
 	expiresAt: number | null;
@@ -47,20 +50,27 @@ export type CoverageState =
 /**
  * Whether the engine will keep this credential current for the whole run.
  *
- * Mirrors the config-and-token cases of `plan_auth_refresh`
- * (engine/src/http/auth_resolver.cpp) - the guard must not promise a refresh
- * the engine will not perform, and must not block a run the engine can carry.
- * Change one, change both.
+ * Mirrors `plan_oauth2_refresh` (engine/src/http/auth_resolver.cpp), the config
+ * and token cases a single-request run and a collection run's steps both go
+ * through - the guard must not promise a refresh the engine will not perform,
+ * and must not block a run the engine can carry. Change one, change both.
  *
- * It cannot mirror that function's last case, which plans a refresh only for a
- * run whose `Authorization` header is the token's own value, and declines when
- * a user-supplied header beat the token to it - swapping the token under that
- * header would change nothing on the wire. This decision is made before a
- * request is composed and is handed a config and a token, never headers, so
- * that case is outside its inputs. The gap leans the safe way: it takes a
- * user-supplied `Authorization` header to reach, and such a run is
- * authenticated by that header rather than by this token, which makes the
- * coverage question moot. Covering it would be a signature change.
+ * It cannot mirror what the engine decides from the request it composed, which
+ * is not an input here (a config and a token are all this is handed):
+ *
+ *   - a run whose `Authorization` header is not the token's own value - a
+ *     user-supplied header beat the token to it, so swapping the token under it
+ *     would change nothing on the wire (`plan_auth_refresh`, and for a
+ *     collection run the step's `auth_header`);
+ *   - a collection step whose auth waited on its scripts, and one that writes
+ *     the token under a different `headerPrefix` than the first step sharing
+ *     its cache key (`plan_scenario_auth_refresh`).
+ *
+ * The gap leans the safe way for the first: a user-supplied `Authorization`
+ * authenticates the request in place of this token, which makes the coverage
+ * question moot. The other two are collection-run only, and there the verdict
+ * can read "the engine renews it" for a step the engine leaves on its first
+ * token. Covering any of them would be a signature change.
  */
 export function isMidRunRefreshable(
 	config: Pick<OAuth2Config, "grantType" | "tokenPlacement" | "autoRefreshToken">,

@@ -6561,14 +6561,19 @@ differ only in those. The recipe is `oauth::cache_key`
 means non-expiring. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row
-(see [Load Test Mode](architecture.md#load-test-mode)). It is skipped - the
-token is fetched once and reused for the whole run - for a query-placed token,
+(see [Load Test Mode](architecture.md#load-test-mode)). A collection load run
+does the same for the tokens its steps were planned with (#3199): one watchdog
+per distinct cache key, however many steps send it, and every such step sends
+the newest token from its first submission on. It is skipped - the token is
+fetched once and reused for the whole run - for a query-placed token,
 `autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
-with no refresh token, a token that lost to a user-supplied `Authorization`
-header, and scenario runs, whose steps each resolve auth at plan time. That
-list is `plan_auth_refresh`'s (`engine/src/http/auth_resolver.cpp`); the app's
-`isMidRunRefreshable` mirrors all of it but the header case - change one,
-change both.
+with no refresh token, and a token that lost to a user-supplied `Authorization`
+header. That list is `plan_oauth2_refresh`'s plus the header check
+(`engine/src/http/auth_resolver.cpp`); the app's `isMidRunRefreshable` mirrors
+all of it but the header case - change one, change both. A collection step is
+also skipped when its auth waited on its scripts, and when it writes the token
+under a different `headerPrefix` than the first step sharing its cache key
+(`plan_scenario_auth_refresh`, `engine/src/core/auth_refresh.cpp`).
 
 #### POST /oauth2/token
 
@@ -9272,7 +9277,7 @@ as a smaller one:
 | A `data` array larger than `maxScenarioDataBytes` | The row count cannot catch a few very large rows, and the engine's general body cap ([Request bodies](#request-bodies)) sits far above this and refuses a whole payload without naming what in it was too large. |
 | A step carrying a `{{data.*}}` token in a run sent without `data` | Nothing would bind it, so the literal token would be sent. The message names the step and the token. The step's credential fields are scanned as well as its request. |
 | A step with a `{{data.*}}` token (or the iteration identity) in its `oauth2` config | The token is acquired against the token endpoint (once, when a load plan is resolved; at the step's send in a sequential run), never bound per iteration, so no iteration exists for a row to reach it. Refused with or without a data set. |
-| A step of a collection **load** run with a `{{name}}` in its `oauth2` config that no variable answers (`invalid_scenario`; a single-request run is refused the same way under `invalid_run_config`, see [Auth pre-flight](#post-runs)) | A load run acquires each step's token once, when the plan is resolved and before any script runs, from the stored values, so the name would reach the token endpoint as written. A script's write to an OAuth 2.0 variable is ignored under load and nothing is re-acquired per iteration (the only change after the start is the [mid-run refresh](#oauth-20-token-cache)). The message names the step and the token (#2521, #2742). A sequential run defers such a name to its step's send instead. |
+| A step of a collection **load** run with a `{{name}}` in its `oauth2` config that no variable answers (`invalid_scenario`; a single-request run is refused the same way under `invalid_run_config`, see [Auth pre-flight](#post-runs)) | A load run acquires each step's token once, when the plan is resolved and before any script runs, from the stored values, so the name would reach the token endpoint as written. A script's write to an OAuth 2.0 variable is ignored under load and nothing is re-acquired per iteration (the only change after the start is each step's [mid-run refresh](#oauth-20-token-cache)). The message names the step and the token (#2521, #2742). A sequential run defers such a name to its step's send instead. |
 | A step whose OAuth 2.0 token endpoint host the run's [`targetPolicy`](#post-execute) refuses | Judged before the endpoint is posted to. The code is the policy's, `target_not_allowed` or `target_host_unknown`, not `invalid_scenario` (#2521). |
 | `dataFileName` or `dataFileHash` present and not a non-empty string, or `dataFileHash` not 64 lowercase hex characters | Stored verbatim as what the run was driven by (issue #2051), so a value that cannot name a file, or a second spelling of one digest, is refused rather than recorded. |
 | `dataFileName` or `dataFileHash` sent without `data` | It would describe rows the run never bound - refused, not ignored (issue #1503). |
@@ -12427,7 +12432,11 @@ entry in `refreshes` is when a renewal landed, in seconds from the run's start.
 run kept sending the credential it had, so 401s in `statusCodes` from that point
 on are explained here rather than by the target. The section is **absent** for a
 run that could never refresh, which is not the same claim as a run that watched
-and never needed to (that one reports an empty `refreshes` array).
+and never needed to (that one reports an empty `refreshes` array). A collection
+load run that keeps several tokens current (one per distinct cache key its steps
+send, #3199) reports them in this one shape: every renewal in `refreshes`, in
+order of `atSeconds`, `refreshFailures` summed, and `lastError` the most recent
+failure of any of them.
 
 **A scenario run adds a `scenario` section** and no other run type carries one:
 

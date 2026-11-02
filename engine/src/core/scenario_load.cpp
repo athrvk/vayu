@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "vayu/core/auth_refresh.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/element_defaults.hpp"
 #include "vayu/core/elements.hpp"
@@ -787,6 +788,10 @@ class ScenarioLoadDriver {
     : context_ (context), db_ (db), execution_ (execution),
       state_ (std::move (state)), max_iterations_ (max_iterations),
       live_vus_ (state_->vus.size ()) {
+        auth_headers_.reserve (context_->auth_refresh_states.size ());
+        for (const auto& credential : context_->auth_refresh_states) {
+            auth_headers_.emplace_back (credential);
+        }
     }
 
     /// How many VUs could still be given work. For a duration-bounded run that
@@ -821,6 +826,9 @@ class ScenarioLoadDriver {
         const size_t iteration = vu->iteration;
         const size_t vu_index  = vu->index;
         vayu::Request request  = step.request;
+        // Before the bind and `step.before`, so a pre-request script reads the
+        // credential this submission actually sends.
+        follow_refreshed_auth (step_index, request);
         // `disableCookies` (issue #1765): this step neither reads nor writes
         // the VU's session - see the completion's `finish_step` call.
         request.track_cookies = !request.disable_cookies;
@@ -985,6 +993,18 @@ class ScenarioLoadDriver {
     }
 
     private:
+    /// Puts the current value of the OAuth 2.0 credential step @p step_index
+    /// follows (#3199) on @p request; a step that follows none is untouched.
+    void follow_refreshed_auth (size_t step_index, vayu::Request& request) {
+        const auto& step_credential = context_->step_auth_refresh;
+        if (step_index >= step_credential.size ()) {
+            return;
+        }
+        if (const auto& credential = step_credential.at (step_index)) {
+            auth_headers_.at (*credential).write_onto (request);
+        }
+    }
+
     /**
      * A virtual user that is neither busy nor retired and not deferred,
      * claimed for one step.
@@ -1558,6 +1578,9 @@ class ScenarioLoadDriver {
     // both called only from the strategy thread, so this needs no lock of
     // its own (issue #1596).
     std::optional<int64_t> earliest_deferred_ready_at_ms_;
+    // One per `context_->auth_refresh_states` entry, in the same order. Read
+    // and written by the strategy thread only, never by a completion callback.
+    std::vector<AuthHeaderCache> auth_headers_;
 };
 
 std::shared_ptr<ScenarioLoadState> execute_scenario_load (

@@ -8,6 +8,7 @@
  */
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/scenario_plan.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/types.hpp"
@@ -17,27 +18,31 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace vayu::core {
 
 /**
- * @brief A run's live OAuth 2.0 credential, refreshed while the run is going.
+ * @brief One live OAuth 2.0 credential of a load run, refreshed while the run
+ *        is going.
  *
- * A load run used to resolve auth exactly once, so a run outliving its token
- * turned into a 401 storm the report never explained. This is the shared cell
- * that fixes it: the run's refresh watchdog re-acquires the token before it
- * expires and publishes the new header value here, and the *submitting* thread
- * copies it onto the request it hands to the event loop.
+ * A load run resolves auth once, before it sends, so without this a run
+ * outliving its token turns into a 401 storm the report never explains. The
+ * credential's refresh watchdog re-acquires the token before it expires and
+ * publishes the new header value here, and the *submitting* thread copies it
+ * onto each request it hands to the event loop. A single-request run has at
+ * most one; a scenario load run has one per distinct token-cache key its steps
+ * send (`plan_scenario_auth_refresh`, #3199).
  *
- * Only header-placed tokens are covered - see `http::plan_auth_refresh` for
+ * Only header-placed tokens are covered - see `http::plan_oauth2_refresh` for
  * every case that stays inert.
  *
- * Threading: exactly one publisher (the watchdog) and one reader (the strategy
- * thread, which is the event loop's sole producer). The reader's hot path is a
- * relaxed load of `generation`; it takes the mutex only on the tick after a
- * refresh actually happened, which is once per token lifetime.
+ * Threading: exactly one publisher (its watchdog) and one reader (the run's
+ * submitting thread, the event loop's sole producer). The reader's hot path is
+ * a relaxed load of `generation`; it takes the mutex only on the submission
+ * after a refresh actually happened, which is once per token lifetime.
  */
 class AuthRefreshState {
     public:
@@ -85,8 +90,9 @@ class AuthRefreshState {
      */
     void publish (std::string value, double at_seconds, int64_t expires_at_ms);
 
-    /// Record a refresh that did not happen. The run continues either way.
-    void record_failure (const std::string& error);
+    /// Record a refresh that did not happen, @p at_seconds into the run. The
+    /// run continues either way.
+    void record_failure (const std::string& error, double at_seconds);
 
     /**
      * @brief The report's `auth` section: when the run refreshed, and what went
@@ -98,17 +104,102 @@ class AuthRefreshState {
      */
     [[nodiscard]] nlohmann::json summary () const;
 
+    /**
+     * @brief The `auth` section for every credential a run kept current, in
+     *        the one shape `summary` writes for a single one.
+     *
+     * `refreshes` is every credential's, ordered by `atSeconds`;
+     * `refreshFailures` is their sum; `lastError` is the most recent failure
+     * of any of them. Nothing for an empty @p states, which is the run that
+     * was never watching.
+     */
+    [[nodiscard]] static std::optional<nlohmann::json> summarize (
+    const std::vector<std::shared_ptr<AuthRefreshState>>& states);
+
     private:
+    /// What the report reads, copied out under the mutex.
+    struct Tally {
+        std::vector<double> refreshed_at_seconds;
+        size_t failures = 0;
+        std::string last_error;
+        double last_failure_at_seconds = 0.0;
+    };
+    [[nodiscard]] Tally tally () const;
+    [[nodiscard]] static nlohmann::json section (const Tally& tally);
+
     vayu::http::AuthRefreshPlan plan_;
     std::atomic<int64_t> expires_at_ms_{ 0 };
     std::atomic<uint64_t> generation_{ 0 };
 
     mutable std::mutex mutex_;
     std::string header_value_;
-    std::vector<double> refreshed_at_seconds_;
-    size_t failures_ = 0;
-    std::string last_error_;
+    Tally tally_;
 };
+
+/**
+ * @brief The submitting thread's copy of one credential, for a request it
+ *        rebuilds per submission.
+ *
+ * `sync_auth_header` serves a request the submitting thread keeps and resends,
+ * so it writes only when the credential moved. A scenario step is copied fresh
+ * from the plan on every submission, still carrying the token it was planned
+ * with, so the current value has to be written every time; this keeps that
+ * value and re-reads the state (under its mutex) only when the generation
+ * moves. Built from the state's current value, so every step sharing a
+ * credential sends the newest token from the first submission on. Owned and
+ * used by the submitting thread only.
+ */
+class AuthHeaderCache {
+    public:
+    explicit AuthHeaderCache (std::shared_ptr<AuthRefreshState> state);
+
+    /// Put the credential's current value on @p request.
+    void write_onto (vayu::Request& request);
+
+    private:
+    std::shared_ptr<AuthRefreshState> state_;
+    uint64_t seen_generation_ = 0;
+    std::string value_;
+};
+
+/**
+ * @brief Which steps of a scenario load run can keep their OAuth 2.0 token
+ *        current, and with how many watchdogs (#3199).
+ */
+struct ScenarioAuthRefreshPlan {
+    /// One per distinct token-cache key (`oauth::cache_key`), in the order the
+    /// plan first sends it. Never two for one key: each watchdog force-refreshes
+    /// the cache row, and two on one row would spend a rotating refresh token
+    /// twice.
+    std::vector<vayu::http::AuthRefreshPlan> credentials;
+    /// One entry per plan step: the index into `credentials` that step's
+    /// `Authorization` follows, or nothing for a step that sends what it was
+    /// planned with.
+    std::vector<std::optional<size_t>> step_credential;
+};
+
+/**
+ * @brief Plan mid-run refresh over a scenario's steps.
+ *
+ * A step follows a credential when its plan resolved an OAuth 2.0 token into
+ * it (`ScenarioStep::oauth2_config`), the engine placed that token on
+ * `Authorization` itself (`Request::auth_header`; a user-set `Authorization`
+ * wins and leaves it empty), and `http::plan_oauth2_refresh` accepts the
+ * config. The token a step carries is not compared with the cache: a token
+ * shorter-lived than the cache's expiry skew is re-acquired for every step
+ * that plans it, so the earlier steps of a key already carry an older token
+ * than the cache holds, and the newest is what they should send.
+ *
+ * Steps that share a key share one credential. Its refresh is bounded by the
+ * shortest timeout among them, so no step waits on a token request longer
+ * than it would wait on its own. A step whose config writes the token under a
+ * different `headerPrefix` than the key's first step stays unarmed: one
+ * credential publishes one header value.
+ *
+ * @param db Token-cache handle; null arms nothing.
+ */
+[[nodiscard]] ScenarioAuthRefreshPlan
+plan_scenario_auth_refresh (const ScenarioPlan& plan, vayu::db::Database* db);
 
 /**
  * @brief The knobs a run's refresh watchdog reads, resolved once when it arms.

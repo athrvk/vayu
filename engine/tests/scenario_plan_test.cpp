@@ -1613,6 +1613,8 @@ TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanO
     const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&late.auth);
     ASSERT_NE (oauth2, nullptr);
     EXPECT_EQ (oauth2->config.at ("clientId"), "{{client}}");
+    EXPECT_TRUE (late.oauth2_config.is_null ())
+    << "a deferred config is `auth`'s, and nothing a load run refreshes";
 
     auto load           = options ();
     load.environment_id = "env";
@@ -1622,6 +1624,8 @@ TEST_F (ScenarioPlanTest, AScriptedOAuth2StepWaitsForItsScriptOnASequentialPlanO
     EXPECT_FALSE (now.auth_after_scripts);
     ASSERT_EQ (now.request.headers.count ("Authorization"), 1u);
     EXPECT_EQ (now.request.headers.at ("Authorization"), "Bearer AT-stored");
+    // Kept, resolved, so the run can refresh the token it placed (#3199).
+    EXPECT_EQ (now.oauth2_config.value ("clientId", std::string ()), "stored");
 }
 
 // A name nothing answers: a load plan, which acquires before any script, has

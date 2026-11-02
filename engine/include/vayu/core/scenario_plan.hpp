@@ -139,6 +139,12 @@ struct ScenarioStep {
     /// (`ScenarioResolveOptions::oauth2_after_scripts`), whose executor hands
     /// `apply_late_auth` the token cache.
     bool auth_after_scripts = false;
+    /// The OAuth 2.0 config whose token was resolved into `request` here, so a
+    /// load run can keep that token current (`plan_scenario_auth_refresh`,
+    /// #3199). Null for every other step: no OAuth 2.0 at all, or auth that
+    /// was deferred, which `auth` above holds instead.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    nlohmann::json oauth2_config{};
 };
 
 /** An ordered, immutable sequence of composed steps. */

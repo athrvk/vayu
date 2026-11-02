@@ -690,9 +690,9 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 // submit time: a value written here reaches every later transfer and none of
 // the ones already queued, with no lock on the submission path.
 //
-// A run without mid-run refresh (the common case - see plan_auth_refresh) never
-// enters the swap at all: `current()` is then a relaxed load short-circuited on
-// a null state.
+// A single-request run has at most one credential to keep current. A run
+// without mid-run refresh (the common case - see plan_auth_refresh) never
+// enters the swap at all: `current()` is then short-circuited on a null state.
 /**
  * Whether every submission of this run sends the shared request as it stands:
  * nothing to bind, no credential to apply, no `step.before` kind to write into
@@ -707,7 +707,10 @@ bool sends_the_shared_request (const RunContext& context) {
 class SubmissionRequest {
     public:
     SubmissionRequest (const std::shared_ptr<RunContext>& context, vayu::Request request)
-    : state_ (context->auth_refresh), request_ (std::move (request)) {
+    : state_ (context->auth_refresh_states.empty () ?
+      nullptr :
+      context->auth_refresh_states.front ()),
+      request_ (std::move (request)) {
         // A path value composition left waiting (issue #1764) is answered by a
         // bind or the residual pass, and a run that sends the shared request
         // runs neither: nothing will ever answer its token, so it is written

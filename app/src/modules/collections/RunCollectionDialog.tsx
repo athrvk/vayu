@@ -73,7 +73,7 @@
  * that memo describes one request, and a sequence multiplies its load.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -90,6 +90,7 @@ import {
 	ToggleGroup,
 	ToggleGroupItem,
 	DialogCancelButton,
+	DisabledHint,
 	ICON_MOTION,
 } from "@/components/ui";
 import { resolveLoadTestLimits } from "@/constants/load-test";
@@ -119,6 +120,9 @@ import {
 	CustomBudgetHint,
 	CustomBudgetRows,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/CustomBudgetRows";
+import OAuth2LoadTestGuard from "@/modules/request-builder/components/OAuth2LoadTestGuard";
+import { OAUTH2_GATE_REASON } from "@/modules/request-builder/components/oauth2-load-test-coverage";
+import { usesDuration } from "@/modules/request-builder/components/LoadTestConfigDialog/profile";
 import { ProfileFields } from "@/modules/request-builder/components/LoadTestConfigDialog/ProfileFields";
 import {
 	ProfilePicker,
@@ -136,6 +140,8 @@ import { summarise } from "@/modules/request-builder/components/LoadTestConfigDi
 import type { LoadTestProfile } from "@/modules/request-builder/components/LoadTestConfigDialog/useSavedLoadTestConfig";
 import DataFilePicker, { type SelectedDataFile } from "./DataFilePicker";
 import { collectSubtreeIds } from "./tree-utils";
+import { useRunOAuth2Configs } from "./useRunOAuth2Configs";
+import type { RunOAuth2Config } from "./runOAuth2Configs";
 
 export interface RunCollectionDialogProps {
 	/**
@@ -186,6 +192,33 @@ const TIMERS_DEFAULT = "asConfigured";
 const SCRIPTS_DEFAULT = "asMarked";
 
 const NO_COLUMNS: string[] = [];
+const NO_COLLECTION_IDS: string[] = [];
+
+/**
+ * One token's check. Its own component so the gate callback keeps its identity
+ * across renders: the guard reports in an effect keyed on it. The per-request
+ * `OAuth2DeferredNote` is left out - it asks `/compose` about one request, and a
+ * run's steps are many.
+ */
+function RunTokenGuard({
+	entry,
+	durationSeconds,
+	onGateChange,
+}: {
+	entry: RunOAuth2Config;
+	durationSeconds: number;
+	onGateChange: (key: string, gated: boolean) => void;
+}) {
+	const { key, config } = entry;
+	const report = useCallback((gated: boolean) => onGateChange(key, gated), [onGateChange, key]);
+	return (
+		<OAuth2LoadTestGuard
+			config={config}
+			durationSeconds={durationSeconds}
+			onGateChange={report}
+		/>
+	);
+}
 
 /**
  * The line under the title. Per mode when the switch is on: Fixed passes ends
@@ -335,6 +368,33 @@ export default function RunCollectionDialog({
 	const { audit } = useColumnAudit(auditedCollectionIds, fileColumns);
 
 	/*
+	 * A duration-based load run is the only one a token's lifetime can cut short
+	 * (issue #3199): the engine keeps one credential per distinct token the
+	 * requests send, and the guard says whether each stays valid for the whole
+	 * run. A pass-count run has no length to judge, so nothing is asked.
+	 */
+	const oauth2DurationSeconds = loadTest && usesDuration(profile.mode) ? profile.duration : null;
+	const oauth2Configs = useRunOAuth2Configs(
+		oauth2DurationSeconds === null ? NO_COLLECTION_IDS : auditedCollectionIds
+	);
+	/*
+	 * Which tokens' guards are gating Run, by cache key. Read back through the
+	 * configs on screen, so a guard that unmounts (a different folder set, Load
+	 * test switched off) cannot leave a stale entry holding Run disabled.
+	 */
+	const [gatedKeys, setGatedKeys] = useState<ReadonlySet<string>>(new Set());
+	const reportGate = useCallback((key: string, gated: boolean) => {
+		setGatedKeys((prev) => {
+			if (prev.has(key) === gated) return prev;
+			const next = new Set(prev);
+			if (gated) next.add(key);
+			else next.delete(key);
+			return next;
+		});
+	}, []);
+	const oauthGated = oauth2Configs.some(({ key }) => gatedKeys.has(key));
+
+	/*
 	 * Empty is a meaningful value only with a data file: it means "one pass per
 	 * row", which is the engine's own default when `iterations` is absent from
 	 * the payload. Without a file there is no row count to fall back to, so an
@@ -358,9 +418,10 @@ export default function RunCollectionDialog({
 
 	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
 
-	const canRun = loadTest
+	const settingsValid = loadTest
 		? !profileError && !dataFileError && !budgetsError
 		: iterationsValid && !dataFileError && !budgetsError;
+	const canRun = settingsValid && !oauthGated;
 
 	/*
 	 * The chosen file against the contract in scope (issue #599), and against
@@ -882,6 +943,18 @@ export default function RunCollectionDialog({
 						disabled={startRun.isPending}
 					/>
 
+					{/* Under everything it gates and just above Run, as in the request
+					    dialog. One per distinct token, not per request. */}
+					{oauth2DurationSeconds !== null &&
+						oauth2Configs.map((entry) => (
+							<RunTokenGuard
+								key={entry.key}
+								entry={entry}
+								durationSeconds={oauth2DurationSeconds}
+								onGateChange={reportGate}
+							/>
+						))}
+
 					{error && (
 						<Callout severity="blocking" title="Couldn't start the run">
 							{error instanceof Error
@@ -896,14 +969,19 @@ export default function RunCollectionDialog({
 						onClick={() => onOpenChange(false)}
 						disabled={startRun.isPending}
 					/>
-					<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
-						{startRun.isPending ? (
-							<Loader2 className="size-icon animate-spin" />
-						) : (
-							<Play className="size-icon" data-icon-motion={ICON_MOTION.scale} />
-						)}
-						Run
-					</Button>
+					{/* The OAuth 2.0 gate is the one worth a hint: the guard above says
+					    what is wrong, but it collapses, and Run then reads as broken.
+					    Every other reason is a callout beside its field. */}
+					<DisabledHint reason={settingsValid && oauthGated && OAUTH2_GATE_REASON}>
+						<Button onClick={handleRun} disabled={!canRun || startRun.isPending}>
+							{startRun.isPending ? (
+								<Loader2 className="size-icon animate-spin" />
+							) : (
+								<Play className="size-icon" data-icon-motion={ICON_MOTION.scale} />
+							)}
+							Run
+						</Button>
+					</DisabledHint>
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>

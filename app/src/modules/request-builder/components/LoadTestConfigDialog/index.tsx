@@ -18,6 +18,7 @@ import { requestReference, type ThresholdOwner } from "@/lib/agent-reference";
 import { appSetting } from "@/modules/settings/main/app-settings";
 import { getAppPanel } from "@/modules/settings/main/app-panels";
 import OAuth2LoadTestGuard from "../OAuth2LoadTestGuard";
+import { OAUTH2_GATE_REASON } from "../oauth2-load-test-coverage";
 import { OAuth2DeferredNote } from "./OAuth2DeferredNote";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { useClientSettingsStore } from "@/stores";
@@ -170,8 +171,7 @@ function startDisabledReason({
 	oauthGated: boolean;
 }): string | false {
 	if (isStarting) return "Starting the run…";
-	if (blockingError === null)
-		return oauthGated && "The OAuth 2.0 token check above hasn't passed.";
+	if (blockingError === null) return oauthGated && OAUTH2_GATE_REASON;
 	// No field fixes it: the notice names the elements and the way out.
 	if (blockingError === elementsError) {
 		return "Disable or remove the elements named above, or run the collection instead.";

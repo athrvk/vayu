@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -72,7 +73,7 @@ void AuthRefreshState::publish (std::string value, double at_seconds, int64_t ex
     {
         const std::lock_guard<std::mutex> lock (mutex_);
         header_value_ = std::move (value);
-        refreshed_at_seconds_.push_back (at_seconds);
+        tally_.refreshed_at_seconds.push_back (at_seconds);
     }
     expires_at_ms_.store (expires_at_ms, std::memory_order_relaxed);
     // Release: the reader acquires this counter and then takes the mutex, so
@@ -80,23 +81,109 @@ void AuthRefreshState::publish (std::string value, double at_seconds, int64_t ex
     generation_.fetch_add (1, std::memory_order_release);
 }
 
-void AuthRefreshState::record_failure (const std::string& error) {
+void AuthRefreshState::record_failure (const std::string& error, double at_seconds) {
     const std::lock_guard<std::mutex> lock (mutex_);
-    ++failures_;
-    last_error_ = error;
+    ++tally_.failures;
+    tally_.last_error              = error;
+    tally_.last_failure_at_seconds = at_seconds;
 }
 
-nlohmann::json AuthRefreshState::summary () const {
+AuthRefreshState::Tally AuthRefreshState::tally () const {
     const std::lock_guard<std::mutex> lock (mutex_);
+    return tally_;
+}
+
+nlohmann::json AuthRefreshState::section (const Tally& tally) {
     nlohmann::json refreshes = nlohmann::json::array ();
-    for (const double at : refreshed_at_seconds_) {
+    for (const double at : tally.refreshed_at_seconds) {
         refreshes.push_back ({ { "atSeconds", at } });
     }
     nlohmann::json out;
     out["refreshes"]       = refreshes;
-    out["refreshFailures"] = failures_;
-    if (!last_error_.empty ()) {
-        out["lastError"] = last_error_;
+    out["refreshFailures"] = tally.failures;
+    if (!tally.last_error.empty ()) {
+        out["lastError"] = tally.last_error;
+    }
+    return out;
+}
+
+nlohmann::json AuthRefreshState::summary () const {
+    return section (tally ());
+}
+
+std::optional<nlohmann::json> AuthRefreshState::summarize (
+const std::vector<std::shared_ptr<AuthRefreshState>>& states) {
+    if (states.empty ()) {
+        return std::nullopt;
+    }
+    Tally merged;
+    for (const auto& state : states) {
+        const Tally one = state->tally ();
+        merged.refreshed_at_seconds.insert (merged.refreshed_at_seconds.end (),
+        one.refreshed_at_seconds.begin (), one.refreshed_at_seconds.end ());
+        merged.failures += one.failures;
+        const bool later = merged.last_error.empty () ||
+        one.last_failure_at_seconds > merged.last_failure_at_seconds;
+        if (!one.last_error.empty () && later) {
+            merged.last_error              = one.last_error;
+            merged.last_failure_at_seconds = one.last_failure_at_seconds;
+        }
+    }
+    std::ranges::sort (merged.refreshed_at_seconds);
+    return std::optional<nlohmann::json> (std::in_place, section (merged));
+}
+
+AuthHeaderCache::AuthHeaderCache (std::shared_ptr<AuthRefreshState> state)
+: state_ (std::move (state)), seen_generation_ (state_->generation ()),
+  value_ (state_->header_value ()) {
+}
+
+void AuthHeaderCache::write_onto (vayu::Request& request) {
+    const uint64_t current = state_->generation ();
+    if (current != seen_generation_) {
+        value_           = state_->header_value ();
+        seen_generation_ = current;
+    }
+    request.headers[state_->header_name ()] = value_;
+}
+
+namespace {
+
+/// A step's own refresh plan, before it is grouped by key: nothing for a step
+/// that did not have the engine place an OAuth 2.0 token on its header.
+std::optional<vayu::http::AuthRefreshPlan>
+step_refresh_plan (const ScenarioStep& step, vayu::db::Database* db) {
+    if (!step.oauth2_config.is_object () || step.request.auth_header != "Authorization") {
+        return std::nullopt;
+    }
+    return vayu::http::plan_oauth2_refresh (step.oauth2_config, step.request.timeout_ms, db);
+}
+
+} // namespace
+
+ScenarioAuthRefreshPlan
+plan_scenario_auth_refresh (const ScenarioPlan& plan, vayu::db::Database* db) {
+    ScenarioAuthRefreshPlan out;
+    out.step_credential.resize (plan.steps.size ());
+    std::unordered_map<std::string, size_t> credential_of_key;
+    for (size_t i = 0; i < plan.steps.size (); ++i) {
+        auto candidate = step_refresh_plan (plan.steps[i], db);
+        if (!candidate) {
+            continue;
+        }
+        const auto [found, inserted] = credential_of_key.try_emplace (
+        vayu::http::oauth::cache_key (candidate->config), out.credentials.size ());
+        if (inserted) {
+            out.credentials.push_back (std::move (*candidate));
+            out.step_credential[i] = found->second;
+            continue;
+        }
+        auto& shared = out.credentials.at (found->second);
+        if (shared.header_value != candidate->header_value) {
+            continue;
+        }
+        shared.timeout_ms = std::min (shared.timeout_ms, candidate->timeout_ms);
+        out.step_credential[i] = found->second;
     }
     return out;
 }
@@ -142,9 +229,9 @@ int64_t auth_refresh_delay_ms (int64_t expires_at_ms, int64_t now_ms, const Auth
 }
 
 void run_auth_refresh (const std::shared_ptr<RunContext>& context,
+const std::shared_ptr<AuthRefreshState>& state,
 vayu::db::Database* db_ptr,
 const AuthRefreshTuning& tuning) {
-    const auto state = context->auth_refresh;
     if (!state || db_ptr == nullptr) {
         return;
     }
@@ -170,7 +257,8 @@ const AuthRefreshTuning& tuning) {
             // has, and the report's auth section plus the target's own 401s
             // say what happened.
             const std::string message = err->code + ": " + err->message;
-            state->record_failure (message);
+            state->record_failure (
+            message, context->seconds_since_load_start (steady_now_ms ()));
             vayu::utils::log_warning ("oauth",
             "OAuth2 mid-run refresh failed for run " + context->run_id + " - " + message);
             if (!wait_while_running (context, retry_ms, tuning.poll_interval_ms)) {

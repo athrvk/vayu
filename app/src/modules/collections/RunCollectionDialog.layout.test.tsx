@@ -49,6 +49,8 @@ const startRunState = { mutate: vi.fn(), isPending: false, error: null as Error 
 
 vi.mock("@/queries", () => ({
 	useStartScenarioRunMutation: () => startRunState,
+	useGlobalsQuery: () => ({ data: undefined }),
+	useEnvironmentsQuery: () => ({ data: [] }),
 	useConfigQuery: () => ({ data: { entries: [] as { key: string; value: string }[] } }),
 	// The dialog resolves the contract in scope through the tree (issue #729);
 	// this file is about the panel's box, so an empty tree is the whole answer.

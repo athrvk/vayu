@@ -399,11 +399,13 @@ Manages the lifecycle of load test runs:
 - **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
   its handle outlives it until another thread collects it.
 - **Per-run auxiliary threads**: a load run has a metrics thread
-  (`collect_metrics`) and, when its auth is a header-placed expiring oauth2
-  token, an auth-refresh watchdog (`run_auth_refresh`, see below). Both watch
-  `is_running` and are joined together through `RunContext::join_aux_threads` -
-  the worker has four exit paths, and a thread joined at only some of them
-  outlives the `Database` it writes through.
+  (`collect_metrics`) and, for each header-placed expiring oauth2 token it
+  sends, an auth-refresh watchdog (`run_auth_refresh`, see below): at most one
+  for a single request, one per distinct token-cache key for a collection.
+  All watch `is_running` and are joined together through
+  `RunContext::join_aux_threads` - the worker has several exit paths, and a
+  thread joined at only some of them outlives the `Database` it writes
+  through.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the
@@ -659,7 +661,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
 - **`request_builder`** (`build_request`) - the single request-construction
   pipeline: deserialize the payload, apply the resolved timeout, then resolve
   auth. Both `POST /execute` and `POST /runs` go through it.
-- **`auth_resolver`** (`apply_auth` / `preflight_auth` / `plan_auth_refresh`) - a
+- **`auth_resolver`** (`apply_auth` / `preflight_auth` / `plan_oauth2_refresh` /
+  `plan_auth_refresh`) - a
   typed `Auth` variant with an exhaustive per-mode handler: bearer/basic/api-key
   are injected inline; `oauth2` delegates to the token client; a mode stored but
   not executed (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`) sends
@@ -688,8 +691,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   submission. A step or run whose credentials hold no such name pays nothing
   per iteration.
   `plan_auth_refresh` decides afterwards
-  whether the credential a *load* run just resolved can be kept current past its
-  expiry - see the run lifecycle below.
+  whether the credential a single-request *load* run just resolved can be kept
+  current past its expiry, and `plan_scenario_auth_refresh`
+  (`core/auth_refresh.cpp`) the same for each step of a collection load run -
+  see the run lifecycle below.
 - **`oauth_client`** (`acquire_token`) - grant handling (client_credentials,
   password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
   cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. An
@@ -1079,8 +1084,8 @@ that never arrived.
    ↓
 5. Start worker thread (execute_load_test)
    ↓
-6. Start metrics thread (collect_metrics), and - for a run whose auth is a
-   refreshable oauth2 token - the auth-refresh watchdog (run_auth_refresh)
+6. Start metrics thread (collect_metrics), and - for each refreshable oauth2
+   token the run sends - an auth-refresh watchdog (run_auth_refresh)
    ↓
 7. Strategy submits requests via SPSC queue → event loop
    ↓
@@ -1122,18 +1127,32 @@ path.
 starts, so a run longer than its OAuth 2.0 access token used to turn into a 401
 storm the report never explained. The watchdog closes that: it sleeps until
 `oauth2RefreshLeadMs` (default 60s) before the token expires, re-acquires it with
-a forced refresh, and publishes the new `Authorization` value on the run's
+a forced refresh, and publishes the new `Authorization` value on its
 `AuthRefreshState`. Its five `oauth2Refresh*` settings are read once, when the
-run arms it (`read_auth_refresh_tuning`), so a run's schedule cannot change
-under it half way through. The *submitting* thread - the strategy, which is the
-event loop's sole producer - copies it onto its own `Request` when the cell's
-generation moves, and `EventLoop::submit` copies that request wholesale into
-each transfer. So the swap needs no lock on the submission path and cannot race
-a transfer already queued. Runs it deliberately leaves alone (query-placed
-tokens, `autoRefreshToken: false`, `authorization_code` with no refresh token,
-non-expiring tokens, scenario runs) behave exactly as they did before it
-existed - see `plan_auth_refresh`. A refresh that fails is retried with a
-backoff and recorded in the report's `auth` section; it never fails the run.
+run arms its watchdogs (`read_auth_refresh_tuning`), so a run's schedule cannot
+change under it half way through. The *submitting* thread - the strategy, which
+is the event loop's sole producer - puts it on the request it submits, and
+`EventLoop::submit` copies that request wholesale into each transfer. So the
+swap needs no lock on the submission path and cannot race a transfer already
+queued. A single-request run keeps one `Request` and rewrites its header when
+the cell's generation moves (`sync_auth_header`). A collection load run
+(#3199) copies each step's request fresh from the plan, so
+`ScenarioLoadDriver::submit_one` writes the current value onto every
+submission of an armed step, before its bind and its `step.before` elements
+(`AuthHeaderCache`, which takes the cell's lock only when the generation
+moves). Its steps are armed by `plan_scenario_auth_refresh`: one
+`AuthRefreshState` and one watchdog per distinct token-cache key, never two on
+one cache row (each forced refresh would spend a rotating refresh token), each
+refresh bounded by the shortest timeout among the steps sharing it, and a step
+armed only where the plan placed the token on `Authorization` itself
+(`ScenarioStep::oauth2_config`, `Request::auth_header`). The report's `auth`
+section folds every credential into the one shape (`AuthRefreshState::summarize`).
+Runs and steps it deliberately leaves alone (query-placed tokens,
+`autoRefreshToken: false`, `authorization_code` with no refresh token,
+non-expiring tokens, a user-supplied `Authorization`, a step whose auth waited
+on its scripts) behave exactly as they did before it existed - see
+`plan_oauth2_refresh`. A refresh that fails is retried with a backoff and
+recorded in the report's `auth` section; it never fails the run.
 
 The tick topic itself is a bounded ring. Run duration is user-controlled with no
 upper bound, so an append-only buffer is a slow OOM on an overnight soak. The
@@ -1828,7 +1847,8 @@ record shape, the category list, the redaction rule and the file layout
   epic, #704 decision 6; the app runs Chromium with `use-mock-keychain`).
   Mid-run token refresh
   is **not** deferred: the [refresh watchdog](#load-test-mode) ships, and
-  re-acquires a load run's OAuth 2.0 token before it expires.
+  re-acquires a load run's OAuth 2.0 tokens (a collection load run's included)
+  before they expire.
 - **Where the redaction line falls, and why it is not one line.** Two columns of
   a run row answer two different questions, and the split is deliberate:
   `runs.config_snapshot` records the request **composed, with its credentials

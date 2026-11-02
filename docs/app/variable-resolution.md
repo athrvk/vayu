@@ -1075,6 +1075,11 @@ info notice states that the run's token is fetched once, before any script, from
 the stored values, and `OAuth2LoadTestGuard` words its verdict as being about
 that token. The cache key it looks up comes from the preview-resolved config, so
 a script that would have changed the key on a Send does not change it here.
+The Run Collection dialog's guards (#3199) resolve the same way, from stored values only, but
+through each request's own collection chain, globals and the active environment
+(`modules/collections/runOAuth2Configs.ts`, which calls `resolveTemplate` over
+`buildVariableValues` because a hook cannot run once per collection); they draw no
+deferred-names notice, which would mean one `/compose` per request.
 `deferredVariables` lists every name a scope answers whenever a pre-request
 script runs, not the names the script writes, so the copy says a script *may*
 change them. The token status row, which does key on the preview-resolved

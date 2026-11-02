@@ -215,37 +215,56 @@ std::string oauth2_header_value (const nlohmann::json& config, const std::string
  * @brief What a long run needs in order to keep its OAuth 2.0 header valid
  *        past the token's expiry.
  *
- * Filled from the token `apply_auth` just placed on @p request, so it describes
- * the credential the run is actually sending - not what the config asks for.
- * The run's refresh watchdog re-acquires with this config and republishes
- * `header_value`; see `vayu::core::run_auth_refresh`.
+ * Filled from the token cache's row for the config, which the run's own
+ * resolution has just written, so it describes the credential the run is
+ * sending - not what the config asks for. The run's refresh watchdog
+ * re-acquires with this config and republishes `header_value`; see
+ * `vayu::core::run_auth_refresh`.
  */
 struct AuthRefreshPlan {
     nlohmann::json config; ///< The oauth2 config block, as acquire_token takes it.
     std::string header_name;  ///< Header the token was placed on.
-    std::string header_value; ///< Value currently on the built request.
+    std::string header_value; ///< The cached token, as that header's value.
     int64_t expires_at_ms = 0; ///< Absolute expiry (ms since epoch) of that token.
-    /// The run's resolved request timeout, which bounds every refresh (#2833).
-    /// Taken from the built request, which carries it.
+    /// The request timeout that bounds every refresh (#2833): the built
+    /// request's, or the shortest of a scenario's steps sharing the token.
     int timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
 };
 
 /**
- * @brief Decide whether a built request's auth can be refreshed mid-run.
+ * @brief Decide whether an oauth2 config's cached token can be refreshed
+ *        mid-run, whatever request sends it.
  *
- * Returns nothing - the run then behaves exactly as it did before mid-run
- * refresh existed - when any of these hold:
- *   - the mode is not `oauth2`, or the token cache has no token for it;
+ * Returns nothing when any of these hold:
+ *   - @p config is not an object, or the token cache has no token for it;
  *   - the token never expires (`expires_in <= 0`);
  *   - `autoRefreshToken` is false (the user's explicit opt-out);
  *   - `tokenPlacement` is `query` - the value is baked into the URL every
  *     transfer copies, which no header swap can reach;
  *   - the grant is `authorization_code` with no refresh token, which cannot be
- *     re-obtained without a browser;
- *   - the request does not actually carry the token (a user-supplied
- *     `Authorization` header won, so refreshing it would change nothing).
+ *     re-obtained without a browser.
  *
- * @param request The request `apply_auth` has already resolved.
+ * The plan's `header_value` is the *cached* token's; whether a request is
+ * actually sending it is the caller's question (`plan_auth_refresh` for a
+ * single request, `core::plan_scenario_auth_refresh` for a scenario's steps).
+ *
+ * @param timeout_ms Bounds each refresh's token request (#2833).
+ * @param db         Token-cache handle; null yields nothing.
+ */
+std::optional<AuthRefreshPlan>
+plan_oauth2_refresh (const nlohmann::json& config, int timeout_ms, vayu::db::Database* db);
+
+/**
+ * @brief Decide whether a built request's auth can be refreshed mid-run.
+ *
+ * Returns nothing - the run then behaves exactly as it did before mid-run
+ * refresh existed - when the mode is not `oauth2`, when `plan_oauth2_refresh`
+ * refuses its config, or when the request does not actually carry the cached
+ * token (a user-supplied `Authorization` header won, so refreshing it would
+ * change nothing).
+ *
+ * @param request The request `apply_auth` has already resolved; its timeout
+ *                bounds each refresh.
  * @param auth    The same raw `auth` object that was applied.
  * @param db      Token-cache handle; null yields nothing.
  */
