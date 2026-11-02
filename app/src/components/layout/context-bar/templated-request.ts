@@ -44,6 +44,9 @@ export function templatedRequest(
 		stream: request.stream,
 		verifySSL: request.verifySSL,
 		followRedirects: request.followRedirects,
+		maxRedirects: request.maxRedirects,
+		timeout: request.timeout,
+		httpVersion: request.httpVersion,
 		disableUrlEncoding: request.disableUrlEncoding,
 	};
 }

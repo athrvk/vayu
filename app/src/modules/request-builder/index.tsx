@@ -202,6 +202,9 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 				stream: request.stream,
 				verifySSL: request.verifySSL,
 				followRedirects: request.followRedirects,
+				maxRedirects: request.maxRedirects,
+				timeout: request.timeout,
+				httpVersion: request.httpVersion,
 				disableUrlEncoding: request.disableUrlEncoding,
 			});
 			// A text button, so the acknowledgement is the toast rather than a
