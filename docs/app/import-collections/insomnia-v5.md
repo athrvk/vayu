@@ -55,6 +55,7 @@ The flattener rewrites the v5 tree into v4's flat resource list and the v4 reade
 | `headers`, `parameters`, `pathParameters` | header rows, query rows, path rows | [Request field mapping](./insomnia-v4.md#request), including the [url/params invariant](./README.md#the-urlparams-invariant) |
 | `scripts.preRequest`, `scripts.afterResponse` | the pre-request and post-request script | read as v4's `preRequestScript` / `afterResponseScript`; honors `importScripts` |
 | `settings.followRedirects` | `followRedirects` | a boolean reads as `on` / `off`; v4's string values read as in v4 (`global` or absent leaves the engine default) |
+| `settings.cookies.send`, `settings.cookies.store` | `disableCookies` | read as v4's `settingSendCookies` / `settingStoreCookies`: either `false` sets `disableCookies` ([Request](./insomnia-v4.md#request)) |
 | `description`, or `meta.description` | `description` | the first that is present |
 | `meta.sortKey` | read as v4's `metaSortKey` | orders a folder's items and sub-folders together, with v4's [missing-key rule](./insomnia-v4.md#structure--tree-reconstruction) (issue [#2573](https://github.com/athrvk/vayu/issues/2573)) |
 | `environments` | `EnvironmentDraft`s | [Environments](./insomnia-v4.md#environments): a base environment with sub-environments imports as one environment per sub-environment, base values merged in; honors `importEnvironments` |
@@ -78,7 +79,7 @@ An `environment.insomnia.rest/5.x` document imports **environments only**, under
 | a top-level member other than `name`, `description`, `collection` and `environments` | Not read. |
 | `meta.id` and every other id | Not carried; the reader mints its own so that a hand-edited file with repeated ids cannot tangle the tree. |
 | Nunjucks tags, filtered expressions | Kept as literal text. |
-| a per-request redirect limit, and every `settings` member except `followRedirects` | Not read; see [Options & lossy behavior](./insomnia-v4.md#options--lossy-behavior). |
+| a per-request redirect limit, and every `settings` member except `followRedirects` and `cookies.send` / `cookies.store` | Not read; see [Options & lossy behavior](./insomnia-v4.md#options--lossy-behavior). |
 
 A gRPC item is recognised by its `protoFileId` or `protoMethodName` member or a `greq_` id prefix on `meta.id`; a WebSocket item by a `ws://` or `wss://` URL or a `ws-req_` id prefix. Both guesses are assumed (below), and a misread one imports as an HTTP request or is dropped without being counted.
 
@@ -106,7 +107,7 @@ Every v5 member the reader consumes is taken from Insomnia's v5 schema. **None o
 - **Document:** `type`, `name`, `description` (or `meta.description`), `collection` (the item list), `environments`.
 - **Item, any kind:** `name`, `description` or `meta.description`, `meta.sortKey` (a number; read on folders and HTTP requests), `meta.id` (read for the folder, gRPC and WebSocket id prefixes only).
 - **Folder:** `children` (its presence is what makes an item a folder), or, for an empty folder written without it, a `fld_` prefix on `meta.id` and no `url` or `method`; `authentication`, `scripts.preRequest`, `scripts.afterResponse`.
-- **Request:** `url`, `method`, `headers`, `parameters`, `pathParameters`, `body`, `authentication`, `scripts.preRequest`, `scripts.afterResponse`, `settings.followRedirects`. Rows and bodies are assumed to keep v4's inner shape (`name` / `value` / `disabled`, `body.mimeType` / `text` / `params`).
+- **Request:** `url`, `method`, `headers`, `parameters`, `pathParameters`, `body`, `authentication`, `scripts.preRequest`, `scripts.afterResponse`, `settings.followRedirects`, `settings.cookies.send`, `settings.cookies.store`. Rows and bodies are assumed to keep v4's inner shape (`name` / `value` / `disabled`, `body.mimeType` / `text` / `params`).
 - **gRPC / WebSocket detection:** `protoFileId`, `protoMethodName`, the `greq_` and `ws-req_` id prefixes in `meta.id`, and a `ws://` / `wss://` URL.
 - **Environments:** `environments.name`, `environments.data`, and `environments.subEnvironments[]` with `name` and `data` each. That an environment document's own `name` is the name the user gave it, and its base environment's `name` is not, is also assumed: Insomnia's actual naming of the base was not checked.
 

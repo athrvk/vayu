@@ -45,6 +45,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -61,6 +62,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "wide_json.hpp"
 
@@ -494,6 +496,113 @@ TEST (InsomniaImport, ExplicitNoneAuthTerminatesInheritanceRatherThanFallingBack
 }
 
 /**
+ * Insomnia writes `{{ _.a.b }}` for a nested environment value and the importer
+ * rewrites it to `{{a.b}}`, which the composer looks up as one whole name. So
+ * `data: {a: {b: 1}}` has to land as the variable `a.b`; stringified into one
+ * `a` it left the template unresolved with no notice. Arrays and empty objects
+ * stay one variable of JSON text, and a sub-environment overrides a nested
+ * leaf in place. Mutation check: make `add_env_var` stringify an object again
+ * and the dotted names, the resolved URL and the override all fail.
+ */
+TEST (InsomniaImport, FlattensANestedEnvironmentValueIntoDottedVariables) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W",
+            "environment":{"a":{"b":1,"c":{"d":"deep"}},"flat":"v"}},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com/{{ _.a.b }}/{{ _.a.c.d }}/{{ _.flat }}"},
+        {"_id":"env","_type":"environment","parentId":"wrk","name":"Base",
+            "data":{"a":{"b":1,"c":{"d":"deep"}},"list":[1,2],"empty":{},"flat":"v"}},
+        {"_id":"sub","_type":"environment","parentId":"env","name":"Prod",
+            "data":{"a":{"b":2}}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& workspace =
+    parsed.result.at ("collections")[0].at ("variables");
+    EXPECT_FALSE (workspace.contains ("a"));
+    EXPECT_EQ (workspace.at ("a.b").at ("value"), "1");
+    EXPECT_EQ (workspace.at ("a.c.d").at ("value"), "deep");
+
+    const std::string url = first_request (parsed.result.at ("collections")[0]).at ("url");
+    ASSERT_EQ (url, "https://x.com/{{a.b}}/{{a.c.d}}/{{flat}}");
+    const auto resolved = [&url] (const json& variables) {
+        return vayu::http::substitute_tokens (url,
+        [&variables] (const std::string& name) -> std::optional<std::string> {
+            return variables.contains (name) ?
+            std::optional<std::string> (
+            variables.at (name).at ("value").get<std::string> ()) :
+            std::nullopt;
+        });
+    };
+    const json& prod = parsed.result.at ("environments")[0].at ("variables");
+    EXPECT_EQ (prod.at ("list").at ("value"), "[1,2]");
+    EXPECT_EQ (prod.at ("empty").at ("value"), "{}");
+    EXPECT_EQ (resolved (prod), "https://x.com/2/deep/v");
+    EXPECT_EQ (resolved (workspace), "https://x.com/1/deep/v");
+}
+
+/**
+ * Insomnia keeps `settingSendCookies` and `settingStoreCookies` per request
+ * (both on by default); Vayu's one `disableCookies` keeps a request away from
+ * the jar in both directions, so either explicitly `false` sets it. Absent,
+ * `true` and a non-boolean leave it unset. Mutation checks: drop the call to
+ * `insomnia_cookie_settings` and every "disabled" case fails; stop at the
+ * first setting (remove the loop's second name) and the store-only case fails.
+ */
+TEST (InsomniaImport, EitherCookieSettingOffDisablesTheRequestsCookies) {
+    const std::vector<std::pair<std::string, bool>> cases{
+        { R"("settingSendCookies":false)", true },
+        { R"("settingStoreCookies":false)", true },
+        { R"("settingSendCookies":false,"settingStoreCookies":false)", true },
+        { R"("settingSendCookies":true,"settingStoreCookies":false)", true },
+        { R"("settingSendCookies":true,"settingStoreCookies":true)", false },
+        { R"("settingSendCookies":"false")", false },
+        { R"("settingFollowRedirects":"on")", false },
+    };
+    for (const auto& [settings, disabled] : cases) {
+        SCOPED_TRACE (settings);
+        const ImportParse parsed = parse_import (
+        R"({"_type":"export","__export_format":4,"resources":[
+            {"_id":"wrk","_type":"workspace","name":"W"},
+            {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com",)" +
+        settings + "}]}",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const auto& request = first_request (parsed.result.at ("collections")[0]);
+        EXPECT_EQ (request.contains ("disableCookies"), disabled);
+        if (disabled) {
+            EXPECT_EQ (request.at ("disableCookies"), true);
+        }
+    }
+}
+
+/**
+ * A digest, NTLM or IAM node is stored as an opaque `config` bag, but its
+ * strings are template-bearing like any other auth field: `{{ _.x }}` becomes
+ * `{{x}}`, in a nested member and an array element too, and a non-string
+ * member is untouched. Mutation check: copy the member through unchanged in
+ * `insomnia_config` and the three modes keep the `_.` spelling.
+ */
+TEST (InsomniaImport, NormalisesTemplatesInAnOpaqueAuthConfig) {
+    for (const char* type : { "digest", "ntlm", "iam" }) {
+        SCOPED_TRACE (type);
+        const ImportParse parsed = parse_import (std::string (R"({"_type":"export","__export_format":4,"resources":[
+            {"_id":"wrk","_type":"workspace","name":"W"},
+            {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com","authentication":{"type":")") +
+        type +
+        R"(","disabled":false,"username":"{{ _.user }}","password":"p",
+            "retries":3,"extra":{"hosts":["{{ _.host }}","literal"]}}}]})",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const json& auth = first_request (parsed.result.at ("collections")[0]).at ("auth");
+        EXPECT_EQ (auth.at ("config"),
+        (json{ { "username", "{{user}}" }, { "password", "p" }, { "retries", 3 },
+        { "extra", { { "hosts", json::array ({ "{{host}}", "literal" }) } } } }));
+    }
+}
+
+/**
  * Insomnia v5 is read by flattening it into the v4 resource list (#2119), so
  * the same workspace exported by either version imports as the same tree;
  * only `meta.format` says which file it was. Mutation check: drop the
@@ -721,6 +830,31 @@ TEST (InsomniaV5Import, ReadsABooleanFollowRedirectsSetting) {
         const auto& request = first_request (parsed.result.at ("collections")[0]);
         ASSERT_TRUE (request.contains ("followRedirects"));
         EXPECT_EQ (request.at ("followRedirects"), follow);
+    }
+}
+
+/**
+ * v5 spells the two cookie settings `settings.cookies.send` / `.store`; they
+ * read as v4's `settingSendCookies` / `settingStoreCookies`, so either `false`
+ * disables the request's cookies. Mutation check: remove the call to
+ * `carry_cookie_settings` in the flattener and both cases lose the field.
+ */
+TEST (InsomniaV5Import, ReadsTheCookieSettingsOfARequest) {
+    for (const std::string member : { "send", "store" }) {
+        SCOPED_TRACE (member);
+        for (const bool on : { true, false }) {
+            SCOPED_TRACE (on);
+            const ImportParse parsed = parse_import (
+            "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n"
+            "  - name: R\n    url: https://x.example/a\n    method: GET\n"
+            "    settings:\n      cookies:\n        " +
+            member + ": " + (on ? "true" : "false") + "\n",
+            {}, {});
+            ASSERT_TRUE (parsed.ok ()) << parsed.error;
+            const auto& request =
+            first_request (parsed.result.at ("collections")[0]);
+            EXPECT_EQ (request.contains ("disableCookies"), !on);
+        }
     }
 }
 

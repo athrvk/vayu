@@ -2540,12 +2540,36 @@ json insomnia_bearer (const json* auth) {
     return json{ { "mode", "bearer" }, { "token", token } };
 }
 
-/// The auth node minus the two members that are not configuration.
+/// @p value with `{{ _.x }}` tightened to `{{x}}` in every string it holds,
+/// however deep; numbers, booleans and nulls pass through.
+json normalize_config_strings (const json& value) {
+    if (value.is_string ()) {
+        return normalize_vars (value.get<std::string> ());
+    }
+    if (value.is_array ()) {
+        json out = json::array ();
+        for (const json& element : value) {
+            out.push_back (normalize_config_strings (element));
+        }
+        return out;
+    }
+    if (!value.is_object ()) {
+        return value;
+    }
+    json out = json::object ();
+    for (auto entry = value.begin (); entry != value.end (); ++entry) {
+        out[entry.key ()] = normalize_config_strings (entry.value ());
+    }
+    return out;
+}
+
+/// The auth node minus the two members that are not configuration, its
+/// strings normalised like every other template-bearing field.
 json insomnia_config (const json* node) {
     json config = json::object ();
     for (auto entry = node->begin (); entry != node->end (); ++entry) {
         if (entry.key () != "type" && entry.key () != "disabled") {
-            config[entry.key ()] = entry.value ();
+            config[entry.key ()] = normalize_config_strings (entry.value ());
         }
     }
     return config;
@@ -2768,6 +2792,43 @@ void insomnia_redirects (const json* resource, json& request) {
     }
 }
 
+/**
+ * Adds @p node under @p name to @p out as a variable. A non-empty object is
+ * not a value but a namespace: `{ "a": { "b": 1 } }` becomes the variable
+ * `a.b`, because the importer rewrites `{{ _.a.b }}` to `{{a.b}}` and the
+ * composer looks up that whole name. An array, or an empty object, stays one
+ * variable holding its JSON text.
+ */
+void add_env_var (const std::string& name, const json& node, json& out) {
+    if (node.is_object () && !node.empty ()) {
+        for (auto member = node.begin (); member != node.end (); ++member) {
+            add_env_var (name + '.' + member.key (), member.value (), out);
+        }
+        return;
+    }
+    out[name] =
+    json{ { "value", normalize_vars (as_string (&node)) }, { "enabled", true } };
+}
+
+/**
+ * Insomnia's per-request `settingSendCookies` / `settingStoreCookies`
+ * (booleans, both on by default). Vayu has one flag, `disableCookies`, that
+ * keeps the request away from the cookie jar in both directions - it neither
+ * reads nor writes - so either setting explicitly `false` sets it: importing
+ * only the other half would leave a jar interaction the user switched off.
+ * Absent, `true` and non-boolean values leave the field absent, the engine's
+ * default.
+ */
+void insomnia_cookie_settings (const json* resource, json& request) {
+    for (const char* name : { "settingSendCookies", "settingStoreCookies" }) {
+        const json* setting = prop (resource, name);
+        if (setting != nullptr && setting->is_boolean () && !setting->get<bool> ()) {
+            request["disableCookies"] = true;
+            return;
+        }
+    }
+}
+
 /// Insomnia env `data` (which may hold non-string values) as Vayu variables.
 json to_env_vars (const json* data) {
     json out = json::object ();
@@ -2775,9 +2836,7 @@ json to_env_vars (const json* data) {
         return out;
     }
     for (auto entry = data->begin (); entry != data->end (); ++entry) {
-        out[entry.key ()] =
-        json{ { "value", normalize_vars (as_string (&entry.value ())) },
-            { "enabled", true } };
+        add_env_var (entry.key (), entry.value (), out);
     }
     return out;
 }
@@ -2905,6 +2964,7 @@ class InsomniaTree {
             as_string (prop (resource, "afterResponseScript")));
         }
         insomnia_redirects (resource, request);
+        insomnia_cookie_settings (resource, request);
         return request;
     }
 
@@ -3207,6 +3267,19 @@ void carry_scripts (const json& item, json& resource) {
     }
 }
 
+/// v5's `settings.cookies.send` / `.store` as v4's `settingSendCookies` /
+/// `settingStoreCookies`.
+void carry_cookie_settings (const json& item, json& resource) {
+    const json* cookies =
+    as_record (prop (as_record (prop (&item, "settings")), "cookies"));
+    if (const json* send = prop (cookies, "send")) {
+        resource["settingSendCookies"] = *send;
+    }
+    if (const json* store = prop (cookies, "store")) {
+        resource["settingStoreCookies"] = *store;
+    }
+}
+
 /// `settings.followRedirects` as v4's `settingFollowRedirects`. A boolean is
 /// read as `"on"` / `"off"`, because `insomnia_redirects` compares strings and
 /// would read a `true` as "global" - that is, as nothing.
@@ -3300,6 +3373,7 @@ class InsomniaV5Flattener {
         carry_members (item, resource,
         { "url", "method", "body", "parameters", "pathParameters", "headers" });
         carry_redirects (item, resource);
+        carry_cookie_settings (item, resource);
         resources_.push_back (std::move (resource));
     }
 
