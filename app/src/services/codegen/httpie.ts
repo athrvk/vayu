@@ -21,7 +21,13 @@
 
 import { shellQuote } from "./curl";
 import { fileBaseName as baseName } from "@/lib/file-path";
-import { prepareRequest, timeoutSeconds, untypedTextPartNote } from "./prepare";
+import {
+	foldRepeatedCookies,
+	prepareRequest,
+	timeoutSeconds,
+	untypedTextPartNote,
+	type PreparedFilePart,
+} from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /**
@@ -66,6 +72,19 @@ function hasInexpressibleBackslash(text: string): boolean {
 	return /(?:^|[^\\])(?:\\\\)*\\[:=@]/.test(text);
 }
 
+/**
+ * What a `key@path` file item cannot carry. HTTPie sends the file's basename
+ * and sniffs its type; a part whose declared name or type differs cannot be
+ * expressed, so it is said rather than quietly changed.
+ */
+function fileItemNote(file: PreparedFilePart): string | undefined {
+	const declared = file.fileName && file.fileName !== baseName(file.path);
+	if (!declared && !file.contentType) return undefined;
+	return `HTTPie names the part after the file on disk: ${file.key} is sent as ${baseName(file.path)}${
+		file.contentType ? ", and its Content-Type is sniffed rather than set" : ""
+	}.`;
+}
+
 export function generateHttpie(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
@@ -88,7 +107,7 @@ export function generateHttpie(
 	if (!prepared.verifySSL) args.push("--verify=no");
 	if (prepared.timeoutMs !== null) args.push(`--timeout=${timeoutSeconds(prepared.timeoutMs)}`);
 
-	for (const [name, value] of prepared.headers) {
+	for (const [name, value] of foldRepeatedCookies(prepared.headers)) {
 		// HTTPie sets the multipart Content-Type, boundary included; one that
 		// names a boundary it did not choose makes the server read the whole body
 		// as a single part.
@@ -112,33 +131,28 @@ export function generateHttpie(
 		// always supplies is emitted above and wins.
 		args.push(shellQuote(`@${prepared.body.path}`));
 	} else if (prepared.body) {
-		if (prepared.body.kind === "urlencoded") args.push("--form");
 		const itemTexts: string[] = [];
-		for (const [key, value] of prepared.body.fields) {
-			args.push(shellQuote(httpieItem(key, value)));
-			itemTexts.push(`${key}=`, value);
-		}
 		const untyped = untypedTextPartNote(prepared.body, "HTTPie");
 		if (untyped) notes.push(untyped);
-		if (prepared.body.kind === "form-data") {
-			for (const file of prepared.body.files) {
-				// `key@path` is HTTPie's file item - the separator this key is
-				// escaped against everywhere else, used deliberately. HTTPie sends
-				// the basename and sniffs the type; a part whose declared name or
-				// type differs cannot be expressed, so it is said rather than
-				// quietly changed.
-				args.push(shellQuote(`${escapeHttpieKey(file.key)}@${file.path}`));
-				itemTexts.push(`${file.key}@`, file.path);
-				const declared = file.fileName && file.fileName !== baseName(file.path);
-				if (declared || file.contentType) {
-					notes.push(
-						`HTTPie names the part after the file on disk: ${file.key} is sent as ${baseName(file.path)}${
-							file.contentType
-								? ", and its Content-Type is sniffed rather than set"
-								: ""
-						}.`
-					);
+		if (prepared.body.kind === "urlencoded") {
+			args.push("--form");
+			for (const [key, value] of prepared.body.fields) {
+				args.push(shellQuote(httpieItem(key, value)));
+				itemTexts.push(`${key}=`, value);
+			}
+		} else {
+			for (const part of prepared.body.parts) {
+				if (part.kind === "text") {
+					args.push(shellQuote(httpieItem(part.key, part.value)));
+					itemTexts.push(`${part.key}=`, part.value);
+					continue;
 				}
+				// `key@path` is HTTPie's file item - the separator the key is escaped
+				// against everywhere else, used deliberately.
+				args.push(shellQuote(`${escapeHttpieKey(part.key)}@${part.path}`));
+				itemTexts.push(`${part.key}@`, part.path);
+				const fileNote = fileItemNote(part);
+				if (fileNote) notes.push(fileNote);
 			}
 		}
 		if (itemTexts.some(hasInexpressibleBackslash)) {

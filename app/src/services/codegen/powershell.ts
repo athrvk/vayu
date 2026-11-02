@@ -25,6 +25,7 @@ import {
 	prepareRequest,
 	timeoutSeconds,
 	untypedTextPartNote,
+	type PreparedPart,
 	type PreparedRequest,
 } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
@@ -52,6 +53,19 @@ function transferParams(prepared: PreparedRequest): string[] {
 		params.push(`-TimeoutSec ${Math.max(1, Math.ceil(timeoutSeconds(prepared.timeoutMs)))}`);
 	}
 	return params;
+}
+
+/**
+ * One `-Form` hashtable entry. `-Form` uploads a FileInfo as a file part;
+ * `Get-Item` is how the docs produce one. `-LiteralPath` so a path containing
+ * `[` or `]` is not read as a wildcard and silently matches nothing.
+ */
+function formEntry(part: PreparedPart): string {
+	const value =
+		part.kind === "text"
+			? powerShellQuote(part.value)
+			: `Get-Item -LiteralPath ${powerShellQuote(part.path)}`;
+	return `    ${powerShellQuote(part.key)} = ${value}`;
 }
 
 export function generatePowerShell(
@@ -128,22 +142,18 @@ export function generatePowerShell(
 		lines.push(`$body = ${powerShellQuote(prepared.body.content)}`, "");
 	} else if (prepared.body) {
 		bodyVariable = "$body";
-		lines.push("$body = @{");
-		for (const [key, value] of prepared.body.fields) {
-			lines.push(`    ${powerShellQuote(key)} = ${powerShellQuote(value)}`);
-		}
+		// `-Form` writes the parts in the order the hashtable enumerates, which
+		// for a plain `@{}` is unspecified. `[ordered]` keeps the row order.
+		lines.push(prepared.body.kind === "urlencoded" ? "$body = @{" : "$body = [ordered]@{");
 		const untyped = untypedTextPartNote(prepared.body, "Invoke-RestMethod -Form");
 		if (untyped) notes.push(untyped);
-		if (prepared.body.kind === "form-data") {
-			for (const file of prepared.body.files) {
-				// `-Form` uploads a FileInfo as a file part; `Get-Item` is how the
-				// docs produce one. `-LiteralPath` so a path containing `[` or `]`
-				// is not read as a wildcard and silently matches nothing.
-				lines.push(
-					`    ${powerShellQuote(file.key)} = Get-Item -LiteralPath ${powerShellQuote(file.path)}`
-				);
+		if (prepared.body.kind === "urlencoded") {
+			for (const [key, value] of prepared.body.fields) {
+				lines.push(`    ${powerShellQuote(key)} = ${powerShellQuote(value)}`);
 			}
-			if (prepared.body.files.length > 0) {
+		} else {
+			lines.push(...prepared.body.parts.map(formEntry));
+			if (prepared.body.parts.some((part) => part.kind === "file")) {
 				notes.push(
 					"Invoke-RestMethod names each file part after the file on disk and sets its Content-Type itself."
 				);

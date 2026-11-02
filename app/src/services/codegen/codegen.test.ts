@@ -32,6 +32,7 @@ import {
 	type CodeTargetId,
 	type SnippetRequest,
 } from "./index";
+import { prepareRequest } from "./prepare";
 import { parseCommand } from "@/services/curl/parseCurl";
 import { encodeHost, encodeUrlAsPostman } from "@/modules/request-builder/utils/query-encoding";
 
@@ -307,6 +308,68 @@ describe("form bodies", () => {
 			);
 			expect(code).not.toContain("s3cr3t");
 			expect(masked).toBe(true);
+		});
+	});
+
+	/**
+	 * The engine adds the parts to the multipart tree in row order (`attach_multipart`
+	 * in `curl_utils.cpp`), so a snippet that groups text before files sends a
+	 * different body than the editor shows (#3198).
+	 */
+	describe("part order", () => {
+		const interleaved: SnippetRequest = {
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "first", value: "", type: "file", src: "/tmp/one.png" },
+					{ key: "middle", value: "text-value" },
+					{ key: "last", value: "", type: "file", src: "/tmp/two.png" },
+				],
+			},
+		};
+
+		/** The `first`, `middle`, `last` keys ordered by where each is written. */
+		function keyOrder(code: string): string[] {
+			return ["first", "middle", "last"]
+				.map((key) => ({ key, at: code.search(new RegExp(`\\b${key}\\b`)) }))
+				.sort((a, b) => a.at - b.at)
+				.map(({ key }) => key);
+		}
+
+		const generators = {
+			curl: generateCurl,
+			httpie: generateHttpie,
+			python: generatePython,
+			fetch: generateFetch,
+			powershell: generatePowerShell,
+		};
+
+		it.each(Object.entries(generators))(
+			"%s writes the parts in row order",
+			(_name, generate) => {
+				// Mutation check: emit the text parts before the files and `middle`
+				// moves to the front.
+				expect(keyOrder(generate(interleaved).code)).toEqual(["first", "middle", "last"]);
+			}
+		);
+
+		it("keeps the order when a file row is disabled between two text rows", () => {
+			const { code } = generateCurl({
+				...GET,
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "first", value: "1" },
+						{ key: "skipped", value: "", type: "file", src: "/tmp/x", enabled: false },
+						{ key: "middle", value: "", type: "file", src: "/tmp/m" },
+						{ key: "last", value: "3" },
+					],
+				},
+			});
+			expect(keyOrder(code)).toEqual(["first", "middle", "last"]);
+			expect(code).not.toContain("skipped");
 		});
 	});
 
@@ -846,6 +909,24 @@ describe("PowerShell", () => {
 		});
 		expect(urlencoded.code).toContain("-Body $body");
 		expect(urlencoded.code).not.toContain("-Form");
+	});
+
+	it("builds the multipart hashtable [ordered], so -Form sends the parts in row order", () => {
+		// Mutation check: a plain `@{` hashtable enumerates in no promised order.
+		const multipart = generatePowerShell({
+			...GET,
+			method: "POST",
+			body: { mode: "form-data", fields: [{ key: "a", value: "b" }] },
+		});
+		expect(multipart.code).toContain("$body = [ordered]@{");
+
+		const urlencoded = generatePowerShell({
+			...GET,
+			method: "POST",
+			body: { mode: "x-www-form-urlencoded", fields: [{ key: "a", value: "b" }] },
+		});
+		expect(urlencoded.code).toContain("$body = @{");
+		expect(urlencoded.code).not.toContain("[ordered]");
 	});
 });
 
@@ -1705,6 +1786,97 @@ describe("the Content-Type a body mode implies", () => {
 });
 
 /**
+ * The body a GraphQL or JSON-RPC snippet carries is the engine's wire body, not
+ * the stored content (#3198): a bare document is wrapped, a bare call gets its
+ * version and id. Without it a copied snippet is a request the server rejects
+ * where Vayu's succeeds. The rules themselves are held in `wire-body.test.ts`;
+ * this holds that `prepareRequest` applies them, in front of the masker, and
+ * that every target carries the result.
+ */
+describe("the envelope a graphql or jsonrpc snippet sends", () => {
+	const withBody = (mode: string, content: string): SnippetRequest => ({
+		...GET,
+		method: "POST",
+		body: { mode, content },
+	});
+	const BARE_GRAPHQL = "{ hero { name } }";
+	const WRAPPED_GRAPHQL = '{"query":"{ hero { name } }"}';
+	const BARE_CALL = '{"method":"eth_blockNumber","params":[]}';
+	const COMPLETED_CALL = '{"method":"eth_blockNumber","params":[],"jsonrpc":"2.0","id":1}';
+	const FULL_ENVELOPE = '{"jsonrpc":"2.0","id":7,"method":"m","params":[]}';
+
+	it("wraps a bare GraphQL document and completes a bare JSON-RPC call", () => {
+		expect(prepareRequest(withBody("graphql", BARE_GRAPHQL)).body).toEqual({
+			kind: "raw",
+			content: WRAPPED_GRAPHQL,
+		});
+		expect(prepareRequest(withBody("jsonrpc", BARE_CALL)).body).toEqual({
+			kind: "raw",
+			content: COMPLETED_CALL,
+		});
+	});
+
+	it("completes a JSON-RPC call whose params are unquoted template tokens", () => {
+		expect(
+			prepareRequest(withBody("jsonrpc", '{"method":"sum","params":[{{a}},{{b}}]}')).body
+		).toEqual({
+			kind: "raw",
+			content: '{"method":"sum","params":[{{a}},{{b}}],"jsonrpc":"2.0","id":1}',
+		});
+	});
+
+	it("leaves an envelope the author wrote, and every other mode, as typed", () => {
+		const envelope = '{ "query": "{ hero }", "variables": {} }';
+		const cases: Array<[string, string]> = [
+			["graphql", envelope],
+			["jsonrpc", FULL_ENVELOPE],
+			["jsonrpc", '[{"method":"a"},{"method":"b"}]'],
+			["json", BARE_CALL],
+			["text", BARE_GRAPHQL],
+		];
+		for (const [mode, content] of cases) {
+			expect(prepareRequest(withBody(mode, content)).body, `${mode} ${content}`).toEqual({
+				kind: "raw",
+				content,
+			});
+		}
+	});
+
+	it("sends the wrapped body in every target", () => {
+		// Each word is one only the envelope supplies: neither bare input has it.
+		for (const [mode, content, word] of [
+			["graphql", BARE_GRAPHQL, "query"],
+			["jsonrpc", BARE_CALL, "jsonrpc"],
+		] as const) {
+			expect(content).not.toContain(word);
+			for (const target of CODE_TARGETS) {
+				expect(
+					target.generate(withBody(mode, content)).code,
+					`${target.id} ${mode}`
+				).toContain(word);
+			}
+			expect(curlBody(generateCurl(withBody(mode, content)).code), mode).toBe(
+				mode === "graphql" ? WRAPPED_GRAPHQL : COMPLETED_CALL
+			);
+		}
+	});
+
+	// The envelope is built before the masker runs, so the quote in this secret
+	// reaches it as `\"` and is found only by the masker's JSON-escaped form.
+	it("masks a secret whose JSON spelling the wrapping changed", () => {
+		const secret = 's3"cr\\x';
+		const { code } = generateCurl(withBody("graphql", `{ me(token: "${secret}") { id } }`), {
+			mask: true,
+			secrets: [secret],
+		});
+		expect(code).not.toContain("s3");
+		expect(curlBody(code)).toBe(
+			`{"query":"{ me(token: \\"${SECRET_PLACEHOLDER}\\") { id } }"}`
+		);
+	});
+});
+
+/**
  * A `:name` segment is filled from the request's path rows (issue #1764), the
  * way `POST /compose` fills it, so the templated snippet sends what Vayu does.
  * The substitution is `prepare.ts`'s, so a target that read `request.url`
@@ -2224,8 +2396,9 @@ describe("credentials in the URL", () => {
 /**
  * A repeated header (issue #2466). Vayu sends every enabled row as its own
  * line, in order, and `POST /compose` hands the generators those lines. curl and
- * HTTPie can repeat a header and do; `fetch`, `requests` and `Invoke-RestMethod`
- * hold one value per name, so they join the lines and say so.
+ * HTTPie can repeat a header and do, except `Cookie`, which the engine joins
+ * into one line; `fetch`, `requests` and `Invoke-RestMethod` hold one value per
+ * name, so they join the lines and say so.
  */
 describe("repeated headers", () => {
 	const THREE: SnippetRequest = {
@@ -2289,6 +2462,85 @@ describe("repeated headers", () => {
 		expect(notes[0]).toContain('"; "');
 		expect(notes[0]).toContain("Vayu sends them joined the same way");
 		expect(notes[0]).not.toContain("separate lines");
+	});
+
+	describe("a repeated Cookie in curl and HTTPie", () => {
+		// The engine sends the typed Cookie rows as one "; "-joined line
+		// (`typed_cookie_value`) and every other repeat as separate lines.
+		const MIXED: SnippetRequest = {
+			...GET,
+			headers: [
+				{ name: "Cookie", value: "a=1" },
+				{ name: "X-Dup", value: "one" },
+				{ name: "cookie", value: "b=2" },
+				{ name: "X-Dup", value: "two" },
+			],
+		};
+
+		it("curl sends one Cookie line, where the first row was, and repeats the rest", () => {
+			// Mutation check: iterate `prepared.headers` unfolded and Cookie is two flags.
+			const { code, notes } = generateCurl(MIXED);
+			const flags = code.split("\n").filter((l) => l.includes("-H "));
+			expect(flags.map((l) => l.replace(/ \\$/, "").trim())).toEqual([
+				"-H 'Cookie: a=1; b=2'",
+				"-H 'X-Dup: one'",
+				"-H 'X-Dup: two'",
+			]);
+			expect(notes).toEqual([]);
+		});
+
+		it("HTTPie sends one Cookie word, where the first row was, and repeats the rest", () => {
+			const { code, notes } = generateHttpie(MIXED);
+			expect(code).toContain("'Cookie:a=1; b=2'");
+			expect(code).not.toContain("'cookie:b=2'");
+			expect(code.match(/'X-Dup:/g)).toHaveLength(2);
+			expect(code.indexOf("'Cookie:")).toBeLessThan(code.indexOf("'X-Dup:one'"));
+			expect(notes).toEqual([]);
+		});
+
+		// `typed_cookie_value` skips a row that does not reach the wire and trims
+		// the edge whitespace of the rest, so none lands inside the joined line.
+		// Mutation check: join the raw values and the line is `Cookie: a=1 ; `.
+		const PADDED: SnippetRequest = {
+			...GET,
+			headers: [
+				{ name: "Cookie", value: "a=1 " },
+				{ name: "Cookie", value: "" },
+			],
+		};
+
+		it("curl trims a row and skips one that reaches no wire", () => {
+			expect(generateCurl(PADDED).code).toContain("-H 'Cookie: a=1'");
+		});
+
+		it("HTTPie trims a row and skips one that reaches no wire", () => {
+			expect(generateHttpie(PADDED).code).toContain("'Cookie:a=1'");
+		});
+
+		it.each([
+			["curl", generateCurl],
+			["HTTPie", generateHttpie],
+			["fetch", generateFetch],
+		])("%s writes no Cookie line when no row reaches the wire", (_name, generate) => {
+			const { code } = generate({
+				...GET,
+				headers: [
+					{ name: "Cookie", value: " \t" },
+					{ name: "cookie", value: "" },
+				],
+			});
+			expect(code.toLowerCase()).not.toContain("cookie");
+		});
+
+		it("fetch trims and skips the same rows", () => {
+			expect(generateFetch(PADDED).code).toContain('"Cookie": "a=1"');
+		});
+
+		it("a single Cookie row is written as it is", () => {
+			expect(
+				generateCurl({ ...GET, headers: [{ name: "Cookie", value: "a=1" }] }).code
+			).toContain("-H 'Cookie: a=1'");
+		});
 	});
 
 	it("keeps every other header where it was, and notes nothing when no name repeats", () => {

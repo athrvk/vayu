@@ -43,9 +43,11 @@ import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DEFAULT_HTTP_VERSION, isHttpVersion, type HttpVersion } from "@/constants/request";
+import { wireBodyContent } from "./wire-body";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
+	kind: "file";
 	key: string;
 	path: string;
 	fileName?: string;
@@ -55,14 +57,25 @@ export interface PreparedFilePart {
 /**
  * A multipart text part: its key and value, and the Content-Type it declares
  * for itself when the request sets one (#2539). A snippet that cannot express
- * the type still reads `[key, value]` and says so in a note.
+ * the type still writes the key and value and says so in a note.
  */
-export type PreparedTextPart = [key: string, value: string, contentType?: string];
+export interface PreparedTextPart {
+	kind: "text";
+	key: string;
+	value: string;
+	contentType?: string;
+}
+
+/** A multipart part, text or file. */
+export type PreparedPart = PreparedTextPart | PreparedFilePart;
 
 export type PreparedBody =
 	| { kind: "raw"; content: string }
 	| { kind: "binary"; path: string }
-	| { kind: "form-data"; fields: PreparedTextPart[]; files: PreparedFilePart[] }
+	// `parts` keeps the rows' order: the engine adds the parts to the multipart
+	// tree in row order, so a generator that groups text before files sends a
+	// different body (#3198).
+	| { kind: "form-data"; parts: PreparedPart[] }
 	| { kind: "urlencoded"; fields: Array<[string, string]> };
 
 /**
@@ -76,7 +89,9 @@ export function untypedTextPartNote(
 	client: string
 ): string | undefined {
 	if (body?.kind !== "form-data") return undefined;
-	const keys = body.fields.flatMap(([key, , contentType]) => (contentType ? [key] : []));
+	const keys = body.parts.flatMap((part) =>
+		part.kind === "text" && part.contentType ? [part.key] : []
+	);
 	if (keys.length === 0) return undefined;
 	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} ${pluralize(keys.length, "is", "are")} sent without the type the request declares.`;
 }
@@ -189,7 +204,9 @@ const URL_CREDENTIALS_DROPPED_NOTE =
  * writes `{` and a backtick where a query leaves them. In the host the composed
  * URL lowercases and punycodes, so a secret there is matched in that form too
  * (#2591); a secret that is only part of a label is rewritten with the whole
- * label by punycode and is not matched.
+ * label by punycode and is not matched. In a JSON-RPC or GraphQL body the
+ * engine's envelope is built first, which writes a quote, backslash or newline
+ * in the secret as a JSON escape, so that spelling is matched too (#3198).
  */
 function secretForms(secret: string): string[] {
 	return [
@@ -201,6 +218,7 @@ function secretForms(secret: string): string[] {
 		encodeQueryComponent(secret, "value"),
 		encodeURIComponent(secret),
 		encodeHost(secret),
+		JSON.stringify(secret).slice(1, -1),
 	];
 }
 
@@ -333,6 +351,27 @@ function binaryContentType(body: SnippetBody): string {
 	return declared ? declared : "application/octet-stream";
 }
 
+type BodyField = NonNullable<SnippetBody["fields"]>[number];
+
+function multipartPart(field: BodyField): PreparedPart {
+	if (field.type === "file") {
+		return {
+			kind: "file",
+			key: field.key,
+			path: field.src ?? "",
+			fileName: field.fileName,
+			contentType: field.contentType,
+		};
+	}
+	const declared = field.contentType?.trim();
+	return {
+		kind: "text",
+		key: field.key,
+		value: field.value,
+		...(declared ? { contentType: declared } : {}),
+	};
+}
+
 function normalizeBody(body: unknown): PreparedBody | undefined {
 	if (body === undefined || body === null) return undefined;
 	// A body sent as a bare string (nothing in the app does today, but the
@@ -352,35 +391,22 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 
 	if (shape.mode === "form-data" || shape.mode === "x-www-form-urlencoded") {
 		const enabled = (shape.fields ?? []).filter((f) => f.enabled !== false);
+		if (enabled.length === 0) return undefined;
 		// urlencoded has no file form on the wire, so a stray file row there is
 		// not a part any snippet could express - the engine refuses it too.
-		const isMultipart = shape.mode === "form-data";
-		const files: PreparedFilePart[] = isMultipart
-			? enabled
-					.filter((f) => f.type === "file")
-					.map((f) => ({
-						key: f.key,
-						path: f.src ?? "",
-						fileName: f.fileName,
-						contentType: f.contentType,
-					}))
-			: [];
-		const texts = enabled.filter((f) => !(isMultipart && f.type === "file"));
-		if (texts.length === 0 && files.length === 0) return undefined;
-		if (!isMultipart) {
+		if (shape.mode === "x-www-form-urlencoded") {
 			return {
 				kind: "urlencoded",
-				fields: texts.map((f): [string, string] => [f.key, f.value]),
+				fields: enabled.map((f): [string, string] => [f.key, f.value]),
 			};
 		}
-		const fields = texts.map((f): PreparedTextPart => {
-			const declared = f.contentType?.trim();
-			return declared ? [f.key, f.value, declared] : [f.key, f.value];
-		});
-		return { kind: "form-data", fields, files };
+		return { kind: "form-data", parts: enabled.map(multipartPart) };
 	}
 
-	return shape.content ? { kind: "raw", content: shape.content } : undefined;
+	if (!shape.content) return undefined;
+	// Before masking (the caller masks the result), as the engine completes the
+	// body before it leaves: a secret inside the envelope is still found.
+	return { kind: "raw", content: wireBodyContent(shape.mode, shape.content) };
 }
 
 /**
@@ -399,10 +425,11 @@ function maskedBody(body: PreparedBody, mask: (text: string) => string): Prepare
 	}
 	return {
 		kind: "form-data",
-		fields: body.fields.map(([k, v, type]): PreparedTextPart =>
-			type ? [k, mask(v), type] : [k, mask(v)]
+		parts: body.parts.map((part): PreparedPart =>
+			part.kind === "text"
+				? { ...part, value: mask(part.value) }
+				: { ...part, path: mask(part.path) }
 		),
-		files: body.files.map((file) => ({ ...file, path: mask(file.path) })),
 	};
 }
 
@@ -420,16 +447,62 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
 	return headerLinesOf(headers).map(({ name, value }): [string, string] => [name, value]);
 }
 
+/** How the engine joins repeated `Cookie` rows into the one line it sends (#2788). */
+const COOKIE_SEPARATOR = "; ";
+
+/** `header_value_reaches_wire`: a value with a non-`std::isspace` character is sent. */
+const REACHES_WIRE = /[^ \t\n\v\f\r]/;
+/** RFC 9110 optional whitespace, space and tab: the edge `trim_optional_whitespace` strips. */
+const EDGE_WHITESPACE = /^[ \t]+|[ \t]+$/g;
+
+/**
+ * The one `Cookie` line the engine builds from the typed rows
+ * (`typed_cookie_value`, `engine/src/http/event_loop/curl_utils.cpp`): a row
+ * with nothing that reaches the wire is skipped, each other row is trimmed of
+ * its edge whitespace, and the rest are joined with "; ". Empty when no row
+ * is sent, in which case the engine writes no `Cookie` line at all.
+ */
+function typedCookieValue(rows: readonly string[]): string {
+	return rows
+		.filter((value) => REACHES_WIRE.test(value))
+		.map((value) => value.replace(EDGE_WHITESPACE, ""))
+		.join(COOKIE_SEPARATOR);
+}
+
+/**
+ * Join repeated `Cookie` rows into one, leaving every other repeat alone.
+ *
+ * The engine sends the typed `Cookie` rows as a single line
+ * (`typedCookieValue`) while any other repeated header goes out as separate
+ * lines. curl and HTTPie can repeat a header, so they fold only this one - and
+ * need no note, because the folded line is what Vayu sends. The line sits where
+ * the first `Cookie` row was and keeps that row's spelling; when no row reaches
+ * the wire there is no line.
+ */
+export function foldRepeatedCookies(
+	headers: ReadonlyArray<[string, string]>
+): Array<[string, string]> {
+	const isCookie = ([name]: [string, string]) => name.toLowerCase() === "cookie";
+	const first = headers.findIndex(isCookie);
+	if (first === -1) return [...headers];
+	const joined = typedCookieValue(headers.filter(isCookie).map(([, value]) => value));
+	return headers.flatMap((row, index): Array<[string, string]> => {
+		if (!isCookie(row)) return [row];
+		return index === first && joined !== "" ? [[row[0], joined]] : [];
+	});
+}
+
 /**
  * Fold every header a client with one value per name cannot repeat into a single
  * entry, and say so. The entry sits where the name first appeared, keeps that
- * row's spelling and joins the values with ", " - `Cookie` with "; ", as the
- * engine's own folded record does - and the note names each name that was
- * joined, because Vayu sends those rows as separate lines - except `Cookie`,
- * which it sends as the same "; " join (issue #2788).
+ * row's spelling and joins the values with ", " - `Cookie` as the engine does
+ * (`typedCookieValue`) - and the note names each name that was joined, because
+ * Vayu sends those rows as separate lines - except `Cookie`, which it sends as
+ * the same "; " join (issue #2788).
  *
  * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
- * dictionary. curl and HTTPie repeat a header and never call this.
+ * dictionary. curl and HTTPie repeat a header and fold only `Cookie`
+ * (`foldRepeatedCookies`).
  */
 export function foldRepeatedHeaders(
 	headers: ReadonlyArray<[string, string]>,
@@ -444,18 +517,21 @@ export function foldRepeatedHeaders(
 	}
 
 	const notes: string[] = [];
-	const out = [...folded].map(([key, { name, values }]): [string, string] => {
-		if (values.length === 1) return [name, values[0]];
-		const separator = key === "cookie" ? "; " : ", ";
-		const sent =
-			key === "cookie"
+	const out: Array<[string, string]> = [];
+	for (const [key, { name, values }] of folded) {
+		const isCookie = key === "cookie";
+		if (values.length > 1) {
+			const separator = isCookie ? COOKIE_SEPARATOR : ", ";
+			const sent = isCookie
 				? "Vayu sends them joined the same way"
 				: "Vayu sends them as separate lines";
-		notes.push(
-			`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; ${sent}.`
-		);
-		return [name, values.join(separator)];
-	});
+			notes.push(
+				`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; ${sent}.`
+			);
+		}
+		const value = isCookie ? typedCookieValue(values) : values.join(", ");
+		if (!isCookie || value !== "") out.push([name, value]);
+	}
 	return { headers: out, notes };
 }
 

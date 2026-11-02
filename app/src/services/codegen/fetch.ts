@@ -21,6 +21,7 @@ import {
 	headerEncodingNotes,
 	prepareRequest,
 	untypedTextPartNote,
+	type PreparedPart,
 	type PreparedRequest,
 } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
@@ -54,6 +55,21 @@ function transferNotes(prepared: PreparedRequest): string[] {
 		);
 	}
 	return notes;
+}
+
+/**
+ * One `FormData` part. A file part cannot be attached: a path is not something
+ * `fetch` can open - the browser has no filesystem, and Node needs
+ * `openAsBlob`. So it is a commented placeholder naming the file, never a
+ * silently absent one, and the note says the snippet is incomplete without it.
+ */
+function formDataLines(part: PreparedPart): string[] {
+	if (part.kind === "text")
+		return [`body.append(${jsString(part.key)}, ${jsString(part.value)});`];
+	return [
+		`// ${part.key}: attach ${part.path} as a File/Blob before sending`,
+		`// body.append(${jsString(part.key)}, fileBlob, ${jsString(part.fileName || part.key)});`,
+	];
 }
 
 export function generateFetch(
@@ -127,27 +143,20 @@ export function generateFetch(
 	} else if (prepared.body) {
 		const ctor = prepared.body.kind === "form-data" ? "FormData" : "URLSearchParams";
 		lines.push(`const body = new ${ctor}();`);
-		for (const [key, value] of prepared.body.fields) {
-			lines.push(`body.append(${jsString(key)}, ${jsString(value)});`);
-		}
 		const untyped = untypedTextPartNote(prepared.body, "FormData");
 		if (untyped) notes.push(untyped);
-		if (prepared.body.kind === "form-data") {
-			for (const file of prepared.body.files) {
-				// A path is not something `fetch` can open - the browser has no
-				// filesystem, and Node needs `openAsBlob`. So the part is a
-				// commented placeholder naming the file, never a silently absent
-				// one, and the note says the snippet is incomplete without it.
-				lines.push(
-					`// ${file.key}: attach ${file.path} as a File/Blob before sending`,
-					`// body.append(${jsString(file.key)}, fileBlob, ${jsString(file.fileName || file.key)});`
-				);
+		if (prepared.body.kind === "urlencoded") {
+			for (const [key, value] of prepared.body.fields) {
+				lines.push(`body.append(${jsString(key)}, ${jsString(value)});`);
 			}
-			if (prepared.body.files.length > 0) {
+		} else {
+			lines.push(...prepared.body.parts.flatMap(formDataLines));
+			const fileKeys = prepared.body.parts.flatMap((part) =>
+				part.kind === "file" ? [part.key] : []
+			);
+			if (fileKeys.length > 0) {
 				notes.push(
-					`fetch can't read a local path: ${prepared.body.files
-						.map((f) => f.key)
-						.join(", ")} must be attached as a File or Blob.`
+					`fetch can't read a local path: ${fileKeys.join(", ")} must be attached as a File or Blob.`
 				);
 			}
 		}

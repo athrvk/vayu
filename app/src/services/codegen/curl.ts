@@ -19,7 +19,13 @@
  * flag on this one - its quoting rules share nothing with these.
  */
 
-import { prepareRequest, timeoutSeconds } from "./prepare";
+import {
+	foldRepeatedCookies,
+	prepareRequest,
+	timeoutSeconds,
+	type PreparedFilePart,
+	type PreparedTextPart,
+} from "./prepare";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
@@ -27,6 +33,35 @@ import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 /** Wrap a value so a POSIX shell passes it through byte for byte. */
 export function shellQuote(value: string): string {
 	return `'${value.split("'").join(`'\\''`)}'`;
+}
+
+/**
+ * A multipart text part. `--form-string`, not `-F`: `-F` reads a value
+ * beginning with `@` or `<` as a file reference and `;type=` as a per-part
+ * override, so a generated command would upload a local file the request never
+ * contained. `--form-string` takes the value literally, always.
+ */
+function textFormFlag({ key, value, contentType }: PreparedTextPart): string {
+	if (!contentType) return `--form-string ${shellQuote(`${key}=${value}`)}`;
+	// `--form-string` has no modifiers, so a typed text part is the one text case
+	// that needs `-F`. A double-quoted value is text to curl whatever it starts
+	// with (`"@x"` is the literal `@x`), with `\` and `\"` the only escapes;
+	// `;type=` is last so a type carrying `;` parameters is taken whole.
+	const quoted = `"${value.replace(/[\\"]/g, "\\$&")}"`;
+	return `-F ${shellQuote(`${key}=${quoted};type=${contentType}`)}`;
+}
+
+/**
+ * A multipart file part - the one case where `-F` is right: `@path` is exactly
+ * what it means here, and the two modifiers carry the part's declared name and
+ * type. This is the inverse of what `parseCurl` reads back.
+ */
+function fileFormFlag(file: PreparedFilePart): string {
+	const modifiers = [
+		file.contentType ? `;type=${file.contentType}` : "",
+		file.fileName ? `;filename=${file.fileName}` : "",
+	].join("");
+	return `-F ${shellQuote(`${file.key}=@${file.path}${modifiers}`)}`;
 }
 
 export function generateCurl(
@@ -37,7 +72,7 @@ export function generateCurl(
 	const args: string[] = [`curl -X ${prepared.method} ${shellQuote(prepared.url)}`];
 
 	const isFormData = prepared.body?.kind === "form-data";
-	for (const [name, value] of prepared.headers) {
+	for (const [name, value] of foldRepeatedCookies(prepared.headers)) {
 		// curl builds the multipart boundary, and a Content-Type that names one
 		// it did not choose makes the server read the body as a single part.
 		if (isFormData && name.toLowerCase() === "content-type") continue;
@@ -108,32 +143,8 @@ export function generateCurl(
 		// `--data-binary` is `application/x-www-form-urlencoded`.
 		args.push(`--data-binary @${shellQuote(prepared.body.path)}`);
 	} else if (prepared.body?.kind === "form-data") {
-		for (const [key, value, contentType] of prepared.body.fields) {
-			// `--form-string`, not `-F`: `-F` reads a value beginning with `@` or
-			// `<` as a file reference and `;type=` as a per-part override, so a
-			// generated command would upload a local file the request never
-			// contained. `--form-string` takes the value literally, always.
-			if (!contentType) {
-				args.push(`--form-string ${shellQuote(`${key}=${value}`)}`);
-				continue;
-			}
-			// `--form-string` has no modifiers, so a typed text part is the one
-			// text case that needs `-F`. A double-quoted value is text to curl
-			// whatever it starts with (`"@x"` is the literal `@x`), with `\` and
-			// `\"` the only escapes; `;type=` is last so a type carrying `;`
-			// parameters is taken whole.
-			const quoted = `"${value.replace(/[\\"]/g, "\\$&")}"`;
-			args.push(`-F ${shellQuote(`${key}=${quoted};type=${contentType}`)}`);
-		}
-		for (const file of prepared.body.files) {
-			// A file part is the one case where `-F` is right: `@path` is exactly
-			// what it means here, and the two modifiers carry the part's declared
-			// name and type. This is the inverse of what `parseCurl` reads back.
-			const modifiers = [
-				file.contentType ? `;type=${file.contentType}` : "",
-				file.fileName ? `;filename=${file.fileName}` : "",
-			].join("");
-			args.push(`-F ${shellQuote(`${file.key}=@${file.path}${modifiers}`)}`);
+		for (const part of prepared.body.parts) {
+			args.push(part.kind === "file" ? fileFormFlag(part) : textFormFlag(part));
 		}
 	} else if (prepared.body?.kind === "urlencoded") {
 		for (const [key, value] of prepared.body.fields) {
