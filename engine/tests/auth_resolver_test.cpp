@@ -13,6 +13,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "oauth_token_server.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/auth_resolver.hpp"
@@ -367,7 +368,125 @@ TEST_F (AuthResolverOAuth2Test, HeaderPlacementLeavesTheQueryParameterEmpty) {
     req, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
     EXPECT_TRUE (result.ok);
     EXPECT_EQ (req.headers.at ("Authorization"), "Bearer AT1");
+    EXPECT_EQ (req.auth_header, "Authorization");
     EXPECT_TRUE (req.auth_query_param.empty ());
+    EXPECT_TRUE (req.auth_notice.empty ());
+}
+
+/// A client-credentials config against @p tokens' `/token-fail`, which refuses
+/// every exchange, so a send that asks it for a token fails.
+json refusing_config (const vayu::tests::MockTokenServer& tokens,
+const json& placement = json::object ()) {
+    json config = { { "grantType", "client_credentials" },
+        { "accessTokenUrl", tokens.url ("/token-fail") }, { "clientId", "cid" },
+        { "clientSecret", "secret" } };
+    config.update (placement);
+    return config;
+}
+
+// #3202: an Authorization header the request carries wins, and no token is
+// fetched for it - the endpoint is never asked, and a token endpoint that is
+// down, a cache that is absent, cannot fail the send. Mutation check: drop the
+// `yields_to_typed_authorization` guard in `resolve_oauth2` and the endpoint is
+// asked (`hits()` is 1) and the send fails.
+TEST_F (AuthResolverOAuth2Test, ATypedAuthorizationHeaderWinsAndNoTokenIsFetched) {
+    const vayu::tests::MockTokenServer tokens;
+    const json auth = { { "mode", "oauth2" }, { "config", refusing_config (tokens) } };
+
+    for (vayu::db::Database* database :
+    { db.get (), static_cast<vayu::db::Database*> (nullptr) }) {
+        for (const char* name : { "Authorization", "authorization" }) {
+            auto req          = make_request ();
+            req.headers[name] = "Basic dHlwZWQ6c2VjcmV0";
+            const auto result = vayu::http::apply_auth (req, auth, database);
+            const std::string context = std::string (name) + (database ? ", db" : ", no db");
+
+            EXPECT_TRUE (result.ok) << context << ": " << result.message;
+            EXPECT_EQ (req.headers.size (), 1u) << context;
+            EXPECT_EQ (req.headers.at ("Authorization"), "Basic dHlwZWQ6c2VjcmV0") << context;
+            EXPECT_TRUE (req.auth_header.empty ()) << context;
+            EXPECT_EQ (req.url, "https://api.example.com/v1") << context;
+            EXPECT_EQ (result.token_fetch_ms, 0.0) << context;
+            EXPECT_NE (req.auth_notice.find ("Authorization header"), std::string::npos)
+            << context << ": " << req.auth_notice;
+            EXPECT_EQ (req.auth_notice.find ("dHlwZWQ"), std::string::npos)
+            << "the notice names no credential: " << req.auth_notice;
+        }
+    }
+    EXPECT_EQ (tokens.hits (), 0);
+}
+
+// The skip is not the endpoint being down: without a typed header the same
+// config asks the endpoint and the send fails, so the test above proves the
+// ask was spared and not merely survived.
+TEST_F (AuthResolverOAuth2Test, WithoutATypedHeaderTheRefusingEndpointFailsTheSend) {
+    const vayu::tests::MockTokenServer tokens;
+    auto req               = make_request ();
+    req.headers["X-Other"] = "1";
+    const auto result      = vayu::http::apply_auth (req,
+    json{ { "mode", "oauth2" }, { "config", refusing_config (tokens) } }, db.get ());
+
+    EXPECT_FALSE (result.ok);
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (req.headers.count ("Authorization"), 0u);
+    EXPECT_TRUE (req.auth_notice.empty ());
+}
+
+// A query-placed token does not touch the Authorization header, so there is
+// nothing to yield: it is fetched and appended beside the typed header, and no
+// notice says otherwise. Mutation check: drop the `tokenPlacement` half of
+// `yields_to_typed_authorization` and the token is never fetched.
+TEST_F (AuthResolverOAuth2Test, AQueryPlacedTokenIsStillFetchedBesideATypedAuthorization) {
+    const vayu::tests::MockTokenServer tokens;
+    json config = refusing_config (tokens, { { "tokenPlacement", "query" } });
+    config["accessTokenUrl"] = tokens.url ("/token");
+
+    auto req                     = make_request ();
+    req.headers["Authorization"] = "Bearer typed";
+    const auto result            = vayu::http::apply_auth (
+    req, json{ { "mode", "oauth2" }, { "config", config } }, db.get ());
+
+    EXPECT_TRUE (result.ok) << result.message;
+    EXPECT_EQ (tokens.hits (), 1);
+    EXPECT_EQ (req.url, "https://api.example.com/v1?access_token=AT1");
+    EXPECT_EQ (req.headers.at ("Authorization"), "Bearer typed");
+    EXPECT_TRUE (req.auth_notice.empty ());
+}
+
+// The pre-flight of a run decides from the headers the run will send, with the
+// same rule: a typed Authorization header spares the fetch there too, and a run
+// without one still asks. Mutation check: pass an empty `HeaderList` from
+// `preflight_run_auth` (or ignore `request_headers` in `preflight_auth`) and the
+// first assertion fails.
+TEST_F (AuthResolverOAuth2Test, PreflightFetchesNoTokenForARunWithATypedAuthorization) {
+    const vayu::tests::MockTokenServer tokens;
+    const json auth = { { "mode", "oauth2" }, { "config", refusing_config (tokens) } };
+
+    vayu::HeaderList typed;
+    typed.add ("authorization", "Bearer typed");
+    const auto spared = vayu::http::preflight_auth (auth, typed, *db, 5000);
+    EXPECT_TRUE (spared.ok) << spared.message;
+    EXPECT_EQ (tokens.hits (), 0);
+
+    vayu::HeaderList other;
+    other.add ("X-Other", "1");
+    const auto asked = vayu::http::preflight_auth (auth, other, *db, 5000);
+    EXPECT_FALSE (asked.ok);
+    EXPECT_EQ (tokens.hits (), 1);
+}
+
+TEST_F (AuthResolverOAuth2Test, PreflightStillFetchesAQueryPlacedTokenBesideATypedAuthorization) {
+    const vayu::tests::MockTokenServer tokens;
+    json config = refusing_config (tokens, { { "tokenPlacement", "query" } });
+    config["accessTokenUrl"] = tokens.url ("/token");
+
+    vayu::HeaderList typed;
+    typed.add ("Authorization", "Bearer typed");
+    const auto result = vayu::http::preflight_auth (
+    json{ { "mode", "oauth2" }, { "config", config } }, typed, *db, 5000);
+
+    EXPECT_TRUE (result.ok) << result.message;
+    EXPECT_EQ (tokens.hits (), 1);
 }
 
 TEST (ParseAuth, MapsModesToVariantAlternatives) {

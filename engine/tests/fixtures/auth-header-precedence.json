@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for which header a request's auth writes when the request already carries one (issue #2475). Read by BOTH the engine gtest suite (engine/tests/auth_header_precedence_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/services/codegen/prepare.conformance.test.ts). The rule is the engine's `apply_auth` (engine/src/http/auth_resolver.cpp): bearer, basic and an API key in a header are skipped when `headers` already holds that name, compared case-insensitively and whatever its value (an empty typed value still wins); an API key in the query is a URL parameter and is appended regardless. The snippet generators flatten auth in app/src/services/codegen/prepare.ts and would otherwise print the typed header and the auth one, two lines where Vayu sends one. Each case: `headers` (the request's typed headers, name -> value), `auth` (the auth block), `url` the request URL, and `expected`: `headers`, the [name, value] pairs that reach the wire in any order (a skipped auth header leaves the typed spelling of the name), and `url`. The app side renders a `basic` block that no typed header displaced as its `Authorization: Basic` pair before comparing, because a snippet keeps those credentials structured for -u, -a and auth=. The credentials in these cases are made up.",
+  "$comment": "Cross-language conformance fixture for which header a request's auth writes when the request already carries one (issue #2475). Read by BOTH the engine gtest suite (engine/tests/auth_header_precedence_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/services/codegen/prepare.conformance.test.ts). The rule is the engine's `apply_auth` (engine/src/http/auth_resolver.cpp): bearer, basic, an API key in a header and an OAuth 2.0 token placed in the header (which is then not fetched at all, issue #3202, so these cases give the engine no database) are skipped when `headers` already holds that name, compared case-insensitively and whatever its value (an empty typed value still wins); an API key in the query is a URL parameter and is appended regardless. The snippet generators flatten auth in app/src/services/codegen/prepare.ts and would otherwise print the typed header and the auth one, two lines where Vayu sends one. Each case: `headers` (the request's typed headers, name -> value), `auth` (the auth block), `url` the request URL, and `expected`: `headers`, the [name, value] pairs that reach the wire in any order (a skipped auth header leaves the typed spelling of the name), and `url`. The app side renders a `basic` block that no typed header displaced as its `Authorization: Basic` pair before comparing, because a snippet keeps those credentials structured for -u, -a and auth=. The credentials in these cases are made up.",
   "cases": [
     {
       "name": "a typed Authorization wins over bearer",
@@ -19,6 +19,20 @@
       "name": "a typed lower-case authorization wins over basic",
       "headers": { "authorization": "Token typed" },
       "auth": { "mode": "basic", "username": "ada", "password": "s3cret" },
+      "url": "https://x/",
+      "expected": { "headers": [["authorization", "Token typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed Authorization wins over an OAuth 2.0 token",
+      "headers": { "Authorization": "Bearer typed" },
+      "auth": { "mode": "oauth2", "config": { "grantType": "client_credentials", "accessTokenUrl": "https://idp.test/token", "clientId": "cid", "clientSecret": "made-up" } },
+      "url": "https://x/",
+      "expected": { "headers": [["Authorization", "Bearer typed"]], "url": "https://x/" }
+    },
+    {
+      "name": "a typed lower-case authorization wins over an OAuth 2.0 token",
+      "headers": { "authorization": "Token typed" },
+      "auth": { "mode": "oauth2", "config": { "grantType": "client_credentials", "accessTokenUrl": "https://idp.test/token", "clientId": "cid", "clientSecret": "made-up" } },
       "url": "https://x/",
       "expected": { "headers": [["authorization", "Token typed"]], "url": "https://x/" }
     },

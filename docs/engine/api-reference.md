@@ -6456,7 +6456,7 @@ hits the wire:
 | `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467) |
 | `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
 | `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467) |
-| `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
+| `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement`; a token placed in the header yields to an `Authorization` header the request carries, and is then not fetched at all (#3202, below) |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
 **When it is applied.** As the request is built, before any pre-request script
@@ -6526,6 +6526,24 @@ headers). Header names are matched case-insensitively, so `authorization` or
 appended regardless. The app's code snippets apply the same rule
 (`engine/tests/fixtures/auth-header-precedence.json`).
 
+**An `oauth2` block whose token goes in the header fetches nothing when the
+request already carries an `Authorization` header** (#3202). The header the
+request typed is sent, no token is acquired, and the token cache, the
+`targetPolicy` and the endpoint are not consulted, so a token endpoint that is
+down, refused by the policy or unreachable cannot fail the send. The send says
+so: `authNotice` reads `the request's own Authorization header was sent; no
+OAuth 2.0 token was fetched` (see [`authNotice`](#post-execute)), and no
+`Authorization` is recorded as written by auth. The rule holds wherever auth is
+applied: at the build, after a pre-request script, in a collection run's step,
+and in a load run, whose `POST /runs` pre-flight reads the payload's headers the
+way the run will and so does not fetch (or fail on) a token it would not send.
+It applies to the `Authorization` header only: an `oauth2` block with
+`tokenPlacement: "query"` writes a URL parameter, has nothing to yield to, and
+is fetched and appended as before. The header is read when auth is applied, so
+one a pre-request script sets spares the fetch only when the auth waits for that
+script ([When it is applied](#authentication)); otherwise the token was already
+fetched and the script's header replaces what auth wrote.
+
 **Redirects.** With `followRedirects` on, a redirect to a different scheme, host
 name or port drops the `Authorization` header and a typed `Cookie`, so
 `bearer`, `basic` and an `oauth2` token placed in the header stop at the first
@@ -6576,8 +6594,8 @@ per distinct cache key, however many steps send it, and every such step sends
 the newest token from its first submission on. It is skipped - the token is
 fetched once and reused for the whole run - for a query-placed token,
 `autoRefreshToken: false`, a non-expiring token, an `authorization_code` grant
-with no refresh token, and a token that lost to a user-supplied `Authorization`
-header. That list is `plan_oauth2_refresh`'s plus the header check
+with no refresh token, and a send that carries its own `Authorization` header,
+for which no token was fetched (#3202). That list is `plan_oauth2_refresh`'s plus the header check
 (`engine/src/http/auth_resolver.cpp`); the app's `isMidRunRefreshable` mirrors
 all of it but the header case - change one, change both. A collection step is
 also skipped when its auth waited on its scripts, and when it writes the token
@@ -8333,6 +8351,10 @@ authentication, and the notice says so, naming the mode:
 ```json
 "authNotice": "auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication"
 ```
+
+It also appears when an `oauth2` block placing its token in the header yielded to
+the `Authorization` header the request carried, so no token was fetched (#3202):
+`the request's own Authorization header was sent; no OAuth 2.0 token was fetched`.
 
 It follows the same rules as the two keys above: one writer for both homes,
 **absent** when empty (every executed mode, and no auth), absent on rows

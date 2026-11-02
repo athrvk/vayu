@@ -165,6 +165,13 @@ struct AuthApplyResult {
  * `InvalidUrl`, with `detail_code` `target_not_allowed` or
  * `target_host_unknown`. Every other mode contacts nothing and ignores it.
  *
+ * An OAuth 2.0 config that places its token in the `Authorization` header
+ * yields to one the request already carries (#3202): nothing is fetched, the
+ * cache, the policy and `db` are not consulted (so a down token endpoint or a
+ * null `db` cannot fail the send), `Request::auth_header` stays empty and
+ * `Request::auth_notice` says the request's own header was sent. A token placed
+ * in the query has no header to yield to and is fetched as usual.
+ *
  * A bearer token and an API key's name and value are trimmed of the spaces and
  * tabs around them (issue #2467): a pasted credential's trailing blank would
  * otherwise go out inside the header value, and a padded name as a line with a
@@ -194,9 +201,13 @@ const std::atomic<bool>* cancel   = nullptr);
  *        unauthorizable run is rejected before it is created. No-op for every
  *        other mode. `timeout_ms` is the run's resolved request timeout,
  *        which bounds the token request (#2833); `target_policy` and `cancel`
- *        as `apply_auth`'s.
+ *        as `apply_auth`'s. `request_headers` are the headers the run will
+ *        send, read through `deserialize_request` as the worker reads them:
+ *        a run whose own `Authorization` header wins fetches no token here
+ *        either (#3202), as `apply_auth` decides.
  */
 AuthApplyResult preflight_auth (const nlohmann::json& auth,
+const vayu::HeaderList& request_headers,
 vayu::db::Database& db,
 int timeout_ms,
 const TargetPolicy* target_policy = nullptr,

@@ -1903,7 +1903,8 @@ and saw none, absent a run stored before the count existed.
 
 `authNotice` is the engine's sentence for a request whose auth mode it stores but
 does not execute (`digest`, `ntlm`, ...), which is sent without authentication
-(issue #2474). The key is **absent** when there is nothing to say, on the live
+(issue #2474), and for a request whose own `Authorization` header was sent in
+place of an OAuth 2.0 token it never fetched (issue #3202). The key is **absent** when there is nothing to say, on the live
 body and in the stored trace alike; the trace holds it on `trace.request`, so a
 failed exchange with no `response` node still has it, and a streaming send
 carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
