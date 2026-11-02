@@ -19,6 +19,7 @@
 #include <pugixml.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -457,7 +458,9 @@ std::optional<KindConfig> parse_script_processor (const pugi::xml_node& el, cons
 /// the recognised half of the flat dispatch in `dispatch_child` below.
 /// Returns `std::nullopt` both for an unrecognised @p tag and for one this
 /// parser recognises but could not extract enough from (an empty pattern, an
-/// unparsable number); either way the caller counts it.
+/// unparsable number). Every refusal is tallied exactly once, here: the bare
+/// tag for one no parser looked at, the parser's own kind (`_unrecognised`,
+/// `_or`, `_unmappable`) for one it did, so the caller counts nothing.
 std::optional<json>
 build_leaf_element (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
     // `parse_response_assertion` tallies its own refusals (either the shared
@@ -498,6 +501,8 @@ build_leaf_element (Ctx& ctx, std::string_view tag, const pugi::xml_node& el) {
     ctx.options.import_scripts) {
         kc = parse_script_processor (el, "script.post");
     } else {
+        // No parser looked at this tag; the bare tag is its only tally.
+        ctx.tally.add (std::string (tag));
         return std::nullopt;
     }
     if (!kc) {
@@ -528,6 +533,39 @@ std::optional<std::string> translate_if_condition (const std::string& condition)
     return "{{" + match[1].str () + "}} " + match[2].str () + " " + match[3].str ();
 }
 
+/// A number JMeter saves as `<FloatProperty><name>..</name><value>..</value>
+/// </FloatProperty>` - the nested form its own GUI writes for a float, which
+/// `double_prop` (a flat `<stringProp>`) never sees.
+std::optional<double> float_property (const pugi::xml_node& element, std::string_view name) {
+    for (const pugi::xml_node prop : element.children ("FloatProperty")) {
+        if (name != std::string_view (prop.child_value ("name"))) {
+            continue;
+        }
+        char* end          = nullptr;
+        const char* text   = prop.child_value ("value");
+        const double value = std::strtod (text, &end);
+        return end != text ? std::optional<double>{ value } : std::nullopt;
+    }
+    return std::nullopt;
+}
+
+/// `ThroughputController.style` 1 is "Percent Executions", the only style
+/// `control.throughput` expresses. Style 0 caps the *number* of executions
+/// (`maxThroughput`), which has no percent to import; it is refused so the
+/// caller tallies it instead of reading a stale or default percent as if it
+/// were the plan's intent. An absent style is read as percent, as hand-written
+/// plans leave it out.
+std::optional<KindConfig> parse_throughput_controller (const pugi::xml_node& el) {
+    constexpr long TOTAL_EXECUTIONS_STYLE = 0;
+    if (long_prop (el, "ThroughputController.style", 1) == TOTAL_EXECUTIONS_STYLE) {
+        return std::nullopt;
+    }
+    constexpr const char* PERCENT = "ThroughputController.percentThroughput";
+    const double percent =
+    float_property (el, PERCENT).value_or (double_prop (el, PERCENT, 100.0));
+    return KindConfig{ "control.throughput", json{ { "percent", percent } } };
+}
+
 std::optional<KindConfig> parse_controller (std::string_view tag, const pugi::xml_node& el) {
     if (tag == "LoopController") {
         const long count = long_prop (el, "LoopController.loops", -1);
@@ -553,9 +591,7 @@ std::optional<KindConfig> parse_controller (std::string_view tag, const pugi::xm
             json{ { "name", el.attribute ("testname").as_string ("Transaction") } } };
     }
     if (tag == "ThroughputController") {
-        return KindConfig{ "control.throughput",
-            json{ { "percent",
-            double_prop (el, "ThroughputController.percentThroughput", 100.0) } } };
+        return parse_throughput_controller (el);
     }
     // `SwitchController` selects by list index or a JMeter variable, neither
     // of which maps onto `control.switch`'s named-case grammar without
@@ -776,7 +812,7 @@ void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, 
 
 /// Whatever a sampler's own `<hashTree>` scopes to it alone: a `HeaderManager`
 /// merged into @p headers, any recognised extractor/assertion/timer/processor
-/// into @p elements, everything else tallied by tag.
+/// into @p elements, everything else tallied once by `build_leaf_element`.
 void collect_sampler_scope (Ctx& ctx, const pugi::xml_node& own_tree, json& headers, json& elements) {
     for_each_paired_child (
     ctx, own_tree, [&] (const pugi::xml_node& child, const pugi::xml_node&) {
@@ -789,10 +825,6 @@ void collect_sampler_scope (Ctx& ctx, const pugi::xml_node& own_tree, json& head
         }
         if (auto built = build_leaf_element (ctx, tag, child)) {
             elements.push_back (std::move (*built));
-            return;
-        }
-        if (tag != "hashTree") {
-            ctx.tally.add (std::string (tag));
         }
     });
 }
@@ -852,15 +884,18 @@ Sink parent) {
         if (auto built = make_valid_element (ctx, kc->first, std::move (kc->second))) {
             folder["elements"].push_back (std::move (*built));
         }
-    } else {
-        // A controller tag this parser recognises but could not build a
-        // `control.*` element for - a `SwitchController`, a `LoopController`
-        // set to JMeter's "forever" (`loops <= 0`), or an `IfController` whose
-        // condition does not match `translate_if_condition`'s grammar. The
-        // folder still imports and still groups its members, but the logic
-        // that shaped it is gone, so it is tallied the same way
-        // `build_leaf_element` tallies a recognised class it could not
-        // extract enough from - never silently, per issue #1443.
+    } else if (tag != "GenericController") {
+        // A controller with no `control.*` element to build: a
+        // `SwitchController` or `WhileController` (no mapping at all), a
+        // `LoopController` set to JMeter's "forever" (`loops <= 0`), an
+        // `IfController` whose condition does not match
+        // `translate_if_condition`'s grammar, or a `ThroughputController` in
+        // "total executions" style. The folder still imports and still groups
+        // its members in source order, but the logic that shaped it is gone,
+        // so it is tallied the same way `build_leaf_element` tallies a
+        // recognised class it could not extract enough from - never silently,
+        // per issue #1443. A `GenericController` only groups, so it is the
+        // one exception: nothing was lost to report.
         ctx.tally.add (std::string (tag) + "_unrecognised");
     }
     int next_order = 0;
@@ -906,6 +941,35 @@ void dispatch_lifecycle_group (Ctx& ctx, std::string_view tag, const pugi::xml_n
     ctx.tally.add (std::string (tag));
 }
 
+/// Every logic controller that imports as a folder holding its members in
+/// source order. The first six may also gain a `control.*` element from
+/// `parse_controller`; the rest have no element-kind equivalent for their
+/// looping or selection semantic, so the folder is all they get and the
+/// caller tallies `<Tag>_unrecognised` for each (`build_controller_folder`) -
+/// except a `GenericController` (Simple Controller), which only groups and so
+/// has nothing to report.
+bool is_folder_controller (std::string_view tag) {
+    static constexpr auto TAGS = std::to_array<std::string_view> ({
+    "LoopController",
+    "IfController",
+    "OnceOnlyController",
+    "SwitchController",
+    "TransactionController",
+    "ThroughputController",
+    "GenericController",
+    "WhileController",
+    "ForeachController",
+    "RandomController",
+    "InterleaveControl",
+    "RandomOrderController",
+    "RunTime",
+    "CriticalSectionController",
+    "ModuleController",
+    "IncludeController",
+    });
+    return std::ranges::find (TAGS, tag) != TAGS.end ();
+}
+
 void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& own_tree, Sink sink) {
     const std::string_view tag = el.name ();
 
@@ -922,9 +986,7 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
         ++ctx.request_count;
         return;
     }
-    if (tag == "LoopController" || tag == "IfController" ||
-    tag == "OnceOnlyController" || tag == "SwitchController" ||
-    tag == "TransactionController" || tag == "ThroughputController") {
+    if (is_folder_controller (tag)) {
         build_controller_folder (ctx, tag, el, own_tree, sink);
         return;
     }
@@ -937,20 +999,16 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
         merge_http_defaults (el, sink.variables);
         return;
     }
-    if (auto built = build_leaf_element (ctx, tag, el)) {
-        sink.elements.push_back (std::move (*built));
-        return;
-    }
-    if (tag == "hashTree") {
-        return; // Paired already; never reached, kept for readability.
-    }
     // Everything JMeter itself never asked this parser to model - listeners
     // (every one of which serializes as `<ResultCollector>` regardless of
     // which report a user picked), `CookieManager`, `CSVDataSet`,
-    // `AuthManager`, `WhileController`, `XPathExtractor`, a stray
-    // `ConfigTestElement` that is not HTTP defaults - counted by its own tag
-    // name so a future kind for any one of them costs nothing to wire up.
-    ctx.tally.add (std::string (tag));
+    // `AuthManager`, `XPathExtractor`, a stray `ConfigTestElement` that is not
+    // HTTP defaults - is counted by its own tag name inside
+    // `build_leaf_element`, so a future kind for any one of them costs nothing
+    // to wire up.
+    if (auto built = build_leaf_element (ctx, tag, el)) {
+        sink.elements.push_back (std::move (*built));
+    }
 }
 
 /// Every recursive edge (controller folder, thread group flatten) re-enters

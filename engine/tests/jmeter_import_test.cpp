@@ -33,6 +33,16 @@ const nlohmann::ordered_json& first_request (const nlohmann::ordered_json& colle
     return collection.at ("requests").at (0);
 }
 
+/// How many elements the import tallied under @p kind; 0 when it did not.
+int skipped_count (const nlohmann::ordered_json& meta, const std::string& kind) {
+    for (const nlohmann::ordered_json& item : meta.at ("skipped")) {
+        if (item.at ("kind").get<std::string> () == kind) {
+            return item.at ("count").get<int> ();
+        }
+    }
+    return 0;
+}
+
 bool has_skipped_kind (const nlohmann::ordered_json& meta, const std::string& kind) {
     const nlohmann::ordered_json& skipped = meta.at ("skipped");
     return std::any_of (
@@ -879,4 +889,179 @@ TEST (JmeterImport, ControllersAloneAreNumberedInDocumentOrder) {
     EXPECT_EQ (stated_orders (root.at ("children")),
     (std::vector<std::string>{ "B=0", "A=1" }));
     EXPECT_TRUE (root.at ("requests").empty ());
+}
+
+// A Simple Controller only groups, so its members import in source order
+// inside one folder and nothing is reported as lost (#3190). Mutation check:
+// drop `GenericController` from `is_folder_controller` and the folder, its
+// members and the count all go red, the controller falling back to a bare-tag
+// tally that drops every sampler inside it.
+TEST (JmeterImport, ASimpleControllerImportsItsMembersInOrderInsideAFolder) {
+    const ImportParse parsed = parse_import (
+    plan_with (sampler ("Before") +
+    controller ("GenericController", "Group", sampler ("First") + sampler ("Second")) +
+    sampler ("After")),
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& root = parsed.result.at ("collections").at (0);
+    ASSERT_EQ (root.at ("children").size (), 1);
+    const nlohmann::ordered_json& folder = root.at ("children").at (0);
+    EXPECT_EQ (folder.at ("name"), "Group");
+    EXPECT_EQ (stated_orders (folder.at ("requests")),
+    (std::vector<std::string>{ "First=0", "Second=1" }));
+    EXPECT_FALSE (folder.contains ("elements"));
+
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (meta.at ("requestCount"), 4);
+    EXPECT_EQ (meta.at ("folderCount"), 1);
+    EXPECT_TRUE (meta.at ("skipped").empty ()) << meta.at ("skipped").dump ();
+}
+
+// Every controller with no element-kind equivalent for its looping or
+// selection semantic keeps its members as a folder and tallies one notice kind
+// per tag, counting each controller (#3190). Mutation check: remove a tag from
+// `is_folder_controller` and its members vanish into the bare-tag tally,
+// failing the request count and the `_unrecognised` count together.
+TEST (JmeterImport, AnUnmappedControllerKeepsItsMembersAndTalliesOneNotice) {
+    const std::vector<std::string> tags = { "WhileController", "ForeachController",
+        "RandomController", "InterleaveControl", "RandomOrderController", "RunTime",
+        "CriticalSectionController", "ModuleController", "IncludeController" };
+    for (const std::string& tag : tags) {
+        const ImportParse parsed = parse_import (
+        plan_with (controller (tag.c_str (), "One", sampler ("A") + sampler ("B")) +
+        controller (tag.c_str (), "Two", sampler ("C"))),
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << tag << ": " << parsed.error;
+
+        const nlohmann::ordered_json& root = parsed.result.at ("collections").at (0);
+        const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+        ASSERT_EQ (root.at ("children").size (), 2) << tag;
+        EXPECT_EQ (stated_orders (root.at ("children").at (0).at ("requests")),
+        (std::vector<std::string>{ "A=0", "B=1" }))
+        << tag;
+        EXPECT_EQ (meta.at ("requestCount"), 3) << tag;
+        EXPECT_EQ (meta.at ("folderCount"), 2) << tag;
+        EXPECT_EQ (skipped_count (meta, tag + "_unrecognised"), 2) << tag;
+        EXPECT_FALSE (has_skipped_kind (meta, tag)) << tag << " tallied as dropped";
+    }
+}
+
+// A controller nested in an unmapped one keeps source order at both levels.
+TEST (JmeterImport, AnUnmappedControllerNestsAndKeepsSourceOrder) {
+    const ImportParse parsed = parse_import (
+    plan_with (controller ("WhileController", "Outer",
+    sampler ("X") + controller ("GenericController", "Inner", sampler ("Y")) + sampler ("Z"))),
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& outer =
+    parsed.result.at ("collections").at (0).at ("children").at (0);
+    EXPECT_EQ (stated_orders (outer.at ("requests")),
+    (std::vector<std::string>{ "X=0", "Z=2" }));
+    EXPECT_EQ (stated_orders (outer.at ("children")),
+    (std::vector<std::string>{ "Inner=1" }));
+    EXPECT_EQ (outer.at ("children").at (0).at ("requests").at (0).at ("name"), "Y");
+}
+
+namespace {
+
+/// A plan with one Throughput Controller holding one sampler, its percent
+/// written as @p percent_props (the controller's own property children).
+nlohmann::ordered_json throughput_plan (const std::string& percent_props) {
+    const std::string plan =
+    plan_with ("<ThroughputController testname=\"Gate\">" + percent_props +
+    "</ThroughputController><hashTree>" + sampler ("Gated") + "</hashTree>");
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/// The nested form JMeter's GUI saves for the percent.
+std::string float_percent (const char* value) {
+    return std::string (
+           "<FloatProperty><name>ThroughputController.percentThroughput</name>"
+           "<value>") +
+    value + "</value><savedValue>0.0</savedValue></FloatProperty>";
+}
+
+} // namespace
+
+// The percent JMeter saves as a nested `FloatProperty` is read, not defaulted
+// to 100 (#3190). Mutation check: drop the `float_property` read from
+// `parse_throughput_controller` and the 25 reads 100.
+TEST (JmeterImport, AThroughputControllerReadsItsNestedFloatPercent) {
+    const nlohmann::ordered_json result = throughput_plan (
+    R"(<intProp name="ThroughputController.style">1</intProp>)" + float_percent ("25.0"));
+    const nlohmann::ordered_json& folder =
+    result.at ("collections").at (0).at ("children").at (0);
+    ASSERT_TRUE (folder.contains ("elements"));
+    EXPECT_EQ (folder.at ("elements").at (0).at ("kind"), "control.throughput");
+    EXPECT_EQ (folder.at ("elements").at (0).at ("config").at ("percent"), 25.0);
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "ThroughputController_unrecognised"));
+}
+
+TEST (JmeterImport, AThroughputControllerStillReadsAFlatStringPercent) {
+    const nlohmann::ordered_json result = throughput_plan (
+    R"(<stringProp name="ThroughputController.percentThroughput">40</stringProp>)");
+    const nlohmann::ordered_json& folder =
+    result.at ("collections").at (0).at ("children").at (0);
+    EXPECT_EQ (folder.at ("elements").at (0).at ("config").at ("percent"), 40.0);
+}
+
+// Style 0 caps a number of executions, which `control.throughput` cannot
+// express: the members still import, no percent is invented, and one notice
+// says so (#3190). Mutation check: drop the style test from
+// `parse_throughput_controller` and the folder gains a `control.throughput`.
+TEST (JmeterImport, ATotalExecutionsThroughputControllerIsTalliedNotImportedAsAPercent) {
+    const nlohmann::ordered_json result =
+    throughput_plan (R"(<intProp name="ThroughputController.style">0</intProp>)"
+                     R"(<intProp name="ThroughputController.maxThroughput">5</intProp>)" +
+    float_percent ("100.0"));
+    const nlohmann::ordered_json& folder =
+    result.at ("collections").at (0).at ("children").at (0);
+    EXPECT_FALSE (folder.contains ("elements"));
+    EXPECT_EQ (folder.at ("requests").size (), 1);
+    EXPECT_EQ (skipped_count (result.at ("meta"), "ThroughputController_unrecognised"), 1);
+}
+
+namespace {
+
+/// The `meta` of a plan whose body under the TestPlan is @p body.
+nlohmann::ordered_json meta_of_plan_with (const std::string& body) {
+    const ImportParse parsed = parse_import (plan_with (body), {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result.at ("meta");
+}
+
+} // namespace
+
+// A refused element is one entry in the preview, not two: a parser that looked
+// at it tallies its own kind and the bare tag stays out; a tag no parser looked
+// at keeps the bare tag (#3190). Mutation check: restore the bare-tag tally
+// after `build_leaf_element` returns empty and each `EXPECT_FALSE` below reds.
+TEST (JmeterImport, ARefusedLeafIsTalliedOnce) {
+    const nlohmann::ordered_json delayless =
+    meta_of_plan_with (R"(<ConstantTimer testname="Pause"/><hashTree/>)");
+    EXPECT_EQ (skipped_count (delayless, "ConstantTimer_unrecognised"), 1);
+    EXPECT_FALSE (has_skipped_kind (delayless, "ConstantTimer"));
+
+    const nlohmann::ordered_json scoped = meta_of_plan_with (
+    R"(<HTTPSamplerProxy testname="S"/><hashTree>)"
+    R"(<ConstantTimer testname="Pause"/><hashTree/></hashTree>)");
+    EXPECT_EQ (skipped_count (scoped, "ConstantTimer_unrecognised"), 1);
+    EXPECT_FALSE (has_skipped_kind (scoped, "ConstantTimer"));
+
+    const nlohmann::ordered_json lookahead = response_assertion_plan (2, { "id(?=:)" });
+    EXPECT_TRUE (has_skipped_kind (lookahead.at ("meta"), "assert.contains_unmappable"));
+    EXPECT_FALSE (has_skipped_kind (lookahead.at ("meta"), "ResponseAssertion"));
+
+    const nlohmann::ordered_json or_result =
+    response_assertion_plan (34, { "foo", "bar" });
+    EXPECT_TRUE (has_skipped_kind (or_result.at ("meta"), "ResponseAssertion_or"));
+    EXPECT_FALSE (has_skipped_kind (or_result.at ("meta"), "ResponseAssertion"));
+
+    const nlohmann::ordered_json unlooked =
+    meta_of_plan_with (R"(<CookieManager testname="C"/><hashTree/>)");
+    EXPECT_EQ (skipped_count (unlooked, "CookieManager"), 1);
 }
