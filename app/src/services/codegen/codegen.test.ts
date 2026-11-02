@@ -1168,6 +1168,240 @@ describe("a request that follows redirects", () => {
 });
 
 /**
+ * The transfer settings every target reads (issue #3195): redirects, TLS
+ * verification, the request's own timeout and, for curl, the protocol. A target
+ * with a native spelling emits it; one without says so in a note, so no snippet
+ * silently describes a different request than Vayu sends. Nothing is asserted
+ * about a default a client already has in common with Vayu.
+ */
+describe("transfer settings across the targets", () => {
+	const BASE: SnippetRequest = { method: "GET", url: "https://api.example.com/" };
+	const OFF: SnippetRequest = { ...BASE, followRedirects: false };
+	const FOLLOWING_CAPPED: SnippetRequest = { ...BASE, followRedirects: true, maxRedirects: 3 };
+	const INSECURE: SnippetRequest = { ...BASE, verifySSL: false };
+	const TIMED: SnippetRequest = { ...BASE, timeout: 2500 };
+	const joined = (notes: string[]) => notes.join("\n");
+
+	describe("curl", () => {
+		it("caps the hops beside -L, and parseCurl reads the cap back", () => {
+			const { code } = generateCurl(FOLLOWING_CAPPED);
+			expect(code).toContain(" -L");
+			expect(code).toContain("--max-redirs 3");
+			const reparsed = parseCommand(code.split("\\\n").join(" "));
+			expect(reparsed?.followRedirects).toBe(true);
+			expect(reparsed?.maxRedirects).toBe(3);
+		});
+
+		it("states no cap when the request does not follow, or names none", () => {
+			expect(generateCurl({ ...OFF, maxRedirects: 3 }).code).not.toContain("--max-redirs");
+			expect(generateCurl(BASE).code).not.toContain("--max-redirs");
+		});
+
+		it("keeps a cap of zero, which is a number and not an absent one", () => {
+			expect(generateCurl({ ...BASE, maxRedirects: 0 }).code).toContain("--max-redirs 0");
+		});
+
+		it("emits the timeout in seconds, decimals kept", () => {
+			expect(generateCurl(TIMED).code).toContain("--max-time 2.5");
+			expect(generateCurl({ ...BASE, timeout: 30000 }).code).toContain("--max-time 30");
+		});
+
+		it("says nothing about a timeout the request does not state", () => {
+			expect(generateCurl(BASE).code).not.toContain("--max-time");
+			expect(generateCurl({ ...BASE, timeout: null }).code).not.toContain("--max-time");
+		});
+
+		it("asks for the protocol the request names, and nothing for auto", () => {
+			expect(generateCurl({ ...BASE, httpVersion: "http1.1" }).code).toContain("--http1.1");
+			expect(generateCurl({ ...BASE, httpVersion: "http2" }).code).toContain("--http2");
+			const auto = generateCurl({ ...BASE, httpVersion: "auto" }).code;
+			expect(auto).not.toContain("--http");
+			expect(generateCurl(BASE).code).not.toContain("--http");
+		});
+
+		it("adds no note for any of them", () => {
+			const all = {
+				...FOLLOWING_CAPPED,
+				...INSECURE,
+				...TIMED,
+				httpVersion: "http2" as const,
+			};
+			expect(generateCurl(all).notes).toEqual([]);
+		});
+	});
+
+	describe("HTTPie", () => {
+		it("follows by default, because HTTPie does not unless told to", () => {
+			expect(generateHttpie(BASE).code).toContain("--follow");
+		});
+
+		it("caps the hops beside --follow", () => {
+			const { code } = generateHttpie(FOLLOWING_CAPPED);
+			expect(code).toContain("--follow");
+			expect(code).toContain("--max-redirects=3");
+		});
+
+		it("emits neither flag when the request does not follow", () => {
+			const { code } = generateHttpie({ ...OFF, maxRedirects: 3 });
+			expect(code).not.toContain("--follow");
+			expect(code).not.toContain("--max-redirects");
+		});
+
+		it("turns verification off with --verify=no, and only then", () => {
+			expect(generateHttpie(INSECURE).code).toContain("--verify=no");
+			expect(generateHttpie({ ...BASE, verifySSL: true }).code).not.toContain("--verify");
+			expect(generateHttpie(BASE).code).not.toContain("--verify");
+		});
+
+		it("emits the timeout in seconds, and nothing when none is stated", () => {
+			expect(generateHttpie(TIMED).code).toContain("--timeout=2.5");
+			expect(generateHttpie(BASE).code).not.toContain("--timeout");
+		});
+
+		it("adds no note for any of them", () => {
+			expect(generateHttpie({ ...FOLLOWING_CAPPED, ...INSECURE, ...TIMED }).notes).toEqual(
+				[]
+			);
+		});
+	});
+
+	describe("Python requests", () => {
+		it("writes allow_redirects=False only when the request does not follow", () => {
+			expect(generatePython(OFF).code).toContain("allow_redirects=False,");
+			expect(generatePython(BASE).code).not.toContain("allow_redirects");
+		});
+
+		it("writes verify=False only when verification is off", () => {
+			expect(generatePython(INSECURE).code).toContain("verify=False,");
+			expect(generatePython(BASE).code).not.toContain("verify=");
+		});
+
+		it("writes the timeout in seconds, and nothing when none is stated", () => {
+			expect(generatePython(TIMED).code).toContain("timeout=2.5,");
+			expect(generatePython(BASE).code).not.toContain("timeout=");
+		});
+
+		it("has no spelling for a hop cap, so a following request with one gets a note", () => {
+			const { code, notes } = generatePython(FOLLOWING_CAPPED);
+			expect(code).not.toContain("redirects=3");
+			expect(joined(notes)).toContain("max_redirects");
+			expect(joined(notes)).toContain("allows 3");
+		});
+
+		it("says nothing about a cap the request does not state, or cannot use", () => {
+			expect(generatePython(BASE).notes).toEqual([]);
+			expect(generatePython({ ...OFF, maxRedirects: 3 }).notes).toEqual([]);
+		});
+
+		it("keeps the call arguments inside the request( ... ) call", () => {
+			const { code } = generatePython({ ...OFF, ...INSECURE, ...TIMED });
+			expect(code).toMatch(
+				/requests\.request\(\n {4}"GET",\n {4}"[^"]+",\n {4}allow_redirects=False,\n {4}verify=False,\n {4}timeout=2\.5,\n\)/
+			);
+		});
+	});
+
+	describe("PowerShell", () => {
+		it("turns following off with -MaximumRedirection 0", () => {
+			expect(generatePowerShell(OFF).code).toContain("-MaximumRedirection 0");
+		});
+
+		it("caps a following request's hops, and states nothing when it names none", () => {
+			expect(generatePowerShell(FOLLOWING_CAPPED).code).toContain("-MaximumRedirection 3");
+			expect(generatePowerShell(BASE).code).not.toContain("-MaximumRedirection");
+		});
+
+		it("does not let a cap on an off request undo the off", () => {
+			const { code } = generatePowerShell({ ...OFF, maxRedirects: 3 });
+			expect(code).toContain("-MaximumRedirection 0");
+			expect(code).not.toContain("-MaximumRedirection 3");
+		});
+
+		it("skips the certificate check when verification is off, and says which shells lack it", () => {
+			const { code, notes } = generatePowerShell(INSECURE);
+			expect(code).toContain("-SkipCertificateCheck");
+			expect(joined(notes)).toContain("PowerShell 6 or later");
+			expect(joined(notes)).toContain("5.1");
+		});
+
+		it("says nothing when the request verifies", () => {
+			const { code, notes } = generatePowerShell(BASE);
+			expect(code).not.toContain("-SkipCertificateCheck");
+			expect(notes).toEqual([]);
+		});
+
+		it.each([
+			[2500, 3],
+			[1000, 1],
+			[1, 1],
+			[30000, 30],
+			[30001, 31],
+		])("rounds a %i ms timeout up to %i whole seconds", (timeout, seconds) => {
+			expect(generatePowerShell({ ...BASE, timeout }).code).toContain(
+				`-TimeoutSec ${seconds}`
+			);
+		});
+
+		it("says nothing about a timeout the request does not state", () => {
+			expect(generatePowerShell(BASE).code).not.toContain("-TimeoutSec");
+		});
+	});
+
+	describe("fetch", () => {
+		it("writes redirect: manual only when the request does not follow", () => {
+			expect(generateFetch(OFF).code).toContain('redirect: "manual",');
+			expect(generateFetch(BASE).code).not.toContain("redirect:");
+		});
+
+		it("notes a verification it cannot turn off, instead of emitting a verifying request silently", () => {
+			const { code, notes } = generateFetch(INSECURE);
+			expect(code).not.toContain("rejectUnauthorized");
+			expect(joined(notes)).toContain("certificate");
+			expect(joined(notes)).toContain("rejectUnauthorized");
+		});
+
+		it("notes a timeout, suggesting AbortSignal.timeout in milliseconds", () => {
+			const { code, notes } = generateFetch(TIMED);
+			expect(code).not.toContain("signal");
+			expect(joined(notes)).toContain("AbortSignal.timeout(2500)");
+		});
+
+		it("notes a hop cap on a following request", () => {
+			expect(joined(generateFetch(FOLLOWING_CAPPED).notes)).toContain("allows 3");
+			expect(generateFetch({ ...OFF, maxRedirects: 3 }).notes).toEqual([]);
+		});
+
+		it("says nothing for a request that states none of them", () => {
+			expect(generateFetch(BASE).notes).toEqual([]);
+		});
+	});
+
+	describe("a request stating none of them", () => {
+		it("adds no note, on any target", () => {
+			for (const target of CODE_TARGETS) {
+				expect(target.generate(BASE).notes).toEqual([]);
+			}
+		});
+
+		it("never writes a NaN or an undefined, whatever the payload carries", () => {
+			// A composed payload is cast to SnippetRequest, so a malformed value
+			// reaches the generators as-is.
+			const odd = {
+				...BASE,
+				maxRedirects: Number.NaN,
+				timeout: Number.NaN,
+				httpVersion: "spdy",
+			} as unknown as SnippetRequest;
+			for (const target of CODE_TARGETS) {
+				const { code, notes } = target.generate(odd);
+				expect(`${code}\n${notes.join("\n")}`).not.toMatch(/NaN|undefined/);
+			}
+			expect(generateCurl(odd).code).not.toMatch(/--max-time|--max-redirs|--http/);
+		});
+	});
+});
+
+/**
  * A stream-flagged request (issue #575). Two targets have a first-class
  * unbuffered mode and emit it; the three whose stock idiom buffers the whole
  * body say so, because a snippet that looked like the request would hang on an

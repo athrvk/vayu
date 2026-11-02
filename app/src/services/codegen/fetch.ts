@@ -21,6 +21,7 @@ import {
 	headerEncodingNotes,
 	prepareRequest,
 	untypedTextPartNote,
+	type PreparedRequest,
 } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
@@ -29,12 +30,42 @@ export function jsString(value: string): string {
 	return JSON.stringify(value);
 }
 
+/**
+ * What fetch has no per-request option for. Redirects are the one setting with
+ * a spelling (`redirect: "manual"`, emitted below); a certificate check, a
+ * deadline and a hop cap are the client's or the process's, so they are said
+ * rather than dropped.
+ */
+function transferNotes(prepared: PreparedRequest): string[] {
+	const notes: string[] = [];
+	if (!prepared.verifySSL) {
+		notes.push(
+			"fetch has no option to skip certificate checks. In Node, pass a dispatcher built with connect: { rejectUnauthorized: false }, or set NODE_TLS_REJECT_UNAUTHORIZED=0 for the process. A browser cannot skip them."
+		);
+	}
+	if (prepared.timeoutMs !== null) {
+		notes.push(
+			`fetch has no timeout option. Add signal: AbortSignal.timeout(${prepared.timeoutMs}) to the options to stop the request after the ${prepared.timeoutMs} ms this request allows.`
+		);
+	}
+	if (prepared.maxRedirects !== null) {
+		notes.push(
+			`fetch has no redirect limit option, so it follows up to 20 hops where this request allows ${prepared.maxRedirects}.`
+		);
+	}
+	return notes;
+}
+
 export function generateFetch(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
-	const notes = [...prepared.notes, ...headerEncodingNotes(prepared, "fetch")];
+	const notes = [
+		...prepared.notes,
+		...headerEncodingNotes(prepared, "fetch"),
+		...transferNotes(prepared),
+	];
 	// Said rather than emitted: this target's stock idiom buffers the whole
 	// body, so a snippet that looked like the request would simply hang on an
 	// endless stream. A stated limit is better than a command that stalls.
@@ -133,6 +164,8 @@ export function generateFetch(
 		init.push("\t},");
 	}
 	if (bodyExpression) init.push(`\tbody: ${bodyExpression},`);
+	// fetch follows by default, as Vayu does, so only the off case is written.
+	if (!prepared.followRedirects) init.push('\tredirect: "manual",');
 
 	lines.push(
 		`const response = await fetch(${jsString(prepared.url)}, {`,

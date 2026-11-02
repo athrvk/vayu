@@ -37,6 +37,7 @@ import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { DEFAULT_HTTP_VERSION, isHttpVersion, type HttpVersion } from "@/constants/request";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -93,6 +94,15 @@ export interface PreparedRequest {
 	verifySSL: boolean;
 	/** Whether redirects are followed - see `SnippetRequest.followRedirects`. */
 	followRedirects: boolean;
+	/**
+	 * The redirect cap to state, or null when there is none to state: the request
+	 * does not follow, or names no cap. Null is "say nothing", never a default.
+	 */
+	maxRedirects: number | null;
+	/** The request's own deadline in milliseconds, or null when it states none. */
+	timeoutMs: number | null;
+	/** The protocol asked for. `auto` is what every client does unasked. */
+	httpVersion: HttpVersion;
 	notes: string[];
 	masked: boolean;
 }
@@ -394,6 +404,26 @@ export function foldRepeatedHeaders(
 	return { headers: out, notes };
 }
 
+/** A redirect cap a client could be told: a whole number of hops, zero included. */
+function validMaxRedirects(value: number | undefined): number | null {
+	return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * The deadline to state, or null. Null and absent both mean the request names
+ * none, so the engine's `defaultTimeout` decides at send time and a snippet
+ * has nothing true to say; a value that is not a positive number is treated the
+ * same way instead of being written into a command as `--max-time NaN`.
+ */
+function validTimeoutMs(value: number | null | undefined): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Milliseconds as the seconds a client flag takes, decimals kept (2500 is 2.5). */
+export function timeoutSeconds(ms: number): number {
+	return ms / 1000;
+}
+
 /**
  * Flatten a request into what a static client has to send, with auth applied
  * and secrets already hidden.
@@ -467,6 +497,10 @@ export function prepareRequest(
 	}
 
 	const body = normalizeBody(request.body);
+	// Absent means following: the engine's own default (issue #1445), unlike
+	// curl's, which is why the flag is worth emitting on the common case
+	// rather than only when it departs from one.
+	const followRedirects = request.followRedirects !== false;
 
 	// After auth, so a header the request carries under any name still counts as
 	// declared; and only when there is a body, because a mode with nothing in it
@@ -490,10 +524,12 @@ export function prepareRequest(
 		// Absent means verifying: the engine's default, and the safe reading of
 		// a caller that never set it.
 		verifySSL: request.verifySSL !== false,
-		// Absent means following: the engine's own default (issue #1445), unlike
-		// curl's, which is why the flag is worth emitting on the common case
-		// rather than only when it departs from one.
-		followRedirects: request.followRedirects !== false,
+		followRedirects,
+		maxRedirects: followRedirects ? validMaxRedirects(request.maxRedirects) : null,
+		timeoutMs: validTimeoutMs(request.timeout),
+		httpVersion: isHttpVersion(request.httpVersion)
+			? request.httpVersion
+			: DEFAULT_HTTP_VERSION,
 		notes,
 		masked: masker.wasUsed(),
 	};

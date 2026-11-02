@@ -20,6 +20,8 @@ import {
 	foldRepeatedHeaders,
 	headerEncodingNotes,
 	prepareRequest,
+	timeoutSeconds,
+	type PreparedRequest,
 	type PreparedTextPart,
 } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
@@ -44,12 +46,39 @@ function textPartEntry([key, value, contentType]: PreparedTextPart): string {
 	return `    ${pythonString(key)}: ${part},`;
 }
 
+/**
+ * The keyword arguments for the settings requests spells per call. Redirects
+ * follow by default, as in Vayu, so only the off case is written; a following
+ * request's hop cap has no argument and is a note (`transferNotes`).
+ */
+function transferArgs(prepared: PreparedRequest): string[] {
+	const args: string[] = [];
+	if (!prepared.followRedirects) args.push("    allow_redirects=False,");
+	if (!prepared.verifySSL) args.push("    verify=False,");
+	// Seconds, decimals allowed. requests applies it to the connect and to each
+	// read rather than to the whole transfer.
+	if (prepared.timeoutMs !== null)
+		args.push(`    timeout=${timeoutSeconds(prepared.timeoutMs)},`);
+	return args;
+}
+
+function transferNotes(prepared: PreparedRequest): string[] {
+	if (prepared.maxRedirects === null) return [];
+	return [
+		`requests has no per-request redirect limit, so it follows up to 30 hops where this request allows ${prepared.maxRedirects}. Set max_redirects on a requests.Session to match.`,
+	];
+}
+
 export function generatePython(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
-	const notes = [...prepared.notes, ...headerEncodingNotes(prepared, "requests")];
+	const notes = [
+		...prepared.notes,
+		...headerEncodingNotes(prepared, "requests"),
+		...transferNotes(prepared),
+	];
 	// Said rather than emitted: this target's stock idiom buffers the whole
 	// body, so a snippet that looked like the request would simply hang on an
 	// endless stream. A stated limit is better than a command that stalls.
@@ -131,6 +160,7 @@ export function generatePython(
 		);
 		callArgs.push("    auth=auth,");
 	}
+	callArgs.push(...transferArgs(prepared));
 
 	lines.push(
 		"response = requests.request(",

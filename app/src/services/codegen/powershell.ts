@@ -20,12 +20,38 @@
  * something else than the reader expects.
  */
 
-import { foldRepeatedHeaders, prepareRequest, untypedTextPartNote } from "./prepare";
+import {
+	foldRepeatedHeaders,
+	prepareRequest,
+	timeoutSeconds,
+	untypedTextPartNote,
+	type PreparedRequest,
+} from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /** A literal PowerShell string. The one escape is a doubled single quote. */
 export function powerShellQuote(value: string): string {
 	return `'${value.split("'").join("''")}'`;
+}
+
+/**
+ * The parameters for the settings Invoke-RestMethod takes per call. Redirects
+ * follow by default, as in Vayu, so the cap is written only for a following
+ * request that names one, and `0` is how following is turned off.
+ */
+function transferParams(prepared: PreparedRequest): string[] {
+	const params: string[] = [];
+	if (!prepared.followRedirects) params.push("-MaximumRedirection 0");
+	else if (prepared.maxRedirects !== null) {
+		params.push(`-MaximumRedirection ${prepared.maxRedirects}`);
+	}
+	if (!prepared.verifySSL) params.push("-SkipCertificateCheck");
+	if (prepared.timeoutMs !== null) {
+		// Whole seconds only, so a sub-second or fractional timeout rounds up: a
+		// deadline that fires early would fail a request Vayu lets finish.
+		params.push(`-TimeoutSec ${Math.max(1, Math.ceil(timeoutSeconds(prepared.timeoutMs)))}`);
+	}
+	return params;
 }
 
 export function generatePowerShell(
@@ -34,6 +60,12 @@ export function generatePowerShell(
 ): GeneratedSnippet {
 	const prepared = prepareRequest(request, options);
 	const notes = [...prepared.notes];
+	// The one parameter above that the shell this target exists for lacks.
+	if (!prepared.verifySSL) {
+		notes.push(
+			"-SkipCertificateCheck needs PowerShell 6 or later. Windows PowerShell 5.1 does not have it."
+		);
+	}
 	// Said rather than emitted: this target's stock idiom buffers the whole
 	// body, so a snippet that looked like the request would simply hang on an
 	// endless stream. A stated limit is better than a command that stalls.
@@ -132,6 +164,8 @@ export function generatePowerShell(
 		// hashtable is urlencoded, and with a string is sent as-is.
 		call.push(isFormData ? `-Form ${bodyVariable}` : `-Body ${bodyVariable}`);
 	}
+
+	call.push(...transferParams(prepared));
 
 	lines.push(call.join(" `\n  "));
 
