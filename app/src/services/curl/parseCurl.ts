@@ -819,8 +819,9 @@ const CURL_SKIP_WITH_ARG = new Set([
 /**
  * Every short flag letter `parseCurl` maps or skips, by whether it takes a
  * value. A cluster (`-sSL`, `-XPOST`) is only split when each letter before its
- * value is in one of these; `parseCurl.test.ts` holds both strings to the
- * switch below, so a letter added there and not here fails the suite.
+ * value is in one of these; `parseCurl.test.ts` checks each letter listed here
+ * is handled by the switch below. A letter added to the switch must be added
+ * here by hand, or its cluster stays one disclosed unknown flag.
  */
 const CURL_SHORT_NOARG = new Set("IGkLNsvfS#Oj");
 const CURL_SHORT_WITH_ARG = new Set("XHAebudFTowmExcD");
