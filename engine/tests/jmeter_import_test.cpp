@@ -422,6 +422,33 @@ TEST (JmeterImport, JoinsQueryArgumentsWithEncodeUriComponent) {
     "https://example.com/search?q=a%7Cb");
 }
 
+/// A sampler's `HTTPSampler.protocol` left empty (what JMeter's GUI saves for
+/// an unset field) means `http` like an absent one; it used to join as
+/// `://host/path` (#3191).
+TEST (JmeterImport, AnEmptyOrBlankProtocolDefaultsToHttp) {
+    for (const char* protocol : { "", "  " }) {
+        const std::string plan = std::string (R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Ping">
+      <stringProp name="HTTPSampler.domain">example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol">)jmx") +
+        protocol + R"jmx(</stringProp>
+      <stringProp name="HTTPSampler.path">/ping</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+        const ImportParse parsed = parse_import (plan, {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (first_request (parsed.result.at ("collections").at (0)).at ("url"),
+        "http://example.com/ping")
+        << "protocol [" << protocol << "]";
+    }
+}
+
 /**
  * `Assertion.test_field` values with no `assert.contains` field to land on
  * (Request Data, Request Headers, Response Message, Document) are refused

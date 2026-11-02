@@ -710,12 +710,30 @@ void merge_arguments_into_variables (const pugi::xml_node& arguments_node, json&
     }
 }
 
+/// @p text without the whitespace around it.
+std::string trimmed (std::string_view text) {
+    constexpr std::string_view SPACE = " \t\r\n";
+    const size_t begin               = text.find_first_not_of (SPACE);
+    if (begin == std::string_view::npos) {
+        return "";
+    }
+    return std::string (text.substr (begin, text.find_last_not_of (SPACE) - begin + 1));
+}
+
+/// The scheme JMeter would use: an empty or blank `HTTPSampler.protocol` is
+/// what its GUI saves for a field left unset, and it means `http`, the same as
+/// the property being absent (#3191).
+std::string protocol_of (const pugi::xml_node& el) {
+    std::string protocol = trimmed (string_prop (el, "HTTPSampler.protocol"));
+    return protocol.empty () ? "http" : protocol;
+}
+
 std::string base_url_of (const pugi::xml_node& el) {
     const std::string domain = string_prop (el, "HTTPSampler.domain");
     if (domain.empty ()) {
         return "";
     }
-    std::string base = string_prop (el, "HTTPSampler.protocol", "http") + "://" + domain;
+    std::string base = protocol_of (el) + "://" + domain;
     if (const std::string port = string_prop (el, "HTTPSampler.port");
     !port.empty () && port != "0") {
         base += ":" + port;
