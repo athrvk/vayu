@@ -207,10 +207,10 @@ describe("form bodies", () => {
 			expect(notes.join(" ")).toContain("is sent as a.png");
 		});
 
-		it("python opens the file in the files dict", () => {
+		it("python opens the file in the files list", () => {
 			const { code } = generatePython(withFile);
 			expect(code).toContain(
-				`"avatar": ("profile.png", open("/tmp/a.png", "rb"), "image/png"),`
+				`("avatar", ("profile.png", open("/tmp/a.png", "rb"), "image/png")),`
 			);
 			expect(code).toContain("files=files,");
 		});
@@ -231,9 +231,9 @@ describe("form bodies", () => {
 			it("sends a text part as a field and names a file part after its path", () => {
 				const { code } = generatePython(mixed);
 				// A bare string would be sent as filename=<key>, a file upload.
-				expect(code).toContain(`"caption": (None, "hi"),`);
+				expect(code).toContain(`("caption", (None, "hi")),`);
 				expect(code).toContain(
-					`"report": ("report.pdf", open("/tmp/a/report.pdf", "rb")),`
+					`("report", ("report.pdf", open("/tmp/a/report.pdf", "rb"))),`
 				);
 			});
 
@@ -252,7 +252,7 @@ describe("form bodies", () => {
 						],
 					},
 				});
-				expect(code).toContain(`"report": ("report.pdf", open(`);
+				expect(code).toContain(`("report", ("report.pdf", open(`);
 			});
 
 			it("writes a declared file name and type, and no type otherwise", () => {
@@ -274,9 +274,56 @@ describe("form bodies", () => {
 					},
 				});
 				expect(code).toContain(
-					`"report": ("q3.pdf", open("/tmp/a/report.pdf", "rb"), "application/pdf"),`
+					`("report", ("q3.pdf", open("/tmp/a/report.pdf", "rb"), "application/pdf")),`
 				);
-				expect(code).toContain(`"note": ("note.txt", open("/tmp/a/note.txt", "rb")),`);
+				expect(code).toContain(`("note", ("note.txt", open("/tmp/a/note.txt", "rb"))),`);
+			});
+		});
+
+		/** A dict holds one value per key, so these would collapse to the last (#3206). */
+		describe("parts that share a key (#3206)", () => {
+			const repeated: SnippetRequest = {
+				...GET,
+				method: "POST",
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "tag", value: "red" },
+						{ key: "tag", value: "", type: "file", src: "/tmp/a/one.png" },
+						{ key: "tag", value: "blue" },
+					],
+				},
+			};
+
+			it("python writes every part, in row order", () => {
+				const { code } = generatePython(repeated);
+				expect(code).toContain(
+					[
+						"files = [",
+						`    ("tag", (None, "red")),`,
+						`    ("tag", ("one.png", open("/tmp/a/one.png", "rb"))),`,
+						`    ("tag", (None, "blue")),`,
+						"]",
+					].join("\n")
+				);
+			});
+
+			it("python sends a repeated urlencoded field as a pair of its own", () => {
+				const { code } = generatePython({
+					...GET,
+					method: "POST",
+					body: {
+						mode: "x-www-form-urlencoded",
+						fields: [
+							{ key: "tag", value: "red" },
+							{ key: "tag", value: "blue" },
+						],
+					},
+				});
+				expect(code).toContain(
+					["data = [", `    ("tag", "red"),`, `    ("tag", "blue"),`, "]"].join("\n")
+				);
+				expect(code).toContain("data=data,");
 			});
 		});
 
@@ -431,8 +478,8 @@ describe("form bodies", () => {
 
 		it("python gives it a filename-less tuple, the one spelling that sets the type", () => {
 			const { code } = generatePython(typed);
-			expect(code).toContain(`"payload": (None, "{\\"a\\":1}", "application/json"),`);
-			expect(code).toContain(`"plain": (None, "hi"),`);
+			expect(code).toContain(`("payload", (None, "{\\"a\\":1}", "application/json")),`);
+			expect(code).toContain(`("plain", (None, "hi")),`);
 		});
 
 		it.each([

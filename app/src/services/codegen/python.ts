@@ -38,7 +38,17 @@ function dictLiteral(entries: Array<[string, string]>, indent = "    "): string[
 }
 
 /**
- * A multipart text part as a `files` entry: requests' `(filename, content[,
+ * A list of `(key, value)` pairs, which `data=` and `files=` take in place of a
+ * dict. A dict holds one value per key, so a body that sends one name twice
+ * (a form field repeated, several files under `attachments`) would write only
+ * the last of them (#3206).
+ */
+function pairListLiteral(entries: Array<[string, string]>): string[] {
+	return entries.map(([key, value]) => `    (${pythonString(key)}, ${pythonString(value)}),`);
+}
+
+/**
+ * A multipart text part as a `files` pair: requests' `(filename, content[,
  * type])` tuple with no filename. A bare string in `files=` is read as a file
  * upload and sent with `filename=<key>`, which a text field must not carry; the
  * `None` filename is the one spelling that keeps it a field, with or without a
@@ -50,11 +60,11 @@ function textPartEntry({ key, value, contentType }: PreparedTextPart): string {
 		pythonString(value),
 		...(contentType ? [pythonString(contentType)] : []),
 	];
-	return `    ${pythonString(key)}: (${parts.join(", ")}),`;
+	return `    (${pythonString(key)}, (${parts.join(", ")})),`;
 }
 
 /**
- * A multipart file part as a `files` entry. The filename is the declared one,
+ * A multipart file part as a `files` pair. The filename is the declared one,
  * else the path's basename - what the engine sends. A declared Content-Type is
  * written; otherwise it is left out so requests guesses it from that filename,
  * as the engine does from the extension.
@@ -65,7 +75,7 @@ function filePartEntry(file: PreparedFilePart): string {
 		`open(${pythonString(file.path)}, "rb")`,
 		...(file.contentType ? [pythonString(file.contentType)] : []),
 	];
-	return `    ${pythonString(file.key)}: (${parts.join(", ")}),`;
+	return `    (${pythonString(file.key)}, (${parts.join(", ")})),`;
 }
 
 /**
@@ -152,7 +162,7 @@ export function generatePython(
 				? prepared.body.parts.map((part) =>
 						part.kind === "file" ? filePartEntry(part) : textPartEntry(part)
 					)
-				: dictLiteral(prepared.body.fields);
+				: pairListLiteral(prepared.body.fields);
 		// requests spells a file part as a tuple: (filename, fileobj, type). The
 		// handles are deliberately not closed - a pasted snippet is one call, and
 		// a `with` block per file would bury the request in scaffolding. Said out
@@ -163,9 +173,9 @@ export function generatePython(
 		) {
 			notes.push("File handles are opened inline and left for the interpreter to close.");
 		}
-		lines.push(`${name} = {`, ...entries, "}", "");
-		// `files=` is what makes requests send multipart; `data=` with a dict is
-		// urlencoded. A multipart body passed as `data=` is silently urlencoded,
+		lines.push(`${name} = [`, ...entries, "]", "");
+		// `files=` is what makes requests send multipart; `data=` with a list of
+		// pairs is urlencoded. A multipart body passed as `data=` is silently urlencoded,
 		// which is the mistake this branch exists to avoid.
 		callArgs.push(`    ${name}=${name},`);
 	}
