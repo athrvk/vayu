@@ -372,9 +372,10 @@ export interface ResponseState {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
-	 * The request's auth mode is one the engine does not execute, so it went
-	 * out without authentication (issue #2474); the engine's own sentence,
-	 * absent when there is nothing to say. Set by **both** funnels -
+	 * The request went out without the authentication it asked for - a mode the
+	 * engine does not execute (issue #2474), or an empty bearer token or API key
+	 * name (issue #3203); the engine's own sentence, absent when there is
+	 * nothing to say. Set by **both** funnels -
 	 * `responseFromExecuteResult` from the `/execute` body,
 	 * `responseFromRunResult` from `trace.request.authNotice` - and drawn by
 	 * `ResponseViewer` as a band above the tabs, so a 401 from the target

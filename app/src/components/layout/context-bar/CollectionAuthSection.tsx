@@ -20,7 +20,7 @@
  */
 
 import { useCollectionsQuery, useCollectionAncestors } from "@/queries";
-import { AUTH_MODE_LABELS } from "@/constants/auth-modes";
+import { AUTH_MODE_LABELS, isEngineExecutableAuthMode } from "@/constants/auth-modes";
 import {
 	isUnsavedAuthDraft,
 	resolveAuthSource,
@@ -29,6 +29,36 @@ import {
 import { useCollectionAuthDraft } from "@/stores";
 import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
+import type { AuthMode, Collection } from "@/types";
+
+/** The clause for a mode the engine stores but has no resolution for (#3203). */
+const NOT_SENT = "Vayu does not send this auth type";
+
+interface OriginInput {
+	own: AuthMode;
+	unsaved: string;
+	source: Collection | null;
+	blockedBy: Collection | null;
+}
+
+/** The sentence under the heading: what a request set to Inherit would pick up. */
+function describeOrigin({ own, unsaved, source, blockedBy }: OriginInput): string {
+	if (own === "noauth") return `Requests below inherit nothing - the walk stops here${unsaved}.`;
+	if (own !== "none") {
+		return isEngineExecutableAuthMode(own)
+			? `Requests set to Inherit send this${unsaved}.`
+			: `${NOT_SENT}, so requests set to Inherit go out without auth${unsaved}.`;
+	}
+	if (source) {
+		const inherited = `Requests below inherit ${AUTH_MODE_LABELS[source.auth.mode]} from ${source.name}${unsaved}.`;
+		return isEngineExecutableAuthMode(source.auth.mode)
+			? inherited
+			: `${inherited} ${NOT_SENT}, so those requests go out without auth.`;
+	}
+	if (blockedBy)
+		return `${blockedBy.name} is set to No auth, so nothing is inherited past it${unsaved}.`;
+	return `No ancestor collection defines auth either${unsaved}.`;
+}
 
 export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 	const { data: collections = [], isLoading } = useCollectionsQuery();
@@ -55,16 +85,7 @@ export function CollectionAuthSection({ tab }: ContextBarSectionProps) {
 	// What this sentence describes is the draft, and a request below sends the
 	// stored row until Save, so the sentence says which it is.
 	const unsaved = isUnsavedAuthDraft(collection.auth, draftAuth) ? " (unsaved)" : "";
-	const origin =
-		own === "noauth"
-			? `Requests below inherit nothing - the walk stops here${unsaved}.`
-			: own !== "none"
-				? `Requests set to Inherit send this${unsaved}.`
-				: source
-					? `Requests below inherit ${AUTH_MODE_LABELS[source.auth.mode]} from ${source.name}${unsaved}.`
-					: blockedBy
-						? `${blockedBy.name} is set to No auth, so nothing is inherited past it${unsaved}.`
-						: `No ancestor collection defines auth either${unsaved}.`;
+	const origin = describeOrigin({ own, unsaved, source, blockedBy });
 
 	return (
 		<div className="space-y-2">
