@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { chromeBashCopy, chromeCmdCopy, chromeCopyArgv } from "./chrome-copy.testkit";
 import { tokenize, UnterminatedQuoteError } from "./tokenize";
 
 describe("tokenize", () => {
@@ -140,37 +141,9 @@ describe("tokenize", () => {
 		// What Chrome writes for a POST with a JSON body: every argument is ^"..."
 		// quoted, a quote inside it is ^\^", a backslash ^\^\, and ^ also guards
 		// & % { } [ ] , ! < > |.
-		const chromeCmd = [
-			String.raw`curl ^"https://api.example.com/v1/users?x=1^&y=2^" ^`,
-			String.raw`  -H ^"accept: application/json^" ^`,
-			String.raw`  -H ^"content-type: application/json^" ^`,
-			String.raw`  -b ^"session=abc^%^3D^" ^`,
-			String.raw`  --data-raw ^"^{^\^"name^\^":^\^"Ada Lovelace^\^",^\^"tags^\^":^[^\^"a^\^",^\^"b^\^"^],^\^"path^\^":^\^"C:^\^\^\^\tmp^\^",^\^"rate^\^":^\^"5^%^\^"^}^" ^`,
-			String.raw`  --compressed`,
-		].join("\n");
-
-		const chromeBash = [
-			`curl 'https://api.example.com/v1/users?x=1&y=2' \\`,
-			`  -H 'accept: application/json' \\`,
-			`  -H 'content-type: application/json' \\`,
-			`  -b 'session=abc%3D' \\`,
-			`  --data-raw '{"name":"Ada Lovelace","tags":["a","b"],"path":"C:\\\\tmp","rate":"5%"}' \\`,
-			`  --compressed`,
-		].join("\n");
-
-		const expected = [
-			"curl",
-			"https://api.example.com/v1/users?x=1&y=2",
-			"-H",
-			"accept: application/json",
-			"-H",
-			"content-type: application/json",
-			"-b",
-			"session=abc%3D",
-			"--data-raw",
-			String.raw`{"name":"Ada Lovelace","tags":["a","b"],"path":"C:\\tmp","rate":"5%"}`,
-			"--compressed",
-		];
+		const chromeCmd = chromeCmdCopy;
+		const chromeBash = chromeBashCopy;
+		const expected = chromeCopyArgv;
 
 		test("a cmd copy tokenizes to the same argv as the bash copy", () => {
 			expect(tokenize(chromeCmd)).toEqual(expected);

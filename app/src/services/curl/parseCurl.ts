@@ -377,6 +377,32 @@ function addHeader(b: Builder, raw: string): void {
 	if (key) b.headers.push({ key, value });
 }
 
+/**
+ * curl's `-H`, which gives two more spellings than `Name: value` a meaning:
+ * `Name;` sends the header with no value, and `Name:` (nothing after the colon)
+ * asks curl to leave out a header it would add itself. The engine reads a
+ * header row with no value as not sent, and an imported request carries no
+ * "never send this default" setting (`disabledSystemHeaders` is written by a
+ * Postman import alone), so the second is disclosed rather than imported as an
+ * empty row that would send nothing and look like it removed something (#3194).
+ */
+function addCurlHeader(b: Builder, raw: string): void {
+	const idx = raw.indexOf(":");
+	if (idx === -1) {
+		const name = raw.endsWith(";") ? raw.slice(0, -1).trim() : "";
+		if (name) b.headers.push({ key: name, value: "" });
+		return;
+	}
+	const name = raw.slice(0, idx).trim();
+	if (name && !raw.slice(idx + 1).trim()) {
+		recordDropped(b, `-H '${name}:'`, {
+			what: `asked curl to leave out its ${name} header, which an imported request cannot say`,
+		});
+		return;
+	}
+	addHeader(b, raw);
+}
+
 function setBasicAuth(b: Builder, raw: string): void {
 	const idx = raw.indexOf(":");
 	if (idx === -1) {
@@ -439,12 +465,13 @@ function formPart(key: string, raw: string): FormPart | null {
 /**
  * A text `-F` value: `v`, or a typed one, `v;type=application/json` or
  * `"v";type=...` with the double-quoted form curl reads as text whatever it
- * starts with (`\` and `\"` the only escapes, #2539). The type takes the rest
- * of the word, as curl does, so `;charset=` parameters stay inside it. Anything
- * else is the literal text it always was.
+ * starts with (`\` and `\"` the only escapes, #2539). A bare value runs to the
+ * first `;` and may hold quotes itself, as in `meta={"x":1};type=...` (#3194).
+ * The type takes the rest of the word, as curl does, so `;charset=` parameters
+ * stay inside it. Anything else is the literal text it always was.
  */
 function textPart(key: string, raw: string): FormPart {
-	const typed = /^(?:"((?:[^"\\]|\\.)*)"|([^";]*));type=(.+)$/is.exec(raw);
+	const typed = /^(?:"((?:[^"\\]|\\.)*)"|([^;]*));type=(.+)$/is.exec(raw);
 	if (!typed) return { key, value: raw };
 	const [, quoted, bare, contentType] = typed;
 	const value = quoted === undefined ? bare : quoted.replace(/\\(.)/gs, "$1");
@@ -789,11 +816,58 @@ const CURL_SKIP_WITH_ARG = new Set([
 	"--proxy-user",
 ]);
 
-function parseCurl(args: string[]): CommandImport {
+/**
+ * Every short flag letter `parseCurl` maps or skips, by whether it takes a
+ * value. A cluster (`-sSL`, `-XPOST`) is only split when each letter before its
+ * value is in one of these; `parseCurl.test.ts` holds both strings to the
+ * switch below, so a letter added there and not here fails the suite.
+ */
+const CURL_SHORT_NOARG = new Set("IGkLNsvfS#Oj");
+const CURL_SHORT_WITH_ARG = new Set("XHAebudFTowmExcD");
+
+/**
+ * curl's own reading of a short-flag cluster, as the separate arguments it
+ * stands for: boolean letters combine (`-sSL` is `-s -S -L`), and a letter that
+ * takes a value ends the cluster and takes the rest of the word as that value
+ * when there is any (`-XPOST`, `-ualice:pw`), or the next argument when not
+ * (`-sSX POST`). The pieces go back through the one switch in `parseCurl`.
+ *
+ * Null for anything that is not a cluster of letters this parser knows: a
+ * lone flag, a `--long` one, or a cluster with an unknown letter, which stays
+ * one unknown flag and is disclosed as before rather than guessed at (guessing
+ * that `-Z` takes no value could leave its value to be taken for the URL).
+ */
+function expandShortCluster(arg: string): string[] | null {
+	if (arg.length < 3 || arg[0] !== "-" || arg[1] === "-") return null;
+	const pieces: string[] = [];
+	for (let at = 1; at < arg.length; at++) {
+		const letter = arg[at];
+		if (CURL_SHORT_WITH_ARG.has(letter)) {
+			pieces.push(`-${letter}`);
+			const rest = arg.slice(at + 1);
+			if (rest) pieces.push(rest);
+			return pieces;
+		}
+		if (!CURL_SHORT_NOARG.has(letter)) return null;
+		pieces.push(`-${letter}`);
+	}
+	return pieces;
+}
+
+function parseCurl(argv: string[]): CommandImport {
 	const b = newBuilder();
+	// Spliced as clusters are met, so a value piece is consumed by its flag and
+	// never read here as a flag of its own.
+	const args = argv.slice();
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
+		const cluster = expandShortCluster(arg);
+		if (cluster) {
+			args.splice(i, 1, ...cluster);
+			i--;
+			continue;
+		}
 		const next = () => args[++i];
 
 		// Split combined `--flag=value` form.
@@ -817,7 +891,7 @@ function parseCurl(args: string[]): CommandImport {
 				break;
 			case "-H":
 			case "--header":
-				addHeader(b, value());
+				addCurlHeader(b, value());
 				break;
 			case "-A":
 			case "--user-agent":
@@ -828,9 +902,14 @@ function parseCurl(args: string[]): CommandImport {
 				b.headers.push({ key: "Referer", value: value() });
 				break;
 			case "-b":
-			case "--cookie":
-				b.headers.push({ key: "Cookie", value: value() });
+			case "--cookie": {
+				// curl reads a value with no `=` as the name of a cookie file, not
+				// as cookies: `-b cookies.txt` has nothing to send as a header.
+				const v = value();
+				if (v.includes("=")) b.headers.push({ key: "Cookie", value: v });
+				else recordDropped(b, flag, { what: "read cookies from a file" });
 				break;
+			}
 			case "-u":
 			case "--user":
 				setBasicAuth(b, value());
