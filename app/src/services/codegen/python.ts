@@ -16,11 +16,13 @@
  * how a generator ends up emitting a raw newline inside a `"`.
  */
 
+import { fileBaseName } from "@/lib/file-path";
 import {
 	foldRepeatedHeaders,
 	headerEncodingNotes,
 	prepareRequest,
 	timeoutSeconds,
+	type PreparedFilePart,
 	type PreparedRequest,
 	type PreparedTextPart,
 } from "./prepare";
@@ -36,14 +38,34 @@ function dictLiteral(entries: Array<[string, string]>, indent = "    "): string[
 }
 
 /**
- * A multipart text part as a `files` entry. One that declares a type is
- * requests' `(filename, content, type)` tuple with no filename - the one
- * spelling that sets the part's Content-Type without making it a file upload.
+ * A multipart text part as a `files` entry: requests' `(filename, content[,
+ * type])` tuple with no filename. A bare string in `files=` is read as a file
+ * upload and sent with `filename=<key>`, which a text field must not carry; the
+ * `None` filename is the one spelling that keeps it a field, with or without a
+ * declared Content-Type.
  */
 function textPartEntry([key, value, contentType]: PreparedTextPart): string {
-	const content = pythonString(value);
-	const part = contentType ? `(None, ${content}, ${pythonString(contentType)})` : content;
-	return `    ${pythonString(key)}: ${part},`;
+	const parts = [
+		"None",
+		pythonString(value),
+		...(contentType ? [pythonString(contentType)] : []),
+	];
+	return `    ${pythonString(key)}: (${parts.join(", ")}),`;
+}
+
+/**
+ * A multipart file part as a `files` entry. The filename is the declared one,
+ * else the path's basename - what the engine sends. A declared Content-Type is
+ * written; otherwise it is left out so requests guesses it from that filename,
+ * as the engine does from the extension.
+ */
+function filePartEntry(file: PreparedFilePart): string {
+	const parts = [
+		pythonString(file.fileName || fileBaseName(file.path)),
+		`open(${pythonString(file.path)}, "rb")`,
+		...(file.contentType ? [pythonString(file.contentType)] : []),
+	];
+	return `    ${pythonString(file.key)}: (${parts.join(", ")}),`;
 }
 
 /**
@@ -134,14 +156,7 @@ export function generatePython(
 			// The handles are deliberately not closed - a pasted snippet is one
 			// call, and a `with` block per file would bury the request in
 			// scaffolding. Said out loud rather than left to be noticed.
-			for (const file of prepared.body.files) {
-				const parts = [
-					pythonString(file.fileName || file.key),
-					`open(${pythonString(file.path)}, "rb")`,
-					...(file.contentType ? [pythonString(file.contentType)] : []),
-				];
-				entries.push(`    ${pythonString(file.key)}: (${parts.join(", ")}),`);
-			}
+			entries.push(...prepared.body.files.map(filePartEntry));
 			if (prepared.body.files.length > 0) {
 				notes.push("File handles are opened inline and left for the interpreter to close.");
 			}

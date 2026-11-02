@@ -213,6 +213,71 @@ describe("form bodies", () => {
 			expect(code).toContain("files=files,");
 		});
 
+		describe("python's files= tuples (#3196)", () => {
+			const mixed: SnippetRequest = {
+				...GET,
+				method: "POST",
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "caption", value: "hi" },
+						{ key: "report", value: "", type: "file", src: "/tmp/a/report.pdf" },
+					],
+				},
+			};
+
+			it("sends a text part as a field and names a file part after its path", () => {
+				const { code } = generatePython(mixed);
+				// A bare string would be sent as filename=<key>, a file upload.
+				expect(code).toContain(`"caption": (None, "hi"),`);
+				expect(code).toContain(
+					`"report": ("report.pdf", open("/tmp/a/report.pdf", "rb")),`
+				);
+			});
+
+			it("names a Windows path's file part after its basename", () => {
+				const { code } = generatePython({
+					...mixed,
+					body: {
+						mode: "form-data",
+						fields: [
+							{
+								key: "report",
+								value: "",
+								type: "file",
+								src: String.raw`C:\docs\report.pdf`,
+							},
+						],
+					},
+				});
+				expect(code).toContain(`"report": ("report.pdf", open(`);
+			});
+
+			it("writes a declared file name and type, and no type otherwise", () => {
+				const { code } = generatePython({
+					...mixed,
+					body: {
+						mode: "form-data",
+						fields: [
+							{
+								key: "report",
+								value: "",
+								type: "file",
+								src: "/tmp/a/report.pdf",
+								fileName: "q3.pdf",
+								contentType: "application/pdf",
+							},
+							{ key: "note", value: "", type: "file", src: "/tmp/a/note.txt" },
+						],
+					},
+				});
+				expect(code).toContain(
+					`"report": ("q3.pdf", open("/tmp/a/report.pdf", "rb"), "application/pdf"),`
+				);
+				expect(code).toContain(`"note": ("note.txt", open("/tmp/a/note.txt", "rb")),`);
+			});
+		});
+
 		it("powershell hands -Form a FileInfo", () => {
 			const { code } = generatePowerShell(withFile);
 			expect(code).toContain("'avatar' = Get-Item -LiteralPath '/tmp/a.png'");
@@ -303,7 +368,7 @@ describe("form bodies", () => {
 		it("python gives it a filename-less tuple, the one spelling that sets the type", () => {
 			const { code } = generatePython(typed);
 			expect(code).toContain(`"payload": (None, "{\\"a\\":1}", "application/json"),`);
-			expect(code).toContain(`"plain": "hi",`);
+			expect(code).toContain(`"plain": (None, "hi"),`);
 		});
 
 		it.each([
