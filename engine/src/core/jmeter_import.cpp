@@ -99,10 +99,8 @@ std::optional<std::string> scalar_text (const pugi::xml_node& element, std::stri
 /// True when @p end stops at the string's terminator or only trailing
 /// whitespace, so `${var}` and `5${var}` are not numbers.
 bool consumed_all (const char* end) {
-    while (std::isspace (static_cast<unsigned char> (*end)) != 0) {
-        ++end;
-    }
-    return *end == '\0';
+    return std::ranges::all_of (std::string_view (end),
+    [] (char c) { return std::isspace (static_cast<unsigned char> (c)) != 0; });
 }
 
 /// The integer @p name holds; nothing when it is absent or not a number (a
