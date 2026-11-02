@@ -28,10 +28,12 @@
  * - a zero is `0.0` or `-0.0`, and a float past the double range (`1e999`) is
  *   not a document at all: nlohmann refuses it as a number overflow.
  *
- * Known residue: nlohmann prints floats with Grisu2, which is the shortest
- * round-trip digit string for nearly every double and a longer one for a few;
- * `toExponential ()` here is always the shortest. A number whose shortest
- * spelling Grisu2 misses would differ in its last digits.
+ * Known residue: nlohmann prints floats with Grisu2, which is not always the
+ * shortest round-trip digit string; `toExponential ()` here always is. Floats
+ * of 16-17 digits differ in roughly 0.1% of cases, and integers at or above
+ * 2^64 with trailing zeros in roughly 10% (`10300000000000000000000` is
+ * `1.0300000000000001e+22` from the engine and `1.03e+22` here). Both spellings
+ * parse to the same double, so a server reads the same number.
  *
  * The grammar is nlohmann's: RFC 8259 with a tolerated UTF-8 byte-order mark,
  * and no comments or trailing commas. A string holding a lone surrogate is
