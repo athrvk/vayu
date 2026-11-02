@@ -2749,10 +2749,10 @@ TEST (InsomniaImport, HawkAndOAuth1AreStoredAsDataNotInherited) {
 /// A type Vayu has no mode for imports as `none`, never `inherit`: inheriting
 /// would send the folder's bearer token in place of the ASAP or netrc credential
 /// the user chose. Each is counted under `unsupported_auth` and a request is
-/// named, a folder is only counted (as Postman's are); an absent node, an
-/// explicit `none` and a node with no type are not losses. Mutation check:
-/// return `inherit` again from the tail of `insomnia_auth` and every `none`
-/// below turns into `inherit`.
+/// named, a folder is only counted (as Postman's are) and ends the walk
+/// (`noauth`); an absent node, an explicit `none` and a node with no type are
+/// not losses. Mutation check: return `inherit` again from the tail of
+/// `insomnia_auth` and every `none` below turns into `inherit`.
 TEST (InsomniaImport, AnAuthTypeWithoutAModeImportsAsNoneAndIsCounted) {
     const ImportParse parsed = parse_insomnia_tree (
     json::array ({ insomnia_folder ("fld", "wrk", "Folder", json{ { "type", "bearer" } }),
@@ -2774,12 +2774,74 @@ TEST (InsomniaImport, AnAuthTypeWithoutAModeImportsAsNoneAndIsCounted) {
     EXPECT_EQ (
     parsed.result.at ("collections")[0].at ("children")[1].at ("auth").at (
     "mode"),
-    "none");
+    "noauth");
 
     EXPECT_EQ (
     skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_auth"), 4);
     EXPECT_EQ (skipped_named (parsed, "unsupported_auth"),
     (Names{ "Asap", "Netrc", "Not a string" }));
+}
+
+/// An explicit `authentication.type` of `inherit` (Insomnia's own "Inherit from
+/// parent") is `inherit`, not an unsupported type: it imports as `inherit` and
+/// is not counted, on a request; on a folder it is transparent (`none`) like an
+/// absent node. Mutation check: delete the `inherit` branch of `insomnia_auth`
+/// and the request becomes `none` and `unsupported_auth` counts two.
+TEST (InsomniaImport, AnExplicitInheritTypeInheritsAndIsNotCounted) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("fld", "wrk", "Folder", json{ { "type", "inherit" } }),
+    insomnia_request ("a", "fld", "Inherits", json{ { "type", "inherit" } }) }),
+    true, json{ { "type", "bearer" }, { "token", "outer" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& folder = parsed.result.at ("collections")[0].at ("children")[0];
+    EXPECT_EQ (folder.at ("auth").at ("mode"), "none");
+    EXPECT_EQ (folder.at ("requests")[0].at ("auth").at ("mode"), "inherit");
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
+}
+
+/// A folder whose own auth Vayu cannot carry - a type with no mode, or a
+/// cookie-placed API key - ends the walk (`noauth`), so a request inheriting
+/// under it sends without auth instead of silently taking the workspace's.
+/// The workspace stays `none`; a folder with no auth of its own still passes
+/// the walk through. The resolved-auth pass sees the same thing: with a
+/// data-only `iam` (stored as `aws`) workspace only the request under the plain folder is
+/// counted. Mutation check: return `none` again from the folder branch of
+/// `insomnia_collection_auth` and "Under asap" and "Under cookie" are counted.
+TEST (InsomniaImport, AFolderWithAnUncarriableAuthEndsTheWalk) {
+    const json cookie_key = { { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } };
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("asap", "wrk", "Asap", json{ { "type", "asap" } }),
+    insomnia_request ("a", "asap", "Under asap"),
+    insomnia_folder ("cookie", "wrk", "Cookie", cookie_key),
+    insomnia_request ("b", "cookie", "Under cookie"), insomnia_folder ("plain", "wrk", "Plain"),
+    insomnia_request ("c", "plain", "Under plain") }),
+    true, json{ { "type", "iam" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("children")[0].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[1].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[2].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (collection.at ("auth").at ("mode"), "aws");
+
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), Names{ "Under plain" });
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("unsupported_auth"), 1);
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("security_unmapped_apikey_cookie"), 1);
+}
+
+/// The workspace has nothing above it to shut out, so an uncarriable auth of
+/// its own stays `none`, counted. Mutation check: drop the `!workspace` guard
+/// in `insomnia_collection_auth` and the workspace turns `noauth`.
+TEST (InsomniaImport, AWorkspaceWithAnUncarriableAuthStaysNone) {
+    for (const json& auth : { json{ { "type", "asap" } },
+         json{ { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } } }) {
+        const ImportParse parsed = parse_insomnia_tree (
+        json::array ({ insomnia_request ("a", "wrk", "Top") }), true, auth);
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (parsed.result.at ("collections")[0].at ("auth").at ("mode"), "none")
+        << auth.dump ();
+    }
 }
 
 /// An API key placed in a cookie has no slot in Vayu's API-key mode, so it
@@ -2826,10 +2888,40 @@ TEST (InsomniaImport, ACookiePlacedApiKeyBecomesACookieHeaderRow) {
     (Names{ "Plain", "Merged", "Disabled row" }));
 }
 
+/// A request's cookie-placed key with no name has no cookie to write, so it
+/// adds no header row; it is counted under `security_unmapped_apikey_cookie`
+/// and the request named, not dropped silently. A disabled one says nothing.
+/// Mutation check: drop the count in `with_cookie_api_key`'s empty-name branch
+/// and the preview hears nothing of "Unnamed" and "No key".
+TEST (InsomniaImport, ACookieApiKeyWithNoNameIsCountedBecauseThereIsNothingToSend) {
+    const json unnamed = { { "type", "apikey" }, { "addTo", "cookie" },
+        { "key", "" }, { "value", "v" } };
+    const json no_key = { { "type", "apikey" }, { "addTo", "cookie" }, { "value", "v" } };
+    json off                 = unnamed;
+    off["disabled"]          = true;
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_request ("a", "wrk", "Unnamed", unnamed),
+    insomnia_request ("b", "wrk", "No key", no_key),
+    insomnia_request ("c", "wrk", "Off", off) }),
+    true);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    for (const size_t at : { 0U, 1U }) {
+        EXPECT_EQ (requests[at].at ("auth").at ("mode"), "none") << at;
+        EXPECT_EQ (requests[at].at ("headers").size (), 0U) << at;
+    }
+    const json& skipped = parsed.result.at ("meta").at ("skipped");
+    EXPECT_EQ (skip_counts (skipped).at ("security_unmapped_apikey_cookie"), 2);
+    EXPECT_FALSE (skip_counts (skipped).contains ("apikey_cookie_header"));
+    EXPECT_EQ (skipped_named (parsed, "security_unmapped_apikey_cookie"),
+    (Names{ "Unnamed", "No key" }));
+}
+
 /// A folder or workspace cannot carry a header row, so its cookie-placed key is
-/// not imported: auth `none`, counted under `security_unmapped_apikey_cookie`
-/// (whose advice is to add the Cookie header by hand), unnamed. A disabled one
-/// says nothing. Mutation check: drop the `apikey_cookie_folder` count in
+/// not imported: counted under `security_unmapped_apikey_cookie` (whose advice
+/// is to add the Cookie header by hand), unnamed; the folder ends the walk
+/// (`noauth`) and the workspace is `none`. A disabled one says nothing.
+/// Mutation check: drop the `apikey_cookie_unmapped` count in
 /// `insomnia_collection_auth` and the credential is lost with no notice.
 TEST (InsomniaImport, AFolderCookieApiKeyIsCountedBecauseItCannotBeCarried) {
     const json key = { { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } };
@@ -2842,7 +2934,8 @@ TEST (InsomniaImport, AFolderCookieApiKeyIsCountedBecauseItCannotBeCarried) {
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& collection = parsed.result.at ("collections")[0];
     EXPECT_EQ (collection.at ("auth").at ("mode"), "none");
-    EXPECT_EQ (collection.at ("children")[0].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (collection.at ("children")[0].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[1].at ("auth").at ("mode"), "none");
     EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped_apikey_cookie"),
     2);
     EXPECT_TRUE (skipped_named (parsed, "security_unmapped_apikey_cookie").empty ());

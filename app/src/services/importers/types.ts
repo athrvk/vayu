@@ -222,8 +222,9 @@ export interface SkippedItem {
 		 * An Insomnia request's API key placed in a cookie (`addTo: "cookie"`),
 		 * which Vayu's API-key mode cannot hold: it imports as no auth plus a
 		 * `Cookie: key=value` header row (issue #3193). A mapping, not a loss.
-		 * The same key on a folder or workspace has no header row to land in and
-		 * counts as `security_unmapped_apikey_cookie`.
+		 * The same key on a folder or workspace has no header row to land in, and
+		 * a request's with no key name has no cookie to write; both count as
+		 * `security_unmapped_apikey_cookie`.
 		 */
 		| "apikey_cookie_header"
 		/**

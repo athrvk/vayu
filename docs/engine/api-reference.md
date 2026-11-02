@@ -4199,14 +4199,14 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `unresolved_base_url` | `servers[0].url` still holds a `{variable}` with no default, or is relative and the document has no source URL; it is kept as written |
 | `no_server_url` | The OpenAPI document names no server URL, so no `{{baseUrl}}` variable is created |
 | `servers_dropped` | An OpenAPI 3.x document with more than one `servers` entry: only `servers[0]` becomes `{{baseUrl}}`, and the count is the entries past the first |
-| `unsupported_auth` | A Postman auth block whose type the schema does not define, or an Insomnia `authentication.type` with no Vayu mode (`asap`, `netrc`) or that is not a string; either way it imports as no auth, never `inherit` |
+| `unsupported_auth` | A Postman auth block whose type the schema does not define, or an Insomnia `authentication.type` with no Vayu mode (`asap`, `netrc`) or that is not a string; either way it imports as no auth, never `inherit` (an Insomnia folder's ends the inherit walk as `noauth`) |
 | `security_unmapped_or` | An OpenAPI operation whose `security` lists more than one alternative requirement; it stays `inherit` |
 | `security_unmapped_and` | An OpenAPI operation whose `security` requirement names more than one scheme at once; it stays `inherit` |
 | `security_unmapped_scheme` | An OpenAPI operation whose `security` names a scheme the document never declares; it stays `inherit` |
 | `security_unmapped_mutualtls` | An operation's `security` names a `mutualTLS` scheme, which has no Vayu auth mode; it stays `inherit` |
 | `security_unmapped_openidconnect` | An operation's `security` names an `openIdConnect` scheme, which has no Vayu auth mode; it stays `inherit` |
 | `security_unmapped_type` | An operation's `security` names a scheme of any other type with no Vayu mode (an `http` scheme other than bearer or basic, or no readable `type`); it stays `inherit` |
-| `security_unmapped_apikey_cookie` | An operation's `security` names an `apiKey` scheme with `in: "cookie"`; Vayu's API-key mode has only header and query placements, so it stays `inherit`. An Insomnia folder or workspace API key with `addTo: "cookie"` is the same kind (no header row to hold it; imported as no auth, unnamed) |
+| `security_unmapped_apikey_cookie` | An operation's `security` names an `apiKey` scheme with `in: "cookie"`; Vayu's API-key mode has only header and query placements, so it stays `inherit`. An Insomnia API key with `addTo: "cookie"` that has no place to go is the same kind: a folder's (imported as `noauth`, ending the inherit walk) or the workspace's (`none`), which have no header row to hold it, and a request's with no key name, which has no cookie to write. Folders and the workspace are unnamed |
 | `apikey_cookie_header` | An Insomnia request's API key with `addTo: "cookie"`, imported as no auth plus a `Cookie: key=value` header row (merged into an enabled `Cookie` row the request already has) - a mapping the user may want to check, not a loss |
 | `oauth2_dropped_field` | A Postman OAuth 2.0 block carrying a pre-fetched `accessToken` beside an explicit grant configuration; the token is not imported |
 | `oauth2_state_regenerated` | A Postman OAuth 2.0 block with a fixed `state`; Vayu generates its own per authorization attempt |

@@ -659,6 +659,24 @@ describe("importNotices - what the Insomnia importer adds (#3193)", () => {
 		expect(notices({ kind: "script_unsupported_insomnia", count: 1 })[0].link).toBeUndefined();
 	});
 
+	it("words an unplaceable cookie API key for a request, a folder and the workspace alike", () => {
+		const kind = "security_unmapped_apikey_cookie";
+		expect(notices({ kind, count: 1, requests: ["Me"] })).toEqual([
+			{
+				tier: "action",
+				text: "Me: API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header",
+			},
+		]);
+		// A folder or the workspace is counted and never named, so the line cannot
+		// claim the count is of requests.
+		expect(notices({ kind, count: 1 })[0].text).toBe(
+			"1 API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header"
+		);
+		expect(notices({ kind, count: 3 })[0].text).toBe(
+			"3 API keys are placed in cookies, which Vayu's API key auth cannot hold - add them as Cookie headers"
+		);
+	});
+
 	it("notes a cookie API key sent as a header, as something that works, not to finish", () => {
 		const [named] = notices({ kind: "apikey_cookie_header", count: 1, requests: ["Me"] });
 		expect(named).toEqual({

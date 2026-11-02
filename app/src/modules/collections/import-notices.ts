@@ -207,11 +207,14 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 request needs a client certificate - add one in Settings",
 		many: "{n} requests need a client certificate - add one in Settings",
 	},
+	// An OpenAPI operation, an Insomnia request with no key name, or an Insomnia
+	// folder or the workspace (counted, never named): the count is of API keys,
+	// not of requests.
 	security_unmapped_apikey_cookie: {
 		tier: "action",
-		named: "API key goes in a cookie - add it as a Cookie header",
-		one: "1 request sends its API key in a cookie - add it as a Cookie header",
-		many: "{n} requests send their API key in a cookie - add it as a Cookie header",
+		named: "API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header",
+		one: "1 API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header",
+		many: "{n} API keys are placed in cookies, which Vayu's API key auth cannot hold - add them as Cookie headers",
 	},
 	// The engine put the key in a Cookie header row and left auth on None, so
 	// a request that looks unauthenticated in the Auth tab is not (#3193).

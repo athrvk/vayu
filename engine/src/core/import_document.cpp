@@ -2467,9 +2467,10 @@ struct InsomniaCounts {
     int unsupported_auth = 0;
     // A request's cookie-placed API key, sent as a `Cookie` header row.
     int apikey_cookie_header = 0;
-    // The same declared on a folder or workspace, which has no header row to
-    // carry it, so it is not imported.
-    int apikey_cookie_folder = 0;
+    // A cookie-placed API key with nowhere to go, so it is not imported: one
+    // on a folder or workspace (no header row to carry it) or a request's with
+    // no key name (no cookie to write).
+    int apikey_cookie_unmapped = 0;
     // Enabled scripts calling `insomnia.*`, which Vayu does not define.
     int insomnia_script = 0;
 };
@@ -2612,10 +2613,10 @@ bool is_cookie_api_key (const json* auth) {
 }
 
 /**
- * Maps an Insomnia `authentication` node. Only an absent node, or one with no
- * type, is `inherit`: a type Vayu has no mode for (`asap`, `netrc`, a
- * non-string) is `none` and counted, because `inherit` would send the parent's
- * credentials in place of the ones the user chose.
+ * Maps an Insomnia `authentication` node. An absent node, one with no type and
+ * an explicit `inherit` are `inherit`: a type Vayu has no mode for (`asap`,
+ * `netrc`, a non-string) is `none` and counted, because `inherit` would send
+ * the parent's credentials in place of the ones the user chose.
  */
 json insomnia_auth (const json* auth, InsomniaCounts& counts) {
     const json* node = as_record (auth);
@@ -2655,6 +2656,9 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
         // bag (stored, not executed).
         return json{ { "mode", "aws" }, { "config", insomnia_config (node) } };
     }
+    if (named == "inherit") {
+        return json{ { "mode", "inherit" } };
+    }
     if (named == "none") {
         // Insomnia's own explicit "No Auth" - distinct from an absent
         // `authentication` object, which means "inherit". An explicit `none`
@@ -2673,7 +2677,7 @@ json insomnia_auth (const json* auth, InsomniaCounts& counts) {
  * @p headers (Vayu's API-key mode has no cookie placement). An enabled `Cookie`
  * row the request already has takes the pair as a further cookie-string
  * member (RFC 6265 s4.2.1) instead of a second header. A key with no name has
- * nothing to send.
+ * nothing to send and is counted as unmapped rather than dropped silently.
  */
 json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts) {
     if (!is_cookie_api_key (auth)) {
@@ -2682,6 +2686,7 @@ json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts
     const json* node      = as_record (auth);
     const std::string key = nv (as_string (prop (node, "key")));
     if (key.empty ()) {
+        counts.apikey_cookie_unmapped += 1;
         return headers;
     }
     counts.apikey_cookie_header += 1;
@@ -2704,20 +2709,28 @@ json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts
 /**
  * What a folder or workspace stores for its `authentication`. A collection
  * never inherits, so an absent one is `none`, which the send-time walk passes
- * through. A folder set to Insomnia's own No Authentication (`type: "none"`,
- * not disabled) is `noauth` instead: the walk ends there, as it does in
- * Insomnia, so the requests under it do not take an outer folder's auth. The
- * workspace has nothing above it to shut out, so its `none` stays `none`.
+ * through. A folder that declares an auth Vayu cannot carry is `noauth`
+ * instead, so the walk ends there as it does in Insomnia and the requests under
+ * it do not take an outer folder's or the workspace's credentials in its place:
+ * Insomnia's own No Authentication (`type: "none"`, not disabled), a type with
+ * no Vayu mode (counted as `unsupported_auth`) and a cookie-placed API key
+ * (counted as `security_unmapped_apikey_cookie`). The workspace has nothing
+ * above it to shut out, so the same cases stay `none` there.
  */
 json insomnia_collection_auth (const json* authentication, bool workspace, InsomniaCounts& counts) {
     const json* type = prop (as_record (authentication), "type");
     if (!workspace && type != nullptr && *type == "none" && !auth_disabled (authentication)) {
         return json{ { "mode", "noauth" } };
     }
-    if (is_cookie_api_key (authentication)) {
-        counts.apikey_cookie_folder += 1;
+    const bool cookie_key        = is_cookie_api_key (authentication);
+    const int unsupported_before = counts.unsupported_auth;
+    if (cookie_key) {
+        counts.apikey_cookie_unmapped += 1;
     }
     json auth = insomnia_auth (authentication, counts);
+    if (!workspace && (cookie_key || counts.unsupported_auth > unsupported_before)) {
+        return json{ { "mode", "noauth" } };
+    }
     return auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
 }
 
@@ -2942,6 +2955,7 @@ std::to_array<std::pair<const char*, int InsomniaCounts::*>> ({
 { "file_body", &InsomniaCounts::file_body },
 { "unsupported_auth", &InsomniaCounts::unsupported_auth },
 { "apikey_cookie_header", &InsomniaCounts::apikey_cookie_header },
+{ "security_unmapped_apikey_cookie", &InsomniaCounts::apikey_cookie_unmapped },
 { "script_unsupported_insomnia", &InsomniaCounts::insomnia_script },
 });
 
@@ -3279,7 +3293,7 @@ json parse_insomnia_resources (const json& resources, const ImportOptions& optio
     tally.add ("file_body", counts.file_body);
     tally.add ("unsupported_auth", counts.unsupported_auth);
     tally.add ("apikey_cookie_header", counts.apikey_cookie_header);
-    tally.add ("security_unmapped_apikey_cookie", counts.apikey_cookie_folder);
+    tally.add ("security_unmapped_apikey_cookie", counts.apikey_cookie_unmapped);
     tally.add ("script_unsupported_insomnia", counts.insomnia_script);
     tree.name_counted ();
 

@@ -488,11 +488,12 @@ Surfaces work Vayu can't represent so the Preview can warn instead of silently d
 per-operation OpenAPI count, Postman's per-request counters - `script_unsupported` also names
 the folder or collection that declares the script - Insomnia's file bodies, unsupported
 auth types, cookie API keys (`apikey_cookie_header`), `insomnia.*` scripts
-(`script_unsupported_insomnia`) and the resources it cannot import), so the Preview can say which request to finish rather than only
-how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
-parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
-[postman.md](./postman.md#oauth-20-extra-request-parameters)), and the folders or collection
-that declared a Postman setting Vayu cannot apply (`protocol_behavior_folder`, see
+(`script_unsupported_insomnia`) and the resources it cannot import), so the Preview can say
+which request to finish rather than only how many. `names` names what was dropped, never its
+value: the keys of the OAuth 2.0 request parameters a Postman parse did not carry
+(`oauth2_unmapped_param`, see [postman.md](./postman.md#oauth-20-extra-request-parameters)), and
+the folders or collection that declared a Postman setting Vayu cannot apply
+(`protocol_behavior_folder`, see
 [postman.md](./postman.md#redirect-settings)). A Postman GET or HEAD that carries a body Postman
 would prune, and that does not opt out with `disableBodyPruning`, is counted as `body_on_get`
 and named under `requests` (also [postman.md](./postman.md#redirect-settings)). How the Preview words and ranks each kind - amber for what the user must finish, muted
@@ -550,16 +551,16 @@ counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu 
 for (a non-string `type`, or one the schema does not list), unlike `awsv4`, `digest`, `ntlm`,
 `hawk`, `oauth1`, `edgegrid` and `jwt`, which import as data and are reported under
 `nonExecutableAuth` instead. An Insomnia `authentication.type` with no Vayu mode (`asap`,
-`netrc`) is the same kind, and imports as no auth rather than `inherit`. `url_without_raw` is not a
-loss: it counts a URL assembled from `host[]`/`path[]` because it carried no `raw` - a mapping
-that changes nothing the user sends, so like `default_response` the Preview does not show it;
-it stays counted in `meta.skipped`. (A fourth, `path_variables`, counted a `:key` segment
-rewritten to `{{key}}` plus a collection variable; issue #1764 retired it along with that
-rewrite - a path variable now imports as the request's own path row, which loses nothing.) `variable_metadata` is a collection,
-folder, environment or globals variable whose `description` or a meaningfully declared `type`
-(anything but `secret` or Postman's own `default` marker) was read and discarded, because
-Vayu's variable record has a field for the value and the secret flag only (see
-[postman.md](./postman.md#variables--environments)).
+`netrc`) is the same kind, and imports as no auth rather than `inherit`. `url_without_raw` is
+not a loss: it counts a URL assembled from `host[]`/`path[]` because it carried no `raw` - a
+mapping that changes nothing the user sends, so like `default_response` the Preview does not
+show it; it stays counted in `meta.skipped`. (A fourth, `path_variables`, counted a `:key`
+segment rewritten to `{{key}}` plus a collection variable; issue #1764 retired it along with
+that rewrite - a path variable now imports as the request's own path row, which loses nothing.)
+`variable_metadata` is a collection, folder, environment or globals variable whose `description`
+or a meaningfully declared `type` (anything but `secret` or Postman's own `default` marker) was
+read and discarded, because Vayu's variable record has a field for the value and the secret flag
+only (see [postman.md](./postman.md#variables--environments)).
 
 Supporting value types:
 - `KeyValueEntry`: `{ key, value, enabled, description? }` - duplicates and `enabled:false`
