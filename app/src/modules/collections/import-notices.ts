@@ -213,6 +213,14 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 request sends its API key in a cookie - add it as a Cookie header",
 		many: "{n} requests send their API key in a cookie - add it as a Cookie header",
 	},
+	// The engine put the key in a Cookie header row and left auth on None, so
+	// a request that looks unauthenticated in the Auth tab is not (#3193).
+	apikey_cookie_header: {
+		tier: "note",
+		named: "API key is sent as a Cookie header (Vayu's API key auth has no cookie placement)",
+		one: "1 request's API key is sent as a Cookie header (Vayu's API key auth has no cookie placement)",
+		many: "{n} requests' API keys are sent as Cookie headers (Vayu's API key auth has no cookie placement)",
+	},
 	// Vayu generates a fresh `state` for every authorization attempt.
 	oauth2_state_regenerated: HIDDEN,
 	// The token Postman had fetched is not a setting to carry over: the grant
@@ -265,6 +273,15 @@ const COPY: Partial<Record<string, Copy>> = {
 		named: "script not imported (loaded from a URL, or on an event Vayu has no phase for) - add it as a pre-request or test script",
 		one: "1 script not imported (loaded from a URL, or on an event Vayu has no phase for) - add it as a pre-request or test script",
 		many: "{n} scripts not imported (loaded from a URL, or on an event Vayu has no phase for) - add them as pre-request or test scripts",
+	},
+	// Insomnia's own scripting API: Vayu runs `pm.*` and defines no `insomnia`,
+	// so the script is kept and throws at first run (#3193). Owners, as above.
+	script_unsupported_insomnia: {
+		tier: "action",
+		owners: "items",
+		named: "script uses Insomnia's insomnia.* API, which Vayu does not run - rewrite it with pm.*",
+		one: "1 script uses Insomnia's insomnia.* API, which Vayu does not run - rewrite it with pm.*",
+		many: "{n} scripts use Insomnia's insomnia.* API, which Vayu does not run - rewrite them with pm.*",
 	},
 	// The engine names the folder or collection under `names`, not `requests`:
 	// the line is about the node that declared the setting.

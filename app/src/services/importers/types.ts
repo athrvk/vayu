@@ -149,7 +149,8 @@ export interface SkippedItem {
 		 * unlike the schema's own types Vayu cannot sign (`awsv4`, `digest`,
 		 * `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`), which import as data and
 		 * count under `nonExecutableAuth` instead. The request imports with no
-		 * auth.
+		 * auth. An Insomnia `authentication.type` Vayu has no mode for (`asap`,
+		 * `netrc`) is the same: no auth, never `inherit` (issue #3193).
 		 */
 		| "unsupported_auth"
 		/**
@@ -218,6 +219,14 @@ export interface SkippedItem {
 		 */
 		| "security_unmapped_apikey_cookie"
 		/**
+		 * An Insomnia request's API key placed in a cookie (`addTo: "cookie"`),
+		 * which Vayu's API-key mode cannot hold: it imports as no auth plus a
+		 * `Cookie: key=value` header row (issue #3193). A mapping, not a loss.
+		 * The same key on a folder or workspace has no header row to land in and
+		 * counts as `security_unmapped_apikey_cookie`.
+		 */
+		| "apikey_cookie_header"
+		/**
 		 * An OpenAPI document declaring more than one `servers` entry (issue
 		 * #1444). Only `servers[0]` becomes the collection's `baseUrl`; each
 		 * further entry names an environment the import does not create.
@@ -283,6 +292,13 @@ export interface SkippedItem {
 		 * `ImportMeta.unsupportedScriptApis` reports it.
 		 */
 		| "script_unsupported"
+		/**
+		 * An Insomnia request, folder or workspace whose imported script uses the
+		 * `insomnia` object, which Vayu does not define (issue #3193). The script
+		 * is kept and throws when it runs. Counted once per owner, named under
+		 * `requests`, and only when scripts are imported.
+		 */
+		| "script_unsupported_insomnia"
 		/**
 		 * The same, declared on a Postman folder or on the collection itself (issue
 		 * #2538), counted once per declaring node with its name under `names`. The
