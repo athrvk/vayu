@@ -103,6 +103,30 @@ export function buildVariableValues(scopes: {
 }
 
 /**
+ * @p obj with every string in it, at any depth, replaced by @p resolveString's
+ * answer. Keys and non-string leaves are copied as they stand.
+ *
+ * The one deep walk behind the hook's `resolveObject` and the resolution a
+ * caller does without a hook (a loop over several collections' scopes).
+ */
+export function resolveStringsDeep<T>(obj: T, resolveString: (input: string) => string): T {
+	const recurse = <U>(value: U): U => {
+		if (value === null || value === undefined) return value;
+		if (typeof value === "string") return resolveString(value) as unknown as U;
+		if (Array.isArray(value)) return value.map((item) => recurse(item)) as unknown as U;
+		if (typeof value === "object") {
+			const result: Record<string, unknown> = {};
+			for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+				result[key] = recurse(val);
+			}
+			return result as U;
+		}
+		return value;
+	};
+	return recurse(obj);
+}
+
+/**
  * The reserved prefix for the data namespace (issue #402). `{{data.column}}`
  * addresses a column of a collection run's data set, never a variable.
  */

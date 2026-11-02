@@ -56,6 +56,7 @@ import {
 	isEnabledDefinition,
 	previewRowBind,
 	renderDataValue,
+	resolveStringsDeep,
 	resolveTemplate,
 	resolveTemplateWithRow,
 	type DataRowCells,
@@ -414,24 +415,7 @@ export function useVariableResolver(
 	);
 
 	const resolveObject = useCallback(
-		<T>(obj: T): T => {
-			// Recurse via a local function rather than the `resolveObject` const so the
-			// reference isn't to a not-yet-declared binding (react-hooks/immutability).
-			const recurse = <U>(value: U): U => {
-				if (value === null || value === undefined) return value;
-				if (typeof value === "string") return resolveString(value) as unknown as U;
-				if (Array.isArray(value)) return value.map((item) => recurse(item)) as unknown as U;
-				if (typeof value === "object") {
-					const result: Record<string, unknown> = {};
-					for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-						result[key] = recurse(val);
-					}
-					return result as U;
-				}
-				return value;
-			};
-			return recurse(obj);
-		},
+		<T>(obj: T): T => resolveStringsDeep(obj, resolveString),
 		[resolveString]
 	);
 

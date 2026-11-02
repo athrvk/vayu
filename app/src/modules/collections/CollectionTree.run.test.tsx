@@ -56,6 +56,9 @@ vi.mock("@/queries", () => ({
 		refetch: vi.fn(),
 	}),
 	useMultipleCollectionRequests: () => ({ requestsByCollection: requests }),
+	// The run dialog's OAuth 2.0 guard resolves against these (#3199).
+	useGlobalsQuery: () => ({ data: undefined }),
+	useEnvironmentsQuery: () => ({ data: [] }),
 	// The run dialog's column audit reads whole rows (#2546).
 	useFullCollectionRequests: () => ({ requestsByCollection: requests, isLoading: false }),
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),

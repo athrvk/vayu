@@ -10,10 +10,11 @@
  * authorized for its whole length.
  *
  * The engine now refreshes a header-placed OAuth 2.0 token *during* the run
- * (#478), so most long runs need no warning at all. What is left is the set of
- * credentials it cannot renew - a query-placed token, `autoRefreshToken: false`,
- * an authorization_code grant with no refresh token - where a run longer than
- * the token still starts failing partway through:
+ * (#478), a collection load run's steps included (#3199), so most long runs
+ * need no warning at all. What is left is the set of credentials it cannot
+ * renew - a query-placed token, `autoRefreshToken: false`, an authorization_code
+ * grant with no refresh token - where a run longer than the token still starts
+ * failing partway through:
  *
  *   - covered              → nothing to do (including "the engine will renew it")
  *   - stale-but-coverable  → offer Refresh (a fresh token gives a full window)
@@ -27,7 +28,9 @@
  * change a name the config uses, a Send could judge another token, so each
  * verdict says which one it is about (`scriptMayChangeSettings`).
  *
- * Reports whether the Start button should be gated via onGateChange.
+ * Reports whether the Start button should be gated via onGateChange. The
+ * request's load dialog renders one; the collection run dialog renders one per
+ * distinct token its requests send, and gates Run while any of them gates.
  */
 
 import { useEffect, useMemo, useState } from "react";

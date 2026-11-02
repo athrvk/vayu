@@ -21,6 +21,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
+import { TooltipProvider } from "@/components/ui";
 import {
 	useClientSettingsStore,
 	useDashboardStore,
@@ -30,7 +31,7 @@ import {
 } from "@/stores";
 import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
-import type { Collection, Request } from "@/types";
+import type { Collection, Environment, OAuth2Config, Request, RequestAuth } from "@/types";
 import { BUDGETS_EXPLAINER } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
 
 const mutate = vi.fn();
@@ -62,12 +63,48 @@ const collections: Collection[] = [];
  */
 const requestsByCollection = new Map<string, Request[]>();
 
+/**
+ * The globals and environments the OAuth 2.0 guard resolves a config against
+ * (issue #3199). Empty by default.
+ */
+const globalVariables: Record<string, { value: string }> = {};
+const environments: Environment[] = [];
+
 vi.mock("@/queries", () => ({
+	useGlobalsQuery: () => ({ data: { id: "globals", variables: globalVariables } }),
+	useEnvironmentsQuery: () => ({ data: environments }),
 	useStartScenarioRunMutation: () => startRunState,
 	// The picker and the pre-fill both read the caps through `useDataFileLimits`.
 	useConfigQuery: () => ({ data: { entries: configEntries } }),
 	useCollectionsQuery: () => ({ data: collections }),
 	useFullCollectionRequests: () => ({ requestsByCollection, isLoading: false }),
+}));
+
+/**
+ * The guard is `OAuth2LoadTestGuard`'s own test's subject. What matters here is
+ * which configs reach it, for how long a run, and that its gate reaches Run: the
+ * stand-in shows the first two and lets a case drive the third.
+ */
+vi.mock("@/modules/request-builder/components/OAuth2LoadTestGuard", () => ({
+	default: ({
+		config,
+		durationSeconds,
+		onGateChange,
+	}: {
+		config: OAuth2Config;
+		durationSeconds: number | null;
+		onGateChange: (gated: boolean) => void;
+	}) => (
+		<div
+			data-testid="oauth2-guard"
+			data-client={config.clientId}
+			data-token-url={config.accessTokenUrl}
+			data-duration={String(durationSeconds)}
+		>
+			<button onClick={() => onGateChange(true)}>gate {config.clientId}</button>
+			<button onClick={() => onGateChange(false)}>clear {config.clientId}</button>
+		</div>
+	),
 }));
 
 /**
@@ -126,6 +163,8 @@ beforeEach(() => {
 	configEntries.length = 0;
 	collections.length = 0;
 	requestsByCollection.clear();
+	environments.length = 0;
+	for (const name of Object.keys(globalVariables)) delete globalVariables[name];
 	mutate.mockClear();
 	updateCollection.mutate.mockReset();
 	readingUpdate.mutate.mockReset();
@@ -1615,5 +1654,242 @@ describe("a pick declares the contract", () => {
 		// this reds.
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 		expect(mutate.mock.calls[0][0].scenario.data).toEqual([{ plan: "free", price: "0" }]);
+	});
+});
+
+/**
+ * The OAuth 2.0 token guard in a collection run (issue #3199). The engine keeps
+ * one credential current per distinct token its steps send, so a duration-based
+ * load run is checked once per token, and only a token the guard cannot promise
+ * to keep current gates Run.
+ */
+describe("the OAuth 2.0 token guard", () => {
+	const oauth2 = (clientId: string, overrides: Partial<OAuth2Config> = {}): OAuth2Config => ({
+		grantType: "client_credentials",
+		accessTokenUrl: "https://idp.test/token",
+		clientId,
+		...overrides,
+	});
+	const storedRequest = (collectionId: string, auth: RequestAuth, id = `req_${collectionId}`) =>
+		({
+			id,
+			collectionId,
+			url: "https://api.test/users",
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			elements: [],
+			auth,
+		}) as unknown as Request;
+	const folder = (
+		id: string,
+		parentId: string | null,
+		auth: RequestAuth,
+		variables: Collection["variables"] = {}
+	) => ({ id, name: id, parentId, elements: [], auth, variables }) as unknown as Collection;
+
+	/** A root folder with no auth of its own and the given requests. */
+	function seed(...auths: RequestAuth[]) {
+		collections.push(folder("col_1", null, { mode: "none" }));
+		requestsByCollection.set(
+			"col_1",
+			auths.map((auth, i) => storedRequest("col_1", auth, `req_${i}`))
+		);
+	}
+	// The app mounts one `TooltipProvider` at its root, which Run's hint needs.
+	const open = () =>
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />, {
+			wrapper: TooltipProvider,
+		});
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+	const guards = () => screen.queryAllByTestId("oauth2-guard");
+	const run = () => screen.getByRole("button", { name: /^run$/i });
+
+	it("checks a request's own OAuth 2.0 config against the run's duration", () => {
+		seed({ mode: "oauth2", config: oauth2("client-a") });
+		open();
+		enableLoadTest();
+
+		// Mutation check: drop the guard from the JSX and this reds.
+		expect(guards()).toHaveLength(1);
+		expect(guards()[0]).toHaveAttribute("data-client", "client-a");
+		expect(guards()[0]).toHaveAttribute("data-duration", "30");
+	});
+
+	it("checks the config a request inherits from the collection", () => {
+		collections.push(folder("col_1", null, { mode: "oauth2", config: oauth2("inherited") }));
+		requestsByCollection.set("col_1", [storedRequest("col_1", { mode: "inherit" })]);
+		open();
+		enableLoadTest();
+
+		expect(guards().map((g) => g.getAttribute("data-client"))).toEqual(["inherited"]);
+	});
+
+	it("follows the run's own duration", () => {
+		seed({ mode: "oauth2", config: oauth2("client-a") });
+		open();
+		enableLoadTest();
+		fireEvent.change(screen.getByLabelText(/duration/i), { target: { value: "120" } });
+
+		expect(guards()[0]).toHaveAttribute("data-duration", "120");
+	});
+
+	it("resolves {{variables}} through the collection chain and the active environment", () => {
+		globalVariables.idp = { value: "https://global.test" };
+		environments.push({
+			id: "env_1",
+			variables: { idp: { value: "https://env.test" } },
+		} as unknown as Environment);
+		useSessionStore.setState({ activeEnvironmentId: "env_1" });
+		collections.push(
+			folder(
+				"col_1",
+				null,
+				{ mode: "none" },
+				{ client: { value: "from-collection", enabled: true } }
+			)
+		);
+		requestsByCollection.set("col_1", [
+			storedRequest("col_1", {
+				mode: "oauth2",
+				config: oauth2("{{client}}", { accessTokenUrl: "{{idp}}/token" }),
+			}),
+		]);
+		open();
+		enableLoadTest();
+
+		expect(guards()[0]).toHaveAttribute("data-client", "from-collection");
+		expect(guards()[0]).toHaveAttribute("data-token-url", "https://env.test/token");
+	});
+
+	it("shows nothing without OAuth 2.0 in the run", () => {
+		seed({ mode: "bearer", token: "t" }, { mode: "none" }, { mode: "inherit" });
+		open();
+		enableLoadTest();
+
+		expect(guards()).toHaveLength(0);
+	});
+
+	it("shows nothing for a run that is not a load test", () => {
+		seed({ mode: "oauth2", config: oauth2("client-a") });
+		open();
+
+		expect(guards()).toHaveLength(0);
+		enableLoadTest();
+		expect(guards()).toHaveLength(1);
+		enableLoadTest();
+		expect(guards()).toHaveLength(0);
+	});
+
+	it("shows nothing for a load run that ends on a pass count", () => {
+		seed({ mode: "oauth2", config: oauth2("client-a") });
+		open();
+		enableLoadTest();
+		const profile = screen.getByRole("radiogroup", { name: /load profile/i });
+		fireEvent.click(within(profile).getByRole("radio", { name: /fixed passes/i }));
+
+		expect(guards()).toHaveLength(0);
+	});
+
+	it("shows one guard for requests that send the same token, and one per distinct token", () => {
+		seed(
+			{ mode: "oauth2", config: oauth2("client-a") },
+			{ mode: "oauth2", config: oauth2("client-a", { scope: "write" }) },
+			{ mode: "oauth2", config: oauth2("client-b") }
+		);
+		open();
+		enableLoadTest();
+
+		// Mutation check: key the guards by request rather than by cache key and
+		// the first assertion reds; collapse them to the first config and the
+		// second does.
+		expect(guards().map((g) => g.getAttribute("data-client"))).toEqual([
+			"client-a",
+			"client-b",
+		]);
+	});
+
+	it("looks under nested collections only once Include nested collections is on", () => {
+		seed({ mode: "none" });
+		collections.push(folder("col_child", "col_1", { mode: "none" }));
+		requestsByCollection.set("col_child", [
+			storedRequest("col_child", { mode: "oauth2", config: oauth2("nested") }),
+		]);
+		open();
+		enableLoadTest();
+		expect(guards()).toHaveLength(0);
+
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
+		expect(guards().map((g) => g.getAttribute("data-client"))).toEqual(["nested"]);
+	});
+
+	describe("the gate", () => {
+		const gate = (client: string) =>
+			fireEvent.click(screen.getByRole("button", { name: `gate ${client}` }));
+		const clear = (client: string) =>
+			fireEvent.click(screen.getByRole("button", { name: `clear ${client}` }));
+
+		it("disables Run while a guard gates, and re-enables it once it clears", () => {
+			seed({ mode: "oauth2", config: oauth2("client-a") });
+			open();
+			enableLoadTest();
+			expect(run()).toBeEnabled();
+
+			gate("client-a");
+			// Mutation check: drop `oauthGated` from `canRun` and these two red.
+			expect(run()).toBeDisabled();
+			fireEvent.click(run());
+			expect(mutate).not.toHaveBeenCalled();
+
+			clear("client-a");
+			expect(run()).toBeEnabled();
+			fireEvent.click(run());
+			expect(mutate).toHaveBeenCalledTimes(1);
+		});
+
+		it("says why Run is disabled", async () => {
+			seed({ mode: "oauth2", config: oauth2("client-a") });
+			open();
+			enableLoadTest();
+			gate("client-a");
+
+			const hint = document.querySelector<HTMLElement>('[data-slot="disabled-hint"]');
+			expect(hint, "a gated Run renders its hint wrapper").not.toBeNull();
+			fireEvent.focus(hint as HTMLElement);
+			expect(
+				(await screen.findAllByText("The OAuth 2.0 token check above hasn't passed."))[0]
+			).toBeTruthy();
+		});
+
+		it("holds Run until every guard has cleared", () => {
+			seed(
+				{ mode: "oauth2", config: oauth2("client-a") },
+				{ mode: "oauth2", config: oauth2("client-b") }
+			);
+			open();
+			enableLoadTest();
+
+			gate("client-a");
+			gate("client-b");
+			clear("client-a");
+			// Mutation check: track one boolean instead of a set of keys and this
+			// reds - the first guard's clear would release the second's gate.
+			expect(run()).toBeDisabled();
+
+			clear("client-b");
+			expect(run()).toBeEnabled();
+		});
+
+		it("stops gating when the guard that gated leaves the dialog", () => {
+			seed({ mode: "oauth2", config: oauth2("client-a") });
+			open();
+			enableLoadTest();
+			gate("client-a");
+			expect(run()).toBeDisabled();
+
+			enableLoadTest();
+			expect(run()).toBeEnabled();
+		});
 	});
 });

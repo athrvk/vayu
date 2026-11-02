@@ -2146,12 +2146,19 @@ header (`authRefreshNote`), a warning when a refresh failed - that failure is
 what explains 401s appearing partway through an otherwise healthy run. Absent
 means the run could never refresh (no OAuth 2.0 auth, a non-expiring or
 query-placed token, `autoRefreshToken: false`, or an older sidecar); present
-with an empty `refreshes` means it was watched and never needed to. The same
-eligibility rule decides whether `OAuth2LoadTestGuard` still blocks a run
-longer than its token - `isMidRunRefreshable` mirrors the config-and-token
-cases of the engine's `plan_auth_refresh`, not its last one, a user-supplied
-`Authorization` header that beats the token and that the guard is never handed
-the headers to see. The two must change together.
+with an empty `refreshes` means it was watched and never needed to. A
+collection load run fills it too (#3199): the engine keeps one token current per
+distinct cache key its steps send and folds them into this one shape, so
+`refreshes` holds every renewal in order and `refreshFailures` is the sum. The
+same eligibility rule decides whether `OAuth2LoadTestGuard` still blocks a run
+longer than its token, in the request's load dialog and, once per distinct
+token, in `RunCollectionDialog` - `isMidRunRefreshable` mirrors the
+config-and-token cases of the engine's `plan_oauth2_refresh`, not what the
+engine decides from the composed request: a user-supplied `Authorization`
+header that beats the token, and for a collection step an auth that waited on
+its scripts or a different `headerPrefix` than the first step sharing its
+cache key. The guard is never handed the headers to see the first. The two must
+change together.
 
 ### Load Test Execution
 
