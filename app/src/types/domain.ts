@@ -1622,8 +1622,9 @@ export interface RunResultTrace {
 		 */
 		bodyFile?: unknown;
 		/**
-		 * The auth mode was not executed and the request went out without
-		 * authentication - see {@link HttpResponse.authNotice} (issue #2474).
+		 * What the auth block did on the wire when that is not the plain case: a
+		 * mode not executed (#2474) or a typed Authorization header that spared
+		 * an OAuth 2.0 token its fetch (#3202) - see {@link HttpResponse.authNotice} (issue #2474).
 		 * Written on the request node because it describes what was sent, so it
 		 * is present on a failed exchange (no `response` node) too.
 		 */
@@ -2462,7 +2463,8 @@ export interface HttpResponse {
 	/**
 	 * The request's auth mode is one the engine stores but does not execute
 	 * (`digest`, `ntlm`, ...), so it was sent without authentication
-	 * (issue #2474). A sentence naming the mode, written by
+	 * (issue #2474), or its own Authorization header was sent and no OAuth 2.0
+	 * token was fetched (issue #3202). A sentence saying which, written by
 	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
 	 * key and to `trace.request.authNotice` from one place. **Absent** when
 	 * there is nothing to say - an executed mode, no auth, or an engine older
