@@ -2017,6 +2017,129 @@ describe("the envelope a graphql or jsonrpc snippet sends", () => {
 });
 
 /**
+ * A GraphQL GET sends its document as query parameters and no body, so its
+ * snippet carries the same URL and no `Content-Type` (#3211). The member rules
+ * are held in `wire-body.test.ts`; this holds that `prepareRequest` applies them
+ * to the URL after auth, drops the body, and that every target carries the URL.
+ */
+describe("a GraphQL GET travels in the URL", () => {
+	const graphqlGet = (content: string, extra: Partial<SnippetRequest> = {}): SnippetRequest => ({
+		...GET,
+		body: { mode: "graphql", content },
+		...extra,
+	});
+	// Every byte class the escaper treats differently from `encodeURIComponent`:
+	// `!'()*` it leaves raw, and a non-ASCII character is its UTF-8 bytes.
+	const DOCUMENT = '{ hero(name: "it\'s!") { name* } } cafe\u0301 \u00e9';
+	const ENCODED =
+		"%7B%20hero%28name%3A%20%22it%27s%21%22%29%20%7B%20name%2A%20%7D%20%7D%20cafe%CC%81%20%C3%A9";
+
+	it("appends the encoded document to the URL and sends no body in every target", () => {
+		const request = graphqlGet(DOCUMENT);
+		expect(prepareRequest(request).url).toBe(
+			`https://api.example.com/v1/users?query=${ENCODED}`
+		);
+		for (const target of CODE_TARGETS) {
+			const { code } = target.generate(request);
+			expect(code, `${target.id} lost the URL`).toContain(`/v1/users?query=${ENCODED}`);
+			expect(code, `${target.id} sent a Content-Type`).not.toMatch(/content-type/i);
+			expect(code, `${target.id} sent the document`).not.toContain("hero(");
+			expect(code, `${target.id} sent a body`).not.toMatch(
+				/--data|body:|\bdata=|-Body|\bjson=/
+			);
+		}
+	});
+
+	it("writes an envelope's members in the author's order, variables as the compact dump", () => {
+		const envelope =
+			'{ "variables": { "b": 1, "a": [1, 2.50] }, "query": "{ me }", "operationName": "Me" }';
+		expect(prepareRequest(graphqlGet(envelope)).url).toBe(
+			"https://api.example.com/v1/users" +
+				"?variables=%7B%22b%22%3A1%2C%22a%22%3A%5B1%2C2.5%5D%7D&query=%7B%20me%20%7D&operationName=Me"
+		);
+	});
+
+	it("skips a null operationName, variables and extensions", () => {
+		const envelope =
+			'{"query":"{ me }","operationName":null,"variables":null,"extensions":null}';
+		expect(prepareRequest(graphqlGet(envelope)).url).toBe(
+			"https://api.example.com/v1/users?query=%7B%20me%20%7D"
+		);
+	});
+
+	it("joins onto an existing query and ahead of a fragment", () => {
+		const get = (url: string) => prepareRequest(graphqlGet("{ me }", { url })).url;
+		expect(get("https://x/g?a=1")).toBe("https://x/g?a=1&query=%7B%20me%20%7D");
+		expect(get("https://x/g#top")).toBe("https://x/g?query=%7B%20me%20%7D#top");
+		expect(get("https://x/g?a=1#top")).toBe("https://x/g?a=1&query=%7B%20me%20%7D#top");
+	});
+
+	it("comes after a query-located API key", () => {
+		const { url } = prepareRequest(
+			graphqlGet("{ me }", { auth: { mode: "apikey", key: "k", value: "v", in: "query" } })
+		);
+		expect(url).toBe("https://api.example.com/v1/users?k=v&query=%7B%20me%20%7D");
+	});
+
+	it("keeps the body and its Content-Type where the engine does", () => {
+		const keeps: Array<[string, string]> = [
+			["an unsupported member", '{"query":"{ me }","extra":1}'],
+			["a non-string operationName", '{"query":"{ me }","operationName":1}'],
+			["a non-object variables", '{"query":"{ me }","variables":[1]}'],
+			["an envelope that does not parse", '{"query":"{ me }", "variables": {{vars}}}'],
+		];
+		for (const [name, content] of keeps) {
+			const prepared = prepareRequest(graphqlGet(content));
+			expect(prepared.url, name).toBe("https://api.example.com/v1/users");
+			expect(prepared.body, name).toEqual({ kind: "raw", content });
+			expect(prepared.headers, name).toContainEqual(["Content-Type", "application/json"]);
+		}
+	});
+
+	it("leaves a POST, and a GET with no document, as they were", () => {
+		const post = prepareRequest(graphqlGet("{ me }", { method: "POST" }));
+		expect(post.url).toBe("https://api.example.com/v1/users");
+		expect(post.body).toEqual({ kind: "raw", content: '{"query":"{ me }"}' });
+		expect(post.headers).toContainEqual(["Content-Type", "application/json"]);
+
+		const empty = prepareRequest(graphqlGet(""));
+		expect(empty.url).toBe("https://api.example.com/v1/users");
+		expect(empty.body).toBeUndefined();
+		expect(empty.headers).toEqual([]);
+	});
+
+	it("reads the method as the engine does: any case, and empty is GET", () => {
+		for (const method of ["get", "GET", "Get", ""]) {
+			const prepared = prepareRequest(graphqlGet("{ me }", { method }));
+			expect(prepared.url, method).toBe(
+				"https://api.example.com/v1/users?query=%7B%20me%20%7D"
+			);
+			expect(prepared.body, method).toBeUndefined();
+		}
+	});
+
+	it("masks a secret in the document through the spelling the URL carries", () => {
+		const secret = "s3!(cr)*t";
+		const request = graphqlGet(`{ me(token: "${secret}") }`);
+		for (const target of CODE_TARGETS) {
+			const { code } = target.generate(request, { mask: true, secrets: [secret] });
+			expect(code, target.id).not.toContain("s3");
+			expect(code, target.id).toContain(SECRET_PLACEHOLDER);
+		}
+	});
+
+	it("masks a secret in the variables through its JSON escape", () => {
+		const secret = 'pa"ss!';
+		const request = graphqlGet(
+			`{"query":"{ me }","variables":{"p":${JSON.stringify(secret)}}}`
+		);
+		const { code } = generateCurl(request, { mask: true, secrets: [secret] });
+		expect(code).not.toContain("pa%");
+		expect(code).toContain(SECRET_PLACEHOLDER);
+	});
+});
+
+/**
  * A `:name` segment is filled from the request's path rows (issue #1764), the
  * way `POST /compose` fills it, so the templated snippet sends what Vayu does.
  * The substitution is `prepare.ts`'s, so a target that read `request.url`
