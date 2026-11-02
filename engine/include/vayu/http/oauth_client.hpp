@@ -126,7 +126,10 @@ std::string cache_key (const nlohmann::json& config);
 
 /**
  * @brief Expiry check with skew: expired iff expires_in > 0 and
- *        now_ms > created_at + expires_in*1000 - skew_ms.
+ *        now_ms > created_at + expires_in*1000 - skew, where
+ *        skew = min(skew_ms, expires_in*1000 / 2). The cap keeps a token that
+ *        lives no longer than the default 45s skew usable for the first half
+ *        of its life instead of expired at mint.
  */
 bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms = 45'000);
 

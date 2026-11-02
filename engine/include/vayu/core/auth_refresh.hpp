@@ -185,10 +185,11 @@ struct ScenarioAuthRefreshPlan {
  * it (`ScenarioStep::oauth2_config`), the engine placed that token on
  * `Authorization` itself (`Request::auth_header`; a user-set `Authorization`
  * wins and leaves it empty), and `http::plan_oauth2_refresh` accepts the
- * config. The token a step carries is not compared with the cache: a token
- * shorter-lived than the cache's expiry skew is re-acquired for every step
- * that plans it, so the earlier steps of a key already carry an older token
- * than the cache holds, and the newest is what they should send.
+ * config. The token a step carries is not compared with the cache: a short-lived
+ * token enters the cache's expiry skew (its last 45s, or its last half when it
+ * lives less than 90s) while the plan is still being built and is re-acquired
+ * for the steps that follow, so the earlier steps of a key can carry an older
+ * token than the cache holds, and the newest is what they should send.
  *
  * Steps that share a key share one credential. Its refresh is bounded by the
  * shortest timeout among them, so no step waits on a token request longer

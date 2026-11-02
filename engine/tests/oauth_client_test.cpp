@@ -254,6 +254,30 @@ TEST (OAuthExpiry, SkewAndNonExpiring) {
     EXPECT_TRUE (oauth::is_expired (t, t.created_at + 3'600'001));
 }
 
+// A token living no longer than the 45s skew is not expired at mint: the skew
+// is capped at half its lifetime (#3200).
+TEST (OAuthExpiry, SkewIsCappedAtHalfTheLifetime) {
+    vayu::db::OAuthToken t;
+    t.created_at = 1'000'000;
+    t.expires_in = 30; // skew 15s, so valid until created_at + 15'000
+
+    EXPECT_FALSE (oauth::is_expired (t, t.created_at));
+    EXPECT_FALSE (oauth::is_expired (t, t.created_at + 14'000));
+    EXPECT_TRUE (oauth::is_expired (t, t.created_at + 16'000));
+
+    t.expires_in = 45; // exactly the default skew: valid for the first 22.5s
+    EXPECT_FALSE (oauth::is_expired (t, t.created_at));
+    EXPECT_TRUE (oauth::is_expired (t, t.created_at + 23'000));
+
+    t.expires_in = 90; // lifetime / 2 == the skew: both rules agree
+    EXPECT_FALSE (oauth::is_expired (t, t.created_at + 45'000));
+    EXPECT_TRUE (oauth::is_expired (t, t.created_at + 45'001));
+
+    t.expires_in = 30; // an explicit skew below the cap is honoured as given
+    EXPECT_FALSE (oauth::is_expired (t, t.created_at + 19'000, 10'000));
+    EXPECT_TRUE (oauth::is_expired (t, t.created_at + 21'000, 10'000));
+}
+
 // ---------------------------------------------------------------------------
 // acquire_token
 // ---------------------------------------------------------------------------
