@@ -72,7 +72,7 @@ describe("jsonRpcWireBody", () => {
 		}
 	});
 
-	it("completes the text a template resolves to, not the template", () => {
+	it("appends jsonrpc and id after the author's members", () => {
 		expect(jsonRpcWireBody('{"method":"m","params":{"n":1}}')).toBe(
 			'{"method":"m","params":{"n":1},"jsonrpc":"2.0","id":1}'
 		);
