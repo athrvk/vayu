@@ -22,6 +22,7 @@
 import { shellQuote } from "./curl";
 import { fileBaseName as baseName } from "@/lib/file-path";
 import {
+	foldRepeatedCookies,
 	prepareRequest,
 	timeoutSeconds,
 	untypedTextPartNote,
@@ -106,7 +107,7 @@ export function generateHttpie(
 	if (!prepared.verifySSL) args.push("--verify=no");
 	if (prepared.timeoutMs !== null) args.push(`--timeout=${timeoutSeconds(prepared.timeoutMs)}`);
 
-	for (const [name, value] of prepared.headers) {
+	for (const [name, value] of foldRepeatedCookies(prepared.headers)) {
 		// HTTPie sets the multipart Content-Type, boundary included; one that
 		// names a boundary it did not choose makes the server read the whole body
 		// as a single part.

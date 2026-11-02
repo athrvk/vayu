@@ -20,6 +20,7 @@
  */
 
 import {
+	foldRepeatedCookies,
 	prepareRequest,
 	timeoutSeconds,
 	type PreparedFilePart,
@@ -71,7 +72,7 @@ export function generateCurl(
 	const args: string[] = [`curl -X ${prepared.method} ${shellQuote(prepared.url)}`];
 
 	const isFormData = prepared.body?.kind === "form-data";
-	for (const [name, value] of prepared.headers) {
+	for (const [name, value] of foldRepeatedCookies(prepared.headers)) {
 		// curl builds the multipart boundary, and a Content-Type that names one
 		// it did not choose makes the server read the body as a single part.
 		if (isFormData && name.toLowerCase() === "content-type") continue;

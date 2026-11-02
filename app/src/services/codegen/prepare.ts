@@ -447,6 +447,35 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
 	return headerLinesOf(headers).map(({ name, value }): [string, string] => [name, value]);
 }
 
+/** How the engine joins repeated `Cookie` rows into the one line it sends (#2788). */
+const COOKIE_SEPARATOR = "; ";
+
+/**
+ * Join repeated `Cookie` rows into one, leaving every other repeat alone.
+ *
+ * The engine sends the typed `Cookie` rows as a single "; "-joined line
+ * (`typed_cookie_value`, `engine/src/http/event_loop/curl_utils.cpp`) while any
+ * other repeated header goes out as separate lines. curl and HTTPie can repeat
+ * a header, so they fold only this one - and need no note, because the folded
+ * line is what Vayu sends. The line sits where the first `Cookie` row was and
+ * keeps that row's spelling.
+ */
+export function foldRepeatedCookies(
+	headers: ReadonlyArray<[string, string]>
+): Array<[string, string]> {
+	const isCookie = ([name]: [string, string]) => name.toLowerCase() === "cookie";
+	const first = headers.findIndex(isCookie);
+	if (first === -1) return [...headers];
+	const joined = headers
+		.filter(isCookie)
+		.map(([, value]) => value)
+		.join(COOKIE_SEPARATOR);
+	return headers.flatMap((row, index): Array<[string, string]> => {
+		if (!isCookie(row)) return [row];
+		return index === first ? [[row[0], joined]] : [];
+	});
+}
+
 /**
  * Fold every header a client with one value per name cannot repeat into a single
  * entry, and say so. The entry sits where the name first appeared, keeps that
@@ -456,7 +485,8 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
  * which it sends as the same "; " join (issue #2788).
  *
  * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
- * dictionary. curl and HTTPie repeat a header and never call this.
+ * dictionary. curl and HTTPie repeat a header and fold only `Cookie`
+ * (`foldRepeatedCookies`).
  */
 export function foldRepeatedHeaders(
 	headers: ReadonlyArray<[string, string]>,
@@ -473,7 +503,7 @@ export function foldRepeatedHeaders(
 	const notes: string[] = [];
 	const out = [...folded].map(([key, { name, values }]): [string, string] => {
 		if (values.length === 1) return [name, values[0]];
-		const separator = key === "cookie" ? "; " : ", ";
+		const separator = key === "cookie" ? COOKIE_SEPARATOR : ", ";
 		const sent =
 			key === "cookie"
 				? "Vayu sends them joined the same way"

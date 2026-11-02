@@ -2370,8 +2370,9 @@ describe("credentials in the URL", () => {
 /**
  * A repeated header (issue #2466). Vayu sends every enabled row as its own
  * line, in order, and `POST /compose` hands the generators those lines. curl and
- * HTTPie can repeat a header and do; `fetch`, `requests` and `Invoke-RestMethod`
- * hold one value per name, so they join the lines and say so.
+ * HTTPie can repeat a header and do, except `Cookie`, which the engine joins
+ * into one line; `fetch`, `requests` and `Invoke-RestMethod` hold one value per
+ * name, so they join the lines and say so.
  */
 describe("repeated headers", () => {
 	const THREE: SnippetRequest = {
@@ -2435,6 +2436,47 @@ describe("repeated headers", () => {
 		expect(notes[0]).toContain('"; "');
 		expect(notes[0]).toContain("Vayu sends them joined the same way");
 		expect(notes[0]).not.toContain("separate lines");
+	});
+
+	describe("a repeated Cookie in curl and HTTPie", () => {
+		// The engine sends the typed Cookie rows as one "; "-joined line
+		// (`typed_cookie_value`) and every other repeat as separate lines.
+		const MIXED: SnippetRequest = {
+			...GET,
+			headers: [
+				{ name: "Cookie", value: "a=1" },
+				{ name: "X-Dup", value: "one" },
+				{ name: "cookie", value: "b=2" },
+				{ name: "X-Dup", value: "two" },
+			],
+		};
+
+		it("curl sends one Cookie line, where the first row was, and repeats the rest", () => {
+			// Mutation check: iterate `prepared.headers` unfolded and Cookie is two flags.
+			const { code, notes } = generateCurl(MIXED);
+			const flags = code.split("\n").filter((l) => l.includes("-H "));
+			expect(flags.map((l) => l.replace(/ \\$/, "").trim())).toEqual([
+				"-H 'Cookie: a=1; b=2'",
+				"-H 'X-Dup: one'",
+				"-H 'X-Dup: two'",
+			]);
+			expect(notes).toEqual([]);
+		});
+
+		it("HTTPie sends one Cookie word, where the first row was, and repeats the rest", () => {
+			const { code, notes } = generateHttpie(MIXED);
+			expect(code).toContain("'Cookie:a=1; b=2'");
+			expect(code).not.toContain("'cookie:b=2'");
+			expect(code.match(/'X-Dup:/g)).toHaveLength(2);
+			expect(code.indexOf("'Cookie:")).toBeLessThan(code.indexOf("'X-Dup:one'"));
+			expect(notes).toEqual([]);
+		});
+
+		it("a single Cookie row is written as it is", () => {
+			expect(
+				generateCurl({ ...GET, headers: [{ name: "Cookie", value: "a=1" }] }).code
+			).toContain("-H 'Cookie: a=1'");
+		});
 	});
 
 	it("keeps every other header where it was, and notes nothing when no name repeats", () => {
