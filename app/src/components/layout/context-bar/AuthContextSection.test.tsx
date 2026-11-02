@@ -36,14 +36,14 @@ vi.mock("@/queries", () => ({
 }));
 
 // `{{name}}` answers from this table, the way the real resolver answers from the
-// scopes; an unset name resolves to "" so an unset variable can be tested.
+// scopes; an unset name stays written, as the real resolver leaves it.
 let variables: Record<string, string> = {};
 vi.mock("@/hooks/useVariableResolver", async () => {
 	const { resolveStringsDeep } = await vi.importActual<
 		typeof import("@/lib/variable-resolution")
 	>("@/lib/variable-resolution");
 	const resolveString = (input: string) =>
-		input.replace(/\{\{(\w+)\}\}/g, (_, name: string) => variables[name] ?? "");
+		input.replace(/\{\{(\w+)\}\}/g, (_, name: string) => variables[name] ?? `{{${name}}}`);
 	return {
 		useVariableResolver: () => ({
 			resolveObject: <T,>(o: T) => resolveStringsDeep(o, resolveString),
@@ -244,6 +244,7 @@ describe("AuthContextSection when the credential is empty (#3203)", () => {
 	});
 
 	it("judges the resolved value: a variable that resolves empty is flagged", () => {
+		variables = { token: "" };
 		requestAuth = bearer("{{token}}");
 		const { unmount } = renderSection();
 		expect(screen.getByText(/empty, nothing sent/)).toBeInTheDocument();
