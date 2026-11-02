@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <optional>
@@ -39,7 +40,8 @@ using json = nlohmann::ordered_json;
 // pugixml property readers - a JMeter test element's own configuration is a
 // flat list of `<stringProp name="...">`, `<boolProp name="...">`,
 // `<intProp>` / `<longProp>` and `<collectionProp>` / `<elementProp>` children
-// directly under it, found by `name`, never by position.
+// directly under it, found by `name`, never by position. A number may be any
+// of the scalar tags, flat or nested (`scalar_text`).
 // ---------------------------------------------------------------------------
 
 pugi::xml_node find_prop (const pugi::xml_node& element, const char* tag, std::string_view name) {
@@ -66,31 +68,78 @@ bool bool_prop (const pugi::xml_node& element, std::string_view name, bool fallb
     return std::string_view (prop.text ().get ()) == "true";
 }
 
-/// `<intProp>` and `<longProp>` are both plain integer text; a caller never
-/// has to know which one a given property happens to use.
-long long_prop (const pugi::xml_node& element, std::string_view name, long fallback = 0) {
-    pugi::xml_node prop = find_prop (element, "longProp", name);
-    if (!prop) {
-        prop = find_prop (element, "intProp", name);
+/// Every tag JMeter saves a scalar under. A GUI-saved plan writes a number as a
+/// `<stringProp>` (so `${var}` can stand in for it) and a float as a nested
+/// `<doubleProp>`; a hand-written one uses `<intProp>` / `<longProp>`.
+constexpr auto SCALAR_TAGS = std::to_array<const char*> (
+{ "stringProp", "intProp", "longProp", "doubleProp", "FloatProperty" });
+
+/// A property's name: the `name` attribute of the flat form, or the `<name>`
+/// child of the nested one (`<doubleProp><name>..</name><value>..</value>
+/// </doubleProp>`).
+std::string_view scalar_name (const pugi::xml_node& prop) {
+    const std::string_view attribute = prop.attribute ("name").value ();
+    return attribute.empty () ? std::string_view (prop.child_value ("name")) : attribute;
+}
+
+/// The text of the scalar @p name in either form, whatever tag holds it.
+std::optional<std::string> scalar_text (const pugi::xml_node& element, std::string_view name) {
+    for (const char* tag : SCALAR_TAGS) {
+        for (const pugi::xml_node prop : element.children (tag)) {
+            if (scalar_name (prop) != name) {
+                continue;
+            }
+            const pugi::xml_node nested = prop.child ("value");
+            return std::string ((nested ? nested : prop).text ().get ());
+        }
     }
-    if (!prop) {
-        return fallback;
+    return std::nullopt;
+}
+
+/// True when @p end stops at the string's terminator or only trailing
+/// whitespace, so `${var}` and `5${var}` are not numbers.
+bool consumed_all (const char* end) {
+    while (std::isspace (static_cast<unsigned char> (*end)) != 0) {
+        ++end;
+    }
+    return *end == '\0';
+}
+
+/// The integer @p name holds; nothing when it is absent or not a number (a
+/// `${var}` reference, a blank), so the caller decides what that means.
+std::optional<long> integer_prop (const pugi::xml_node& element, std::string_view name) {
+    const std::optional<std::string> text = scalar_text (element, name);
+    if (!text) {
+        return std::nullopt;
     }
     char* end         = nullptr;
-    const char* text  = prop.text ().get ();
-    const long parsed = std::strtol (text, &end, 10);
-    return end != text ? parsed : fallback;
+    const long parsed = std::strtol (text->c_str (), &end, 10);
+    if (end == text->c_str () || !consumed_all (end)) {
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+long long_prop (const pugi::xml_node& element, std::string_view name, long fallback = 0) {
+    return integer_prop (element, name).value_or (fallback);
+}
+
+/// The number @p name holds, as `integer_prop`.
+std::optional<double> number_prop (const pugi::xml_node& element, std::string_view name) {
+    const std::optional<std::string> text = scalar_text (element, name);
+    if (!text) {
+        return std::nullopt;
+    }
+    char* end           = nullptr;
+    const double parsed = std::strtod (text->c_str (), &end);
+    if (end == text->c_str () || !consumed_all (end)) {
+        return std::nullopt;
+    }
+    return parsed;
 }
 
 double double_prop (const pugi::xml_node& element, std::string_view name, double fallback = 0.0) {
-    const pugi::xml_node prop = find_prop (element, "stringProp", name);
-    if (!prop) {
-        return fallback;
-    }
-    char* end           = nullptr;
-    const char* text    = prop.text ().get ();
-    const double parsed = std::strtod (text, &end);
-    return end != text ? parsed : fallback;
+    return number_prop (element, name).value_or (fallback);
 }
 
 pugi::xml_node element_prop (const pugi::xml_node& element, std::string_view name) {
@@ -476,19 +525,42 @@ std::optional<KindConfig> parse_constant_timer (const pugi::xml_node& el) {
     return KindConfig{ "timer.think", json{ { "ms", ms } } };
 }
 
+/// The two numbers a random timer is built from: the constant offset JMeter
+/// shares with the Constant Timer (`ConstantTimer.delay`) and the random
+/// spread (`RandomTimer.range`). Either missing or not a number (a `${var}`)
+/// refuses the timer rather than inventing a 0ms wait.
+struct RandomTimerBounds {
+    double base;
+    double range;
+};
+
+std::optional<RandomTimerBounds> random_timer_bounds (const pugi::xml_node& el) {
+    const std::optional<double> base  = number_prop (el, "ConstantTimer.delay");
+    const std::optional<double> range = number_prop (el, "RandomTimer.range");
+    if (!base || !range) {
+        return std::nullopt;
+    }
+    return RandomTimerBounds{ *base, *range };
+}
+
 std::optional<KindConfig> parse_uniform_random_timer (const pugi::xml_node& el) {
-    const double base  = double_prop (el, "ConstantDelay");
-    const double range = double_prop (el, "RandomTime.range");
+    const std::optional<RandomTimerBounds> bounds = random_timer_bounds (el);
+    if (!bounds) {
+        return std::nullopt;
+    }
     return KindConfig{ "timer.think",
-        json{ { "minMs", static_cast<long> (base) },
-        { "maxMs", static_cast<long> (base + range) } } };
+        json{ { "minMs", static_cast<long> (bounds->base) },
+        { "maxMs", static_cast<long> (bounds->base + bounds->range) } } };
 }
 
 std::optional<KindConfig> parse_gaussian_random_timer (const pugi::xml_node& el) {
-    const double base  = double_prop (el, "ConstantDelay");
-    const double range = double_prop (el, "RandomTime.range");
+    const std::optional<RandomTimerBounds> bounds = random_timer_bounds (el);
+    if (!bounds) {
+        return std::nullopt;
+    }
     return KindConfig{ "timer.think",
-        json{ { "gaussian", json{ { "meanMs", base }, { "deviationMs", range } } } } };
+        json{ { "gaussian",
+        json{ { "meanMs", bounds->base }, { "deviationMs", bounds->range } } } } };
 }
 
 /// JMeter's rate is samples per minute by default - the exact unit
@@ -616,22 +688,6 @@ std::optional<std::string> translate_if_condition (const std::string& condition)
     return "{{" + match[1].str () + "}} " + match[2].str () + " " + match[3].str ();
 }
 
-/// A number JMeter saves as `<FloatProperty><name>..</name><value>..</value>
-/// </FloatProperty>` - the nested form its own GUI writes for a float, which
-/// `double_prop` (a flat `<stringProp>`) never sees.
-std::optional<double> float_property (const pugi::xml_node& element, std::string_view name) {
-    for (const pugi::xml_node prop : element.children ("FloatProperty")) {
-        if (name != std::string_view (prop.child_value ("name"))) {
-            continue;
-        }
-        char* end          = nullptr;
-        const char* text   = prop.child_value ("value");
-        const double value = std::strtod (text, &end);
-        return end != text ? std::optional<double>{ value } : std::nullopt;
-    }
-    return std::nullopt;
-}
-
 /// `ThroughputController.style` 1 is "Percent Executions", the only style
 /// `control.throughput` expresses. Style 0 caps the *number* of executions
 /// (`maxThroughput`), which has no percent to import; it is refused so the
@@ -644,8 +700,7 @@ std::optional<KindConfig> parse_throughput_controller (const pugi::xml_node& el)
         return std::nullopt;
     }
     constexpr const char* PERCENT = "ThroughputController.percentThroughput";
-    const double percent =
-    float_property (el, PERCENT).value_or (double_prop (el, PERCENT, 100.0));
+    const double percent          = double_prop (el, PERCENT, 100.0);
     return KindConfig{ "control.throughput", json{ { "percent", percent } } };
 }
 

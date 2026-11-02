@@ -988,8 +988,8 @@ std::string float_percent (const char* value) {
 } // namespace
 
 // The percent JMeter saves as a nested `FloatProperty` is read, not defaulted
-// to 100 (#3190). Mutation check: drop the `float_property` read from
-// `parse_throughput_controller` and the 25 reads 100.
+// to 100 (#3190). Mutation check: drop the nested read from
+// `scalar_text` and the 25 reads 100.
 TEST (JmeterImport, AThroughputControllerReadsItsNestedFloatPercent) {
     const nlohmann::ordered_json result = throughput_plan (
     R"(<intProp name="ThroughputController.style">1</intProp>)" + float_percent ("25.0"));
@@ -1332,6 +1332,180 @@ TEST (JmeterImport, UnpairableExtractorListsAreCountedNotGuessedAt) {
         EXPECT_EQ (skipped_count (result.at ("meta"), "JSONPostProcessor_unrecognised"), 1)
         << names << " / " << paths;
     }
+}
+
+namespace {
+
+/// The folder a plan's one @p tag controller (carrying @p props, holding one
+/// sampler) imports as.
+nlohmann::ordered_json controller_folder (const char* tag, const std::string& props) {
+    const ImportParse parsed =
+    parse_import (plan_with (std::string ("<") + tag + " testname=\"C\">" + props +
+                  "</" + tag + "><hashTree>" + sampler ("S") + "</hashTree>"),
+    {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/// @p result's only folder.
+const nlohmann::ordered_json& only_folder (const nlohmann::ordered_json& result) {
+    return result.at ("collections").at (0).at ("children").at (0);
+}
+
+} // namespace
+
+// JMeter's GUI saves a loop count as a `<stringProp>` (so `${var}` can stand
+// in for it); hand-written plans use `<intProp>` / `<longProp>`. All three
+// import as the same `control.loop`. Mutation check: drop `stringProp` from
+// `SCALAR_TAGS` and the string case reads "forever" and is tallied instead.
+TEST (JmeterImport, ALoopCountIsReadWhateverTagJMeterSavedItUnder) {
+    for (const char* tag : { "stringProp", "intProp", "longProp" }) {
+        const std::string prop =
+        std::string ("<") + tag + " name=\"LoopController.loops\">3</" + tag + ">";
+        const nlohmann::ordered_json result =
+        controller_folder ("LoopController", prop);
+        const nlohmann::ordered_json& folder = only_folder (result);
+        ASSERT_EQ (folder.at ("elements").size (), 1) << tag;
+        EXPECT_EQ (folder.at ("elements").at (0).at ("kind"), "control.loop") << tag;
+        EXPECT_EQ (folder.at ("elements").at (0).at ("config").at ("count"), 3) << tag;
+        EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "LoopController_unrecognised"))
+        << tag;
+    }
+}
+
+// A count that is not a number - a `${var}` the plan resolves at run time, a
+// blank (the GUI's "forever" box), `-1` - has no `control.loop`; the folder
+// still imports and one notice says so, never a loop of the wrong size.
+// Mutation check: have `integer_prop` accept a prefix (`5${n}` reads 5) and the
+// `5${n}` case grows an element.
+TEST (JmeterImport, ALoopCountThatIsNotANumberIsTalliedNotImported) {
+    for (const char* loops : { "${loops}", "", "-1", "5${n}" }) {
+        const nlohmann::ordered_json result =
+        controller_folder ("LoopController",
+        std::string (R"(<stringProp name="LoopController.loops">)") + loops + "</stringProp>");
+        const nlohmann::ordered_json& folder = only_folder (result);
+        EXPECT_FALSE (folder.contains ("elements")) << loops;
+        EXPECT_EQ (folder.at ("requests").size (), 1) << loops;
+        EXPECT_EQ (skipped_count (result.at ("meta"), "LoopController_unrecognised"), 1)
+        << loops;
+    }
+}
+
+// A match number saved as a `<stringProp>` is honoured by the Regular
+// Expression and Boundary extractors; a `${var}` falls back to JMeter's first
+// match. Mutation check: drop `stringProp` from `SCALAR_TAGS` and the 2 reads 1.
+TEST (JmeterImport, AStringMatchNumberIsReadByRegexAndBoundaryExtractors) {
+    const std::string regex_props = string_prop_xml ("RegexExtractor.refname", "id") +
+    string_prop_xml ("RegexExtractor.regex", "id=(\\d+)");
+    const nlohmann::ordered_json regex = sampler_scope_result ("RegexExtractor",
+    regex_props + string_prop_xml ("RegexExtractor.match_number", "2"));
+    EXPECT_EQ (request_elements (regex).at (0).at ("config").at ("matchNo"), 2);
+
+    const nlohmann::ordered_json regex_var =
+    sampler_scope_result ("RegexExtractor",
+    regex_props + string_prop_xml ("RegexExtractor.match_number", "${n}"));
+    EXPECT_EQ (request_elements (regex_var).at (0).at ("config").at ("matchNo"), 1);
+
+    const nlohmann::ordered_json boundary =
+    sampler_scope_result ("BoundaryExtractor",
+    string_prop_xml ("BoundaryExtractor.refname", "id") +
+    string_prop_xml ("BoundaryExtractor.lboundary", "id=") +
+    string_prop_xml ("BoundaryExtractor.rboundary", ";") +
+    string_prop_xml ("BoundaryExtractor.match_number", "3"));
+    EXPECT_EQ (request_elements (boundary).at (0).at ("config").at ("matchNo"), 3);
+}
+
+namespace {
+
+/// The `timer.think` config a random timer (@p tag) saved with @p base and
+/// @p range imports as, written the way JMeter's GUI writes them.
+nlohmann::ordered_json
+random_timer_config (const char* tag, const std::string& base, const std::string& range) {
+    const nlohmann::ordered_json result = sampler_scope_result (tag,
+    string_prop_xml ("ConstantTimer.delay", base) +
+    string_prop_xml ("RandomTimer.range", range));
+    return request_elements (result).at (0).at ("config");
+}
+
+} // namespace
+
+// A random timer's floor is `ConstantTimer.delay` and its spread
+// `RandomTimer.range`, the names the GUI saves. Mutation check: read
+// `ConstantDelay` again as the base and `minMs` is 0, `maxMs` 500.
+TEST (JmeterImport, AUniformRandomTimerIsFlooredAtItsConstantDelay) {
+    const nlohmann::ordered_json config =
+    random_timer_config ("UniformRandomTimer", "1000", "500.0");
+    EXPECT_EQ (config.at ("minMs"), 1000);
+    EXPECT_EQ (config.at ("maxMs"), 1500);
+}
+
+TEST (JmeterImport, AGaussianRandomTimerIsCentredOnItsConstantDelay) {
+    const nlohmann::ordered_json config =
+    random_timer_config ("GaussianRandomTimer", "1000", "500.0");
+    EXPECT_EQ (config.at ("gaussian").at ("meanMs"), 1000.0);
+    EXPECT_EQ (config.at ("gaussian").at ("deviationMs"), 500.0);
+}
+
+// A random timer whose numbers cannot be read - a `${var}`, or the property
+// names an older reader looked for - is counted, not imported as a 0ms wait.
+TEST (JmeterImport, ARandomTimerWithUnreadableNumbersIsTalliedNotImported) {
+    for (const char* tag : { "UniformRandomTimer", "GaussianRandomTimer" }) {
+        const nlohmann::ordered_json variable = sampler_scope_result (tag,
+        string_prop_xml ("ConstantTimer.delay", "${base}") +
+        string_prop_xml ("RandomTimer.range", "500.0"));
+        EXPECT_FALSE (first_request (variable.at ("collections").at (0)).contains ("elements"))
+        << tag;
+        EXPECT_EQ (skipped_count (variable.at ("meta"), std::string (tag) + "_unrecognised"), 1)
+        << tag;
+
+        const nlohmann::ordered_json renamed = sampler_scope_result (tag,
+        string_prop_xml ("ConstantDelay", "1000") +
+        string_prop_xml ("RandomTime.range", "500.0"));
+        EXPECT_EQ (skipped_count (renamed.at ("meta"), std::string (tag) + "_unrecognised"), 1)
+        << tag;
+    }
+}
+
+namespace {
+
+/// A Constant Throughput Timer config; @p throughput is the property element.
+nlohmann::ordered_json throughput_timer_result (const std::string& throughput,
+const std::string& calc_mode) {
+    return sampler_scope_result ("ConstantThroughputTimer", throughput + calc_mode);
+}
+
+} // namespace
+
+// The GUI saves `throughput` as a nested `<doubleProp>` (name and value as
+// children), and `calcMode` as an int; a hand-written plan uses a flat string.
+// 60 per minute is one every 1000ms. Mutation check: drop the nested read from
+// `scalar_text` and the plan is tallied unrecognised instead.
+TEST (JmeterImport, AConstantThroughputTimerReadsItsNestedDoubleThroughput) {
+    const nlohmann::ordered_json nested =
+    throughput_timer_result (R"(<doubleProp><name>throughput</name><value>60.0</value>)"
+                             R"(<savedValue>0.0</savedValue></doubleProp>)",
+    R"(<intProp name="calcMode">0</intProp>)");
+    const nlohmann::ordered_json& config = request_elements (nested).at (0).at ("config");
+    EXPECT_EQ (request_elements (nested).at (0).at ("kind"), "timer.pacing");
+    EXPECT_EQ (config.at ("everyMs"), 1000);
+    EXPECT_EQ (config.at ("perUser"), true);
+    EXPECT_FALSE (
+    has_skipped_kind (nested.at ("meta"), "ConstantThroughputTimer_unrecognised"));
+
+    const nlohmann::ordered_json flat = throughput_timer_result (
+    string_prop_xml ("throughput", "30"), string_prop_xml ("calcMode", "2"));
+    const nlohmann::ordered_json& flat_config =
+    request_elements (flat).at (0).at ("config");
+    EXPECT_EQ (flat_config.at ("everyMs"), 2000);
+    EXPECT_EQ (flat_config.at ("perUser"), false);
+}
+
+TEST (JmeterImport, AConstantThroughputTimerWithAVariableRateIsTalliedNotImported) {
+    const nlohmann::ordered_json result = throughput_timer_result (
+    string_prop_xml ("throughput", "${rate}"), R"(<intProp name="calcMode">0</intProp>)");
+    EXPECT_FALSE (first_request (result.at ("collections").at (0)).contains ("elements"));
+    EXPECT_EQ (
+    skipped_count (result.at ("meta"), "ConstantThroughputTimer_unrecognised"), 1);
 }
 
 namespace {
