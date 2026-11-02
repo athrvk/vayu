@@ -32,6 +32,35 @@ describe("templatedRequest", () => {
 		expect(generateCurl(snippet).code).toContain("'{{host}}/users/42'");
 	});
 
+	it("carries the execution settings a snippet states (#3195)", () => {
+		// Mutation check: drop one from templatedRequest and its flag disappears.
+		const request = {
+			method: "GET",
+			url: "{{host}}/x",
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			auth: { mode: "none" },
+			followRedirects: true,
+			maxRedirects: 4,
+			timeout: 1500,
+			httpVersion: "http2",
+			verifySSL: false,
+		} as unknown as Request;
+		const snippet = templatedRequest(request, []);
+		expect(snippet).toMatchObject({
+			followRedirects: true,
+			maxRedirects: 4,
+			timeout: 1500,
+			httpVersion: "http2",
+			verifySSL: false,
+		});
+		const code = generateCurl(snippet).code;
+		for (const flag of ["-L", "--max-redirs 4", "--max-time 1.5", "--http2", "-k"]) {
+			expect(code).toContain(` ${flag}`);
+		}
+	});
+
 	it("carries every enabled header row in order, a repeat repeated (#2466)", () => {
 		// Mutation check: a record keyed by name makes the three rows one.
 		const request = {

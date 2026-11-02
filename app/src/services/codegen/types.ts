@@ -16,6 +16,7 @@
  * the call site needs no conversion.
  */
 
+import type { HttpVersion } from "@/constants/request";
 import type { HeaderLine, KeyValueEntry } from "@/types";
 
 /**
@@ -93,7 +94,27 @@ export interface SnippetRequest {
 	 */
 	followRedirects?: boolean;
 	/**
-	 * The request's `disableUrlEncoding` (issue #1765). Default `false`. On, a
+	 * Redirect hops allowed while {@link followRedirects} is on (the engine caps
+	 * at 10 unless told otherwise). Said only when following: a request that does
+	 * not follow has no hops to count. curl and HTTPie have a flag for it, and
+	 * the targets with none carry a note.
+	 */
+	maxRedirects?: number;
+	/**
+	 * The request's own deadline in milliseconds (issue #2937), `null` or absent
+	 * when it states none. Absent means the engine's `defaultTimeout` setting
+	 * decides at send time, which a snippet cannot know, so nothing is emitted
+	 * and nothing is said - the same reading `POST /compose` takes.
+	 */
+	timeout?: number | null;
+	/**
+	 * The protocol the request asks for. Only curl has a flag for it; `auto`
+	 * (and absent) lets the client negotiate, which is what every target does
+	 * unasked, so nothing is emitted for it and no other target says anything.
+	 */
+	httpVersion?: HttpVersion;
+	/**
+	 * The request's `disableUrlEncoding' (issue #1765). Default `false`. On, a
 	 * `:name` path value and an API-key query param go into the URL as written,
 	 * which is what the engine sends; the snippet quotes that URL unchanged.
 	 */

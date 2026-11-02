@@ -101,18 +101,17 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 	});
 
 	/**
-	 * `followRedirects` and `verifySSL` gained a second hop in the builder with
-	 * issue #1436's "gone" pane: `DeletedRequestBanner`'s cURL recovery snippet
-	 * reads them off the same `request`, so a draft copied out as curl after its
-	 * request is deleted still says `-L`/`-k` correctly rather than silently
-	 * defaulting. `maxRedirects` and `httpVersion` have no curl hop -
-	 * `SnippetRequest` has no field for either - so they stay at the save hop.
+	 * Every one of these gained a second hop in the builder with issue #1436's
+	 * "gone" pane: `DeletedRequestBanner`'s cURL recovery snippet reads them off
+	 * the same `request`, so a draft copied out as curl after its request is
+	 * deleted still says `-L`, `-k`, `--max-redirs`, `--max-time` and `--http2`
+	 * correctly rather than silently defaulting.
 	 */
 	const SAVE_AND_CURL_HOPS: Record<string, number> = {
 		followRedirects: 2,
-		maxRedirects: 1,
-		timeout: 1,
-		httpVersion: 1,
+		maxRedirects: 2,
+		timeout: 2,
+		httpVersion: 2,
 		verifySSL: 2,
 	};
 
@@ -128,8 +127,7 @@ describe("redirect policy and protocol reach every payload the renderer builds",
 		});
 
 		it(`persists ${field} on save`, () => {
-			// One for the update mutation, and for the two fields the cURL
-			// recovery snippet also reads, one more.
+			// One for the update mutation, one more for the cURL recovery snippet.
 			expect(hops(source ?? "", "request", field)).toBe(SAVE_AND_CURL_HOPS[field]);
 		});
 

@@ -19,7 +19,7 @@
  * flag on this one - its quoting rules share nothing with these.
  */
 
-import { prepareRequest } from "./prepare";
+import { prepareRequest, timeoutSeconds } from "./prepare";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
 import { ACCEPT_HEADER, SSE_ACCEPT } from "@/constants/request";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
@@ -75,7 +75,19 @@ export function generateCurl(
 		// one that needs the flag (issue #1445). `parseCurl` reads `-L` back as
 		// the same setting.
 		args.push("-L");
+		// Only beside `-L`: a cap on hops that are never taken says nothing. curl's
+		// own cap is 50 and Vayu's default 10, so the flag is worth its line.
+		if (prepared.maxRedirects !== null) args.push(`--max-redirs ${prepared.maxRedirects}`);
 	}
+
+	// `--max-time` bounds the whole transfer, which is what the request's
+	// timeout means; seconds, decimals allowed. Absent states no timeout, so
+	// curl's own (none) applies.
+	if (prepared.timeoutMs !== null) args.push(`--max-time ${timeoutSeconds(prepared.timeoutMs)}`);
+
+	// `auto` emits nothing: curl negotiates by itself, which is what it means.
+	if (prepared.httpVersion === "http1.1") args.push("--http1.1");
+	if (prepared.httpVersion === "http2") args.push("--http2");
 
 	if (prepared.basicAuth) {
 		args.push(

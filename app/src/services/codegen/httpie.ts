@@ -21,7 +21,7 @@
 
 import { shellQuote } from "./curl";
 import { fileBaseName as baseName } from "@/lib/file-path";
-import { prepareRequest, untypedTextPartNote } from "./prepare";
+import { prepareRequest, timeoutSeconds, untypedTextPartNote } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
 /**
@@ -64,6 +64,14 @@ export function generateHttpie(
 	// HTTPie has a first-class unbuffered mode, so a stream-flagged request has
 	// an idiomatic form rather than a caveat.
 	if (prepared.stream) args.push("--stream");
+	// HTTPie does not follow redirects unless told to, so the following default
+	// is the case that needs the flag (issue #1445), as with curl's `-L`.
+	if (prepared.followRedirects) {
+		args.push("--follow");
+		if (prepared.maxRedirects !== null) args.push(`--max-redirects=${prepared.maxRedirects}`);
+	}
+	if (!prepared.verifySSL) args.push("--verify=no");
+	if (prepared.timeoutMs !== null) args.push(`--timeout=${timeoutSeconds(prepared.timeoutMs)}`);
 
 	for (const [name, value] of prepared.headers) {
 		// HTTPie sets the multipart Content-Type, boundary included; one that
