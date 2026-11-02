@@ -486,8 +486,9 @@ they already have their own segments in the count line.
 Surfaces work Vayu can't represent so the Preview can warn instead of silently dropping.
 `requests` names the requests a count applies to, when the walk had one in hand (every
 per-operation OpenAPI count, Postman's per-request counters - `script_unsupported` also names
-the folder or collection that declares the script - Insomnia's file bodies and the
-resources it cannot import), so the Preview can say which request to finish rather than only
+the folder or collection that declares the script - Insomnia's file bodies, unsupported
+auth types, cookie API keys (`apikey_cookie_header`), `insomnia.*` scripts
+(`script_unsupported_insomnia`) and the resources it cannot import), so the Preview can say which request to finish rather than only
 how many. `names` names what was dropped, never its value: the keys of the OAuth 2.0 request
 parameters a Postman parse did not carry (`oauth2_unmapped_param`, see
 [postman.md](./postman.md#oauth-20-extra-request-parameters)), and the folders or collection
@@ -548,7 +549,8 @@ The last three are Postman kinds added by issue #1443, closing gaps in the same 
 counted" promise. `unsupported_auth` is an `auth.type` Postman defines and Vayu has no mode
 for (a non-string `type`, or one the schema does not list), unlike `awsv4`, `digest`, `ntlm`,
 `hawk`, `oauth1`, `edgegrid` and `jwt`, which import as data and are reported under
-`nonExecutableAuth` instead. `url_without_raw` is not a
+`nonExecutableAuth` instead. An Insomnia `authentication.type` with no Vayu mode (`asap`,
+`netrc`) is the same kind, and imports as no auth rather than `inherit`. `url_without_raw` is not a
 loss: it counts a URL assembled from `host[]`/`path[]` because it carried no `raw` - a mapping
 that changes nothing the user sends, so like `default_response` the Preview does not show it;
 it stays counted in `meta.skipped`. (A fourth, `path_variables`, counted a `:key` segment

@@ -2461,6 +2461,17 @@ struct InsomniaCounts {
     int file_body = 0;
     int requests  = 0;
     int folders   = 0;
+    // An `authentication.type` with no Vayu mode (`asap`, `netrc`, a non-string
+    // type), imported as `none` rather than inherited. Folders and the
+    // workspace count too, unnamed, as Postman's do.
+    int unsupported_auth = 0;
+    // A request's cookie-placed API key, sent as a `Cookie` header row.
+    int apikey_cookie_header = 0;
+    // The same declared on a folder or workspace, which has no header row to
+    // carry it, so it is not imported.
+    int apikey_cookie_folder = 0;
+    // Enabled scripts calling `insomnia.*`, which Vayu does not define.
+    int insomnia_script = 0;
 };
 
 /// A row array that may be absent but must not be another type.
@@ -2581,7 +2592,32 @@ bool auth_disabled (const json* node) {
     return disabled != nullptr && disabled->is_boolean () && disabled->get<bool> ();
 }
 
-json insomnia_auth (const json* auth) {
+/// The Insomnia types Vayu stores as an opaque `config` bag under a mode of the
+/// same name: stored, not executed (`CONFIG_AUTH_TYPES`).
+constexpr auto STORED_AUTH_TYPES =
+std::to_array<std::string_view> ({ "digest", "ntlm", "hawk", "oauth1" });
+
+/// Whether an `apikey` node asks for the key in a cookie, a placement Vayu's
+/// API-key mode (header and query only) has no slot for.
+bool api_key_in_cookie (const json* node) {
+    const json* add_to = prop (node, "addTo");
+    return add_to != nullptr && *add_to == "cookie";
+}
+
+/// Whether @p auth is an enabled API key placed in a cookie.
+bool is_cookie_api_key (const json* auth) {
+    const json* node = as_record (auth);
+    return node != nullptr && !auth_disabled (node) &&
+    as_string (prop (node, "type")) == "apikey" && api_key_in_cookie (node);
+}
+
+/**
+ * Maps an Insomnia `authentication` node. Only an absent node, or one with no
+ * type, is `inherit`: a type Vayu has no mode for (`asap`, `netrc`, a
+ * non-string) is `none` and counted, because `inherit` would send the parent's
+ * credentials in place of the ones the user chose.
+ */
+json insomnia_auth (const json* auth, InsomniaCounts& counts) {
     const json* node = as_record (auth);
     const bool off   = auth_disabled (node);
     if (node == nullptr || !truthy (prop (node, "type")) || off) {
@@ -2598,6 +2634,11 @@ json insomnia_auth (const json* auth) {
             { "password", nv (as_string (prop (node, "password"))) } };
     }
     if (named == "apikey") {
+        if (api_key_in_cookie (node)) {
+            // The key travels as a `Cookie` header row (`with_cookie_api_key`),
+            // which only a request can hold.
+            return json{ { "mode", "none" } };
+        }
         const json* add_to = prop (node, "addTo");
         return json{ { "mode", "apikey" }, { "key", nv (as_string (prop (node, "key"))) },
             { "value", nv (as_string (prop (node, "value"))) },
@@ -2606,7 +2647,7 @@ json insomnia_auth (const json* auth) {
     if (named == "oauth2") {
         return map_insomnia_oauth2 (node);
     }
-    if (named == "digest" || named == "ntlm") {
+    if (std::ranges::contains (STORED_AUTH_TYPES, named)) {
         return json{ { "mode", named }, { "config", insomnia_config (node) } };
     }
     if (named == "iam") {
@@ -2623,7 +2664,41 @@ json insomnia_auth (const json* auth) {
         // out of them for.
         return json{ { "mode", "none" } };
     }
-    return json{ { "mode", "inherit" } };
+    counts.unsupported_auth += 1;
+    return json{ { "mode", "none" } };
+}
+
+/**
+ * The `Cookie` row an Insomnia API key placed in a cookie becomes, appended to
+ * @p headers (Vayu's API-key mode has no cookie placement). An enabled `Cookie`
+ * row the request already has takes the pair as a further cookie-string
+ * member (RFC 6265 s4.2.1) instead of a second header. A key with no name has
+ * nothing to send.
+ */
+json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts) {
+    if (!is_cookie_api_key (auth)) {
+        return headers;
+    }
+    const json* node      = as_record (auth);
+    const std::string key = nv (as_string (prop (node, "key")));
+    if (key.empty ()) {
+        return headers;
+    }
+    counts.apikey_cookie_header += 1;
+    const std::string pair = key + "=" + nv (as_string (prop (node, "value")));
+    for (json& header : headers) {
+        if (!vayu::utils::ascii_lower_equal (
+            trim_ascii_space (header.at ("key").get<std::string> ()), "cookie") ||
+        !truthy (prop (&header, "enabled"))) {
+            continue;
+        }
+        const std::string existing =
+        trim_ascii_space (header.at ("value").get<std::string> ());
+        header["value"] = existing.empty () ? pair : existing + "; " + pair;
+        return headers;
+    }
+    headers.push_back ({ { "key", "Cookie" }, { "value", pair }, { "enabled", true } });
+    return headers;
 }
 
 /**
@@ -2634,12 +2709,15 @@ json insomnia_auth (const json* auth) {
  * Insomnia, so the requests under it do not take an outer folder's auth. The
  * workspace has nothing above it to shut out, so its `none` stays `none`.
  */
-json insomnia_collection_auth (const json* authentication, bool workspace) {
+json insomnia_collection_auth (const json* authentication, bool workspace, InsomniaCounts& counts) {
     const json* type = prop (as_record (authentication), "type");
     if (!workspace && type != nullptr && *type == "none" && !auth_disabled (authentication)) {
         return json{ { "mode", "noauth" } };
     }
-    json auth = insomnia_auth (authentication);
+    if (is_cookie_api_key (authentication)) {
+        counts.apikey_cookie_folder += 1;
+    }
+    json auth = insomnia_auth (authentication, counts);
     return auth.at ("mode") == "inherit" ? json{ { "mode", "none" } } : auth;
 }
 
@@ -2858,6 +2936,23 @@ json resource_name (const json* resource, const char* fallback) {
     return name == nullptr || name->is_null () ? json (fallback) : *name;
 }
 
+/// The counters `build_request` can grow for one request, by tally kind.
+constexpr auto INSOMNIA_REQUEST_COUNTERS =
+std::to_array<std::pair<const char*, int InsomniaCounts::*>> ({
+{ "file_body", &InsomniaCounts::file_body },
+{ "unsupported_auth", &InsomniaCounts::unsupported_auth },
+{ "apikey_cookie_header", &InsomniaCounts::apikey_cookie_header },
+{ "script_unsupported_insomnia", &InsomniaCounts::insomnia_script },
+});
+
+/// Whether a request, folder or workspace carries a script that calls the
+/// `insomnia.` API. Insomnia has no per-script switch, so a non-blank script is
+/// an enabled one.
+bool calls_insomnia_api (const json* node) {
+    return uses_insomnia_api (as_string (prop (node, "preRequestScript"))) ||
+    uses_insomnia_api (as_string (prop (node, "afterResponseScript")));
+}
+
 /**
  * An Insomnia export's resource tree - a v4 resource list, or the flattened
  * list a v5 document becomes - indexed by parent.
@@ -2956,15 +3051,36 @@ class InsomniaTree {
         for (json& row : path_variable_rows (declared_path_rows)) {
             request["params"].push_back (std::move (row));
         }
-        request["headers"] = with_required_content_type (map_key_values (&headers), body);
+        const json* authentication = prop (resource, "authentication");
+        request["headers"]         = with_cookie_api_key (
+        with_required_content_type (map_key_values (&headers), body), authentication, counts_);
         request["body"] = std::move (body);
-        request["auth"] = insomnia_auth (prop (resource, "authentication"));
+        request["auth"] = insomnia_auth (authentication, counts_);
         if (counts_.options.import_scripts) {
             set_script_elements (request, as_string (prop (resource, "preRequestScript")),
             as_string (prop (resource, "afterResponseScript")));
+            counts_.insomnia_script += calls_insomnia_api (resource) ? 1 : 0;
         }
         insomnia_redirects (resource, request);
         insomnia_cookie_settings (resource, request);
+        return request;
+    }
+
+    /// `build_request`, noting the request's name against every counter it
+    /// grew, so the preview can say which request to finish by hand.
+    json build_request_named (const json* resource) {
+        std::array<int, INSOMNIA_REQUEST_COUNTERS.size ()> before{};
+        for (std::size_t i = 0; i < before.size (); ++i) {
+            before.at (i) = counts_.*(INSOMNIA_REQUEST_COUNTERS.at (i).second);
+        }
+        json request           = build_request (resource);
+        const std::string name = as_string (&request.at ("name"));
+        for (std::size_t i = 0; i < before.size (); ++i) {
+            const auto& [kind, counter] = INSOMNIA_REQUEST_COUNTERS.at (i);
+            if (counts_.*counter > before.at (i)) {
+                named_[kind].push_back (name);
+            }
+        }
         return request;
     }
 
@@ -3019,13 +3135,7 @@ class InsomniaTree {
             return &children.back ();
         }
         if (type_is (child, "request")) {
-            const int file_bodies  = counts_.file_body;
-            json request           = build_request (child);
-            const std::string name = as_string (&request.at ("name"));
-            if (counts_.file_body > file_bodies) {
-                named_["file_body"].push_back (name);
-            }
-            requests.push_back (std::move (request));
+            requests.push_back (build_request_named (child));
             return &requests.back ();
         }
         // What Vayu has no request shape for is still named, so the
@@ -3078,13 +3188,18 @@ class InsomniaTree {
         to_env_vars (as_record (prop (node, "environment"))) :
         json::object ();
         collection["auth"] =
-        insomnia_collection_auth (prop (node, "authentication"), workspace);
+        insomnia_collection_auth (prop (node, "authentication"), workspace, counts_);
         // Insomnia 9.3+ lets a folder carry scripts, and its v4 export writes
         // model fields verbatim - so these are the request-level key names. An
         // export that spells them differently reads as absent.
         if (counts_.options.import_scripts) {
             set_script_elements (collection, as_string (prop (node, "preRequestScript")),
             as_string (prop (node, "afterResponseScript")));
+            if (calls_insomnia_api (node)) {
+                counts_.insomnia_script += 1;
+                named_["script_unsupported_insomnia"].push_back (
+                as_string (&collection.at ("name")));
+            }
         }
         collection["children"] = std::move (children);
         collection["requests"] = std::move (requests);
@@ -3159,7 +3274,13 @@ json parse_insomnia_resources (const json& resources, const ImportOptions& optio
     kind == InsomniaExport::V5Environment ? json::array () : tree.collections ();
     json environments = tree.environments ();
 
-    tree.tally ().add ("file_body", tree.counts ().file_body);
+    const InsomniaCounts& counts = tree.counts ();
+    ImportTally& tally           = tree.tally ();
+    tally.add ("file_body", counts.file_body);
+    tally.add ("unsupported_auth", counts.unsupported_auth);
+    tally.add ("apikey_cookie_header", counts.apikey_cookie_header);
+    tally.add ("security_unmapped_apikey_cookie", counts.apikey_cookie_folder);
+    tally.add ("script_unsupported_insomnia", counts.insomnia_script);
     tree.name_counted ();
 
     json meta;

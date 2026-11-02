@@ -52,6 +52,16 @@ namespace vayu::core {
  */
 [[nodiscard]] std::string strip_comments_and_literals (std::string_view source);
 
+/**
+ * @brief Whether @p script uses `insomnia`, the object Insomnia's scripting API
+ *        hangs off and Vayu does not define (issue #3193).
+ *
+ * Read like a table row (comments and string text stripped, a local variable
+ * named `insomnia` not counted), but kept out of the table: the table is the
+ * Postman notice's, and its names link to the Postman compatibility page.
+ */
+[[nodiscard]] bool uses_insomnia_api (std::string_view script);
+
 /// The names one request, folder or collection uses across all its scripts.
 class UnsupportedScriptApis {
     public:
