@@ -4147,8 +4147,9 @@ other format, is not a `meta.skipped` kind, and never changes what is imported;
 kind order. **`requests`**, when present, names the requests the count applies
 to, in the order the walk met them: every count an OpenAPI parse takes while on
 an operation, Postman's per-request counters (and, for `script_unsupported`,
-the folder or collection that declares the script), and Insomnia's file bodies
-and the resources it cannot import. A count that belongs to the document (a second
+the folder or collection that declares the script), and Insomnia's file bodies,
+unsupported auth types, cookie API keys, `insomnia` scripts and the resources it
+cannot import. A count that belongs to the document (a second
 server URL, a malformed section) has none. **`names`**, when present, names
 what the count dropped, never its value: `oauth2_unmapped_param`, whose
 `names` are the keys of the OAuth 2.0 request parameters a Postman parse did
@@ -4198,14 +4199,15 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `unresolved_base_url` | `servers[0].url` still holds a `{variable}` with no default, or is relative and the document has no source URL; it is kept as written |
 | `no_server_url` | The OpenAPI document names no server URL, so no `{{baseUrl}}` variable is created |
 | `servers_dropped` | An OpenAPI 3.x document with more than one `servers` entry: only `servers[0]` becomes `{{baseUrl}}`, and the count is the entries past the first |
-| `unsupported_auth` | A Postman auth block whose type the schema does not define, or whose `type` is not a string (imported as no auth) |
+| `unsupported_auth` | A Postman auth block whose type the schema does not define, or an Insomnia `authentication.type` with no Vayu mode (`asap`, `netrc`) or that is not a string; either way it imports as no auth, never `inherit` (an Insomnia folder's ends the inherit walk as `noauth`) |
 | `security_unmapped_or` | An OpenAPI operation whose `security` lists more than one alternative requirement; it stays `inherit` |
 | `security_unmapped_and` | An OpenAPI operation whose `security` requirement names more than one scheme at once; it stays `inherit` |
 | `security_unmapped_scheme` | An OpenAPI operation whose `security` names a scheme the document never declares; it stays `inherit` |
 | `security_unmapped_mutualtls` | An operation's `security` names a `mutualTLS` scheme, which has no Vayu auth mode; it stays `inherit` |
 | `security_unmapped_openidconnect` | An operation's `security` names an `openIdConnect` scheme, which has no Vayu auth mode; it stays `inherit` |
 | `security_unmapped_type` | An operation's `security` names a scheme of any other type with no Vayu mode (an `http` scheme other than bearer or basic, or no readable `type`); it stays `inherit` |
-| `security_unmapped_apikey_cookie` | An operation's `security` names an `apiKey` scheme with `in: "cookie"`; Vayu's API-key mode has only header and query placements, so it stays `inherit` |
+| `security_unmapped_apikey_cookie` | An operation's `security` names an `apiKey` scheme with `in: "cookie"`; Vayu's API-key mode has only header and query placements, so it stays `inherit`. An Insomnia API key with `addTo: "cookie"` that has no place to go is the same kind: a folder's (imported as `noauth`, ending the inherit walk) or the workspace's (`none`), which have no header row to hold it, and a request's with no key name, which has no cookie to write. Folders and the workspace are unnamed |
+| `apikey_cookie_header` | An Insomnia request's API key with `addTo: "cookie"`, imported as no auth plus a `Cookie: key=value` header row (merged into an enabled `Cookie` row the request already has) - a mapping the user may want to check, not a loss |
 | `oauth2_dropped_field` | A Postman OAuth 2.0 block carrying a pre-fetched `accessToken` beside an explicit grant configuration; the token is not imported |
 | `oauth2_state_regenerated` | A Postman OAuth 2.0 block with a fixed `state`; Vayu generates its own per authorization attempt |
 | `oauth2_unmapped_param` | A Postman OAuth 2.0 extra request parameter that was not carried, its key under `names` |
@@ -4218,6 +4220,7 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `protocol_behavior_folder` | The same, declared on a folder or the collection: counted once per declaring node, its name under `names` |
 | `body_on_get` | A Postman GET or HEAD with a non-empty body whose resolved `disableBodyPruning` is not `true`: Postman does not send it, Vayu does |
 | `script_unsupported` | A Postman enabled event with a `script.src`, or script text under a `listen` other than `prerequest` / `test`, which has no element to become |
+| `script_unsupported_insomnia` | An Insomnia request, folder or workspace whose imported, non-blank script uses the `insomnia` object, which Vayu does not define; the script is kept and throws when it runs. Counted once per owner, only with `importScripts` on, the owner under `requests` |
 
 Three kinds are counted but are not in that order, so they come after it, in
 first-encountered order: `elements_invalid` (an `elements` array, from a

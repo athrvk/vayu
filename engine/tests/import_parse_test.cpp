@@ -45,6 +45,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -61,6 +62,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/utils/diagnostics.hpp"
 #include "wide_json.hpp"
 
@@ -494,6 +496,113 @@ TEST (InsomniaImport, ExplicitNoneAuthTerminatesInheritanceRatherThanFallingBack
 }
 
 /**
+ * Insomnia writes `{{ _.a.b }}` for a nested environment value and the importer
+ * rewrites it to `{{a.b}}`, which the composer looks up as one whole name. So
+ * `data: {a: {b: 1}}` has to land as the variable `a.b`; stringified into one
+ * `a` it left the template unresolved with no notice. Arrays and empty objects
+ * stay one variable of JSON text, and a sub-environment overrides a nested
+ * leaf in place. Mutation check: make `add_env_var` stringify an object again
+ * and the dotted names, the resolved URL and the override all fail.
+ */
+TEST (InsomniaImport, FlattensANestedEnvironmentValueIntoDottedVariables) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W",
+            "environment":{"a":{"b":1,"c":{"d":"deep"}},"flat":"v"}},
+        {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com/{{ _.a.b }}/{{ _.a.c.d }}/{{ _.flat }}"},
+        {"_id":"env","_type":"environment","parentId":"wrk","name":"Base",
+            "data":{"a":{"b":1,"c":{"d":"deep"}},"list":[1,2],"empty":{},"flat":"v"}},
+        {"_id":"sub","_type":"environment","parentId":"env","name":"Prod",
+            "data":{"a":{"b":2}}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& workspace =
+    parsed.result.at ("collections")[0].at ("variables");
+    EXPECT_FALSE (workspace.contains ("a"));
+    EXPECT_EQ (workspace.at ("a.b").at ("value"), "1");
+    EXPECT_EQ (workspace.at ("a.c.d").at ("value"), "deep");
+
+    const std::string url = first_request (parsed.result.at ("collections")[0]).at ("url");
+    ASSERT_EQ (url, "https://x.com/{{a.b}}/{{a.c.d}}/{{flat}}");
+    const auto resolved = [&url] (const json& variables) {
+        return vayu::http::substitute_tokens (url,
+        [&variables] (const std::string& name) -> std::optional<std::string> {
+            return variables.contains (name) ?
+            std::optional<std::string> (
+            variables.at (name).at ("value").get<std::string> ()) :
+            std::nullopt;
+        });
+    };
+    const json& prod = parsed.result.at ("environments")[0].at ("variables");
+    EXPECT_EQ (prod.at ("list").at ("value"), "[1,2]");
+    EXPECT_EQ (prod.at ("empty").at ("value"), "{}");
+    EXPECT_EQ (resolved (prod), "https://x.com/2/deep/v");
+    EXPECT_EQ (resolved (workspace), "https://x.com/1/deep/v");
+}
+
+/**
+ * Insomnia keeps `settingSendCookies` and `settingStoreCookies` per request
+ * (both on by default); Vayu's one `disableCookies` keeps a request away from
+ * the jar in both directions, so either explicitly `false` sets it. Absent,
+ * `true` and a non-boolean leave it unset. Mutation checks: drop the call to
+ * `insomnia_cookie_settings` and every "disabled" case fails; stop at the
+ * first setting (remove the loop's second name) and the store-only case fails.
+ */
+TEST (InsomniaImport, EitherCookieSettingOffDisablesTheRequestsCookies) {
+    const std::vector<std::pair<std::string, bool>> cases{
+        { R"("settingSendCookies":false)", true },
+        { R"("settingStoreCookies":false)", true },
+        { R"("settingSendCookies":false,"settingStoreCookies":false)", true },
+        { R"("settingSendCookies":true,"settingStoreCookies":false)", true },
+        { R"("settingSendCookies":true,"settingStoreCookies":true)", false },
+        { R"("settingSendCookies":"false")", false },
+        { R"("settingFollowRedirects":"on")", false },
+    };
+    for (const auto& [settings, disabled] : cases) {
+        SCOPED_TRACE (settings);
+        const ImportParse parsed = parse_import (
+        R"({"_type":"export","__export_format":4,"resources":[
+            {"_id":"wrk","_type":"workspace","name":"W"},
+            {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com",)" +
+        settings + "}]}",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const auto& request = first_request (parsed.result.at ("collections")[0]);
+        EXPECT_EQ (request.contains ("disableCookies"), disabled);
+        if (disabled) {
+            EXPECT_EQ (request.at ("disableCookies"), true);
+        }
+    }
+}
+
+/**
+ * A digest, NTLM or IAM node is stored as an opaque `config` bag, but its
+ * strings are template-bearing like any other auth field: `{{ _.x }}` becomes
+ * `{{x}}`, in a nested member and an array element too, and a non-string
+ * member is untouched. Mutation check: copy the member through unchanged in
+ * `insomnia_config` and the three modes keep the `_.` spelling.
+ */
+TEST (InsomniaImport, NormalisesTemplatesInAnOpaqueAuthConfig) {
+    for (const char* type : { "digest", "ntlm", "iam" }) {
+        SCOPED_TRACE (type);
+        const ImportParse parsed = parse_import (std::string (R"({"_type":"export","__export_format":4,"resources":[
+            {"_id":"wrk","_type":"workspace","name":"W"},
+            {"_id":"req","_type":"request","parentId":"wrk","name":"R","method":"get",
+            "url":"https://x.com","authentication":{"type":")") +
+        type +
+        R"(","disabled":false,"username":"{{ _.user }}","password":"p",
+            "retries":3,"extra":{"hosts":["{{ _.host }}","literal"]}}}]})",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const json& auth = first_request (parsed.result.at ("collections")[0]).at ("auth");
+        EXPECT_EQ (auth.at ("config"),
+        (json{ { "username", "{{user}}" }, { "password", "p" }, { "retries", 3 },
+        { "extra", { { "hosts", json::array ({ "{{host}}", "literal" }) } } } }));
+    }
+}
+
+/**
  * Insomnia v5 is read by flattening it into the v4 resource list (#2119), so
  * the same workspace exported by either version imports as the same tree;
  * only `meta.format` says which file it was. Mutation check: drop the
@@ -721,6 +830,31 @@ TEST (InsomniaV5Import, ReadsABooleanFollowRedirectsSetting) {
         const auto& request = first_request (parsed.result.at ("collections")[0]);
         ASSERT_TRUE (request.contains ("followRedirects"));
         EXPECT_EQ (request.at ("followRedirects"), follow);
+    }
+}
+
+/**
+ * v5 spells the two cookie settings `settings.cookies.send` / `.store`; they
+ * read as v4's `settingSendCookies` / `settingStoreCookies`, so either `false`
+ * disables the request's cookies. Mutation check: remove the call to
+ * `carry_cookie_settings` in the flattener and both cases lose the field.
+ */
+TEST (InsomniaV5Import, ReadsTheCookieSettingsOfARequest) {
+    for (const std::string member : { "send", "store" }) {
+        SCOPED_TRACE (member);
+        for (const bool on : { true, false }) {
+            SCOPED_TRACE (on);
+            const ImportParse parsed = parse_import (
+            "type: collection.insomnia.rest/5.0\nname: W\ncollection:\n"
+            "  - name: R\n    url: https://x.example/a\n    method: GET\n"
+            "    settings:\n      cookies:\n        " +
+            member + ": " + (on ? "true" : "false") + "\n",
+            {}, {});
+            ASSERT_TRUE (parsed.ok ()) << parsed.error;
+            const auto& request =
+            first_request (parsed.result.at ("collections")[0]);
+            EXPECT_EQ (request.contains ("disableCookies"), !on);
+        }
     }
 }
 
@@ -2585,6 +2719,283 @@ TEST (InsomniaImport, CountsTheRequestsOfEveryWorkspaceInTheExport) {
     EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
     EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), (Names{ "Digest", "Ntlm" }));
     EXPECT_EQ (meta.at ("nonExecutableAuthCollection"), "Two");
+}
+
+/// Hawk and OAuth 1.0 are stored as data under their own modes, as Postman's
+/// are, not dropped to `inherit`, and the shared `nonExecutableAuth` pass
+/// reports them (#3193). Mutation check: take `hawk` and `oauth1` out of
+/// `STORED_AUTH_TYPES` and both requests fall to `none`.
+TEST (InsomniaImport, HawkAndOAuth1AreStoredAsDataNotInherited) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_request ("a", "wrk", "Hawk",
+                   json{ { "type", "hawk" }, { "id", "{{ _.hawk_id }}" }, { "key", "k" } }),
+    insomnia_request ("b", "wrk", "OAuth1",
+    json{ { "type", "oauth1" }, { "consumerKey", "ck" } }) }),
+    true, json{ { "type", "bearer" }, { "token", "outer" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    EXPECT_EQ (requests[0].at ("auth").at ("mode"), "hawk");
+    EXPECT_EQ (requests[0].at ("auth").at ("config"),
+    (json{ { "id", "{{hawk_id}}" }, { "key", "k" } }));
+    EXPECT_EQ (requests[1].at ("auth").at ("mode"), "oauth1");
+    EXPECT_EQ (requests[1].at ("auth").at ("config"), (json{ { "consumerKey", "ck" } }));
+
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (meta.at ("nonExecutableAuth"), 2);
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), (Names{ "Hawk", "OAuth1" }));
+    EXPECT_FALSE (skip_counts (meta.at ("skipped")).contains ("unsupported_auth"));
+}
+
+/// A type Vayu has no mode for imports as `none`, never `inherit`: inheriting
+/// would send the folder's bearer token in place of the ASAP or netrc credential
+/// the user chose. Each is counted under `unsupported_auth` and a request is
+/// named, a folder is only counted (as Postman's are) and ends the walk
+/// (`noauth`); an absent node, an explicit `none` and a node with no type are
+/// not losses. Mutation check: return `inherit` again from the tail of
+/// `insomnia_auth` and every `none` below turns into `inherit`.
+TEST (InsomniaImport, AnAuthTypeWithoutAModeImportsAsNoneAndIsCounted) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("fld", "wrk", "Folder", json{ { "type", "bearer" } }),
+    insomnia_request ("a", "fld", "Asap", json{ { "type", "asap" } }),
+    insomnia_request ("b", "fld", "Netrc", json{ { "type", "netrc" } }),
+    insomnia_request ("c", "fld", "Not a string", json{ { "type", 5 } }),
+    insomnia_request ("d", "fld", "Inherits"),
+    insomnia_request ("e", "fld", "No type", json::object ()),
+    insomnia_request ("f", "fld", "Opted out", json{ { "type", "none" } }),
+    insomnia_folder ("odd", "wrk", "Odd folder", json{ { "type", "asap" } }) }),
+    true);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& folder = parsed.result.at ("collections")[0].at ("children")[0];
+    const std::vector<std::string> expected{ "none", "none", "none", "inherit",
+        "inherit", "none" };
+    for (size_t at = 0; at < expected.size (); ++at) {
+        EXPECT_EQ (folder.at ("requests")[at].at ("auth").at ("mode"), expected[at]) << at;
+    }
+    EXPECT_EQ (
+    parsed.result.at ("collections")[0].at ("children")[1].at ("auth").at (
+    "mode"),
+    "noauth");
+
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("unsupported_auth"), 4);
+    EXPECT_EQ (skipped_named (parsed, "unsupported_auth"),
+    (Names{ "Asap", "Netrc", "Not a string" }));
+}
+
+/// An explicit `authentication.type` of `inherit` (Insomnia's own "Inherit from
+/// parent") is `inherit`, not an unsupported type: it imports as `inherit` and
+/// is not counted, on a request; on a folder it is transparent (`none`) like an
+/// absent node. Mutation check: delete the `inherit` branch of `insomnia_auth`
+/// and the request becomes `none` and `unsupported_auth` counts two.
+TEST (InsomniaImport, AnExplicitInheritTypeInheritsAndIsNotCounted) {
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("fld", "wrk", "Folder", json{ { "type", "inherit" } }),
+    insomnia_request ("a", "fld", "Inherits", json{ { "type", "inherit" } }) }),
+    true, json{ { "type", "bearer" }, { "token", "outer" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& folder = parsed.result.at ("collections")[0].at ("children")[0];
+    EXPECT_EQ (folder.at ("auth").at ("mode"), "none");
+    EXPECT_EQ (folder.at ("requests")[0].at ("auth").at ("mode"), "inherit");
+    EXPECT_FALSE (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_auth"));
+}
+
+/// A folder whose own auth Vayu cannot carry - a type with no mode, or a
+/// cookie-placed API key - ends the walk (`noauth`), so a request inheriting
+/// under it sends without auth instead of silently taking the workspace's.
+/// The workspace stays `none`; a folder with no auth of its own still passes
+/// the walk through. The resolved-auth pass sees the same thing: with a
+/// data-only `iam` (stored as `aws`) workspace only the request under the plain folder is
+/// counted. Mutation check: return `none` again from the folder branch of
+/// `insomnia_collection_auth` and "Under asap" and "Under cookie" are counted.
+TEST (InsomniaImport, AFolderWithAnUncarriableAuthEndsTheWalk) {
+    const json cookie_key = { { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } };
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("asap", "wrk", "Asap", json{ { "type", "asap" } }),
+    insomnia_request ("a", "asap", "Under asap"),
+    insomnia_folder ("cookie", "wrk", "Cookie", cookie_key),
+    insomnia_request ("b", "cookie", "Under cookie"), insomnia_folder ("plain", "wrk", "Plain"),
+    insomnia_request ("c", "plain", "Under plain") }),
+    true, json{ { "type", "iam" } });
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("children")[0].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[1].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[2].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (collection.at ("auth").at ("mode"), "aws");
+
+    const json meta = json::parse (parsed.result.at ("meta").dump ());
+    EXPECT_EQ (names_in (meta, "nonExecutableAuthRequests"), Names{ "Under plain" });
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("unsupported_auth"), 1);
+    EXPECT_EQ (skip_counts (meta.at ("skipped")).at ("security_unmapped_apikey_cookie"), 1);
+}
+
+/// The workspace has nothing above it to shut out, so an uncarriable auth of
+/// its own stays `none`, counted. Mutation check: drop the `!workspace` guard
+/// in `insomnia_collection_auth` and the workspace turns `noauth`.
+TEST (InsomniaImport, AWorkspaceWithAnUncarriableAuthStaysNone) {
+    for (const json& auth : { json{ { "type", "asap" } },
+         json{ { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } } }) {
+        const ImportParse parsed = parse_insomnia_tree (
+        json::array ({ insomnia_request ("a", "wrk", "Top") }), true, auth);
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (parsed.result.at ("collections")[0].at ("auth").at ("mode"), "none")
+        << auth.dump ();
+    }
+}
+
+/// An API key placed in a cookie has no slot in Vayu's API-key mode, so it
+/// becomes a `Cookie` header row with auth `none`, and the request is named. An
+/// enabled `Cookie` row the request already sends takes it as a further cookie
+/// (one header, "; " joined); a disabled one is left alone. Mutation checks:
+/// drop the `api_key_in_cookie` branch of `insomnia_auth` and the first case
+/// keeps a header-placed key; drop the `enabled` test in `with_cookie_api_key`
+/// and the disabled row swallows the pair.
+TEST (InsomniaImport, ACookiePlacedApiKeyBecomesACookieHeaderRow) {
+    const json key = { { "type", "apikey" }, { "addTo", "cookie" },
+        { "key", "sid" }, { "value", "{{ _.token }}" } };
+    json plain     = insomnia_request ("a", "wrk", "Plain", key);
+    json merged    = insomnia_request ("b", "wrk", "Merged", key);
+    merged["headers"] =
+    json::array ({ { { "name", "cookie" }, { "value", "theme=dark" } } });
+    json disabled       = insomnia_request ("c", "wrk", "Disabled row", key);
+    disabled["headers"] = json::array (
+    { { { "name", "Cookie" }, { "value", "old=1" }, { "disabled", true } } });
+    json header_key = insomnia_request ("d", "wrk", "Header key",
+    json{ { "type", "apikey" }, { "addTo", "header" }, { "key", "X-Key" }, { "value", "v" } });
+    const ImportParse parsed =
+    parse_insomnia_tree (json::array ({ plain, merged, disabled, header_key }), true);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    for (const size_t at : { 0U, 1U, 2U }) {
+        EXPECT_EQ (requests[at].at ("auth").at ("mode"), "none") << at;
+    }
+    EXPECT_EQ (requests[0].at ("headers"),
+    (json::array (
+    { { { "key", "Cookie" }, { "value", "sid={{token}}" }, { "enabled", true } } })));
+    EXPECT_EQ (requests[1].at ("headers").size (), 1U);
+    EXPECT_EQ (requests[1].at ("headers")[0].at ("value"), "theme=dark; sid={{token}}");
+    EXPECT_EQ (requests[2].at ("headers").size (), 2U);
+    EXPECT_EQ (requests[2].at ("headers")[0].at ("value"), "old=1");
+    EXPECT_EQ (requests[2].at ("headers")[1].at ("value"), "sid={{token}}");
+    EXPECT_EQ (requests[3].at ("auth").at ("mode"), "apikey");
+    EXPECT_EQ (requests[3].at ("headers").size (), 0U);
+
+    EXPECT_EQ (
+    skip_counts (parsed.result.at ("meta").at ("skipped")).at ("apikey_cookie_header"), 3);
+    EXPECT_EQ (skipped_named (parsed, "apikey_cookie_header"),
+    (Names{ "Plain", "Merged", "Disabled row" }));
+}
+
+/// A request's cookie-placed key with no name has no cookie to write, so it
+/// adds no header row; it is counted under `security_unmapped_apikey_cookie`
+/// and the request named, not dropped silently. A disabled one says nothing.
+/// Mutation check: drop the count in `with_cookie_api_key`'s empty-name branch
+/// and the preview hears nothing of "Unnamed" and "No key".
+TEST (InsomniaImport, ACookieApiKeyWithNoNameIsCountedBecauseThereIsNothingToSend) {
+    const json unnamed = { { "type", "apikey" }, { "addTo", "cookie" },
+        { "key", "" }, { "value", "v" } };
+    const json no_key = { { "type", "apikey" }, { "addTo", "cookie" }, { "value", "v" } };
+    json off                 = unnamed;
+    off["disabled"]          = true;
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_request ("a", "wrk", "Unnamed", unnamed),
+    insomnia_request ("b", "wrk", "No key", no_key),
+    insomnia_request ("c", "wrk", "Off", off) }),
+    true);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+    for (const size_t at : { 0U, 1U }) {
+        EXPECT_EQ (requests[at].at ("auth").at ("mode"), "none") << at;
+        EXPECT_EQ (requests[at].at ("headers").size (), 0U) << at;
+    }
+    const json& skipped = parsed.result.at ("meta").at ("skipped");
+    EXPECT_EQ (skip_counts (skipped).at ("security_unmapped_apikey_cookie"), 2);
+    EXPECT_FALSE (skip_counts (skipped).contains ("apikey_cookie_header"));
+    EXPECT_EQ (skipped_named (parsed, "security_unmapped_apikey_cookie"),
+    (Names{ "Unnamed", "No key" }));
+}
+
+/// A folder or workspace cannot carry a header row, so its cookie-placed key is
+/// not imported: counted under `security_unmapped_apikey_cookie` (whose advice
+/// is to add the Cookie header by hand), unnamed; the folder ends the walk
+/// (`noauth`) and the workspace is `none`. A disabled one says nothing.
+/// Mutation check: drop the `apikey_cookie_unmapped` count in
+/// `insomnia_collection_auth` and the credential is lost with no notice.
+TEST (InsomniaImport, AFolderCookieApiKeyIsCountedBecauseItCannotBeCarried) {
+    const json key = { { "type", "apikey" }, { "addTo", "cookie" }, { "key", "sid" } };
+    json off                 = key;
+    off["disabled"]          = true;
+    const ImportParse parsed = parse_insomnia_tree (
+    json::array ({ insomnia_folder ("fld", "wrk", "Keyed", key),
+    insomnia_request ("a", "fld", "Under"), insomnia_folder ("fld2", "wrk", "Off", off) }),
+    true, key);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& collection = parsed.result.at ("collections")[0];
+    EXPECT_EQ (collection.at ("auth").at ("mode"), "none");
+    EXPECT_EQ (collection.at ("children")[0].at ("auth").at ("mode"), "noauth");
+    EXPECT_EQ (collection.at ("children")[1].at ("auth").at ("mode"), "none");
+    EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("security_unmapped_apikey_cookie"),
+    2);
+    EXPECT_TRUE (skipped_named (parsed, "security_unmapped_apikey_cookie").empty ());
+}
+
+/// An Insomnia export with @p resources under workspace "W", read with @p options.
+ImportParse parse_insomnia_with (json resources, const ImportOptions& options) {
+    json list =
+    json::array ({ { { "_id", "wrk" }, { "_type", "workspace" }, { "name", "W" } } });
+    for (json& resource : resources) {
+        list.push_back (std::move (resource));
+    }
+    return parse_import (
+    json{ { "_type", "export" }, { "__export_format", 4 }, { "resources", list } }
+    .dump (),
+    options, {});
+}
+
+/// A request or folder with the two script members set.
+json with_scripts (json resource, const std::string& pre, const std::string& post = "") {
+    resource["preRequestScript"]    = pre;
+    resource["afterResponseScript"] = post;
+    return resource;
+}
+
+/// The Insomnia scripting API is `insomnia.*`, which Vayu does not define, so
+/// a script that calls it throws on first run. One notice kind names each
+/// request and folder whose imported script does, once per owner whichever
+/// script it is in; comments, strings and `pm.*` scripts name nothing, and the
+/// Postman API notice stays out of it. With the scripts option off nothing is
+/// imported, so nothing is named. Mutation checks: drop the `import_scripts`
+/// gate around the count in `build_request` and the off case names "Pre"; make
+/// `uses_insomnia_api` return false and the on case names nothing.
+TEST (InsomniaImport, AScriptCallingTheInsomniaApiIsNamedOnlyWhenImported) {
+    const auto resources = [] {
+        return json::array ({ with_scripts (insomnia_folder ("fld", "wrk", "Folder"),
+                              "insomnia.variables.set('a', 1);"),
+        with_scripts (insomnia_request ("a", "fld", "Pre"),
+        "const r = insomnia.request;\nr.addHeader('x', 'y');"),
+        with_scripts (insomnia_request ("b", "fld", "Post"), "", "insomnia.test('ok', () => {});"),
+        with_scripts (insomnia_request ("c", "fld", "Both"), "insomnia.x();", "insomnia.y();"),
+        with_scripts (insomnia_request ("d", "fld", "Pm"), "pm.variables.set('a', 1);"),
+        with_scripts (insomnia_request ("e", "fld", "Mentioned"), "// insomnia.x\nconsole.log('insomnia.y');"),
+        with_scripts (insomnia_request ("f", "fld", "Own"), "const insomnia = {};\ninsomnia.x();"),
+        with_scripts (insomnia_request ("g", "fld", "Blank"), "  \n") });
+    };
+    const ImportParse on = parse_insomnia_with (resources (), {});
+    ASSERT_TRUE (on.ok ()) << on.error;
+    EXPECT_EQ (skip_counts (on.result.at ("meta").at ("skipped")).at ("script_unsupported_insomnia"),
+    4);
+    EXPECT_EQ (skipped_named (on, "script_unsupported_insomnia"),
+    (Names{ "Pre", "Post", "Both", "Folder" }));
+    EXPECT_FALSE (on.result.at ("meta").contains ("unsupportedScriptApis"));
+
+    ImportOptions off;
+    off.import_scripts      = false;
+    const ImportParse gated = parse_insomnia_with (resources (), off);
+    ASSERT_TRUE (gated.ok ()) << gated.error;
+    EXPECT_FALSE (
+    skip_counts (gated.result.at ("meta").at ("skipped")).contains ("script_unsupported_insomnia"));
 }
 
 /// One Postman request with a single `prerequest` script whose lines are

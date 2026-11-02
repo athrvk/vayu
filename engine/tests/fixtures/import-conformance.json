@@ -2733,6 +2733,13 @@
               "requests": [
                 "Greeter"
               ]
+            },
+            {
+              "kind": "script_unsupported_insomnia",
+              "count": 1,
+              "requests": [
+                "Create user"
+              ]
             }
           ],
           "nonExecutableAuth": 0,

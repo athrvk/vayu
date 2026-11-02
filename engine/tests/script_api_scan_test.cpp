@@ -33,6 +33,7 @@ namespace {
 
 using vayu::core::strip_comments_and_literals;
 using vayu::core::UnsupportedScriptApis;
+using vayu::core::uses_insomnia_api;
 using Names = std::vector<std::string>;
 
 Names names_in (const std::string& script) {
@@ -878,6 +879,23 @@ TEST (ScriptApiScan, PairsBracketsOfMixedKindsAsTheScanAlwaysDid) {
     EXPECT_EQ (names_in ("function f(a, cheerio] { } cheerio.x"), Names{});
     EXPECT_EQ (names_in ("var [ cheerio.x"), Names{ "cheerio" });
     EXPECT_EQ (names_in ("cheerio) => 1; cheerio.x"), Names{ "cheerio" });
+}
+
+/// `insomnia` is a name in scope, so it is read like a table row: a use in code
+/// counts, the word in a comment or string, a property of that name, a number
+/// and a script's own variable do not. Mutation check: strip nothing before the
+/// token pass and the comment and string cases are reported.
+TEST (ScriptApiScan, FindsTheInsomniaObjectOnlyWhereItIsUsed) {
+    EXPECT_TRUE (uses_insomnia_api ("insomnia.environment.set('a', 1);"));
+    EXPECT_TRUE (uses_insomnia_api ("const r = insomnia\n  .request;"));
+    EXPECT_TRUE (uses_insomnia_api ("const i = insomnia;"));
+    EXPECT_FALSE (uses_insomnia_api ("// insomnia.x\n/* insomnia.y */"));
+    EXPECT_FALSE (uses_insomnia_api ("log('insomnia.x'); `insomnia.y`"));
+    EXPECT_FALSE (
+    uses_insomnia_api ("pm.insomnia.x; insomnia1.x; x_insomnia.y"));
+    EXPECT_FALSE (uses_insomnia_api ("const insomnia = {}; insomnia.x();"));
+    EXPECT_FALSE (uses_insomnia_api ("pm.variables.set('a', 1);"));
+    EXPECT_FALSE (uses_insomnia_api (""));
 }
 
 } // namespace

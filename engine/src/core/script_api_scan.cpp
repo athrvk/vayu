@@ -1022,6 +1022,20 @@ std::string strip_comments_and_literals (std::string_view source) {
     return Stripper (source).run ();
 }
 
+bool uses_insomnia_api (std::string_view script) {
+    static constexpr ApiRule INSOMNIA{ "insomnia", Anchor::Bare, "insomnia", "" };
+    const std::string code          = strip_comments_and_literals (script);
+    const std::vector<Token> tokens = tokenize (code);
+    const Declarations declared (code, tokens);
+    const ScanInput in{ script, code, tokens, declared };
+    for (std::size_t first = 0; first < tokens.size (); ++first) {
+        if (is_unsupported_use (in, first, INSOMNIA)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void UnsupportedScriptApis::scan (std::string_view script) {
     const std::string code          = strip_comments_and_literals (script);
     const std::vector<Token> tokens = tokenize (code);

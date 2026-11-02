@@ -712,6 +712,66 @@ describe("importNotices - a Postman script Vayu cannot import (#2541)", () => {
 	});
 });
 
+describe("importNotices - what the Insomnia importer adds (#3193)", () => {
+	const notices = (item: SkippedItem) => importNotices(meta({ skipped: [item] }));
+
+	it("tells a script owner to rewrite an insomnia.* script, counting items not requests", () => {
+		expect(
+			notices({ kind: "script_unsupported_insomnia", count: 1, requests: ["Login"] })
+		).toEqual([
+			{
+				tier: "action",
+				text: "Login: script uses Insomnia's insomnia.* API, which Vayu does not run - rewrite it with pm.*",
+			},
+		]);
+		expect(
+			notices({
+				kind: "script_unsupported_insomnia",
+				count: 2,
+				requests: ["Login", "Folder"],
+			})[0].text
+		).toBe(
+			"2 items: script uses Insomnia's insomnia.* API, which Vayu does not run - rewrite it with pm.* - Login, Folder"
+		);
+		expect(notices({ kind: "script_unsupported_insomnia", count: 3 })[0].text).toBe(
+			"3 scripts use Insomnia's insomnia.* API, which Vayu does not run - rewrite them with pm.*"
+		);
+	});
+
+	it("links nowhere: the Postman compatibility page is not about this script", () => {
+		expect(notices({ kind: "script_unsupported_insomnia", count: 1 })[0].link).toBeUndefined();
+	});
+
+	it("words an unplaceable cookie API key for a request, a folder and the workspace alike", () => {
+		const kind = "security_unmapped_apikey_cookie";
+		expect(notices({ kind, count: 1, requests: ["Me"] })).toEqual([
+			{
+				tier: "action",
+				text: "Me: API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header",
+			},
+		]);
+		// A folder or the workspace is counted and never named, so the line cannot
+		// claim the count is of requests.
+		expect(notices({ kind, count: 1 })[0].text).toBe(
+			"1 API key is placed in a cookie, which Vayu's API key auth cannot hold - add it as a Cookie header"
+		);
+		expect(notices({ kind, count: 3 })[0].text).toBe(
+			"3 API keys are placed in cookies, which Vayu's API key auth cannot hold - add them as Cookie headers"
+		);
+	});
+
+	it("notes a cookie API key sent as a header, as something that works, not to finish", () => {
+		const [named] = notices({ kind: "apikey_cookie_header", count: 1, requests: ["Me"] });
+		expect(named).toEqual({
+			tier: "note",
+			text: "Me: API key is sent as a Cookie header (Vayu's API key auth has no cookie placement)",
+		});
+		expect(notices({ kind: "apikey_cookie_header", count: 2 })[0].text).toBe(
+			"2 requests' API keys are sent as Cookie headers (Vayu's API key auth has no cookie placement)"
+		);
+	});
+});
+
 describe("the closed set of skipped kinds", () => {
 	/** The string literals of `SkippedItem["kind"]` before its open JMeter tail. */
 	function declaredKinds(): string[] {
