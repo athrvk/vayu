@@ -239,6 +239,27 @@ function authorityStart(head: string, view: string): number {
 	return 0;
 }
 
+/**
+ * `url` without the user info of its `scheme://` authority, and that user info
+ * as written (no `@`); null when there is no such authority or it holds no `@`.
+ * The authority ends at the first `/`, `?` or `#` and the user info at its last
+ * `@`, which is how libcurl reads it and the engine's `rfind ('@')`. A
+ * `{{...}}` token is opaque, so an `@`, `:` or `/` inside one is not structure.
+ */
+export function splitUrlUserInfo(url: string): { userInfo: string; url: string } | null {
+	const view = maskTokens(url);
+	const start = authorityStart(url, view);
+	if (start === 0) return null;
+	const length = view.slice(start).search(/[/?#]/);
+	const end = length === -1 ? url.length : start + length;
+	const atSign = view.slice(start, end).lastIndexOf("@");
+	if (atSign === -1) return null;
+	return {
+		userInfo: url.slice(start, start + atSign),
+		url: url.slice(0, start) + url.slice(start + atSign + 1),
+	};
+}
+
 /** The scheme, user info, host and path of `head` (no query, no fragment). */
 function encodeHead(head: string): string {
 	const view = maskTokens(head);
