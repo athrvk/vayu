@@ -910,6 +910,24 @@ describe("PowerShell", () => {
 		expect(urlencoded.code).toContain("-Body $body");
 		expect(urlencoded.code).not.toContain("-Form");
 	});
+
+	it("builds the multipart hashtable [ordered], so -Form sends the parts in row order", () => {
+		// Mutation check: a plain `@{` hashtable enumerates in no promised order.
+		const multipart = generatePowerShell({
+			...GET,
+			method: "POST",
+			body: { mode: "form-data", fields: [{ key: "a", value: "b" }] },
+		});
+		expect(multipart.code).toContain("$body = [ordered]@{");
+
+		const urlencoded = generatePowerShell({
+			...GET,
+			method: "POST",
+			body: { mode: "x-www-form-urlencoded", fields: [{ key: "a", value: "b" }] },
+		});
+		expect(urlencoded.code).toContain("$body = @{");
+		expect(urlencoded.code).not.toContain("[ordered]");
+	});
 });
 
 describe("Python requests", () => {

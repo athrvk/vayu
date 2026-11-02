@@ -142,7 +142,9 @@ export function generatePowerShell(
 		lines.push(`$body = ${powerShellQuote(prepared.body.content)}`, "");
 	} else if (prepared.body) {
 		bodyVariable = "$body";
-		lines.push("$body = @{");
+		// `-Form` writes the parts in the order the hashtable enumerates, which
+		// for a plain `@{}` is unspecified. `[ordered]` keeps the row order.
+		lines.push(prepared.body.kind === "urlencoded" ? "$body = @{" : "$body = [ordered]@{");
 		const untyped = untypedTextPartNote(prepared.body, "Invoke-RestMethod -Form");
 		if (untyped) notes.push(untyped);
 		if (prepared.body.kind === "urlencoded") {
