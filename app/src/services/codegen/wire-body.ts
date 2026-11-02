@@ -40,7 +40,8 @@ const OPENS_AS_JSON_OBJECT = /^[ \t\n\v\f\r]*\{[ \t\n\v\f\r]*"/;
  */
 export function jsonRpcWireBody(content: string): string {
 	if (content === "") return content;
-	const call = readCompactJson(content, ENGINE_MAX_JSON_DEPTH);
+	// The text is unresolved: `[{{a}},{{b}}]` is a call once the tokens are numbers.
+	const call = readCompactJson(content, ENGINE_MAX_JSON_DEPTH, { templateTokens: true });
 	if (call?.kind !== "object") return content;
 	if (call.members.get("jsonrpc")?.kind === "string") return content;
 

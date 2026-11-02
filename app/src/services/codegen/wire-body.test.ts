@@ -58,18 +58,41 @@ describe("jsonRpcWireBody", () => {
 
 	it("returns a batch, a scalar, empty and unparseable content as typed", () => {
 		const batch = '[{"jsonrpc":"2.0","id":1,"method":"a"},{"method":"b"}]';
+		for (const content of [batch, "42", '"a string"', "null", "", '{"method":"m",}', "{"]) {
+			expect(jsonRpcWireBody(content), content).toBe(content);
+		}
+	});
+
+	// Unresolved text: the engine resolves `{{a}}` and only then completes the
+	// call, so a token in value position must not stop the completion.
+	// Mutation check: drop `templateTokens` in `jsonRpcWireBody` and each of
+	// these comes back as typed.
+	it("completes a call whose values are unquoted template tokens", () => {
+		expect(jsonRpcWireBody('{"method":"sum","params":[{{a}},{{b}}]}')).toBe(
+			'{"method":"sum","params":[{{a}},{{b}}],"jsonrpc":"2.0","id":1}'
+		);
+		expect(jsonRpcWireBody('{"method":"m","params":{{args}}}')).toBe(
+			'{"method":"m","params":{{args}},"jsonrpc":"2.0","id":1}'
+		);
+		expect(jsonRpcWireBody('{ "method" : "m" , "id" : {{id}} }')).toBe(
+			'{"method":"m","id":{{id}},"jsonrpc":"2.0"}'
+		);
+	});
+
+	it("does not read a template token as a key or inside a number or string", () => {
 		for (const content of [
-			batch,
-			"42",
-			'"a string"',
-			"null",
-			"",
-			'{"method":"m","params":{{args}}}',
-			'{"method":"m",}',
-			"{",
+			"{{{k}}:1}",
+			'{"method":"m","params":[{{a}}5]}',
+			'{"method":"m","params":[1{{a}}]}',
+			'{"method":"m","params":[{{}}]}',
+			'{"method":"m","params":[{{a]}',
+			'{"method":"m","params":[{{{a}}}]}',
 		]) {
 			expect(jsonRpcWireBody(content), content).toBe(content);
 		}
+		expect(jsonRpcWireBody('{"method":"{{m}}"}')).toBe(
+			'{"method":"{{m}}","jsonrpc":"2.0","id":1}'
+		);
 	});
 
 	it("appends jsonrpc and id after the author's members", () => {
@@ -199,6 +222,12 @@ describe("graphqlWireBody", () => {
 		]) {
 			expect(graphqlWireBody(templated), templated).toBe(templated);
 		}
+	});
+
+	// GraphQL reads the text without tokens: `{"query": {{q}}}` stays the
+	// author's envelope rather than a query-less object that would be wrapped.
+	it("keeps a templated query value an envelope", () => {
+		expect(graphqlWireBody('{"query":{{q}}}')).toBe('{"query":{{q}}}');
 	});
 
 	it("wraps unparseable text that does not open as a quoted-key object", () => {

@@ -1816,13 +1816,21 @@ describe("the envelope a graphql or jsonrpc snippet sends", () => {
 		});
 	});
 
+	it("completes a JSON-RPC call whose params are unquoted template tokens", () => {
+		expect(
+			prepareRequest(withBody("jsonrpc", '{"method":"sum","params":[{{a}},{{b}}]}')).body
+		).toEqual({
+			kind: "raw",
+			content: '{"method":"sum","params":[{{a}},{{b}}],"jsonrpc":"2.0","id":1}',
+		});
+	});
+
 	it("leaves an envelope the author wrote, and every other mode, as typed", () => {
 		const envelope = '{ "query": "{ hero }", "variables": {} }';
 		const cases: Array<[string, string]> = [
 			["graphql", envelope],
 			["jsonrpc", FULL_ENVELOPE],
 			["jsonrpc", '[{"method":"a"},{"method":"b"}]'],
-			["jsonrpc", '{"method":"m","params":{{args}}}'],
 			["json", BARE_CALL],
 			["text", BARE_GRAPHQL],
 		];

@@ -38,6 +38,8 @@
  * refused, as nlohmann refuses an invalid `\u` pair.
  */
 
+import { VARIABLE_PATTERN } from "@/constants/variables";
+
 /** A value read from the text, with the compact spelling the engine writes it in. */
 export type JsonNode =
 	| { kind: "object"; text: string; members: Map<string, JsonNode> }
@@ -45,6 +47,8 @@ export type JsonNode =
 
 const WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0d]);
 const NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+/** The app's `{{name}}` token, sticky so it matches at the reader's position only. */
+const TEMPLATE_TOKEN = new RegExp(VARIABLE_PATTERN.source, "y");
 const HEX4 = /^[0-9a-fA-F]{4}$/;
 const SIMPLE_ESCAPES = '"\\/bfnrt';
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -110,12 +114,25 @@ function numberText(token: string): string {
 	return (isIntegerToken ? integerText(token) : undefined) ?? floatText(token);
 }
 
+/** What the reader accepts beyond strict JSON. */
+export interface ReadOptions {
+	/**
+	 * Read a `{{name}}` token in value position as an opaque value written as
+	 * typed. The engine resolves tokens before it reads the body, so text that
+	 * still holds `[{{a}},{{b}}]` is the document it will read once they are
+	 * numbers. Keys and string contents are unaffected: a token is a value only
+	 * where a value can start.
+	 */
+	templateTokens?: boolean;
+}
+
 class Reader {
 	private i = 0;
 
 	constructor(
 		private readonly source: string,
-		private readonly maxDepth: number
+		private readonly maxDepth: number,
+		private readonly options: ReadOptions
 	) {}
 
 	readDocument(): JsonNode {
@@ -139,6 +156,9 @@ class Reader {
 
 	private readValue(depth: number): JsonNode {
 		this.skipWhitespace();
+		// Before the object case: `{{` opens a token, and no JSON object opens with `{{`.
+		const token = this.readTemplateToken();
+		if (token) return token;
 		const char = this.source[this.i];
 		if (char === "{") return this.readObject(depth + 1);
 		if (char === "[") return this.readArray(depth + 1);
@@ -152,6 +172,15 @@ class Reader {
 			return { kind: "other", text: literal };
 		}
 		return this.readNumber();
+	}
+
+	private readTemplateToken(): JsonNode | undefined {
+		if (!this.options.templateTokens) return undefined;
+		TEMPLATE_TOKEN.lastIndex = this.i;
+		const match = TEMPLATE_TOKEN.exec(this.source);
+		if (!match) return undefined;
+		this.i += match[0].length;
+		return { kind: "other", text: match[0] };
 	}
 
 	private enter(depth: number): void {
@@ -241,10 +270,11 @@ class Reader {
  */
 export function readCompactJson(
 	source: string,
-	maxDepth: number = Number.POSITIVE_INFINITY
+	maxDepth: number = Number.POSITIVE_INFINITY,
+	options: ReadOptions = {}
 ): JsonNode | undefined {
 	try {
-		return new Reader(source, maxDepth).readDocument();
+		return new Reader(source, maxDepth, options).readDocument();
 	} catch (error) {
 		if (error instanceof Malformed || error instanceof RangeError) return undefined;
 		throw error;
