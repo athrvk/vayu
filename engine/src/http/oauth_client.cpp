@@ -403,7 +403,12 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
     if (t.expires_in <= 0) {
         return false; // no expiry information → treat as non-expiring
     }
-    return now > t.created_at + (t.expires_in * 1000) - skew_ms;
+    const int64_t lifetime_ms = t.expires_in * 1000;
+    // Capped at half the lifetime: a token living no longer than the skew
+    // would otherwise be expired the moment it is minted and re-fetched on
+    // every send (#3200).
+    const int64_t effective_skew_ms = std::min (skew_ms, lifetime_ms / 2);
+    return now > t.created_at + lifetime_ms - effective_skew_ms;
 }
 
 namespace {

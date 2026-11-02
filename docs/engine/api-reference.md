@@ -6566,7 +6566,7 @@ did before the lists existed. `scope`, `audience` and `resource` are not read, s
 differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
-`engine/tests/oauth_client_test.cpp`. Expiry uses a 45s skew; a missing `expires_in`
+`engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
 means non-expiring. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row

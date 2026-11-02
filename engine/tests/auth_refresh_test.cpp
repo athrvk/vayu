@@ -593,9 +593,9 @@ TEST_F (PlanScenarioAuthRefreshTest, StepsSharingATokenFollowOneCredential) {
     << "a shared refresh is bounded by the shortest of its steps' timeouts";
 }
 
-// A token shorter-lived than the cache's expiry skew is re-acquired for each
-// step that plans it, so an earlier step carries an older token than the
-// cache. It still follows the credential, and sends the newest.
+// A short-lived token that entered the cache's expiry skew is re-acquired for
+// the steps planned after it, so an earlier step carries an older token than
+// the cache. It still follows the credential, and sends the newest.
 TEST_F (PlanScenarioAuthRefreshTest, AStepPlannedWithAnOlderTokenStillFollows) {
     const json config = oauth2_config ("https://idp.test/token");
     cache_token (config, "AT2", 3);

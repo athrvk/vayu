@@ -697,7 +697,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   see the run lifecycle below.
 - **`oauth_client`** (`acquire_token`) - grant handling (client_credentials,
   password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
-  cache (45s expiry skew, refresh-token rotation), and RFC 6749 client auth. An
+  cache (expiry skew min(45s, lifetime/2), refresh-token rotation), and RFC 6749 client auth. An
   interactive call skips the cache and always exchanges its code. It never logs
   token bodies/headers.
 - **`oauth_authorize`** - the interactive Authorization Code manager: an

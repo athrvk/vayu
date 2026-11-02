@@ -2025,7 +2025,8 @@ Auto-created by `sync_schema()`.
 | `expires_in`    | INTEGER | Seconds; `0` = non-expiring                                       |
 | `created_at`    | INTEGER | Unix ms                                                           |
 
-Expiry is `now > created_at + expires_in*1000 − 45s` (skew). On refresh the
+Expiry is `now > created_at + expires_in*1000 − skew`, with skew = min(45s, `expires_in`/2),
+so a token living less than 90s is still valid for the first half of its life. On refresh the
 `refresh_token` rotates when the provider issues a new one; a rejected refresh
 token clears the row and falls back to a fresh grant.
 
