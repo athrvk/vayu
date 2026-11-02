@@ -2498,6 +2498,44 @@ describe("repeated headers", () => {
 			expect(notes).toEqual([]);
 		});
 
+		// `typed_cookie_value` skips a row that does not reach the wire and trims
+		// the edge whitespace of the rest, so none lands inside the joined line.
+		// Mutation check: join the raw values and the line is `Cookie: a=1 ; `.
+		const PADDED: SnippetRequest = {
+			...GET,
+			headers: [
+				{ name: "Cookie", value: "a=1 " },
+				{ name: "Cookie", value: "" },
+			],
+		};
+
+		it("curl trims a row and skips one that reaches no wire", () => {
+			expect(generateCurl(PADDED).code).toContain("-H 'Cookie: a=1'");
+		});
+
+		it("HTTPie trims a row and skips one that reaches no wire", () => {
+			expect(generateHttpie(PADDED).code).toContain("'Cookie:a=1'");
+		});
+
+		it.each([
+			["curl", generateCurl],
+			["HTTPie", generateHttpie],
+			["fetch", generateFetch],
+		])("%s writes no Cookie line when no row reaches the wire", (_name, generate) => {
+			const { code } = generate({
+				...GET,
+				headers: [
+					{ name: "Cookie", value: " \t" },
+					{ name: "cookie", value: "" },
+				],
+			});
+			expect(code.toLowerCase()).not.toContain("cookie");
+		});
+
+		it("fetch trims and skips the same rows", () => {
+			expect(generateFetch(PADDED).code).toContain('"Cookie": "a=1"');
+		});
+
 		it("a single Cookie row is written as it is", () => {
 			expect(
 				generateCurl({ ...GET, headers: [{ name: "Cookie", value: "a=1" }] }).code

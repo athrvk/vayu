@@ -450,15 +450,34 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
 /** How the engine joins repeated `Cookie` rows into the one line it sends (#2788). */
 const COOKIE_SEPARATOR = "; ";
 
+/** `header_value_reaches_wire`: a value with a non-`std::isspace` character is sent. */
+const REACHES_WIRE = /[^ \t\n\v\f\r]/;
+/** RFC 9110 optional whitespace, space and tab: the edge `trim_optional_whitespace` strips. */
+const EDGE_WHITESPACE = /^[ \t]+|[ \t]+$/g;
+
+/**
+ * The one `Cookie` line the engine builds from the typed rows
+ * (`typed_cookie_value`, `engine/src/http/event_loop/curl_utils.cpp`): a row
+ * with nothing that reaches the wire is skipped, each other row is trimmed of
+ * its edge whitespace, and the rest are joined with "; ". Empty when no row
+ * is sent, in which case the engine writes no `Cookie` line at all.
+ */
+function typedCookieValue(rows: readonly string[]): string {
+	return rows
+		.filter((value) => REACHES_WIRE.test(value))
+		.map((value) => value.replace(EDGE_WHITESPACE, ""))
+		.join(COOKIE_SEPARATOR);
+}
+
 /**
  * Join repeated `Cookie` rows into one, leaving every other repeat alone.
  *
- * The engine sends the typed `Cookie` rows as a single "; "-joined line
- * (`typed_cookie_value`, `engine/src/http/event_loop/curl_utils.cpp`) while any
- * other repeated header goes out as separate lines. curl and HTTPie can repeat
- * a header, so they fold only this one - and need no note, because the folded
- * line is what Vayu sends. The line sits where the first `Cookie` row was and
- * keeps that row's spelling.
+ * The engine sends the typed `Cookie` rows as a single line
+ * (`typedCookieValue`) while any other repeated header goes out as separate
+ * lines. curl and HTTPie can repeat a header, so they fold only this one - and
+ * need no note, because the folded line is what Vayu sends. The line sits where
+ * the first `Cookie` row was and keeps that row's spelling; when no row reaches
+ * the wire there is no line.
  */
 export function foldRepeatedCookies(
 	headers: ReadonlyArray<[string, string]>
@@ -466,23 +485,20 @@ export function foldRepeatedCookies(
 	const isCookie = ([name]: [string, string]) => name.toLowerCase() === "cookie";
 	const first = headers.findIndex(isCookie);
 	if (first === -1) return [...headers];
-	const joined = headers
-		.filter(isCookie)
-		.map(([, value]) => value)
-		.join(COOKIE_SEPARATOR);
+	const joined = typedCookieValue(headers.filter(isCookie).map(([, value]) => value));
 	return headers.flatMap((row, index): Array<[string, string]> => {
 		if (!isCookie(row)) return [row];
-		return index === first ? [[row[0], joined]] : [];
+		return index === first && joined !== "" ? [[row[0], joined]] : [];
 	});
 }
 
 /**
  * Fold every header a client with one value per name cannot repeat into a single
  * entry, and say so. The entry sits where the name first appeared, keeps that
- * row's spelling and joins the values with ", " - `Cookie` with "; ", as the
- * engine's own folded record does - and the note names each name that was
- * joined, because Vayu sends those rows as separate lines - except `Cookie`,
- * which it sends as the same "; " join (issue #2788).
+ * row's spelling and joins the values with ", " - `Cookie` as the engine does
+ * (`typedCookieValue`) - and the note names each name that was joined, because
+ * Vayu sends those rows as separate lines - except `Cookie`, which it sends as
+ * the same "; " join (issue #2788).
  *
  * For `fetch`, `requests` and `Invoke-RestMethod`, whose header map is a
  * dictionary. curl and HTTPie repeat a header and fold only `Cookie`
@@ -501,18 +517,21 @@ export function foldRepeatedHeaders(
 	}
 
 	const notes: string[] = [];
-	const out = [...folded].map(([key, { name, values }]): [string, string] => {
-		if (values.length === 1) return [name, values[0]];
-		const separator = key === "cookie" ? COOKIE_SEPARATOR : ", ";
-		const sent =
-			key === "cookie"
+	const out: Array<[string, string]> = [];
+	for (const [key, { name, values }] of folded) {
+		const isCookie = key === "cookie";
+		if (values.length > 1) {
+			const separator = isCookie ? COOKIE_SEPARATOR : ", ";
+			const sent = isCookie
 				? "Vayu sends them joined the same way"
 				: "Vayu sends them as separate lines";
-		notes.push(
-			`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; ${sent}.`
-		);
-		return [name, values.join(separator)];
-	});
+			notes.push(
+				`${client} holds one value per header name, so the ${values.length} ${name} lines are joined into one with "${separator}"; ${sent}.`
+			);
+		}
+		const value = isCookie ? typedCookieValue(values) : values.join(", ");
+		if (!isCookie || value !== "") out.push([name, value]);
+	}
 	return { headers: out, notes };
 }
 
