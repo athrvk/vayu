@@ -2697,9 +2697,12 @@ json with_cookie_api_key (json headers, const json* auth, InsomniaCounts& counts
         !truthy (prop (&header, "enabled"))) {
             continue;
         }
-        const std::string existing =
-        trim_ascii_space (header.at ("value").get<std::string> ());
-        header["value"] = existing.empty () ? pair : existing + "; " + pair;
+        std::string joined = trim_ascii_space (header.at ("value").get<std::string> ());
+        if (!joined.empty ()) {
+            joined += "; ";
+        }
+        joined += pair;
+        header["value"] = std::move (joined);
         return headers;
     }
     headers.push_back ({ { "key", "Cookie" }, { "value", pair }, { "enabled", true } });
