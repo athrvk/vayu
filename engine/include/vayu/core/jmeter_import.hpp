@@ -24,7 +24,8 @@
  * The mapping (JMeter class -> Vayu element kind) is `docs/engine/elements.md`
  * read backwards: `HTTPSamplerProxy` becomes a request, `ThreadGroup` and
  * `TestPlan` flatten into the collection (Vayu has no thread-group concept -
- * a collection already runs every request once), and everything else JMeter
+ * a collection already runs every request once; a group's threads, ramp-up,
+ * duration and loops are counted as `ThreadGroup_profile`), and everything else JMeter
  * calls a "config element" - extractors, assertions, timers, controllers,
  * pre/post-processors - becomes the matching element kind, attached to
  * whichever request or folder its own `<hashTree>` scopes it under. A class

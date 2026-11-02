@@ -1039,7 +1039,7 @@ nlohmann::ordered_json meta_of_plan_with (const std::string& body) {
 // A refused element is one entry in the preview, not two: a parser that looked
 // at it tallies its own kind and the bare tag stays out; a tag no parser looked
 // at keeps the bare tag (#3190). Mutation check: restore the bare-tag tally
-// after `build_leaf_element` returns empty and each `EXPECT_FALSE` below reds.
+// after `build_leaf_elements` returns empty and each `EXPECT_FALSE` below reds.
 TEST (JmeterImport, ARefusedLeafIsTalliedOnce) {
     const nlohmann::ordered_json delayless =
     meta_of_plan_with (R"(<ConstantTimer testname="Pause"/><hashTree/>)");
@@ -1064,4 +1064,337 @@ TEST (JmeterImport, ARefusedLeafIsTalliedOnce) {
     const nlohmann::ordered_json unlooked =
     meta_of_plan_with (R"(<CookieManager testname="C"/><hashTree/>)");
     EXPECT_EQ (skipped_count (unlooked, "CookieManager"), 1);
+}
+
+namespace {
+
+/// The names the import attached to @p kind, in the order given.
+std::vector<std::string>
+skipped_names (const nlohmann::ordered_json& meta, const std::string& kind) {
+    std::vector<std::string> names;
+    for (const nlohmann::ordered_json& item : meta.at ("skipped")) {
+        if (item.at ("kind").get<std::string> () != kind || !item.contains ("names")) {
+            continue;
+        }
+        for (const nlohmann::ordered_json& name : item.at ("names")) {
+            names.push_back (name.get<std::string> ());
+        }
+    }
+    return names;
+}
+
+/// A thread group named "Users" carrying @p props, with @p members inside.
+std::string thread_group (const std::string& props,
+const std::string& members = "",
+const char* enabled        = "true") {
+    return std::string ("<ThreadGroup testname=\"Users\" enabled=\"") + enabled +
+    "\">" + props + "</ThreadGroup><hashTree>" + members + "</hashTree>";
+}
+
+std::string string_prop_xml (const char* name, const std::string& value) {
+    return std::string ("<stringProp name=\"") + name + "\">" + value + "</stringProp>";
+}
+
+/// The loop count JMeter nests under `ThreadGroup.main_controller`; @p prop is
+/// the property element, since JMeter writes a count as either a string or an
+/// int.
+std::string main_controller (const std::string& prop) {
+    return "<elementProp name=\"ThreadGroup.main_controller\" "
+           "elementType=\"LoopController\">" +
+    prop + "</elementProp>";
+}
+
+} // namespace
+
+// A thread group's threads, ramp-up, duration and loops are the run profile
+// the collection does not carry, so the import names them (#3190). Values are
+// read from `ThreadGroup.*` and the loop count under
+// `ThreadGroup.main_controller`, whether JMeter wrote it as a string or an
+// int. Mutation check: drop the `tally_thread_group_profile` call in
+// `dispatch_child` and this reds.
+TEST (JmeterImport, AThreadGroupsRunProfileIsTalliedWithItsValues) {
+    const nlohmann::ordered_json meta = meta_of_plan_with (
+    thread_group (string_prop_xml ("ThreadGroup.num_threads", "10") +
+    string_prop_xml ("ThreadGroup.ramp_time", "5") +
+    main_controller (R"(<intProp name="LoopController.loops">3</intProp>)")));
+    EXPECT_EQ (skipped_count (meta, "ThreadGroup_profile"), 1);
+    EXPECT_EQ (skipped_names (meta, "ThreadGroup_profile"),
+    (std::vector<std::string>{ "Users: 10 threads; ramp-up 5s; 3 loops" }));
+
+    const nlohmann::ordered_json as_string =
+    meta_of_plan_with (thread_group (string_prop_xml ("ThreadGroup.num_threads", "2") +
+    main_controller (R"(<stringProp name="LoopController.loops">1</stringProp>)")));
+    EXPECT_EQ (skipped_names (as_string, "ThreadGroup_profile"),
+    (std::vector<std::string>{ "Users: 2 threads; 1 loop" }));
+}
+
+// A duration counts only with the scheduler on, as in JMeter (a stale value
+// under an unticked scheduler is not the plan's intent), and an unbounded loop
+// reads "forever". A property that is a JMeter function call stays as written.
+// Mutation check: read `ThreadGroup.duration` without the scheduler flag and
+// the scheduler-off half reds.
+TEST (JmeterImport, AThreadGroupsDurationNeedsTheSchedulerAndForeverIsSpelledOut) {
+    const nlohmann::ordered_json scheduled = meta_of_plan_with (
+    thread_group (R"(<boolProp name="ThreadGroup.scheduler">true</boolProp>)" +
+    string_prop_xml ("ThreadGroup.duration", "60") +
+    string_prop_xml ("ThreadGroup.num_threads", "${__P(users,10)}") +
+    string_prop_xml ("ThreadGroup.ramp_time", "20") +
+    main_controller (R"(<intProp name="LoopController.loops">-1</intProp>)")));
+    EXPECT_EQ (skipped_names (scheduled, "ThreadGroup_profile"),
+    (std::vector<std::string>{
+    "Users: ${__P(users,10)} threads; ramp-up 20s; duration 60s; forever" }));
+
+    const nlohmann::ordered_json unscheduled = meta_of_plan_with (
+    thread_group (R"(<boolProp name="ThreadGroup.scheduler">false</boolProp>)" +
+    string_prop_xml ("ThreadGroup.duration", "60")));
+    EXPECT_FALSE (has_skipped_kind (unscheduled, "ThreadGroup_profile"));
+}
+
+// A group at JMeter's defaults has nothing for the user to set, so it is not
+// reported: no properties at all, or one thread making one pass (its ramp-up
+// is moot with a single thread). Mutation check: return the description
+// unconditionally from `thread_group_profile` and both groups red.
+TEST (JmeterImport, ADefaultThreadGroupIsNotReported) {
+    EXPECT_FALSE (
+    has_skipped_kind (meta_of_plan_with (thread_group ("")), "ThreadGroup_profile"));
+
+    const nlohmann::ordered_json explicit_defaults =
+    meta_of_plan_with (thread_group (string_prop_xml ("ThreadGroup.num_threads", "1") +
+    string_prop_xml ("ThreadGroup.ramp_time", "1") +
+    main_controller (R"(<stringProp name="LoopController.loops">1</stringProp>)")));
+    EXPECT_FALSE (has_skipped_kind (explicit_defaults, "ThreadGroup_profile"));
+}
+
+// One count per group, aggregated under the one kind with a name each; a
+// disabled group is not reported (it never ran in JMeter) and the samplers
+// inside a group still import. Mutation check: tally outside the per-group
+// call (once per kind) and the count of 2 reds.
+TEST (JmeterImport, EachThreadGroupIsCountedAndItsSamplersStillImport) {
+    const ImportParse parsed = parse_import (
+    plan_with (thread_group (string_prop_xml ("ThreadGroup.num_threads", "3"), sampler ("A")) +
+    thread_group (string_prop_xml ("ThreadGroup.num_threads", "7"), sampler ("B")) +
+    thread_group (string_prop_xml ("ThreadGroup.num_threads", "9"), sampler ("C"), "false")),
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "ThreadGroup_profile"), 2);
+    EXPECT_EQ (skipped_names (meta, "ThreadGroup_profile"),
+    (std::vector<std::string>{ "Users: 3 threads; 1 loop", "Users: 7 threads; 1 loop" }));
+    EXPECT_EQ (meta.at ("requestCount"), 2);
+}
+
+namespace {
+
+/// A request under the plan holding one @p tag element built from @p props.
+nlohmann::ordered_json sampler_scope_result (const char* tag, const std::string& props) {
+    const ImportParse parsed = parse_import (
+    plan_with (R"(<HTTPSamplerProxy testname="S"/><hashTree>)" + std::string ("<") +
+    tag + " testname=\"T\">" + props + "</" + tag + "><hashTree/></hashTree>"),
+    {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+const nlohmann::ordered_json& request_elements (const nlohmann::ordered_json& result) {
+    return first_request (result.at ("collections").at (0)).at ("elements");
+}
+
+} // namespace
+
+// Several patterns without Or all have to hold, so each is its own assertion
+// with the shared mode and Not; the Or case stays refused. Mutation check:
+// emit only `texts.front ()` and the size and `bar` expectations red.
+TEST (JmeterImport, EveryPatternOfAResponseAssertionBecomesAnAssertion) {
+    const nlohmann::ordered_json plain = response_assertion_plan (16, { "foo", "bar" });
+    const nlohmann::ordered_json& elements = request_elements (plain);
+    ASSERT_EQ (elements.size (), 2);
+    EXPECT_EQ (elements.at (0).at ("kind"), "assert.contains");
+    EXPECT_EQ (elements.at (0).at ("config").at ("text"), "foo");
+    EXPECT_EQ (elements.at (1).at ("config").at ("text"), "bar");
+    EXPECT_EQ (elements.at (1).at ("config").at ("mode"), "contains");
+    EXPECT_FALSE (has_skipped_kind (plain.at ("meta"), "ResponseAssertion_or"));
+
+    const nlohmann::ordered_json negated = response_assertion_plan (6, { "foo", "bar" });
+    ASSERT_EQ (request_elements (negated).size (), 2);
+    for (const nlohmann::ordered_json& element : request_elements (negated)) {
+        EXPECT_EQ (element.at ("config").at ("negate"), true);
+    }
+
+    const nlohmann::ordered_json either = response_assertion_plan (34, { "foo", "bar" });
+    EXPECT_FALSE (first_request (either.at ("collections").at (0)).contains ("elements"));
+    EXPECT_EQ (skipped_count (either.at ("meta"), "ResponseAssertion_or"), 1);
+}
+
+// A pattern the registry refuses drops only itself: its sibling still imports
+// and the refusal is counted once. Mutation check: validate the patterns as
+// one all-or-nothing list and the surviving `ok` reds.
+TEST (JmeterImport, OneBadPatternDoesNotTakeItsSiblingsWithIt) {
+    const nlohmann::ordered_json result =
+    response_assertion_plan (2, { "id(?=:)", "ok" });
+    const nlohmann::ordered_json& elements = request_elements (result);
+    ASSERT_EQ (elements.size (), 1);
+    EXPECT_EQ (elements.at (0).at ("config").at ("text"), "ok");
+    EXPECT_EQ (skipped_count (result.at ("meta"), "assert.contains_unmappable"), 1);
+}
+
+// A response-code assertion keeps its one `assert.status` listing every code.
+TEST (JmeterImport, SeveralResponseCodesStayOneStatusAssertion) {
+    const nlohmann::ordered_json result =
+    sampler_scope_result ("ResponseAssertion",
+    R"(<collectionProp name="Asserion.test_strings">)"
+    R"(<stringProp name="1">200</stringProp><stringProp name="2">201</stringProp>)"
+    R"(</collectionProp>)"
+    R"(<stringProp name="Assertion.test_field">Assertion.response_code</stringProp>)");
+    const nlohmann::ordered_json& elements = request_elements (result);
+    ASSERT_EQ (elements.size (), 1);
+    EXPECT_EQ (elements.at (0).at ("kind"), "assert.status");
+    EXPECT_EQ (elements.at (0).at ("config").at ("in"),
+    (nlohmann::ordered_json{ 200, 201 }));
+}
+
+namespace {
+
+std::string json_extractor_props (const std::string& names,
+const std::string& paths,
+const std::string& defaults = "",
+const std::string& matches  = "") {
+    return string_prop_xml ("JSONPostProcessor.referenceNames", names) +
+    string_prop_xml ("JSONPostProcessor.jsonPathExprs", paths) +
+    string_prop_xml ("JSONPostProcessor.defaultValues", defaults) +
+    string_prop_xml ("JSONPostProcessor.match_numbers", matches);
+}
+
+} // namespace
+
+// A JSON Extractor's `;`-separated lists are parallel: one extractor per
+// pair, the default and match number read by the same index. Mutation check:
+// take only the first segment of each list again and the size and `b`
+// expectations red.
+TEST (JmeterImport, EveryNamePathPairOfAJsonExtractorBecomesAnExtractor) {
+    const nlohmann::ordered_json result = sampler_scope_result (
+    "JSONPostProcessor", json_extractor_props ("a;b", "$.x;$.y", "d1", "2;-1"));
+    const nlohmann::ordered_json& elements = request_elements (result);
+    ASSERT_EQ (elements.size (), 2);
+    const nlohmann::ordered_json& first = elements.at (0).at ("config");
+    EXPECT_EQ (first.at ("variable"), "a");
+    EXPECT_EQ (first.at ("path"), "$.x");
+    EXPECT_EQ (first.at ("default"), "d1");
+    EXPECT_EQ (first.at ("matchNo"), 2);
+    const nlohmann::ordered_json& second = elements.at (1).at ("config");
+    EXPECT_EQ (second.at ("variable"), "b");
+    EXPECT_EQ (second.at ("path"), "$.y");
+    EXPECT_FALSE (second.contains ("default"));
+    EXPECT_EQ (second.at ("matchNo"), -1);
+    EXPECT_TRUE (result.at ("meta").at ("skipped").empty ());
+}
+
+// JMeter's lists are split the way Java's `String.split` does, so a trailing
+// `;` adds nothing, and a match number JMeter wrote as a string is honoured
+// (the old reader looked only at numeric properties and always used 1).
+// Mutation check: keep trailing empty segments and the trailing-`;` plan is
+// refused as unrecognised.
+TEST (JmeterImport, ATrailingSeparatorAddsNoExtractorAndAStringMatchNumberIsRead) {
+    const nlohmann::ordered_json result = sampler_scope_result (
+    "JSONPostProcessor", json_extractor_props ("a;", "$.x;", "", "0"));
+    const nlohmann::ordered_json& elements = request_elements (result);
+    ASSERT_EQ (elements.size (), 1);
+    EXPECT_EQ (elements.at (0).at ("config").at ("matchNo"), 0);
+}
+
+// Lists that cannot be paired (different lengths, an empty name or path
+// between separators) import nothing and are counted once, rather than
+// guessing which name goes with which path. Mutation check: pair by the
+// shorter list and the first case imports an extractor.
+TEST (JmeterImport, UnpairableExtractorListsAreCountedNotGuessedAt) {
+    for (const auto& [names, paths] : std::vector<std::pair<std::string, std::string>>{
+         { "a;b", "$.x" }, { "a", "$.x;$.y" }, { "a;;b", "$.x;$.y;$.z" }, { "", "" } }) {
+        const nlohmann::ordered_json result = sampler_scope_result (
+        "JSONPostProcessor", json_extractor_props (names, paths));
+        EXPECT_FALSE (first_request (result.at ("collections").at (0)).contains ("elements"))
+        << names << " / " << paths;
+        EXPECT_EQ (skipped_count (result.at ("meta"), "JSONPostProcessor_unrecognised"), 1)
+        << names << " / " << paths;
+    }
+}
+
+namespace {
+
+/// A setup or teardown group (@p tag) holding @p members, inside the test plan.
+std::string lifecycle_group (const char* tag, const std::string& members) {
+    return std::string ("<") + tag + " testname=\"Lifecycle\"/><hashTree>" +
+    members + "</hashTree>";
+}
+
+std::string script_element (const char* tag, const std::string& body) {
+    return std::string ("<") + tag + " testname=\"Script\">" +
+    string_prop_xml ("script", body) + "</" + tag + "><hashTree/>";
+}
+
+} // namespace
+
+// A setup/teardown group of samplers is not imported as requests (they would
+// run on every pass instead of once) and each sampler is counted, at any
+// depth, so the number is how many to rebuild by hand. An empty group is still
+// one loss. Mutation check: count the group as 1 again and the 3 reds; import
+// the samplers and `requestCount` reds.
+TEST (JmeterImport, ALifecycleGroupOfSamplersIsCountedPerSamplerNotImported) {
+    const ImportParse parsed = parse_import (
+    plan_with (lifecycle_group ("SetupThreadGroup",
+               sampler ("Login") + sampler ("Seed") +
+               controller ("TransactionController", "Inner", sampler ("Warm"))) +
+    lifecycle_group ("PostThreadGroup", sampler ("Cleanup"))),
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "SetupThreadGroup"), 3);
+    EXPECT_EQ (skipped_count (meta, "PostThreadGroup"), 1);
+    EXPECT_EQ (meta.at ("requestCount"), 0);
+    const nlohmann::ordered_json& collection = parsed.result.at ("collections").at (0);
+    EXPECT_TRUE (collection.at ("requests").empty ());
+    EXPECT_TRUE (collection.at ("children").empty ());
+
+    const nlohmann::ordered_json empty =
+    meta_of_plan_with (lifecycle_group ("SetupThreadGroup", ""));
+    EXPECT_EQ (skipped_count (empty, "SetupThreadGroup"), 1);
+}
+
+// The script a group carries imports as the lifecycle script; a sampler beside
+// it is still reported, and a scripted sampler that became the script is not.
+// Mutation check: return without tallying after the script imports and the
+// `Cleanup` count reds; stop subtracting `scripted_samplers` and the
+// script-only case reports a loss.
+TEST (JmeterImport, ALifecycleScriptImportsAndTheSamplersBesideItAreStillCounted) {
+    const ImportParse beside = parse_import (
+    plan_with (lifecycle_group ("PostThreadGroup",
+    script_element ("JSR223PostProcessor", "pm.environment.clear();") + sampler ("Cleanup"))),
+    {}, {});
+    ASSERT_TRUE (beside.ok ()) << beside.error;
+    const nlohmann::ordered_json& collection = beside.result.at ("collections").at (0);
+    ASSERT_EQ (collection.at ("elements").size (), 1);
+    EXPECT_EQ (collection.at ("elements").at (0).at ("kind"), "script.teardown");
+    EXPECT_EQ (skipped_count (beside.result.at ("meta"), "PostThreadGroup"), 1);
+
+    const ImportParse script_only = parse_import (
+    plan_with (lifecycle_group ("SetupThreadGroup", script_element ("JSR223Sampler", "x();"))),
+    {}, {});
+    ASSERT_TRUE (script_only.ok ()) << script_only.error;
+    EXPECT_EQ (script_only.result.at ("collections").at (0).at ("elements").size (), 1);
+    EXPECT_FALSE (has_skipped_kind (script_only.result.at ("meta"), "SetupThreadGroup"));
+}
+
+// With scripts not imported, a scripted sampler is one more thing left out.
+// An element switched off in JMeter is tallied once, by the walk that counts
+// the group, and the group is still one loss.
+TEST (JmeterImport, ALifecycleScriptThatIsNotImportedIsCountedAndADisabledSamplerOnce) {
+    ImportOptions without_scripts;
+    without_scripts.import_scripts = false;
+    const ImportParse parsed       = parse_import (
+    plan_with (lifecycle_group ("SetupThreadGroup",
+    script_element ("JSR223Sampler", "x();") + sampler ("Off", "false"))),
+    without_scripts, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const nlohmann::ordered_json& meta = parsed.result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "SetupThreadGroup"), 1);
+    EXPECT_EQ (skipped_count (meta, "HTTPSamplerProxy_disabled"), 1);
+    EXPECT_FALSE (parsed.result.at ("collections").at (0).contains ("elements"));
 }
