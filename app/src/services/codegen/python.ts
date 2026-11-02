@@ -44,7 +44,7 @@ function dictLiteral(entries: Array<[string, string]>, indent = "    "): string[
  * `None` filename is the one spelling that keeps it a field, with or without a
  * declared Content-Type.
  */
-function textPartEntry([key, value, contentType]: PreparedTextPart): string {
+function textPartEntry({ key, value, contentType }: PreparedTextPart): string {
 	const parts = [
 		"None",
 		pythonString(value),
@@ -149,17 +149,19 @@ export function generatePython(
 		const name = prepared.body.kind === "form-data" ? "files" : "data";
 		const entries =
 			prepared.body.kind === "form-data"
-				? prepared.body.fields.map(textPartEntry)
+				? prepared.body.parts.map((part) =>
+						part.kind === "file" ? filePartEntry(part) : textPartEntry(part)
+					)
 				: dictLiteral(prepared.body.fields);
-		if (prepared.body.kind === "form-data") {
-			// requests spells a file part as a tuple: (filename, fileobj, type).
-			// The handles are deliberately not closed - a pasted snippet is one
-			// call, and a `with` block per file would bury the request in
-			// scaffolding. Said out loud rather than left to be noticed.
-			entries.push(...prepared.body.files.map(filePartEntry));
-			if (prepared.body.files.length > 0) {
-				notes.push("File handles are opened inline and left for the interpreter to close.");
-			}
+		// requests spells a file part as a tuple: (filename, fileobj, type). The
+		// handles are deliberately not closed - a pasted snippet is one call, and
+		// a `with` block per file would bury the request in scaffolding. Said out
+		// loud rather than left to be noticed.
+		if (
+			prepared.body.kind === "form-data" &&
+			prepared.body.parts.some((p) => p.kind === "file")
+		) {
+			notes.push("File handles are opened inline and left for the interpreter to close.");
 		}
 		lines.push(`${name} = {`, ...entries, "}", "");
 		// `files=` is what makes requests send multipart; `data=` with a dict is

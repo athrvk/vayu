@@ -312,6 +312,68 @@ describe("form bodies", () => {
 	});
 
 	/**
+	 * The engine adds the parts to the multipart tree in row order (`attach_multipart`
+	 * in `curl_utils.cpp`), so a snippet that groups text before files sends a
+	 * different body than the editor shows (#3198).
+	 */
+	describe("part order", () => {
+		const interleaved: SnippetRequest = {
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: "first", value: "", type: "file", src: "/tmp/one.png" },
+					{ key: "middle", value: "text-value" },
+					{ key: "last", value: "", type: "file", src: "/tmp/two.png" },
+				],
+			},
+		};
+
+		/** The `first`, `middle`, `last` keys ordered by where each is written. */
+		function keyOrder(code: string): string[] {
+			return ["first", "middle", "last"]
+				.map((key) => ({ key, at: code.search(new RegExp(`\\b${key}\\b`)) }))
+				.sort((a, b) => a.at - b.at)
+				.map(({ key }) => key);
+		}
+
+		const generators = {
+			curl: generateCurl,
+			httpie: generateHttpie,
+			python: generatePython,
+			fetch: generateFetch,
+			powershell: generatePowerShell,
+		};
+
+		it.each(Object.entries(generators))(
+			"%s writes the parts in row order",
+			(_name, generate) => {
+				// Mutation check: emit the text parts before the files and `middle`
+				// moves to the front.
+				expect(keyOrder(generate(interleaved).code)).toEqual(["first", "middle", "last"]);
+			}
+		);
+
+		it("keeps the order when a file row is disabled between two text rows", () => {
+			const { code } = generateCurl({
+				...GET,
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "first", value: "1" },
+						{ key: "skipped", value: "", type: "file", src: "/tmp/x", enabled: false },
+						{ key: "middle", value: "", type: "file", src: "/tmp/m" },
+						{ key: "last", value: "3" },
+					],
+				},
+			});
+			expect(keyOrder(code)).toEqual(["first", "middle", "last"]);
+			expect(code).not.toContain("skipped");
+		});
+	});
+
+	/**
 	 * A text part that declares its own Content-Type (a Postman import keeps
 	 * one, #2539) is sent with it, so a snippet that dropped the type would
 	 * preview a request the wire does not send.

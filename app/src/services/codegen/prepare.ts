@@ -47,6 +47,7 @@ import { wireBodyContent } from "./wire-body";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
+	kind: "file";
 	key: string;
 	path: string;
 	fileName?: string;
@@ -56,14 +57,25 @@ export interface PreparedFilePart {
 /**
  * A multipart text part: its key and value, and the Content-Type it declares
  * for itself when the request sets one (#2539). A snippet that cannot express
- * the type still reads `[key, value]` and says so in a note.
+ * the type still writes the key and value and says so in a note.
  */
-export type PreparedTextPart = [key: string, value: string, contentType?: string];
+export interface PreparedTextPart {
+	kind: "text";
+	key: string;
+	value: string;
+	contentType?: string;
+}
+
+/** A multipart part, text or file. */
+export type PreparedPart = PreparedTextPart | PreparedFilePart;
 
 export type PreparedBody =
 	| { kind: "raw"; content: string }
 	| { kind: "binary"; path: string }
-	| { kind: "form-data"; fields: PreparedTextPart[]; files: PreparedFilePart[] }
+	// `parts` keeps the rows' order: the engine adds the parts to the multipart
+	// tree in row order, so a generator that groups text before files sends a
+	// different body (#3198).
+	| { kind: "form-data"; parts: PreparedPart[] }
 	| { kind: "urlencoded"; fields: Array<[string, string]> };
 
 /**
@@ -77,7 +89,9 @@ export function untypedTextPartNote(
 	client: string
 ): string | undefined {
 	if (body?.kind !== "form-data") return undefined;
-	const keys = body.fields.flatMap(([key, , contentType]) => (contentType ? [key] : []));
+	const keys = body.parts.flatMap((part) =>
+		part.kind === "text" && part.contentType ? [part.key] : []
+	);
 	if (keys.length === 0) return undefined;
 	return `${client} cannot set a text part's Content-Type: ${keys.join(", ")} ${pluralize(keys.length, "is", "are")} sent without the type the request declares.`;
 }
@@ -337,6 +351,27 @@ function binaryContentType(body: SnippetBody): string {
 	return declared ? declared : "application/octet-stream";
 }
 
+type BodyField = NonNullable<SnippetBody["fields"]>[number];
+
+function multipartPart(field: BodyField): PreparedPart {
+	if (field.type === "file") {
+		return {
+			kind: "file",
+			key: field.key,
+			path: field.src ?? "",
+			fileName: field.fileName,
+			contentType: field.contentType,
+		};
+	}
+	const declared = field.contentType?.trim();
+	return {
+		kind: "text",
+		key: field.key,
+		value: field.value,
+		...(declared ? { contentType: declared } : {}),
+	};
+}
+
 function normalizeBody(body: unknown): PreparedBody | undefined {
 	if (body === undefined || body === null) return undefined;
 	// A body sent as a bare string (nothing in the app does today, but the
@@ -356,32 +391,16 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 
 	if (shape.mode === "form-data" || shape.mode === "x-www-form-urlencoded") {
 		const enabled = (shape.fields ?? []).filter((f) => f.enabled !== false);
+		if (enabled.length === 0) return undefined;
 		// urlencoded has no file form on the wire, so a stray file row there is
 		// not a part any snippet could express - the engine refuses it too.
-		const isMultipart = shape.mode === "form-data";
-		const files: PreparedFilePart[] = isMultipart
-			? enabled
-					.filter((f) => f.type === "file")
-					.map((f) => ({
-						key: f.key,
-						path: f.src ?? "",
-						fileName: f.fileName,
-						contentType: f.contentType,
-					}))
-			: [];
-		const texts = enabled.filter((f) => !(isMultipart && f.type === "file"));
-		if (texts.length === 0 && files.length === 0) return undefined;
-		if (!isMultipart) {
+		if (shape.mode === "x-www-form-urlencoded") {
 			return {
 				kind: "urlencoded",
-				fields: texts.map((f): [string, string] => [f.key, f.value]),
+				fields: enabled.map((f): [string, string] => [f.key, f.value]),
 			};
 		}
-		const fields = texts.map((f): PreparedTextPart => {
-			const declared = f.contentType?.trim();
-			return declared ? [f.key, f.value, declared] : [f.key, f.value];
-		});
-		return { kind: "form-data", fields, files };
+		return { kind: "form-data", parts: enabled.map(multipartPart) };
 	}
 
 	if (!shape.content) return undefined;
@@ -406,10 +425,11 @@ function maskedBody(body: PreparedBody, mask: (text: string) => string): Prepare
 	}
 	return {
 		kind: "form-data",
-		fields: body.fields.map(([k, v, type]): PreparedTextPart =>
-			type ? [k, mask(v), type] : [k, mask(v)]
+		parts: body.parts.map((part): PreparedPart =>
+			part.kind === "text"
+				? { ...part, value: mask(part.value) }
+				: { ...part, path: mask(part.path) }
 		),
-		files: body.files.map((file) => ({ ...file, path: mask(file.path) })),
 	};
 }
 
