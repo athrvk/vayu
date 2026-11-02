@@ -526,6 +526,24 @@ describe("importNotices", () => {
 			expect(notices({ kind, count: 3 })).toEqual([{ tier: "action", text: many }]);
 		});
 
+		it("names the HTTP Request Defaults settings that reach no request, as a note", () => {
+			expect(notices({ kind: "HttpDefaults_unmapped", count: 1, names: ["path"] })).toEqual([
+				{
+					tier: "note",
+					text: "1 HTTP Request Defaults setting not imported (path) - set it on the requests themselves",
+				},
+			]);
+			expect(
+				notices({
+					kind: "HttpDefaults_unmapped",
+					count: 2,
+					names: ["connect timeout", "response timeout"],
+				})[0].text
+			).toBe(
+				"2 HTTP Request Defaults settings not imported (connect timeout, response timeout) - set them on the requests themselves"
+			);
+		});
+
 		it("puts the left-out samplers before the profile", () => {
 			const ordered = importNotices(
 				meta({

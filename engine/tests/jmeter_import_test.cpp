@@ -852,6 +852,81 @@ TEST (JmeterImport, ARawPostBodyStillWinsOverTheFormBody) {
     EXPECT_TRUE (request.at ("params").empty ());
 }
 
+/// A plan whose HTTP Request Defaults carry @p defaults_props (raw
+/// `<stringProp>` lines) above one sampler that names no domain of its own.
+nlohmann::ordered_json import_with_http_defaults (const std::string& defaults_props) {
+    const std::string plan = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="Defaults">
+)jmx" +
+    defaults_props + R"jmx(
+    </ConfigTestElement>
+    <hashTree/>
+    <HTTPSamplerProxy testname="List">
+      <stringProp name="HTTPSampler.path">/items</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/// HTTP Request Defaults name their host through variables as often as not;
+/// the `baseUrl` it becomes is rewritten like a sampler's own URL, not left
+/// as a literal `${host}` (#3191).
+TEST (JmeterImport, HttpDefaultsRewriteVariableReferencesInTheBaseUrl) {
+    const nlohmann::ordered_json result      = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">${host}</stringProp>
+      <stringProp name="HTTPSampler.protocol">https</stringProp>
+      <stringProp name="HTTPSampler.port">${port}</stringProp>)");
+    const nlohmann::ordered_json& collection = result.at ("collections").at (0);
+    EXPECT_EQ (collection.at ("variables").at ("baseUrl").at ("value"),
+    "https://{{host}}:{{port}}");
+    EXPECT_EQ (first_request (collection).at ("url"), "{{baseUrl}}/items");
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
+}
+
+/// The scheme of a defaults element falls back to `http` like a sampler's.
+TEST (JmeterImport, HttpDefaultsWithAnEmptyProtocolUseHttp) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol"></stringProp>
+      <stringProp name="HTTPSampler.port">8080</stringProp>)");
+    EXPECT_EQ (result.at ("collections").at (0).at ("variables").at ("baseUrl").at ("value"),
+    "http://api.example.com:8080");
+}
+
+/// A path or timeout on the defaults reaches no request: counted under one
+/// kind with each setting named, not dropped quietly (#3191).
+TEST (JmeterImport, HttpDefaultsPathAndTimeoutsAreTalliedByName) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.path">/v2</stringProp>
+      <stringProp name="HTTPSampler.connect_timeout">2000</stringProp>
+      <stringProp name="HTTPSampler.response_timeout">5000</stringProp>)");
+    const nlohmann::ordered_json& meta  = result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "HttpDefaults_unmapped"), 3);
+    const nlohmann::ordered_json& item = meta.at ("skipped").at (0);
+    EXPECT_EQ (item.at ("names"),
+    (nlohmann::ordered_json::array ({ "path", "connect timeout", "response timeout" })));
+    EXPECT_EQ (first_request (result.at ("collections").at (0)).at ("url"), "{{baseUrl}}/items");
+}
+
+/// JMeter's blank and `0` timeouts mean "none", so they leave nothing to count.
+TEST (JmeterImport, HttpDefaultsWithNoRealTimeoutOrPathTallyNothing) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.path"></stringProp>
+      <stringProp name="HTTPSampler.connect_timeout"></stringProp>
+      <stringProp name="HTTPSampler.response_timeout">0</stringProp>)");
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
+}
+
 /// A `HTTPFileArg` with no `File.paramname` names nothing a `form-data` field
 /// could key on - tallied rather than imported as a nameless row, the same
 /// "nothing dropped quietly" rule the sibling-tag fallback follows.

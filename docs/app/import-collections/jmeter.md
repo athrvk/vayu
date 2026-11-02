@@ -58,7 +58,7 @@ A `.jmx` file's `<hashTree>` children alternate a test element (`<ThreadGroup>`,
 | `ConstantThroughputTimer` | `timer.pacing` | JMeter's rate is samples/minute; `everyMs = 60000 / throughput`. `calcMode == 0` ("this thread only") is `perUser: true`, every other mode `perUser: false` |
 | `JSR223Pre/PostProcessor`, `BeanShellPre/PostProcessor` | `script.pre` / `script.post`, imported **disabled** | Groovy and BeanShell are not JavaScript; the element carries the source text as a comment when JMeter's own `script` property is empty |
 | `Arguments` (User Defined Variables) | collection variables | merged wherever the node sits in the tree (`TestPlan`, or a bare `Arguments` node) |
-| `ConfigTestElement` with `guiclass="HttpDefaultsGui"` (HTTP Request Defaults) | the collection's `baseUrl` variable | only when it names a domain |
+| `ConfigTestElement` with `guiclass="HttpDefaultsGui"` (HTTP Request Defaults) | the `baseUrl` variable of the folder or collection it sits in | only when it names a domain; `protocol://domain[:port]` with `${x}` rewritten to `{{x}}` and an empty protocol read as `http`. Its path and its connect and response timeouts reach no request and are counted, each by name, under `HttpDefaults_unmapped` ([why](#http-request-defaults)) |
 | `XPathExtractor`, `XPath2Extractor`, `CookieManager`, `CSVDataSet`, `AuthManager`, every listener (`ResultCollector` and its kin) | not mapped | counted by class name - see [Drop counting](#drop-counting) |
 
 ## Run profile
@@ -90,6 +90,15 @@ One `HTTPSamplerProxy` becomes one request:
 - **Body.** A sampler carrying `HTTPsampler.Files` → `{mode: "form-data", fields: [...]}`: one file field per `HTTPFileArg` (`File.paramname` as `key`, `File.path` as `src` - sent only once picked or allowed, since it names a file on the exporting machine, `File.mimetype` as `contentType` when present), with any `HTTPsampler.Arguments` folded in beside them as plain fields - a file has no query-string or raw-body form to take instead, so this is the one case where `HTTPSampler.DO_MULTIPART_POST` plays no part in the decision. Otherwise, `HTTPSampler.postBodyRaw` true and at least one argument → `{mode: "text", content: <the one argument's value>}`, whatever the method. Otherwise the `HTTPsampler.Arguments` go where JMeter sends them for the sampler's method ([issue #3191](https://github.com/athrvk/vayu/issues/3191); the method is trimmed and case-folded for the decision): `GET`, `DELETE`, `HEAD` and `OPTIONS` → `params` rows (enabled), which the import joins into the URL's query; every other method (`POST`, `PUT`, `PATCH`, a custom verb) → a body, `{mode: "x-www-form-urlencoded", fields: [...]}`, or `{mode: "form-data", ...}` when `HTTPSampler.DO_MULTIPART_POST` is true, and nothing in the query. A sampler with no arguments gets no body. The engine adds `Content-Type: application/x-www-form-urlencoded` itself for the first shape, and a `HeaderManager` `Content-Type` row wins over it.
 - **Headers.** A `HeaderManager` directly inside the sampler's own `<hashTree>` becomes the request's `headers` rows.
 - **Elements.** Every recognised extractor/assertion/timer/processor directly inside the sampler's own `<hashTree>` becomes a request-level element, in encounter order.
+
+## HTTP Request Defaults
+
+Variables are the only thing a defaults element hands down: `baseUrl`, read by a sampler that names no domain of its own (`{{baseUrl}}` + its path). The element's **path** and **connect/response timeouts** are counted instead of carried, as `HttpDefaults_unmapped` with one count per setting (`path`, `connect timeout`, `response timeout` under `names`), because neither can be inherited correctly:
+
+- A request has no inherited path. JMeter applies a default path only to a sampler whose own path is empty (a sampler's path replaces it, it is not a prefix), so folding it into `baseUrl` would prefix every other sampler wrongly; deciding per sampler needs JMeter's positional scoping, which this parser does not resolve (see [The tree walk](#the-tree-walk)).
+- A timeout is a per-request setting (`timeout`, milliseconds) with no folder or collection level, so honouring a default means stamping the sum of two JMeter timeouts onto each request in the element's scope, again by positional scoping. A blank or `0` timeout, JMeter's "none", is not counted.
+
+The preview shows it as a note: "2 HTTP Request Defaults settings not imported (path, connect timeout) - set them on the requests themselves".
 
 ## Drop counting
 

@@ -742,10 +742,45 @@ std::string base_url_of (const pugi::xml_node& el) {
     return base;
 }
 
-void merge_http_defaults (const pugi::xml_node& el, json& variables) {
-    if (const std::string base = base_url_of (el); !base.empty ()) {
-        variables["baseUrl"] = json{ { "value", base }, { "enabled", true } };
+/// Tally kind for HTTP Request Defaults settings a request cannot inherit: one
+/// count per setting, the setting named under `names`.
+constexpr std::string_view HTTP_DEFAULTS_KIND = "HttpDefaults_unmapped";
+
+/// The settings of an HTTP Request Defaults element that reach no request.
+/// Variables are all that propagates from a defaults element, and Vayu has no
+/// inherited path or timeout: stamping either onto the requests below would
+/// mean resolving JMeter's positional scope, which this parser does not
+/// attempt, and a default path only applies to a sampler with none of its own.
+/// A `0` timeout is JMeter's "none".
+void tally_unmapped_defaults (Ctx& ctx, const pugi::xml_node& el) {
+    std::vector<std::string> unmapped;
+    if (!trimmed (string_prop (el, "HTTPSampler.path")).empty ()) {
+        unmapped.emplace_back ("path");
     }
+    for (const auto& [property, name] :
+    { std::pair{ "HTTPSampler.connect_timeout", "connect timeout" },
+    std::pair{ "HTTPSampler.response_timeout", "response timeout" } }) {
+        if (const std::string timeout = trimmed (text_prop (el, property));
+        !timeout.empty () && timeout != "0") {
+            unmapped.emplace_back (name);
+        }
+    }
+    if (unmapped.empty ()) {
+        return;
+    }
+    ctx.tally.add (HTTP_DEFAULTS_KIND, static_cast<int> (unmapped.size ()));
+    ctx.tally.name_dropped (HTTP_DEFAULTS_KIND, unmapped);
+}
+
+/// An HTTP Request Defaults element: its `protocol://domain[:port]` becomes
+/// the `baseUrl` variable a sampler with no domain of its own reads, `${x}`
+/// references rewritten like any other value (#3191).
+void merge_http_defaults (Ctx& ctx, const pugi::xml_node& el, json& variables) {
+    if (const std::string base = base_url_of (el); !base.empty ()) {
+        variables["baseUrl"] =
+        json{ { "value", rewrite_variables (base) }, { "enabled", true } };
+    }
+    tally_unmapped_defaults (ctx, el);
 }
 
 // ---------------------------------------------------------------------------
@@ -1231,7 +1266,7 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
     }
     if (tag == "ConfigTestElement" &&
     std::string_view (el.attribute ("guiclass").value ()) == "HttpDefaultsGui") {
-        merge_http_defaults (el, sink.variables);
+        merge_http_defaults (ctx, el, sink.variables);
         return;
     }
     // Everything JMeter itself never asked this parser to model - listeners
