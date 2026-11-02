@@ -451,9 +451,92 @@ describe("importNotices", () => {
 		).map((n) => n.text);
 		expect(texts).toEqual([
 			"2 assert.status elements dropped (invalid)",
-			"1 IfController not imported",
+			"1 IfController imported as a plain folder - its looping or selection is not carried",
 			"3 ResultCollector not imported",
 		]);
+	});
+
+	it("says a folder-imported controller kept its members and lost only its logic", () => {
+		const texts = importNotices(
+			meta({
+				skipped: [
+					{ kind: "WhileController_unrecognised", count: 1 },
+					{ kind: "RecordingController_unrecognised", count: 2 },
+				],
+			})
+		).map((n) => n.text);
+		expect(texts).toEqual([
+			"1 WhileController imported as a plain folder - its looping or selection is not carried",
+			"2 RecordingController controllers imported as plain folders - their looping or selection is not carried",
+		]);
+	});
+
+	describe("a JMeter run profile and the samplers of a setUp or tearDown group (#3190)", () => {
+		const notices = (item: SkippedItem) => importNotices(meta({ skipped: [item] }));
+		const PROFILE = "Users: 10 threads; ramp-up 5s; duration 60s; 3 loops";
+
+		it("tells the user a thread group's run profile is theirs to set on the load test, as a note", () => {
+			expect(notices({ kind: "ThreadGroup_profile", count: 1, names: [PROFILE] })).toEqual([
+				{
+					tier: "note",
+					text: `1 thread group run profile not imported (${PROFILE}) - set the load, ramp-up and duration when you start the load test`,
+				},
+			]);
+		});
+
+		it("lists the groups by name, three at most, then how many more", () => {
+			const names = [
+				"A: 2 threads; 1 loop",
+				"B: 3 threads; forever",
+				"C: 4 threads; 2 loops",
+			];
+			expect(
+				notices({
+					kind: "ThreadGroup_profile",
+					count: 5,
+					names: [...names, "D: 5 threads; 1 loop", "E: 6 threads; 1 loop"],
+				})
+			).toEqual([
+				{
+					tier: "note",
+					text: `5 thread group run profiles not imported (${names.join(", ")}, +2 more) - set the load, ramp-up and duration when you start each load test`,
+				},
+			]);
+		});
+
+		it("still counts the profiles when the engine named none", () => {
+			expect(notices({ kind: "ThreadGroup_profile", count: 2 })[0].text).toBe(
+				"2 thread group run profiles not imported - set the load, ramp-up and duration when you start each load test"
+			);
+		});
+
+		it.each([
+			[
+				"SetupThreadGroup",
+				"1 setUp sampler not imported - a request runs on every pass, so send it from a setup script instead",
+				"3 setUp samplers not imported - a request runs on every pass, so send them from a setup script instead",
+			],
+			[
+				"PostThreadGroup",
+				"1 tearDown sampler not imported - a request runs on every pass, so send it from a teardown script instead",
+				"3 tearDown samplers not imported - a request runs on every pass, so send them from a teardown script instead",
+			],
+		])("counts the samplers %s left out, as an action", (kind, one, many) => {
+			expect(notices({ kind, count: 1 })).toEqual([{ tier: "action", text: one }]);
+			expect(notices({ kind, count: 3 })).toEqual([{ tier: "action", text: many }]);
+		});
+
+		it("puts the left-out samplers before the profile", () => {
+			const ordered = importNotices(
+				meta({
+					skipped: [
+						{ kind: "ThreadGroup_profile", count: 1, names: [PROFILE] },
+						{ kind: "SetupThreadGroup", count: 2 },
+					],
+				})
+			);
+			expect(ordered.map((n) => n.tier)).toEqual(["action", "note"]);
+		});
 	});
 
 	it("says a Postman protocol setting is kept, not dropped, now that cookies, headers and encoding apply (#1765)", () => {

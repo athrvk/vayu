@@ -4244,10 +4244,16 @@ says nothing is the defect this list exists to prevent, so a format with
 nothing to report answers `[]` rather than omitting the field. **A JMeter
 import's `kind` is not limited to this list** (issue #1518): a `.jmx` class
 this parser has no element-kind mapping for is counted under its own literal
-class name (`ThreadGroup`, `CookieManager`, ...), since JMeter's own class list
+class name (`CookieManager`, `CSVDataSet`, ...), since JMeter's own class list
 is open-ended - `ImportTally::items()` emits every kind it was given a count
 for, the enumerable ones first in the fixed order above, anything else after in
-first-encountered order. `meta.folderStrategy`
+first-encountered order. A JMeter `ThreadGroup` whose threads, ramp-up,
+duration or loops are not the defaults is counted as `ThreadGroup_profile`
+(one per group), and the item's `names` lists one line per group with the
+values as written, e.g. `Users: 10 threads; ramp-up 5s; 3 loops`, so a client
+can show what to set on the load run; a setUp or tearDown group is counted
+under `SetupThreadGroup` / `PostThreadGroup`, once per sampler left out
+(`docs/app/import-collections/jmeter.md`). `meta.folderStrategy`
 (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
 folders, since a document that declares no operation tags gets a tree it never
 spelled out.

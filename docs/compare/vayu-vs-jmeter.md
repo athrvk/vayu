@@ -60,7 +60,12 @@ element model, and so do:
   `OnceOnlyController`, `TransactionController`, `ThroughputController`).
   `SwitchController` imports as a plain folder, with its members and without a
   `control.switch`, because JMeter selects by list index or variable value and
-  the plan never declares the named cases that element needs.
+  the plan never declares the named cases that element needs. The other
+  controllers (Simple, While, ForEach, Random, Interleave, Random Order,
+  Runtime, Critical Section, Module, Include) import the same way, their
+  members in source order inside a folder; the looping or selection each one
+  performs in JMeter is not carried, and the import preview counts every
+  controller whose behaviour was lost.
 
 A class this importer has no mapping for (a listener, a cookie manager, a
 protocol Vayu's HTTP engine does not speak) is counted by its own class name
@@ -116,9 +121,10 @@ are things Vayu plans to catch up on:
 - **You need distributed load.** JMeter's controller-and-workers model drives a
   test from many machines. Vayu runs from one.
 - **Your `.jmx` plans lean on what the importer does not map** - a protocol
-  other than HTTP, distributed execution, a plugin sampler, `SwitchController`,
-  or a JSR223/BeanShell script (imported disabled, since Groovy and BeanShell
-  are not JavaScript). A plan built from the common element set (HTTP samplers,
+  other than HTTP, distributed execution, a plugin sampler, the looping or
+  selection of a `SwitchController`, While, ForEach, Random or Interleave
+  controller (the members import, the logic does not), or a JSR223/BeanShell
+  script (imported disabled, since Groovy and BeanShell are not JavaScript). A plan built from the common element set (HTTP samplers,
   the extractors, assertions, timers and the five translated logic controllers
   in the table above)
   imports and runs; a team fluent in JMeter's full plugin ecosystem is still

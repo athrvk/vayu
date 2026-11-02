@@ -315,7 +315,49 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: '1 "any of" assertion not imported',
 		many: '{n} "any of" assertions not imported',
 	},
+	// A note: every request imports and a Send or collection run is unaffected;
+	// only a load test would run with other load than the plan asked for, and the
+	// user sets that when starting one. The engine names one line per group under
+	// `names`, parts joined by ";" because the clause below is comma-separated.
+	ThreadGroup_profile: {
+		tier: "note",
+		one: "1 thread group run profile not imported{names} - set the load, ramp-up and duration when you start the load test",
+		many: "{n} thread group run profiles not imported{names} - set the load, ramp-up and duration when you start each load test",
+	},
+	// The count is samplers left out at any depth, not groups. A request runs on
+	// every pass and a setUp or tearDown sampler once, so the sampler is not
+	// imported as a request: the user rebuilds it in the script that runs once.
+	SetupThreadGroup: {
+		tier: "action",
+		one: "1 setUp sampler not imported - a request runs on every pass, so send it from a setup script instead",
+		many: "{n} setUp samplers not imported - a request runs on every pass, so send them from a setup script instead",
+	},
+	PostThreadGroup: {
+		tier: "action",
+		one: "1 tearDown sampler not imported - a request runs on every pass, so send it from a teardown script instead",
+		many: "{n} tearDown samplers not imported - a request runs on every pass, so send them from a teardown script instead",
+	},
 };
+
+/** The JMeter classes the engine imports as a folder (`is_folder_controller`). */
+const JMETER_FOLDER_CONTROLLERS: ReadonlySet<string> = new Set([
+	"LoopController",
+	"IfController",
+	"OnceOnlyController",
+	"SwitchController",
+	"TransactionController",
+	"ThroughputController",
+	"WhileController",
+	"ForeachController",
+	"RandomController",
+	"InterleaveControl",
+	"RandomOrderController",
+	"RunTime",
+	"CriticalSectionController",
+	"ModuleController",
+	"IncludeController",
+	"RecordingController",
+]);
 
 /**
  * A kind with no entry - a JMeter class name, open-ended by nature (issue
@@ -336,6 +378,15 @@ function copyOf(kind: SkippedItem["kind"]): Copy {
 		};
 	}
 	const name = kind.endsWith("_unrecognised") ? kind.slice(0, -"_unrecognised".length) : kind;
+	// A logic controller imports as a folder holding its members; what is lost
+	// is the looping or selection it did, not the requests inside it.
+	if (kind.endsWith("_unrecognised") && JMETER_FOLDER_CONTROLLERS.has(name)) {
+		return {
+			tier: "note",
+			one: `1 ${name} imported as a plain folder - its looping or selection is not carried`,
+			many: `{n} ${name} controllers imported as plain folders - their looping or selection is not carried`,
+		};
+	}
 	return { tier: "note", one: `1 ${name} not imported`, many: `{n} ${name} not imported` };
 }
 
