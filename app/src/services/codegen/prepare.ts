@@ -26,12 +26,17 @@ import {
 	type SnippetBody,
 	type SnippetRequest,
 } from "./types";
-import { substitutePathVariables } from "@/modules/request-builder/utils/path-variables";
+import {
+	mapOutsideTokens,
+	maskTokens,
+	substitutePathVariables,
+} from "@/modules/request-builder/utils/path-variables";
 import {
 	encodeAtUrlComponent,
 	encodeHost,
 	encodeQueryComponent,
 	resolveUrlTemplate,
+	splitUrlUserInfo,
 } from "@/modules/request-builder/utils/query-encoding";
 import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
@@ -84,7 +89,8 @@ export interface PreparedRequest {
 	 * Basic credentials stay structured instead of being pre-encoded: curl says
 	 * this with `-u` and never sees the base64, while fetch has to build the
 	 * header itself. Encoding here would force curl to render a blob no reader
-	 * can check.
+	 * can check. The URL's own `user:pass@` lands here too, so no target's URL
+	 * carries it.
 	 */
 	basicAuth: { username: string; password: string } | null;
 	body: PreparedBody | undefined;
@@ -123,6 +129,55 @@ function unreproducibleAuthName(mode: string): string {
 function asString(value: unknown): string {
 	return typeof value === "string" ? value : "";
 }
+
+const PERCENT_ESCAPES = /(?:%[0-9A-Fa-f]{2})+/g;
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * One half of a URL's user info as libcurl decodes it before building the
+ * Basic header: a valid `%XX` run is read as UTF-8 bytes, a malformed escape
+ * (`%zz`) stays literal, and a component whose escapes are not UTF-8 is left
+ * exactly as written. A `{{token}}` is kept whole.
+ */
+function percentDecodeCredential(text: string): string {
+	let valid = true;
+	const decoded = mapOutsideTokens(text, (plain) =>
+		plain.replace(PERCENT_ESCAPES, (run) => {
+			const bytes = Uint8Array.from(run.match(/%(..)/g) ?? [], (escape) =>
+				parseInt(escape.slice(1), 16)
+			);
+			try {
+				return strictUtf8.decode(bytes);
+			} catch {
+				valid = false;
+				return run;
+			}
+		})
+	);
+	return valid ? decoded : text;
+}
+
+/** A URL's user info: the credentials it sends, and the password as written. */
+interface UrlCredentials {
+	username: string;
+	password: string;
+	writtenPassword: string;
+}
+
+/** Split at the first `:` outside a token; a user info with no `:` has an empty password. */
+function parseUserInfo(userInfo: string): UrlCredentials | null {
+	if (userInfo === "") return null;
+	const colon = maskTokens(userInfo).indexOf(":");
+	const writtenPassword = colon === -1 ? "" : userInfo.slice(colon + 1);
+	return {
+		username: percentDecodeCredential(colon === -1 ? userInfo : userInfo.slice(0, colon)),
+		password: percentDecodeCredential(writtenPassword),
+		writtenPassword,
+	};
+}
+
+const URL_CREDENTIALS_DROPPED_NOTE =
+	"The URL's credentials were dropped because the request's own authorization wins, as Vayu sends.";
 
 /**
  * A secret as it can appear in a URL: as written, as substituted into URL text
@@ -434,6 +489,12 @@ export function timeoutSeconds(ms: number): number {
  * appending both made a snippet send two `Authorization` lines where Vayu sends
  * one. A query-located API key is a URL parameter, not a header, and is never
  * skipped.
+ *
+ * The URL's `user:pass@` is taken off the URL for every target. It is Basic
+ * credentials only where nothing else authorizes the request: libcurl sends it
+ * unless an `Authorization` header is set, which any header-writing auth or a
+ * typed one is, and then it is dropped with a note. The password is masked as a
+ * secret whether it is kept or not.
  */
 export function prepareRequest(
 	request: SnippetRequest,
@@ -454,12 +515,22 @@ export function prepareRequest(
 		(text) => text,
 		{ encode }
 	);
+	const userInfo = splitUrlUserInfo(url);
+	const urlCredentials = userInfo ? parseUserInfo(userInfo.userInfo) : null;
+	if (userInfo) url = userInfo.url;
 	const headers = headerPairs(request.headers);
 	let basicAuth: { username: string; password: string } | null = null;
 
 	const auth = request.auth;
 	const mode = auth ? asString(auth.mode) : "";
-	const masker = createSecretMasker(options.secrets, options.mask, apiKeyHeaderName(auth));
+	const masker = createSecretMasker(
+		[
+			...(options.secrets ?? []),
+			...(urlCredentials ? [urlCredentials.password, urlCredentials.writtenPassword] : []),
+		],
+		options.mask,
+		apiKeyHeaderName(auth)
+	);
 	switch (mode) {
 		case "":
 		case "none":
@@ -492,8 +563,17 @@ export function prepareRequest(
 		}
 		default:
 			notes.push(
-				`This request uses ${unreproducibleAuthName(mode)}, so the snippet carries no credentials.`
+				`This request uses ${unreproducibleAuthName(mode)}, so the snippet carries no credentials from it.`
 			);
+	}
+
+	if (urlCredentials) {
+		// OAuth 2.0 writes `Authorization` at send time, so it wins though no
+		// header is in the snippet.
+		const requestAuthWins =
+			basicAuth !== null || mode === "oauth2" || carriesHeader(headers, "Authorization");
+		if (requestAuthWins) notes.push(URL_CREDENTIALS_DROPPED_NOTE);
+		else basicAuth = { username: urlCredentials.username, password: urlCredentials.password };
 	}
 
 	const body = normalizeBody(request.body);

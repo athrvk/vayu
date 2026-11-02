@@ -29,6 +29,7 @@ import {
 	generatePowerShell,
 	generatePython,
 	generateSnippet,
+	type CodeTargetId,
 	type SnippetRequest,
 } from "./index";
 import { parseCommand } from "@/services/curl/parseCurl";
@@ -954,22 +955,31 @@ function httpieItems(code: string): string[] {
 /**
  * Parse an HTTPie request item the way HTTPie does.
  *
- * A backslash escapes the character after it when that character is special,
- * and the separator is then the *earliest* one still standing, longest first at
- * that position. Returning the separator is the point: an item that parses with
- * `=@` instead of `=` is a file read, and one that parses with `==` is a query
- * parameter, both with a perfectly innocent-looking key and value.
+ * Mirrors HTTPie's `KeyValueArgType.tokenize`: the specials are `:`, `=` and
+ * `@` only. A backslash before one is consumed as its escape; a backslash
+ * before anything else, another backslash included, is kept with that character
+ * as two literals, so pairs are consumed left to right. The separator is then
+ * the *earliest* unescaped one, longest first at that position. Returning the
+ * separator is the point: an item that parses with `=@` instead of `=` is a
+ * file read, and one that parses with `==` is a query parameter, both with a
+ * perfectly innocent-looking key and value.
  */
 function parseHttpieItem(item: string): { key: string; value: string; separator: string } {
-	const special = new Set(["\\", ":", "=", "@"]);
+	const special = new Set([":", "=", "@"]);
 	const characters: Array<{ char: string; escaped: boolean }> = [];
 	for (let i = 0; i < item.length; i++) {
-		if (item[i] === "\\" && special.has(item[i + 1] ?? "")) {
-			characters.push({ char: item[i + 1], escaped: true });
-			i++;
-		} else {
+		if (item[i] !== "\\") {
 			characters.push({ char: item[i], escaped: false });
+			continue;
 		}
+		const next = item[i + 1] ?? "";
+		i++;
+		if (special.has(next)) {
+			characters.push({ char: next, escaped: true });
+			continue;
+		}
+		characters.push({ char: "\\", escaped: false });
+		if (next) characters.push({ char: next, escaped: false });
 	}
 	// An escaped character occupies one position in both strings, so an index
 	// found in `visible` addresses `literal` unchanged.
@@ -1061,17 +1071,82 @@ describe("a form value is never read as a local file", () => {
 		});
 	}
 
-	it("HTTPie keeps a backslash instead of letting it escape the next character", () => {
-		const { code } = generateHttpie({
+	// A backslash is not special to HTTPie, so it goes out as written: doubling it
+	// would send two (#3197).
+	const BACKSLASH_VALUES: Array<[string, string]> = [
+		["one backslash", String.raw`C:\temp`],
+		["two backslashes", String.raw`C:\\temp`],
+		["a trailing backslash", "C:\\temp\\"],
+		["an even run before a separator", String.raw`a\\=b`],
+	];
+
+	for (const [name, value] of BACKSLASH_VALUES) {
+		it(`HTTPie sends a form value with ${name} unchanged`, () => {
+			const { code, notes } = generateHttpie({
+				...GET,
+				method: "POST",
+				body: { mode: "form-data", fields: [{ key: "path", value }] },
+			});
+			const [item] = httpieItems(code);
+			expect(item).toBe(`path=${value}`);
+			expect(parseHttpieItem(item)).toEqual({ key: "path", value, separator: "=" });
+			expect(notes.filter((note) => note.includes("backslash"))).toEqual([]);
+		});
+	}
+
+	it("HTTPie keeps an even run of backslashes in a key before an escaped separator", () => {
+		const key = String.raw`a\\=b`;
+		const { code, notes } = generateHttpie({
 			...GET,
 			method: "POST",
-			body: { mode: "form-data", fields: [{ key: "path", value: String.raw`C:\=temp` }] },
+			body: { mode: "x-www-form-urlencoded", fields: [{ key, value: "v" }] },
 		});
-		expect(parseHttpieItem(httpieItems(code)[0])).toEqual({
-			key: "path",
-			value: String.raw`C:\=temp`,
-			separator: "=",
+		expect(parseHttpieItem(httpieItems(code)[0])).toEqual({ key, value: "v", separator: "=" });
+		expect(notes).toEqual([]);
+	});
+
+	const INEXPRESSIBLE: Array<[string, Array<{ key: string; value: string }>]> = [
+		["a value", [{ key: "path", value: String.raw`C:\=temp` }]],
+		["a value before a colon", [{ key: "path", value: String.raw`a\:b` }]],
+		["a key", [{ key: String.raw`a\=b`, value: "v" }]],
+		["a key that ends in one, before the separator HTTPie reads", [{ key: "a\\", value: "v" }]],
+		["an odd run of three", [{ key: "path", value: String.raw`a\\\@b` }]],
+		[
+			"several fields, said once",
+			[
+				{ key: "one", value: String.raw`a\=b` },
+				{ key: "two", value: String.raw`c\@d` },
+			],
+		],
+	];
+
+	for (const [name, fields] of INEXPRESSIBLE) {
+		it(`HTTPie says a backslash before a separator in ${name} cannot be expressed`, () => {
+			const { notes } = generateHttpie({
+				...GET,
+				method: "POST",
+				body: { mode: "x-www-form-urlencoded", fields },
+			});
+			expect(
+				notes.filter((note) => note.startsWith("HTTPie cannot express a backslash"))
+			).toHaveLength(1);
 		});
+	}
+
+	it("HTTPie says it for a file part's name too", () => {
+		const { notes } = generateHttpie({
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: String.raw`up\@load`, value: "", type: "file", src: "/data/a.bin" },
+				],
+			},
+		});
+		expect(notes.some((note) => note.startsWith("HTTPie cannot express a backslash"))).toBe(
+			true
+		);
 	});
 
 	it("PowerShell says -Form needs 6.1+, and says it only where -Form is used", () => {
@@ -1933,6 +2008,216 @@ describe("a header value fetch and requests cannot send as Vayu does", () => {
 			expect(generate(withHeader("नमस्ते")).notes).toEqual([]);
 			expect(generate(withHeader("café")).notes).toEqual([]);
 		}
+	});
+});
+
+/**
+ * Credentials typed into the URL (#3197). libcurl percent-decodes `user:pass@`
+ * and sends it as Basic unless an `Authorization` header is set, so every
+ * target carries it as the Basic credentials it already knows, keeps it out of
+ * its URL (Node's fetch throws on one) and masks the password.
+ */
+describe("credentials in the URL", () => {
+	const spellings: Record<CodeTargetId, (user: string, password: string) => string> = {
+		curl: (user, password) => `-u '${user}:${password}'`,
+		httpie: (user, password) => `-a '${user}:${password}'`,
+		python: (user, password) => `auth = ("${user}", "${password}")`,
+		fetch: (user, password) => `btoa("${user}:${password}")`,
+		powershell: (user, password) => `GetBytes('${user}:${password}')`,
+	};
+	const at = (userInfo: string, rest: Partial<SnippetRequest> = {}): SnippetRequest => ({
+		...GET,
+		url: `https://${userInfo}@api.example.com/v1/users`,
+		...rest,
+	});
+
+	for (const target of CODE_TARGETS) {
+		describe(target.label, () => {
+			it("sends the decoded user info as Basic and leaves it out of the URL", () => {
+				const { code, notes } = target.generate(at("user:p%40ss"));
+				expect(code).toContain(spellings[target.id]("user", "p@ss"));
+				expect(code).toContain("https://api.example.com/v1/users");
+				expect(code).not.toContain("p%40ss");
+				expect(code).not.toContain("@api.example");
+				expect(notes).toEqual([]);
+			});
+
+			it("masks the password, written either way, when hide-secrets is on", () => {
+				for (const written of ["p%40ss", "p@ss"]) {
+					const { code, masked } = target.generate(at(`user:${written}`), {
+						mask: true,
+						secrets: [],
+					});
+					expect(code).toContain(spellings[target.id]("user", SECRET_PLACEHOLDER));
+					expect(code).not.toContain("p@ss");
+					expect(code).not.toContain("p%40ss");
+					expect(masked).toBe(true);
+				}
+			});
+
+			it("sends a username alone with an empty password", () => {
+				const { code } = target.generate(at("user"));
+				expect(code).toContain(spellings[target.id]("user", ""));
+				expect(code).not.toContain("@api.example");
+			});
+
+			it("sends a password alone with an empty username", () => {
+				const { code } = target.generate(at(":secret"));
+				expect(code).toContain(spellings[target.id]("", "secret"));
+			});
+
+			it("leaves a malformed escape literal, as curl does", () => {
+				const { code } = target.generate(at("user:50%zz%41"));
+				expect(code).toContain(spellings[target.id]("user", "50%zzA"));
+			});
+
+			it("leaves a component whose escapes are not UTF-8 as written", () => {
+				const { code } = target.generate(at("user:%FF"));
+				expect(code).toContain(spellings[target.id]("user", "%FF"));
+			});
+
+			it("splits at the last @ of the authority, so an @ in the password is the password's", () => {
+				const { code } = target.generate(at("user:p@ss"));
+				expect(code).toContain(spellings[target.id]("user", "p@ss"));
+				expect(code).toContain("https://api.example.com/v1/users");
+			});
+
+			it("keeps the credentials of a templated URL as the templated Basic fields", () => {
+				const { code } = target.generate({
+					...GET,
+					url: "https://{{user}}:{{pass}}@{{host}}/v1/users",
+				});
+				expect(code).toContain(spellings[target.id]("{{user}}", "{{pass}}"));
+				expect(code).toContain("https://{{host}}/v1/users");
+			});
+
+			it("masks a secret variable that is the password", () => {
+				const { code, masked } = target.generate(at("user:hunter2"), {
+					mask: true,
+					secrets: ["hunter2"],
+				});
+				expect(code).not.toContain("hunter2");
+				expect(masked).toBe(true);
+			});
+
+			it("drops them for a typed Authorization header, and says so", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", { headers: { Authorization: "Token typed" } })
+				);
+				expect(code).toContain("Token typed");
+				expect(code).not.toContain("urlpass");
+				expect(code).not.toContain("@api.example");
+				expect(notes).toEqual([
+					"The URL's credentials were dropped because the request's own authorization wins, as Vayu sends.",
+				]);
+			});
+
+			it("drops them for bearer auth, which writes the header", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", { auth: { mode: "bearer", token: "t0ken" } })
+				);
+				expect(code).toContain("Bearer t0ken");
+				expect(code).not.toContain("urlpass");
+				expect(notes.join(" ")).toContain("URL's credentials were dropped");
+			});
+
+			it("drops them for basic auth, which Vayu sends over the URL's", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", {
+						auth: { mode: "basic", username: "ada", password: "authpass" },
+					})
+				);
+				expect(code).toContain(spellings[target.id]("ada", "authpass"));
+				expect(code).not.toContain("urlpass");
+				expect(notes.join(" ")).toContain("URL's credentials were dropped");
+			});
+
+			it("drops them for OAuth 2.0, whose token the engine writes as Authorization", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", { auth: { mode: "oauth2", config: {} } })
+				);
+				expect(code).not.toContain("urlpass");
+				expect(notes.join(" ")).toContain("URL's credentials were dropped");
+			});
+
+			it("keeps them beside an API key that is not the Authorization header", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", {
+						auth: { mode: "apikey", key: "X-Key", value: "k", in: "header" },
+					})
+				);
+				expect(code).toContain(spellings[target.id]("user", "urlpass"));
+				expect(code).toContain("X-Key");
+				expect(notes).toEqual([]);
+			});
+
+			it("drops them for an API key written as the Authorization header", () => {
+				const { code, notes } = target.generate(
+					at("user:urlpass", {
+						auth: { mode: "apikey", key: "Authorization", value: "k", in: "header" },
+					})
+				);
+				expect(code).not.toContain("urlpass");
+				expect(notes.join(" ")).toContain("URL's credentials were dropped");
+			});
+
+			it("keeps them beside an API key in the query", () => {
+				const { code } = target.generate(
+					at("user:urlpass", {
+						auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+					})
+				);
+				expect(code).toContain(spellings[target.id]("user", "urlpass"));
+				expect(code).toContain("https://api.example.com/v1/users?k=v");
+			});
+
+			it("keeps them under a mode Vayu does not send, as libcurl does", () => {
+				const { code } = target.generate(
+					at("user:urlpass", { auth: { mode: "hawk", config: {} } })
+				);
+				expect(code).toContain(spellings[target.id]("user", "urlpass"));
+			});
+		});
+	}
+
+	it("reads an @ in the path or the query as no user info", () => {
+		for (const url of ["https://api.example.com/a@b", "https://api.example.com/?e=a@b"]) {
+			const { code, notes } = generateCurl({ ...GET, url });
+			expect(code).not.toContain("-u ");
+			expect(code).toContain("@b");
+			expect(notes).toEqual([]);
+		}
+	});
+
+	it("ends the authority at ? and #, so an @ after them is not user info", () => {
+		for (const url of ["https://api.example.com?e=a@b", "https://api.example.com#a@b"]) {
+			expect(generateCurl({ ...GET, url }).code).not.toContain("-u ");
+		}
+	});
+
+	it("does not split on a token that holds an @ or a colon", () => {
+		const { code } = generateCurl({ ...GET, url: "https://{{a:b@c}}/v1" });
+		expect(code).not.toContain("-u ");
+		expect(code).toContain("https://{{a:b@c}}/v1");
+	});
+
+	it("leaves a URL with no scheme alone", () => {
+		expect(generateCurl({ ...GET, url: "user:pass@api.example.com/v1" }).code).not.toContain(
+			"-u "
+		);
+	});
+
+	it("does not read a :// inside the query of a scheme-less URL as an authority", () => {
+		const url = "example.com/cb?u=https://bob@host/x";
+		const { code } = generateCurl({ ...GET, url });
+		expect(code).not.toContain("-u ");
+		expect(code).toContain("bob@host");
+	});
+
+	it("sends no credentials for an empty user info", () => {
+		const { code } = generateCurl({ ...GET, url: "https://@api.example.com/v1" });
+		expect(code).not.toContain("-u ");
+		expect(code).toContain("https://api.example.com/v1");
 	});
 });
 
