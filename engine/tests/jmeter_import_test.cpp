@@ -761,6 +761,97 @@ TEST (JmeterImport, FileAndArgumentMixFoldsIntoOneFormDataBody) {
     EXPECT_FALSE (body.at ("fields").at (1).contains ("type"));
 }
 
+/// One sampler on @p method, with @p extra_props (raw `<boolProp>` lines) and
+/// two arguments, `a=1` and `b=two words`, imported on its own.
+nlohmann::ordered_json import_sampler_with_arguments (const std::string& method,
+const std::string& extra_props = "") {
+    const std::string plan = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Submit">
+      <stringProp name="HTTPSampler.domain">example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol">https</stringProp>
+      <stringProp name="HTTPSampler.path">/submit</stringProp>
+      <stringProp name="HTTPSampler.method">)jmx" +
+    method + "</stringProp>\n" + extra_props + R"jmx(
+      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="a" elementType="HTTPArgument">
+            <stringProp name="Argument.name">a</stringProp>
+            <stringProp name="Argument.value">1</stringProp>
+          </elementProp>
+          <elementProp name="b" elementType="HTTPArgument">
+            <stringProp name="Argument.name">b</stringProp>
+            <stringProp name="Argument.value">two words</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return first_request (parsed.result.at ("collections").at (0));
+}
+
+/// JMeter sends a POST's arguments as the form body, not the query (#3191).
+/// Before, they were `params` rows and so joined into the URL.
+TEST (JmeterImport, APostsArgumentsAreAFormBodyAndNotAQuery) {
+    for (const char* method : { "POST", "PUT", "PATCH", " post " }) {
+        const nlohmann::ordered_json request = import_sampler_with_arguments (method);
+        EXPECT_EQ (request.at ("url"), "https://example.com/submit") << method;
+        EXPECT_TRUE (request.at ("params").empty ()) << method;
+        const nlohmann::ordered_json& body = request.at ("body");
+        EXPECT_EQ (body.at ("mode"), "x-www-form-urlencoded") << method;
+        ASSERT_EQ (body.at ("fields").size (), 2u) << method;
+        const nlohmann::ordered_json& second = body.at ("fields").at (1);
+        EXPECT_EQ (body.at ("fields").at (0).at ("key"), "a");
+        EXPECT_EQ (body.at ("fields").at (0).at ("value"), "1");
+        EXPECT_EQ (second.at ("key"), "b");
+        EXPECT_EQ (second.at ("value"), "two words");
+        EXPECT_TRUE (second.at ("enabled").get<bool> ());
+    }
+}
+
+/// The methods JMeter sends no body for keep the arguments in the query,
+/// whatever the case the plan spelled the method in.
+TEST (JmeterImport, ArgumentsOfAMethodWithNoBodyStayInTheQuery) {
+    for (const char* method : { "GET", "DELETE", "HEAD", "OPTIONS", "delete", " get " }) {
+        const nlohmann::ordered_json request = import_sampler_with_arguments (method);
+        EXPECT_EQ (request.at ("url"), "https://example.com/submit?a=1&b=two%20words")
+        << method;
+        EXPECT_EQ (request.at ("params").size (), 2u) << method;
+        EXPECT_EQ (request.at ("body").at ("mode"), "none") << method;
+    }
+}
+
+/// `HTTPSampler.DO_MULTIPART_POST` picks multipart for a body method, and
+/// means nothing for one with no body.
+TEST (JmeterImport, DoMultipartPostMakesTheArgumentsAFormDataBody) {
+    const char* flag = R"(<boolProp name="HTTPSampler.DO_MULTIPART_POST">true</boolProp>)";
+    const nlohmann::ordered_json post = import_sampler_with_arguments ("POST", flag);
+    EXPECT_EQ (post.at ("body").at ("mode"), "form-data");
+    EXPECT_EQ (post.at ("body").at ("fields").size (), 2u);
+    EXPECT_TRUE (post.at ("params").empty ());
+    EXPECT_EQ (post.at ("url"), "https://example.com/submit");
+
+    const nlohmann::ordered_json get = import_sampler_with_arguments ("GET", flag);
+    EXPECT_EQ (get.at ("body").at ("mode"), "none");
+    EXPECT_EQ (get.at ("params").size (), 2u);
+}
+
+/// A raw body still wins over the method, as it did before.
+TEST (JmeterImport, ARawPostBodyStillWinsOverTheFormBody) {
+    const char* raw = R"(<boolProp name="HTTPSampler.postBodyRaw">true</boolProp>)";
+    const nlohmann::ordered_json request =
+    import_sampler_with_arguments ("POST", raw);
+    EXPECT_EQ (request.at ("body").at ("mode"), "text");
+    EXPECT_EQ (request.at ("body").at ("content"), "1");
+    EXPECT_TRUE (request.at ("params").empty ());
+}
+
 /// A `HTTPFileArg` with no `File.paramname` names nothing a `form-data` field
 /// could key on - tallied rather than imported as a nameless row, the same
 /// "nothing dropped quietly" rule the sibling-tag fallback follows.

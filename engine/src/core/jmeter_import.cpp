@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <pugixml.hpp>
 
@@ -901,29 +902,51 @@ json jmeter_file_fields (Ctx& ctx, const pugi::xml_node& el) {
     return fields;
 }
 
-/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`: a
-/// `form-data` body when the sampler carries file parts (regular arguments,
-/// if any, fold in beside them - a file has no query-string or raw-body form
-/// to take instead), the raw-body case when `postBodyRaw` is set and there is
-/// exactly the one argument that shape implies otherwise, query/form rows in
-/// every other case.
+/// A sampler's arguments as table rows.
+json argument_rows (const std::vector<std::pair<std::string, std::string>>& pairs) {
+    json rows = json::array ();
+    for (const auto& [key, value] : pairs) {
+        rows.push_back (json{ { "key", key }, { "value", value },
+        { "description", "" }, { "enabled", true } });
+    }
+    return rows;
+}
+
+/// Whether JMeter appends a sampler's arguments to the URL's query for
+/// @p method, rather than sending them as the request body. Only the methods
+/// with no body go in the query; every other one (POST, PUT, PATCH, a custom
+/// verb) sends them as the body.
+bool arguments_go_in_query (std::string_view method) {
+    const std::string name = vayu::utils::ascii_upper (trimmed (method));
+    return name == "GET" || name == "DELETE" || name == "HEAD" || name == "OPTIONS";
+}
+
+/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`, as the
+/// shape JMeter sends them in:
 ///
-/// `HTTPSampler.DO_MULTIPART_POST` is read nowhere here. Without file parts it
-/// would only ever decide whether an arguments-only sampler's body is
-/// query-shaped or `x-www-form-urlencoded` - a broader remapping of the
-/// existing (untouched) query/form-rows path this issue does not ask for and
-/// no fixture demonstrates a need for. A sampler that already carries file
-/// parts has no such choice to make: multipart is the only wire form a file
-/// has, flag or no flag.
-void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, json& body) {
+/// - file parts: a `form-data` body, with any regular arguments folded in
+///   beside them (a file has no query-string or raw-body form to take instead,
+///   so multipart is the only wire form it has, flag or no flag);
+/// - `HTTPSampler.postBodyRaw` with at least one argument: the raw-body case,
+///   the first argument's value as a `text` body, whatever the method;
+/// - otherwise by @p method: `params` rows for GET, DELETE, HEAD and OPTIONS,
+///   a body for every other one - `form-data` when
+///   `HTTPSampler.DO_MULTIPART_POST` is set, `x-www-form-urlencoded` if not
+///   (#3191). Rows left in `params` for a POST would be joined into the URL's
+///   query, which is not where JMeter sends them.
+void apply_sampler_arguments (Ctx& ctx,
+const pugi::xml_node& el,
+std::string_view method,
+json& params,
+json& body) {
     json file_fields               = jmeter_file_fields (ctx, el);
     const pugi::xml_node arguments = element_prop (el, "HTTPsampler.Arguments");
     const auto pairs               = argument_pairs (arguments);
+    json rows                      = argument_rows (pairs);
 
     if (!file_fields.empty ()) {
-        for (const auto& [key, value] : pairs) {
-            file_fields.push_back (json{ { "key", key }, { "value", value },
-            { "description", "" }, { "enabled", true } });
+        for (json& row : rows) {
+            file_fields.push_back (std::move (row));
         }
         body = json{ { "mode", "form-data" }, { "fields", std::move (file_fields) } };
         return;
@@ -935,10 +958,16 @@ void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, 
         body = json{ { "mode", "text" }, { "content", pairs.front ().second } };
         return;
     }
-    for (const auto& [key, value] : pairs) {
-        params.push_back (json{ { "key", key }, { "value", value },
-        { "description", "" }, { "enabled", true } });
+    if (arguments_go_in_query (method)) {
+        params = std::move (rows);
+        return;
     }
+    if (rows.empty ()) {
+        return;
+    }
+    const bool multipart = bool_prop (el, "HTTPSampler.DO_MULTIPART_POST", false);
+    body = json{ { "mode", multipart ? "form-data" : "x-www-form-urlencoded" },
+        { "fields", std::move (rows) } };
 }
 
 /// Whatever a sampler's own `<hashTree>` scopes to it alone: a `HeaderManager`
@@ -977,7 +1006,7 @@ json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_nod
 
     json params = json::array ();
     json body   = json{ { "mode", "none" } };
-    apply_sampler_arguments (ctx, el, params, body);
+    apply_sampler_arguments (ctx, el, request["method"].get<std::string> (), params, body);
     request["params"] = std::move (params);
     request["body"]   = std::move (body);
     request["auth"]   = json{ { "mode", "inherit" } };
