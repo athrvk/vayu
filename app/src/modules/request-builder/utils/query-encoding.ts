@@ -248,6 +248,9 @@ function authorityStart(head: string, view: string): number {
  */
 export function splitUrlUserInfo(url: string): { userInfo: string; url: string } | null {
 	const view = maskTokens(url);
+	// The scheme comes before any `/`, `?` or `#`: a `://` later in a scheme-less
+	// URL (a redirect target in a query value) is not an authority.
+	if (!/^[^/?#]*:\/\//.test(view)) return null;
 	const start = authorityStart(url, view);
 	if (start === 0) return null;
 	const length = view.slice(start).search(/[/?#]/);

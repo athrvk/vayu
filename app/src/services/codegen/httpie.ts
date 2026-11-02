@@ -116,7 +116,7 @@ export function generateHttpie(
 		const itemTexts: string[] = [];
 		for (const [key, value] of prepared.body.fields) {
 			args.push(shellQuote(httpieItem(key, value)));
-			itemTexts.push(key, value);
+			itemTexts.push(`${key}=`, value);
 		}
 		const untyped = untypedTextPartNote(prepared.body, "HTTPie");
 		if (untyped) notes.push(untyped);
@@ -128,7 +128,7 @@ export function generateHttpie(
 				// type differs cannot be expressed, so it is said rather than
 				// quietly changed.
 				args.push(shellQuote(`${escapeHttpieKey(file.key)}@${file.path}`));
-				itemTexts.push(file.key, file.path);
+				itemTexts.push(`${file.key}@`, file.path);
 				const declared = file.fileName && file.fileName !== baseName(file.path);
 				if (declared || file.contentType) {
 					notes.push(

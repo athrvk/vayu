@@ -1109,6 +1109,7 @@ describe("a form value is never read as a local file", () => {
 		["a value", [{ key: "path", value: String.raw`C:\=temp` }]],
 		["a value before a colon", [{ key: "path", value: String.raw`a\:b` }]],
 		["a key", [{ key: String.raw`a\=b`, value: "v" }]],
+		["a key that ends in one, before the separator HTTPie reads", [{ key: "a\\", value: "v" }]],
 		["an odd run of three", [{ key: "path", value: String.raw`a\\\@b` }]],
 		[
 			"several fields, said once",
@@ -2204,6 +2205,13 @@ describe("credentials in the URL", () => {
 		expect(generateCurl({ ...GET, url: "user:pass@api.example.com/v1" }).code).not.toContain(
 			"-u "
 		);
+	});
+
+	it("does not read a :// inside the query of a scheme-less URL as an authority", () => {
+		const url = "example.com/cb?u=https://bob@host/x";
+		const { code } = generateCurl({ ...GET, url });
+		expect(code).not.toContain("-u ");
+		expect(code).toContain("bob@host");
 	});
 
 	it("sends no credentials for an empty user info", () => {
