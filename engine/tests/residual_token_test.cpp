@@ -1121,6 +1121,19 @@ TEST (LateAuth, ABearerTokenResolves) {
     EXPECT_EQ (request.headers["Authorization"], "Bearer fresh-token");
 }
 
+/// A deferred token the script left empty is the build's empty token (#3203):
+/// no header, and the notice the send records.
+TEST (LateAuth, ABearerTokenResolvingEmptySendsNoHeaderAndSaysSo) {
+    vayu::Request request;
+    const auto refusal = apply_late_auth (request,
+    vayu::http::BearerAuth{ "{{token}}" }, environment_with ("token", ""));
+
+    EXPECT_FALSE (refusal.has_value ());
+    EXPECT_FALSE (request.headers.contains ("Authorization"));
+    EXPECT_NE (request.auth_notice.find ("bearer token is empty"), std::string::npos)
+    << request.auth_notice;
+}
+
 /// A header the request already carries wins, as at build time (#2475) - which
 /// is what lets a script-set `Authorization` override the Auth tab here too.
 TEST (LateAuth, AnAuthorizationTheRequestCarriesWins) {

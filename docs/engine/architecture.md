@@ -667,7 +667,9 @@ applied to the outgoing request rather than being left to the UI. This lives in
   are injected inline; `oauth2` delegates to the token client; a mode stored but
   not executed (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`) sends
   the request without auth and sets `Request::auth_notice`, which the
-  `/execute` answer and the stored trace carry as `authNotice` (#2474). A
+  `/execute` answer and the stored trace carry as `authNotice` (#2474); a
+  bearer token or API key name that is empty once trimmed writes nothing and
+  sets it too (#3203). A
   user-supplied `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
   `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
   into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
@@ -1881,9 +1883,9 @@ record shape, the category list, the redaction rule and the file layout
   of the query parameter auth appended) and `request.authHeaders`, each absent
   when auth wrote none (#1835); the live `POST /execute` answer carries the
   same two keys at its top level, so `run_request` masks what it returns by the
-  same rule (#1845). Beside them, `authNotice` says when an auth mode Vayu does
-  not execute sent the request without authentication (#2474); it carries no
-  credential and is not masked. What
+  same rule (#1845). Beside them, `authNotice` says when auth sent nothing: a
+  mode Vayu does not execute (#2474), or an empty bearer token or API key name
+  (#3203); it carries no credential and is not masked. What
   bounds their lifetime is run retention (`maxRunsRetained` /
   `maxDesignRunsRetained` and the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.

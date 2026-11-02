@@ -6453,9 +6453,9 @@ hits the wire:
 | `auth.mode` | Effect |
 |-------------|--------|
 | `none` / `inherit` | No-op (`inherit` is resolved by [`POST /compose`](#post-compose) before it reaches an execution endpoint; one arriving unresolved is a warning in the logs) |
-| `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467) |
+| `bearer` | `Authorization: Bearer <token>`, the token trimmed of the spaces and tabs around it (#2467); a token empty once trimmed writes no header at all and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
 | `basic` | `Authorization: Basic <base64(user:pass)>`, as typed - a password may end in a space |
-| `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467) |
+| `apikey` | Header `key: value`, or `?key=value` when `in: "query"`; the key and the value are trimmed of the spaces and tabs around them (#2467); a key empty once trimmed writes nothing and the send carries an [`authNotice`](#post-execute) saying so (#3203) |
 | `oauth2` | Acquires/caches a token (below) and injects it per `tokenPlacement` |
 | any other mode (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`, `jwt`, which an import can store) | Not executed: the request is sent without authentication, never refused, and the `/execute` answer and the stored trace carry an [`authNotice`](#post-execute) saying so (#2474) |
 
@@ -6514,8 +6514,13 @@ refusal: it is sent as written and counted like any other unresolved token
 
 An `apikey` with `in: "header"` whose key is not a header name once trimmed
 (`X Key`) is refused, with nothing written: the failure is `AUTH_FAILED` with an
-`authErrorCode` of `invalid_header_name` (an `apikey` with a key of only
-padding writes nothing, as an empty key always did). A `bearer` token with
+`authErrorCode` of `invalid_header_name`. An `apikey` whose key is empty or
+only padding, in the header or the query, and a `bearer` token that is empty or
+only padding are not refused: nothing is written (never `Authorization: Bearer `
+with nothing after it), the request is sent without that credential, and the
+send carries an [`authNotice`](#post-execute) saying so (#3203), so a variable
+left unset on purpose does not fail a run. A token or key that resolves empty
+after the pre-request script is judged the same way. A `bearer` token with
 spaces *inside* it keeps them: only the ends are trimmed.
 
 A user-supplied header always wins over the one auth would write: `Authorization`
@@ -8340,9 +8345,24 @@ authentication, and the notice says so, naming the mode:
 "authNotice": "auth mode 'ntlm' is not executed by Vayu; the request was sent without authentication"
 ```
 
+It appears too when an executed mode had nothing to write (#3203): a `bearer`
+token, or an `apikey` key, that is empty once trimmed of its spaces and tabs.
+The request is sent without that credential rather than refused:
+
+```json
+"authNotice": "the bearer token is empty; the request was sent without an Authorization header"
+```
+
+and, for the API key, `"the API key has no name; the request was sent without
+it"`.
+
 It follows the same rules as the two keys above: one writer for both homes,
-**absent** when empty (every executed mode, and no auth), absent on rows
-written before the field, and on a streaming send only in the stored trace.
+**absent** when empty (no auth, and an executed mode that wrote its
+credential, or skipped it under a header the request already carries), absent
+on rows written before the field, and on a streaming send only in the stored
+trace. A pre-request script that assigns `pm.request.auth` replaces the notice
+along with the credential: the record then describes the script's auth, so it
+is absent unless the script's own token or key name is empty.
 A collection run's stored step traces carry it through the same trace writer;
 a load run sends such a request the same way and raises no run warning for it.
 
