@@ -36,19 +36,34 @@ import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
  * separator instead of the one we emit.
  *
  * The fix is HTTPie's documented escape, a backslash before the character that
- * must not be read as a separator; `\` itself is that escape character, so a
- * literal one is doubled or it swallows the character after it. Only a
+ * must not be read as a separator. Only `:`, `=` and `@` are special to HTTPie's
+ * tokenizer; a backslash is not, and one followed by anything else (another
+ * backslash included) is kept as the two characters it is. So a backslash is
+ * sent as written and is never doubled: `C:\temp` stays one backslash. Only a
  * *leading* separator matters on the value side - past the `=` we emit, nothing
  * later is the earliest match - so a JSON value keeps its colons and stays
  * readable.
+ *
+ * The one thing that cannot be said is a literal backslash directly before a
+ * special (see `hasInexpressibleBackslash`).
  */
 function httpieItem(key: string, value: string): string {
-	const escapedKey = key.replace(/[\\:=@]/g, "\\$&");
-	const escapedValue = value
-		.split("\\")
-		.join("\\\\")
-		.replace(/^[:=@]/, "\\$&");
-	return `${escapedKey}=${escapedValue}`;
+	return `${escapeHttpieKey(key)}=${value.replace(/^[:=@]/, "\\$&")}`;
+}
+
+function escapeHttpieKey(key: string): string {
+	return key.replace(/[:=@]/g, "\\$&");
+}
+
+/**
+ * Whether `text` holds a run of an odd number of backslashes right before
+ * `:`, `=` or `@`. The tokenizer reads backslashes left to right, so the last
+ * one of an odd run always pairs with the special and is consumed as its escape;
+ * no spelling keeps both the backslash and the character literal. An even run
+ * is fine - the pairs are kept and the special stands alone.
+ */
+function hasInexpressibleBackslash(text: string): boolean {
+	return /(?:^|[^\\])(?:\\\\)*\\[:=@]/.test(text);
 }
 
 export function generateHttpie(
@@ -98,8 +113,10 @@ export function generateHttpie(
 		args.push(shellQuote(`@${prepared.body.path}`));
 	} else if (prepared.body) {
 		if (prepared.body.kind === "urlencoded") args.push("--form");
+		const itemTexts: string[] = [];
 		for (const [key, value] of prepared.body.fields) {
 			args.push(shellQuote(httpieItem(key, value)));
+			itemTexts.push(key, value);
 		}
 		const untyped = untypedTextPartNote(prepared.body, "HTTPie");
 		if (untyped) notes.push(untyped);
@@ -110,7 +127,8 @@ export function generateHttpie(
 				// the basename and sniffs the type; a part whose declared name or
 				// type differs cannot be expressed, so it is said rather than
 				// quietly changed.
-				args.push(shellQuote(`${file.key.replace(/[\\:=@]/g, "\\$&")}@${file.path}`));
+				args.push(shellQuote(`${escapeHttpieKey(file.key)}@${file.path}`));
+				itemTexts.push(file.key, file.path);
 				const declared = file.fileName && file.fileName !== baseName(file.path);
 				if (declared || file.contentType) {
 					notes.push(
@@ -122,6 +140,11 @@ export function generateHttpie(
 					);
 				}
 			}
+		}
+		if (itemTexts.some(hasInexpressibleBackslash)) {
+			notes.push(
+				"HTTPie cannot express a backslash directly before `=`, `:` or `@` in a field name or value, so those fields are not sent as written."
+			);
 		}
 	}
 

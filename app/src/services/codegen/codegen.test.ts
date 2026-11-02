@@ -954,22 +954,31 @@ function httpieItems(code: string): string[] {
 /**
  * Parse an HTTPie request item the way HTTPie does.
  *
- * A backslash escapes the character after it when that character is special,
- * and the separator is then the *earliest* one still standing, longest first at
- * that position. Returning the separator is the point: an item that parses with
- * `=@` instead of `=` is a file read, and one that parses with `==` is a query
- * parameter, both with a perfectly innocent-looking key and value.
+ * Mirrors HTTPie's `KeyValueArgType.tokenize`: the specials are `:`, `=` and
+ * `@` only. A backslash before one is consumed as its escape; a backslash
+ * before anything else, another backslash included, is kept with that character
+ * as two literals, so pairs are consumed left to right. The separator is then
+ * the *earliest* unescaped one, longest first at that position. Returning the
+ * separator is the point: an item that parses with `=@` instead of `=` is a
+ * file read, and one that parses with `==` is a query parameter, both with a
+ * perfectly innocent-looking key and value.
  */
 function parseHttpieItem(item: string): { key: string; value: string; separator: string } {
-	const special = new Set(["\\", ":", "=", "@"]);
+	const special = new Set([":", "=", "@"]);
 	const characters: Array<{ char: string; escaped: boolean }> = [];
 	for (let i = 0; i < item.length; i++) {
-		if (item[i] === "\\" && special.has(item[i + 1] ?? "")) {
-			characters.push({ char: item[i + 1], escaped: true });
-			i++;
-		} else {
+		if (item[i] !== "\\") {
 			characters.push({ char: item[i], escaped: false });
+			continue;
 		}
+		const next = item[i + 1] ?? "";
+		i++;
+		if (special.has(next)) {
+			characters.push({ char: next, escaped: true });
+			continue;
+		}
+		characters.push({ char: "\\", escaped: false });
+		if (next) characters.push({ char: next, escaped: false });
 	}
 	// An escaped character occupies one position in both strings, so an index
 	// found in `visible` addresses `literal` unchanged.
@@ -1061,17 +1070,81 @@ describe("a form value is never read as a local file", () => {
 		});
 	}
 
-	it("HTTPie keeps a backslash instead of letting it escape the next character", () => {
-		const { code } = generateHttpie({
+	// A backslash is not special to HTTPie, so it goes out as written: doubling it
+	// would send two (#3197).
+	const BACKSLASH_VALUES: Array<[string, string]> = [
+		["one backslash", String.raw`C:\temp`],
+		["two backslashes", String.raw`C:\\temp`],
+		["a trailing backslash", "C:\\temp\\"],
+		["an even run before a separator", String.raw`a\\=b`],
+	];
+
+	for (const [name, value] of BACKSLASH_VALUES) {
+		it(`HTTPie sends a form value with ${name} unchanged`, () => {
+			const { code, notes } = generateHttpie({
+				...GET,
+				method: "POST",
+				body: { mode: "form-data", fields: [{ key: "path", value }] },
+			});
+			const [item] = httpieItems(code);
+			expect(item).toBe(`path=${value}`);
+			expect(parseHttpieItem(item)).toEqual({ key: "path", value, separator: "=" });
+			expect(notes.filter((note) => note.includes("backslash"))).toEqual([]);
+		});
+	}
+
+	it("HTTPie keeps an even run of backslashes in a key before an escaped separator", () => {
+		const key = String.raw`a\\=b`;
+		const { code, notes } = generateHttpie({
 			...GET,
 			method: "POST",
-			body: { mode: "form-data", fields: [{ key: "path", value: String.raw`C:\=temp` }] },
+			body: { mode: "x-www-form-urlencoded", fields: [{ key, value: "v" }] },
 		});
-		expect(parseHttpieItem(httpieItems(code)[0])).toEqual({
-			key: "path",
-			value: String.raw`C:\=temp`,
-			separator: "=",
+		expect(parseHttpieItem(httpieItems(code)[0])).toEqual({ key, value: "v", separator: "=" });
+		expect(notes).toEqual([]);
+	});
+
+	const INEXPRESSIBLE: Array<[string, Array<{ key: string; value: string }>]> = [
+		["a value", [{ key: "path", value: String.raw`C:\=temp` }]],
+		["a value before a colon", [{ key: "path", value: String.raw`a\:b` }]],
+		["a key", [{ key: String.raw`a\=b`, value: "v" }]],
+		["an odd run of three", [{ key: "path", value: String.raw`a\\\@b` }]],
+		[
+			"several fields, said once",
+			[
+				{ key: "one", value: String.raw`a\=b` },
+				{ key: "two", value: String.raw`c\@d` },
+			],
+		],
+	];
+
+	for (const [name, fields] of INEXPRESSIBLE) {
+		it(`HTTPie says a backslash before a separator in ${name} cannot be expressed`, () => {
+			const { notes } = generateHttpie({
+				...GET,
+				method: "POST",
+				body: { mode: "x-www-form-urlencoded", fields },
+			});
+			expect(
+				notes.filter((note) => note.startsWith("HTTPie cannot express a backslash"))
+			).toHaveLength(1);
 		});
+	}
+
+	it("HTTPie says it for a file part's name too", () => {
+		const { notes } = generateHttpie({
+			...GET,
+			method: "POST",
+			body: {
+				mode: "form-data",
+				fields: [
+					{ key: String.raw`up\@load`, value: "", type: "file", src: "/data/a.bin" },
+				],
+			},
+		});
+		expect(notes.some((note) => note.startsWith("HTTPie cannot express a backslash"))).toBe(
+			true
+		);
 	});
 
 	it("PowerShell says -Form needs 6.1+, and says it only where -Form is used", () => {
