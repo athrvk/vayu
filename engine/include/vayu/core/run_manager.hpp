@@ -380,16 +380,24 @@ struct RunContext {
     /// Per-series totals for the report's `monitor` section; null when the run
     /// configured no monitor. Written by `monitor_thread`, read after its join.
     std::unique_ptr<MonitorTotals> monitor_totals;
-    // Refreshes the run's OAuth 2.0 credential before it expires. Spawned only
-    // when the run's auth can actually be refreshed (see
-    // `http::plan_auth_refresh`), joined everywhere metrics_thread is - it
-    // holds a shared_ptr to this context and calls a blocking HTTP client, so
-    // an unjoined one outlives the database it acquires through.
-    std::thread auth_refresh_thread;
-    // The credential that thread publishes and the strategy thread sends. Null
-    // for every run without mid-run refresh, which is the inert case
-    // everywhere: no thread, no swap, no report section.
-    std::shared_ptr<AuthRefreshState> auth_refresh;
+    // One watchdog per OAuth 2.0 credential the run keeps current, each
+    // refreshing its token before it expires: at most one for a single-request
+    // run (`http::plan_auth_refresh`), one per distinct token-cache key for a
+    // scenario load run (`plan_scenario_auth_refresh`, #3199). Joined
+    // everywhere metrics_thread is - each holds a shared_ptr to this context
+    // and calls a blocking HTTP client, so an unjoined one outlives the
+    // database it acquires through.
+    std::vector<std::thread> auth_refresh_threads;
+    // The credentials those threads publish and the submitting thread sends,
+    // index-aligned with `auth_refresh_threads` and written before load
+    // starts. Empty for every run without mid-run refresh, which is the inert
+    // case everywhere: no thread, no swap, no report section.
+    std::vector<std::shared_ptr<AuthRefreshState>> auth_refresh_states;
+    // A scenario load run's step position -> the index into
+    // `auth_refresh_states` of the credential that step's `Authorization`
+    // follows, nothing for a step that sends what it was planned with. Empty
+    // for a single-request run.
+    std::vector<std::optional<size_t>> step_auth_refresh;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
     nlohmann::json config;
@@ -1144,10 +1152,11 @@ struct RunContext {
     RunContext& operator= (RunContext&&)      = delete;
 
     /**
-     * @brief Join the run's auxiliary threads (metrics tick, auth refresh).
+     * @brief Join the run's auxiliary threads (metrics tick, monitor scrape,
+     *        every auth refresh watchdog).
      *
-     * Both watch `is_running`, so the caller clears it first. They are joined
-     * through one helper because the run has four exit paths - two inner
+     * All watch `is_running`, so the caller clears it first. They are joined
+     * through one helper because the run has several exit paths - the inner
      * failure returns, the normal end, and the outer catch - and a thread added
      * to the spawn site but missed at one of them outlives the database it
      * writes through.
@@ -1803,22 +1812,25 @@ vayu::db::Database* db_ptr,
 const MonitorConfig& config);
 
 /**
- * @brief Keep a run's OAuth 2.0 credential valid for as long as the run lasts.
+ * @brief Keep one of a run's OAuth 2.0 credentials valid for as long as the
+ *        run lasts.
  *
- * Sleeps until `tuning.lead_ms` before the published token expires, re-acquires
+ * Sleeps until `tuning.lead_ms` before @p state's token expires, re-acquires
  * (forced, so the cache cannot hand back the one that is about to die),
- * publishes the new header on `context->auth_refresh` and re-arms from the new
- * expiry. A failed refresh is recorded and retried with a backoff; it never
- * fails the run, because the honest report of a 401 storm is the target's own
- * status codes plus the `auth` section saying the refresh did not happen.
+ * publishes the new header on @p state and re-arms from the new expiry. One
+ * runs per entry of `context->auth_refresh_states`. A failed refresh is
+ * recorded and retried with a backoff; it never fails the run, because the
+ * honest report of a 401 storm is the target's own status codes plus the
+ * `auth` section saying the refresh did not happen.
  *
  * @p tuning is the run's snapshot of the user's `oauth2Refresh*` settings, read
  * once when the watchdog arms (`read_auth_refresh_tuning`).
  *
  * Returns as soon as the run stops, or once the published token no longer
- * expires. Inert (returns immediately) when the run has no `auth_refresh`.
+ * expires. Inert (returns immediately) for a null @p state.
  */
 void run_auth_refresh (const std::shared_ptr<RunContext>& context,
+const std::shared_ptr<AuthRefreshState>& state,
 vayu::db::Database* db_ptr,
 const AuthRefreshTuning& tuning);
 

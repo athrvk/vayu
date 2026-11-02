@@ -460,6 +460,7 @@ set(vayu_scratch_database_suites
     PerHostLimitRunTest
     PersistScriptVariablesTest
     PlanAuthRefreshTest
+    PlanScenarioAuthRefreshTest
     PostmanExportRouteTest
     RecordDesignResultTest
     RelayTest
@@ -478,6 +479,7 @@ set(vayu_scratch_database_suites
     RunStopAccountingTest
     RunsRouteTest
     ScenarioLoadTest
+    ScenarioMidRunRefreshTest
     ScenarioPlanTest
     ScenarioRunnerTest
     ScratchDatabaseCleanup

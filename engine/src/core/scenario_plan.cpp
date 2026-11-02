@@ -539,6 +539,8 @@ nlohmann::json& raw_elements_out) {
         step.auth               = parsed_auth;
         step.auth_template      = std::move (auth_template);
         step.auth_after_scripts = auth_after_scripts;
+    } else if (const auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&parsed_auth)) {
+        step.oauth2_config = oauth2->config;
     }
     plan.steps.push_back (std::move (step));
     return std::nullopt;

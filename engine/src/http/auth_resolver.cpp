@@ -180,18 +180,11 @@ std::string oauth2_header_value (const nlohmann::json& config, const std::string
     return prefix.empty () ? access_token : prefix + " " + access_token;
 }
 
-std::optional<AuthRefreshPlan> plan_auth_refresh (const vayu::Request& request,
-const nlohmann::json& auth,
-vayu::db::Database* db) {
-    if (db == nullptr) {
+std::optional<AuthRefreshPlan>
+plan_oauth2_refresh (const nlohmann::json& config, int timeout_ms, vayu::db::Database* db) {
+    if (db == nullptr || !config.is_object ()) {
         return std::nullopt;
     }
-    const Auth parsed  = parse_auth (auth);
-    const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed);
-    if (oauth2 == nullptr || !oauth2->config.is_object ()) {
-        return std::nullopt;
-    }
-    const auto& config = oauth2->config;
 
     // A query-placed token was written into the URL that every transfer copies;
     // republishing a header would leave the stale one in the query string.
@@ -218,13 +211,31 @@ vayu::db::Database* db) {
     plan.header_name   = "Authorization";
     plan.header_value  = oauth2_header_value (config, cached->access_token);
     plan.expires_at_ms = cached->created_at + (cached->expires_in * 1000);
-    plan.timeout_ms    = request.timeout_ms;
+    plan.timeout_ms    = timeout_ms;
+    return plan;
+}
+
+std::optional<AuthRefreshPlan> plan_auth_refresh (const vayu::Request& request,
+const nlohmann::json& auth,
+vayu::db::Database* db) {
+    if (db == nullptr) {
+        return std::nullopt;
+    }
+    const Auth parsed  = parse_auth (auth);
+    const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed);
+    if (oauth2 == nullptr) {
+        return std::nullopt;
+    }
+    auto plan = plan_oauth2_refresh (oauth2->config, request.timeout_ms, db);
+    if (!plan) {
+        return std::nullopt;
+    }
 
     // A user-supplied Authorization header wins over the token (see
     // resolve_oauth2), and this run is sending that one - swapping the token
     // under it would change nothing on the wire.
-    const auto it = request.headers.find (plan.header_name);
-    if (it == request.headers.end () || it->value != plan.header_value) {
+    const auto it = request.headers.find (plan->header_name);
+    if (it == request.headers.end () || it->value != plan->header_value) {
         return std::nullopt;
     }
     return plan;

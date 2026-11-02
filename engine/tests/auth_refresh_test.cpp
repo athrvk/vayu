@@ -15,6 +15,7 @@
 
 #include <array>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -53,10 +54,12 @@ int64_t now_ms () {
 }
 
 /**
- * The target of the run: `/api` records every distinct `Authorization` value it
- * is sent, in the order they first appeared. That ordering is the assertion -
- * the run must move from the first token to the second while it is still going,
- * not merely end up on the second.
+ * The target of the run: `/api`, and every path under it, records each
+ * distinct `Authorization` value it is sent, in the order they first appeared,
+ * per path. That ordering is the assertion - the run must move from the first
+ * token to the second while it is still going, not merely end up on the
+ * second. A scenario's steps each get a path of their own, so one step's
+ * tokens cannot stand in for another's.
  *
  * The identity provider it used to carry alongside is now `MockIssuerManager`
  * (#479), the engine's own mock issuer, so there is one mock IdP in the tree
@@ -67,12 +70,14 @@ class MockTarget {
     MockTarget () {
         svr_.new_task_queue = vayu::tests::pooled_task_queue (16);
 
-        svr_.Get ("/api", [this] (const httplib::Request& req, httplib::Response& res) {
+        svr_.Get (R"(/api(/.*)?)",
+        [this] (const httplib::Request& req, httplib::Response& res) {
             const std::string auth = req.get_header_value ("Authorization");
             {
                 const std::lock_guard<std::mutex> lock (mutex_);
-                if (seen_.empty () || seen_.back () != auth) {
-                    seen_.push_back (auth);
+                auto& seen = seen_[req.path];
+                if (seen.empty () || seen.back () != auth) {
+                    seen.push_back (auth);
                 }
             }
             res.set_content ("{}", "application/json");
@@ -93,14 +98,21 @@ class MockTarget {
     MockTarget (MockTarget&&)                 = delete;
     MockTarget& operator= (MockTarget&&)      = delete;
 
-    std::string api_url () const {
-        return "http://127.0.0.1:" + std::to_string (port_) + "/api";
+    std::string api_url (const std::string& path = "/api") const {
+        return "http://127.0.0.1:" + std::to_string (port_) + path;
     }
 
-    /// Every Authorization value the target saw, de-duplicated consecutively.
-    std::vector<std::string> credentials_seen () const {
+    /// Every Authorization value @p path saw, de-duplicated consecutively.
+    std::vector<std::string> credentials_seen (const std::string& path = "/api") const {
         const std::lock_guard<std::mutex> lock (mutex_);
-        return seen_;
+        const auto found = seen_.find (path);
+        return found == seen_.end () ? std::vector<std::string>{} : found->second;
+    }
+
+    /// How many different Authorization values @p path saw.
+    size_t distinct_credentials (const std::string& path) const {
+        const auto seen = credentials_seen (path);
+        return std::set<std::string> (seen.begin (), seen.end ()).size ();
     }
 
     private:
@@ -108,7 +120,7 @@ class MockTarget {
     std::thread thread_;
     int port_ = 0;
     mutable std::mutex mutex_;
-    std::vector<std::string> seen_;
+    std::map<std::string, std::vector<std::string>> seen_;
 };
 
 json oauth2_config (const std::string& token_url) {
@@ -222,7 +234,7 @@ TEST (AuthRefreshState, SummaryCarriesEveryRefreshAndTheLastFailure) {
     EXPECT_FALSE (state->summary ().contains ("lastError"));
 
     state->publish ("Bearer AT2", 60.5, 2000);
-    state->record_failure ("oauth2_provider_error: nope");
+    state->record_failure ("oauth2_provider_error: nope", 61.0);
 
     const auto summary = state->summary ();
     ASSERT_EQ (summary["refreshes"].size (), 1u);
@@ -230,6 +242,61 @@ TEST (AuthRefreshState, SummaryCarriesEveryRefreshAndTheLastFailure) {
     EXPECT_EQ (summary["refreshFailures"], 1u);
     EXPECT_EQ (summary["lastError"], "oauth2_provider_error: nope");
     EXPECT_EQ (state->expires_at_ms (), 2000);
+}
+
+// A scenario load run keeps one credential per token-cache key (#3199), and
+// its report has the one `auth` shape a single-request run writes: every
+// refresh in run order, the failures summed, the most recent error.
+TEST (AuthRefreshState, SummarizeFoldsEveryCredentialIntoTheOneSection) {
+    EXPECT_FALSE (AuthRefreshState::summarize ({}).has_value ())
+    << "a run that was never watching must report no section";
+
+    auto first = std::make_shared<AuthRefreshState> (plan_for ("Bearer A1", 1000));
+    auto second = std::make_shared<AuthRefreshState> (plan_for ("Bearer B1", 1000));
+    first->publish ("Bearer A2", 2.0, 2000);
+    first->publish ("Bearer A3", 9.0, 3000);
+    second->publish ("Bearer B2", 4.5, 2000);
+    second->record_failure ("oauth2_timeout: late", 7.0);
+    first->record_failure ("oauth2_provider_error: early", 3.0);
+
+    const auto merged = AuthRefreshState::summarize ({ first, second });
+    ASSERT_HAS_VALUE (merged);
+    std::vector<double> at;
+    for (const auto& refresh : (*merged)["refreshes"]) {
+        at.push_back (refresh["atSeconds"].get<double> ());
+    }
+    EXPECT_EQ (at, (std::vector<double>{ 2.0, 4.5, 9.0 }));
+    EXPECT_EQ ((*merged)["refreshFailures"], 2u);
+    EXPECT_EQ ((*merged)["lastError"], "oauth2_timeout: late")
+    << "the most recent failure, not the first credential's";
+
+    // One credential reads exactly as its own summary always has.
+    EXPECT_EQ (AuthRefreshState::summarize ({ first }), first->summary ());
+}
+
+// A scenario step is copied fresh from the plan per submission, so the cache
+// writes the current value every time - including the first, when the step
+// still carries an older token than the credential holds.
+TEST (AuthHeaderCache, WritesTheCurrentCredentialOntoEveryFreshCopy) {
+    auto state = std::make_shared<AuthRefreshState> (plan_for ("Bearer CACHED", 1000));
+    vayu::core::AuthHeaderCache cache (state);
+    vayu::Request planned;
+    planned.headers["Authorization"] = "Bearer PLANNED";
+
+    vayu::Request first = planned;
+    cache.write_onto (first);
+    EXPECT_EQ (first.headers["Authorization"], "Bearer CACHED");
+
+    state->publish ("Bearer REFRESHED", 1.0, 2000);
+    vayu::Request second = planned;
+    cache.write_onto (second);
+    EXPECT_EQ (second.headers["Authorization"], "Bearer REFRESHED");
+
+    vayu::Request third = planned;
+    cache.write_onto (third);
+    EXPECT_EQ (third.headers["Authorization"], "Bearer REFRESHED")
+    << "a copy made after the swap must not fall back to the planned token";
+    EXPECT_EQ (third.headers.count ("Authorization"), 1u);
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +544,120 @@ TEST_F (PlanAuthRefreshTest, InertForEveryUnrefreshableShape) {
 }
 
 // ---------------------------------------------------------------------------
+// Which steps of a scenario load run are armed (#3199)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// A step as `resolve_step` leaves one whose OAuth 2.0 token it placed on
+/// `Authorization` itself.
+vayu::core::ScenarioStep
+oauth2_step (const json& config, const std::string& authorization, int timeout_ms = 5000) {
+    vayu::core::ScenarioStep step;
+    step.request.url                      = "https://example.test/api";
+    step.request.timeout_ms               = timeout_ms;
+    step.request.headers["Authorization"] = authorization;
+    step.request.auth_header              = "Authorization";
+    step.oauth2_config                    = config;
+    return step;
+}
+
+} // namespace
+
+class PlanScenarioAuthRefreshTest : public PlanAuthRefreshTest {};
+
+// Mutation check: key the grouping per step instead of per cache key and this
+// plans three credentials - three watchdogs force-refreshing two cache rows.
+TEST_F (PlanScenarioAuthRefreshTest, StepsSharingATokenFollowOneCredential) {
+    const json shared = oauth2_config ("https://idp.test/token");
+    json other        = shared;
+    other["clientId"] = "other";
+    cache_token (shared, "AT1", 3600);
+    cache_token (other, "OT1", 3600);
+
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back (oauth2_step (shared, "Bearer AT1", 5000));
+    plan.steps.push_back (oauth2_step (other, "Bearer OT1"));
+    plan.steps.push_back (oauth2_step (shared, "Bearer AT1", 1500));
+
+    const auto refresh = vayu::core::plan_scenario_auth_refresh (plan, db.get ());
+
+    ASSERT_EQ (refresh.credentials.size (), 2u);
+    ASSERT_EQ (refresh.step_credential.size (), 3u);
+    EXPECT_EQ (refresh.step_credential[0], std::optional<size_t> (0));
+    EXPECT_EQ (refresh.step_credential[1], std::optional<size_t> (1));
+    EXPECT_EQ (refresh.step_credential[2], std::optional<size_t> (0));
+    EXPECT_EQ (refresh.credentials[0].header_value, "Bearer AT1");
+    EXPECT_EQ (refresh.credentials[1].header_value, "Bearer OT1");
+    EXPECT_EQ (refresh.credentials[0].timeout_ms, 1500)
+    << "a shared refresh is bounded by the shortest of its steps' timeouts";
+}
+
+// A token shorter-lived than the cache's expiry skew is re-acquired for each
+// step that plans it, so an earlier step carries an older token than the
+// cache. It still follows the credential, and sends the newest.
+TEST_F (PlanScenarioAuthRefreshTest, AStepPlannedWithAnOlderTokenStillFollows) {
+    const json config = oauth2_config ("https://idp.test/token");
+    cache_token (config, "AT2", 3);
+
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back (oauth2_step (config, "Bearer AT1"));
+    plan.steps.push_back (oauth2_step (config, "Bearer AT2"));
+
+    const auto refresh = vayu::core::plan_scenario_auth_refresh (plan, db.get ());
+
+    ASSERT_EQ (refresh.credentials.size (), 1u);
+    EXPECT_EQ (refresh.credentials[0].header_value, "Bearer AT2");
+    EXPECT_EQ (refresh.step_credential[0], std::optional<size_t> (0));
+    EXPECT_EQ (refresh.step_credential[1], std::optional<size_t> (0));
+}
+
+// Each of these steps sends something other than the engine's token, or opted
+// out, so it is sent as planned - and none of them stops the step beside it,
+// which shares the key, from following.
+TEST_F (PlanScenarioAuthRefreshTest, AStepNotSendingTheEnginesTokenStaysUnarmed) {
+    const json config = oauth2_config ("https://idp.test/token");
+    cache_token (config, "AT1", 3600);
+
+    // A user-set Authorization won: resolve_oauth2 placed nothing.
+    auto user_set                = oauth2_step (config, "Bearer MINE");
+    user_set.request.auth_header = "";
+    // Auth deferred past the scripts, or no OAuth 2.0 at all.
+    auto deferred          = oauth2_step (config, "Bearer AT1");
+    deferred.oauth2_config = nullptr;
+    // The user's opt-out, on this step's own config.
+    json opted_out                = config;
+    opted_out["autoRefreshToken"] = false;
+    // Another prefix: one credential publishes one header value.
+    json prefixed            = config;
+    prefixed["headerPrefix"] = "Token";
+
+    vayu::core::ScenarioPlan plan;
+    plan.steps.push_back (user_set);
+    plan.steps.push_back (deferred);
+    plan.steps.push_back (oauth2_step (opted_out, "Bearer AT1"));
+    plan.steps.push_back (oauth2_step (config, "Bearer AT1"));
+    plan.steps.push_back (oauth2_step (prefixed, "Token AT1"));
+
+    const auto refresh = vayu::core::plan_scenario_auth_refresh (plan, db.get ());
+
+    ASSERT_EQ (refresh.credentials.size (), 1u);
+    ASSERT_EQ (refresh.step_credential.size (), 5u);
+    EXPECT_FALSE (refresh.step_credential[0].has_value ())
+    << "user-set Authorization";
+    EXPECT_FALSE (refresh.step_credential[1].has_value ())
+    << "no planned OAuth 2.0 token";
+    EXPECT_FALSE (refresh.step_credential[2].has_value ())
+    << "autoRefreshToken: false";
+    EXPECT_EQ (refresh.step_credential[3], std::optional<size_t> (0));
+    EXPECT_FALSE (refresh.step_credential[4].has_value ())
+    << "another headerPrefix";
+
+    EXPECT_TRUE (
+    vayu::core::plan_scenario_auth_refresh (plan, nullptr).credentials.empty ());
+}
+
+// ---------------------------------------------------------------------------
 // A whole run against a mock IdP
 // ---------------------------------------------------------------------------
 
@@ -627,7 +808,7 @@ TEST_F (MidRunRefreshTest, ARefreshIsStampedFromLoadStartNotFromTheWatchdogStart
     auto context = std::make_shared<vayu::core::RunContext> (
     "run-auth-load-start", json::object ());
     context->is_running = true;
-    context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+    const auto state = std::make_shared<AuthRefreshState> (std::move (*plan));
     context->load_start_steady_ms.store (
     std::chrono::duration_cast<std::chrono::milliseconds> (Clock::now ().time_since_epoch ())
     .count () -
@@ -638,12 +819,12 @@ TEST_F (MidRunRefreshTest, ARefreshIsStampedFromLoadStartNotFromTheWatchdogStart
     tuning.min_interval_ms  = 20;
     tuning.poll_interval_ms = 10;
     std::thread watchdog (
-    [&] () { vayu::core::run_auth_refresh (context, db.get (), tuning); });
+    [&] () { vayu::core::run_auth_refresh (context, state, db.get (), tuning); });
 
     json refreshes = json::array ();
     for (int i = 0; i < 1000 && refreshes.empty (); ++i) {
         std::this_thread::sleep_for (std::chrono::milliseconds (10));
-        refreshes = context->auth_refresh->summary ()["refreshes"];
+        refreshes = state->summary ()["refreshes"];
     }
     context->is_running = false;
     watchdog.join ();
@@ -683,7 +864,7 @@ TEST_F (MidRunRefreshTest, ARefreshIsBoundedByTheRunsRequestTimeout) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "run-auth-refresh-timeout", json::object ());
     context->is_running = true;
-    context->auth_refresh = std::make_shared<AuthRefreshState> (std::move (*plan));
+    const auto state = std::make_shared<AuthRefreshState> (std::move (*plan));
 
     vayu::core::AuthRefreshTuning tuning;
     tuning.lead_ms          = 0;
@@ -691,16 +872,15 @@ TEST_F (MidRunRefreshTest, ARefreshIsBoundedByTheRunsRequestTimeout) {
     tuning.retry_ms         = 60'000; // one attempt is the subject
     tuning.poll_interval_ms = 10;
     std::thread watchdog (
-    [&] () { vayu::core::run_auth_refresh (context, db.get (), tuning); });
+    [&] () { vayu::core::run_auth_refresh (context, state, db.get (), tuning); });
 
-    const bool failed   = vayu::tests::wait_until ([&] {
-        return context->auth_refresh->summary ()["refreshFailures"].get<size_t> () > 0;
-    });
+    const bool failed = vayu::tests::wait_until (
+    [&] { return state->summary ()["refreshFailures"].get<size_t> () > 0; });
     context->is_running = false;
     watchdog.join ();
 
     ASSERT_TRUE (failed) << "the refresh never gave up on the hung endpoint";
-    const auto summary = context->auth_refresh->summary ();
+    const auto summary = state->summary ();
     EXPECT_EQ (
     summary["lastError"].get<std::string> ().rfind ("oauth2_timeout: ", 0), 0u)
     << summary.dump ();
@@ -775,4 +955,128 @@ TEST_F (MidRunRefreshTest, ANonRefreshableRunReportsNoAuthSection) {
     const auto seen = target.credentials_seen ();
     ASSERT_EQ (seen.size (), 1u);
     EXPECT_EQ (seen[0].rfind ("Bearer ", 0), 0u) << seen[0];
+}
+
+// ---------------------------------------------------------------------------
+// A collection load run against a mock IdP (#3199)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+class ScenarioMidRunRefreshTest : public MidRunRefreshTest {
+    protected:
+    /// Stores `col` holding one request per `{name, path, headers}` row, each
+    /// under @p auth, and plans it the way `POST /runs` plans a load run.
+    std::shared_ptr<const vayu::core::ScenarioExecution> plan_collection (
+    const MockTarget& target,
+    const json& auth,
+    const std::vector<std::pair<std::string, json>>& steps) {
+        vayu::db::Collection collection;
+        collection.id         = "col";
+        collection.name       = "Collection";
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db->create_collection (collection);
+        int order = 0;
+        for (const auto& [name, headers] : steps) {
+            vayu::db::Request request;
+            request.id            = name;
+            request.collection_id = collection.id;
+            request.name          = name;
+            request.method        = vayu::HttpMethod::GET;
+            request.url           = target.api_url ("/api/" + name);
+            request.headers       = headers.dump ();
+            request.auth          = auth.dump ();
+            request.order         = order++;
+            request.created_at    = 1;
+            request.updated_at    = 1;
+            db->save_request (request);
+        }
+
+        vayu::core::ScenarioResolveOptions options;
+        options.timeout_ms           = 5000;
+        options.limits.max_steps     = 10;
+        options.limits.max_data_rows = 100;
+        options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        auto resolved = vayu::core::resolve_scenario (*db,
+        json{ { "source", "collection" }, { "collectionId", collection.id } }, options);
+        EXPECT_TRUE (resolved.ok) << resolved.error;
+        auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
+        execution->request = std::move (resolved.request);
+        execution->plan    = std::move (resolved.plan);
+        return execution;
+    }
+};
+
+} // namespace
+
+// The acceptance criterion for a collection: a load run outliving its token
+// keeps sending valid ones on every step that sends the engine's token, with
+// one watchdog per token, and its report says when the token changed. The run
+// is long enough that only a missing refresh ends it by its duration; it is
+// stopped as soon as both steps have each sent a second token. Mutation
+// checks: arm nothing for a scenario in `build_load_request`, or drop the
+// `follow_refreshed_auth` call from `ScenarioLoadDriver::submit_one`, and
+// `/api/a` never sees a second token.
+TEST_F (ScenarioMidRunRefreshTest, ACollectionRunOutlivingItsTokenSendsARefreshedOne) {
+    MockTarget target;
+    vayu::http::MockIssuerManager issuers;
+    const auto issuer = issuers.start (json{ { "expiresInSeconds", 3 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const json auth        = { { "mode", "oauth2" },
+        { "config", oauth2_config (issuer.token_url) } };
+    const json user_header = json::array (
+    { { { "key", "Authorization" }, { "value", "Bearer MINE" }, { "enabled", true } } });
+    // `a` and `b` share one token-cache key; `mine` shares it too but sends a
+    // header of its own, which wins over the token.
+    const auto execution = plan_collection (target, auth,
+    { { "a", json::array () }, { "b", json::array () }, { "mine", user_header } });
+    ASSERT_EQ (execution->plan.steps.size (), 3u);
+
+    const std::string run_id = "run-scenario-auth-refresh";
+    create_run_row (run_id);
+    const json config = { { "mode", "constant_concurrency" }, { "duration", "40s" },
+        { "concurrency", 1 }, { "timeout", 5000 }, { "workers", 1 },
+        { "scenario", { { "source", "collection" }, { "collectionId", "col" } } } };
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db, execution));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+
+    const bool refreshed = vayu::tests::wait_until ([&] {
+        return target.distinct_credentials ("/api/a") >= 2 &&
+        target.distinct_credentials ("/api/b") >= 2;
+    });
+    // The watchdogs are armed before load starts, and this load is what
+    // publishes that write to this thread.
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] { return context->load_start_steady_ms.load () != 0; }));
+    const size_t credentials = context->auth_refresh_states.size ();
+    const size_t watchdogs   = context->auth_refresh_threads.size ();
+    context->should_stop     = true;
+    context->notify_refill ();
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
+    << "the run never finished";
+    manager.shutdown (std::chrono::milliseconds (15000));
+
+    ASSERT_TRUE (refreshed)
+    << "a step sent one credential for the whole run: a saw "
+    << target.distinct_credentials ("/api/a") << ", b saw "
+    << target.distinct_credentials ("/api/b");
+    EXPECT_EQ (credentials, 1u)
+    << "steps sharing a token must share one credential";
+    EXPECT_EQ (watchdogs, 1u)
+    << "two watchdogs on one cache row refresh it twice";
+    EXPECT_EQ (target.credentials_seen ("/api/mine"), std::vector<std::string>{ "Bearer MINE" })
+    << "a user-set Authorization must never be swapped for the token";
+
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    const auto summary = json::parse (stored->summary, nullptr, false);
+    ASSERT_TRUE (summary.is_object () && summary.contains ("auth")) << stored->summary;
+    const auto& section = summary["auth"];
+    ASSERT_TRUE (section["refreshes"].is_array ());
+    EXPECT_GE (section["refreshes"].size (), 1u) << section.dump ();
+    EXPECT_EQ (section["refreshFailures"], 0u) << section.dump ();
 }
