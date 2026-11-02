@@ -1067,7 +1067,13 @@ std::optional<std::string> thread_group_profile (const pugi::xml_node& group) {
     }
     parts.push_back (loops == "-1" ? "forever" : counted_unit (loops, "loop"));
 
-    std::string profile = group.attribute ("testname").as_string ("Thread Group");
+    // The app joins `names` with commas, so a comma in the group's name would
+    // read as two groups; an empty name would read as ": 10 threads".
+    std::string profile = group.attribute ("testname").as_string ();
+    std::ranges::replace (profile, ',', ' ');
+    if (profile.empty ()) {
+        profile = "Thread Group";
+    }
     profile += ":";
     for (size_t i = 0; i < parts.size (); ++i) {
         profile += (i == 0 ? " " : "; ") + parts[i];
@@ -1144,6 +1150,7 @@ bool is_folder_controller (std::string_view tag) {
     "CriticalSectionController",
     "ModuleController",
     "IncludeController",
+    "RecordingController",
     });
     return std::ranges::find (TAGS, tag) != TAGS.end ();
 }

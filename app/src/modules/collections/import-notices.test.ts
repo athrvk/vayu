@@ -451,8 +451,23 @@ describe("importNotices", () => {
 		).map((n) => n.text);
 		expect(texts).toEqual([
 			"2 assert.status elements dropped (invalid)",
-			"1 IfController not imported",
+			"1 IfController imported as a plain folder - its looping or selection is not carried",
 			"3 ResultCollector not imported",
+		]);
+	});
+
+	it("says a folder-imported controller kept its members and lost only its logic", () => {
+		const texts = importNotices(
+			meta({
+				skipped: [
+					{ kind: "WhileController_unrecognised", count: 1 },
+					{ kind: "RecordingController_unrecognised", count: 2 },
+				],
+			})
+		).map((n) => n.text);
+		expect(texts).toEqual([
+			"1 WhileController imported as a plain folder - its looping or selection is not carried",
+			"2 RecordingController controllers imported as plain folders - their looping or selection is not carried",
 		]);
 	});
 

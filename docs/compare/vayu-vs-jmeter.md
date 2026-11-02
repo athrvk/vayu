@@ -121,9 +121,10 @@ are things Vayu plans to catch up on:
 - **You need distributed load.** JMeter's controller-and-workers model drives a
   test from many machines. Vayu runs from one.
 - **Your `.jmx` plans lean on what the importer does not map** - a protocol
-  other than HTTP, distributed execution, a plugin sampler, `SwitchController`,
-  a While, ForEach, Random or Interleave controller, or a JSR223/BeanShell script (imported disabled, since Groovy and BeanShell
-  are not JavaScript). A plan built from the common element set (HTTP samplers,
+  other than HTTP, distributed execution, a plugin sampler, the looping or
+  selection of a `SwitchController`, While, ForEach, Random or Interleave
+  controller (the members import, the logic does not), or a JSR223/BeanShell
+  script (imported disabled, since Groovy and BeanShell are not JavaScript). A plan built from the common element set (HTTP samplers,
   the extractors, assertions, timers and the five translated logic controllers
   in the table above)
   imports and runs; a team fluent in JMeter's full plugin ecosystem is still

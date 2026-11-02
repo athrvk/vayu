@@ -1106,6 +1106,23 @@ std::string main_controller (const std::string& prop) {
 
 } // namespace
 
+// The app joins a notice's `names` with commas and prints the first words of
+// each, so a comma in the group's name must not read as two groups and an
+// empty name must not read as ": 10 threads". Mutation check: restore the
+// raw `testname` read in `thread_group_profile` and this reds.
+TEST (JmeterImport, AThreadGroupProfileNameHasNoCommaAndIsNeverEmpty) {
+    const std::string props = string_prop_xml ("ThreadGroup.num_threads", "10");
+    const auto named        = [&] (const char* testname) {
+        return skipped_names (
+        meta_of_plan_with (std::string ("<ThreadGroup testname=\"") + testname +
+        "\" enabled=\"true\">" + props + "</ThreadGroup><hashTree></hashTree>"),
+        "ThreadGroup_profile");
+    };
+    EXPECT_EQ (named ("Users, EU"),
+    (std::vector<std::string>{ "Users  EU: 10 threads; 1 loop" }));
+    EXPECT_EQ (named (""), (std::vector<std::string>{ "Thread Group: 10 threads; 1 loop" }));
+}
+
 // A thread group's threads, ramp-up, duration and loops are the run profile
 // the collection does not carry, so the import names them (#3190). Values are
 // read from `ThreadGroup.*` and the loop count under

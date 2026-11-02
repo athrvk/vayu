@@ -339,6 +339,26 @@ const COPY: Partial<Record<string, Copy>> = {
 	},
 };
 
+/** The JMeter classes the engine imports as a folder (`is_folder_controller`). */
+const JMETER_FOLDER_CONTROLLERS: ReadonlySet<string> = new Set([
+	"LoopController",
+	"IfController",
+	"OnceOnlyController",
+	"SwitchController",
+	"TransactionController",
+	"ThroughputController",
+	"WhileController",
+	"ForeachController",
+	"RandomController",
+	"InterleaveControl",
+	"RandomOrderController",
+	"RunTime",
+	"CriticalSectionController",
+	"ModuleController",
+	"IncludeController",
+	"RecordingController",
+]);
+
 /**
  * A kind with no entry - a JMeter class name, open-ended by nature (issue
  * #1518) - still says something: the class is what a JMeter user sees in
@@ -358,6 +378,15 @@ function copyOf(kind: SkippedItem["kind"]): Copy {
 		};
 	}
 	const name = kind.endsWith("_unrecognised") ? kind.slice(0, -"_unrecognised".length) : kind;
+	// A logic controller imports as a folder holding its members; what is lost
+	// is the looping or selection it did, not the requests inside it.
+	if (kind.endsWith("_unrecognised") && JMETER_FOLDER_CONTROLLERS.has(name)) {
+		return {
+			tier: "note",
+			one: `1 ${name} imported as a plain folder - its looping or selection is not carried`,
+			many: `{n} ${name} controllers imported as plain folders - their looping or selection is not carried`,
+		};
+	}
 	return { tier: "note", one: `1 ${name} not imported`, many: `{n} ${name} not imported` };
 }
 
