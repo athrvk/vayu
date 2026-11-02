@@ -207,10 +207,10 @@ describe("form bodies", () => {
 			expect(notes.join(" ")).toContain("is sent as a.png");
 		});
 
-		it("python opens the file in the files dict", () => {
+		it("python opens the file in the files list", () => {
 			const { code } = generatePython(withFile);
 			expect(code).toContain(
-				`"avatar": ("profile.png", open("/tmp/a.png", "rb"), "image/png"),`
+				`("avatar", ("profile.png", open("/tmp/a.png", "rb"), "image/png")),`
 			);
 			expect(code).toContain("files=files,");
 		});
@@ -231,9 +231,9 @@ describe("form bodies", () => {
 			it("sends a text part as a field and names a file part after its path", () => {
 				const { code } = generatePython(mixed);
 				// A bare string would be sent as filename=<key>, a file upload.
-				expect(code).toContain(`"caption": (None, "hi"),`);
+				expect(code).toContain(`("caption", (None, "hi")),`);
 				expect(code).toContain(
-					`"report": ("report.pdf", open("/tmp/a/report.pdf", "rb")),`
+					`("report", ("report.pdf", open("/tmp/a/report.pdf", "rb"))),`
 				);
 			});
 
@@ -252,7 +252,7 @@ describe("form bodies", () => {
 						],
 					},
 				});
-				expect(code).toContain(`"report": ("report.pdf", open(`);
+				expect(code).toContain(`("report", ("report.pdf", open(`);
 			});
 
 			it("writes a declared file name and type, and no type otherwise", () => {
@@ -274,9 +274,56 @@ describe("form bodies", () => {
 					},
 				});
 				expect(code).toContain(
-					`"report": ("q3.pdf", open("/tmp/a/report.pdf", "rb"), "application/pdf"),`
+					`("report", ("q3.pdf", open("/tmp/a/report.pdf", "rb"), "application/pdf")),`
 				);
-				expect(code).toContain(`"note": ("note.txt", open("/tmp/a/note.txt", "rb")),`);
+				expect(code).toContain(`("note", ("note.txt", open("/tmp/a/note.txt", "rb"))),`);
+			});
+		});
+
+		/** A dict holds one value per key, so these would collapse to the last (#3206). */
+		describe("parts that share a key (#3206)", () => {
+			const repeated: SnippetRequest = {
+				...GET,
+				method: "POST",
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "tag", value: "red" },
+						{ key: "tag", value: "", type: "file", src: "/tmp/a/one.png" },
+						{ key: "tag", value: "blue" },
+					],
+				},
+			};
+
+			it("python writes every part, in row order", () => {
+				const { code } = generatePython(repeated);
+				expect(code).toContain(
+					[
+						"files = [",
+						`    ("tag", (None, "red")),`,
+						`    ("tag", ("one.png", open("/tmp/a/one.png", "rb"))),`,
+						`    ("tag", (None, "blue")),`,
+						"]",
+					].join("\n")
+				);
+			});
+
+			it("python sends a repeated urlencoded field as a pair of its own", () => {
+				const { code } = generatePython({
+					...GET,
+					method: "POST",
+					body: {
+						mode: "x-www-form-urlencoded",
+						fields: [
+							{ key: "tag", value: "red" },
+							{ key: "tag", value: "blue" },
+						],
+					},
+				});
+				expect(code).toContain(
+					["data = [", `    ("tag", "red"),`, `    ("tag", "blue"),`, "]"].join("\n")
+				);
+				expect(code).toContain("data=data,");
 			});
 		});
 
@@ -284,6 +331,99 @@ describe("form bodies", () => {
 			const { code } = generatePowerShell(withFile);
 			expect(code).toContain("'avatar' = Get-Item -LiteralPath '/tmp/a.png'");
 			expect(code).toContain("-Form $body");
+		});
+
+		describe("powershell, parts that share a name (#3206)", () => {
+			const repeated: SnippetRequest = {
+				...GET,
+				method: "POST",
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "tag", value: "red" },
+						{
+							key: "tag",
+							value: "",
+							type: "file",
+							src: "/tmp/a/one.png",
+							contentType: "image/png",
+						},
+						{ key: "Tag", value: "it's blue", contentType: "text/plain" },
+					],
+				},
+			};
+
+			it("builds a MultipartFormDataContent with every part, in row order", () => {
+				const { code } = generatePowerShell(repeated);
+				// A `-Form` hashtable cannot hold a name twice, in any case, and a
+				// literal that repeats one does not parse.
+				expect(code).not.toContain("-Form");
+				expect(code).not.toContain("[ordered]@{");
+				expect(code).toContain("-Body $body");
+				expect(code).toContain(
+					[
+						"$body = [System.Net.Http.MultipartFormDataContent]::new()",
+						"$part = [System.Net.Http.ByteArrayContent]::new([Text.Encoding]::UTF8.GetBytes('red'))",
+						"$body.Add($part, 'tag')",
+						"$part = [System.Net.Http.StreamContent]::new((Get-Item -LiteralPath '/tmp/a/one.png').OpenRead())",
+						"$part.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('image/png')",
+						"$body.Add($part, 'tag', 'one.png')",
+						"$part = [System.Net.Http.ByteArrayContent]::new([Text.Encoding]::UTF8.GetBytes('it''s blue'))",
+						"$part.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('text/plain')",
+						"$body.Add($part, 'Tag')",
+					].join("\n")
+				);
+			});
+
+			it("states the floor and why the hashtable was left", () => {
+				const { code, notes } = generatePowerShell(repeated);
+				expect(code.startsWith("# requires PowerShell 6.1+")).toBe(true);
+				expect(notes.join(" ")).toContain("Parts named tag repeat");
+				expect(notes.join(" ")).toContain("File streams are opened inline");
+				// Every part declares its type here, so nothing is said about a missing one,
+				// and a text part's type is written rather than dropped.
+				expect(notes.join(" ")).not.toContain("without");
+			});
+
+			it("names a file part after its path when it declares no name, and says it is untyped", () => {
+				const { code, notes } = generatePowerShell({
+					...repeated,
+					body: {
+						mode: "form-data",
+						fields: [
+							{ key: "f", value: "", type: "file", src: String.raw`C:\docs\a.pdf` },
+							{
+								key: "f",
+								value: "",
+								type: "file",
+								src: "/tmp/b.pdf",
+								fileName: "q3.pdf",
+							},
+						],
+					},
+				});
+				expect(code).toContain("$body.Add($part, 'f', 'a.pdf')");
+				expect(code).toContain("$body.Add($part, 'f', 'q3.pdf')");
+				expect(code).not.toContain("Headers.ContentType");
+				expect(notes.join(" ")).toContain(
+					"with no declared Content-Type is sent without one"
+				);
+			});
+
+			it("keeps -Form and the hashtable when no name repeats", () => {
+				const { code } = generatePowerShell({
+					...repeated,
+					body: {
+						mode: "form-data",
+						fields: [
+							{ key: "a", value: "1" },
+							{ key: "b", value: "2" },
+						],
+					},
+				});
+				expect(code).toContain("-Form $body");
+				expect(code).not.toContain("MultipartFormDataContent");
+			});
 		});
 
 		it("fetch says it cannot read a path rather than dropping the part", () => {
@@ -431,8 +571,8 @@ describe("form bodies", () => {
 
 		it("python gives it a filename-less tuple, the one spelling that sets the type", () => {
 			const { code } = generatePython(typed);
-			expect(code).toContain(`"payload": (None, "{\\"a\\":1}", "application/json"),`);
-			expect(code).toContain(`"plain": (None, "hi"),`);
+			expect(code).toContain(`("payload", (None, "{\\"a\\":1}", "application/json")),`);
+			expect(code).toContain(`("plain", (None, "hi")),`);
 		});
 
 		it.each([
