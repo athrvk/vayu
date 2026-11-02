@@ -43,6 +43,7 @@ import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DEFAULT_HTTP_VERSION, isHttpVersion, type HttpVersion } from "@/constants/request";
+import { wireBodyContent } from "./wire-body";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -189,7 +190,9 @@ const URL_CREDENTIALS_DROPPED_NOTE =
  * writes `{` and a backtick where a query leaves them. In the host the composed
  * URL lowercases and punycodes, so a secret there is matched in that form too
  * (#2591); a secret that is only part of a label is rewritten with the whole
- * label by punycode and is not matched.
+ * label by punycode and is not matched. In a JSON-RPC or GraphQL body the
+ * engine's envelope is built first, which writes a quote, backslash or newline
+ * in the secret as a JSON escape, so that spelling is matched too (#3198).
  */
 function secretForms(secret: string): string[] {
 	return [
@@ -201,6 +204,7 @@ function secretForms(secret: string): string[] {
 		encodeQueryComponent(secret, "value"),
 		encodeURIComponent(secret),
 		encodeHost(secret),
+		JSON.stringify(secret).slice(1, -1),
 	];
 }
 
@@ -380,7 +384,10 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 		return { kind: "form-data", fields, files };
 	}
 
-	return shape.content ? { kind: "raw", content: shape.content } : undefined;
+	if (!shape.content) return undefined;
+	// Before masking (the caller masks the result), as the engine completes the
+	// body before it leaves: a secret inside the envelope is still found.
+	return { kind: "raw", content: wireBodyContent(shape.mode, shape.content) };
 }
 
 /**

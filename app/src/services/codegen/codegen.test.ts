@@ -32,6 +32,7 @@ import {
 	type CodeTargetId,
 	type SnippetRequest,
 } from "./index";
+import { prepareRequest } from "./prepare";
 import { parseCommand } from "@/services/curl/parseCurl";
 import { encodeHost, encodeUrlAsPostman } from "@/modules/request-builder/utils/query-encoding";
 
@@ -1701,6 +1702,89 @@ describe("the Content-Type a body mode implies", () => {
 	it("adds nothing when the mode carries no content", () => {
 		const { code } = generateCurl(withBody("xml", ""));
 		expect(code).not.toContain("application/xml");
+	});
+});
+
+/**
+ * The body a GraphQL or JSON-RPC snippet carries is the engine's wire body, not
+ * the stored content (#3198): a bare document is wrapped, a bare call gets its
+ * version and id. Without it a copied snippet is a request the server rejects
+ * where Vayu's succeeds. The rules themselves are held in `wire-body.test.ts`;
+ * this holds that `prepareRequest` applies them, in front of the masker, and
+ * that every target carries the result.
+ */
+describe("the envelope a graphql or jsonrpc snippet sends", () => {
+	const withBody = (mode: string, content: string): SnippetRequest => ({
+		...GET,
+		method: "POST",
+		body: { mode, content },
+	});
+	const BARE_GRAPHQL = "{ hero { name } }";
+	const WRAPPED_GRAPHQL = '{"query":"{ hero { name } }"}';
+	const BARE_CALL = '{"method":"eth_blockNumber","params":[]}';
+	const COMPLETED_CALL = '{"method":"eth_blockNumber","params":[],"jsonrpc":"2.0","id":1}';
+	const FULL_ENVELOPE = '{"jsonrpc":"2.0","id":7,"method":"m","params":[]}';
+
+	it("wraps a bare GraphQL document and completes a bare JSON-RPC call", () => {
+		expect(prepareRequest(withBody("graphql", BARE_GRAPHQL)).body).toEqual({
+			kind: "raw",
+			content: WRAPPED_GRAPHQL,
+		});
+		expect(prepareRequest(withBody("jsonrpc", BARE_CALL)).body).toEqual({
+			kind: "raw",
+			content: COMPLETED_CALL,
+		});
+	});
+
+	it("leaves an envelope the author wrote, and every other mode, as typed", () => {
+		const envelope = '{ "query": "{ hero }", "variables": {} }';
+		const cases: Array<[string, string]> = [
+			["graphql", envelope],
+			["jsonrpc", FULL_ENVELOPE],
+			["jsonrpc", '[{"method":"a"},{"method":"b"}]'],
+			["jsonrpc", '{"method":"m","params":{{args}}}'],
+			["json", BARE_CALL],
+			["text", BARE_GRAPHQL],
+		];
+		for (const [mode, content] of cases) {
+			expect(prepareRequest(withBody(mode, content)).body, `${mode} ${content}`).toEqual({
+				kind: "raw",
+				content,
+			});
+		}
+	});
+
+	it("sends the wrapped body in every target", () => {
+		// Each word is one only the envelope supplies: neither bare input has it.
+		for (const [mode, content, word] of [
+			["graphql", BARE_GRAPHQL, "query"],
+			["jsonrpc", BARE_CALL, "jsonrpc"],
+		] as const) {
+			expect(content).not.toContain(word);
+			for (const target of CODE_TARGETS) {
+				expect(
+					target.generate(withBody(mode, content)).code,
+					`${target.id} ${mode}`
+				).toContain(word);
+			}
+			expect(curlBody(generateCurl(withBody(mode, content)).code), mode).toBe(
+				mode === "graphql" ? WRAPPED_GRAPHQL : COMPLETED_CALL
+			);
+		}
+	});
+
+	// The envelope is built before the masker runs, so the quote in this secret
+	// reaches it as `\"` and is found only by the masker's JSON-escaped form.
+	it("masks a secret whose JSON spelling the wrapping changed", () => {
+		const secret = 's3"cr\\x';
+		const { code } = generateCurl(withBody("graphql", `{ me(token: "${secret}") { id } }`), {
+			mask: true,
+			secrets: [secret],
+		});
+		expect(code).not.toContain("s3");
+		expect(curlBody(code)).toBe(
+			`{"query":"{ me(token: \\"${SECRET_PLACEHOLDER}\\") { id } }"}`
+		);
 	});
 });
 
