@@ -74,9 +74,13 @@ Vayu keeps threads, ramp-up, duration and loops on the load run, not on the coll
 
 The values stay as written, so a `${__P(users,10)}` function call reads as that text. A group at the defaults - one thread, one pass, no duration, or none of the properties at all - has nothing to set and is not counted; a disabled group is counted as `ThreadGroup_disabled` like any disabled element and not as a profile (nothing under it imports). The samplers inside an enabled group import as requests whatever its profile.
 
+The preview shows it as a note, not a warning, since every request imports and only a load test would run with other load than the plan: "1 thread group run profile not imported (Users: 10 threads; ramp-up 5s; duration 60s; 3 loops) - set the load, ramp-up and duration when you start the load test", with up to three groups spelled out and "+N more" after them.
+
 ## Setup and teardown groups
 
 A `SetupThreadGroup` or `PostThreadGroup` is counted under its own tag name (`SetupThreadGroup`, `PostThreadGroup`), and the count is the number of samplers inside it at any depth, controllers included - the number of requests to rebuild by hand. A group with no sampler inside and no script that imported is still one loss, so the count is never below 1 for a group that left something out. The samplers are not imported as requests and `meta.requestCount` does not include them. When a JSR223/BeanShell script does import as `script.setup` / `script.teardown`, a scripted sampler that became that script is not a loss, but any other sampler beside it still is and is counted. Samplers are recognised by the JMeter naming (`HTTPSamplerProxy`, `JDBCSampler`, ... any tag ending `Sampler` or `SamplerProxy`, and `TestAction`).
+
+The preview words the count as samplers, not groups, and shows it as an action since requests are missing: "2 setUp samplers not imported - a request runs on every pass, so send them from a setup script instead", and the same for tearDown with a teardown script.
 
 ## Request mapping
 
