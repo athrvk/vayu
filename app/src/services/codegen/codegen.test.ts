@@ -333,6 +333,99 @@ describe("form bodies", () => {
 			expect(code).toContain("-Form $body");
 		});
 
+		describe("powershell, parts that share a name (#3206)", () => {
+			const repeated: SnippetRequest = {
+				...GET,
+				method: "POST",
+				body: {
+					mode: "form-data",
+					fields: [
+						{ key: "tag", value: "red" },
+						{
+							key: "tag",
+							value: "",
+							type: "file",
+							src: "/tmp/a/one.png",
+							contentType: "image/png",
+						},
+						{ key: "Tag", value: "it's blue", contentType: "text/plain" },
+					],
+				},
+			};
+
+			it("builds a MultipartFormDataContent with every part, in row order", () => {
+				const { code } = generatePowerShell(repeated);
+				// A `-Form` hashtable cannot hold a name twice, in any case, and a
+				// literal that repeats one does not parse.
+				expect(code).not.toContain("-Form");
+				expect(code).not.toContain("[ordered]@{");
+				expect(code).toContain("-Body $body");
+				expect(code).toContain(
+					[
+						"$body = [System.Net.Http.MultipartFormDataContent]::new()",
+						"$part = [System.Net.Http.ByteArrayContent]::new([Text.Encoding]::UTF8.GetBytes('red'))",
+						"$body.Add($part, 'tag')",
+						"$part = [System.Net.Http.StreamContent]::new((Get-Item -LiteralPath '/tmp/a/one.png').OpenRead())",
+						"$part.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('image/png')",
+						"$body.Add($part, 'tag', 'one.png')",
+						"$part = [System.Net.Http.ByteArrayContent]::new([Text.Encoding]::UTF8.GetBytes('it''s blue'))",
+						"$part.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('text/plain')",
+						"$body.Add($part, 'Tag')",
+					].join("\n")
+				);
+			});
+
+			it("states the floor and why the hashtable was left", () => {
+				const { code, notes } = generatePowerShell(repeated);
+				expect(code.startsWith("# requires PowerShell 6.1+")).toBe(true);
+				expect(notes.join(" ")).toContain("Parts named tag repeat");
+				expect(notes.join(" ")).toContain("File streams are opened inline");
+				// Every part declares its type here, so nothing is said about a missing one,
+				// and a text part's type is written rather than dropped.
+				expect(notes.join(" ")).not.toContain("without");
+			});
+
+			it("names a file part after its path when it declares no name, and says it is untyped", () => {
+				const { code, notes } = generatePowerShell({
+					...repeated,
+					body: {
+						mode: "form-data",
+						fields: [
+							{ key: "f", value: "", type: "file", src: String.raw`C:\docs\a.pdf` },
+							{
+								key: "f",
+								value: "",
+								type: "file",
+								src: "/tmp/b.pdf",
+								fileName: "q3.pdf",
+							},
+						],
+					},
+				});
+				expect(code).toContain("$body.Add($part, 'f', 'a.pdf')");
+				expect(code).toContain("$body.Add($part, 'f', 'q3.pdf')");
+				expect(code).not.toContain("Headers.ContentType");
+				expect(notes.join(" ")).toContain(
+					"with no declared Content-Type is sent without one"
+				);
+			});
+
+			it("keeps -Form and the hashtable when no name repeats", () => {
+				const { code } = generatePowerShell({
+					...repeated,
+					body: {
+						mode: "form-data",
+						fields: [
+							{ key: "a", value: "1" },
+							{ key: "b", value: "2" },
+						],
+					},
+				});
+				expect(code).toContain("-Form $body");
+				expect(code).not.toContain("MultipartFormDataContent");
+			});
+		});
+
 		it("fetch says it cannot read a path rather than dropping the part", () => {
 			const { code, notes } = generateFetch(withFile);
 			expect(code).toContain("/tmp/a.png");

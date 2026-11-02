@@ -20,13 +20,16 @@
  * something else than the reader expects.
  */
 
+import { fileBaseName } from "@/lib/file-path";
 import {
 	foldRepeatedHeaders,
 	prepareRequest,
 	timeoutSeconds,
 	untypedTextPartNote,
+	type PreparedFilePart,
 	type PreparedPart,
 	type PreparedRequest,
+	type PreparedTextPart,
 } from "./prepare";
 import type { CodegenOptions, GeneratedSnippet, SnippetRequest } from "./types";
 
@@ -68,6 +71,83 @@ function formEntry(part: PreparedPart): string {
 	return `    ${powerShellQuote(part.key)} = ${value}`;
 }
 
+/**
+ * The part names that appear more than once, as first written. A `-Form`
+ * hashtable keeps one entry per name and compares names without regard to case,
+ * so `tag` and `Tag` collide as well; a literal that repeats one does not parse
+ * (#3206).
+ */
+function repeatedPartKeys(parts: PreparedPart[]): string[] {
+	const seen = new Set<string>();
+	const repeated = new Map<string, string>();
+	for (const { key } of parts) {
+		const folded = key.toLowerCase();
+		if (seen.has(folded) && !repeated.has(folded)) repeated.set(folded, key);
+		seen.add(folded);
+	}
+	return [...repeated.values()];
+}
+
+/**
+ * The statements that give `$part` its Content-Type, when the part declares one.
+ * Left unset otherwise: a text part goes out untyped, as the engine sends it.
+ */
+function contentTypeLines(contentType: string | undefined): string[] {
+	if (!contentType) return [];
+	return [
+		`$part.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse(${powerShellQuote(contentType)})`,
+	];
+}
+
+function textContentLines({ key, value, contentType }: PreparedTextPart): string[] {
+	return [
+		`$part = [System.Net.Http.ByteArrayContent]::new([Text.Encoding]::UTF8.GetBytes(${powerShellQuote(value)}))`,
+		...contentTypeLines(contentType),
+		`$body.Add($part, ${powerShellQuote(key)})`,
+	];
+}
+
+/** As in `formEntry`, `-LiteralPath` keeps `[` and `]` in a path from being a wildcard. */
+function fileContentLines(file: PreparedFilePart): string[] {
+	const fileName = file.fileName || fileBaseName(file.path);
+	return [
+		`$part = [System.Net.Http.StreamContent]::new((Get-Item -LiteralPath ${powerShellQuote(file.path)}).OpenRead())`,
+		...contentTypeLines(file.contentType),
+		`$body.Add($part, ${powerShellQuote(file.key)}, ${powerShellQuote(fileName)})`,
+	];
+}
+
+function contentBodyNotes(parts: PreparedPart[], repeatedKeys: string[]): string[] {
+	const notes = [
+		`Parts named ${repeatedKeys.join(", ")} repeat, which a -Form hashtable cannot hold, so the parts are built as a MultipartFormDataContent and passed as -Body.`,
+	];
+	const files = parts.filter((part) => part.kind === "file");
+	if (files.length > 0) {
+		notes.push("File streams are opened inline and left for the shell to close.");
+	}
+	if (files.some((file) => !file.contentType)) {
+		notes.push(
+			"A file part with no declared Content-Type is sent without one; Vayu derives it from the file's extension."
+		);
+	}
+	return notes;
+}
+
+/**
+ * A multipart body as a `MultipartFormDataContent`, which `Invoke-RestMethod`
+ * takes as `-Body` and which, unlike a `-Form` hashtable, can hold several
+ * parts under one name. It adds the boundary and the matching Content-Type
+ * itself, as `-Form` does.
+ */
+function multipartContentLines(parts: PreparedPart[]): string[] {
+	return [
+		"$body = [System.Net.Http.MultipartFormDataContent]::new()",
+		...parts.flatMap((part) =>
+			part.kind === "file" ? fileContentLines(part) : textContentLines(part)
+		),
+	];
+}
+
 export function generatePowerShell(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
@@ -92,6 +172,8 @@ export function generatePowerShell(
 
 	const headers: Array<{ name: string; expression: string }> = [];
 	const isFormData = prepared.body?.kind === "form-data";
+	const repeatedKeys =
+		prepared.body?.kind === "form-data" ? repeatedPartKeys(prepared.body.parts) : [];
 	const folded = foldRepeatedHeaders(prepared.headers, "Invoke-RestMethod");
 	notes.push(...folded.notes);
 	for (const [name, value] of folded.headers) {
@@ -119,8 +201,14 @@ export function generatePowerShell(
 		// `-Form` arrived in PowerShell 6.1. Windows PowerShell 5.1 - the shell
 		// whose `curl` alias is why this target exists at all - has no such
 		// parameter and fails the call outright, so the snippet says so in the one
-		// place the reader is already looking.
-		lines.push("# requires PowerShell 6.1+ (-Form)", "");
+		// place the reader is already looking. The content form (repeated part
+		// names) keeps the same floor rather than claim an older shell.
+		lines.push(
+			repeatedKeys.length > 0
+				? "# requires PowerShell 6.1+ (MultipartFormDataContent as -Body)"
+				: "# requires PowerShell 6.1+ (-Form)",
+			""
+		);
 	}
 
 	if (headers.length > 0) {
@@ -131,17 +219,23 @@ export function generatePowerShell(
 		lines.push("}", "");
 	}
 
-	let bodyVariable: string | null = null;
+	let bodyParam: string | null = null;
 	let inFile: string | null = null;
 	if (prepared.body?.kind === "binary") {
 		// `-InFile` sends the file as the body; `-Body` would want its bytes
 		// read into a variable first.
 		inFile = prepared.body.path;
 	} else if (prepared.body?.kind === "raw") {
-		bodyVariable = "$body";
+		bodyParam = "-Body $body";
 		lines.push(`$body = ${powerShellQuote(prepared.body.content)}`, "");
+	} else if (prepared.body?.kind === "form-data" && repeatedKeys.length > 0) {
+		bodyParam = "-Body $body";
+		lines.push(...multipartContentLines(prepared.body.parts), "");
+		notes.push(...contentBodyNotes(prepared.body.parts, repeatedKeys));
 	} else if (prepared.body) {
-		bodyVariable = "$body";
+		// `-Form` is the multipart switch (PowerShell 6.1+); `-Body` with a
+		// hashtable is urlencoded.
+		bodyParam = isFormData ? "-Form $body" : "-Body $body";
 		// `-Form` writes the parts in the order the hashtable enumerates, which
 		// for a plain `@{}` is unspecified. `[ordered]` keeps the row order.
 		lines.push(prepared.body.kind === "urlencoded" ? "$body = @{" : "$body = [ordered]@{");
@@ -169,11 +263,7 @@ export function generatePowerShell(
 	];
 	if (headers.length > 0) call.push("-Headers $headers");
 	if (inFile !== null) call.push(`-InFile ${powerShellQuote(inFile)}`);
-	if (bodyVariable) {
-		// `-Form` is the multipart switch (PowerShell 6.1+); `-Body` with a
-		// hashtable is urlencoded, and with a string is sent as-is.
-		call.push(isFormData ? `-Form ${bodyVariable}` : `-Body ${bodyVariable}`);
-	}
+	if (bodyParam) call.push(bodyParam);
 
 	call.push(...transferParams(prepared));
 
