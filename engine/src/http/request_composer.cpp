@@ -1700,6 +1700,16 @@ const std::map<std::string, std::string>& substituted) {
     return refusal;
 }
 
+/** An explicit choice wins; otherwise a deferring composition resolves OAuth 2.0 at composition. */
+OAuth2Resolution oauth2_resolution_of (std::optional<OAuth2Resolution> chosen,
+DynamicResolution dynamic) {
+    if (chosen) {
+        return *chosen;
+    }
+    return dynamic == DynamicResolution::Defer ? OAuth2Resolution::AtComposition :
+                                                 OAuth2Resolution::AfterTheScript;
+}
+
 /**
  * Auth: `inherit` resolved through the chain first, then `{{vars}}` inside
  * whatever concrete block won - strictly before any OAuth 2.0 cache key can be
@@ -1915,9 +1925,7 @@ VariableDeferral deferral) {
     // generator in a credential is generated here, once, exactly as it was.
     // A run composition's OAuth 2.0 config resolves here: no HTTP client
     // composes for a sequential collection run, so a run here is a load run.
-    const OAuth2Resolution oauth2_resolution = oauth2.value_or (
-    dynamic == DynamicResolution::Defer ? OAuth2Resolution::AtComposition :
-                                          OAuth2Resolution::AfterTheScript);
+    const OAuth2Resolution oauth2_resolution = oauth2_resolution_of (oauth2, dynamic);
     if (auto refusal = resolve_compose_auth (chain,
         ComposeLookup{ vars, bound_columns, DynamicResolution::Generate, defer_into },
         oauth2_resolution, payload)) {

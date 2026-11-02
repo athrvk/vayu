@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <format>
 #include <memory>
 #include <string>
 #include <variant>
@@ -170,7 +171,7 @@ TEST (AuthResolver, AnApiKeyWithNoNameSendsNothingAndSaysSo) {
             auto result             = vayu::http::apply_auth (req,
             json{ { "mode", "apikey" }, { "key", key }, { "value", "secret" }, { "in", in } },
             nullptr);
-            const std::string label = in + " '" + key + "'";
+            const std::string label = std::format ("{} '{}'", in, key);
             EXPECT_TRUE (result.ok) << label;
             EXPECT_TRUE (req.headers.empty ()) << label;
             EXPECT_EQ (req.url, "https://api.example.com/v1") << label;
