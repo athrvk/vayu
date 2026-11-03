@@ -16,6 +16,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include <pugixml.hpp>
 
@@ -197,6 +198,16 @@ std::vector<std::string> split_list (const std::string& list, char separator) {
 /// Tally kind for a branch left out because it nests past `MAX_READ_DEPTH`.
 constexpr const char* NESTING_TOO_DEEP_KIND = "nesting_too_deep";
 
+/// The HTTP Request Defaults settings a sampler inherits, each trimmed and
+/// empty when unset (a blank field is JMeter's "not set", and a `0` timeout its
+/// "none"). The text is kept as written so a sampler's own value and a
+/// default's are read the same way.
+struct HttpDefaults {
+    std::string path;
+    std::string connect_timeout;
+    std::string response_timeout;
+};
+
 struct Ctx {
     const ImportOptions& options;
     ImportTally& tally;
@@ -205,6 +216,9 @@ struct Ctx {
     /// `<hashTree>` levels the walk is currently inside; bounded by
     /// `walk_hash_tree` (#1782).
     size_t depth = 0;
+    /// The HTTP Request Defaults in force at the level being walked: every
+    /// enclosing level's, the nearer one winning per field (#3217).
+    HttpDefaults defaults;
 };
 
 /// Where the walk currently appends - a folder and the root collection share
@@ -795,45 +809,54 @@ std::string base_url_of (const pugi::xml_node& el) {
     return base;
 }
 
-/// Tally kind for HTTP Request Defaults settings a request cannot inherit: one
-/// count per setting, the setting named under `names`.
-constexpr std::string_view HTTP_DEFAULTS_KIND = "HttpDefaults_unmapped";
+/// Tally kind for a request whose timeout text is not a whole number of
+/// milliseconds (a `${var}`): that part is left out of `timeout`.
+constexpr std::string_view TIMEOUT_UNRECOGNISED_KIND =
+"HTTPSampler_timeout_unrecognised";
 
-/// The settings of an HTTP Request Defaults element that reach no request.
-/// Variables are all that propagates from a defaults element, and Vayu has no
-/// inherited path or timeout: stamping either onto the requests below would
-/// mean resolving JMeter's positional scope, which this parser does not
-/// attempt, and a default path only applies to a sampler with none of its own.
-/// A `0` timeout is JMeter's "none".
-void tally_unmapped_defaults (Ctx& ctx, const pugi::xml_node& el) {
-    std::vector<std::string> unmapped;
-    if (!trimmed (string_prop (el, "HTTPSampler.path")).empty ()) {
-        unmapped.emplace_back ("path");
-    }
-    for (const auto& [property, name] :
-    { std::pair{ "HTTPSampler.connect_timeout", "connect timeout" },
-    std::pair{ "HTTPSampler.response_timeout", "response timeout" } }) {
-        if (const std::string timeout = trimmed (text_prop (el, property));
-        !timeout.empty () && timeout != "0") {
-            unmapped.emplace_back (name);
+/// Tally kind for a request with both a connect and a response timeout: Vayu
+/// has the one total, so they are added, and the request is named.
+constexpr std::string_view TIMEOUT_TOTAL_KIND = "Timeout_total";
+
+/// A request's `timeout` ceiling, as the requests API validates it
+/// (`REQUEST_TIMEOUT_FIELD`, `http/request_exchange.hpp`).
+constexpr long long MAX_REQUEST_TIMEOUT_MS = 86400000;
+
+/// The path and timeouts @p el carries under the property names a sampler and
+/// an HTTP Request Defaults element share.
+HttpDefaults http_settings_of (const pugi::xml_node& el) {
+    return { trimmed (string_prop (el, "HTTPSampler.path")),
+        trimmed (text_prop (el, "HTTPSampler.connect_timeout")),
+        trimmed (text_prop (el, "HTTPSampler.response_timeout")) };
+}
+
+/// @p outer with every field @p inner sets laid over it.
+HttpDefaults overlaid (HttpDefaults outer, const HttpDefaults& inner) {
+    const auto take = [] (std::string& field, const std::string& value) {
+        if (!value.empty ()) {
+            field = value;
         }
-    }
-    if (unmapped.empty ()) {
-        return;
-    }
-    ctx.tally.add (HTTP_DEFAULTS_KIND, static_cast<int> (unmapped.size ()));
-    ctx.tally.name_dropped (HTTP_DEFAULTS_KIND, unmapped);
+    };
+    take (outer.path, inner.path);
+    take (outer.connect_timeout, inner.connect_timeout);
+    take (outer.response_timeout, inner.response_timeout);
+    return outer;
+}
+
+bool is_http_defaults (const pugi::xml_node& el) {
+    return std::string_view (el.name ()) == "ConfigTestElement" &&
+    std::string_view (el.attribute ("guiclass").value ()) == "HttpDefaultsGui";
 }
 
 /// An HTTP Request Defaults element: its `protocol://domain[:port]` becomes
 /// the `baseUrl` variable a sampler with no domain of its own reads, `${x}`
-/// references rewritten like any other value (#3191).
-void merge_http_defaults (Ctx& ctx, const pugi::xml_node& el, json& variables) {
+/// references rewritten like any other value (#3191). Its path and timeouts
+/// are not variables: `defaults_in_scope` carries them to the samplers below.
+void merge_http_defaults (const pugi::xml_node& el, json& variables) {
     if (const std::string base = base_url_of (el); !base.empty ()) {
         variables["baseUrl"] =
         json{ { "value", rewrite_variables (base) }, { "enabled", true } };
     }
-    tally_unmapped_defaults (ctx, el);
 }
 
 // ---------------------------------------------------------------------------
@@ -850,15 +873,9 @@ bool jmeter_enabled (const pugi::xml_node& el) {
 /// A `<hashTree>`'s direct children, paired: a test element followed by its
 /// own (possibly empty) `<hashTree>`, in document order - JMeter's own
 /// serialization shape. @p visit receives the element and that following
-/// tree, an empty node when there is none.
-///
-/// A disabled element - and everything nested under it, since JMeter itself
-/// never runs a disabled element's children either - is skipped here rather
-/// than by each caller: this is the one place every walk in the file passes
-/// through, so a caller cannot forget the check the way a request the user
-/// turned off silently reappearing as active on import would suggest one did.
+/// tree, an empty node when there is none, and sees a disabled element too.
 template <typename Visit>
-void for_each_paired_child (Ctx& ctx, const pugi::xml_node& hash_tree, Visit&& visit) {
+void for_each_pair (const pugi::xml_node& hash_tree, Visit&& visit) {
     pugi::xml_node child = hash_tree.first_child ();
     while (child) {
         if (std::string_view (child.name ()) == "hashTree") {
@@ -874,14 +891,31 @@ void for_each_paired_child (Ctx& ctx, const pugi::xml_node& hash_tree, Visit&& v
             own_tree = next;
             next     = next.next_sibling ();
         }
-        if (!jmeter_enabled (element)) {
-            ctx.tally.add (std::string (element.name ()) + "_disabled");
-            child = next;
-            continue;
-        }
         visit (element, own_tree);
         child = next;
     }
+}
+
+/// `for_each_pair` over the enabled elements only.
+///
+/// A disabled element - and everything nested under it, since JMeter itself
+/// never runs a disabled element's children either - is skipped here rather
+/// than by each caller: this is the one place every walk in the file passes
+/// through, so a caller cannot forget the check the way a request the user
+/// turned off silently reappearing as active on import would suggest one did.
+/// Each disabled element met is tallied, so a pre-pass over the same tree
+/// reads `for_each_pair` and checks `jmeter_enabled` itself rather than tally
+/// it twice.
+template <typename Visit>
+void for_each_paired_child (Ctx& ctx, const pugi::xml_node& hash_tree, Visit&& visit) {
+    for_each_pair (hash_tree,
+    [&] (const pugi::xml_node& element, const pugi::xml_node& own_tree) {
+        if (!jmeter_enabled (element)) {
+            ctx.tally.add (std::string (element.name ()) + "_disabled");
+            return;
+        }
+        visit (element, own_tree);
+    });
 }
 
 json make_folder () {
@@ -1077,20 +1111,62 @@ void collect_sampler_scope (Ctx& ctx, const pugi::xml_node& own_tree, json& head
     });
 }
 
+/// The timeout part @p text names, in milliseconds: nothing for JMeter's blank
+/// and `0` ("none"). Text that is not a whole non-negative number (a `${var}`)
+/// is nothing too and sets @p unreadable.
+long long timeout_part_ms (const std::string& text, bool& unreadable) {
+    if (text.empty ()) {
+        return 0;
+    }
+    const std::optional<long long> parsed = vayu::utils::parse_number<long long> (text);
+    if (!parsed || *parsed < 0) {
+        unreadable = true;
+        return 0;
+    }
+    return std::min (*parsed, MAX_REQUEST_TIMEOUT_MS);
+}
+
+/// The request's `timeout` from the connect and response timeouts in force for
+/// it, their sum since Vayu has the one total. Absent for none, so the request
+/// keeps the `defaultTimeout` setting (#2937); never `0`.
+void stamp_timeout (Ctx& ctx, const HttpDefaults& effective, json& request) {
+    bool unreadable = false;
+    const long long connect = timeout_part_ms (effective.connect_timeout, unreadable);
+    const long long response = timeout_part_ms (effective.response_timeout, unreadable);
+    if (unreadable) {
+        ctx.tally.add (TIMEOUT_UNRECOGNISED_KIND);
+    }
+    if (connect > 0 && response > 0) {
+        // The app joins `names` with commas, as for a thread group's profile.
+        std::string name = request.at ("name").get<std::string> ();
+        std::ranges::replace (name, ',', ' ');
+        ctx.tally.add (TIMEOUT_TOTAL_KIND);
+        ctx.tally.name_dropped (TIMEOUT_TOTAL_KIND, { name });
+    }
+    if (const long long total = std::min (connect + response, MAX_REQUEST_TIMEOUT_MS);
+    total > 0) {
+        request["timeout"] = total;
+    }
+}
+
 /// One `<HTTPSamplerProxy>`, plus whatever its own `<hashTree>` scopes to it
 /// alone (a `HeaderManager` and any extractor/assertion/timer/processor
 /// nested directly under it - the common, flat `.jmx` shape this parser
-/// targets; JMeter's own scoping rules let a config element further up the
-/// tree also apply here, which this parser does not attempt to resolve).
+/// targets). A `HeaderManager` or processor further up the tree is not
+/// resolved onto it; the HTTP Request Defaults in scope are (`ctx.defaults`):
+/// their path stands in for an empty one, and their timeouts for ones the
+/// sampler leaves unset.
 json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& own_tree) {
     json request;
     request["name"]        = el.attribute ("testname").as_string ("Request");
     request["description"] = "";
     request["method"]      = string_prop (el, "HTTPSampler.method", "GET");
 
-    const std::string path = string_prop (el, "HTTPSampler.path");
+    const std::string own_path = string_prop (el, "HTTPSampler.path");
+    const std::string path = trimmed (own_path).empty () ? ctx.defaults.path : own_path;
     const std::string base = base_url_of (el);
     request["url"] = rewrite_variables ((base.empty () ? "{{baseUrl}}" : base) + path);
+    stamp_timeout (ctx, overlaid (ctx.defaults, http_settings_of (el)), request);
 
     json params = json::array ();
     json body   = json{ { "mode", "none" } };
@@ -1317,9 +1393,8 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
         merge_arguments_into_variables (el, sink.variables);
         return;
     }
-    if (tag == "ConfigTestElement" &&
-    std::string_view (el.attribute ("guiclass").value ()) == "HttpDefaultsGui") {
-        merge_http_defaults (ctx, el, sink.variables);
+    if (is_http_defaults (el)) {
+        merge_http_defaults (el, sink.variables);
         return;
     }
     // Everything JMeter itself never asked this parser to model - listeners
@@ -1334,6 +1409,19 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
     }
 }
 
+/// The defaults in force below @p hash_tree: @p inherited with the enabled HTTP
+/// Request Defaults among its direct children laid over it, a later sibling's
+/// field winning as in JMeter. Read ahead of the walk because a defaults
+/// element covers the samplers at its level wherever it sits among them.
+HttpDefaults defaults_in_scope (HttpDefaults inherited, const pugi::xml_node& hash_tree) {
+    for_each_pair (hash_tree, [&] (const pugi::xml_node& el, const pugi::xml_node&) {
+        if (is_http_defaults (el) && jmeter_enabled (el)) {
+            inherited = overlaid (std::move (inherited), http_settings_of (el));
+        }
+    });
+    return inherited;
+}
+
 /// Every recursive edge (controller folder, thread group flatten) re-enters
 /// here, so this one guard bounds the stack. A `.jmx` skips `read_document`
 /// and its `MAX_READ_DEPTH` check, so the same constant is applied here: past
@@ -1344,10 +1432,13 @@ void walk_hash_tree (const pugi::xml_node& hash_tree, Sink sink, Ctx& ctx) {
         return;
     }
     ++ctx.depth;
+    HttpDefaults enclosing = ctx.defaults;
+    ctx.defaults           = defaults_in_scope (enclosing, hash_tree);
     for_each_paired_child (ctx, hash_tree,
     [&] (const pugi::xml_node& el, const pugi::xml_node& own_tree) {
         dispatch_child (ctx, el, own_tree, sink);
     });
+    ctx.defaults = std::move (enclosing);
     --ctx.depth;
 }
 

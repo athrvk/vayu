@@ -4256,8 +4256,11 @@ duration or loops are not the defaults is counted as `ThreadGroup_profile`
 values as written, e.g. `Users: 10 threads; ramp-up 5s; 3 loops`, so a client
 can show what to set on the load run; a setUp or tearDown group is counted
 under `SetupThreadGroup` / `PostThreadGroup`, once per sampler left out
-(`docs/app/import-collections/jmeter.md`). `meta.folderStrategy`
-(`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
+(`docs/app/import-collections/jmeter.md`). A JMeter request with both a connect
+and a response timeout is counted as `Timeout_total` (one per request, its name
+in `names`) because Vayu keeps one total timeout and adds them, and a timeout
+that is not a number (a `${var}`) as `HTTPSampler_timeout_unrecognised`.
+`meta.folderStrategy` (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
 folders, since a document that declares no operation tags gets a tree it never
 spelled out.
 
