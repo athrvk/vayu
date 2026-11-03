@@ -405,8 +405,10 @@ app-wide setting, not a per-request field, see [insomnia-v4.md](./insomnia-v4.md
 
 `timeout` (milliseconds, issue #2937) follows the same rule: absent means the request
 uses the `defaultTimeout` setting, and the orchestrator forwards it only when set. Its
-one producer is a Vayu OpenAPI export (`x-vayu-request.settings.timeout`); Postman,
-Insomnia and JMeter state no per-request timeout the importer reads (a JMeter HTTP Request Defaults timeout is counted as `HttpDefaults_unmapped`, see [jmeter.md](./jmeter.md#http-request-defaults)).
+producers are a Vayu OpenAPI export (`x-vayu-request.settings.timeout`) and JMeter (a
+sampler's connect and response timeouts, or those of the HTTP Request Defaults in its
+scope, summed, see [jmeter.md](./jmeter.md#timeouts)); Postman and Insomnia state no
+per-request timeout the importer reads.
 
 **`ExampleDraft`** - `name`, `status: number`, `headers: KeyValueEntry[]`, `body: string`,
 `contentType: string`. A saved example response the source file carried next to the request

@@ -526,22 +526,45 @@ describe("importNotices", () => {
 			expect(notices({ kind, count: 3 })).toEqual([{ tier: "action", text: many }]);
 		});
 
-		it("names the HTTP Request Defaults settings that reach no request, as a note", () => {
-			expect(notices({ kind: "HttpDefaults_unmapped", count: 1, names: ["path"] })).toEqual([
+		it("says a request's connect and response timeouts were added into one, naming the request, as a note", () => {
+			expect(notices({ kind: "Timeout_total", count: 1, names: ["Login"] })).toEqual([
 				{
 					tier: "note",
-					text: "1 HTTP Request Defaults setting not imported (path) - set it on the requests themselves",
+					text: "1 request has both a connect and a response timeout (Login) - Vayu has one total timeout, so they were added",
 				},
 			]);
+		});
+
+		it("lists the requests whose timeouts were added, three at most, then how many more", () => {
 			expect(
-				notices({
-					kind: "HttpDefaults_unmapped",
-					count: 2,
-					names: ["connect timeout", "response timeout"],
-				})[0].text
-			).toBe(
-				"2 HTTP Request Defaults settings not imported (connect timeout, response timeout) - set them on the requests themselves"
+				notices({ kind: "Timeout_total", count: 5, names: ["A", "B", "C", "D", "E"] })
+			).toEqual([
+				{
+					tier: "note",
+					text: "5 requests have both a connect and a response timeout (A, B, C, +2 more) - Vayu has one total timeout, so they were added",
+				},
+			]);
+		});
+
+		it("still counts the added timeouts when the engine named no request", () => {
+			expect(notices({ kind: "Timeout_total", count: 2 })[0].text).toBe(
+				"2 requests have both a connect and a response timeout - Vayu has one total timeout, so they were added"
 			);
+		});
+
+		it("tells the user a timeout that is not a number was left out and to set it, as a note", () => {
+			expect(notices({ kind: "HTTPSampler_timeout_unrecognised", count: 1 })).toEqual([
+				{
+					tier: "note",
+					text: "1 request has a timeout that is not a number (such as ${t}) and was left out - set the timeout on the request",
+				},
+			]);
+			expect(notices({ kind: "HTTPSampler_timeout_unrecognised", count: 3 })).toEqual([
+				{
+					tier: "note",
+					text: "3 requests have timeouts that are not numbers (such as ${t}) and were left out - set the timeout on each request",
+				},
+			]);
 		});
 
 		it("puts the left-out samplers before the profile", () => {

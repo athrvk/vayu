@@ -888,7 +888,6 @@ TEST (JmeterImport, HttpDefaultsRewriteVariableReferencesInTheBaseUrl) {
     EXPECT_EQ (collection.at ("variables").at ("baseUrl").at ("value"),
     "https://{{host}}:{{port}}");
     EXPECT_EQ (first_request (collection).at ("url"), "{{baseUrl}}/items");
-    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
 }
 
 /// The scheme of a defaults element falls back to `http` like a sampler's.
@@ -901,30 +900,256 @@ TEST (JmeterImport, HttpDefaultsWithAnEmptyProtocolUseHttp) {
     "http://api.example.com:8080");
 }
 
-/// A path or timeout on the defaults reaches no request: counted under one
-/// kind with each setting named, not dropped quietly (#3191).
-TEST (JmeterImport, HttpDefaultsPathAndTimeoutsAreTalliedByName) {
-    const nlohmann::ordered_json result = import_with_http_defaults (R"(
-      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
-      <stringProp name="HTTPSampler.path">/v2</stringProp>
-      <stringProp name="HTTPSampler.connect_timeout">2000</stringProp>
-      <stringProp name="HTTPSampler.response_timeout">5000</stringProp>)");
-    const nlohmann::ordered_json& meta  = result.at ("meta");
-    EXPECT_EQ (skipped_count (meta, "HttpDefaults_unmapped"), 3);
-    const nlohmann::ordered_json& item = meta.at ("skipped").at (0);
-    EXPECT_EQ (item.at ("names"),
-    (nlohmann::ordered_json::array ({ "path", "connect timeout", "response timeout" })));
-    EXPECT_EQ (first_request (result.at ("collections").at (0)).at ("url"), "{{baseUrl}}/items");
+namespace {
+
+/// The `<stringProp>` lines of a connect and a response timeout; an empty
+/// argument leaves its property out.
+std::string timeout_props (const std::string& connect, const std::string& response) {
+    std::string props;
+    if (!connect.empty ()) {
+        props += R"(<stringProp name="HTTPSampler.connect_timeout">)" + connect + "</stringProp>";
+    }
+    if (!response.empty ()) {
+        props += R"(<stringProp name="HTTPSampler.response_timeout">)" + response + "</stringProp>";
+    }
+    return props;
 }
 
-/// JMeter's blank and `0` timeouts mean "none", so they leave nothing to count.
-TEST (JmeterImport, HttpDefaultsWithNoRealTimeoutOrPathTallyNothing) {
-    const nlohmann::ordered_json result = import_with_http_defaults (R"(
-      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
-      <stringProp name="HTTPSampler.path"></stringProp>
-      <stringProp name="HTTPSampler.connect_timeout"></stringProp>
-      <stringProp name="HTTPSampler.response_timeout">0</stringProp>)");
-    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
+/// A sampler named @p name carrying @p props, with an empty tree.
+std::string sampler_xml (const std::string& name, const std::string& props = "") {
+    return R"(<HTTPSamplerProxy testname=")" + name +
+    R"("><stringProp name="HTTPSampler.domain">example.com</stringProp>)" +
+    props + "</HTTPSamplerProxy><hashTree/>";
+}
+
+/// An HTTP Request Defaults element carrying @p props (it names no domain, so
+/// `baseUrl` stays out of the way).
+std::string defaults_xml (const std::string& props, const char* enabled = "true") {
+    return R"(<ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="Defaults" enabled=")" +
+    std::string (enabled) + R"(">)" + props + "</ConfigTestElement><hashTree/>";
+}
+
+/// A `LoopController` folder named @p name holding @p members.
+std::string folder_xml (const std::string& name, const std::string& members) {
+    return R"(<LoopController testname=")" + name + R"("/><hashTree>)" + members + "</hashTree>";
+}
+
+/// @p members imported as the children of the plan's `TestPlan`.
+nlohmann::ordered_json import_plan (const std::string& members) {
+    const std::string plan =
+    R"(<?xml version="1.0"?><jmeterTestPlan version="1.2"><hashTree><TestPlan testname="Plan"/><hashTree>)" +
+    members + "</hashTree></hashTree></jmeterTestPlan>";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/// The request called @p name anywhere under @p node (a collection or folder),
+/// null when there is none.
+nlohmann::ordered_json
+request_named (const nlohmann::ordered_json& node, const std::string& name) {
+    for (const nlohmann::ordered_json& request : node.at ("requests")) {
+        if (request.at ("name") == name) {
+            return request;
+        }
+    }
+    for (const nlohmann::ordered_json& folder : node.at ("children")) {
+        if (nlohmann::ordered_json found = request_named (folder, name); !found.is_null ()) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+/// The request @p name of an imported plan; fails the test when it is missing.
+nlohmann::ordered_json imported_request (const nlohmann::ordered_json& result,
+const std::string& name) {
+    nlohmann::ordered_json request =
+    request_named (result.at ("collections").at (0), name);
+    EXPECT_FALSE (request.is_null ()) << "no request " << name;
+    return request;
+}
+
+/// The `timeout` of the request @p name, -1 when it carries none.
+long long timeout_of (const nlohmann::ordered_json& result, const std::string& name) {
+    const nlohmann::ordered_json request = imported_request (result, name);
+    return request.contains ("timeout") ? request.at ("timeout").get<long long> () : -1;
+}
+
+/// The names the import attached to @p kind, in the order given.
+std::vector<std::string>
+skipped_names (const nlohmann::ordered_json& meta, const std::string& kind) {
+    for (const nlohmann::ordered_json& item : meta.at ("skipped")) {
+        if (item.at ("kind") == kind && item.contains ("names")) {
+            return item.at ("names").get<std::vector<std::string>> ();
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+/// Vayu has one total timeout, so a sampler's connect and response timeouts
+/// are added; the request is named so the sum is not a surprise (#3217).
+TEST (JmeterImport, ASamplerWithBothTimeoutsGetsTheirSumAndIsNamedInANotice) {
+    const nlohmann::ordered_json result =
+    import_plan (sampler_xml ("Both", timeout_props ("2000", "5000")));
+    EXPECT_EQ (timeout_of (result, "Both"), 7000);
+    const nlohmann::ordered_json& meta = result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "Timeout_total"), 1);
+    EXPECT_EQ (skipped_names (meta, "Timeout_total"), (std::vector<std::string>{ "Both" }));
+}
+
+/// A comma in the name would read as two requests where the app joins `names`.
+TEST (JmeterImport, TheTimeoutNoticeNamesARequestWithoutCommas) {
+    const nlohmann::ordered_json result =
+    import_plan (sampler_xml ("Get a, b", timeout_props ("1", "1")));
+    EXPECT_EQ (skipped_names (result.at ("meta"), "Timeout_total"),
+    (std::vector<std::string>{ "Get a  b" }));
+}
+
+TEST (JmeterImport, ASamplerWithOneTimeoutKeepsThatValueAndRaisesNoNotice) {
+    const nlohmann::ordered_json result =
+    import_plan (sampler_xml ("Connect", timeout_props ("3000", "")) +
+    sampler_xml ("Response", timeout_props ("", "4000")));
+    EXPECT_EQ (timeout_of (result, "Connect"), 3000);
+    EXPECT_EQ (timeout_of (result, "Response"), 4000);
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "Timeout_total"));
+}
+
+/// Blank and `0` are JMeter's "none": no key, so the request keeps the
+/// `defaultTimeout` setting, never a `0` that would mean something else.
+TEST (JmeterImport, BlankAndZeroTimeoutsStampNoTimeout) {
+    const nlohmann::ordered_json result = import_plan (sampler_xml ("None") +
+    sampler_xml ("Zero", timeout_props ("0", "0")) +
+    sampler_xml ("Blank", timeout_props (" ", " ")));
+    for (const char* name : { "None", "Zero", "Blank" }) {
+        EXPECT_EQ (timeout_of (result, name), -1) << name;
+    }
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "Timeout_total"));
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HTTPSampler_timeout_unrecognised"));
+}
+
+/// A `${var}` has no number to read: that part is left out and counted, once
+/// per request, while the other part still applies.
+TEST (JmeterImport, ATimeoutThatIsNotANumberIsOmittedAndTallied) {
+    const nlohmann::ordered_json result =
+    import_plan (sampler_xml ("Half", timeout_props ("${t}", "5000")) +
+    sampler_xml ("Neither", timeout_props ("${t}", "-5")));
+    EXPECT_EQ (timeout_of (result, "Half"), 5000);
+    EXPECT_EQ (timeout_of (result, "Neither"), -1);
+    const nlohmann::ordered_json& meta = result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "HTTPSampler_timeout_unrecognised"), 2);
+    EXPECT_FALSE (has_skipped_kind (meta, "Timeout_total"));
+}
+
+/// The stored `timeout` is bounded to a day; a value past what a number holds
+/// is unreadable rather than wrapped.
+TEST (JmeterImport, TheTimeoutIsClampedToTheStoredRange) {
+    const nlohmann::ordered_json result =
+    import_plan (sampler_xml ("Sum", timeout_props ("86400000", "86400000")) +
+    sampler_xml ("Huge", timeout_props ("99999999999999999999", "")));
+    EXPECT_EQ (timeout_of (result, "Sum"), 86400000);
+    EXPECT_EQ (timeout_of (result, "Huge"), -1);
+    EXPECT_EQ (skipped_count (result.at ("meta"), "HTTPSampler_timeout_unrecognised"), 1);
+}
+
+/// JMeter's defaults cover the samplers at their level and below, wherever the
+/// element sits among them: a sampler ahead of it, one after it, one in a
+/// nested folder - and none beside the folder.
+TEST (JmeterImport, DefaultsTimeoutsReachTheSamplersInScopeInAnyDocumentOrder) {
+    const nlohmann::ordered_json result = import_plan (
+    folder_xml ("Scoped",
+    sampler_xml ("Before") + defaults_xml (timeout_props ("2000", "5000")) +
+    sampler_xml ("After") + folder_xml ("Nested", sampler_xml ("Deep"))) +
+    folder_xml ("Outside", sampler_xml ("Beside")) + sampler_xml ("Top"));
+    for (const char* name : { "Before", "After", "Deep" }) {
+        EXPECT_EQ (timeout_of (result, name), 7000) << name;
+    }
+    for (const char* name : { "Beside", "Top" }) {
+        EXPECT_EQ (timeout_of (result, name), -1) << name;
+    }
+    const nlohmann::ordered_json& meta = result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "Timeout_total"), 3);
+    EXPECT_EQ (skipped_names (meta, "Timeout_total"),
+    (std::vector<std::string>{ "Before", "After", "Deep" }));
+}
+
+/// A defaults element in the `TestPlan`'s tree covers its thread groups, and
+/// one inside a thread group covers that group alone, though both groups
+/// flatten into the same collection.
+TEST (JmeterImport, DefaultsScopeFollowsTheThreadGroupTheyAreIn) {
+    const nlohmann::ordered_json result = import_plan (
+    defaults_xml (timeout_props ("", "1000")) + R"(<ThreadGroup testname="A"/><hashTree>)" +
+    defaults_xml (timeout_props ("", "2000")) + sampler_xml ("InA") + "</hashTree>" +
+    R"(<ThreadGroup testname="B"/><hashTree>)" + sampler_xml ("InB") + "</hashTree>");
+    EXPECT_EQ (timeout_of (result, "InA"), 2000);
+    EXPECT_EQ (timeout_of (result, "InB"), 1000);
+}
+
+/// The nearest defaults win per field, so an inner element that sets only the
+/// connect timeout still inherits the outer response timeout; among defaults at
+/// one level the later sibling wins, as in JMeter.
+TEST (JmeterImport, NearerDefaultsOverrideOuterOnesPerField) {
+    const nlohmann::ordered_json result =
+    import_plan (defaults_xml (timeout_props ("1000", "2000")) +
+    folder_xml ("Inner", defaults_xml (timeout_props ("300", "")) + sampler_xml ("InInner")) +
+    folder_xml ("Siblings",
+    defaults_xml (timeout_props ("10", "20")) +
+    defaults_xml (timeout_props ("", "40")) + sampler_xml ("InSiblings")) +
+    sampler_xml ("InOuter"));
+    EXPECT_EQ (timeout_of (result, "InInner"), 2300);
+    EXPECT_EQ (timeout_of (result, "InSiblings"), 50);
+    EXPECT_EQ (timeout_of (result, "InOuter"), 3000);
+}
+
+/// A sampler's own timeout beats the defaults' for that field alone; its own
+/// `0` is a stated "none", not an absent value.
+TEST (JmeterImport, ASamplersOwnTimeoutBeatsTheDefaultsPerField) {
+    const nlohmann::ordered_json result =
+    import_plan (defaults_xml (timeout_props ("1000", "2000")) +
+    sampler_xml ("OwnConnect", timeout_props ("500", "")) +
+    sampler_xml ("OwnNone", timeout_props ("", "0")) + sampler_xml ("Inherits"));
+    EXPECT_EQ (timeout_of (result, "OwnConnect"), 2500);
+    EXPECT_EQ (timeout_of (result, "OwnNone"), 1000);
+    EXPECT_EQ (timeout_of (result, "Inherits"), 3000);
+}
+
+/// A disabled element covers nothing, and is counted once - the pre-pass that
+/// finds defaults ahead of the walk must not tally it a second time.
+TEST (JmeterImport, ADisabledDefaultsElementCoversNothingAndIsCountedOnce) {
+    const nlohmann::ordered_json result = import_plan (
+    defaults_xml (timeout_props ("", "1000"), "false") + sampler_xml ("Plain"));
+    EXPECT_EQ (timeout_of (result, "Plain"), -1);
+    EXPECT_EQ (skipped_count (result.at ("meta"), "ConfigTestElement_disabled"), 1);
+}
+
+/// JMeter uses a default path only for a sampler whose own is empty; a path of
+/// its own replaces it, and it is no prefix. Outside the defaults' scope it
+/// does not apply.
+TEST (JmeterImport, ADefaultsPathFillsAnEmptySamplerPathOnly) {
+    const std::string path = R"(<stringProp name="HTTPSampler.path">)";
+    const nlohmann::ordered_json result = import_plan (
+    folder_xml ("Scoped",
+    sampler_xml ("Empty", path + "</stringProp>") + defaults_xml (path + "/v2</stringProp>") +
+    sampler_xml ("Absent") + sampler_xml ("Blank", path + "  </stringProp>") +
+    sampler_xml ("Own", path + "/items</stringProp>")) +
+    sampler_xml ("Outside"));
+    for (const char* name : { "Empty", "Absent", "Blank" }) {
+        EXPECT_EQ (imported_request (result, name).at ("url"), "http://example.com/v2")
+        << name;
+    }
+    EXPECT_EQ (imported_request (result, "Own").at ("url"), "http://example.com/items");
+    EXPECT_EQ (imported_request (result, "Outside").at ("url"), "http://example.com");
+}
+
+/// A default path with a variable in it is rewritten like a sampler's own.
+TEST (JmeterImport, ADefaultsPathVariableIsRewritten) {
+    const nlohmann::ordered_json result = import_plan (
+    defaults_xml (R"(<stringProp name="HTTPSampler.path">/${version}/items</stringProp>)") +
+    sampler_xml ("Versioned"));
+    EXPECT_EQ (imported_request (result, "Versioned").at ("url"),
+    "http://example.com/{{version}}/items");
 }
 
 /// A `HTTPFileArg` with no `File.paramname` names nothing a `form-data` field
@@ -1260,21 +1485,6 @@ TEST (JmeterImport, ARefusedLeafIsTalliedOnce) {
 }
 
 namespace {
-
-/// The names the import attached to @p kind, in the order given.
-std::vector<std::string>
-skipped_names (const nlohmann::ordered_json& meta, const std::string& kind) {
-    std::vector<std::string> names;
-    for (const nlohmann::ordered_json& item : meta.at ("skipped")) {
-        if (item.at ("kind").get<std::string> () != kind || !item.contains ("names")) {
-            continue;
-        }
-        for (const nlohmann::ordered_json& name : item.at ("names")) {
-            names.push_back (name.get<std::string> ());
-        }
-    }
-    return names;
-}
 
 /// A thread group named "Users" carrying @p props, with @p members inside.
 std::string thread_group (const std::string& props,
