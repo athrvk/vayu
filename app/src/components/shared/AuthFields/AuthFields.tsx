@@ -125,6 +125,7 @@ export default function AuthFields({
 						value={value.token}
 						onChange={(token) => onChange(edited(value, { token }))}
 						placeholder="Bearer token or {{variable}}"
+						type="password"
 					/>
 				</Field>
 			</div>
@@ -213,6 +214,7 @@ export default function AuthFields({
 							value={value.value}
 							onChange={(v) => onChange(edited(value, { value: v }))}
 							placeholder="{{api_key}}"
+							type="password"
 						/>
 					</Field>
 				</div>

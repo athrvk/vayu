@@ -128,17 +128,13 @@ describe("AuthFields host parameterisation", () => {
 		// The collection tab used a plain Input with a `text-variable` class; the
 		// builder used the full token editor. The default input keeps the accent
 		// so the collection side lost nothing in the consolidation.
-		renderFields({ mode: "bearer", token: "{{token}}" });
-		expect(screen.getByPlaceholderText(/Bearer token or/i).className).toContain(
-			"text-variable"
-		);
+		renderFields({ mode: "basic", username: "{{user}}", password: "" });
+		expect(screen.getByPlaceholderText(/Username/i).className).toContain("text-variable");
 	});
 
 	it("does not accent a literal value", () => {
-		renderFields({ mode: "bearer", token: "abc" });
-		expect(screen.getByPlaceholderText(/Bearer token or/i).className).not.toContain(
-			"text-variable"
-		);
+		renderFields({ mode: "basic", username: "abc", password: "" });
+		expect(screen.getByPlaceholderText(/Username/i).className).not.toContain("text-variable");
 	});
 
 	it("says where the credentials land, on both hosts", () => {
@@ -176,5 +172,21 @@ describe("AuthFields host parameterisation", () => {
 		// statements, one empty state.
 		renderFields({ mode: "none" });
 		expect(screen.getByText("Nothing will be sent.")).toBeInTheDocument();
+	});
+});
+
+describe("AuthFields masks the credential fields", () => {
+	it("masks the bearer token and reveals it on request", () => {
+		renderFields({ mode: "bearer", token: "tok-123" });
+		const input = screen.getByPlaceholderText(/Bearer token/i);
+		expect(input).toHaveAttribute("type", "password");
+		fireEvent.click(screen.getByRole("button", { name: /Show value/i }));
+		expect(input).toHaveAttribute("type", "text");
+	});
+
+	it("masks the API key value but not the key name", () => {
+		renderFields({ mode: "apikey", key: "X-API-Key", value: "sekret", in: "header" });
+		expect(screen.getByPlaceholderText("{{api_key}}")).toHaveAttribute("type", "password");
+		expect(screen.getByPlaceholderText("X-API-Key")).not.toHaveAttribute("type", "password");
 	});
 });
