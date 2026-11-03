@@ -467,7 +467,7 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
 const COOKIE_SEPARATOR = "; ";
 
 /** `has_header_value`: a value with a non-`std::isspace` character is not blank. */
-const REACHES_WIRE = /[^ \t\n\v\f\r]/;
+const HAS_HEADER_VALUE = /[^ \t\n\v\f\r]/;
 
 /**
  * Whether the engine reads the value as blank (empty or only whitespace), which
@@ -475,8 +475,9 @@ const REACHES_WIRE = /[^ \t\n\v\f\r]/;
  * spell such a row `Name;`: `Name: ` is curl's "remove this header".
  */
 export function isBlankHeaderValue(value: string): boolean {
-	return !REACHES_WIRE.test(value);
+	return !HAS_HEADER_VALUE.test(value);
 }
+
 /** RFC 9110 optional whitespace, space and tab: the edge `trim_optional_whitespace` strips. */
 const EDGE_WHITESPACE = /^[ \t]+|[ \t]+$/g;
 
@@ -489,7 +490,7 @@ const EDGE_WHITESPACE = /^[ \t]+|[ \t]+$/g;
  */
 function typedCookieValue(rows: readonly string[]): string {
 	return rows
-		.filter((value) => REACHES_WIRE.test(value))
+		.filter((value) => HAS_HEADER_VALUE.test(value))
 		.map((value) => value.replace(EDGE_WHITESPACE, ""))
 		.join(COOKIE_SEPARATOR);
 }
