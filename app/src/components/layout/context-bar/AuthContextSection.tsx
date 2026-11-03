@@ -32,6 +32,33 @@ import { SectionEmpty, SectionLoading } from "./Section";
 import type { ContextBarSectionProps } from "./types";
 import type { OAuth2Config, RequestAuth } from "@/types";
 
+/**
+ * The engine's `trimmed_credential`: only spaces and tabs, so a value of just a
+ * newline is still something the engine sends.
+ */
+const trimCredential = (text: string) => text.replace(/^[ \t]+|[ \t]+$/g, "");
+
+/**
+ * Why a bearer token or API key is a no-op, judged on the value the send will
+ * carry. The engine writes no header for an empty token or a nameless key and
+ * says so in `authNotice` - after the send. This is the same verdict from the
+ * stored configuration before there is a send, so a script that sets the
+ * variable at send time is outside it ("as configured"). Null when a credential
+ * would go out (#3203).
+ */
+function emptyCredentialReason(
+	auth: RequestAuth | undefined,
+	resolve: <T>(value: T) => T
+): string | null {
+	if (auth?.mode === "bearer") {
+		return trimCredential(resolve(auth.token)) === "" ? "empty, nothing sent" : null;
+	}
+	if (auth?.mode === "apikey") {
+		return trimCredential(resolve(auth.key)) === "" ? "no name, nothing sent" : null;
+	}
+	return null;
+}
+
 export function AuthContextSection({ tab }: ContextBarSectionProps) {
 	const { data: request, isLoading } = useRequestQuery(tab.entityId);
 	const ancestors = useCollectionAncestors(request?.collectionId ?? null);
@@ -110,11 +137,17 @@ export function AuthContextSection({ tab }: ContextBarSectionProps) {
 
 	const mode = effective.auth?.mode ?? "none";
 	const label = AUTH_MODE_LABELS[mode];
+	const emptyReason = emptyCredentialReason(effective.auth, resolveObject);
 
 	return (
 		<div className="space-y-2">
 			<p className="text-xs text-foreground m-0">
-				{isEngineExecutableAuthMode(mode) ? (
+				{emptyReason ? (
+					<>
+						<span className="font-semibold text-primary">{label}</span> - {emptyReason}{" "}
+						(as configured)
+					</>
+				) : isEngineExecutableAuthMode(mode) ? (
 					<>
 						Sending <span className="font-semibold text-primary">{label}</span>
 					</>

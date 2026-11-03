@@ -2293,7 +2293,10 @@ block is not there (`{ type: 'basic' }` with no `basic` beside it, or the key
 misspelled), a parameter the type does not take, and a block with no credential
 in it. Each type takes the names Postman's own auth helper reads: `basic`
 `username` and `password` (either may be empty, not both), `bearer` `token`
-(not empty), `apikey` `key` (required), `value` and `in`. The refusal names the
+(not empty), `apikey` `key` (required), `value` and `in`. A token or key
+naming a variable that resolves empty is not refused: it writes nothing, as
+the request's own auth would, and on `pm.request.auth` the send's `authNotice`
+says so (#3203). The refusal names the
 parameter and lists those, so `basic: { user, pass }` fails saying so rather
 than composing `Basic Og==`. What Postman's export writes beside the
 credential still reads: an entry's own `type` member, and the basic helper's

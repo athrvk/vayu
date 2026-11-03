@@ -35,9 +35,20 @@ vi.mock("@/queries", () => ({
 	useCollectionAncestors: () => ancestors,
 }));
 
-vi.mock("@/hooks/useVariableResolver", () => ({
-	useVariableResolver: () => ({ resolveObject: <T,>(o: T) => o }),
-}));
+// `{{name}}` answers from this table, the way the real resolver answers from the
+// scopes; an unset name stays written, as the real resolver leaves it.
+let variables: Record<string, string> = {};
+vi.mock("@/hooks/useVariableResolver", async () => {
+	const { resolveStringsDeep, resolveTemplate } = await vi.importActual<
+		typeof import("@/lib/variable-resolution")
+	>("@/lib/variable-resolution");
+	const resolveString = (input: string) => resolveTemplate(input, (name) => variables[name]);
+	return {
+		useVariableResolver: () => ({
+			resolveObject: <T,>(o: T) => resolveStringsDeep(o, resolveString),
+		}),
+	};
+});
 
 // The engine's answer to "which names may a pre-request script change", and what the
 // section asked for it with: the real hook needs a query client and a /compose.
@@ -87,6 +98,7 @@ const renderSection = () => render(<AuthContextSection tab={TAB} />);
 beforeEach(() => {
 	requestAuth = { mode: "inherit" };
 	ancestors = [];
+	variables = {};
 	engineDeferred = [];
 	useDeferredVariables.mockClear();
 });
@@ -179,6 +191,83 @@ describe("AuthContextSection", () => {
 		requestAuth = { mode: "basic", username: "u", password: "p" };
 		renderSection();
 		expect(screen.queryByTestId("token-status")).not.toBeInTheDocument();
+	});
+});
+
+describe("AuthContextSection when the credential is empty (#3203)", () => {
+	const bearer = (token: string): RequestAuth => ({ mode: "bearer", token });
+	const apiKey = (key: string): RequestAuth => ({
+		mode: "apikey",
+		key,
+		value: "v",
+		in: "header",
+	});
+
+	it.each([
+		["an empty bearer token", bearer(""), "Bearer token", /empty, nothing sent/],
+		["a whitespace-only bearer token", bearer(" \t "), "Bearer token", /empty, nothing sent/],
+		["an empty API key name", apiKey(""), "API key", /no name, nothing sent/],
+		["a whitespace-only API key name", apiKey("  "), "API key", /no name, nothing sent/],
+	])("says nothing is sent for %s", (_name, auth, label, reason) => {
+		requestAuth = auth;
+		renderSection();
+
+		expect(screen.getByText(label)).toBeInTheDocument();
+		expect(screen.getByText(reason)).toHaveTextContent("(as configured)");
+		expect(screen.queryByText(/Sending/)).not.toBeInTheDocument();
+	});
+
+	it.each([
+		["a bearer token", bearer("abc")],
+		["a bearer token with spaces around it", bearer("  abc  ")],
+		["an API key name", apiKey("X-Api-Key")],
+	])("still says Sending for %s", (_name, auth) => {
+		requestAuth = auth;
+		renderSection();
+
+		expect(screen.getByText(/Sending/)).toBeInTheDocument();
+		expect(screen.queryByText(/nothing sent/)).not.toBeInTheDocument();
+	});
+
+	it("judges the resolved value: a variable that resolves non-empty is not flagged", () => {
+		variables = { token: "abc", header: "X-Key" };
+		requestAuth = bearer("{{token}}");
+		const { unmount } = renderSection();
+		expect(screen.getByText(/Sending/)).toBeInTheDocument();
+		unmount();
+
+		requestAuth = apiKey("{{header}}");
+		renderSection();
+		expect(screen.getByText(/Sending/)).toBeInTheDocument();
+		expect(screen.queryByText(/nothing sent/)).not.toBeInTheDocument();
+	});
+
+	it("judges the resolved value: a variable that resolves empty is flagged", () => {
+		variables = { token: "" };
+		requestAuth = bearer("{{token}}");
+		const { unmount } = renderSection();
+		expect(screen.getByText(/empty, nothing sent/)).toBeInTheDocument();
+		unmount();
+
+		variables = { header: "  " };
+		requestAuth = apiKey("{{header}}");
+		renderSection();
+		expect(screen.getByText(/no name, nothing sent/)).toBeInTheDocument();
+	});
+
+	it("judges the inherited auth, not the request's own inherit", () => {
+		ancestors = [collection("root", { mode: "bearer", token: "" })];
+		renderSection();
+
+		expect(screen.getByText(/empty, nothing sent/)).toBeInTheDocument();
+		expect(screen.getByText("Inherited from root")).toBeInTheDocument();
+	});
+
+	it("does not flag an API key whose value is empty but whose name is set", () => {
+		requestAuth = { mode: "apikey", key: "X-Key", value: "", in: "header" };
+		renderSection();
+
+		expect(screen.getByText(/Sending/)).toBeInTheDocument();
 	});
 });
 

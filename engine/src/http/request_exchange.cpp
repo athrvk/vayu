@@ -829,10 +829,14 @@ LateTokenAcquisition* acquisition) {
         return std::nullopt;
     }
     // Resolved raw: `apply_auth` encodes what each destination needs (base64
-    // for a basic pair, the query rule for an api key in the query).
-    vayu::http::walk_auth_credentials (
-    auth, [&vars] (std::string& field, vayu::http::CredentialDestination) {
-        field = vayu::http::resolve_template (field, vars);
+    // for a basic pair, the query rule for an api key in the query). One it
+    // writes into a header line as it stands is held to the header rule.
+    std::optional<vayu::http::HeaderTextRefusal> unspellable;
+    vayu::http::walk_auth_credentials (auth,
+    [&vars, &unspellable] (std::string& field, vayu::http::CredentialDestination destination) {
+        field = destination == vayu::http::CredentialDestination::HeaderLine ?
+        vayu::http::resolve_header_template (field, vars, unspellable) :
+        vayu::http::resolve_template (field, vars);
     });
     // Before `apply_auth`, which computes the cache key from it (D10).
     if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
@@ -844,6 +848,13 @@ LateTokenAcquisition* acquisition) {
     acquisition != nullptr ? acquisition->cancel : nullptr);
     if (acquisition != nullptr) {
         acquisition->fetch_ms += applied.token_fetch_ms;
+    }
+    // Applied before it is refused: a load run sends whatever this answers
+    // (`resolve_load_residuals`), and the pre-send gate then stops the line it
+    // carries rather than the request going out with no credential at all.
+    // First, as composition orders it: a line break is the nearer fault.
+    if (unspellable) {
+        return unsendable_header_refusal (*unspellable);
     }
     if (applied.ok) {
         return std::nullopt;

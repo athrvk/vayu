@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <format>
 #include <memory>
 #include <string>
 #include <variant>
@@ -159,13 +160,53 @@ TEST (AuthResolver, ApiKeyHeaderNameWithBracesIsJudgedAroundItsTokens) {
     EXPECT_EQ (req.headers.at ("X-{{a}}-b"), "secret");
 }
 
-TEST (AuthResolver, ApiKeyOfOnlyPaddingIsNoKey) {
-    auto req    = make_request ();
-    auto result = vayu::http::apply_auth (req,
-    json{ { "mode", "apikey" }, { "key", "  " }, { "value", "secret" }, { "in", "header" } },
-    nullptr);
+// #3203: a credential that is empty once trimmed writes nothing and says so,
+// never refused, because a variable left unset on purpose must not fail a
+// run. Mutation check: drop either new `auth_notice` assignment in
+// `auth_resolver.cpp` and the matching case below reds.
+TEST (AuthResolver, AnApiKeyWithNoNameSendsNothingAndSaysSo) {
+    for (const std::string in : { "header", "query" }) {
+        for (const std::string key : { "", "  ", "\t" }) {
+            auto req                = make_request ();
+            auto result             = vayu::http::apply_auth (req,
+            json{ { "mode", "apikey" }, { "key", key }, { "value", "secret" }, { "in", in } },
+            nullptr);
+            const std::string label = std::format ("{} '{}'", in, key);
+            EXPECT_TRUE (result.ok) << label;
+            EXPECT_TRUE (req.headers.empty ()) << label;
+            EXPECT_EQ (req.url, "https://api.example.com/v1") << label;
+            EXPECT_TRUE (req.auth_query_param.empty ()) << label;
+            EXPECT_TRUE (req.auth_header.empty ()) << label;
+            EXPECT_NE (req.auth_notice.find ("API key has no name"), std::string::npos)
+            << label << ": " << req.auth_notice;
+        }
+    }
+}
+
+TEST (AuthResolver, AnEmptyBearerTokenSendsNoHeaderAndSaysSo) {
+    for (const std::string token : { "", "   ", " \t " }) {
+        auto req    = make_request ();
+        auto result = vayu::http::apply_auth (
+        req, json{ { "mode", "bearer" }, { "token", token } }, nullptr);
+        EXPECT_TRUE (result.ok) << "'" << token << "'";
+        EXPECT_TRUE (req.headers.empty ()) << "'" << token << "'";
+        EXPECT_TRUE (req.auth_header.empty ()) << "'" << token << "'";
+        EXPECT_NE (req.auth_notice.find ("bearer token is empty"), std::string::npos)
+        << "'" << token << "': " << req.auth_notice;
+        EXPECT_NE (req.auth_notice.find ("without an Authorization header"), std::string::npos)
+        << req.auth_notice;
+    }
+}
+
+// The typed header is what goes out, so there is nothing to explain.
+TEST (AuthResolver, AnEmptyBearerTokenUnderATypedAuthorizationSaysNothing) {
+    auto req                     = make_request ();
+    req.headers["Authorization"] = "Custom typed";
+    auto result                  = vayu::http::apply_auth (
+    req, json{ { "mode", "bearer" }, { "token", "" } }, nullptr);
     EXPECT_TRUE (result.ok);
-    EXPECT_TRUE (req.headers.empty ());
+    EXPECT_EQ (req.headers.at ("Authorization"), "Custom typed");
+    EXPECT_TRUE (req.auth_notice.empty ()) << req.auth_notice;
 }
 
 TEST (AuthResolver, BasicEncodesCredentials) {
@@ -282,6 +323,9 @@ TEST (AuthResolver, ExecutedModesLeaveNoNotice) {
         json{ { "mode", "bearer" }, { "token", "t" } },
         json{ { "mode", "basic" }, { "username", "u" }, { "password", "p" } },
         json{ { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "v" } },
+        json{ { "mode", "apikey" }, { "key", "k" }, { "value", "v" }, { "in", "query" } },
+        // A named key with an empty value is still a key: `k=` is written.
+        json{ { "mode", "apikey" }, { "key", "X-Api-Key" }, { "value", "" } },
     };
     for (const auto& auth : executed) {
         auto req = make_request ();

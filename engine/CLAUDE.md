@@ -1262,7 +1262,11 @@ before the send, in the same words and with the same code compose uses for the
 carries as `refusalCode`). Since a scripted request defers its variables, the
 pass also runs compose's header-text rule (#738) on them: a variable whose
 value ends or cuts a header line is refused here as `unsendable_header`, before
-anything is rewritten. The two rules read different reaches
+anything is rewritten. A credential written into a header line as it stands (a
+bearer token, a header-placed api key; `CredentialDestination::HeaderLine`) is
+held to the same rule, by compose and by `apply_late_auth` (#3203), which
+applies the auth before refusing so a load run sends what it always did. The
+two rules read different reaches
 (#1095): the empty-name rule reads every header name, the collision rule only
 the names that still held a token. A data row whose header-name column is
 blank is refused at bind time (`core/scenario_data.cpp`). A scenario load
