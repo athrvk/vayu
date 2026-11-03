@@ -188,14 +188,18 @@ void register_oauth_routes (RouteContext& ctx) {
         body->value ("attemptId", std::string{}),
         body->value ("callbackUrl", std::string{}), &ctx.server_stopping);
         res.status    = st.state == "not_found" ? 404 : 200;
-        res.set_content (authorize_status_json (st).dump (), "application/json");
+        res.set_content (authorize_status_json (st).dump (-1, ' ', false,
+                         nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const auto st = ctx.authorize_manager.status (req.matches[1]);
         res.status    = st.state == "not_found" ? 404 : 200;
-        res.set_content (authorize_status_json (st).dump (), "application/json");
+        res.set_content (authorize_status_json (st).dump (-1, ' ', false,
+                         nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     ctx.server.Delete (R"(/oauth2/authorize/([^/]+))",
