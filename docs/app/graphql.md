@@ -28,6 +28,14 @@ when an import wrote one - the Query pane header then carries a **Sent as query
 parameters** badge naming what will happen, so nothing silently 400s with no
 explanation on screen.
 
+The Code section's snippets follow the same split. For a GET they carry the
+document in the URL (`?query=…`, with `operationName`, `variables` and
+`extensions` when you wrote an envelope, in the order you wrote them) and no
+body or `Content-Type`; for any other method they carry the JSON envelope. An
+envelope that cannot travel as parameters - a member other than those four, a
+non-object `variables` - keeps the JSON body in the snippet, as it does in the
+send.
+
 ## The schema
 
 The moment a GraphQL body is on screen with a URL in the bar, Vayu introspects

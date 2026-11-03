@@ -17,12 +17,19 @@
  * (`engine/src/http/graphql_body.cpp`), and is applied before masking, as the
  * engine applies it before the bytes leave. Content that is not a body to
  * complete (empty, unparseable, a batch array) comes back untouched.
+ *
+ * A GraphQL GET has no body at all: the engine sends the document as query
+ * parameters (`graphql_get_parameters`), which `graphqlGetQuery` restates
+ * (#3211).
  */
 
-import { compactObject, readCompactJson } from "./compact-json";
+import { compactObject, readCompactJson, type JsonNode } from "./compact-json";
 
 /** `constants::request_body::MAX_JSON_DEPTH`: a JSON-RPC call nested deeper is left as typed. */
 const ENGINE_MAX_JSON_DEPTH = 128;
+
+/** What `curl_easy_escape` leaves alone. */
+const UNRESERVED = /[A-Za-z0-9\-._~]/;
 
 /** The id a bare call is stamped with: constant, so a replay sends the bytes it replays. */
 const DEFAULT_JSONRPC_ID = 1;
@@ -68,6 +75,87 @@ function isGraphqlEnvelope(content: string): boolean {
 export function graphqlWireBody(content: string): string {
 	if (content === "" || isGraphqlEnvelope(content)) return content;
 	return JSON.stringify({ query: content });
+}
+
+/**
+ * `curl_easy_escape`, the escaper behind the engine's `percent_encode`: the
+ * UTF-8 bytes of the text, every one outside `A-Za-z0-9-._~` as an uppercase
+ * `%XX`. `encodeURIComponent` leaves `!'()*` raw, so it writes another URL.
+ */
+export function curlEscape(text: string): string {
+	let out = "";
+	for (const byte of new TextEncoder().encode(text)) {
+		const char = String.fromCharCode(byte);
+		out += UNRESERVED.test(char)
+			? char
+			: `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+	}
+	return out;
+}
+
+/** Whether @p node is a JSON `null`. */
+function isNull(node: JsonNode): boolean {
+	return node.kind === "other" && node.text === "null";
+}
+
+/**
+ * One GraphQL envelope member as a query parameter, or `null` for one with
+ * nothing to send, or `undefined` for one the URL cannot carry. `operationName`
+ * is a string, `variables` and `extensions` are objects written as the engine's
+ * compact dump, and an explicit `null` is the same as leaving the member out.
+ */
+function envelopeParameter(key: string, node: JsonNode): string | null | undefined {
+	if (key === "query") return `query=${curlEscape(JSON.parse(node.text) as string)}`;
+	if (key !== "operationName" && key !== "variables" && key !== "extensions") return undefined;
+	if (isNull(node)) return null;
+	if (key === "operationName") {
+		return node.kind === "string"
+			? `operationName=${curlEscape(JSON.parse(node.text) as string)}`
+			: undefined;
+	}
+	return node.kind === "object" ? `${key}=${curlEscape(node.text)}` : undefined;
+}
+
+/**
+ * The query string a GraphQL GET travels as, or undefined when the document
+ * travels in the body like every other request: `graphql_get_parameters`
+ * (`engine/src/http/graphql_body.cpp`). A bare document is the whole `query`
+ * parameter. An envelope becomes one parameter per member in the author's
+ * order; one the engine cannot read, or holding a member with no parameter to
+ * carry it, keeps the body. A `{{name}}` inside a bare document is encoded with
+ * the rest, so the unresolved view shows `%7B%7Bname%7D%7D` where the engine,
+ * which resolves first, sends the value.
+ */
+export function graphqlGetQuery(content: string): string | undefined {
+	if (content === "") return undefined;
+	if (!isGraphqlEnvelope(content)) return `query=${curlEscape(content)}`;
+
+	const envelope = readCompactJson(content, ENGINE_MAX_JSON_DEPTH);
+	if (envelope?.kind !== "object") return undefined;
+
+	const parameters: string[] = [];
+	for (const [key, node] of envelope.members) {
+		const parameter = envelopeParameter(key, node);
+		if (parameter === undefined) return undefined;
+		if (parameter !== null) parameters.push(parameter);
+	}
+	return parameters.join("&");
+}
+
+/**
+ * @p url with @p query appended, as the engine's `url_with_query`: the fragment
+ * is split off first and put back last, a URL with no `?` gets one, and a
+ * separator is added unless the URL already ends in `?` or `&`.
+ */
+export function urlWithQuery(url: string, query: string): string {
+	if (query === "") return url;
+	const hash = url.indexOf("#");
+	const target = hash === -1 ? url : url.slice(0, hash);
+	const fragment = hash === -1 ? "" : url.slice(hash);
+	let separator = "";
+	if (!target.includes("?")) separator = "?";
+	else if (target !== "" && !target.endsWith("?") && !target.endsWith("&")) separator = "&";
+	return `${target}${separator}${query}${fragment}`;
 }
 
 /** The content a body of @p mode is sent as. Every other mode is sent as stored. */
