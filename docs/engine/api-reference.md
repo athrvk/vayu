@@ -4260,9 +4260,9 @@ under `SetupThreadGroup` / `PostThreadGroup`, once per sampler left out
 and a response timeout is counted as `Timeout_total` (one per request, its name
 in `names`) because Vayu keeps one total timeout and adds them, and a timeout
 that is not a number (a `${var}`) as `HTTPSampler_timeout_unrecognised`.
-`meta.folderStrategy` (`tags` / `paths` / `mixed`) is present only when an OpenAPI import built
-folders, since a document that declares no operation tags gets a tree it never
-spelled out.
+`meta.folderStrategy` (`tags` / `paths` / `mixed`) is present only when an
+OpenAPI import built folders, since a document that declares no operation tags
+gets a tree it never spelled out.
 
 **A document Vayu exported reads back as the collection it came from.** An
 operation's `x-vayu-request` and the root's `x-vayu-collection` (see
