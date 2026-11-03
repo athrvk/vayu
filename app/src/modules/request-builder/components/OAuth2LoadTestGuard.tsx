@@ -41,7 +41,12 @@ import { useOAuth2TokenStatusQuery, useFetchOAuth2TokenMutation } from "@/querie
 import { useToastStore } from "@/stores";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import type { OAuth2Config } from "@/types";
-import { coverageState, fmtDuration, isMidRunRefreshable } from "./oauth2-load-test-coverage";
+import {
+	coverageState,
+	fmtDuration,
+	isMidRunRefreshable,
+	willRefreshFetchedToken,
+} from "./oauth2-load-test-coverage";
 import { Callout } from "@/components/shared";
 
 interface OAuth2LoadTestGuardProps {
@@ -166,8 +171,9 @@ export default function OAuth2LoadTestGuard({
 					</Button>
 				}
 			>
-				One is fetched when the run starts. If its lifetime is shorter than the run,
-				requests fail once it expires.
+				{willRefreshFetchedToken(config)
+					? "One is fetched when the run starts, and Vayu's engine refreshes it mid-run if it expires."
+					: "One is fetched when the run starts. If its lifetime is shorter than the run, requests fail once it expires."}
 			</Callout>
 		);
 	}

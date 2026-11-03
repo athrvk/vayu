@@ -264,6 +264,23 @@ describe("TokenStatusRow with a complete config", () => {
 		expect(showToast).toHaveBeenCalledWith("Access token URL must be an http(s) URL", "error");
 	});
 
+	it("toasts the engine's provider-status message as it arrived", () => {
+		// The engine puts the provider's HTTP status in the message itself (#3201),
+		// so the row has nothing to add: it must not drop or rewrite it.
+		fetchMutation.mutate.mockImplementation(
+			(_vars: unknown, opts?: { onError?: (e: unknown) => void }) => {
+				opts?.onError?.(
+					new ApiError(502, "oauth2_token_error", "Token endpoint error (HTTP 503)")
+				);
+			}
+		);
+
+		renderRow(complete);
+		fireEvent.click(getTokenButton());
+
+		expect(showToast).toHaveBeenCalledWith("Token endpoint error (HTTP 503)", "error");
+	});
+
 	it("tells the user their sign-in landed, since the browser had them", async () => {
 		authorize.mockResolvedValue(undefined);
 
