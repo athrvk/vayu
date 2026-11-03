@@ -393,11 +393,35 @@ function pushHeader(b: Builder, key: string, value: string): void {
  * (#3220). The same last-one-wins rule as `pushHeader`: rows already written
  * for the name go, because the command ends by removing it.
  */
-function removeHeader(b: Builder, name: string): void {
+function removeHeader(b: Builder, name: string, flag: string): void {
 	const lower = name.toLowerCase();
+	const hadRows = hasHeaderRow(b, lower);
 	b.headers = b.headers.filter((row) => row.key.toLowerCase() !== lower);
+	// The engine reads a stored opt-out for the headers it adds itself. Any
+	// other name with no row of ours to drop would import as an opt-out that
+	// changes nothing, so the paste says so (the engine also refuses a name
+	// that is not an RFC 9110 token).
+	if (!HEADER_TOKEN.test(name) || (!hadRows && !ENGINE_DEFAULT_HEADERS.has(lower))) {
+		recordDropped(b, flag, {
+			what: `asked curl to leave out its ${name} header, which an imported request cannot say`,
+		});
+		return;
+	}
 	if (!b.removedHeaders.includes(lower)) b.removedHeaders.push(lower);
 }
+
+/** The headers the engine adds itself and `suppressed_default_headers` can refuse (`default_headers.cpp`, `curl_utils.cpp`). */
+const ENGINE_DEFAULT_HEADERS = new Set([
+	"accept",
+	"accept-encoding",
+	"content-type",
+	"expect",
+	"user-agent",
+	"x-vayu-request-id",
+]);
+
+/** RFC 9110 token. */
+const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 function isRemoved(b: Builder, name: string): boolean {
 	return b.removedHeaders.includes(name.toLowerCase());
@@ -427,7 +451,7 @@ function addCurlHeader(b: Builder, raw: string): void {
 	}
 	const name = raw.slice(0, idx).trim();
 	if (name && !raw.slice(idx + 1).trim()) {
-		removeHeader(b, name);
+		removeHeader(b, name, `-H '${raw.trim()}'`);
 		return;
 	}
 	addHeader(b, raw);
@@ -533,6 +557,12 @@ function findHeader(b: Builder, name: string): string | undefined {
 	return b.headers.find((h) => h.key.toLowerCase() === lower)?.value;
 }
 
+/** A row exists for the name, a blank one included (`findHeader` reads `""` as absent). */
+function hasHeaderRow(b: Builder, name: string): boolean {
+	const lower = name.toLowerCase();
+	return b.headers.some((h) => h.key.toLowerCase() === lower);
+}
+
 /** The data flags whose `@file` curl reads with newlines stripped. */
 const STRIPS_NEWLINES = new Set(["-d", "--data", "--data-ascii"]);
 
@@ -629,9 +659,9 @@ function resolve(b: Builder): CommandImport {
 	// --- headers + auth -----------------------------------------------------
 	const headers = b.headers.slice();
 	if (b.jsonShortcut) {
-		if (!findHeader(b, "content-type") && !isRemoved(b, "content-type"))
+		if (!hasHeaderRow(b, "content-type") && !isRemoved(b, "content-type"))
 			headers.push({ key: "Content-Type", value: "application/json" });
-		if (!findHeader(b, "accept") && !isRemoved(b, "accept"))
+		if (!hasHeaderRow(b, "accept") && !isRemoved(b, "accept"))
 			headers.push({ key: "Accept", value: "application/json" });
 	}
 	// The same header the Event stream toggle arms, through the same rule: a

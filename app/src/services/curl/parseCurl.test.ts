@@ -975,6 +975,27 @@ describe("parseCommand - curl -H spellings with no value", () => {
 		}
 	);
 
+	test("a blank row stands in for --json's own header: no second value is added (#3220)", () => {
+		const r = parseCommand(`curl --json '{}' -H 'Accept;' -H 'Content-Type;' https://x.com/a`)!;
+		expect(r.headers).toEqual(
+			kv([
+				{ key: "Accept", value: "" },
+				{ key: "Content-Type", value: "" },
+			])
+		);
+	});
+
+	test("a removal the engine cannot honour is disclosed, not stored as an inert opt-out", () => {
+		const imported = importCommand(
+			`curl -u a:b -H 'Authorization:' -H 'Bad Name:' https://x.com/a`
+		)!;
+		expect(imported.request.disabledSystemHeaders).toEqual([]);
+		expect(imported.dropped.map((d) => d.flag)).toEqual([
+			"-H 'Authorization:'",
+			"-H 'Bad Name:'",
+		]);
+	});
+
 	test("a name removed twice, in any case, is listed once", () => {
 		const r = parseCommand(`curl -H 'Accept:' -H 'accept:' -H 'User-Agent:' https://x.com/a`)!;
 		expect(r.disabledSystemHeaders).toEqual(["accept", "user-agent"]);
