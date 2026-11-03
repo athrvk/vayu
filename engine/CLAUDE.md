@@ -1045,7 +1045,11 @@ logged as a warning: it means a client skipped composition.
   it, and the runtime pin is the whole answer. **Windows ships its anchors in a
   certificate store**, so `system_ca_bundle_path()` finds nothing there and
   `CURLSSLOPT_NATIVE_CA` is set unconditionally; an OpenSSL build without that
-  flag and with nothing pasted trusts nothing at all.
+  flag and with nothing pasted trusts nothing at all. **macOS sets it
+  unconditionally too**: the port's `USE_APPLE_SECTRUST` asks the Keychain
+  only under that flag and only after the file's check failed, so with it unset
+  and nothing pasted a macOS user trusted `/etc/ssl/cert.pem` alone. SecTrust
+  refuses a `CURLOPT_CRLFILE`, so setting one would break every macOS send.
   `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts whichever mechanism
   applies. The additive claim is checked on every CI platform by two tests
   answering different questions (#812): `TlsBackend.AcceptsACustomCaBundleOnThisPlatform`

@@ -274,6 +274,8 @@ const std::filesystem::path& directory) {
     // unconditionally on that platform (`curl_utils.cpp`) - so the store still
     // applies beside this file. A machine that exports `CURL_CA_BUNDLE` puts a
     // file back in reach and the merge below runs there like anywhere else.
+    // macOS merges its file here and also sets that flag, which adds the
+    // Keychain when this file's check fails (`curl_utils.cpp`).
     std::string content;
     const std::filesystem::path system_bundle = system_ca_bundle_path ();
     if (!system_bundle.empty ()) {

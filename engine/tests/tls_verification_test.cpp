@@ -428,7 +428,9 @@ TEST_F (ProxyTlsVerificationTest, ALoadRunWithVerificationOffAcceptsAnUntrustedH
  * the port was built on - so the default store there is whatever
  * `CURLSSLOPT_NATIVE_CA` loads, and if the applier stopped setting it the
  * platform would trust nothing at all with every one of those four cases still
- * passing.
+ * passing. On macOS the same flag adds the Keychain behind
+ * `/etc/ssl/cert.pem`; before it was set there with nothing pasted, this case
+ * failed on a chain only the Keychain completes.
  *
  * Same fixture, opposite direction: nothing is pasted, and the handshake has to
  * succeed anyway.

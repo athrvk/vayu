@@ -1280,7 +1280,7 @@ backend, and each is stated rather than assumed:
 | Platform | Backend | What the bundle does |
 |----------|---------|----------------------|
 | Linux | OpenSSL (default paths + `CURL_CA_FALLBACK`) | `CURLOPT_CAINFO` **replaces** the default bundle, so the materialized file is the platform's own anchors **concatenated with** the pasted ones. The system bundle is located the way curl locates it: `CURL_CA_BUNDLE` / `SSL_CERT_FILE`, then libcurl's compiled-in `cainfo`, then the standard distribution paths. |
-| macOS | OpenSSL | Same as Linux, not the OS store this table claimed until issue #818, and the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. |
+| macOS | OpenSSL | Same as Linux, and the anchors are read from `/etc/ssl/cert.pem` and merged into the materialized file. `CURLSSLOPT_NATIVE_CA` is also set on **every** macOS handle, pasted CA or not: when a certificate does not verify against the file, the Keychain is asked, so a root or an admin-installed CA the Keychain trusts verifies with nothing pasted. |
 | Windows | OpenSSL, selected explicitly (issue #851; Schannel before it) | The anchors live in the certificate store and Windows ships no PEM bundle to merge with, so the materialized file holds the pasted certificates alone and `CURLSSLOPT_NATIVE_CA` - set on **every** Windows handle, pasted CA or not - loads the store beside it. A machine that exports `CURL_CA_BUNDLE` puts a file back in reach and the merge runs there as it does on Linux. |
 
 Three things make that table checkable rather than a claim. The backend column
@@ -1306,9 +1306,9 @@ certificate has to verify with nothing pasted, and go on verifying once an
 unrelated CA is.
 
 `CURLSSLOPT_NATIVE_CA` asks the backend to keep consulting the OS store. It is
-set unconditionally on Windows, where it is the anchor source; elsewhere it is
-set whenever a bundle is in force, and the merge above is what carries the
-guarantee.
+set unconditionally on Windows, where it is the anchor source, and on macOS,
+where the Keychain backs the file; on Linux it is set whenever a bundle is in
+force, and the merge above is what carries the guarantee.
 
 **What the Windows certificate store does not give you.** OpenSSL reads it
 through the Windows crypto API rather than being the OS verifier, so three
