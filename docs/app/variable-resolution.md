@@ -638,7 +638,10 @@ has no escape for it. A variable holding `ok\r\nX-Admin: true` written into
 and make `X-Admin: true` a header nobody wrote.
 
 So a header is the one place `POST /compose` rejects a payload over a *value*
-rather than over its shape: a `400` with code `unsendable_header`, whose message
+rather than over its shape - a header row, and a credential the engine writes
+into a header line as it stands (a bearer token, an api key sent in a header;
+basic auth and a query api key are encoded first) - with a `400` with code
+`unsendable_header`, whose message
 names the variable - composition is the last layer that still knows which one
 carried the byte. A NUL is refused with it, because the engine hands the header
 line to `curl_slist_append`, which reads to the first NUL and would send the
@@ -654,9 +657,9 @@ Composition is one of three layers holding the same rule, one definition
 (`engine/include/vayu/http/header_text.hpp`): a bound `{{data.column}}` is
 refused earlier, at bind time, naming the column and the row
 ([data-driven runs](./data-driven-runs.md)); everything else - a script
-assigning to `pm.request.headers`, an auth credential, an import, a payload
-posted straight to `POST /execute` - is refused before the transfer starts,
-naming the header instead of a variable.
+assigning to `pm.request.headers`, a credential typed with the byte in it, an
+import, a payload posted straight to `POST /execute` - is refused before the
+transfer starts, naming the header instead of a variable.
 
 **A scripted request is refused at the send, not at compose** (#2521). A
 request a pre-request script runs before keeps its variables written (D1

@@ -62,6 +62,7 @@ const collection = (
 });
 
 const bearer: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "bearer", token: "t" };
+const digest: Exclude<RequestAuth, { mode: "inherit" }> = { mode: "digest", config: {} };
 
 beforeEach(() => {
 	collections = [];
@@ -145,6 +146,76 @@ describe("CollectionAuthSection", () => {
 		expect(
 			screen.getByText("Requests below inherit nothing - the walk stops here (unsaved).")
 		).toBeInTheDocument();
+	});
+
+	describe("a mode the engine does not send (#3203)", () => {
+		it("says requests set to Inherit go out without auth, not that they send it", () => {
+			collections = [collection("col_leaf", digest)];
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(screen.getByText("Digest")).toBeInTheDocument();
+			expect(
+				screen.getByText(
+					"Vayu does not send this auth type, so requests set to Inherit go out without auth."
+				)
+			).toBeInTheDocument();
+			expect(screen.queryByText(/send this\./)).not.toBeInTheDocument();
+		});
+
+		it("says the inherited ancestor's mode is not sent either", () => {
+			collections = [
+				collection("col_root", digest, undefined, "Billing"),
+				collection("col_leaf", { mode: "none" }, "col_root"),
+			];
+			render(<CollectionAuthSection tab={TAB} />);
+
+			expect(
+				screen.getByText(
+					"Requests below inherit Digest from Billing. Vayu does not send this auth type, so those requests go out without auth."
+				)
+			).toBeInTheDocument();
+		});
+
+		it("keeps the (unsaved) mark on both sentences", () => {
+			collections = [collection("col_leaf", bearer)];
+			useCollectionAuthDraftStore.getState().setDraft("col_leaf", digest);
+			const { unmount } = render(<CollectionAuthSection tab={TAB} />);
+			expect(
+				screen.getByText(
+					"Vayu does not send this auth type, so requests set to Inherit go out without auth (unsaved)."
+				)
+			).toBeInTheDocument();
+			unmount();
+
+			collections = [
+				collection("col_root", digest, undefined, "Billing"),
+				collection("col_leaf", bearer, "col_root"),
+			];
+			useCollectionAuthDraftStore.getState().setDraft("col_leaf", { mode: "none" });
+			render(<CollectionAuthSection tab={TAB} />);
+			expect(
+				screen.getByText(
+					"Requests below inherit Digest from Billing (unsaved). Vayu does not send this auth type, so those requests go out without auth."
+				)
+			).toBeInTheDocument();
+		});
+
+		it("still says a sent mode is sent, own and inherited", () => {
+			collections = [collection("col_leaf", bearer)];
+			const { unmount } = render(<CollectionAuthSection tab={TAB} />);
+			expect(screen.getByText("Requests set to Inherit send this.")).toBeInTheDocument();
+			unmount();
+
+			collections = [
+				collection("col_root", bearer, undefined, "Billing"),
+				collection("col_leaf", { mode: "none" }, "col_root"),
+			];
+			render(<CollectionAuthSection tab={TAB} />);
+			expect(
+				screen.getByText("Requests below inherit Bearer token from Billing.")
+			).toBeInTheDocument();
+			expect(screen.queryByText(/does not send/)).not.toBeInTheDocument();
+		});
 	});
 
 	describe("marking a draft that is not saved yet", () => {

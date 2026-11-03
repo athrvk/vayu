@@ -281,8 +281,8 @@ vayu::http::Auth& out) {
         auto token = params.find ("token");
         if (token == params.end () || token->second.empty ()) {
             return where +
-            " needs a 'token' - an empty one would send the header "
-            "with nothing after \"Bearer\"";
+            " needs a 'token' - an empty one would send no "
+            "Authorization header at all";
         }
         out = vayu::http::BearerAuth{ std::move (token->second) };
         return std::nullopt;

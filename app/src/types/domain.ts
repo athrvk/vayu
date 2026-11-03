@@ -1623,8 +1623,10 @@ export interface RunResultTrace {
 		bodyFile?: unknown;
 		/**
 		 * What the auth block did on the wire when that is not the plain case: a
-		 * mode not executed (#2474) or a typed Authorization header that spared
-		 * an OAuth 2.0 token its fetch (#3202) - see {@link HttpResponse.authNotice} (issue #2474).
+		 * mode the engine does not execute, an empty bearer token or API key
+		 * name, or a typed Authorization header that spared an OAuth 2.0 token
+		 * its fetch - see {@link HttpResponse.authNotice} (issues #2474, #3203,
+		 * #3202).
 		 * Written on the request node because it describes what was sent, so it
 		 * is present on a failed exchange (no `response` node) too.
 		 */
@@ -2461,13 +2463,14 @@ export interface HttpResponse {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
-	 * The request's auth mode is one the engine stores but does not execute
-	 * (`digest`, `ntlm`, ...), so it was sent without authentication
-	 * (issue #2474), or its own Authorization header was sent and no OAuth 2.0
-	 * token was fetched (issue #3202). A sentence saying which, written by
+	 * The request was sent without the authentication it asked for: its auth
+	 * mode is one the engine stores but does not execute (`digest`, `ntlm`, ...;
+	 * issue #2474), or it is a bearer token that is empty or an API key with no
+	 * name (issue #3203); or its own Authorization header was sent and no
+	 * OAuth 2.0 token was fetched (issue #3202). A sentence naming the cause, written by
 	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
 	 * key and to `trace.request.authNotice` from one place. **Absent** when
-	 * there is nothing to say - an executed mode, no auth, or an engine older
+	 * there is nothing to say - credentials applied, no auth, or an engine older
 	 * than the key - and on a streaming send, which is answered before it
 	 * exists: only its stored trace carries it.
 	 */

@@ -179,6 +179,11 @@ struct AuthApplyResult {
  * once trimmed is refused (`ok == false`, `AuthFailed`, `invalid_header_name`)
  * with nothing written. Basic credentials are not trimmed: a password may end
  * in a space, and the pair is encoded as typed.
+ *
+ * Nothing is written, and `Request::auth_notice` says why, for a bearer token
+ * or an API key name that is empty once trimmed (#3203) and for a mode Vayu
+ * stores but does not execute (#2474). Neither is refused: the request is sent
+ * without the credential.
  */
 AuthApplyResult apply_auth (vayu::Request& req,
 const Auth& auth,

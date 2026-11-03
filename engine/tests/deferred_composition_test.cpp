@@ -400,6 +400,30 @@ TEST_F (DeferredCompositionTest, ADeferredHeaderVariableCarryingALineBreakIsRefu
     EXPECT_NE (answer.dump ().find ("{{note}}"), std::string::npos) << answer.dump ();
 }
 
+// The same for a bearer token (#3203): composition kept `{{token}}` for the
+// auth applied after the script, which refuses it by name, on the buffered
+// send and on the streaming one, where it used to fail at the pre-send gate as
+// an INTERNAL_ERROR naming only `Authorization`.
+TEST_F (DeferredCompositionTest, ADeferredBearerTokenCarryingALineBreakIsRefusedAtTheSend) {
+    const vayu::tests::EchoServer echo;
+    seed_environment ({ { "token", "fine" } });
+    seed_request (echo.url (), json::object (),
+    "pm.environment.set('token', 'ok\\r\\nX-Admin: true');",
+    json{ { "mode", "bearer" }, { "token", "{{token}}" } });
+
+    const json answer = compose_and_execute ();
+    EXPECT_EQ (answer.value ("refusalCode", ""), "unsendable_header") << answer.dump ();
+    EXPECT_NE (answer.dump ().find ("{{token}}"), std::string::npos) << answer.dump ();
+
+    json streaming               = compose ();
+    streaming["stream"]          = true;
+    const auto [status, refused] = post ("/execute", streaming);
+    EXPECT_EQ (status, 400) << refused.dump ();
+    EXPECT_EQ (refused.value (json::json_pointer ("/error/code"), std::string ()), "unsendable_header")
+    << refused.dump ();
+    EXPECT_EQ (echo.requests_seen (), 0) << "the forged line went out";
+}
+
 // A load run of the same composed payload: `POST /runs` takes the payload with
 // `deferredVariables` in it, and the residual pass every submission of a run
 // declaring `requestElements` makes answers the deferred name from the run's

@@ -499,6 +499,17 @@ class RequestComposerTest : public ::testing::Test {
         db_->save_environment (env);
     }
 
+    /// An inline GET under @p auth, composed in `env_1` holding `secret` =
+    /// @p value: `{status, payload}`.
+    json composed_with_secret (const json& auth, const std::string& value) {
+        seed_environment ("env_1",
+        json{ { "secret", { { "value", value }, { "enabled", true } } } }.dump ());
+        auto [status, payload] = vayu::http::compose_request_core (*db_,
+        json{ { "request", { { "method", "GET" }, { "url", "https://x.test/" }, { "auth", auth } } },
+        { "environmentId", "env_1" } });
+        return { { "status", status }, { "payload", payload } };
+    }
+
     vayu::db::Request make_request (const std::string& id, const std::string& collection_id) {
         vayu::db::Request r;
         r.id            = id;
@@ -1576,6 +1587,67 @@ TEST_F (RequestComposerTest, TheSameVariableIsFineEverywhereElse) {
     ASSERT_EQ (status, 200) << payload.dump ();
     EXPECT_EQ (payload["url"], "https://x.test/ok%0D%0AX-Admin:%20true");
     EXPECT_EQ (payload["body"]["fields"][0]["value"], "ok\r\nX-Admin: true");
+}
+
+// A credential `apply_auth` writes into a header line as it stands is that
+// header's text, so a variable in it is held to the same rule and refused by
+// name (#3203), where it used to reach the pre-send gate as an INTERNAL_ERROR
+// naming only `Authorization`. Mutation check: make `resolve_compose_auth`
+// skip `unspellable_header_credential` and the first two fail on the status;
+// the third must keep passing.
+TEST_F (RequestComposerTest, ABearerTokenVariableCarryingALineBreakIsRefusedByName) {
+    for (const std::string& value : { std::string ("ok\r\nX-Admin: true"),
+         std::string ("a\nb"), std::string ("a\rb"), std::string ("a\0b", 3) }) {
+        const json answer = composed_with_secret (
+        { { "mode", "bearer" }, { "token", "Bearer-{{secret}}" } }, value);
+        EXPECT_EQ (answer["status"], 400) << answer.dump ();
+        EXPECT_EQ (
+        answer.value (json::json_pointer ("/payload/error/code"), std::string ()), "unsendable_header")
+        << answer.dump ();
+        const auto message =
+        answer.value (json::json_pointer ("/payload/error/message"), std::string ());
+        EXPECT_NE (message.find ("{{secret}}"), std::string::npos) << message;
+    }
+}
+
+TEST_F (RequestComposerTest, AHeaderApiKeyVariableCarryingALineBreakIsRefusedByName) {
+    for (const json& auth : { json{ { "mode", "apikey" }, { "key", "X-Api-Key" },
+                              { "value", "{{secret}}" }, { "in", "header" } },
+         json{ { "mode", "apikey" }, { "key", "X-{{secret}}" }, { "value", "v" } } }) {
+        const json answer = composed_with_secret (auth, "ok\r\nX-Admin: true");
+        EXPECT_EQ (answer["status"], 400) << answer.dump ();
+        EXPECT_EQ (
+        answer.value (json::json_pointer ("/payload/error/code"), std::string ()), "unsendable_header")
+        << answer.dump ();
+        const auto message =
+        answer.value (json::json_pointer ("/payload/error/message"), std::string ());
+        EXPECT_NE (message.find ("{{secret}}"), std::string::npos) << message;
+    }
+}
+
+// What `apply_auth` encodes before the wire (a basic pair's base64, a query
+// api key's percent-encoding) is not header text, an OAuth 2.0 config is the
+// input to a token request, and a clean token is just a token: all compose.
+TEST_F (RequestComposerTest, AnEncodedOrCleanCredentialVariableComposes) {
+    const std::string line_break = "ok\r\nX-Admin: true";
+    for (const json& auth :
+    { json{ { "mode", "basic" }, { "username", "user" }, { "password", "{{secret}}" } },
+    json{ { "mode", "apikey" }, { "key", "api_key" }, { "value", "{{secret}}" }, { "in", "query" } },
+    json{ { "mode", "oauth2" },
+    { "config", { { "accessTokenUrl", "https://idp.test/token" }, { "scope", "{{secret}}" } } } } }) {
+        const json answer = composed_with_secret (auth, line_break);
+        EXPECT_EQ (answer["status"], 200) << answer.dump ();
+    }
+    const json clean = composed_with_secret (
+    { { "mode", "bearer" }, { "token", "{{secret}}" } }, "fresh-token");
+    ASSERT_EQ (clean["status"], 200) << clean.dump ();
+    EXPECT_EQ (clean.value (json::json_pointer ("/payload/auth/token"), std::string ()),
+    "fresh-token");
+    const json basic = composed_with_secret (
+    { { "mode", "basic" }, { "username", "user" }, { "password", "{{secret}}" } }, line_break);
+    EXPECT_EQ (
+    basic.value (json::json_pointer ("/payload/auth/password"), std::string ()), line_break)
+    << basic.dump ();
 }
 
 // A CR the user typed into the header themselves is not a variable's doing, so

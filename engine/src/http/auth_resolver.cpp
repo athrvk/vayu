@@ -56,13 +56,35 @@ std::string trimmed_credential (const std::string& text) {
     return std::string (vayu::http::trim_optional_whitespace (text));
 }
 
+// Place a bearer token. An empty one writes no header rather than `Bearer `
+// with nothing after it, and says so, never refused: a variable left unset on
+// purpose must not fail a run (#3203).
+AuthApplyResult apply_bearer (vayu::Request& req, const BearerAuth& auth) {
+    // Headers is case-insensitive, so this covers "authorization" too.
+    if (req.headers.count ("Authorization") != 0) {
+        return {};
+    }
+    const std::string token = trimmed_credential (auth.token);
+    if (token.empty ()) {
+        req.auth_notice = "the bearer token is empty; the request was sent "
+                          "without an Authorization header";
+        return {};
+    }
+    req.headers["Authorization"] = "Bearer " + token;
+    req.auth_header              = "Authorization";
+    return {};
+}
+
 // Place an API key. Both halves are trimmed; a header name must also be a
 // token, and one that is not is refused with nothing written, because the
-// alternative is a header line the author did not mean.
+// alternative is a header line the author did not mean. A key with no name
+// writes nothing and says so, as an empty bearer token does.
 AuthApplyResult apply_api_key (vayu::Request& req, const ApiKeyAuth& auth) {
     const std::string key   = trimmed_credential (auth.key);
     const std::string value = trimmed_credential (auth.value);
     if (key.empty ()) {
+        req.auth_notice =
+        "the API key has no name; the request was sent without it";
         return {};
     }
     if (auth.in_query) {
@@ -308,12 +330,7 @@ const std::atomic<bool>* cancel) {
         if constexpr (std::is_same_v<T, NoAuth>) {
             return {};
         } else if constexpr (std::is_same_v<T, BearerAuth>) {
-            // Headers is case-insensitive, so this covers "authorization" too.
-            if (req.headers.count ("Authorization") == 0) {
-                req.headers["Authorization"] = "Bearer " + trimmed_credential (a.token);
-                req.auth_header = "Authorization";
-            }
-            return {};
+            return apply_bearer (req, a);
         } else if constexpr (std::is_same_v<T, BasicAuth>) {
             if (req.headers.count ("Authorization") == 0) {
                 req.headers["Authorization"] = "Basic " +

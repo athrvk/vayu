@@ -15,7 +15,14 @@
 
 import { describe, it, expect } from "vitest";
 import { readCompactJson } from "./compact-json";
-import { graphqlWireBody, jsonRpcWireBody, wireBodyContent } from "./wire-body";
+import {
+	curlEscape,
+	graphqlGetQuery,
+	graphqlWireBody,
+	jsonRpcWireBody,
+	urlWithQuery,
+	wireBodyContent,
+} from "./wire-body";
 
 describe("jsonRpcWireBody", () => {
 	it("completes a bare call with the version and id after the author's members", () => {
@@ -235,6 +242,117 @@ describe("graphqlWireBody", () => {
 		expect(graphqlWireBody("{ me }")).toBe('{"query":"{ me }"}');
 		expect(graphqlWireBody("{}x")).toBe('{"query":"{}x"}');
 		expect(graphqlWireBody("{'a': 1}")).toBe('{"query":"{\'a\': 1}"}');
+	});
+});
+
+describe("curlEscape", () => {
+	it("keeps A-Za-z0-9-._~ and nothing else", () => {
+		expect(curlEscape("aZ09-._~")).toBe("aZ09-._~");
+		// `encodeURIComponent` leaves these five raw; curl escapes them.
+		expect(curlEscape("!'()*")).toBe("%21%27%28%29%2A");
+		expect(curlEscape(" &=?#/:+%@")).toBe("%20%26%3D%3F%23%2F%3A%2B%25%40");
+	});
+
+	it("writes a character as the uppercase hex of its UTF-8 bytes", () => {
+		expect(curlEscape("\u00e9")).toBe("%C3%A9");
+		expect(curlEscape("\u{1f600}")).toBe("%F0%9F%98%80");
+		expect(curlEscape("\n\u007f")).toBe("%0A%7F");
+		expect(curlEscape("")).toBe("");
+	});
+});
+
+describe("graphqlGetQuery", () => {
+	it("sends a bare document as the whole query parameter", () => {
+		expect(graphqlGetQuery("{ hero { name } }")).toBe(
+			"query=%7B%20hero%20%7B%20name%20%7D%20%7D"
+		);
+		expect(graphqlGetQuery("query Q($id: ID!) {\n me }")).toBe(
+			"query=query%20Q%28%24id%3A%20ID%21%29%20%7B%0A%20me%20%7D"
+		);
+	});
+
+	it("treats JSON that is not an envelope as a document", () => {
+		expect(graphqlGetQuery('{"variables":{}}')).toBe("query=%7B%22variables%22%3A%7B%7D%7D");
+		expect(graphqlGetQuery("[1]")).toBe("query=%5B1%5D");
+		expect(graphqlGetQuery("{{query}}")).toBe("query=%7B%7Bquery%7D%7D");
+	});
+
+	it("has nothing to send for empty content", () => {
+		expect(graphqlGetQuery("")).toBeUndefined();
+	});
+
+	it("writes an envelope's members in the author's order", () => {
+		expect(
+			graphqlGetQuery(
+				'{"variables":{"a":1},"operationName":"Q","query":"{ a }","extensions":{"b":2}}'
+			)
+		).toBe(
+			"variables=%7B%22a%22%3A1%7D&operationName=Q&query=%7B%20a%20%7D&extensions=%7B%22b%22%3A2%7D"
+		);
+	});
+
+	// An integer-like key would be hoisted by a JS object; the author's order stands.
+	it("writes variables as the engine's compact dump, in the author's order", () => {
+		const query = '{"query":"{ a }","variables":{ "b" : 1.0, "1" : [ 1e3, "x" ], "a" : {} }}';
+		expect(decodeURIComponent(graphqlGetQuery(query)!.split("&")[1])).toBe(
+			'variables={"b":1.0,"1":[1000.0,"x"],"a":{}}'
+		);
+	});
+
+	it("skips a null operationName, variables and extensions", () => {
+		expect(
+			graphqlGetQuery(
+				'{"operationName":null,"query":"{ a }","variables":null,"extensions":null}'
+			)
+		).toBe("query=%7B%20a%20%7D");
+	});
+
+	it("keeps the body for an envelope the URL cannot carry", () => {
+		for (const content of [
+			'{"query":"{ a }","unknown":1}',
+			'{"query":"{ a }","operationName":3}',
+			'{"query":"{ a }","operationName":{}}',
+			'{"query":"{ a }","variables":"{}"}',
+			'{"query":"{ a }","variables":[]}',
+			'{"query":"{ a }","extensions":1}',
+			'{"query":"{ a }","variables":{{vars}}}',
+			'{"query":"{ a }",}',
+		]) {
+			expect(graphqlGetQuery(content), content).toBeUndefined();
+		}
+	});
+
+	it("reads a repeated member as the last value at the first position", () => {
+		expect(graphqlGetQuery('{"query":"a","operationName":"X","query":"b"}')).toBe(
+			"query=b&operationName=X"
+		);
+	});
+
+	// The engine bounds the envelope at 128 levels and keeps the body past it.
+	it("sends variables nested at the engine's bound and keeps the body one past it", () => {
+		const nested = (objects: number) =>
+			`{"query":"{ a }","variables":${'{"a":'.repeat(objects - 1)}{}${"}".repeat(objects - 1)}}`;
+		expect(graphqlGetQuery(nested(127))).toMatch(/^query=%7B%20a%20%7D&variables=%7B/);
+		expect(graphqlGetQuery(nested(128))).toBeUndefined();
+	});
+});
+
+describe("urlWithQuery", () => {
+	it.each([
+		["a bare URL", "https://x/g", "https://x/g?q=1"],
+		["an existing query", "https://x/g?a=1", "https://x/g?a=1&q=1"],
+		["a trailing ?", "https://x/g?", "https://x/g?q=1"],
+		["a trailing &", "https://x/g?a=1&", "https://x/g?a=1&q=1"],
+		["a fragment", "https://x/g#top", "https://x/g?q=1#top"],
+		["a query and a fragment", "https://x/g?a=1#top", "https://x/g?a=1&q=1#top"],
+		["a ? only in the fragment", "https://x/g#a?b", "https://x/g?q=1#a?b"],
+		["an empty URL", "", "?q=1"],
+	])("joins onto %s", (_name, url, expected) => {
+		expect(urlWithQuery(url, "q=1")).toBe(expected);
+	});
+
+	it("returns the URL unchanged for an empty query", () => {
+		expect(urlWithQuery("https://x/g#top", "")).toBe("https://x/g#top");
 	});
 });
 

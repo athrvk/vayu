@@ -32,10 +32,12 @@
  *   bind time, naming the column and the row - the only place that knows them.
  * - **A composed `{{variable}}`** (`http/request_composer.cpp`, issue #738)
  *   refuses at composition, naming the variable - the only place that knows
- *   *which* variable carried the byte. A request a pre-request script runs
- *   before keeps its variables written through composition (#2521), so for it
- *   the residual pass after that script refuses instead, in the same words and
- *   under the same code. `POST /compose` is otherwise a pure
+ *   *which* variable carried the byte. That covers a header row and a
+ *   credential written into a header line as it stands (#3203). A request a
+ *   pre-request script runs before keeps its variables written through
+ *   composition (#2521), so for it the residual pass and the late auth after
+ *   that script refuse instead, in the same words and under the same code.
+ *   `POST /compose` is otherwise a pure
  *   resolution step, and this is the one payload it rejects over a value:
  *   substituting the byte and answering 200 would hand the caller a payload
  *   whose only remaining fate is the refusal below, with the name that would
@@ -44,9 +46,9 @@
  *   `validate_transferable`) refuses before any driver configures a handle.
  *   This is the backstop that cannot be bypassed: a script that assigned to
  *   `pm.request.headers`, an importer, a client posting straight to
- *   `POST /execute`, an auth credential - none of them pass through the two
- *   above, and all three drivers (the single-request client, the load event
- *   loop, the SSE stream consumer) call the gate.
+ *   `POST /execute`, a credential typed with the byte - none of them pass
+ *   through the two above, and all three drivers (the single-request client,
+ *   the load event loop, the SSE stream consumer) call the gate.
  *
  * The layers are not three rules: they are three messages for one rule, whose
  * single definition is `ends_a_header_line` / `truncates_a_header_line` below.
@@ -86,8 +88,9 @@ namespace vayu::http {
 
 /**
  * @brief The code a header refused over a *variable's* value answers with: the
- *        `POST /compose` 400, and the residual pass's refusal of the same
- *        variable when a pre-request script runs before it resolves (#2521).
+ *        `POST /compose` 400, and the residual pass's or the late auth's
+ *        refusal of the same variable when a pre-request script runs before
+ *        it resolves (#2521, #3203).
  */
 inline constexpr std::string_view UNSENDABLE_HEADER_CODE = "unsendable_header";
 

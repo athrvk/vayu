@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
+#include "vayu/utils/ascii_case.hpp"
 
 #include <pugixml.hpp>
 
@@ -710,12 +711,30 @@ void merge_arguments_into_variables (const pugi::xml_node& arguments_node, json&
     }
 }
 
+/// @p text without the whitespace around it.
+std::string trimmed (std::string_view text) {
+    constexpr std::string_view SPACE = " \t\r\n";
+    const size_t begin               = text.find_first_not_of (SPACE);
+    if (begin == std::string_view::npos) {
+        return "";
+    }
+    return std::string (text.substr (begin, text.find_last_not_of (SPACE) - begin + 1));
+}
+
+/// The scheme JMeter would use: an empty or blank `HTTPSampler.protocol` is
+/// what its GUI saves for a field left unset, and it means `http`, the same as
+/// the property being absent (#3191).
+std::string protocol_of (const pugi::xml_node& el) {
+    std::string protocol = trimmed (string_prop (el, "HTTPSampler.protocol"));
+    return protocol.empty () ? "http" : protocol;
+}
+
 std::string base_url_of (const pugi::xml_node& el) {
     const std::string domain = string_prop (el, "HTTPSampler.domain");
     if (domain.empty ()) {
         return "";
     }
-    std::string base = string_prop (el, "HTTPSampler.protocol", "http") + "://" + domain;
+    std::string base = protocol_of (el) + "://" + domain;
     if (const std::string port = string_prop (el, "HTTPSampler.port");
     !port.empty () && port != "0") {
         base += ":" + port;
@@ -723,10 +742,45 @@ std::string base_url_of (const pugi::xml_node& el) {
     return base;
 }
 
-void merge_http_defaults (const pugi::xml_node& el, json& variables) {
-    if (const std::string base = base_url_of (el); !base.empty ()) {
-        variables["baseUrl"] = json{ { "value", base }, { "enabled", true } };
+/// Tally kind for HTTP Request Defaults settings a request cannot inherit: one
+/// count per setting, the setting named under `names`.
+constexpr std::string_view HTTP_DEFAULTS_KIND = "HttpDefaults_unmapped";
+
+/// The settings of an HTTP Request Defaults element that reach no request.
+/// Variables are all that propagates from a defaults element, and Vayu has no
+/// inherited path or timeout: stamping either onto the requests below would
+/// mean resolving JMeter's positional scope, which this parser does not
+/// attempt, and a default path only applies to a sampler with none of its own.
+/// A `0` timeout is JMeter's "none".
+void tally_unmapped_defaults (Ctx& ctx, const pugi::xml_node& el) {
+    std::vector<std::string> unmapped;
+    if (!trimmed (string_prop (el, "HTTPSampler.path")).empty ()) {
+        unmapped.emplace_back ("path");
     }
+    for (const auto& [property, name] :
+    { std::pair{ "HTTPSampler.connect_timeout", "connect timeout" },
+    std::pair{ "HTTPSampler.response_timeout", "response timeout" } }) {
+        if (const std::string timeout = trimmed (text_prop (el, property));
+        !timeout.empty () && timeout != "0") {
+            unmapped.emplace_back (name);
+        }
+    }
+    if (unmapped.empty ()) {
+        return;
+    }
+    ctx.tally.add (HTTP_DEFAULTS_KIND, static_cast<int> (unmapped.size ()));
+    ctx.tally.name_dropped (HTTP_DEFAULTS_KIND, unmapped);
+}
+
+/// An HTTP Request Defaults element: its `protocol://domain[:port]` becomes
+/// the `baseUrl` variable a sampler with no domain of its own reads, `${x}`
+/// references rewritten like any other value (#3191).
+void merge_http_defaults (Ctx& ctx, const pugi::xml_node& el, json& variables) {
+    if (const std::string base = base_url_of (el); !base.empty ()) {
+        variables["baseUrl"] =
+        json{ { "value", rewrite_variables (base) }, { "enabled", true } };
+    }
+    tally_unmapped_defaults (ctx, el);
 }
 
 // ---------------------------------------------------------------------------
@@ -883,29 +937,51 @@ json jmeter_file_fields (Ctx& ctx, const pugi::xml_node& el) {
     return fields;
 }
 
-/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`: a
-/// `form-data` body when the sampler carries file parts (regular arguments,
-/// if any, fold in beside them - a file has no query-string or raw-body form
-/// to take instead), the raw-body case when `postBodyRaw` is set and there is
-/// exactly the one argument that shape implies otherwise, query/form rows in
-/// every other case.
+/// A sampler's arguments as table rows.
+json argument_rows (const std::vector<std::pair<std::string, std::string>>& pairs) {
+    json rows = json::array ();
+    for (const auto& [key, value] : pairs) {
+        rows.push_back (json{ { "key", key }, { "value", value },
+        { "description", "" }, { "enabled", true } });
+    }
+    return rows;
+}
+
+/// Whether JMeter appends a sampler's arguments to the URL's query for
+/// @p method, rather than sending them as the request body. Only the methods
+/// with no body go in the query; every other one (POST, PUT, PATCH, a custom
+/// verb) sends them as the body.
+bool arguments_go_in_query (std::string_view method) {
+    const std::string name = vayu::utils::ascii_upper (trimmed (method));
+    return name == "GET" || name == "DELETE" || name == "HEAD" || name == "OPTIONS";
+}
+
+/// A sampler's own `HTTPsampler.Arguments` and `HTTPsampler.Files`, as the
+/// shape JMeter sends them in:
 ///
-/// `HTTPSampler.DO_MULTIPART_POST` is read nowhere here. Without file parts it
-/// would only ever decide whether an arguments-only sampler's body is
-/// query-shaped or `x-www-form-urlencoded` - a broader remapping of the
-/// existing (untouched) query/form-rows path this issue does not ask for and
-/// no fixture demonstrates a need for. A sampler that already carries file
-/// parts has no such choice to make: multipart is the only wire form a file
-/// has, flag or no flag.
-void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, json& body) {
+/// - file parts: a `form-data` body, with any regular arguments folded in
+///   beside them (a file has no query-string or raw-body form to take instead,
+///   so multipart is the only wire form it has, flag or no flag);
+/// - `HTTPSampler.postBodyRaw` with at least one argument: the raw-body case,
+///   the first argument's value as a `text` body, whatever the method;
+/// - otherwise by @p method: `params` rows for GET, DELETE, HEAD and OPTIONS,
+///   a body for every other one - `form-data` when
+///   `HTTPSampler.DO_MULTIPART_POST` is set, `x-www-form-urlencoded` if not
+///   (#3191). Rows left in `params` for a POST would be joined into the URL's
+///   query, which is not where JMeter sends them.
+void apply_sampler_arguments (Ctx& ctx,
+const pugi::xml_node& el,
+std::string_view method,
+json& params,
+json& body) {
     json file_fields               = jmeter_file_fields (ctx, el);
     const pugi::xml_node arguments = element_prop (el, "HTTPsampler.Arguments");
     const auto pairs               = argument_pairs (arguments);
+    json rows                      = argument_rows (pairs);
 
     if (!file_fields.empty ()) {
-        for (const auto& [key, value] : pairs) {
-            file_fields.push_back (json{ { "key", key }, { "value", value },
-            { "description", "" }, { "enabled", true } });
+        for (json& row : rows) {
+            file_fields.push_back (std::move (row));
         }
         body = json{ { "mode", "form-data" }, { "fields", std::move (file_fields) } };
         return;
@@ -917,10 +993,16 @@ void apply_sampler_arguments (Ctx& ctx, const pugi::xml_node& el, json& params, 
         body = json{ { "mode", "text" }, { "content", pairs.front ().second } };
         return;
     }
-    for (const auto& [key, value] : pairs) {
-        params.push_back (json{ { "key", key }, { "value", value },
-        { "description", "" }, { "enabled", true } });
+    if (arguments_go_in_query (method)) {
+        params = std::move (rows);
+        return;
     }
+    if (rows.empty ()) {
+        return;
+    }
+    const bool multipart = bool_prop (el, "HTTPSampler.DO_MULTIPART_POST", false);
+    body = json{ { "mode", multipart ? "form-data" : "x-www-form-urlencoded" },
+        { "fields", std::move (rows) } };
 }
 
 /// Whatever a sampler's own `<hashTree>` scopes to it alone: a `HeaderManager`
@@ -959,7 +1041,7 @@ json build_http_sampler (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_nod
 
     json params = json::array ();
     json body   = json{ { "mode", "none" } };
-    apply_sampler_arguments (ctx, el, params, body);
+    apply_sampler_arguments (ctx, el, request["method"].get<std::string> (), params, body);
     request["params"] = std::move (params);
     request["body"]   = std::move (body);
     request["auth"]   = json{ { "mode", "inherit" } };
@@ -1184,7 +1266,7 @@ void dispatch_child (Ctx& ctx, const pugi::xml_node& el, const pugi::xml_node& o
     }
     if (tag == "ConfigTestElement" &&
     std::string_view (el.attribute ("guiclass").value ()) == "HttpDefaultsGui") {
-        merge_http_defaults (el, sink.variables);
+        merge_http_defaults (ctx, el, sink.variables);
         return;
     }
     // Everything JMeter itself never asked this parser to model - listeners

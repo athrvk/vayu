@@ -220,6 +220,22 @@ TEST_F (ExecuteAuthProvenanceTest, ADigestSendSaysItWentWithoutAuth) {
     expect_sent_without_auth ("digest");
 }
 
+// #3203: an empty bearer token sends no `Authorization` at all, and both
+// records say why.
+TEST_F (ExecuteAuthProvenanceTest, AnEmptyBearerTokenSendsNoHeaderAndSaysSo) {
+    const vayu::tests::EchoServer echo;
+    const auto answer = execute (echo, { { "mode", "bearer" }, { "token", " " } });
+
+    EXPECT_FALSE (echo.has_header ("Authorization"))
+    << echo.header ("Authorization");
+    const std::string notice = answer.value ("authNotice", "");
+    EXPECT_NE (notice.find ("bearer token is empty"), std::string::npos)
+    << answer.dump ();
+    const json trace = stored_trace ();
+    ASSERT_TRUE (trace.contains ("request")) << trace.dump ();
+    EXPECT_EQ (trace.at ("request").value ("authNotice", ""), notice);
+}
+
 // --- auth applied after the pre-request script (#2473) ----------------------
 //
 // A credential still holding a name no scope defined at compose waits for the
@@ -410,6 +426,34 @@ TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedQueryApiKeyReplacesTheRequests
     EXPECT_EQ (echo.target ().find ("access_token="), std::string::npos)
     << echo.target ();
     EXPECT_EQ (answer.value ("authQueryParam", ""), "api_key") << answer.dump ();
+}
+
+/// The notice describes the auth that went out: the request's own empty token
+/// says nothing once a script's credential replaced it, and a script's token
+/// naming a variable it left empty says what the request's would have (#3203).
+/// A literal empty token is refused by the script reader, so the variable is
+/// the one way an assigned token reaches `apply_auth` empty.
+TEST_F (ExecuteAuthProvenanceTest, TheNoticeFollowsAScriptAssignedAuth) {
+    const json empty_bearer{ { "mode", "bearer" }, { "token", "" } };
+
+    const vayu::tests::EchoServer replaced;
+    const auto replaced_answer =
+    post_execute (scripted_payload (replaced, empty_bearer, ASSIGN_BASIC), 200);
+    EXPECT_EQ (basic_pair_of (replaced.header ("Authorization")), "ada:pw");
+    EXPECT_FALSE (replaced_answer.contains ("authNotice")) << replaced_answer.dump ();
+
+    const vayu::tests::EchoServer assigned;
+    const auto assigned_answer =
+    post_execute (scripted_payload (assigned, no_auth (),
+                  "pm.environment.set('t', '');"
+                  "pm.request.auth = { type: 'bearer', bearer: "
+                  "[{ key: 'token', value: '{{t}}' }] };"),
+    200);
+    EXPECT_FALSE (assigned.has_header ("Authorization"))
+    << assigned.header ("Authorization");
+    EXPECT_NE (assigned_answer.value ("authNotice", "").find ("bearer token is empty"),
+    std::string::npos)
+    << assigned_answer.dump ();
 }
 
 TEST_F (ExecuteAuthProvenanceTest, AScriptAssignedNoauthSendsNoCredential) {
