@@ -173,7 +173,8 @@ const vayu::Response& response);
  * reader that masks credentials cannot recover from the URL or the header set
  * (#1835), `authQueryParam` (the raw name of the query parameter) and
  * `authHeaders` (the header names), and `authNotice`, the sentence saying the
- * auth mode was not executed and the request went without it (#2474). Each is
+ * auth wrote nothing and why: a mode Vayu does not execute (#2474), an empty
+ * bearer token or API key name (#3203). Each is
  * omitted when empty - unlike `serialize (Response)`'s always-present fields -
  * and a reader treats absent as "nothing written".
  *
@@ -775,8 +776,12 @@ resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValue
  * reaches the token endpoint. The endpoints it would post to are judged by
  * @p acquisition's target policy first, as resolved.
  *
- * @return why the send must not go out, in the residual pass's shape, when
- *         `apply_auth` fails: an api key name that is not a header name, an
+ * @return why the send must not go out, in the residual pass's shape: a
+ *         variable in a bearer token or a header-placed api key whose value
+ *         ends or cuts the header line (`UNSENDABLE_HEADER_CODE`, named as the
+ *         residual pass names a header row's, though the auth is applied
+ *         first so a load run sends what it always did); or, when
+ *         `apply_auth` fails, an api key name that is not a header name, an
  *         OAuth 2.0 token endpoint the target policy refuses (`InvalidUrl`,
  *         `target_not_allowed` or `target_host_unknown`), or an OAuth 2.0
  *         token not acquired (`oauth2_no_database` with no @p acquisition).

@@ -99,6 +99,19 @@ export type ContextMenuItem =
 /** The shell command a clipboard's text would import, or `null` for ordinary text. */
 export type ClipboardCommand = "curl" | "wget";
 
+/** The first word of a command line, or the whole of a quoted one, unquoted. */
+function commandWord(stripped: string): string {
+	const quote = stripped[0];
+	if (quote === '"' || quote === "'") {
+		const end = stripped.indexOf(quote, 1);
+		return end === -1 ? "" : stripped.slice(1, end);
+	}
+	return stripped.split(/\s/, 1)[0] ?? "";
+}
+
+/** Windows' `curl.exe`, bare or after a path; a bare `curl` takes no path. */
+const CURL_EXE = /^(?:.*[\\/])?curl\.exe$/;
+
 /**
  * Whether the clipboard holds a command the request builder can import.
  *
@@ -110,8 +123,8 @@ export type ClipboardCommand = "curl" | "wget";
  */
 export function commandOnClipboard(text: string): ClipboardCommand | null {
 	const stripped = text.trim().replace(/^[$>]\s+/, "");
-	const first = stripped.split(/\s/, 1)[0]?.toLowerCase();
-	if (first === "curl") return "curl";
+	const first = commandWord(stripped).toLowerCase();
+	if (first === "curl" || CURL_EXE.test(first)) return "curl";
 	if (first === "wget") return "wget";
 	return null;
 }

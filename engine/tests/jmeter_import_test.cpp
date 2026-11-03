@@ -422,6 +422,33 @@ TEST (JmeterImport, JoinsQueryArgumentsWithEncodeUriComponent) {
     "https://example.com/search?q=a%7Cb");
 }
 
+/// A sampler's `HTTPSampler.protocol` left empty (what JMeter's GUI saves for
+/// an unset field) means `http` like an absent one; it used to join as
+/// `://host/path` (#3191).
+TEST (JmeterImport, AnEmptyOrBlankProtocolDefaultsToHttp) {
+    for (const char* protocol : { "", "  " }) {
+        const std::string plan = std::string (R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Ping">
+      <stringProp name="HTTPSampler.domain">example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol">)jmx") +
+        protocol + R"jmx(</stringProp>
+      <stringProp name="HTTPSampler.path">/ping</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+        const ImportParse parsed = parse_import (plan, {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (first_request (parsed.result.at ("collections").at (0)).at ("url"),
+        "http://example.com/ping")
+        << "protocol [" << protocol << "]";
+    }
+}
+
 /**
  * `Assertion.test_field` values with no `assert.contains` field to land on
  * (Request Data, Request Headers, Response Message, Document) are refused
@@ -732,6 +759,172 @@ TEST (JmeterImport, FileAndArgumentMixFoldsIntoOneFormDataBody) {
     EXPECT_EQ (body.at ("fields").at (1).at ("key").get<std::string> (), "caption");
     EXPECT_EQ (body.at ("fields").at (1).at ("value").get<std::string> (), "hello");
     EXPECT_FALSE (body.at ("fields").at (1).contains ("type"));
+}
+
+/// One sampler on @p method, with @p extra_props (raw `<boolProp>` lines) and
+/// two arguments, `a=1` and `b=two words`, imported on its own.
+nlohmann::ordered_json import_sampler_with_arguments (const std::string& method,
+const std::string& extra_props = "") {
+    const std::string plan = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <HTTPSamplerProxy testname="Submit">
+      <stringProp name="HTTPSampler.domain">example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol">https</stringProp>
+      <stringProp name="HTTPSampler.path">/submit</stringProp>
+      <stringProp name="HTTPSampler.method">)jmx" +
+    method + "</stringProp>\n" + extra_props + R"jmx(
+      <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="a" elementType="HTTPArgument">
+            <stringProp name="Argument.name">a</stringProp>
+            <stringProp name="Argument.value">1</stringProp>
+          </elementProp>
+          <elementProp name="b" elementType="HTTPArgument">
+            <stringProp name="Argument.name">b</stringProp>
+            <stringProp name="Argument.value">two words</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return first_request (parsed.result.at ("collections").at (0));
+}
+
+/// JMeter sends a POST's arguments as the form body, not the query (#3191).
+/// Before, they were `params` rows and so joined into the URL.
+TEST (JmeterImport, APostsArgumentsAreAFormBodyAndNotAQuery) {
+    for (const char* method : { "POST", "PUT", "PATCH", " post " }) {
+        const nlohmann::ordered_json request = import_sampler_with_arguments (method);
+        EXPECT_EQ (request.at ("url"), "https://example.com/submit") << method;
+        EXPECT_TRUE (request.at ("params").empty ()) << method;
+        const nlohmann::ordered_json& body = request.at ("body");
+        EXPECT_EQ (body.at ("mode"), "x-www-form-urlencoded") << method;
+        ASSERT_EQ (body.at ("fields").size (), 2u) << method;
+        const nlohmann::ordered_json& second = body.at ("fields").at (1);
+        EXPECT_EQ (body.at ("fields").at (0).at ("key"), "a");
+        EXPECT_EQ (body.at ("fields").at (0).at ("value"), "1");
+        EXPECT_EQ (second.at ("key"), "b");
+        EXPECT_EQ (second.at ("value"), "two words");
+        EXPECT_TRUE (second.at ("enabled").get<bool> ());
+    }
+}
+
+/// The methods JMeter sends no body for keep the arguments in the query,
+/// whatever the case the plan spelled the method in.
+TEST (JmeterImport, ArgumentsOfAMethodWithNoBodyStayInTheQuery) {
+    for (const char* method : { "GET", "DELETE", "HEAD", "OPTIONS", "delete", " get " }) {
+        const nlohmann::ordered_json request = import_sampler_with_arguments (method);
+        EXPECT_EQ (request.at ("url"), "https://example.com/submit?a=1&b=two%20words")
+        << method;
+        EXPECT_EQ (request.at ("params").size (), 2u) << method;
+        EXPECT_EQ (request.at ("body").at ("mode"), "none") << method;
+    }
+}
+
+/// `HTTPSampler.DO_MULTIPART_POST` picks multipart for a body method, and
+/// means nothing for one with no body.
+TEST (JmeterImport, DoMultipartPostMakesTheArgumentsAFormDataBody) {
+    const char* flag = R"(<boolProp name="HTTPSampler.DO_MULTIPART_POST">true</boolProp>)";
+    const nlohmann::ordered_json post = import_sampler_with_arguments ("POST", flag);
+    EXPECT_EQ (post.at ("body").at ("mode"), "form-data");
+    EXPECT_EQ (post.at ("body").at ("fields").size (), 2u);
+    EXPECT_TRUE (post.at ("params").empty ());
+    EXPECT_EQ (post.at ("url"), "https://example.com/submit");
+
+    const nlohmann::ordered_json get = import_sampler_with_arguments ("GET", flag);
+    EXPECT_EQ (get.at ("body").at ("mode"), "none");
+    EXPECT_EQ (get.at ("params").size (), 2u);
+}
+
+/// A raw body still wins over the method, as it did before.
+TEST (JmeterImport, ARawPostBodyStillWinsOverTheFormBody) {
+    const char* raw = R"(<boolProp name="HTTPSampler.postBodyRaw">true</boolProp>)";
+    const nlohmann::ordered_json request =
+    import_sampler_with_arguments ("POST", raw);
+    EXPECT_EQ (request.at ("body").at ("mode"), "text");
+    EXPECT_EQ (request.at ("body").at ("content"), "1");
+    EXPECT_TRUE (request.at ("params").empty ());
+}
+
+/// A plan whose HTTP Request Defaults carry @p defaults_props (raw
+/// `<stringProp>` lines) above one sampler that names no domain of its own.
+nlohmann::ordered_json import_with_http_defaults (const std::string& defaults_props) {
+    const std::string plan = R"jmx(<?xml version="1.0"?>
+<jmeterTestPlan version="1.2"><hashTree>
+  <TestPlan testname="Plan"/><hashTree>
+    <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="Defaults">
+)jmx" +
+    defaults_props + R"jmx(
+    </ConfigTestElement>
+    <hashTree/>
+    <HTTPSamplerProxy testname="List">
+      <stringProp name="HTTPSampler.path">/items</stringProp>
+      <stringProp name="HTTPSampler.method">GET</stringProp>
+    </HTTPSamplerProxy>
+    <hashTree/>
+  </hashTree>
+</hashTree></jmeterTestPlan>
+)jmx";
+    const ImportParse parsed = parse_import (plan, {}, {});
+    EXPECT_TRUE (parsed.ok ()) << parsed.error;
+    return parsed.result;
+}
+
+/// HTTP Request Defaults name their host through variables as often as not;
+/// the `baseUrl` it becomes is rewritten like a sampler's own URL, not left
+/// as a literal `${host}` (#3191).
+TEST (JmeterImport, HttpDefaultsRewriteVariableReferencesInTheBaseUrl) {
+    const nlohmann::ordered_json result      = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">${host}</stringProp>
+      <stringProp name="HTTPSampler.protocol">https</stringProp>
+      <stringProp name="HTTPSampler.port">${port}</stringProp>)");
+    const nlohmann::ordered_json& collection = result.at ("collections").at (0);
+    EXPECT_EQ (collection.at ("variables").at ("baseUrl").at ("value"),
+    "https://{{host}}:{{port}}");
+    EXPECT_EQ (first_request (collection).at ("url"), "{{baseUrl}}/items");
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
+}
+
+/// The scheme of a defaults element falls back to `http` like a sampler's.
+TEST (JmeterImport, HttpDefaultsWithAnEmptyProtocolUseHttp) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.protocol"></stringProp>
+      <stringProp name="HTTPSampler.port">8080</stringProp>)");
+    EXPECT_EQ (result.at ("collections").at (0).at ("variables").at ("baseUrl").at ("value"),
+    "http://api.example.com:8080");
+}
+
+/// A path or timeout on the defaults reaches no request: counted under one
+/// kind with each setting named, not dropped quietly (#3191).
+TEST (JmeterImport, HttpDefaultsPathAndTimeoutsAreTalliedByName) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.path">/v2</stringProp>
+      <stringProp name="HTTPSampler.connect_timeout">2000</stringProp>
+      <stringProp name="HTTPSampler.response_timeout">5000</stringProp>)");
+    const nlohmann::ordered_json& meta  = result.at ("meta");
+    EXPECT_EQ (skipped_count (meta, "HttpDefaults_unmapped"), 3);
+    const nlohmann::ordered_json& item = meta.at ("skipped").at (0);
+    EXPECT_EQ (item.at ("names"),
+    (nlohmann::ordered_json::array ({ "path", "connect timeout", "response timeout" })));
+    EXPECT_EQ (first_request (result.at ("collections").at (0)).at ("url"), "{{baseUrl}}/items");
+}
+
+/// JMeter's blank and `0` timeouts mean "none", so they leave nothing to count.
+TEST (JmeterImport, HttpDefaultsWithNoRealTimeoutOrPathTallyNothing) {
+    const nlohmann::ordered_json result = import_with_http_defaults (R"(
+      <stringProp name="HTTPSampler.domain">api.example.com</stringProp>
+      <stringProp name="HTTPSampler.path"></stringProp>
+      <stringProp name="HTTPSampler.connect_timeout"></stringProp>
+      <stringProp name="HTTPSampler.response_timeout">0</stringProp>)");
+    EXPECT_FALSE (has_skipped_kind (result.at ("meta"), "HttpDefaults_unmapped"));
 }
 
 /// A `HTTPFileArg` with no `File.paramname` names nothing a `form-data` field

@@ -1901,9 +1901,10 @@ its message. The number is for MCP and export readers. Unlike
 `httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
 and saw none, absent a run stored before the count existed.
 
-`authNotice` is the engine's sentence for a request whose auth mode it stores but
-does not execute (`digest`, `ntlm`, ...), which is sent without authentication
-(issue #2474). The key is **absent** when there is nothing to say, on the live
+`authNotice` is the engine's sentence for a request whose auth sent nothing: a
+mode it stores but does not execute (`digest`, `ntlm`, ..., issue #2474), or a
+bearer token or API key name that is empty (issue #3203). The request is still
+sent, without that credential. The key is **absent** when there is nothing to say, on the live
 body and in the stored trace alike; the trace holds it on `trace.request`, so a
 failed exchange with no `response` node still has it, and a streaming send
 carries it only there. `responseFromExecuteResult` and `responseFromRunResult`

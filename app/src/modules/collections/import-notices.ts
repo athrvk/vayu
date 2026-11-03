@@ -344,6 +344,14 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 thread group run profile not imported{names} - set the load, ramp-up and duration when you start the load test",
 		many: "{n} thread group run profiles not imported{names} - set the load, ramp-up and duration when you start each load test",
 	},
+	// A JMeter HTTP Request Defaults element hands requests its host only (as the
+	// `baseUrl` variable); its path and timeouts reach none. The count is
+	// settings, named under `names`.
+	HttpDefaults_unmapped: {
+		tier: "note",
+		one: "1 HTTP Request Defaults setting not imported{names} - set it on the requests themselves",
+		many: "{n} HTTP Request Defaults settings not imported{names} - set them on the requests themselves",
+	},
 	// The count is samplers left out at any depth, not groups. A request runs on
 	// every pass and a setUp or tearDown sampler once, so the sampler is not
 	// imported as a request: the user rebuilds it in the script that runs once.

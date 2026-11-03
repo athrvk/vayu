@@ -1622,8 +1622,9 @@ export interface RunResultTrace {
 		 */
 		bodyFile?: unknown;
 		/**
-		 * The auth mode was not executed and the request went out without
-		 * authentication - see {@link HttpResponse.authNotice} (issue #2474).
+		 * The request went out without the authentication it asked for: a mode
+		 * the engine does not execute, or an empty bearer token or API key name
+		 * - see {@link HttpResponse.authNotice} (issues #2474, #3203).
 		 * Written on the request node because it describes what was sent, so it
 		 * is present on a failed exchange (no `response` node) too.
 		 */
@@ -2460,12 +2461,13 @@ export interface HttpResponse {
 	 */
 	httpVersionDowngraded?: boolean;
 	/**
-	 * The request's auth mode is one the engine stores but does not execute
-	 * (`digest`, `ntlm`, ...), so it was sent without authentication
-	 * (issue #2474). A sentence naming the mode, written by
+	 * The request was sent without the authentication it asked for: its auth
+	 * mode is one the engine stores but does not execute (`digest`, `ntlm`, ...;
+	 * issue #2474), or it is a bearer token that is empty or an API key with no
+	 * name (issue #3203). A sentence naming the cause, written by
 	 * `record_auth_provenance` (`engine/src/http/request_exchange.cpp`) to this
 	 * key and to `trace.request.authNotice` from one place. **Absent** when
-	 * there is nothing to say - an executed mode, no auth, or an engine older
+	 * there is nothing to say - credentials applied, no auth, or an engine older
 	 * than the key - and on a streaming send, which is answered before it
 	 * exists: only its stored trace carries it.
 	 */

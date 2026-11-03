@@ -43,7 +43,7 @@ import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DEFAULT_HTTP_VERSION, isHttpVersion, type HttpVersion } from "@/constants/request";
-import { wireBodyContent } from "./wire-body";
+import { curlEscape, graphqlGetQuery, urlWithQuery, wireBodyContent } from "./wire-body";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -206,7 +206,10 @@ const URL_CREDENTIALS_DROPPED_NOTE =
  * (#2591); a secret that is only part of a label is rewritten with the whole
  * label by punycode and is not matched. In a JSON-RPC or GraphQL body the
  * engine's envelope is built first, which writes a quote, backslash or newline
- * in the secret as a JSON escape, so that spelling is matched too (#3198).
+ * in the secret as a JSON escape, so that spelling is matched too (#3198). A
+ * GraphQL GET carries the document in the URL escaped as `curl_easy_escape`
+ * does, which differs from `encodeURIComponent` on `!'()*`, and an envelope's
+ * `variables` are escaped after their JSON spelling (#3211).
  */
 function secretForms(secret: string): string[] {
 	return [
@@ -219,6 +222,8 @@ function secretForms(secret: string): string[] {
 		encodeURIComponent(secret),
 		encodeHost(secret),
 		JSON.stringify(secret).slice(1, -1),
+		curlEscape(secret),
+		curlEscape(JSON.stringify(secret).slice(1, -1)),
 	];
 }
 
@@ -407,6 +412,17 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 	// Before masking (the caller masks the result), as the engine completes the
 	// body before it leaves: a secret inside the envelope is still found.
 	return { kind: "raw", content: wireBodyContent(shape.mode, shape.content) };
+}
+
+/**
+ * The query string a GraphQL GET carries its document as, or undefined for any
+ * other request and for a GraphQL body the engine keeps in the body frame
+ * (`graphql_url_transport`, `engine/src/http/form_body.cpp`).
+ */
+function graphqlUrlTransport(method: string, body: unknown): string | undefined {
+	if (method !== "GET" || typeof body !== "object" || body === null) return undefined;
+	const { mode, content } = body as SnippetBody;
+	return mode === "graphql" && content ? graphqlGetQuery(content) : undefined;
 }
 
 /**
@@ -652,7 +668,12 @@ export function prepareRequest(
 		else basicAuth = { username: urlCredentials.username, password: urlCredentials.password };
 	}
 
-	const body = normalizeBody(request.body);
+	const method = (request.method || "GET").toUpperCase();
+	// A GraphQL GET sends its document in the URL and no body (#3211), after
+	// every parameter auth added, as the engine appends it last.
+	const graphqlQuery = graphqlUrlTransport(method, request.body);
+	if (graphqlQuery !== undefined) url = urlWithQuery(url, graphqlQuery);
+	const body = graphqlQuery === undefined ? normalizeBody(request.body) : undefined;
 	// Absent means following: the engine's own default (issue #1445), unlike
 	// curl's, which is why the flag is worth emitting on the common case
 	// rather than only when it departs from one.
@@ -661,7 +682,8 @@ export function prepareRequest(
 	// After auth, so a header the request carries under any name still counts as
 	// declared; and only when there is a body, because a mode with nothing in it
 	// sends none - the engine's `has_wire_body` gate, which `normalizeBody`
-	// already applied by returning undefined.
+	// applied by returning undefined and a GraphQL GET applied by moving its
+	// document into the URL.
 	const withContentType = body ? withImpliedContentType(headers, request.body) : headers;
 
 	// Mask last, over everything at once, so a credential and a secret variable
@@ -671,7 +693,7 @@ export function prepareRequest(
 		: null;
 
 	return {
-		method: (request.method || "GET").toUpperCase(),
+		method,
 		url: masker.apply(url),
 		headers: withContentType.map(([k, v]): [string, string] => [k, masker.applyHeader(k, v)]),
 		basicAuth: maskedBasic,

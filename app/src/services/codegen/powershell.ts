@@ -72,20 +72,48 @@ function formEntry(part: PreparedPart): string {
 }
 
 /**
- * The part names that appear more than once, as first written. A `-Form`
- * hashtable keeps one entry per name and compares names without regard to case,
- * so `tag` and `Tag` collide as well; a literal that repeats one does not parse
- * (#3206).
+ * The names that appear more than once, spelled as at their first repeat. A
+ * hashtable literal (`-Form`, or a urlencoded `-Body`) keeps one entry per name
+ * and compares names without regard to case, so `tag` and `Tag` collide as
+ * well; a literal that repeats one does not parse (#3206, #3216).
  */
-function repeatedPartKeys(parts: PreparedPart[]): string[] {
+function repeatedNames(names: readonly string[]): string[] {
 	const seen = new Set<string>();
 	const repeated = new Map<string, string>();
-	for (const { key } of parts) {
-		const folded = key.toLowerCase();
-		if (seen.has(folded) && !repeated.has(folded)) repeated.set(folded, key);
+	for (const name of names) {
+		const folded = name.toLowerCase();
+		if (seen.has(folded) && !repeated.has(folded)) repeated.set(folded, name);
 		seen.add(folded);
 	}
 	return [...repeated.values()];
+}
+
+/** The body's repeated field or part names; none for the modes that have no fields. */
+function repeatedBodyNames(body: PreparedRequest["body"]): string[] {
+	if (body?.kind === "form-data") return repeatedNames(body.parts.map((part) => part.key));
+	if (body?.kind === "urlencoded") return repeatedNames(body.fields.map(([key]) => key));
+	return [];
+}
+
+/**
+ * One urlencoded component as the engine writes it (`curl_easy_escape`): every
+ * byte outside RFC 3986's unreserved set is `%XX`, a space included. Not
+ * `encodeURIComponent`, which leaves `!'()*` raw.
+ */
+function percentEncodeComponent(text: string): string {
+	return Array.from(new TextEncoder().encode(text), (byte) => {
+		const char = String.fromCharCode(byte);
+		return /[A-Za-z0-9\-._~]/.test(char)
+			? char
+			: `%${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+	}).join("");
+}
+
+/** A urlencoded body as the one string the engine puts on the wire, in row order. */
+function encodedFormString(fields: Array<[string, string]>): string {
+	return fields
+		.map(([key, value]) => `${percentEncodeComponent(key)}=${percentEncodeComponent(value)}`)
+		.join("&");
 }
 
 /**
@@ -172,8 +200,7 @@ export function generatePowerShell(
 
 	const headers: Array<{ name: string; expression: string }> = [];
 	const isFormData = prepared.body?.kind === "form-data";
-	const repeatedKeys =
-		prepared.body?.kind === "form-data" ? repeatedPartKeys(prepared.body.parts) : [];
+	const repeatedKeys = repeatedBodyNames(prepared.body);
 	const folded = foldRepeatedHeaders(prepared.headers, "Invoke-RestMethod");
 	notes.push(...folded.notes);
 	for (const [name, value] of folded.headers) {
@@ -221,6 +248,7 @@ export function generatePowerShell(
 
 	let bodyParam: string | null = null;
 	let inFile: string | null = null;
+	let encodedFormContentType: string | null = null;
 	if (prepared.body?.kind === "binary") {
 		// `-InFile` sends the file as the body; `-Body` would want its bytes
 		// read into a variable first.
@@ -232,6 +260,15 @@ export function generatePowerShell(
 		bodyParam = "-Body $body";
 		lines.push(...multipartContentLines(prepared.body.parts), "");
 		notes.push(...contentBodyNotes(prepared.body.parts, repeatedKeys));
+	} else if (prepared.body?.kind === "urlencoded" && repeatedKeys.length > 0) {
+		bodyParam = "-Body $body";
+		// A string -Body is sent as written and the hashtable form is what made the
+		// cmdlet urlencode, so the type is named on the call.
+		encodedFormContentType = "application/x-www-form-urlencoded";
+		lines.push(`$body = ${powerShellQuote(encodedFormString(prepared.body.fields))}`, "");
+		notes.push(
+			`Fields named ${repeatedKeys.join(", ")} repeat, which a -Body hashtable cannot hold, so the body is passed as one pre-encoded string.`
+		);
 	} else if (prepared.body) {
 		// `-Form` is the multipart switch (PowerShell 6.1+); `-Body` with a
 		// hashtable is urlencoded.
@@ -264,6 +301,11 @@ export function generatePowerShell(
 	if (headers.length > 0) call.push("-Headers $headers");
 	if (inFile !== null) call.push(`-InFile ${powerShellQuote(inFile)}`);
 	if (bodyParam) call.push(bodyParam);
+	// A declared Content-Type is already in $headers and wins, as it does in Vayu.
+	const declaresContentType = headers.some(({ name }) => name.toLowerCase() === "content-type");
+	if (encodedFormContentType && !declaresContentType) {
+		call.push(`-ContentType ${powerShellQuote(encodedFormContentType)}`);
+	}
 
 	call.push(...transferParams(prepared));
 
