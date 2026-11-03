@@ -1051,6 +1051,63 @@ describe("PowerShell", () => {
 		expect(urlencoded.code).not.toContain("-Form");
 	});
 
+	describe("urlencoded fields that share a name (#3216)", () => {
+		const urlencoded = (fields: Array<{ key: string; value: string }>): SnippetRequest => ({
+			...GET,
+			method: "POST",
+			body: { mode: "x-www-form-urlencoded", fields },
+		});
+
+		it("sends one pre-encoded string with every pair, in row order, instead of a hashtable", () => {
+			const { code, notes } = generatePowerShell(
+				urlencoded([
+					{ key: "a", value: "1" },
+					{ key: "b", value: "x" },
+					{ key: "A", value: "2" },
+				])
+			);
+			// A hashtable literal repeating a name, in any case, does not parse.
+			expect(code).not.toContain("@{");
+			expect(code).toContain("$body = 'a=1&b=x&A=2'");
+			expect(code).toContain("-Body $body");
+			expect(code).toContain("-ContentType 'application/x-www-form-urlencoded'");
+			expect(notes.join(" ")).toContain("Fields named A repeat");
+		});
+
+		it("encodes names and values as the engine does, quote and reserved characters included", () => {
+			const { code } = generatePowerShell(
+				urlencoded([
+					{ key: "q k", value: "it's a&b=c" },
+					{ key: "q k", value: "(!*)~é" },
+				])
+			);
+			expect(code).toContain("$body = 'q%20k=it%27s%20a%26b%3Dc&q%20k=%28%21%2A%29~%C3%A9'");
+		});
+
+		it("leaves the type to a declared Content-Type header", () => {
+			const { code } = generatePowerShell({
+				...urlencoded([
+					{ key: "a", value: "1" },
+					{ key: "a", value: "2" },
+				]),
+				headers: [{ name: "content-type", value: "application/x-www-form-urlencoded" }],
+			});
+			expect(code).toContain("'content-type' = 'application/x-www-form-urlencoded'");
+			expect(code).not.toContain("-ContentType");
+		});
+
+		it("keeps the hashtable when no name repeats", () => {
+			const { code } = generatePowerShell(
+				urlencoded([
+					{ key: "a", value: "1" },
+					{ key: "b", value: "2" },
+				])
+			);
+			expect(code).toContain("$body = @{");
+			expect(code).not.toContain("-ContentType");
+		});
+	});
+
 	it("builds the multipart hashtable [ordered], so -Form sends the parts in row order", () => {
 		// Mutation check: a plain `@{` hashtable enumerates in no promised order.
 		const multipart = generatePowerShell({
