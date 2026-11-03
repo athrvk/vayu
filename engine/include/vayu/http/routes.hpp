@@ -133,6 +133,30 @@ error_body (int status, const std::string& message, std::string_view code = {}) 
 }
 
 /**
+ * @brief Adds an OAuth 2.0 token endpoint's own reply to an `error_body`:
+ *        `providerStatus`, `providerError` and `providerErrorDescription`
+ *        inside its `error` object, each left out when the failure has none.
+ *
+ * The one copy for every route that answers a token failure (`/oauth2/token`
+ * and the `POST /runs` auth pre-flight, #3201), so the keys cannot drift.
+ */
+inline void add_provider_reply (nlohmann::json& body,
+int provider_status,
+const std::string& provider_error,
+const std::string& provider_error_description) {
+    auto& error = body["error"];
+    if (provider_status != 0) {
+        error["providerStatus"] = provider_status;
+    }
+    if (!provider_error.empty ()) {
+        error["providerError"] = provider_error;
+    }
+    if (!provider_error_description.empty ()) {
+        error["providerErrorDescription"] = provider_error_description;
+    }
+}
+
+/**
  * The response a refusal produces: the HTTP status, and the body to send with
  * it.
  *

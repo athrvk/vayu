@@ -88,6 +88,18 @@ export function isMidRunRefreshable(
 }
 
 /**
+ * Whether the engine will renew the token a run is about to fetch, judged from
+ * the config alone - there is no cached token to ask. The token is assumed to
+ * expire and to arrive without a refresh token, so an authorization_code grant,
+ * whose only way back is one, reads as not renewable.
+ */
+export function willRefreshFetchedToken(
+	config: Pick<OAuth2Config, "grantType" | "tokenPlacement" | "autoRefreshToken">
+): boolean {
+	return isMidRunRefreshable(config, { expiresAt: null, expiresIn: 1, hasRefreshToken: false });
+}
+
+/**
  * Decide whether a duration-based test is covered by the token. Pure so the
  * state machine can be unit-tested without React. `now` is injectable for tests.
  *

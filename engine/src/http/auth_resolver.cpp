@@ -115,12 +115,15 @@ bool flag (const nlohmann::json& obj, const char* key, bool fallback) {
 // Map a token-acquisition failure onto the auth-resolution result shape.
 AuthApplyResult from_token_error (const oauth::TokenError& err) {
     AuthApplyResult out;
-    out.ok          = false;
-    out.code        = err.code == "oauth2_interactive_required" ?
+    out.ok                         = false;
+    out.code                       = err.code == "oauth2_interactive_required" ?
     vayu::ErrorCode::AuthRequired :
     vayu::ErrorCode::AuthFailed;
-    out.message     = err.message;
-    out.detail_code = err.code;
+    out.message                    = err.message;
+    out.detail_code                = err.code;
+    out.provider_status            = err.provider_status;
+    out.provider_error             = err.provider_error;
+    out.provider_error_description = err.provider_error_description;
     return out;
 }
 

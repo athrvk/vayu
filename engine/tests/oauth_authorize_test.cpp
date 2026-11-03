@@ -196,6 +196,28 @@ TEST_F (OAuthAuthorizeTest, EmbeddedCompletesAndExchanges) {
     expect_exchanged_token_stored (config, idp);
 }
 
+// The IdP's refusal reads the same through complete() as through the loopback
+// callback (`LoopbackIdpErrorWithStateFailsAttempt`), description included
+// (#3201). Mutation check: have complete() record `params.at ("error")` alone.
+TEST_F (OAuthAuthorizeTest, EmbeddedIdpErrorCarriesItsDescription) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    const json config = { { "grantType", "authorization_code" },
+        { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", idp.url ("/token") }, { "clientId", "cid" },
+        { "clientSecret", "sec" }, { "callbackUrl", "https://app/callback" } };
+
+    auto start = mgr.start (*db_, config, "embedded");
+    ASSERT_TRUE (start.ok);
+    const std::string state = parse_q (query_of (start.authorize_url))["state"];
+
+    const auto st = mgr.complete (*db_,
+    start.attempt_id, "https://app/callback?error=access_denied&error_description=User%20said%20no&state=" + state);
+    EXPECT_EQ (st.state, "failed");
+    EXPECT_EQ (st.error, "access_denied: User said no");
+    EXPECT_EQ (idp.hits (), 0);
+}
+
 TEST_F (OAuthAuthorizeTest, LoopbackEndToEnd) {
     vayu::http::OAuth2AuthorizeManager mgr;
     MockTokenServer idp;

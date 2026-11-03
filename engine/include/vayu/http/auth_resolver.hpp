@@ -139,6 +139,10 @@ void walk_auth_credentials (AuthRef& auth, Visit&& visit) {
  *
  * `token_fetch_ms` is the time resolution spent waiting on an OAuth 2.0
  * provider's token endpoint - zero for every other mode and for a cached token.
+ *
+ * The `provider_*` fields are `oauth::TokenError`'s, carried unchanged when an
+ * OAuth 2.0 token request failed at the endpoint (#3201): 0 and empty
+ * otherwise.
  */
 struct AuthApplyResult {
     bool ok              = true;
@@ -146,6 +150,14 @@ struct AuthApplyResult {
     std::string message;
     std::string detail_code;
     double token_fetch_ms = 0.0;
+    int provider_status   = 0;
+    // `{}` for the reason `oauth::TokenError` gives: most failures are a
+    // four-field aggregate init, which -Wmissing-field-initializers reports
+    // for a member without a default member initializer.
+    // NOLINTBEGIN(readability-redundant-member-init)
+    std::string provider_error{};
+    std::string provider_error_description{};
+    // NOLINTEND(readability-redundant-member-init)
 };
 
 /**

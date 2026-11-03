@@ -39,16 +39,8 @@ namespace {
  */
 nlohmann::json token_error_body (const oauth::TokenError& err) {
     auto body = routes::error_body (err.http_status, err.message, err.code);
-    auto& e   = body["error"];
-    if (err.provider_status != 0) {
-        e["providerStatus"] = err.provider_status;
-    }
-    if (!err.provider_error.empty ()) {
-        e["providerError"] = err.provider_error;
-    }
-    if (!err.provider_error_description.empty ()) {
-        e["providerErrorDescription"] = err.provider_error_description;
-    }
+    add_provider_reply (body, err.provider_status, err.provider_error,
+    err.provider_error_description);
     return body;
 }
 
@@ -196,14 +188,18 @@ void register_oauth_routes (RouteContext& ctx) {
         body->value ("attemptId", std::string{}),
         body->value ("callbackUrl", std::string{}), &ctx.server_stopping);
         res.status    = st.state == "not_found" ? 404 : 200;
-        res.set_content (authorize_status_json (st).dump (), "application/json");
+        res.set_content (authorize_status_json (st).dump (-1, ' ', false,
+                         nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const auto st = ctx.authorize_manager.status (req.matches[1]);
         res.status    = st.state == "not_found" ? 404 : 200;
-        res.set_content (authorize_status_json (st).dump (), "application/json");
+        res.set_content (authorize_status_json (st).dump (-1, ' ', false,
+                         nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     ctx.server.Delete (R"(/oauth2/authorize/([^/]+))",

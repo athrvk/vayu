@@ -115,6 +115,36 @@ const VERDICTS: Verdict[] = [
 	},
 ];
 
+describe("OAuth2LoadTestGuard's no-token body", () => {
+	beforeEach(() => {
+		statusQuery.data = { found: false };
+	});
+
+	it("says the engine refreshes the token mid-run when the config can renew it", () => {
+		renderGuard({});
+
+		const callout = screen.getByText(/One is fetched when the run starts/);
+		expect(callout).toHaveTextContent(
+			"One is fetched when the run starts, and Vayu's engine refreshes it mid-run if it expires."
+		);
+		expect(callout).not.toHaveTextContent("requests fail");
+	});
+
+	it("keeps the lifetime warning when the config cannot renew it", () => {
+		renderGuard({ config: unrenewable });
+
+		expect(screen.getByText(/One is fetched when the run starts/)).toHaveTextContent(
+			"One is fetched when the run starts. If its lifetime is shorter than the run, requests fail once it expires."
+		);
+	});
+
+	it("keeps the lifetime warning for a grant that needs a refresh token it does not have yet", () => {
+		renderGuard({ config: { ...config, grantType: "authorization_code" } });
+
+		expect(screen.getByText(/requests fail once it expires/)).toBeInTheDocument();
+	});
+});
+
 describe("OAuth2LoadTestGuard's verdict wording", () => {
 	beforeEach(() => {
 		statusQuery.data = undefined;

@@ -38,7 +38,7 @@ reply on `/oauth2/*`:
 {
   "error": {
     "code": "oauth2_provider_error",
-    "message": "Token endpoint rejected the request: invalid_client",
+    "message": "Token endpoint refused the request (HTTP 401): invalid_client",
     "providerStatus": 401,
     "providerError": "invalid_client"
   }
@@ -6670,9 +6670,21 @@ a `{{data.*}}` token in one is refused like one anywhere else in the config.
 ```
 
 `expiresAt` is `null` for a non-expiring token; `scope` is omitted when empty.
-Errors carry an `oauth2_*` code: `400` invalid config, `401` provider rejected
-the request, `409` interactive authorization required, `502` network error,
-`504` `oauth2_timeout` when the token endpoint did not answer in time. The
+Errors carry an `oauth2_*` code: `400` invalid config, `401`
+`oauth2_provider_error` when the token endpoint answered without a token, `409`
+interactive authorization required, `502` network error, `504`
+`oauth2_timeout` when the token endpoint did not answer in time. A `401`'s
+message always names the endpoint's status (#3201): a 4xx JSON answer, or an
+RFC 6749 `error` under any status below 500, reads `Token endpoint refused the
+request (HTTP 400): invalid_client (bad secret)`; a 5xx, or a body nothing could
+read, reads `Token endpoint error (HTTP 503)`, with `: unparseable response`
+when the body was neither JSON nor a form. The provider's reply rides inside
+the error as `providerStatus`, `providerError` and `providerErrorDescription`,
+each left out when absent. A body that is not JSON is read as the legacy
+form-encoded token response only under an
+`application/x-www-form-urlencoded`, `text/plain` or absent `Content-Type`, and
+never when it opens with `<`, so a gateway's HTML page is not decoded as a
+form. The
 token request is bounded by the `defaultTimeout` setting (this route takes no
 `timeout` of its own), and the bound covers the whole acquisition: a refresh
 the provider rejects falls back to a fresh grant that gets only what the
@@ -10390,7 +10402,10 @@ longer reads as a refused request (#2319).
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
-required) or `400`, carrying the `/oauth2` error codes, so a bad token never
+required) or `400`, carrying the `/oauth2` error codes and, when the token
+endpoint answered, its reply inside the error object as
+[`POST /oauth2/token`](#post-oauth2token) carries it (`providerStatus`,
+`providerError`, `providerErrorDescription`, #3201), so a bad token never
 surfaces as a silently-failed run. A load run acquires once, before any script,
 from the stored values (a script that sets an OAuth 2.0 variable has no effect
 under load, and nothing is re-acquired per iteration), so an `oauth2` config

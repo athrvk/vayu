@@ -548,6 +548,62 @@ TEST_F (OAuthClientTest, FormEncodedResponseAndStringExpiresIn) {
     EXPECT_EQ (t.expires_in, 1200);
 }
 
+// The form type is read through its parameters: a provider answering
+// `application/x-www-form-urlencoded; charset=utf-8` is the legacy shape too.
+// Mutation check: compare the raw Content-Type in `may_be_form_encoded`.
+TEST_F (OAuthClientTest, AFormDeclaredWithACharsetIsReadAsAToken) {
+    MockTokenServer idp;
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-form-encoded"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (r));
+    EXPECT_EQ (std::get<vayu::db::OAuthToken> (r).access_token, "form");
+}
+
+// A body declared `text/html` is never a form, however it is shaped (#3201).
+// Mutation check: return true from `may_be_form_encoded` after the markup test.
+TEST_F (OAuthClientTest, AFormDeclaredAsHtmlIsNotAToken) {
+    MockTokenServer idp;
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-form-as-html"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    EXPECT_NE (
+    std::get<oauth::TokenError> (r).message.find ("unparseable response"), std::string::npos)
+    << std::get<oauth::TokenError> (r).message;
+}
+
+// A gateway's 503 page is the endpoint failing, not the provider refusing: the
+// message names the status and says nothing was rejected, and the page's
+// `&error=` is not read as the provider's `error` (#3201). Mutation checks:
+// word every failure "rejected" in `provider_failure`; drop the
+// `may_be_form_encoded` call from `parse_token_body`.
+TEST_F (OAuthClientTest, AGatewayErrorPageNamesItsStatusAndIsNotARefusal) {
+    MockTokenServer idp;
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-unavailable-html"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    const auto& err = std::get<oauth::TokenError> (r);
+    EXPECT_EQ (err.message, "Token endpoint error (HTTP 503): unparseable response");
+    EXPECT_EQ (err.message.find ("rejected"), std::string::npos) << err.message;
+    EXPECT_EQ (err.provider_status, 503);
+    EXPECT_EQ (err.provider_error, "");
+    EXPECT_EQ (err.http_status, 401);
+    EXPECT_EQ (err.code, "oauth2_provider_error");
+}
+
+// Markup is not a form under `text/plain` either: the page a misconfigured
+// gateway labels as text still reads as unparseable (#3201). Mutation check:
+// drop the leading-`<` test from `may_be_form_encoded`.
+TEST_F (OAuthClientTest, MarkupDeclaredAsPlainTextIsNotAForm) {
+    MockTokenServer idp;
+    auto r = oauth::acquire_token (*db_, cc_config (idp, "/token-markup-as-plain"),
+    false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r));
+    const auto& err = std::get<oauth::TokenError> (r);
+    EXPECT_EQ (err.provider_error, "") << err.message;
+    EXPECT_NE (err.message.find ("unparseable response"), std::string::npos)
+    << err.message;
+}
+
 TEST_F (OAuthClientTest, ExpiredTokenRefreshesAndKeepsOldRefreshToken) {
     MockTokenServer idp;
     auto config = cc_config (idp, "/refresh-norotate");
@@ -605,6 +661,7 @@ TEST_F (OAuthClientTest, ProviderErrorIsStructured) {
     EXPECT_EQ (err.provider_status, 400);
     EXPECT_EQ (err.provider_error, "invalid_client");
     EXPECT_EQ (err.provider_error_description, "bad secret");
+    EXPECT_EQ (err.message, "Token endpoint refused the request (HTTP 400): invalid_client (bad secret)");
 }
 
 // The bound is inclusive: a token body nested exactly to it still parses.
