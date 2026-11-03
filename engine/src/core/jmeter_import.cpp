@@ -1471,7 +1471,7 @@ parse_jmeter (const std::string& text, const ImportOptions& options, ImportTally
         { "variables", json::object () }, { "auth", json{ { "mode", "none" } } },
         { "children", json::array () }, { "requests", json::array () } };
     json elements = json::array ();
-    Ctx ctx{ options, tally };
+    Ctx ctx{ options, tally, 0, 0, 0, {} };
     int next_order = 0;
     Sink root_sink{ collection["requests"], collection["children"], elements,
         collection["variables"], next_order };
