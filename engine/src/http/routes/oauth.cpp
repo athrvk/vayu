@@ -39,16 +39,8 @@ namespace {
  */
 nlohmann::json token_error_body (const oauth::TokenError& err) {
     auto body = routes::error_body (err.http_status, err.message, err.code);
-    auto& e   = body["error"];
-    if (err.provider_status != 0) {
-        e["providerStatus"] = err.provider_status;
-    }
-    if (!err.provider_error.empty ()) {
-        e["providerError"] = err.provider_error;
-    }
-    if (!err.provider_error_description.empty ()) {
-        e["providerErrorDescription"] = err.provider_error_description;
-    }
+    add_provider_reply (body, err.provider_status, err.provider_error,
+    err.provider_error_description);
     return body;
 }
 

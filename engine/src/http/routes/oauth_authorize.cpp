@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <variant>
@@ -78,6 +79,26 @@ std::map<std::string, std::string> parse_query (const std::string& query) {
         pos = amp + 1;
     }
     return out;
+}
+
+/**
+ * The IdP's refusal an authorization redirect carries (RFC 6749 4.1.2.1), as
+ * `<error>: <error_description>` or `<error>` alone, or nothing when the
+ * redirect carries no `error`. Read by both the loopback callback and
+ * `complete()`, so the two report one refusal in the same words (#3201).
+ */
+std::optional<std::string> redirect_refusal (
+const std::map<std::string, std::string>& params) {
+    const auto error = params.find ("error");
+    if (error == params.end ()) {
+        return std::nullopt;
+    }
+    std::string refusal = error->second;
+    if (const auto description = params.find ("error_description");
+    description != params.end ()) {
+        refusal += ": " + description->second;
+    }
+    return refusal;
 }
 
 std::string generate_attempt_id () {
@@ -168,12 +189,8 @@ const std::string& code_verifier,
 const std::string& redirect_uri,
 const std::map<std::string, std::string>& params) {
     CallbackOutcome outcome;
-    if (const auto err = params.find ("error"); err != params.end ()) {
-        outcome.error = err->second;
-        if (auto description = params.find ("error_description");
-        description != params.end ()) {
-            outcome.error += ": " + description->second;
-        }
+    if (auto refusal = redirect_refusal (params)) {
+        outcome.error = std::move (*refusal);
         return outcome;
     }
 
@@ -411,8 +428,8 @@ const std::atomic<bool>* cancel) {
     int result_state = kFailed;
     std::string error;
     std::string cache_key;
-    if (const auto err = params.find ("error"); err != params.end ()) {
-        error = err->second;
+    if (auto refusal = redirect_refusal (params)) {
+        error = std::move (*refusal);
     } else if (params.count ("state") == 0 || params.at ("state") != state) {
         error = "State mismatch (possible CSRF)";
     } else {

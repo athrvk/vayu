@@ -694,6 +694,30 @@ TEST_F (DeferredCompositionTest, OAuth2ARunsPreflightIsBoundedByTheRunsTimeout) 
     EXPECT_EQ (echo.requests_seen (), 0);
 }
 
+// A pre-flight the token endpoint refuses carries the provider's own reply
+// inside its error object, the keys `POST /oauth2/token` answers with (#3201).
+// Mutation check: drop the `add_provider_reply` call in `preflight_run_auth`.
+TEST_F (DeferredCompositionTest, OAuth2ARunsPreflightRefusalCarriesTheProvidersReply) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "stored" }, { "scope", "read" } });
+    seed_request (echo.url (), json::object (), "",
+    client_credentials (tokens, "/token-fail"));
+
+    const auto [status, body] =
+    post ("/runs", as_single_iteration_run (compose_for_a_run ()));
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    const json error = body.value ("error", json::object ());
+    EXPECT_EQ (error.value ("code", ""), "oauth2_provider_error") << body.dump ();
+    EXPECT_EQ (error.value ("providerStatus", 0), 400) << body.dump ();
+    EXPECT_EQ (error.value ("providerError", ""), "invalid_client") << body.dump ();
+    EXPECT_EQ (error.value ("providerErrorDescription", ""), "bad secret")
+    << body.dump ();
+    EXPECT_TRUE (db_->get_all_runs ().empty ());
+    EXPECT_EQ (echo.requests_seen (), 0);
+}
+
 // A load run acquires once, before any script: composed for a run, the config
 // carries the stored values and the run sends their token; composed for a
 // Send, it is still a template and the run is refused rather than asking the

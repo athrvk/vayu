@@ -10402,7 +10402,10 @@ longer reads as a refused request (#2319).
 **Auth pre-flight.** When `auth.mode` is `oauth2`, the run route resolves the
 token **before** creating the run and warms the cache for the workers. An
 unauthorizable config is rejected up front with `409` (interactive sign-in
-required) or `400`, carrying the `/oauth2` error codes, so a bad token never
+required) or `400`, carrying the `/oauth2` error codes and, when the token
+endpoint answered, its reply inside the error object as
+[`POST /oauth2/token`](#post-oauth2token) carries it (`providerStatus`,
+`providerError`, `providerErrorDescription`, #3201), so a bad token never
 surfaces as a silently-failed run. A load run acquires once, before any script,
 from the stored values (a script that sets an OAuth 2.0 variable has no effect
 under load, and nothing is re-acquired per iteration), so an `oauth2` config

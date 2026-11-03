@@ -3000,8 +3000,10 @@ const vayu::http::TargetPolicy* target_policy) {
         vayu::utils::log_warning (
         "http", "POST /runs - Auth pre-flight failed: " + preflight.message);
         const int status = (preflight.code == vayu::ErrorCode::AuthRequired) ? 409 : 400;
-        return RouteError{ status,
-            error_body (status, preflight.message, preflight.detail_code) };
+        auto body = error_body (status, preflight.message, preflight.detail_code);
+        add_provider_reply (body, preflight.provider_status,
+        preflight.provider_error, preflight.provider_error_description);
+        return RouteError{ status, std::move (body) };
     }
     return std::nullopt;
 }
@@ -3226,7 +3228,10 @@ httplib::Response& res) {
     if (!is_scenario) {
         if (auto rejection = preflight_run_auth (ctx, json, target_policy_ptr)) {
             res.status = rejection->status;
-            res.set_content (rejection->body.dump (), "application/json");
+            // The provider's reply is quoted, so a strict dump could throw.
+            res.set_content (rejection->body.dump (-1, ' ', false,
+                             nlohmann::json::error_handler_t::replace),
+            "application/json");
             return;
         }
     }
