@@ -434,8 +434,7 @@ std::string body_content_type_value (const Request& request) {
     const bool declared = std::any_of (request.headers.begin (),
     request.headers.end (), [&request] (const HeaderLine& line) {
         return CaseInsensitiveLess::equal (line.name, "Content-Type") &&
-        (request.body.mode != BodyMode::Binary ||
-        header_value_reaches_wire (line.value));
+        (request.body.mode != BodyMode::Binary || has_header_value (line.value));
     });
     return declared ? std::string () : implied;
 }
@@ -445,7 +444,7 @@ bool suppresses_request_header (const Request& request, const std::string& key) 
     CaseInsensitiveLess::equal (key, "Content-Type");
 }
 
-bool header_value_reaches_wire (std::string_view value) {
+bool has_header_value (std::string_view value) {
     return std::any_of (value.begin (), value.end (),
     [] (char c) { return std::isspace (static_cast<unsigned char> (c)) == 0; });
 }
@@ -469,10 +468,10 @@ bool libcurl_defaults_content_type (const Request& request) {
 /// libcurl adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and then
 /// waits a second for an interim reply a server may never send, so it stays
 /// only where `sendExpectContinue` is on. @p lists_expect is a typed Expect
-/// that reached the list: the way to send one on purpose, sent as typed. A
-/// typed row left blank never gets there (`append` drops it), which is the gap
-/// libcurl fills, so it does not count. Refusing the declared row removes
-/// libcurl's own line when the policy would have let it stay.
+/// row, blank ones included: libcurl adds none of its own beside a listed
+/// `Expect` in either spelling, so the row is sent as typed and nothing needs
+/// removing. Refusing the declared row removes libcurl's own line when the
+/// policy would have let it stay.
 bool removes_libcurl_expect (const Request& request,
 const DefaultHeaderPolicy& policy,
 bool lists_expect) {
@@ -484,9 +483,8 @@ bool lists_expect) {
 
 /// Append the removal lines that keep libcurl from adding a header of its own.
 /// `Name:` with nothing after the colon is libcurl's spelling of "remove the
-/// line", so each is appended directly - `append` drops a value-less header -
-/// and none is recorded as sent. @p lists_content_type and @p lists_expect say
-/// whether the list already names that header.
+/// line", so none is recorded as sent. @p lists_content_type and
+/// @p lists_expect say whether the list already names that header.
 curl_slist* append_removal_lines (curl_slist* list,
 const Request& request,
 const DefaultHeaderPolicy& policy,
@@ -514,6 +512,15 @@ bool is_cookie_header (std::string_view name) {
     return vayu::utils::ascii_lower_equal (name, "Cookie");
 }
 
+/// A blank Content-Type row means "no Content-Type", never an empty one, so it
+/// is not sent. What it does to the body's implied type is
+/// `body_content_type_value`'s rule; the removal line keeps libcurl's form type
+/// off.
+bool is_blank_content_type (std::string_view name, std::string_view value) {
+    return vayu::utils::ascii_lower_equal (name, "Content-Type") &&
+    !has_header_value (value);
+}
+
 // RFC 9110 section 5.5: the optional whitespace around a field value, space and
 // tab, is not part of it.
 std::string_view trim_optional_whitespace (std::string_view value) {
@@ -530,7 +537,7 @@ std::string_view trim_optional_whitespace (std::string_view value) {
 std::string typed_cookie_value (const Request& request) {
     std::string joined;
     for (const auto& [key, value] : request.headers) {
-        if (!is_cookie_header (key) || !header_value_reaches_wire (value)) {
+        if (!is_cookie_header (key) || !has_header_value (value)) {
             continue;
         }
         if (!joined.empty ()) {
@@ -552,22 +559,33 @@ HeaderList* sent) {
     }
 
     // Every header goes out through here, so the wire and the sent record are
-    // the same decision made once. A value libcurl would read as a removal is
-    // neither appended nor reported.
+    // the same decision made once.
     const auto record = [&] (const std::string& key, const std::string& value) {
         if (sent != nullptr) {
             sent->add (key, value);
         }
     };
-    // True when the line went on the list.
+    // A header the engine derives. An empty value is nothing to add, so it is
+    // neither appended nor recorded. True when the line went on the list.
     const auto append = [&] (const std::string& key, const std::string& value) {
-        if (!header_value_reaches_wire (value)) {
+        if (!has_header_value (value)) {
             return false;
         }
         const std::string line = key + ": " + value;
         list                   = curl_slist_append (list, line.c_str ());
         record (key, value);
         return true;
+    };
+    // A request row is sent whatever its value (#3220). A blank one is spelled
+    // `Name;`, libcurl's form for an empty header, because `Name:` with nothing
+    // after the colon would remove the header instead.
+    const auto append_row = [&] (const std::string& key, const std::string& value) {
+        if (append (key, value)) {
+            return;
+        }
+        const std::string line = key + ";";
+        list                   = curl_slist_append (list, line.c_str ());
+        record (key, "");
     };
     // A default the request already names is not added: someone who typed the
     // header means it, the same rule the body-implied Content-Type follows.
@@ -579,32 +597,31 @@ HeaderList* sent) {
     bool lists_content_type = false;
     bool lists_expect       = false;
     for (const auto& [key, value] : request.headers) {
-        if (suppresses_request_header (request, key)) {
+        if (suppresses_request_header (request, key) || is_blank_content_type (key, value)) {
             // Not sent, so not reported as sent either - libcurl writes the
-            // multipart Content-Type, boundary and all.
+            // multipart Content-Type, boundary and all; a blank Content-Type
+            // row means "no Content-Type".
             continue;
         }
         if (is_cookie_header (key)) {
             // Recorded, not appended: the typed rows ride `CURLOPT_COOKIE`
             // (see apply_default_header_options), which libcurl ignores while
             // the list names a Cookie, so a listed row would send a second
-            // line beside the jar's (#2788).
-            if (header_value_reaches_wire (value)) {
+            // line beside the jar's (#2788). A blank row joins nothing into
+            // that line, so it is not recorded.
+            if (has_header_value (value)) {
                 record (key, value);
             }
             continue;
         }
-        if (!append (key, value)) {
-            continue;
-        }
+        append_row (key, value);
         lists_content_type =
         lists_content_type || CaseInsensitiveLess::equal (key, "Content-Type");
         lists_expect = lists_expect || CaseInsensitiveLess::equal (key, "Expect");
     }
 
     // The Content-Type the body mode implies, when the request declares none.
-    // Empty when neither holds - which `append` drops, as it drops any
-    // value-less header.
+    // Empty when neither holds, which `append` leaves off the list.
     if (!suppresses_default_header (request, "Content-Type") &&
     append ("Content-Type", body_content_type_value (request))) {
         lists_content_type = true;

@@ -1247,8 +1247,10 @@ iteration of a load run carries its own.
 `sendExpectContinue` off, a request that names no `Expect` gets libcurl's
 removal line, whatever its size or verb. A typed `Expect: 100-continue` is the
 way to send one on purpose: it goes out as typed with the key off, and is
-recorded in `requestHeaders`. A typed `Expect` with a blank value is dropped
-like any value-less header and does not let libcurl's own back in. With the key
+recorded in `requestHeaders`. A typed `Expect` with a blank value is sent empty,
+like any blank row (see [`requestHeaders`](#post-execute)), and recorded with
+the value `""`; libcurl adds no `100-continue` of its own beside it, so the body
+goes out without the wait and without a removal line. With the key
 on nothing is appended, so libcurl decides (over 1 MiB, on HTTP/1.1), and the
 `Expect` row `GET /request-defaults` declares is the one a send refuses with
 `disabledDefaultHeaders`, which removes libcurl's line again. With the key off
@@ -8290,12 +8292,18 @@ time - the body-implied `Content-Type` (`text/plain` for a `text` body since
 issue #2464), and every [default header](#default-request-headers) this send
 adds (the `User-Agent`, the negotiated `Accept-Encoding`, an enabled
 correlation id) - and drops a `form-data` `Content-Type`, which libcurl writes
-itself with the boundary. It
-also drops **an enabled header whose value is empty or only whitespace**: a
-header line with nothing after the colon is libcurl's spelling for *remove this
-header*, so such a row never reaches the wire on any transport and is not
-reported as sent either. To send a header that is present with an empty value,
-give it a value - the engine does not emit libcurl's `Key;` form. It
+itself with the boundary. **An enabled header whose value is empty or only
+whitespace is sent empty** on every transport (issue #3220) and recorded with
+the value `""`: a header line with nothing after the colon is libcurl's spelling
+for *remove this header*, so the engine writes libcurl's `Key;` form instead,
+which sends `Key:` with no value. A blank row never removes a header; refusing
+one of the engine's defaults is `disabledDefaultHeaders`' job. A blank `Accept`
+or `Expect` row is therefore sent empty in place of libcurl's own `Accept: */*`
+or `Expect: 100-continue`. Two blank rows keep a meaning of their own and are
+neither sent nor recorded: a blank `Content-Type` means no Content-Type (on a
+`binary` body, absent, so the file's type applies; see
+[the `body` union](#the-request-body-union)), and a blank `Cookie` row joins
+nothing into the cookie line. A disabled row is never sent. The record
 does not carry libcurl's own additions or the jar's `Cookie` line; those are
 `rawRequest`'s alone. A test script's `pm.request.headers` reads this same set
 (see [scripting.md](scripting.md#request-object-pmrequest)), so an assertion
@@ -8326,9 +8334,9 @@ on every row written before the field, so a reader falls back to
 run's sampled capture records no sent headers at all: its deferred replay and
 the Samples viewer both keep reading the composed map, as
 [scripting.md](scripting.md#request-object-pmrequest) documents. That map can
-differ from the wire in exactly the two ways this record exists to state - a
-value-less enabled header is listed although it never went out, and the derived
-`User-Agent` and body-implied `Content-Type` are absent - and for load samples
+differ from the wire in the way this record exists to state - the derived
+`User-Agent` and body-implied `Content-Type` are absent, and a blank
+`Content-Type` or `Cookie` row, which is not sent, is listed - and for load samples
 that divergence is **recorded as permanent** rather than treated as a gap to
 close (issue #677 item 7). Which completions become samples is decided when they
 finish, so a sent record for the few that are kept would have to be built for

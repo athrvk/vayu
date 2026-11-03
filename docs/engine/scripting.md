@@ -986,11 +986,12 @@ Four consequences worth knowing:
   itself, boundary and all, so the engine suppresses an authored one and does
   not report as sent what it did not send. The script's view matches the
   response pane's Headers tab exactly.
-- **A header with an empty value is absent too.** A header line with nothing
-  after the colon is libcurl's spelling for *remove this header*, so an enabled
-  row whose value is empty (or only whitespace) never goes on the wire - and
-  the sent record does not claim it did. A pre-request script that sets a
-  header to `''` has removed it, not blanked it; give it a value to send one.
+- **A header with an empty value is sent empty.** An enabled row whose value
+  is empty (or only whitespace) goes on the wire with no value and reads back
+  as `''` (issue #3220). A pre-request script that sets a header to `''` has
+  blanked it, not removed it; `pm.request.headers.remove` removes one. A blank
+  `Content-Type` is the exception: it means no Content-Type, so it is absent,
+  and so is a blank `Cookie` row.
 - **`Cookie` is not here.** It is wire-only by design; `pm.cookies` is the
   cookie surface, and the response's raw view is the full wire frame (which also
   carries libcurl's own `Accept`, `Host` and `Content-Length`).

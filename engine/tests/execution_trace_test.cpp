@@ -277,8 +277,7 @@ vayu::Request make_multipart_request () {
     request.method = vayu::HttpMethod::POST;
     request.url    = "http://127.0.0.1/upload";
     // Composed, but not sent: libcurl writes the multipart Content-Type itself
-    // with the boundary, and a value-less header is libcurl's spelling for
-    // "remove this one" (issue #662).
+    // with the boundary. X-Blank is a blank row, sent empty since #3220.
     request.headers["Content-Type"] = "multipart/form-data";
     request.headers["X-Blank"]      = "";
     request.headers["accept"]       = "application/json";
@@ -306,7 +305,7 @@ TEST (ExecutionTrace, StoresTheSentHeadersBesideTheComposedMap) {
     // The two the composed map structurally cannot answer for.
     EXPECT_EQ (sent["User-Agent"], "vayu/0.17.0");
     EXPECT_EQ (sent["Content-Type"], "multipart/form-data; boundary=------abc123");
-    // The one the wire dropped is not reported as sent.
+    // The record is the hand-built response's, which names no X-Blank.
     EXPECT_FALSE (sent.contains ("X-Blank"));
 
     // And the composed map is still stored, unchanged: design-run-seed.ts

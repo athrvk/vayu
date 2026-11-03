@@ -2296,8 +2296,9 @@ falls back to rebuilding the view from `method`/`url`/`headers`/`body` -
 The `request` node carries a second header map, **`sentHeaders`** - the record of what the
 transfer issued, the same map the live [`POST /execute`](api-reference.md#post-execute) response
 returns as `requestHeaders` (issue #664). It is `headers` minus the entries the transfer
-suppresses (a `form-data` `Content-Type`, which libcurl writes itself with the boundary) and the
-value-less ones libcurl drops, plus what the engine derives at send time: the body-implied
+suppresses (a `form-data` `Content-Type`, which libcurl writes itself with the boundary) and a
+blank `Content-Type` or `Cookie` row, which is not sent (any other blank row is sent empty and
+recorded as `""`, issue #3220), plus what the engine derives at send time: the body-implied
 `Content-Type` and the [default headers](api-reference.md#default-request-headers) this send
 added - the `User-Agent`, a negotiated `Accept-Encoding`, a correlation id where one is switched
 on. None of those is written into the request row itself (issue #1229): they are applied per send,

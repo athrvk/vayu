@@ -958,28 +958,84 @@ describe("parseCommand - curl -b", () => {
 });
 
 describe("parseCommand - curl -H spellings with no value", () => {
-	test("Name; is a header sent with an empty value", () => {
+	test("Name; is an enabled row with an empty value, which the engine sends (#3220)", () => {
 		const imported = importCommand(`curl -H 'X-Empty;' https://x.com/a`)!;
 		expect(imported.request.headers).toEqual(kv([{ key: "X-Empty", value: "" }]));
+		expect(imported.request.disabledSystemHeaders).toEqual([]);
 		expect(imported.dropped).toEqual([]);
 	});
 
-	test.each([`'Accept:'`, `'Accept: '`])(
-		"%s asks curl to drop a header: disclosed, never an enabled empty row",
+	test.each([`'Accept:'`, `'Accept: '`, `'ACCEPT:'`])(
+		"%s leaves the default out: a stored opt-out, no row and no dropped entry",
 		(header) => {
 			const imported = importCommand(`curl -H ${header} -H 'X-Key: v' https://x.com/a`)!;
 			expect(imported.request.headers).toEqual(kv([{ key: "X-Key", value: "v" }]));
-			expect(imported.dropped).toEqual([
-				expect.objectContaining({
-					flag: "-H 'Accept:'",
-					what: expect.stringContaining("Accept"),
-				}),
-			]);
+			expect(imported.request.disabledSystemHeaders).toEqual(["accept"]);
+			expect(imported.dropped).toEqual([]);
 		}
 	);
+
+	test("a blank row stands in for --json's own header: no second value is added (#3220)", () => {
+		const r = parseCommand(`curl --json '{}' -H 'Accept;' -H 'Content-Type;' https://x.com/a`)!;
+		expect(r.headers).toEqual(
+			kv([
+				{ key: "Accept", value: "" },
+				{ key: "Content-Type", value: "" },
+			])
+		);
+	});
+
+	test("a removal the engine cannot honour is disclosed, not stored as an inert opt-out", () => {
+		const imported = importCommand(
+			`curl -u a:b -H 'Authorization:' -H 'Bad Name:' https://x.com/a`
+		)!;
+		expect(imported.request.disabledSystemHeaders).toEqual([]);
+		expect(imported.dropped.map((d) => d.flag)).toEqual([
+			"-H 'Authorization:'",
+			"-H 'Bad Name:'",
+		]);
+	});
+
+	test("a name removed twice, in any case, is listed once", () => {
+		const r = parseCommand(`curl -H 'Accept:' -H 'accept:' -H 'User-Agent:' https://x.com/a`)!;
+		expect(r.disabledSystemHeaders).toEqual(["accept", "user-agent"]);
+	});
+
+	test("the last word on a name wins, as in curl: a value after a removal brings the header back", () => {
+		const r = parseCommand(`curl -H 'Accept:' -H 'accept: text/csv' https://x.com/a`)!;
+		expect(r.headers).toEqual(kv([{ key: "accept", value: "text/csv" }]));
+		expect(r.disabledSystemHeaders).toEqual([]);
+	});
+
+	test("a removal after a value takes the earlier rows of that name with it", () => {
+		const r = parseCommand(
+			`curl -H 'Accept: text/csv' -H 'X-Key: v' -H 'accept;' -H 'ACCEPT:' https://x.com/a`
+		)!;
+		expect(r.headers).toEqual(kv([{ key: "X-Key", value: "v" }]));
+		expect(r.disabledSystemHeaders).toEqual(["accept"]);
+	});
+
+	test("a flag that writes the header lifts an earlier removal too", () => {
+		const r = parseCommand(`curl -H 'User-Agent:' -A 'probe/1' https://x.com/a`)!;
+		expect(r.headers).toEqual(kv([{ key: "User-Agent", value: "probe/1" }]));
+		expect(r.disabledSystemHeaders).toEqual([]);
+	});
+
+	test("the headers --json and -N add themselves are not added over a removal", () => {
+		const r = parseCommand(
+			`curl --json '{"a":1}' -N -H 'Accept:' -H 'Content-Type:' https://x.com/a`
+		)!;
+		expect(r.headers).toEqual([]);
+		expect(r.disabledSystemHeaders).toEqual(["accept", "content-type"]);
+	});
+
+	test("a command with no removal carries an empty list", () => {
+		expect(parseCommand(`curl https://x.com/a`)!.disabledSystemHeaders).toEqual([]);
+	});
 
 	test("a header with a value, or with no name or colon, is as before", () => {
 		const r = parseCommand(`curl -H 'A: 1' -H ':' -H 'junk' https://x.com/a`)!;
 		expect(r.headers).toEqual(kv([{ key: "A", value: "1" }]));
+		expect(r.disabledSystemHeaders).toEqual([]);
 	});
 });

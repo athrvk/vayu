@@ -108,8 +108,9 @@ inline constexpr std::string_view UNSENDABLE_HEADER_CODE = "unsendable_header";
  *   content, where a line break is ordinary - and is deliberately not checked.
  *
  * A disabled part is skipped, because it is not sent; a request header is
- * checked whether or not it would survive `header_value_reaches_wire`, so this
- * answer does not depend on a second decision made elsewhere.
+ * checked whether or not the header list sends it (a blank `Content-Type` or
+ * `Cookie` row is not), so this answer does not depend on a second decision
+ * made elsewhere.
  *
  * The returned message names the header (or the part) and what the byte does.
  * `std::nullopt` means every header this request would send is spellable.

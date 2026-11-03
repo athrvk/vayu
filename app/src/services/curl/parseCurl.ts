@@ -48,6 +48,7 @@ export type ParsedRequest = Pick<
 	| "url"
 	| "params"
 	| "headers"
+	| "disabledSystemHeaders"
 	| "bodyMode"
 	| "body"
 	| "formData"
@@ -241,6 +242,12 @@ interface Builder {
 	url: string;
 	method: HttpMethod | null;
 	headers: Array<{ key: string; value: string }>;
+	/**
+	 * Lowercased names of the headers the command asked curl to leave out
+	 * (`-H 'Name:'`), which is the stored `disabledSystemHeaders` list - see
+	 * `removeHeader`.
+	 */
+	removedHeaders: string[];
 	dataParts: string[]; // -d / --data*
 	urlEncodeParts: string[]; // --data-urlencode
 	formParts: FormPart[]; // -F
@@ -280,6 +287,7 @@ function newBuilder(): Builder {
 		positionals: [],
 		method: null,
 		headers: [],
+		removedHeaders: [],
 		dataParts: [],
 		urlEncodeParts: [],
 		formParts: [],
@@ -369,35 +377,81 @@ function pickUrl(b: Builder): string {
 	return b.positionals[chosenIndex] ?? "";
 }
 
+/**
+ * Add a header row the command writes out. curl sends the last thing a command
+ * says about a name, so a row also lifts an earlier `-H 'Name:'` removal.
+ */
+function pushHeader(b: Builder, key: string, value: string): void {
+	const lower = key.toLowerCase();
+	b.removedHeaders = b.removedHeaders.filter((name) => name !== lower);
+	b.headers.push({ key, value });
+}
+
+/**
+ * `-H 'Name:'`: leave out a header curl would add itself. In Vayu that is a
+ * stored `disabledSystemHeaders` entry, which the engine honours on every send
+ * (#3220). The same last-one-wins rule as `pushHeader`: rows already written
+ * for the name go, because the command ends by removing it.
+ */
+function removeHeader(b: Builder, name: string, flag: string): void {
+	const lower = name.toLowerCase();
+	const hadRows = hasHeaderRow(b, lower);
+	b.headers = b.headers.filter((row) => row.key.toLowerCase() !== lower);
+	// The engine reads a stored opt-out for the headers it adds itself. Any
+	// other name with no row of ours to drop would import as an opt-out that
+	// changes nothing, so the paste says so (the engine also refuses a name
+	// that is not an RFC 9110 token).
+	if (!HEADER_TOKEN.test(name) || (!hadRows && !ENGINE_DEFAULT_HEADERS.has(lower))) {
+		recordDropped(b, flag, {
+			what: `asked curl to leave out its ${name} header, which an imported request cannot say`,
+		});
+		return;
+	}
+	if (!b.removedHeaders.includes(lower)) b.removedHeaders.push(lower);
+}
+
+/** The headers the engine adds itself and `suppressed_default_headers` can refuse (`default_headers.cpp`, `curl_utils.cpp`). */
+const ENGINE_DEFAULT_HEADERS = new Set([
+	"accept",
+	"accept-encoding",
+	"content-type",
+	"expect",
+	"user-agent",
+	"x-vayu-request-id",
+]);
+
+/** RFC 9110 token. */
+const HEADER_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+function isRemoved(b: Builder, name: string): boolean {
+	return b.removedHeaders.includes(name.toLowerCase());
+}
+
 function addHeader(b: Builder, raw: string): void {
 	const idx = raw.indexOf(":");
 	if (idx === -1) return;
 	const key = raw.slice(0, idx).trim();
 	const value = raw.slice(idx + 1).trim();
-	if (key) b.headers.push({ key, value });
+	if (key) pushHeader(b, key, value);
 }
 
 /**
  * curl's `-H`, which gives two more spellings than `Name: value` a meaning:
- * `Name;` sends the header with no value, and `Name:` (nothing after the colon)
- * asks curl to leave out a header it would add itself. The engine reads a
- * header row with no value as not sent, and an imported request carries no
- * "never send this default" setting (`disabledSystemHeaders` is written by a
- * Postman import alone), so the second is disclosed rather than imported as an
- * empty row that would send nothing and look like it removed something (#3194).
+ * `Name;` sends the header with no value, an enabled row with an empty value
+ * that the engine now sends as such, and `Name:` (nothing after the colon) asks
+ * curl to leave out a header it would add itself, which imports as a stored
+ * opt-out rather than an empty row (#3220, #3194).
  */
 function addCurlHeader(b: Builder, raw: string): void {
 	const idx = raw.indexOf(":");
 	if (idx === -1) {
 		const name = raw.endsWith(";") ? raw.slice(0, -1).trim() : "";
-		if (name) b.headers.push({ key: name, value: "" });
+		if (name) pushHeader(b, name, "");
 		return;
 	}
 	const name = raw.slice(0, idx).trim();
 	if (name && !raw.slice(idx + 1).trim()) {
-		recordDropped(b, `-H '${name}:'`, {
-			what: `asked curl to leave out its ${name} header, which an imported request cannot say`,
-		});
+		removeHeader(b, name, `-H '${raw.trim()}'`);
 		return;
 	}
 	addHeader(b, raw);
@@ -503,6 +557,12 @@ function findHeader(b: Builder, name: string): string | undefined {
 	return b.headers.find((h) => h.key.toLowerCase() === lower)?.value;
 }
 
+/** A row exists for the name, a blank one included (`findHeader` reads `""` as absent). */
+function hasHeaderRow(b: Builder, name: string): boolean {
+	const lower = name.toLowerCase();
+	return b.headers.some((h) => h.key.toLowerCase() === lower);
+}
+
 /** The data flags whose `@file` curl reads with newlines stripped. */
 const STRIPS_NEWLINES = new Set(["-d", "--data", "--data-ascii"]);
 
@@ -599,9 +659,10 @@ function resolve(b: Builder): CommandImport {
 	// --- headers + auth -----------------------------------------------------
 	const headers = b.headers.slice();
 	if (b.jsonShortcut) {
-		if (!findHeader(b, "content-type"))
+		if (!hasHeaderRow(b, "content-type") && !isRemoved(b, "content-type"))
 			headers.push({ key: "Content-Type", value: "application/json" });
-		if (!findHeader(b, "accept")) headers.push({ key: "Accept", value: "application/json" });
+		if (!hasHeaderRow(b, "accept") && !isRemoved(b, "accept"))
+			headers.push({ key: "Accept", value: "application/json" });
 	}
 	// The same header the Event stream toggle arms, through the same rule: a
 	// command that already declares an Accept keeps what it wrote, because a
@@ -614,7 +675,8 @@ function resolve(b: Builder): CommandImport {
 			SSE_ACCEPT,
 			headers.map((h) => ({ ...h, enabled: true }))
 		);
-		if (accept) headers.push({ key: ACCEPT_HEADER, value: accept });
+		if (accept && !isRemoved(b, ACCEPT_HEADER))
+			headers.push({ key: ACCEPT_HEADER, value: accept });
 	}
 
 	// Bearer (curl --oauth2-bearer) wins over basic if both are somehow present,
@@ -684,6 +746,7 @@ function resolve(b: Builder): CommandImport {
 			url,
 			params,
 			headers: toItems(headers),
+			disabledSystemHeaders: b.removedHeaders,
 			bodyMode,
 			body,
 			formData,
@@ -896,18 +959,18 @@ function parseCurl(argv: string[]): CommandImport {
 				break;
 			case "-A":
 			case "--user-agent":
-				b.headers.push({ key: "User-Agent", value: value() });
+				pushHeader(b, "User-Agent", value());
 				break;
 			case "-e":
 			case "--referer":
-				b.headers.push({ key: "Referer", value: value() });
+				pushHeader(b, "Referer", value());
 				break;
 			case "-b":
 			case "--cookie": {
 				// curl reads a value with no `=` as the name of a cookie file, not
 				// as cookies: `-b cookies.txt` has nothing to send as a header.
 				const v = value();
-				if (v.includes("=")) b.headers.push({ key: "Cookie", value: v });
+				if (v.includes("=")) pushHeader(b, "Cookie", v);
 				else recordDropped(b, flag, { what: "read cookies from a file" });
 				break;
 			}
@@ -1115,10 +1178,10 @@ function parseWget(args: string[]): CommandImport {
 				break;
 			case "-U":
 			case "--user-agent":
-				b.headers.push({ key: "User-Agent", value: value() });
+				pushHeader(b, "User-Agent", value());
 				break;
 			case "--referer":
-				b.headers.push({ key: "Referer", value: value() });
+				pushHeader(b, "Referer", value());
 				break;
 			case "--body-data":
 			case "--post-data": {

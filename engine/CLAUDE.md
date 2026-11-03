@@ -965,7 +965,11 @@ logged as a warning: it means a client skipped composition.
   inverted: libcurl adds it to an HTTP/1.1 body over 1 MiB and waits a second,
   so `build_request_header_list` appends the `Expect:` removal line unless
   `sendExpectContinue` (`DefaultHeaderPolicy::expect_continue`, one key for both
-  scopes) is on or the request types a non-blank `Expect`. Add a default
+  scopes) is on or the request types an `Expect`, blank included. A blank
+  request row is sent empty, as libcurl's `Name;` (`Name:` would remove it), and
+  recorded as `""` (#3220): a blank row never removes a default, only
+  `suppressed_default_headers` does. A blank `Content-Type` (no Content-Type)
+  and a blank `Cookie` row are the two not sent. Add a default
   there, never in a driver. A
   load or collection run's `config_snapshot` records the resolved decision
   too (#1488, plus `expectContinue`, #2516, so a run that let libcurl wait on

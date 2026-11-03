@@ -168,9 +168,10 @@ const vayu::Response& response) {
     // The *sent* record, beside the composed map (issue #664). `headers` above
     // is what the request was composed with; `response.request_headers` is what
     // `build_request_header_list` appended - that set minus the suppressed
-    // (a `form-data` Content-Type libcurl writes itself) and the value-less
-    // (issue #662), plus the two the engine derives at send time, the
-    // body-implied `Content-Type` and the default `User-Agent`. The response
+    // (a `form-data` Content-Type libcurl writes itself) and a blank
+    // `Content-Type` or `Cookie` row (#3220), plus the two the engine derives
+    // at send time, the body-implied `Content-Type` and the default
+    // `User-Agent`. The response
     // pane's "request headers sent" disclosure means the second, and rebuilding
     // it from the first named headers the wire never carried and hid the two it
     // did - so the same exchange read differently live and after a reload.

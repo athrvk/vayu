@@ -1680,8 +1680,9 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   composed is not the request that was sent, and asserting on the composed one
   is how a correct request gets reported as wrong. `requestHeaders` in the
   result is the sent record - composed plus everything but the `Cookie` line,
-  minus a `form-data` `Content-Type` libcurl writes itself and minus any header
-  whose value is empty, which libcurl reads as a removal rather than sending -
+  minus a `form-data` `Content-Type` libcurl writes itself and minus a blank
+  `Content-Type` or `Cookie` row, which is not sent (any other blank header is
+  sent empty and recorded as `""`, issue #3220) -
   folded to one value per name (a repeat joined with `", "`, `Cookie` with
   `"; "`); `requestHeaderLines` is the same set unfolded, one `{name, value}`
   per line in wire order, a repeated name repeated in the spelling written

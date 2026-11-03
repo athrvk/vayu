@@ -21,6 +21,7 @@
 
 import {
 	foldRepeatedCookies,
+	isBlankHeaderValue,
 	prepareRequest,
 	timeoutSeconds,
 	type PreparedFilePart,
@@ -64,6 +65,19 @@ function fileFormFlag(file: PreparedFilePart): string {
 	return `-F ${shellQuote(`${file.key}=@${file.path}${modifiers}`)}`;
 }
 
+/**
+ * One `-H` word. A blank value is `Name;`, curl's spelling for a header sent
+ * empty, because `Name: ` asks curl to leave the header out and Vayu sends it.
+ * A blank Content-Type is the exception: the engine sends none, which is what
+ * the removal spelling also means.
+ */
+function headerArgument(name: string, value: string): string {
+	if (!isBlankHeaderValue(value) || name.toLowerCase() === "content-type") {
+		return `${name}: ${value}`;
+	}
+	return `${name};`;
+}
+
 export function generateCurl(
 	request: SnippetRequest,
 	options: CodegenOptions = {}
@@ -76,7 +90,7 @@ export function generateCurl(
 		// curl builds the multipart boundary, and a Content-Type that names one
 		// it did not choose makes the server read the body as a single part.
 		if (isFormData && name.toLowerCase() === "content-type") continue;
-		args.push(`-H ${shellQuote(`${name}: ${value}`)}`);
+		args.push(`-H ${shellQuote(headerArgument(name, value))}`);
 	}
 
 	if (prepared.stream) {
