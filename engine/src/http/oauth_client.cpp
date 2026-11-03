@@ -9,6 +9,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/json_depth.hpp"
+#include "vayu/core/sample_capture.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/default_headers.hpp"
@@ -48,11 +49,33 @@ bool flag (const nlohmann::json& obj, const char* key, bool fallback) {
 
 using vayu::utils::url_decode;
 
+/**
+ * Whether a body that is not JSON may be read as the legacy form-encoded token
+ * response (#3201): only under a form, `text/plain` or absent Content-Type, and
+ * never when it opens like markup. A gateway's HTML error page holds `=` in
+ * every attribute, and decoded as a form it named its own markup as the
+ * provider's `error`.
+ */
+bool may_be_form_encoded (const std::string& body, const vayu::Headers& headers) {
+    const auto first = body.find_first_not_of (" \t\r\n");
+    if (first != std::string::npos && body[first] == '<') {
+        return false;
+    }
+    const auto declared = headers.find ("Content-Type");
+    if (declared == headers.end ()) {
+        return true;
+    }
+    const std::string media = vayu::core::media_type (declared->second);
+    return media.empty () || media == "application/x-www-form-urlencoded" ||
+    media == "text/plain";
+}
+
 // Parse a token response body: JSON preferred, x-www-form-urlencoded fallback
-// (legacy GitHub-style). Returns a null json on failure, and for a JSON body
-// nested past `MAX_BODY_DEPTH` (#2413). That returns rather than throws so the
-// form decode below never runs over text that was JSON.
-nlohmann::json parse_token_body (const std::string& body) {
+// (legacy GitHub-style) where `may_be_form_encoded` allows it. Returns a null
+// json on failure, and for a JSON body nested past `MAX_BODY_DEPTH` (#2413).
+// That returns rather than throws so the form decode below never runs over
+// text that was JSON.
+nlohmann::json parse_token_body (const std::string& body, const vayu::Headers& headers) {
     try {
         auto parsed = nlohmann::json::parse (body);
         if (!vayu::core::json_within_depth (
@@ -67,7 +90,7 @@ nlohmann::json parse_token_body (const std::string& body) {
         // shape, decoded below - which is the whole reason this function
         // takes two passes rather than one.
     }
-    if (body.find ('=') == std::string::npos) {
+    if (body.find ('=') == std::string::npos || !may_be_form_encoded (body, headers)) {
         return nlohmann::json ();
     }
     nlohmann::json out = nlohmann::json::object ();
@@ -181,6 +204,39 @@ const TokenDeadline& deadline) {
     return TokenError{ 502, "oauth2_network_error", "Token request failed: " + detail };
 }
 
+/**
+ * A token endpoint's answer that carries no token, worded by which side failed
+ * (#3201): a 4xx JSON answer, or an RFC 6749 `error` under any status below
+ * 500, is the provider refusing the request; a 5xx, or a body nothing could
+ * read, is the endpoint failing. The message always names the status.
+ */
+TokenError provider_failure (int status, const nlohmann::json& body) {
+    TokenError err;
+    err.http_status     = 401;
+    err.code            = "oauth2_provider_error";
+    err.provider_status = status;
+    if (body.is_object ()) {
+        err.provider_error             = field (body, "error");
+        err.provider_error_description = field (body, "error_description");
+    }
+    const bool refused = body.is_object () && status < 500 &&
+    (status >= 400 || !err.provider_error.empty ());
+    err.message = std::string (refused ? "Token endpoint refused the request" :
+                                         "Token endpoint error") +
+    " (HTTP " + std::to_string (status) + ")";
+    if (!body.is_object ()) {
+        err.message += ": unparseable response";
+    } else if (!err.provider_error.empty ()) {
+        err.message += ": " + err.provider_error;
+        if (!err.provider_error_description.empty ()) {
+            err.message += " (" + err.provider_error_description + ")";
+        }
+    } else if (status < 400) {
+        err.message += ": no access_token in the response";
+    }
+    return err;
+}
+
 std::variant<vayu::db::OAuthToken, TokenError> post_token_request (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& url,
@@ -225,29 +281,11 @@ const std::atomic<bool>* cancel) {
         resp.error_message.empty () ? "connection error" : resp.error_message, deadline);
     }
 
-    auto body = parse_token_body (resp.body);
+    auto body = parse_token_body (resp.body, resp.headers);
 
     if (resp.status_code >= 400 || !body.is_object () ||
     field (body, "access_token").empty ()) {
-        TokenError err;
-        err.http_status     = 401;
-        err.code            = "oauth2_provider_error";
-        err.provider_status = resp.status_code;
-        if (body.is_object ()) {
-            err.provider_error             = field (body, "error");
-            err.provider_error_description = field (body, "error_description");
-        }
-        err.message = "Token endpoint rejected the request";
-        if (!err.provider_error.empty ()) {
-            err.message += ": " + err.provider_error;
-            if (!err.provider_error_description.empty ()) {
-                err.message += " (" + err.provider_error_description + ")";
-            }
-        } else if (!body.is_object ()) {
-            err.message += " (unparseable response, HTTP " +
-            std::to_string (resp.status_code) + ")";
-        }
-        return err;
+        return provider_failure (resp.status_code, body);
     }
 
     vayu::db::OAuthToken token;

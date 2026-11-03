@@ -21,6 +21,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace vayu::tests {
@@ -52,12 +53,22 @@ inline std::string token_body_nested_to (size_t depth) {
     vayu::tests::nested_object_text (depth - 1, "1") + "}";
 }
 
+/// A gateway's error page: markup whose attributes hold `=` and `&error=`, so a
+/// form decode of it would name part of the page as the provider's `error`.
+inline constexpr std::string_view GATEWAY_ERROR_PAGE =
+"<html><head><meta charset=\"utf-8\"></head><body><h1>503 Service Unavailable"
+"</h1><a href=\"/status?page=1&error=upstream\">status</a></body></html>";
+
 /// Mock IdP: records the last request for assertions.
 ///
 /// `/token` answers `AT<hits>` with refresh token `RT1`, so every exchange
 /// yields an access token no earlier row can share. `/token-at-depth-bound` and
 /// `/token-past-depth-bound` answer a body nested to `MAX_BODY_DEPTH` and one
-/// level past it. `/token-hang` never answers on its own (#2833), and
+/// level past it. `/token-legacy` and `/token-form-encoded` answer a form under
+/// `text/plain` and under the form type with a charset; `/token-form-as-html`
+/// the same form declared `text/html`. `/token-unavailable-html` answers 503
+/// with `GATEWAY_ERROR_PAGE` as `text/html`, and `/token-markup-as-plain` the
+/// same page as `text/plain` (#3201). `/token-hang` never answers on its own (#2833), and
 /// `/refresh-rejected-then-hang` rejects a refresh after
 /// `SLOW_REFRESH_REJECT_MS` and then hangs the fresh grant; a hung handler
 /// returns once the fixture is torn down.
@@ -99,6 +110,17 @@ class MockTokenServer {
                 // Form-encoded body with a string expires_in (legacy GitHub style)
                 res.set_content (
                 "access_token=legacy&token_type=bearer&expires_in=1200", "text/plain");
+            } else if (req.path == "/token-form-encoded") {
+                res.set_content ("access_token=form&token_type=bearer",
+                "application/x-www-form-urlencoded; charset=utf-8");
+            } else if (req.path == "/token-form-as-html") {
+                res.set_content ("access_token=from-html&token_type=bearer", "text/html");
+            } else if (req.path == "/token-unavailable-html") {
+                res.status = 503;
+                res.set_content (std::string (GATEWAY_ERROR_PAGE), "text/html");
+            } else if (req.path == "/token-markup-as-plain") {
+                res.status = 503;
+                res.set_content (std::string (GATEWAY_ERROR_PAGE), "text/plain");
             } else if (req.path == "/refresh-norotate") {
                 if (grant == "refresh_token") {
                     res.set_content (R"({"access_token":"REFRESHED","expires_in":3600})",
