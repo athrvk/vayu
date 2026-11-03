@@ -45,7 +45,7 @@ function describeAuth(c: Collection): { label: string; secret: string | null } {
 	const label = AUTH_MODE_LABELS[auth.mode];
 	switch (auth.mode) {
 		case "bearer":
-			return { label, secret: auth.token || null };
+			return { label, secret: auth.token ? SECRET_MASK : null };
 		case "basic":
 			return { label, secret: auth.username || null };
 		case "apikey":
@@ -54,6 +54,9 @@ function describeAuth(c: Collection): { label: string; secret: string | null } {
 			return { label, secret: null };
 	}
 }
+
+/** The banner never prints a credential; the collection's own editor reveals it. */
+const SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
 
 function renderWithVariables(text: string) {
 	return text.split(VARIABLE_SPLIT_PATTERN).map((part, i) =>

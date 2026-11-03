@@ -118,6 +118,14 @@ describe("AuthPanel with an auth mode it cannot edit", () => {
 		ancestorChain = [];
 	});
 
+	it("never prints an inherited bearer token in the banner", () => {
+		ancestorChain = [collection("root", { mode: "bearer", token: "super-secret-token" })];
+		const { container } = renderPanel({ mode: "inherit" }, "root");
+
+		expect(container.textContent).not.toContain("super-secret-token");
+		ancestorChain = [];
+	});
+
 	it("labels aws and ntlm too", () => {
 		renderPanel({ mode: "aws", config: {} });
 		expect(screen.getByText(/AWS Signature auth is set/i)).toBeInTheDocument();
