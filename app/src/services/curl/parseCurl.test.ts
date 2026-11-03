@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { chromeBashCopy, chromeCmdCopy } from "./chrome-copy.testkit";
 import { DROPPED_FLAG_INFO, detectCommand, importCommand, parseCommand } from "./parseCurl";
 
 const kv = (items: Array<{ key: string; value: string }>) =>
@@ -18,6 +19,14 @@ describe("detectCommand", () => {
 		["  curl https://x.com", "curl"],
 		["$ curl https://x.com", "curl"],
 		["CURL https://x.com", "curl"],
+		["curl.exe https://x.com", "curl"],
+		["CURL.EXE https://x.com", "curl"],
+		[String.raw`.\curl.exe https://x.com`, "curl"],
+		[String.raw`C:\Windows\System32\curl.exe https://x.com`, "curl"],
+		[String.raw`"C:\Program Files\curl\bin\curl.exe" https://x.com`, "curl"],
+		[`'/mnt/c/Windows/System32/curl.exe' https://x.com`, "curl"],
+		[`"curl.exe" https://x.com`, "curl"],
+		["> curl.exe https://x.com", "curl"],
 	])("detects %s", (input, expected) => {
 		expect(detectCommand(input)).toBe(expected);
 	});
@@ -28,6 +37,11 @@ describe("detectCommand", () => {
 		"",
 		"curlsomething https://x.com",
 		"echo hi",
+		"curl.exefoo https://x.com",
+		"mycurl.exe https://x.com",
+		"/tmp/curl https://x.com",
+		`"curl.exe https://x.com`,
+		"echo curl.exe",
 	])("rejects %s", (input) => {
 		expect(detectCommand(input)).toBeNull();
 	});
@@ -765,4 +779,207 @@ test("every described flag is still one a parser skips", () => {
 		].map((entry) => entry.flag);
 		expect(seen, `${flag} is described but no longer skipped`).toContain(flag);
 	}
+});
+
+describe("parseCommand - curl.exe", () => {
+	test.each([
+		"curl.exe -X POST https://x.com/a",
+		String.raw`C:\Windows\System32\curl.exe -X POST https://x.com/a`,
+		String.raw`.\curl.exe -X POST https://x.com/a`,
+		String.raw`"C:\Program Files\curl\curl.exe" -X POST https://x.com/a`,
+	])("imports %s", (command) => {
+		const r = parseCommand(command)!;
+		expect(r.method).toBe("POST");
+		expect(r.url).toBe("https://x.com/a");
+	});
+});
+
+describe("parseCommand - Chrome Copy as cURL", () => {
+	test("a cmd copy and a bash copy import the same request", () => {
+		const fromCmd = importCommand(chromeCmdCopy)!;
+		const fromBash = importCommand(chromeBashCopy)!;
+		// Row ids are minted per import, so the comparison is over their content.
+		const withoutIds = (rows: Array<{ id: string }>) => rows.map(({ id: _id, ...row }) => row);
+		const stable = ({ request }: typeof fromCmd) => ({
+			...request,
+			headers: withoutIds(request.headers),
+			params: withoutIds(request.params),
+		});
+		expect(stable(fromCmd)).toEqual(stable(fromBash));
+		expect(fromCmd.dropped).toEqual(fromBash.dropped);
+
+		const r = fromCmd.request;
+		expect(r.method).toBe("POST");
+		expect(r.url).toBe("https://api.example.com/v1/users?x=1&y=2");
+		expect(r.bodyMode).toBe("json");
+		expect(JSON.parse(r.body)).toEqual({
+			name: "Ada Lovelace",
+			tags: ["a", "b"],
+			path: String.raw`C:\tmp`,
+			rate: "5%",
+		});
+		expect(r.headers).toEqual(
+			kv([
+				{ key: "accept", value: "application/json" },
+				{ key: "content-type", value: "application/json" },
+				{ key: "Cookie", value: "session=abc%3D" },
+			])
+		);
+	});
+});
+
+describe("parseCommand - curl short-flag clusters", () => {
+	test("booleans combine and a value flag takes the rest of its word", () => {
+		const r = parseCommand(`curl -XPOST -sSL -H'X: 1' https://x.com/a`)!;
+		expect(r.method).toBe("POST");
+		expect(r.headers).toEqual(kv([{ key: "X", value: "1" }]));
+		expect(r.followRedirects).toBe(true);
+		expect(r.url).toBe("https://x.com/a");
+	});
+
+	test("a cluster of booleans is each of its flags", () => {
+		const r = importCommand(`curl -kL https://x.com/a`)!;
+		expect(r.request.verifySSL).toBe(false);
+		expect(r.request.followRedirects).toBe(true);
+		expect(r.dropped).toEqual([]);
+	});
+
+	test("booleans then a value flag, whose value is the rest or the next word", () => {
+		expect(parseCommand(`curl -sSLXPOST https://x.com/a`)!.method).toBe("POST");
+		const split = parseCommand(`curl -sSLX PUT https://x.com/a`)!;
+		expect(split.method).toBe("PUT");
+		expect(split.url).toBe("https://x.com/a");
+		expect(split.followRedirects).toBe(true);
+	});
+
+	test("-u, -d and -F take the rest of the word", () => {
+		const auth = parseCommand(`curl -ualice:pw https://x.com/a`)!;
+		expect(auth.auth).toEqual({ mode: "basic", username: "alice", password: "pw" });
+
+		const data = parseCommand(
+			`curl -sd'{"a":1}' -H 'Content-Type: application/json' https://x.com/a`
+		)!;
+		expect(data.method).toBe("POST");
+		expect(data.body).toBe('{"a":1}');
+
+		const form = parseCommand(`curl -sFa=b https://x.com/a`)!;
+		expect(form.bodyMode).toBe("form-data");
+		expect(form.formData).toEqual([expect.objectContaining({ key: "a", value: "b" })]);
+	});
+
+	test("a value that starts with a dash is a value, not a cluster", () => {
+		const data = parseCommand(`curl -d -sSL https://x.com/a`)!;
+		expect(data.body).toBe("-sSL");
+		expect(data.followRedirects).toBe(false);
+
+		const joined = parseCommand(`curl -d-sSL https://x.com/a`)!;
+		expect(joined.body).toBe("-sSL");
+		expect(joined.followRedirects).toBe(false);
+	});
+
+	test("a lone short flag and a long flag are left as they were", () => {
+		const r = parseCommand(`curl -# -I -O --location https://x.com/a`)!;
+		expect(r.method).toBe("HEAD");
+		expect(r.followRedirects).toBe(true);
+		expect(r.url).toBe("https://x.com/a");
+	});
+
+	test("a cluster with a letter the parser does not know is disclosed whole and never eats the URL", () => {
+		const imported = importCommand(`curl -sZ https://x.com/a`)!;
+		expect(imported.request.url).toBe("https://x.com/a");
+		expect(imported.dropped.map((entry) => entry.flag)).toEqual(["-sZ"]);
+
+		const unknownThenValue = importCommand(`curl -sZ value https://x.com/a`)!;
+		expect(unknownThenValue.request.url).toBe("https://x.com/a");
+		expect(unknownThenValue.dropped.map((entry) => entry.flag)).toContain("-sZ");
+	});
+
+	test("the letters a cluster may hold are exactly the ones the parser handles", () => {
+		// `-Z` is a letter nothing handles; it shows what an unhandled letter
+		// looks like in the ledger, so the checks below can fail.
+		const unknownValue = importCommand("curl -Z v https://x.com/a")!;
+		expect(unknownValue.dropped.map((entry) => entry.what)).toContain(
+			"was ignored as an argument"
+		);
+		const unknownBare = importCommand("curl -Z https://x.com/a")!;
+		expect(unknownBare.dropped.map((entry) => entry.what)).toContain("was not carried over");
+
+		for (const letter of "IGkLNsvfS#Oj") {
+			const dropped = importCommand(`curl -${letter} https://x.com/a`)!.dropped;
+			expect(
+				dropped.map((entry) => entry.what),
+				`-${letter}`
+			).not.toContain("was not carried over");
+		}
+		for (const letter of "XHAebudFTowmExcD") {
+			const dropped = importCommand(`curl -${letter} v https://x.com/a`)!.dropped;
+			expect(
+				dropped.map((entry) => entry.what),
+				`-${letter}`
+			).not.toContain("was ignored as an argument");
+		}
+	});
+});
+
+describe("parseCommand - curl -F with a typed text part holding quotes", () => {
+	test("a JSON value keeps its quotes and its type is read", () => {
+		const r = parseCommand(`curl https://x.com -F 'meta={"x":1};type=application/json'`)!;
+		expect(r.formData.map(({ id: _id, ...row }) => row)).toEqual([
+			{ key: "meta", value: '{"x":1}', enabled: true, contentType: "application/json" },
+		]);
+	});
+
+	test("a bare value with a stray quote still ends at the first semicolon", () => {
+		const r = parseCommand(`curl https://x.com -F 'a=say "hi";type=text/plain'`)!;
+		expect(r.formData[0]).toEqual(
+			expect.objectContaining({ value: 'say "hi"', contentType: "text/plain" })
+		);
+	});
+});
+
+describe("parseCommand - curl -b", () => {
+	test("a value with an = is cookies and becomes a Cookie header", () => {
+		const imported = importCommand(`curl -b 'a=1; b=2' https://x.com/a`)!;
+		expect(imported.request.headers).toEqual(kv([{ key: "Cookie", value: "a=1; b=2" }]));
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test.each([`-b cookies.txt`, `--cookie cookies.txt`, `--cookie=cookies.txt`])(
+		"%s is a cookie file: disclosed, no header",
+		(flags) => {
+			const imported = importCommand(`curl ${flags} https://x.com/a`)!;
+			expect(imported.request.url).toBe("https://x.com/a");
+			expect(imported.request.headers).toEqual([]);
+			expect(imported.dropped).toEqual([
+				{ flag: flags.split(/[ =]/)[0], what: "read cookies from a file" },
+			]);
+		}
+	);
+});
+
+describe("parseCommand - curl -H spellings with no value", () => {
+	test("Name; is a header sent with an empty value", () => {
+		const imported = importCommand(`curl -H 'X-Empty;' https://x.com/a`)!;
+		expect(imported.request.headers).toEqual(kv([{ key: "X-Empty", value: "" }]));
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test.each([`'Accept:'`, `'Accept: '`])(
+		"%s asks curl to drop a header: disclosed, never an enabled empty row",
+		(header) => {
+			const imported = importCommand(`curl -H ${header} -H 'X-Key: v' https://x.com/a`)!;
+			expect(imported.request.headers).toEqual(kv([{ key: "X-Key", value: "v" }]));
+			expect(imported.dropped).toEqual([
+				expect.objectContaining({
+					flag: "-H 'Accept:'",
+					what: expect.stringContaining("Accept"),
+				}),
+			]);
+		}
+	);
+
+	test("a header with a value, or with no name or colon, is as before", () => {
+		const r = parseCommand(`curl -H 'A: 1' -H ':' -H 'junk' https://x.com/a`)!;
+		expect(r.headers).toEqual(kv([{ key: "A", value: "1" }]));
+	});
 });
