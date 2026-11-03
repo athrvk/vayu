@@ -426,7 +426,7 @@ class ImportTally {
     void name_requests (std::string_view kind, const std::vector<std::string>& requests);
 
     /// Names what an already counted @p kind dropped (a parameter's key,
-    /// never its value; a JMeter thread group's profile line), for a preview
+    /// never its value; a JMeter thread group's profile line or an HTTP Request Defaults setting), for a preview
     /// to say which. A no-op for a kind never counted.
     void name_dropped (std::string_view kind, const std::vector<std::string>& names);
 
