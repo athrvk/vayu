@@ -597,9 +597,10 @@ HeaderList* sent) {
     bool lists_content_type = false;
     bool lists_expect       = false;
     for (const auto& [key, value] : request.headers) {
-        if (suppresses_request_header (request, key)) {
+        if (suppresses_request_header (request, key) || is_blank_content_type (key, value)) {
             // Not sent, so not reported as sent either - libcurl writes the
-            // multipart Content-Type, boundary and all.
+            // multipart Content-Type, boundary and all; a blank Content-Type
+            // row means "no Content-Type".
             continue;
         }
         if (is_cookie_header (key)) {
@@ -611,9 +612,6 @@ HeaderList* sent) {
             if (has_header_value (value)) {
                 record (key, value);
             }
-            continue;
-        }
-        if (is_blank_content_type (key, value)) {
             continue;
         }
         append_row (key, value);
