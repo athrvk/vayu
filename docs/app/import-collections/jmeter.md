@@ -32,12 +32,14 @@ A `.jmx` file's `<hashTree>` children alternate a test element (`<ThreadGroup>`,
 
 ## Class mapping
 
+A number is read however JMeter saved it: a `<stringProp>` (what the GUI writes, so `${var}` can stand in for it), an `<intProp>` or `<longProp>`, or the nested `<doubleProp>` / `<FloatProperty>` form with `<name>` and `<value>` children. Text that is not wholly a number (a `${var}`, a blank) is never guessed at: the element is refused and counted under its `_unrecognised` kind, or, for a match number, falls back to JMeter's first match.
+
 | JMeter class | Vayu | Notes |
 |---|---|---|
 | `TestPlan`, `ThreadGroup` | flattens into the collection | no per-user loop count, no thread count - a load run configures those separately; a non-default profile is counted as `ThreadGroup_profile`, naming the values ([Run profile](#run-profile)) |
 | `SetupThreadGroup`, `PostThreadGroup` | `script.setup`, `script.teardown` | only when a JSR223/BeanShell script is found inside; every sampler left out is counted under the group's tag ([Setup and teardown groups](#setup-and-teardown-groups)) |
 | `HTTPSamplerProxy` (+ `HeaderManager` in its own `<hashTree>`) | a request, with headers | see [Request mapping](#request-mapping); `HTTPSampler.follow_redirects` / `HTTPSampler.auto_redirects` (either true means Vayu's `followRedirects` is true) carry through; `HTTPsampler.Arguments` become query `params` or a form body by method ([Request mapping](#request-mapping)); `HTTPsampler.Files` (a multipart file upload, [issue #1657](https://github.com/athrvk/vayu/issues/1657)) becomes a `form-data` body row per file - a `HTTPFileArg` with no `File.paramname` is counted as `HTTPsampler.Files` instead, since it names nothing a field could key on and is nested inside the sampler tag itself, so it would otherwise never reach the sibling-tag tally |
-| `LoopController` | folder + `control.loop` | `LoopController.loops` of `-1` (JMeter's "forever") has no `control.loop` equivalent - the folder still imports as a plain grouping |
+| `LoopController` | folder + `control.loop` | `LoopController.loops` of `-1` (JMeter's "forever"), or one that is not a number (a `${var}`, a blank), has no `control.loop` equivalent - the folder still imports as a plain grouping and the controller is counted as `LoopController_unrecognised` |
 | `IfController` | folder + `control.if` | only the `"${var}" == "value"` / `!=` shape translates into `{{var}} == value`; anything else (a JS expression, `&&`/`||`) is left unmapped |
 | `OnceOnlyController` | folder + `control.once` | |
 | `TransactionController` | folder + `control.transaction` | named from `testname` |
@@ -53,9 +55,9 @@ A `.jmx` file's `<hashTree>` children alternate a test element (`<ThreadGroup>`,
 | `SizeAssertion` | `assert.size` | only JMeter's Equal operator maps precisely (`op: "eq"`); every other operator code has drifted across JMeter releases and falls back to `assert.size`'s own default (`lte`) |
 | `JSONPathAssertion` | `assert.jsonpath` | `INVERT` → `negate`; `JSONVALIDATION` + `EXPECTED_VALUE` → `expected`, else `exists: true` |
 | `ConstantTimer` | `timer.think` (fixed `ms`) | |
-| `UniformRandomTimer` | `timer.think` (`minMs`/`maxMs`) | `ConstantDelay` is the floor, `+ RandomTime.range` the ceiling |
-| `GaussianRandomTimer` | `timer.think` (`gaussian`) | `ConstantDelay` → `meanMs`, `RandomTime.range` → `deviationMs` |
-| `ConstantThroughputTimer` | `timer.pacing` | JMeter's rate is samples/minute; `everyMs = 60000 / throughput`. `calcMode == 0` ("this thread only") is `perUser: true`, every other mode `perUser: false` |
+| `UniformRandomTimer` | `timer.think` (`minMs`/`maxMs`) | `ConstantTimer.delay` is the floor, `+ RandomTimer.range` the ceiling; either missing or not a number (a `${var}`) leaves the timer unimported and counted as `UniformRandomTimer_unrecognised` |
+| `GaussianRandomTimer` | `timer.think` (`gaussian`) | `ConstantTimer.delay` → `meanMs`, `RandomTimer.range` → `deviationMs`; refused and counted as `GaussianRandomTimer_unrecognised` on the same terms as the uniform timer |
+| `ConstantThroughputTimer` | `timer.pacing` | JMeter's rate is samples/minute; `everyMs = 60000 / throughput`. `calcMode == 0` ("this thread only") is `perUser: true`, every other mode `perUser: false`. The rate is read from the nested `<doubleProp>` JMeter's GUI saves; one that is not a positive number (a `${var}`) is counted as `ConstantThroughputTimer_unrecognised` |
 | `JSR223Pre/PostProcessor`, `BeanShellPre/PostProcessor` | `script.pre` / `script.post`, imported **disabled** | Groovy and BeanShell are not JavaScript; the element carries the source text as a comment when JMeter's own `script` property is empty |
 | `Arguments` (User Defined Variables) | collection variables | merged wherever the node sits in the tree (`TestPlan`, or a bare `Arguments` node) |
 | `ConfigTestElement` with `guiclass="HttpDefaultsGui"` (HTTP Request Defaults) | the `baseUrl` variable of the folder or collection it sits in | only when it names a domain; `protocol://domain[:port]` with `${x}` rewritten to `{{x}}` and an empty protocol read as `http`. Its path and its connect and response timeouts reach no request and are counted, each by name, under `HttpDefaults_unmapped` ([why](#http-request-defaults)) |
