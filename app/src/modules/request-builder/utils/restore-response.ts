@@ -182,9 +182,9 @@ export function validationFromTrace(
  *
  * `trace.request.sentHeaders` is the same preference one field over, for the
  * structured map (issue #664). The panel this fills is labelled as what was
- * sent, and `headers` is the *composed* request: it names a value-less header
- * libcurl dropped and a `form-data` `Content-Type` it wrote itself, and it is
- * missing the body-implied `Content-Type` and default `User-Agent` the engine
+ * sent, and `headers` is the *composed* request: it names a blank `Cookie` row
+ * that joined nothing and a `form-data` `Content-Type` libcurl wrote itself, and
+ * it is missing the body-implied `Content-Type` and default `User-Agent` the engine
  * derives - so the live and restored panels disagreed about one exchange. The
  * composed map stays as the fallback for the rows written before the field, and
  * stays in the trace because `design-run-seed.ts` reseeds a request tab from

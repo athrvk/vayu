@@ -466,8 +466,17 @@ function headerPairs(headers: SnippetRequest["headers"]): Array<[string, string]
 /** How the engine joins repeated `Cookie` rows into the one line it sends (#2788). */
 const COOKIE_SEPARATOR = "; ";
 
-/** `header_value_reaches_wire`: a value with a non-`std::isspace` character is sent. */
+/** `has_header_value`: a value with a non-`std::isspace` character is not blank. */
 const REACHES_WIRE = /[^ \t\n\v\f\r]/;
+
+/**
+ * Whether the engine reads the value as blank (empty or only whitespace), which
+ * it sends as an empty header on the wire (issue #3220). A curl snippet has to
+ * spell such a row `Name;`: `Name: ` is curl's "remove this header".
+ */
+export function isBlankHeaderValue(value: string): boolean {
+	return !REACHES_WIRE.test(value);
+}
 /** RFC 9110 optional whitespace, space and tab: the edge `trim_optional_whitespace` strips. */
 const EDGE_WHITESPACE = /^[ \t]+|[ \t]+$/g;
 

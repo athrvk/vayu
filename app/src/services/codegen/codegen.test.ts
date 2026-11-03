@@ -1555,6 +1555,42 @@ describe("a request with TLS verification off", () => {
 });
 
 /**
+ * A header row with no value (issue #3220). The engine sends it empty, and
+ * curl's `Name: ` means "remove this header", so the snippet writes `Name;`;
+ * read back, it is the same empty row rather than a removal.
+ */
+describe("a header row with no value", () => {
+	const BLANK: SnippetRequest = {
+		method: "GET",
+		url: "https://api.example.com/",
+		headers: [
+			{ name: "X-Empty", value: "" },
+			{ name: "X-Spaces", value: "  " },
+			{ name: "Content-Type", value: "" },
+			{ name: "X-Key", value: "v" },
+		],
+	};
+
+	it("curl writes Name; for a blank value, and the removal spelling for a blank Content-Type", () => {
+		const { code } = generateCurl(BLANK);
+		expect(code).toContain("-H 'X-Empty;'");
+		expect(code).toContain("-H 'X-Spaces;'");
+		expect(code).toContain("-H 'Content-Type: '");
+		expect(code).toContain("-H 'X-Key: v'");
+	});
+
+	it("round-trips through parseCurl as an empty row, never a removal", () => {
+		const reparsed = parseCommand(generateCurl(BLANK).code.split("\\\n").join(" "))!;
+		expect(reparsed.headers.map((h) => [h.key, h.value])).toEqual([
+			["X-Empty", ""],
+			["X-Spaces", ""],
+			["X-Key", "v"],
+		]);
+		expect(reparsed.disabledSystemHeaders).toEqual(["content-type"]);
+	});
+});
+
+/**
  * A request that follows redirects (issue #1445). The split is the opposite
  * of `-k` above: curl does NOT follow unless told to, while the engine (and
  * this field's own default) does, so it is the common case that needs the

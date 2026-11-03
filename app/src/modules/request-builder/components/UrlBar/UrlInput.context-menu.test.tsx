@@ -98,6 +98,19 @@ describe("the URL bar answers the menu's import", () => {
 		expect(imported.headers.some((h: { key: string }) => h.key === "X-Key")).toBe(true);
 	});
 
+	it("hands the builder the headers the command left out, replacing the previous list (#3220)", () => {
+		const { setRequest, send } = renderUrlInput();
+
+		act(() => {
+			send({
+				type: "import-command",
+				text: "curl https://api.example.com/orders -H 'Accept:'",
+			});
+		});
+
+		expect(setRequest.mock.calls[0][0].disabledSystemHeaders).toEqual(["accept"]);
+	});
+
 	it("leaves the request alone for a command that does not parse", () => {
 		const { setRequest, send } = renderUrlInput();
 

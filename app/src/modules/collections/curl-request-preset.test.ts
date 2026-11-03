@@ -34,6 +34,13 @@ describe("presetFromCommand", () => {
 		});
 	});
 
+	it("carries the headers the command left out as stored opt-outs (#3220)", () => {
+		const result = preset(`curl -H 'Accept:' -H 'X-Empty;' https://x.test/a`);
+
+		expect(result.disabledSystemHeaders).toEqual(["accept"]);
+		expect(result.headers).toEqual([{ key: "X-Empty", value: "", enabled: true }]);
+	});
+
 	it("states an empty body as mode none", () => {
 		expect(preset("curl https://x.test/a")).toMatchObject({
 			body: { mode: "none" },

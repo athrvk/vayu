@@ -1593,9 +1593,10 @@ export interface RunResultTrace {
 		/**
 		 * What the transfer actually issued - `build_result_trace`'s copy of the
 		 * live response's `requestHeaders` (issue #664), which is `headers`
-		 * minus the suppressed and value-less entries plus the two the engine
-		 * derives at send time (the body-implied `Content-Type`, the default
-		 * `User-Agent`).
+		 * minus the suppressed entries and a blank `Content-Type` or `Cookie`
+		 * row (any other blank row is sent empty, issue #3220) plus the two the
+		 * engine derives at send time (the body-implied `Content-Type`, the
+		 * default `User-Agent`).
 		 *
 		 * This is the map the response pane's "sent" disclosure means;
 		 * `headers` beside it is the *composed* request and stays because

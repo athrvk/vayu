@@ -23,6 +23,7 @@ export function presetFromCommand(request: ParsedRequest): RequestPreset {
 		url: request.url,
 		params: toKeyValueEntries(request.params),
 		headers: toKeyValueEntries(request.headers),
+		disabledSystemHeaders: request.disabledSystemHeaders,
 		body,
 		bodyType: body.mode,
 		auth: request.auth,

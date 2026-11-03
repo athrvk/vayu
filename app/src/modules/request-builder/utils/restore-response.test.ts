@@ -186,7 +186,7 @@ describe("responseFromRunResult", () => {
 	/**
 	 * The gap issue #664 closed, one field over from #348. The panel this feeds
 	 * is labelled as what was sent, and `trace.request.headers` is the
-	 * *composed* request: it names an empty-valued header libcurl dropped and a
+	 * *composed* request: it names a blank `Cookie` row that joined nothing and a
 	 * `form-data` `Content-Type` libcurl rewrote with its boundary, and it is
 	 * missing the body-implied `Content-Type` and the default `User-Agent` the
 	 * engine derives at send time - which the live panel showed. The engine now
@@ -204,7 +204,7 @@ describe("responseFromRunResult", () => {
 						url: "https://api.example.test/upload",
 						headers: {
 							"Content-Type": "multipart/form-data",
-							"X-Blank": "",
+							Cookie: "",
 							accept: "application/json",
 						},
 						sentHeaders: {
@@ -220,8 +220,8 @@ describe("responseFromRunResult", () => {
 
 		// Exhaustive, so all three drifts fail here at once: the derived
 		// `User-Agent` the composed map lacks, the boundary libcurl added to the
-		// multipart `Content-Type`, and the value-less `X-Blank` that never
-		// reached the wire.
+		// multipart `Content-Type`, and the blank `Cookie` row that joined
+		// nothing into the request.
 		expect(restored?.requestHeaders).toEqual({
 			accept: "application/json",
 			"Content-Type": "multipart/form-data; boundary=------abc123",
