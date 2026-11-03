@@ -344,13 +344,21 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 thread group run profile not imported{names} - set the load, ramp-up and duration when you start the load test",
 		many: "{n} thread group run profiles not imported{names} - set the load, ramp-up and duration when you start each load test",
 	},
-	// A JMeter HTTP Request Defaults element hands requests its host only (as the
-	// `baseUrl` variable); its path and timeouts reach none. The count is
-	// settings, named under `names`.
-	HttpDefaults_unmapped: {
+	// JMeter times the connect and the response separately; the request imports
+	// with their sum as its one total timeout. The engine names the requests
+	// under `names`, not `requests`: the line says what was done, not what to fix.
+	Timeout_total: {
 		tier: "note",
-		one: "1 HTTP Request Defaults setting not imported{names} - set it on the requests themselves",
-		many: "{n} HTTP Request Defaults settings not imported{names} - set them on the requests themselves",
+		one: "1 request has both a connect and a response timeout{names} - Vayu has one total timeout, so they were added",
+		many: "{n} requests have both a connect and a response timeout{names} - Vayu has one total timeout, so they were added",
+	},
+	// A note: the request imports and sends; the part that was not a number (a
+	// `${var}`) is left out of its timeout, so it falls back to the default
+	// timeout until the user sets one. The engine names none of these requests.
+	HTTPSampler_timeout_unrecognised: {
+		tier: "note",
+		one: "1 request has a timeout that is not a number (such as ${t}) and was left out - set the timeout on the request",
+		many: "{n} requests have timeouts that are not numbers (such as ${t}) and were left out - set the timeout on each request",
 	},
 	// The count is samplers left out at any depth, not groups. A request runs on
 	// every pass and a setUp or tearDown sampler once, so the sampler is not
