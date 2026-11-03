@@ -124,16 +124,35 @@ AuthApplyResult from_token_error (const oauth::TokenError& err) {
     return out;
 }
 
+// An Authorization header the request already carries wins over an OAuth 2.0
+// token placed in the header, so no token is wanted (#3202). A query-placed
+// token never touches that header, so it has nothing to yield to.
+bool yields_to_typed_authorization (const nlohmann::json& config, bool typed_authorization) {
+    return typed_authorization && field (config, "tokenPlacement") != "query";
+}
+
 // Resolve an oauth2 config to a token (cache-aware) and place it on the
 // request per tokenPlacement. Shared by apply_auth and preflight_auth
 // (the latter passes a null request and only acquires). `timeout_ms` bounds
-// the token request (#2833).
+// the token request (#2833). @p typed_authorization is whether the request
+// carries its own Authorization header.
 AuthApplyResult resolve_oauth2 (vayu::Request* req,
+bool typed_authorization,
 const nlohmann::json& config,
 vayu::db::Database* db,
 int timeout_ms,
 const TargetPolicy* target_policy,
 const std::atomic<bool>* cancel) {
+    // Ahead of every refusal below: a send that fetches nothing has no token
+    // endpoint to judge and no cache to need.
+    if (yields_to_typed_authorization (config, typed_authorization)) {
+        if (req != nullptr) {
+            req->auth_notice =
+            "the request's own Authorization header was sent; "
+            "no OAuth 2.0 token was fetched";
+        }
+        return {};
+    }
     // Before the cache is read, so a token endpoint the policy refuses is
     // refused whether or not an earlier send left its token cached (#2521).
     if (target_policy != nullptr) {
@@ -182,7 +201,7 @@ const std::atomic<bool>* cancel) {
             }
             append_query_param (req->url, param, token.access_token, !req->disable_url_encoding);
             req->auth_query_param = param;
-        } else if (req->headers.count ("Authorization") == 0) {
+        } else {
             req->headers["Authorization"] = oauth2_header_value (config, token.access_token);
             req->auth_header = "Authorization";
         }
@@ -322,7 +341,8 @@ const std::atomic<bool>* cancel) {
         } else if constexpr (std::is_same_v<T, ApiKeyAuth>) {
             return apply_api_key (req, a);
         } else if constexpr (std::is_same_v<T, OAuth2Auth>) {
-            return resolve_oauth2 (&req, a.config, db, req.timeout_ms, target_policy, cancel);
+            return resolve_oauth2 (&req, req.headers.count ("Authorization") != 0,
+            a.config, db, req.timeout_ms, target_policy, cancel);
         } else {
             static_assert (std::is_same_v<T, UnsupportedAuth>, "unhandled Auth variant");
             vayu::utils::log_debug ("http",
@@ -345,6 +365,7 @@ const std::atomic<bool>* cancel) {
 }
 
 AuthApplyResult preflight_auth (const nlohmann::json& auth,
+const vayu::HeaderList& request_headers,
 vayu::db::Database& db,
 int timeout_ms,
 const TargetPolicy* target_policy,
@@ -353,8 +374,8 @@ const std::atomic<bool>* cancel) {
     if (const auto* oauth2 = std::get_if<OAuth2Auth> (&parsed)) {
         // Acquire (cache-aware) without touching any request - warms the token
         // cache so the run worker's apply_auth is a cache hit.
-        return resolve_oauth2 (
-        nullptr, oauth2->config, &db, timeout_ms, target_policy, cancel);
+        return resolve_oauth2 (nullptr, request_headers.count ("Authorization") != 0,
+        oauth2->config, &db, timeout_ms, target_policy, cancel);
     }
     return {};
 }

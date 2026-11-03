@@ -135,7 +135,7 @@ export interface PreparedRequest {
  */
 function unreproducibleAuthName(mode: string): string {
 	if (mode === "oauth2")
-		return "OAuth 2.0 - Vayu's engine fetches and attaches the token at send time";
+		return "OAuth 2.0 - Vayu's engine fetches and attaches the token at send time (unless the request has its own Authorization header)";
 	if (isUneditableAuthMode(mode))
 		return `${AUTH_MODE_LABELS[mode]} - Vayu does not send this auth type`;
 	return `${mode} auth`;

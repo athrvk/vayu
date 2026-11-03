@@ -95,11 +95,13 @@ std::string token_form_field (const MockTokenServer& tokens, const std::string& 
 }
 
 /// A composed payload as `POST /runs` takes it for a single-request run of one
-/// iteration: the request's elements under `requestElements`, its `elements`
-/// being the run override.
+/// iteration: the request's elements (a request with none composes no
+/// `elements`) under `requestElements`, its `elements` being the run override.
 json as_single_iteration_run (json payload) {
-    payload["requestElements"] = payload.at ("elements");
-    payload.erase ("elements");
+    if (const auto elements = payload.find ("elements"); elements != payload.end ()) {
+        payload["requestElements"] = std::move (*elements);
+        payload.erase ("elements");
+    }
     payload.update (
     { { "mode", "iterations" }, { "iterations", 1 }, { "concurrency", 1 } });
     return payload;
@@ -717,6 +719,62 @@ TEST_F (DeferredCompositionTest, OAuth2ALoadRunAcquiresFromTheStoredValuesOrIsRe
     await_run (body.value ("runId", std::string ()));
     EXPECT_EQ (token_form_field (tokens, "client_secret"), "stored");
     EXPECT_EQ (echo.header ("Authorization"), "Bearer AT1");
+}
+
+// A request's own Authorization header wins over an OAuth 2.0 token and no token
+// is fetched for it (#3202), so a token endpoint that refuses every exchange
+// cannot fail the send. Both resolutions are covered: at the build (no script)
+// and after a pre-request script (`apply_late_auth`). The notice says which
+// header went. Mutation check: drop the `yields_to_typed_authorization` guard
+// in `resolve_oauth2`; the endpoint is asked and the send fails.
+TEST_F (DeferredCompositionTest, OAuth2ATypedAuthorizationHeaderSendsWithoutFetchingAToken) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "old" }, { "scope", "read" } });
+
+    for (const char* pre_script : { "", "pm.environment.set('secret', 'new');" }) {
+        seed_request (echo.url (), { { "Authorization", "Bearer typed" } },
+        pre_script, client_credentials (tokens, "/token-fail"));
+        const json answer = compose_and_execute ();
+
+        EXPECT_EQ (answer.value ("status", -1), 200) << answer.dump ();
+        EXPECT_EQ (echo.header ("Authorization"), "Bearer typed") << pre_script;
+        EXPECT_NE (answer.value ("authNotice", "").find ("Authorization header"),
+        std::string::npos)
+        << answer.dump ();
+    }
+    EXPECT_EQ (tokens.hits (), 0);
+}
+
+// The same rule at a load run's pre-flight, which sees the payload and not a
+// built request: without it the run is refused with the endpoint's 400 before
+// any request is sent. A disabled Authorization row is no typed header (compose
+// drops it), so that run still asks the endpoint and is refused. Mutation
+// check: pass an empty `HeaderList` to `preflight_auth` in `preflight_run_auth`.
+TEST_F (DeferredCompositionTest, OAuth2ARunWithATypedAuthorizationHeaderFetchesNoToken) {
+    const vayu::tests::EchoServer echo;
+    const MockTokenServer tokens;
+    seed_environment ({ { "client", "cid" }, { "secret", "stored" }, { "scope", "read" } });
+    seed_request (echo.url (), { { "Authorization", "Bearer typed" } }, "",
+    client_credentials (tokens, "/token-fail"));
+
+    const auto [status, body] =
+    post ("/runs", as_single_iteration_run (compose_for_a_run ()));
+    ASSERT_EQ (status, 202) << body.dump ();
+    await_run (body.value ("runId", std::string ()));
+    EXPECT_EQ (echo.header ("Authorization"), "Bearer typed");
+    EXPECT_EQ (tokens.hits (), 0);
+
+    auto stored = db_->get_request (REQUEST_ID);
+    ASSERT_HAS_VALUE (stored);
+    json disabled_row = { { "key", "Authorization" },
+        { "value", "Bearer typed" }, { "enabled", false } };
+    stored->headers   = json::array ({ disabled_row }).dump ();
+    db_->save_request (*stored);
+    const auto [refused, refusal] =
+    post ("/runs", as_single_iteration_run (compose_for_a_run ()));
+    EXPECT_EQ (refused, 400) << refusal.dump ();
+    EXPECT_EQ (tokens.hits (), 1);
 }
 
 // The token is acquired once per run, not per iteration or per virtual user

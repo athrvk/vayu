@@ -670,7 +670,10 @@ applied to the outgoing request rather than being left to the UI. This lives in
   `/execute` answer and the stored trace carry as `authNotice` (#2474); a
   bearer token or API key name that is empty once trimmed writes nothing and
   sets it too (#3203). A
-  user-supplied `Authorization` header always wins. Credentials carrying a `{{data.*}}` or a
+  user-supplied `Authorization` header always wins; against an `oauth2` token
+  placed in the header it wins before anything is fetched (#3202), at the build,
+  at `preflight_auth` (which takes the run payload's headers) and in a late
+  `apply_auth`, and sets an `authNotice` saying so. Credentials carrying a `{{data.*}}` or a
   `{{$vu}}` / `{{$iteration}}` token are the first case auth is *not* resolved
   into the plan (a credential awaiting a script is the second, below): the value has to be bound before the credential is encoded, so
   the step keeps its typed `Auth` and applies it per iteration
@@ -1152,7 +1155,8 @@ armed only where the plan placed the token on `Authorization` itself
 section folds every credential into the one shape (`AuthRefreshState::summarize`).
 Runs and steps it deliberately leaves alone (query-placed tokens,
 `autoRefreshToken: false`, `authorization_code` with no refresh token,
-non-expiring tokens, a user-supplied `Authorization`, a step whose auth waited
+non-expiring tokens, a user-supplied `Authorization` (no token is fetched for it
+at all, #3202), a step whose auth waited
 on its scripts) behave exactly as they did before it existed - see
 `plan_oauth2_refresh`. A refresh that fails is retried with a backoff and
 recorded in the report's `auth` section; it never fails the run.
@@ -1885,7 +1889,8 @@ record shape, the category list, the redaction rule and the file layout
   same two keys at its top level, so `run_request` masks what it returns by the
   same rule (#1845). Beside them, `authNotice` says when auth sent nothing: a
   mode Vayu does not execute (#2474), or an empty bearer token or API key name
-  (#3203); it carries no credential and is not masked. What
+  (#3203); or when a typed `Authorization` header spared an OAuth 2.0 token its
+  fetch (#3202); it carries no credential and is not masked. What
   bounds their lifetime is run retention (`maxRunsRetained` /
   `maxDesignRunsRetained` and the prune pass), not the
   process - so clearing the cookie jar does not clear the runs that recorded it.

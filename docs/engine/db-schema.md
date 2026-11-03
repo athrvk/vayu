@@ -2327,7 +2327,8 @@ function. That function also writes **`authNotice`** (string, #2474) when the re
 is one Vayu stores but does not execute (`digest`, `aws`, `ntlm`, `hawk`, `oauth1`, `edgegrid`,
 `jwt`): the request went out without authentication and the notice says so, naming the mode. It
 says so too for a bearer token or API key name that is empty, which writes nothing (#3203).
-Absent when empty, on the same rule.
+It is also written when an OAuth 2.0 token placed in the header yielded to the request's own
+`Authorization` header and was not fetched (#3202). Absent when empty, on the same rule.
 
 The design-mode `request.body` and `response.body` are **capped at `maxTraceBodyBytes`**
 (config, `data_retention`, default 5 MiB) before storage, so downloading one 50 MB response does

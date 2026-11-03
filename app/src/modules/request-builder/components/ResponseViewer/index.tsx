@@ -523,10 +523,12 @@ export default function ResponseViewer() {
 			/>
 
 			{/*
-			 * The engine's own sentence, saying the request went out with no
-			 * authentication because its auth mode is one Vayu does not execute
-			 * (issue #2474), or its bearer token or API key name was empty
-			 * (issue #3203). A band between the status and the tabs rather than
+			 * The engine's own sentence about what the auth block did on the wire:
+			 * the request went out with no authentication because its auth mode
+			 * is one Vayu does not execute (issue #2474) or its bearer token or
+			 * API key name was empty (issue #3203), or its own Authorization
+			 * header was sent and no OAuth 2.0 token was fetched (issue #3202).
+			 * The title stays neutral for that reason. A band between the status and the tabs rather than
 			 * inside the Body tab, unlike the two body notices: it explains the
 			 * status (a 401 is the expected result), so it must show on every
 			 * tab and on a `status: 0` failure, whose Body tab is
@@ -534,7 +536,7 @@ export default function ResponseViewer() {
 			 */}
 			{shown.authNotice && (
 				<div className={cn("px-4 pt-3 shrink-0", staleClass)}>
-					<Callout severity="warning" title="Authentication not sent">
+					<Callout severity="warning" title="Authentication note">
 						{shown.authNotice}
 					</Callout>
 				</div>

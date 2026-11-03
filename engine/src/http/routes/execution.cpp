@@ -2980,13 +2980,21 @@ nlohmann::json& scenario_manifest) {
  * resolved at plan time, and a step that could not be authorized already failed
  * resolution with a 400 - so this is the single-request path's check alone.
  * An OAuth 2.0 token endpoint @p target_policy refuses is a 400 under the
- * policy's code, before anything is posted (#2521).
+ * policy's code, before anything is posted (#2521). A payload with its own
+ * Authorization header fetches no token (#3202).
  */
 std::optional<RouteError> preflight_run_auth (RouteContext& ctx,
 const nlohmann::json& json,
 const vayu::http::TargetPolicy* target_policy) {
-    auto preflight =
-    vayu::http::preflight_auth (json.value ("auth", nlohmann::json ()), ctx.db,
+    // The headers the worker will build the request from, so a typed
+    // Authorization header spares the token fetch here as it does there
+    // (#3202). A payload that does not deserialize carries none; the run's
+    // own build reports why.
+    auto parsed = vayu::json::deserialize_request (json);
+    const vayu::HeaderList request_headers =
+    parsed.is_error () ? vayu::HeaderList{} : std::move (parsed).value ().headers;
+    auto preflight = vayu::http::preflight_auth (
+    json.value ("auth", nlohmann::json ()), request_headers, ctx.db,
     resolve_request_timeout_ms (json, ctx.db), target_policy, &ctx.server_stopping);
     if (!preflight.ok) {
         vayu::utils::log_warning (

@@ -575,7 +575,8 @@ struct Request {
      * Set by `apply_auth` for a mode Vayu stores but does not execute (digest,
      * AWS Signature, NTLM, ...), and for a bearer token or an API key name that
      * is empty (#3203); each sends the request without that credential rather
-     * than refusing it. Recorded as `authNotice` on the live `/execute` answer
+     * than refusing it. Also set for an OAuth 2.0 config that yielded to the
+     * request's own Authorization header (#3202). Recorded as `authNotice` on the live `/execute` answer
      * and the stored trace (#2474), so the send says what the user could not
      * otherwise tell from a 401.
      */

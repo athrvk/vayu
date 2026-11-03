@@ -64,7 +64,7 @@ describe("response auth notice", () => {
 	it("shows the engine's sentence beside a 401 from the target", () => {
 		renderWith({ authNotice: NOTICE });
 
-		expect(screen.getByText("Authentication not sent")).toBeInTheDocument();
+		expect(screen.getByText("Authentication note")).toBeInTheDocument();
 		expect(screen.getByText(NOTICE_TEXT)).toBeInTheDocument();
 	});
 
@@ -98,6 +98,6 @@ describe("response auth notice", () => {
 	it("shows nothing when the response carries no notice", () => {
 		renderWith();
 
-		expect(screen.queryByText("Authentication not sent")).toBeNull();
+		expect(screen.queryByText("Authentication note")).toBeNull();
 	});
 });
