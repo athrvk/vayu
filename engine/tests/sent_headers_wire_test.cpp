@@ -10,11 +10,10 @@
  * @brief `Response::request_headers` against the wire it claims to describe
  *        (issue #662).
  *
- * The sent record exists to be trusted about what went out, and it was not:
- * every driver spells a header `key + ": " + value`, which libcurl reads as an
- * instruction to *remove* the header when the value is empty - so an enabled
- * request row with a blank value never reached the wire while the response
- * pane's Headers tab listed it as sent.
+ * The sent record exists to be trusted about what went out. libcurl reads
+ * `key: ` with nothing after the colon as an instruction to *remove* the
+ * header, so a blank row is where wire and record most easily part ways: the
+ * engine sends it empty, as libcurl's `key;` (issue #3220), and records it so.
  *
  * So the assertions here are paired: what the server received, and what the
  * record says it received. A record built by any means other than the appends
@@ -115,24 +114,24 @@ class SentHeadersWireTest : public ::testing::Test {
 // whose record the response pane renders.
 // ---------------------------------------------------------------------------
 
-// The premise, stated as a test rather than assumed from libcurl's docs: a
-// value-less header does not reach the server. If libcurl ever started sending
-// it, the filter below would be the wrong fix and this reddens first.
-TEST_F (SentHeadersWireTest, ValuelessHeaderNeverReachesTheWire) {
+// An enabled row with no value is a header the author wants present and empty
+// (issue #3220). Mutation check: spell a blank row `key: ` again in
+// `build_request_header_list` (the `append_row` fallback) and libcurl removes
+// it, so the server never sees `X-Blank`.
+TEST_F (SentHeadersWireTest, ABlankHeaderReachesTheWireEmpty) {
     Request request              = get_request (server_->url ());
     request.headers["X-Blank"]   = "";
     request.headers["X-Present"] = "kept";
 
     ASSERT_TRUE (client_->send (request).is_ok ());
 
-    EXPECT_FALSE (server_->has_header ("X-Blank"));
+    EXPECT_TRUE (server_->has_header ("X-Blank"));
+    EXPECT_EQ (server_->header ("X-Blank"), "");
     EXPECT_EQ (server_->header ("X-Present"), "kept");
 }
 
-// The bug itself. Mutation check: drop the `header_value_reaches_wire` gate in
-// `build_request_header_list` and `X-Blank` is reported as sent again while the
-// assertion above still passes - which is exactly the state this fixes.
-TEST_F (SentHeadersWireTest, ValuelessHeaderIsNotReportedAsSent) {
+// The record says the same thing the wire did, in both of its shapes.
+TEST_F (SentHeadersWireTest, ABlankHeaderIsReportedAsSentEmpty) {
     Request request              = get_request (server_->url ());
     request.headers["X-Blank"]   = "";
     request.headers["X-Present"] = "kept";
@@ -141,15 +140,17 @@ TEST_F (SentHeadersWireTest, ValuelessHeaderIsNotReportedAsSent) {
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
 
     const auto& sent = result.value ().request_headers;
-    EXPECT_FALSE (sent.contains ("X-Blank"))
-    << "reported a header libcurl dropped as sent";
+    ASSERT_TRUE (sent.contains ("X-Blank"))
+    << "a header the wire carried is missing";
+    EXPECT_EQ (sent.at ("X-Blank"), "");
     EXPECT_EQ (sent.at ("X-Present"), "kept");
+    EXPECT_EQ (lines_named (lines_of (sent), { "X-Blank" }), (Lines{ { "X-Blank", "" } }));
 }
 
-// libcurl skips the whitespace after the colon before deciding, so a value of
-// spaces alone is a removal too - and a record that only checked for `empty()`
-// would report it as sent.
-TEST_F (SentHeadersWireTest, WhitespaceOnlyValueIsDroppedAndUnreported) {
+// libcurl skips the whitespace after the colon before deciding, so `key:  ` is
+// a removal too: a value of spaces alone goes out as `key;` like an empty one,
+// and is recorded as the empty value the server received.
+TEST_F (SentHeadersWireTest, AWhitespaceOnlyValueIsSentAndReportedEmpty) {
     Request request              = get_request (server_->url ());
     request.headers["X-Spaces"]  = "  \t ";
     request.headers["X-Present"] = "kept";
@@ -157,8 +158,9 @@ TEST_F (SentHeadersWireTest, WhitespaceOnlyValueIsDroppedAndUnreported) {
     auto result = client_->send (request);
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
 
-    EXPECT_FALSE (server_->has_header ("X-Spaces"));
-    EXPECT_FALSE (result.value ().request_headers.contains ("X-Spaces"));
+    EXPECT_TRUE (server_->has_header ("X-Spaces"));
+    EXPECT_EQ (server_->header ("X-Spaces"), "");
+    EXPECT_EQ (result.value ().request_headers.at ("X-Spaces"), "");
     EXPECT_EQ (server_->header ("X-Present"), "kept");
 }
 
@@ -192,9 +194,8 @@ TEST_F (SentHeadersWireTest, ADeclaredUserAgentWinsOverTheDefault) {
     EXPECT_EQ (result.value ().request_headers.at ("User-Agent"), "test-agent/1.0");
 }
 
-// The multipart Content-Type rule is untouched by the filter: it is suppressed
-// because libcurl writes it with the boundary, not because it is value-less,
-// and both reasons run through the same builder now.
+// A typed multipart Content-Type is suppressed, because libcurl writes it with
+// the boundary, and the record leaves it out with the wire.
 TEST_F (SentHeadersWireTest, MultipartContentTypeIsStillSuppressed) {
     Request request                 = get_request (server_->url ());
     request.method                  = HttpMethod::POST;
@@ -214,10 +215,10 @@ TEST_F (SentHeadersWireTest, MultipartContentTypeIsStillSuppressed) {
 // ---------------------------------------------------------------------------
 // The other two drivers. All three build their header list through
 // `build_request_header_list`, and these prove the sharing is real: a driver
-// that kept its own loop would still send the value-less header here.
+// that kept its own `key: value` loop would drop the blank header here.
 // ---------------------------------------------------------------------------
 
-TEST_F (SentHeadersWireTest, LoadDriverDropsTheSameHeader) {
+TEST_F (SentHeadersWireTest, LoadDriverSendsTheSameBlankHeader) {
     EventLoop loop;
     loop.start ();
 
@@ -228,11 +229,12 @@ TEST_F (SentHeadersWireTest, LoadDriverDropsTheSameHeader) {
     loop.stop ();
 
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
-    EXPECT_FALSE (server_->has_header ("X-Blank"));
+    EXPECT_TRUE (server_->has_header ("X-Blank"));
+    EXPECT_EQ (server_->header ("X-Blank"), "");
     EXPECT_EQ (server_->header ("X-Present"), "kept");
 }
 
-TEST_F (SentHeadersWireTest, StreamConsumerDropsTheSameHeaderAndReportsTheTruth) {
+TEST_F (SentHeadersWireTest, StreamConsumerSendsTheSameBlankHeaderAndReportsIt) {
     SseStreamRequest stream_request;
     stream_request.run_id                       = "run-sent-headers";
     stream_request.request                      = get_request (server_->url ());
@@ -245,10 +247,11 @@ TEST_F (SentHeadersWireTest, StreamConsumerDropsTheSameHeaderAndReportsTheTruth)
 
     const vayu::Response response = consume_sse_stream (stream_request, context);
 
-    EXPECT_FALSE (server_->has_header ("X-Blank"));
+    EXPECT_TRUE (server_->has_header ("X-Blank"));
     EXPECT_EQ (server_->header ("X-Present"), "kept");
-    EXPECT_FALSE (response.request_headers.contains ("X-Blank"))
-    << "the stream consumer reported a header libcurl dropped as sent";
+    ASSERT_TRUE (response.request_headers.contains ("X-Blank"))
+    << "the stream consumer left a header the wire carried out of its record";
+    EXPECT_EQ (response.request_headers.at ("X-Blank"), "");
     EXPECT_EQ (response.request_headers.at ("X-Present"), "kept");
 }
 
@@ -416,6 +419,31 @@ TEST_F (SentHeadersWireTest, AUserTypedHeaderStillGoesOutUnderARefusal) {
     ASSERT_TRUE (client_->send (request).is_ok ());
     EXPECT_EQ (server_->header ("User-Agent"), "typed/1");
     EXPECT_EQ (server_->header ("Accept"), "text/plain");
+}
+
+// Removing a default is the refusal's job, never a blank row's (issue #3220):
+// the refused `Accept` is absent, a blank `Accept` row is present and empty -
+// not libcurl's `*/*` - and wins over a refusal as any typed header does.
+// Mutation check: spell a blank row `key: ` again and the blank cases arrive
+// with no Accept at all.
+TEST_F (SentHeadersWireTest, ARefusedAcceptIsAbsentAndABlankAcceptRowIsSentEmpty) {
+    Request refused = get_request (server_->url ());
+    refused.suppressed_default_headers.insert ("accept");
+    ASSERT_TRUE (client_->send (refused).is_ok ());
+    EXPECT_FALSE (server_->has_header ("Accept")) << server_->header ("Accept");
+
+    Request blank           = get_request (server_->url ());
+    blank.headers["Accept"] = "";
+    auto result             = client_->send (blank);
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_TRUE (server_->has_header ("Accept"));
+    EXPECT_EQ (server_->header ("Accept"), "");
+    EXPECT_EQ (result.value ().request_headers.at ("Accept"), "");
+
+    blank.suppressed_default_headers.insert ("accept");
+    ASSERT_TRUE (client_->send (blank).is_ok ());
+    EXPECT_TRUE (server_->has_header ("Accept"));
+    EXPECT_EQ (server_->header ("Accept"), "");
 }
 
 TEST_F (SentHeadersWireTest, TheLoadDriverHonoursTheSameRefusal) {
@@ -626,10 +654,12 @@ TEST_F (SentHeadersWireTest, ARefusedContentTypeSendsNoneForATextBody) {
     EXPECT_FALSE (result.value ().request_headers.contains ("Content-Type"));
 }
 
-// A typed row left blank is the author's (it wins over `text/plain`), and
-// `append` drops it as a removal line - so nothing named a type, which is the
-// gap libcurl filled. Mutation check: drop the removal line and the form type
-// reappears on both requests, the refused one included.
+// A typed row left blank is the author's (it wins over `text/plain`) and means
+// "no Content-Type", the one blank row not sent empty (issue #3220) - so
+// nothing named a type, which is the gap libcurl filled. Mutation check: drop
+// the removal line and the form type reappears on both requests, the refused
+// one included; drop the `is_blank_content_type` skip and the first request
+// sends an empty Content-Type.
 TEST_F (SentHeadersWireTest, ABlankTypedContentTypeDoesNotLetTheFormTypeBack) {
     Request request = text_request (server_->url (), HttpMethod::POST);
     request.headers["Content-Type"] = "  ";
@@ -742,17 +772,21 @@ TEST_F (SentHeadersWireTest, ATypedExpectIsSentAsTypedWhileTheKeyIsOff) {
     EXPECT_EQ (result.value ().request_headers.at ("Expect"), "100-continue");
 }
 
-// Mutation check: count a blank row as naming an Expect (`lists_expect` set
-// before `append`'s gate) and libcurl's own comes back on the wire.
-TEST_F (SentHeadersWireTest, ABlankTypedExpectDoesNotLetLibcurlsBack) {
+// A blank Expect row is a header like any other (issue #3220): it goes out
+// empty, and libcurl adds no `100-continue` of its own beside a listed Expect,
+// so the large body is sent without the wait. The list-level half (no removal
+// line beside it) is `default_headers_test.cpp`'s.
+TEST_F (SentHeadersWireTest, ABlankTypedExpectIsSentEmptyAndKeepsLibcurlsOff) {
     Request request = sized_post (server_->url (), 2 * EXPECT_THRESHOLD_BYTES);
     request.headers["Expect"] = "";
 
     auto result = client_->send (request);
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
 
-    EXPECT_FALSE (server_->has_header ("Expect")) << server_->header ("Expect");
-    EXPECT_FALSE (result.value ().request_headers.contains ("Expect"));
+    EXPECT_EQ (server_->body ().size (), 2 * EXPECT_THRESHOLD_BYTES);
+    EXPECT_TRUE (server_->has_header ("Expect"));
+    EXPECT_EQ (server_->header ("Expect"), "");
+    EXPECT_EQ (result.value ().request_headers.at ("Expect"), "");
 }
 
 TEST_F (SentHeadersWireTest, TheLoadDriverDecidesExpectTheSameWay) {
@@ -833,7 +867,7 @@ TEST_F (SentHeadersWireTest, ATypedCookieWithNoJarArrivesAlone) {
 }
 
 // Each row is trimmed of its edge whitespace before the join, so none lands
-// between two cookie-pairs; a blank row is dropped as any blank header is.
+// between two cookie-pairs; a blank row joins nothing and is not recorded.
 TEST_F (SentHeadersWireTest, TwoTypedCookieRowsArriveAsOneLineInRowOrder) {
     Request request = get_request (server_->url ());
     request.headers.add ("Cookie", "a=1 ");

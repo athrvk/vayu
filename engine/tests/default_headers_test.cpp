@@ -275,12 +275,11 @@ TEST (DefaultHeadersTest, ExpectContinueIsRemovedUnlessThePolicyAllowsIt) {
 }
 
 // A typed Expect is how a person sends one on purpose, so it is sent as typed
-// and nothing removes it. A typed blank one is dropped like any value-less
-// header, which would leave libcurl's own - so it still gets the removal line.
-// Mutation check: drop the `lists_expect` guard and the typed case gains a
-// removal line beside its own; set it for a blank row too and the blank case
-// loses its removal line.
-TEST (DefaultHeadersTest, ATypedExpectWinsAndATypedBlankOneStillGetsTheRemoval) {
+// and nothing removes it. A blank one is sent empty (issue #3220), and libcurl
+// adds no Expect of its own beside a listed one, so it gets no removal line
+// either. Mutation check: drop the `lists_expect` guard and both cases gain a
+// removal line beside their own.
+TEST (DefaultHeadersTest, ATypedExpectWinsAndABlankOneIsSentEmpty) {
     vayu::Request request     = get_request ();
     request.headers["expect"] = "100-continue";
 
@@ -291,8 +290,71 @@ TEST (DefaultHeadersTest, ATypedExpectWinsAndATypedBlankOneStillGetsTheRemoval) 
 
     request.headers["expect"] = "  ";
     const auto blank          = build (request, full_policy ());
-    EXPECT_TRUE (has_line (blank.lines, "Expect:"));
-    EXPECT_FALSE (blank.sent.contains ("expect"));
+    EXPECT_TRUE (has_line (blank.lines, "expect;"));
+    EXPECT_FALSE (has_line (blank.lines, "Expect:"));
+    EXPECT_EQ (blank.sent.at ("expect"), "");
+}
+
+// libcurl reads `Name:` (spaces after the colon included) as a removal and
+// `Name;` as the header sent empty, so a blank row is only ever the second
+// (issue #3220). Mutation check: spell a blank row `key + ": " + value` in the
+// `append_row` fallback and neither `;` line is listed.
+TEST (DefaultHeadersTest, ABlankRowIsListedInLibcurlsEmptyHeaderSpelling) {
+    vayu::Request request       = get_request ();
+    request.headers["X-Empty"]  = "";
+    request.headers["X-Spaces"] = " \t ";
+
+    const auto built = build (request, full_policy ());
+    EXPECT_TRUE (has_line (built.lines, "X-Empty;"));
+    EXPECT_TRUE (has_line (built.lines, "X-Spaces;"));
+    for (const auto& line : built.lines) {
+        EXPECT_FALSE (line.starts_with ("X-Empty:")) << line;
+        EXPECT_FALSE (line.starts_with ("X-Spaces:")) << line;
+    }
+    EXPECT_EQ (built.sent.at ("X-Empty"), "");
+    EXPECT_EQ (built.sent.at ("X-Spaces"), "");
+}
+
+// Refusing `Accept` is libcurl's removal line; a blank `Accept` row is the
+// header sent empty, and the row wins over a refusal as any typed header does,
+// so the two never share a list. Mutation check: drop the `contains ("Accept")`
+// guard in `append_removal_lines` and the last list carries both.
+TEST (DefaultHeadersTest, ARefusedAcceptIsRemovedAndABlankAcceptRowIsSentEmpty) {
+    vayu::Request refused = get_request ();
+    refused.suppressed_default_headers.insert ("accept");
+    const auto removed = build (refused, full_policy ());
+    EXPECT_TRUE (has_line (removed.lines, "Accept:"));
+    EXPECT_FALSE (removed.sent.contains ("Accept"));
+
+    vayu::Request blank     = get_request ();
+    blank.headers["Accept"] = "";
+    const auto sent_empty   = build (blank, full_policy ());
+    EXPECT_TRUE (has_line (sent_empty.lines, "Accept;"));
+    EXPECT_FALSE (has_line (sent_empty.lines, "Accept:"));
+    EXPECT_EQ (sent_empty.sent.at ("Accept"), "");
+
+    blank.suppressed_default_headers.insert ("accept");
+    const auto both = build (blank, full_policy ());
+    EXPECT_TRUE (has_line (both.lines, "Accept;"));
+    EXPECT_FALSE (has_line (both.lines, "Accept:"));
+}
+
+// A blank Content-Type row is the one blank row not sent: it means "no
+// Content-Type", so a body that would imply one gets libcurl's removal line
+// and nothing recorded. Mutation check: drop the `is_blank_content_type` skip
+// and the list carries `Content-Type;` instead.
+TEST (DefaultHeadersTest, ABlankContentTypeRowIsTheRemovalLineNotAnEmptyHeader) {
+    vayu::Request request           = get_request ();
+    request.method                  = vayu::HttpMethod::POST;
+    request.body.mode               = vayu::BodyMode::Json;
+    request.body.content            = R"({"a":1})";
+    request.headers["Content-Type"] = "";
+
+    const auto built = build (request, full_policy ());
+    EXPECT_TRUE (has_line (built.lines, "Content-Type:"));
+    EXPECT_FALSE (has_line (built.lines, "Content-Type;"));
+    EXPECT_FALSE (has_line (built.lines, "Content-Type: application/json"));
+    EXPECT_FALSE (built.sent.contains ("Content-Type"));
 }
 
 // With the policy on, the declared row is the one a send can refuse; refusing

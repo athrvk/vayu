@@ -35,11 +35,14 @@
 #include <utility>
 #include <vector>
 
+#include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/default_headers.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/request_composer.hpp"
 #include "vayu/utils/json.hpp"
@@ -2017,6 +2020,44 @@ TEST_F (RequestComposerTest, APaddedBodyModeRowStillCarriesItsMarker) {
     auto composed = vayu::json::deserialize_request (payload);
     ASSERT_TRUE (composed.is_ok ()) << composed.error ().message;
     EXPECT_FALSE (composed.value ().headers.contains ("Content-Type"));
+}
+
+// A disabled row never reaches the wire, blank or valued, while an enabled
+// blank row does, as libcurl's empty-header line (issue #3220): composition
+// decides the first and the header list the second, so this drives both.
+// Mutation check: drop the `enabled` check in `stored_header_rows` and both
+// `X-Off` rows are listed.
+TEST_F (RequestComposerTest, ADisabledRowNeverReachesTheHeaderListAndAnEnabledBlankOneDoes) {
+    seed_collection ("col", "");
+    auto request    = make_request ("req_1", "col");
+    request.url     = "https://x.test/";
+    request.headers = R"([{"key":"X-Off","value":"","enabled":false},
+        {"key":"X-Off-Valued","value":"v","enabled":false},
+        {"key":"X-Blank","value":"","enabled":true}])";
+    db_->save_request (request);
+
+    auto [status, payload] =
+    vayu::http::compose_request_core (*db_, json{ { "requestId", "req_1" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    auto composed = vayu::json::deserialize_request (payload);
+    ASSERT_TRUE (composed.is_ok ()) << composed.error ().message;
+
+    vayu::HeaderList sent;
+    curl_slist* list = vayu::http::detail::build_request_header_list (
+    composed.value (), vayu::http::DefaultHeaderPolicy{}, &sent);
+    std::vector<std::string> lines;
+    for (curl_slist* node = list; node != nullptr; node = node->next) {
+        lines.emplace_back (node->data);
+    }
+    curl_slist_free_all (list);
+
+    EXPECT_NE (std::find (lines.begin (), lines.end (), "X-Blank;"), lines.end ());
+    for (const auto& line : lines) {
+        EXPECT_FALSE (line.starts_with ("X-Off")) << line;
+    }
+    EXPECT_EQ (sent.at ("X-Blank"), "");
+    EXPECT_FALSE (sent.contains ("X-Off"));
+    EXPECT_FALSE (sent.contains ("X-Off-Valued"));
 }
 
 TEST_F (RequestComposerTest, AnInlineHeaderNameIsTrimmedAndAPaddedRepeatIsStillARepeat) {

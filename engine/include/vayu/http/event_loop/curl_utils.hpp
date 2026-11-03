@@ -264,24 +264,22 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
 [[nodiscard]] bool suppresses_request_header (const Request& request, const std::string& key);
 
 /**
- * @brief True when libcurl sends this header value rather than reading the
- *        line as an instruction to remove the header.
+ * @brief True when the value holds something other than whitespace.
  *
  * `CURLOPT_HTTPHEADER` overloads one string with two meanings: `Key: value`
  * adds a header, and `Key:` with nothing after the colon *removes* one, which
  * is how libcurl lets a caller drop a header it would otherwise add itself.
- * The engine spells every header `key + ": " + value`, so an enabled request
- * row with an empty value lands on the removal side and never reaches the wire
- * - sending it deliberately would need the `Key;` spelling, which the engine
- * does not emit (issue #662). libcurl skips the whitespace after the colon
- * before deciding, so a value of spaces alone is dropped too.
+ * libcurl skips the whitespace after the colon before deciding, so a value of
+ * spaces alone reads as a removal too. A value this answers false for is
+ * therefore never spelled `key + ": " + value`: a request row goes out in
+ * libcurl's empty-header form `Key;` instead (issue #3220).
  */
-[[nodiscard]] bool header_value_reaches_wire (std::string_view value);
+[[nodiscard]] bool has_header_value (std::string_view value);
 
 /**
  * @brief The request's own `Cookie` rows as one value, for `CURLOPT_COOKIE`.
  *
- * Every row named `Cookie` whose value reaches the wire, trimmed of its edge
+ * Every row named `Cookie` that has a value (`has_header_value`), trimmed of its edge
  * whitespace and joined with `; ` in row order; empty when there is none.
  * libcurl writes this after the jar's matches on one `Cookie` line, so a
  * request never carries two (RFC 6265 section 5.4, issue #2788), and drops it
@@ -294,9 +292,9 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  *        puts on the wire.
  *
  * The one place a driver's outbound header set is decided: the request's own
- * headers minus the suppressed and the value-less, plus what the engine derives
- * - the body-implied Content-Type, and the declared defaults @p policy carries
- * for a name the request does not (see `http/default_headers.hpp`). All three
+ * headers minus the suppressed, plus what the engine derives - the
+ * body-implied Content-Type, and the declared defaults @p policy carries for a
+ * name the request does not (see `http/default_headers.hpp`). All three
  * drivers - the single-request client, the load event loop and the SSE stream
  * consumer - call this, so none of them can disagree about what goes out.
  *
@@ -321,19 +319,28 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * the order the request holds them (issue #2466): a repeated name is sent
  * repeated, and authored order is wire order.
  *
+ * A request line whose value is empty or only whitespace is sent empty, as
+ * libcurl's `Name;` (see `has_header_value`), and recorded with the value `""`
+ * (issue #3220). Removing a default is `suppressed_default_headers`' job, never
+ * a blank row's. A blank `Content-Type` is the one line not sent: it means "no
+ * Content-Type", so the body's implied type stays off (on a binary body, where
+ * it is absent instead, the file's type applies) and so does libcurl's form
+ * type.
+ *
  * `Cookie` is the exception (issue #2788): its rows are recorded, one entry
  * per row as typed, but never appended. libcurl ignores `CURLOPT_COOKIE`
  * while the list names a Cookie and writes the jar's matches on a line of
  * their own, so a listed row would put two `Cookie` lines on the wire.
  * `apply_default_header_options` hands the rows to libcurl instead, as
- * `typed_cookie_value`, and libcurl merges them into the jar's line.
+ * `typed_cookie_value`, and libcurl merges them into the jar's line. A blank
+ * `Cookie` row joins nothing into it and is not recorded.
  *
  * libcurl also adds `Expect: 100-continue` to an HTTP/1.1 body over 1 MiB and
  * waits a second for the interim reply (issue #2468). Unless
  * `policy.expect_continue` is on, the list carries the removal line `Expect:`,
- * unrecorded for the same reason. A request that types a non-blank Expect sends
- * it as typed; a typed blank one is dropped like any value-less header and so
- * still gets the removal line. With the policy on, nothing is appended and
+ * unrecorded for the same reason. A request that types an Expect sends it as
+ * typed, a blank one as `Expect;`, and gets no removal line: libcurl adds none
+ * of its own beside a listed Expect. With the policy on, nothing is appended and
  * libcurl decides, unless the send refuses the `Expect` default
  * (`suppresses_default_header`), which removes it again.
  *
