@@ -900,6 +900,29 @@ TEST (ScopeOverlayTest, AScriptsUnsetOfABaseNameSticksForThatVuUntilASetBringsIt
     }
 }
 
+// A VU's write keeps its scope's rank: one into the collection scope stays
+// under the environment's stored value of the same name, as
+// `values_from_scopes` ranks a design send's, and answers once that value is
+// gone. Mutation check: have `apply_onto` assign each layer's written values
+// over @p vars in turn instead of re-reading each name, and the first read is
+// "vu-collection".
+TEST (ScopeOverlayTest, AWriteUnderAHigherScopesStoredValueStaysUnderIt) {
+    const auto base = environment_with ("host", "env.test");
+    ScopeOverlay overlay;
+    overlay.set ("collection", "host", "vu-collection");
+
+    auto vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_EQ (vars["host"], "env.test");
+    EXPECT_EQ (flatten_variable_scopes (overlay.materialize (base))["host"], "env.test")
+    << "the residual pass and a script disagree";
+
+    EXPECT_TRUE (overlay.unset ("env", "host", base));
+    vars = flatten_variable_scopes (base);
+    overlay.apply_onto (vars, base);
+    EXPECT_EQ (vars["host"], "vu-collection");
+}
+
 // --- the exchange, on the wire -----------------------------------------------
 
 class ResidualTokenExchangeTest : public ::testing::Test {

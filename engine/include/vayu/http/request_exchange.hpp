@@ -449,11 +449,11 @@ class ScopeOverlay {
     /// iterations, the way a sequential run keeps it.
     void clear_local ();
 
-    /// Applied lowest precedence first, so the highest-precedence overlay
-    /// entry a VU wrote is what survives on @p vars - the same order
-    /// `values_from_scopes` built @p vars in to begin with. @p vars is
-    /// @p base flattened; a tombstoned name is re-read from @p base's
-    /// scopes, because the flattened map cannot say which scope answered it.
+    /// Every name this VU wrote or unset, re-read over @p base's scopes as
+    /// `materialize (base)` would answer it, so a write in a lower scope
+    /// stays under a higher scope's base value. @p vars is @p base
+    /// flattened, and the flattened map cannot say which scope answered a
+    /// name.
     void apply_onto (vayu::http::VariableValues& vars, const ScriptVariableScopes& base) const;
 
     /// This VU's local scope as text (#2564), for the one reader that must

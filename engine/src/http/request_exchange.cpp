@@ -1048,24 +1048,23 @@ void ScopeOverlay::clear_local () {
 
 void ScopeOverlay::apply_onto (vayu::http::VariableValues& vars,
 const ScriptVariableScopes& base) const {
-    // Lowest precedence first, so local - highest, matching
-    // `values_from_scopes`'s own order - is applied last and wins.
-    for (const Layer* saved : { &globals_, &collection_, &environment_ }) {
+    const auto settle = [&] (const std::string& name) {
+        if (auto value = visible_value (name, base)) {
+            vars[name] = std::move (*value);
+        } else {
+            vars.erase (name);
+        }
+    };
+    for (const Layer* saved : { &environment_, &collection_, &globals_ }) {
         for (const auto& [name, variable] : saved->written) {
-            vars[name] = variable.value;
+            settle (name);
+        }
+        for (const auto& name : saved->unset) {
+            settle (name);
         }
     }
     for (const auto& [name, variable] : local_) {
-        vars[name] = variable.value;
-    }
-    for (const Layer* hiding : { &globals_, &collection_, &environment_ }) {
-        for (const auto& name : hiding->unset) {
-            if (auto value = visible_value (name, base)) {
-                vars[name] = std::move (*value);
-            } else {
-                vars.erase (name);
-            }
-        }
+        settle (name);
     }
 }
 
