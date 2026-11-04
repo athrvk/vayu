@@ -359,7 +359,8 @@ std::optional<std::string> ca_pem_rejection (std::string_view pem);
  * *content* and the merge in `resolve_transport_policy` does real work there
  * rather than the no-op that reading implied, while on Windows the anchors
  * reach libcurl through `CURLSSLOPT_NATIVE_CA` instead and the materialized
- * bundle carries the user's paste alone.
+ * bundle carries the user's paste alone. macOS also sets that flag on every
+ * handle, so the Keychain backs the file whether or not anything is pasted.
  * `TlsBackend.FindsTheSystemAnchorsTheMergeExtends` asserts each of those on
  * the leg it applies to, because a build that finds nothing here *and* does
  * not load the store would narrow the user's trust to their own paste.

@@ -581,7 +581,8 @@ three platforms verify with **one TLS backend** - OpenSSL, pinned in
 things depending on where the platform keeps its anchors: Linux and macOS read
 their bundle from disk and the materialized file is that plus the paste, while
 Windows keeps its in the certificate store and the engine loads it with
-`CURLSSLOPT_NATIVE_CA` beside the bundle. Per request, the Settings tab's
+`CURLSSLOPT_NATIVE_CA` beside the bundle. macOS sets that flag too, so the
+Keychain is asked whenever a certificate does not verify against the file. Per request, the Settings tab's
 *Verify TLS certificate* row turns verification off for one endpoint - stored,
 sent on every send and load test, and painted as a warning while it is off. See
 [TLS trust settings](engine/api-reference.md#tls-trust-settings) for the

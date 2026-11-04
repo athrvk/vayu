@@ -861,13 +861,22 @@ void apply_ca_options (CURL* curl, const TransportPolicy& policy) {
     // rule reads "the native store plus whatever the user pasted" on Windows
     // too - the store supplying the anchors the merged file does elsewhere.
     //
+    // macOS sets it unconditionally too. The port builds curl with
+    // `USE_APPLE_SECTRUST`, which consults the Keychain only under this flag
+    // and only after OpenSSL's own check against the file has failed, so the
+    // flag adds trust and never narrows it. Without it a handle with nothing
+    // pasted trusted `/etc/ssl/cert.pem` alone: a chain the Keychain accepts
+    // and that file does not (a newer root, an admin-installed CA) failed
+    // with "unable to get local issuer certificate". This build sets no
+    // `CURLOPT_CRLFILE`, the one option curl refuses beside SecTrust.
+    //
     // Written in both directions - the default `0` where no bundle is set and
     // the native store is not the anchor source - because a reused handle
     // would otherwise keep a flag the current policy never asked for, the rule
     // every option here follows. The proxy leg has its own copy of the flag
     // and takes the same value, for the reason the bundle is shared above.
     long ssl_options = 0L;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     ssl_options |= static_cast<long> (CURLSSLOPT_NATIVE_CA);
 #else
     if (!policy.ca_bundle_path.empty ()) {
