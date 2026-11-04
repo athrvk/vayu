@@ -560,6 +560,61 @@ describe("eventsFromTrace", () => {
 });
 
 /**
+ * A stream's trace states how many bytes it delivered (issue #3238), and a
+ * reply that was not an event stream keeps its body. The pane's size chip is
+ * the first, the Body tab the second, and neither is a truncation.
+ */
+describe("a stored stream's body and byte count", () => {
+	const streamSample = (response: Record<string, unknown>): RunResultSample =>
+		sample({
+			trace: {
+				...sample().trace,
+				response,
+				events: {
+					items: [],
+					totalEvents: 0,
+					eventsTruncated: false,
+					endReason: "completed",
+				},
+			},
+		});
+
+	it("sizes the response by the bytes delivered, not by the body held", () => {
+		// An event stream keeps no body, so the held length is 0 and only
+		// `bodyBytes` can say what arrived. Mutation check: size from the held
+		// body only and this reads 0.
+		const restored = responseFromRunResult(
+			streamSample({
+				headers: { "content-type": "text/event-stream" },
+				body: "",
+				bodyBytes: 2048,
+			})
+		);
+
+		expect(restored?.size).toBe(2048);
+		expect(restored?.bodyBytes).toBe(2048);
+		expect(restored?.bodyTruncated).toBeUndefined();
+	});
+
+	it("keeps a non-stream reply's body, with bodyBytes as its size and no truncation", () => {
+		const body = '{"error":"not found"}';
+		const restored = responseFromRunResult(
+			streamSample({
+				headers: { "content-type": "application/json" },
+				body,
+				bodyBytes: body.length,
+			})
+		);
+
+		expect(restored?.bodyRaw).toBe(body);
+		expect(restored?.body).toContain('"error"');
+		expect(restored?.size).toBe(body.length);
+		// `bodyBytes` on a stream is a size; the Body tab's notice reads this flag.
+		expect(restored?.bodyTruncated).toBeUndefined();
+	});
+});
+
+/**
  * The `scripts` node a streaming run stores (issue #575).
  *
  * This is the *only* route a streaming send's test results ever take: that send

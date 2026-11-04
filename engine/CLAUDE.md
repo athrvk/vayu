@@ -709,7 +709,10 @@ logged as a warning: it means a client skipped composition.
   (server close, `POST /runs/:id/stop`, `maxStreamEvents`,
   `maxStreamDurationMs`, the idle timeout), never a whole-transfer deadline,
   which this path deliberately does not set. `stream` with `transient` is a
-  `400`. `POST /runs` takes `stream` too (#576) through the same
+  `400`. A final hop that is not `text/event-stream` also keeps its bytes as
+  the body, up to `maxDesignResponseBodyBytes`, and every stream's trace
+  carries its wire count as `response.bodyBytes`, which `cap_trace_bodies`
+  keeps (#3238). `POST /runs` takes `stream` too (#576) through the same
   `read_stream_flag` parser; under load a stream becomes
   `Request::stream_bounds`, the event loop ends it counting with
   `SseFrameCounter` (which agrees with `SseParser` on what an event is), and

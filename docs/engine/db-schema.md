@@ -2342,6 +2342,11 @@ stored at all. When a body is cut, its node gains two keys:
 | `bodyTruncated`               | bool | Present and `true` only when the stored `body` is a prefix, not the whole body |
 | `bodyBytes`                   | int  | The **original** body length in bytes (the stored `body` is the first `maxTraceBodyBytes` of it) |
 
+A streaming run's `response` carries `bodyBytes` cut or not (#3238): the bytes the server
+delivered, which can exceed what `body` holds (none for `text/event-stream`, at most
+`maxDesignResponseBodyBytes` otherwise). `build_result_trace` writes it before the cap, and the
+cap keeps it.
+
 A `response.body` that is not text (not valid UTF-8 over its whole length, or carrying a NUL) is
 stored as its base64, and only then does `response` carry **`bodyEncoding: "base64"`** (#2458):
 the same decision and spelling the live `POST /execute` answer makes for `bodyRaw`, including

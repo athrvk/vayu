@@ -1056,19 +1056,6 @@ struct Response {
     int connection_replays = 0;
 
     /**
-     * @brief Events this transfer delivered, when it was a bounded stream
-     *        (`Request::stream_bounds`); absent otherwise (issue #576).
-     *
-     * Optional rather than a zero, and for the reason the report's sections are
-     * omitted rather than zeroed: "this was not a stream" and "this stream
-     * delivered nothing" are different facts, and a run whose target closed
-     * every connection before the first event is exactly the one where telling
-     * them apart matters.
-     *
-     * Counted by `SseFrameCounter` on the write callback, which agrees with
-     * `SseParser` on what an event is - see that header.
-     */
-    /**
      * @brief The client-certificate registry entry this transfer presented,
      *        as `host` or `host:port`; empty when none matched (issue #707).
      *
@@ -1087,7 +1074,30 @@ struct Response {
      */
     std::string client_certificate;
 
+    /**
+     * @brief Events this transfer delivered, when it was a bounded stream
+     *        (`Request::stream_bounds`); absent otherwise (issue #576).
+     *
+     * Optional rather than a zero, and for the reason the report's sections are
+     * omitted rather than zeroed: "this was not a stream" and "this stream
+     * delivered nothing" are different facts, and a run whose target closed
+     * every connection before the first event is exactly the one where telling
+     * them apart matters.
+     *
+     * Counted by `SseFrameCounter` on the write callback, which agrees with
+     * `SseParser` on what an event is - see that header.
+     */
     std::optional<std::size_t> stream_events;
+
+    /**
+     * @brief Body bytes the final response delivered over a design stream
+     *        (`consume_sse_stream`, issue #3238); absent on every other path.
+     *
+     * Not `body_size`, which is what `body` holds: an event stream holds no
+     * body at all, and any other reply holds at most the design bound. The
+     * stored trace writes this as `response.bodyBytes`.
+     */
+    std::optional<std::size_t> stream_body_bytes;
 
     /**
      * @brief True when a cap in `Request::stream_bounds` is what ended this
