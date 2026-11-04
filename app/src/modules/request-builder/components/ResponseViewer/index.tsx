@@ -507,7 +507,9 @@ export default function ResponseViewer() {
 				status={shown.status}
 				statusText={shown.statusText}
 				time={shown.time}
-				size={shown.size}
+				// The placeholder built from the `open` frame has no byte count (the
+				// relay carries no body), and `0 B` would read as an empty reply.
+				size={shown === streamedResponse ? undefined : shown.size}
 				headers={shown.headers}
 				engineMs={shown.timing?.engineMs}
 				httpVersion={shown.httpVersion}
@@ -833,6 +835,7 @@ export default function ResponseViewer() {
 						endReason={endReason}
 						isStreaming={isStreaming}
 						isStream={isStream}
+						contentType={contentTypeOf(shown.headers)}
 						error={streamIsMine ? liveError : null}
 						// Only for the live list. A stored trace arrives whole, so the
 						// row count is the identity the window wants there.

@@ -327,7 +327,12 @@ export interface ResponseState {
 	 * Only the restore funnel sets it: a live send has nothing stored yet.
 	 */
 	bodyTruncated?: boolean;
-	/** The response body's original byte length, present only when truncated. */
+	/**
+	 * The response body's original byte length. Present when the body was
+	 * truncated, and on every stored stream, where it is the bytes delivered
+	 * whether or not a body was kept (issue #3238) - so it is the size, never a
+	 * truncation signal: `bodyTruncated` is.
+	 */
 	bodyBytes?: number;
 	/**
 	 * The engine only ever *read* this much of the body, stopping at

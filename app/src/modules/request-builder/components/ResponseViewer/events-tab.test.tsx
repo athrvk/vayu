@@ -241,6 +241,143 @@ describe("the Events tab", () => {
 		expect(screen.queryByText(/not an event stream/i)).toBeNull();
 	});
 
+	/**
+	 * A stream request whose reply was not an event stream (issue #3238): the
+	 * body is on the Body tab, so the Events tab must say that instead of
+	 * blaming the server for sending no events.
+	 */
+	describe("when the server answered with something that is not an event stream", () => {
+		const jsonError = (headers: Record<string, string>) =>
+			okResponse({
+				status: 404,
+				statusText: "Not Found",
+				headers,
+				body: '{"error":"no such stream"}',
+				bodyRaw: '{"error":"no such stream"}',
+				size: 26,
+				events: [],
+				totalEvents: 0,
+				eventsTruncated: false,
+				streamEndReason: "completed",
+			});
+
+		it("names the type and points at Body, once the run is stored", () => {
+			state.response = jsonError({ "content-type": "application/json" });
+			renderViewer();
+			openEventsTab();
+
+			const panel = screen.getByRole("tabpanel", { name: /events/i });
+			expect(panel.textContent).toContain(
+				"The server answered application/json, not an event stream - see Body."
+			);
+			// The type is code, not prose.
+			expect(panel.querySelector("code")?.textContent).toBe("application/json");
+			expect(screen.queryByText(/no events received/i)).toBeNull();
+		});
+
+		it("names it from the live open frame while the stream is still open", () => {
+			state.response = null;
+			state.isExecuting = true;
+			useExecutionEventsStore.getState().startStream({
+				requestId: "req_1",
+				runId: "run_1",
+				eventsUrl: "/runs/run_1/events",
+			});
+			useExecutionEventsStore.getState().noteOpen("run_1", {
+				statusCode: 404,
+				statusText: "Not Found",
+				headers: { "Content-Type": "application/json; charset=utf-8" },
+			});
+			renderViewer();
+			openEventsTab();
+
+			expect(screen.getByText(/not an event stream - see Body/)).toBeTruthy();
+			expect(screen.getByText("application/json")).toBeTruthy();
+			expect(screen.queryByText(/Waiting for the first event/)).toBeNull();
+		});
+
+		it("keeps the empty-stream wording for text/event-stream, parameters and case aside", () => {
+			state.response = okResponse({
+				headers: { "Content-Type": "Text/Event-Stream; charset=utf-8" },
+				events: [],
+				totalEvents: 0,
+				eventsTruncated: false,
+				streamEndReason: "completed",
+			});
+			renderViewer();
+			openEventsTab();
+
+			expect(screen.getByText(/no events received/i)).toBeTruthy();
+			expect(screen.queryByText(/not an event stream - see Body/)).toBeNull();
+		});
+
+		it("keeps the empty-stream wording when the reply carried no Content-Type", () => {
+			state.response = okResponse({
+				status: 0,
+				statusText: "",
+				headers: {},
+				events: [],
+				totalEvents: 0,
+				eventsTruncated: false,
+				streamEndReason: "error",
+			});
+			renderViewer();
+			openEventsTab();
+
+			expect(screen.getByText(/no events received/i)).toBeTruthy();
+			expect(screen.queryByText(/see Body/)).toBeNull();
+		});
+
+		it("shows the stored body and status on the Body tab", () => {
+			state.response = jsonError({ "content-type": "application/json" });
+			renderViewer();
+			// The strip remembers the last tab the previous case left open.
+			const body = screen.getByRole("tab", { name: /^body/i });
+			body.focus();
+			fireEvent.mouseDown(body);
+
+			expect(screen.getByTestId("body-content").textContent).toContain("no such stream");
+			expect(screen.getByText("404 Not Found")).toBeTruthy();
+		});
+	});
+
+	describe("the size chip of a stream", () => {
+		it("is absent while the placeholder from the open frame is all there is", () => {
+			// The relay carries no body, so `0 B` would claim an empty reply.
+			state.response = null;
+			state.isExecuting = true;
+			useExecutionEventsStore.getState().startStream({
+				requestId: "req_1",
+				runId: "run_1",
+				eventsUrl: "/runs/run_1/events",
+			});
+			useExecutionEventsStore
+				.getState()
+				.noteOpen("run_1", { statusCode: 200, statusText: "OK", headers: {} });
+			renderViewer();
+
+			expect(screen.getByText(/Streaming - 0 events/i)).toBeTruthy();
+			expect(screen.queryByText("0 B")).toBeNull();
+		});
+
+		it("shows the bytes delivered once the stored run replaces the placeholder", () => {
+			state.response = okResponse({
+				size: 2048,
+				bodyBytes: 2048,
+				events: [event("a")],
+				totalEvents: 1,
+				eventsTruncated: false,
+				streamEndReason: "completed",
+			});
+			renderViewer();
+
+			expect(screen.getByText("2.0 KB")).toBeTruthy();
+			expect(screen.queryByText("0 B")).toBeNull();
+			// A size is not a truncation: `bodyBytes` on a stream is always set.
+			expect(screen.queryByText(/Body truncated for storage/)).toBeNull();
+		});
+	});
+
 	it("expands a row to its full payload, pretty-printed when it is JSON", () => {
 		state.response = okResponse({
 			events: [event('{"a":1}')],

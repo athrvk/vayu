@@ -41,9 +41,10 @@ interface EmptyStateBaseProps {
 	/**
 	 * Sentence case. A `pane` title is a heading, so no trailing period ("No
 	 * run selected"); an `inline` title is the whole message and may be a
-	 * sentence.
+	 * sentence. A node is phrasing content only (text, `code`, `span`): it
+	 * renders inside a `<p>` in the `pane` variant.
 	 */
-	title: string;
+	title: ReactNode;
 	/**
 	 * A Button, usually `variant="link"`. A create path plus Import may be two
 	 * Buttons in a `flex gap-2` wrapper. Both variants.

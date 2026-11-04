@@ -40,16 +40,18 @@
  * be inferred from the row count.
  */
 
-import { memo, useState } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { Callout, EmptyState } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useGrowingWindow } from "@/hooks/useGrowingWindow";
+import { SSE_ACCEPT } from "@/constants/request";
 import { formatJson } from "@/lib/json-format";
 import { cn } from "@/lib/utils";
 import type { StreamEndReason, StreamEvent } from "@/types";
 import { pluralize } from "@/modules/dashboard/utils/format";
+import { mediaTypeOf } from "@/modules/request-builder/utils/response-bytes";
 
 export interface ResponseEventsProps {
 	/** The events to render, oldest first. */
@@ -71,6 +73,15 @@ export interface ResponseEventsProps {
 	 * rather than "no events yet" - they are different answers.
 	 */
 	isStream?: boolean;
+	/**
+	 * The `Content-Type` the server answered with, when the caller has one.
+	 *
+	 * Read only for the empty state: a stream request whose reply was not an
+	 * event stream (a JSON 404, NDJSON) has no events and never will, and
+	 * "the server sent no events" would hide that the reply is on the Body tab
+	 * (issue #3238). Absent or empty keeps the generic wording.
+	 */
+	contentType?: string;
 	/** A transport failure on the relay, if the live stream hit one. */
 	error?: string | null;
 	/**
@@ -128,6 +139,34 @@ const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }
  */
 function formatEventData(data: string): string {
 	return formatJson(data);
+}
+
+/**
+ * The `type/subtype` the server answered with when it is not an event stream,
+ * else `undefined`: no header, or one that names `text/event-stream` (a
+ * `; charset=` parameter does not change that).
+ */
+function nonEventStreamType(contentType: string | undefined): string | undefined {
+	if (!contentType) return undefined;
+	const { type, subtype } = mediaTypeOf(contentType);
+	if (!type || !subtype) return undefined;
+	const essence = `${type}/${subtype}`;
+	return essence === SSE_ACCEPT ? undefined : essence;
+}
+
+/** The empty state of a stream that has no rows, by what the server answered. */
+function emptyTitle(isStreaming: boolean, otherMediaType: string | undefined): ReactNode {
+	if (otherMediaType) {
+		return (
+			<>
+				The server answered <code className="font-mono">{otherMediaType}</code>, not an
+				event stream - see Body.
+			</>
+		);
+	}
+	return isStreaming
+		? "Waiting for the first event. The stream is open and nothing has arrived yet."
+		: "No events received. The stream opened but the server sent no events before it ended.";
 }
 
 /**
@@ -229,6 +268,7 @@ export default function ResponseEvents({
 	endReason,
 	isStreaming = false,
 	isStream = false,
+	contentType,
 	error = null,
 	listKey,
 }: ResponseEventsProps) {
@@ -261,6 +301,7 @@ export default function ResponseEvents({
 	// The received total, which is what the header counts. `totalEvents` is the
 	// engine's own and outranks the row count whenever it is there.
 	const received = totalEvents ?? events.length;
+	const otherMediaType = nonEventStreamType(contentType);
 
 	return (
 		<div className="flex h-full flex-col">
@@ -307,14 +348,7 @@ export default function ResponseEvents({
 				)}
 
 				{events.length === 0 ? (
-					<EmptyState
-						variant="inline"
-						title={
-							isStreaming
-								? "Waiting for the first event. The stream is open and nothing has arrived yet."
-								: "No events received. The stream opened but the server sent no events before it ended."
-						}
-					/>
+					<EmptyState variant="inline" title={emptyTitle(isStreaming, otherMediaType)} />
 				) : (
 					<div className={cn(error || note || eventsTruncated ? "pt-2" : undefined)}>
 						{events.slice(0, visible).map((event, i) => (
