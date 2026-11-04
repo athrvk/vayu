@@ -330,6 +330,20 @@ bool is_vayu_variable_type (const std::string& type) {
     return type == "string" || type == "number" || type == "boolean";
 }
 
+/// `disabled != null ? !disabled : enabled != null ? !!enabled : true` -
+/// JavaScript truthiness on both, not a boolean test.
+bool variable_row_enabled (const json* record) {
+    if (const json* disabled = prop (record, "disabled");
+    disabled != nullptr && !disabled->is_null ()) {
+        return !truthy (disabled);
+    }
+    if (const json* declared = prop (record, "enabled");
+    declared != nullptr && !declared->is_null ()) {
+        return truthy (declared);
+    }
+    return true;
+}
+
 /**
  * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
  *
@@ -374,19 +388,9 @@ json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_
         *declared_type != "default" && !is_vayu_variable_type (*declared_type))) {
             skipped_variable_metadata += 1;
         }
-        // `disabled != null ? !disabled : enabled != null ? !!enabled : true` -
-        // JavaScript truthiness on both, not a boolean test.
-        bool enabled = true;
-        if (const json* disabled = prop (record, "disabled");
-        disabled != nullptr && !disabled->is_null ()) {
-            enabled = !truthy (disabled);
-        } else if (const json* declared = prop (record, "enabled");
-        declared != nullptr && !declared->is_null ()) {
-            enabled = truthy (declared);
-        }
         json value;
         value["value"]   = normalize_vars (as_string (prop (record, "value")));
-        value["enabled"] = enabled;
+        value["enabled"] = variable_row_enabled (record);
         if (declared_type != nullptr && *declared_type == "secret") {
             value["secret"] = true;
         } else if (declared_type != nullptr && is_vayu_variable_type (*declared_type)) {
