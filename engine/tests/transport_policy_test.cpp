@@ -386,6 +386,22 @@ TEST (ProxyUrlValidation, RejectsTheShapesThatAreAlwaysMistakes) {
     EXPECT_TRUE (proxy_url_rejection ("http://").has_value ());
 }
 
+// libcurl ends the userinfo at the first '@', so `p@ss@proxy` would make
+// "ss@proxy.example" the host: refused, with the spelling that works.
+TEST (ProxyUrlValidation, RefusesARawAtSignInThePasswordAndNamesTheEncoding) {
+    for (const char* url : { "http://u:p@ss@proxy.example:8080",
+         "u:p@ss@proxy.example:8080", "http://u:@@proxy.example:8080" }) {
+        const auto rejection = proxy_url_rejection (url);
+        ASSERT_HAS_VALUE (rejection) << url;
+        EXPECT_NE (rejection->find ("%40"), std::string::npos) << *rejection;
+    }
+}
+
+TEST (ProxyUrlValidation, DoesNotCountAnAtSignPastTheAuthority) {
+    EXPECT_FALSE (proxy_url_rejection ("http://u:pw@proxy.example:8080/a@b").has_value ());
+    EXPECT_FALSE (proxy_url_rejection ("http://proxy.example:8080/a@b@c").has_value ());
+}
+
 // ---------------------------------------------------------------------------
 // Bypass list validation - libcurl reads an entry it has no form for as a
 // hostname no transfer dials, so the exemption is stored and never applies

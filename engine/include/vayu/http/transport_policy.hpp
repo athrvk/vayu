@@ -100,8 +100,10 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
  * Deliberately permissive about the shapes curl itself accepts - a bare
  * `host:port` is valid and means `http://host:port` - and strict about the
  * shapes that are always a mistake: empty, whitespace-bearing, no host, a
- * scheme libcurl has no proxy support for, or a non-ASCII host with no ASCII
- * name (`unsendable_host`; one that has one is dialled by it).
+ * scheme libcurl has no proxy support for, a second '@' in the authority (a
+ * raw '@' in the password - libcurl ends the userinfo at the first one, so it
+ * must be written %40; an '@' in a path is not counted), or a non-ASCII host
+ * with no ASCII name (`unsendable_host`; one that has one is dialled by it).
  */
 std::optional<std::string> proxy_url_rejection (std::string_view url);
 

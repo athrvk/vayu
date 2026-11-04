@@ -17,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1132,6 +1133,19 @@ TEST_F (ConfigRouteTest, EveryBypassFormCurlReadsIsStored) {
         EXPECT_EQ (status, 200) << list << ": " << body.dump ();
         EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), list);
     }
+}
+
+TEST_F (ConfigRouteTest, ARawAtSignInTheProxyPasswordIs400ButPercentEncodedIsStored) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":"http://bob:p@ss@proxy:8080"}})");
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("%40"), std::string::npos)
+    << body.dump ();
+
+    std::tie (status, body) = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":"http://bob:p%40ss@proxy:8080"}})");
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://bob:p%40ss@proxy:8080");
 }
 
 TEST_F (ConfigRouteTest, AStoredUrlSurvivesSwitchingTheModeOff) {

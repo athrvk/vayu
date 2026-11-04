@@ -479,16 +479,21 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
         authority = url.substr (scheme_end + 3);
     }
 
-    // Userinfo is optional and may itself contain '@' in an encoded password,
-    // so the host starts after the *last* one.
-    const auto userinfo_end = authority.rfind ('@');
+    // Anything past the authority (a path curl ignores on a proxy URL) is not
+    // part of it, and an '@' there is not userinfo.
+    authority = authority.substr (0, authority.find ('/'));
+    // libcurl ends the userinfo at the *first* '@', so a second one is not part
+    // of the password: it makes the rest of the password the start of the host.
+    const auto userinfo_end = authority.find ('@');
     if (userinfo_end != std::string_view::npos) {
+        if (authority.find ('@', userinfo_end + 1) != std::string_view::npos) {
+            return std::string (
+            "proxy URL has more than one '@' before the host - "
+            "percent-encode @ in the password as %40");
+        }
         authority = authority.substr (userinfo_end + 1);
     }
-    // Anything past the authority (a path curl ignores on a proxy URL) is not
-    // part of the host.
-    const auto host = authority.substr (0, authority.find ('/'));
-    if (host.empty () || host.front () == ':') {
+    if (authority.empty () || authority.front () == ':') {
         return std::string ("proxy URL names no host");
     }
     if (auto problem = vayu::http::unsendable_host (url)) {
