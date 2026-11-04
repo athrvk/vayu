@@ -1894,7 +1894,7 @@ with its credentials withheld. Composition has already written every
   `url`, `params`, `headers`, `body.content` and `body.fields` becomes
   `<redacted>`. The values come from the scopes the payload names: globals,
   `environmentId`, and the collection chain of `requestId`'s request (a
-  scenario run: of its collection). A value under four characters is left
+  scenario run: of its collection and of every folder a step sits in, #3270). A value under four characters is left
   alone, because it recurs in ordinary text and masking it would shred the
   snapshot.
 

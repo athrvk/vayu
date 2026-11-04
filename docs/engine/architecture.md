@@ -1870,7 +1870,8 @@ record shape, the category list, the redaction rule and the file layout
   `params`, `headers`, `body.content` or `body.fields` (issue #1803). Composition answers with
   values, not provenance, so the secret values are read from the scopes the
   payload names (globals, `environmentId`, the collection chain of
-  `requestId`'s request or of a scenario's collection), and a value under four
+  `requestId`'s request; for a scenario, the chains of its collection and of
+  every folder a step sits in, #3270), and a value under four
   characters is not masked. A scenario run stores the uncomposed URL besides - a composed
   plan carries resolved `Authorization` headers and an `apikey` in the query
   string, and the sanitizer reads no plan. `results.trace_data` records what was **sent**, which

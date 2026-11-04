@@ -28,6 +28,7 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -233,6 +234,60 @@ TEST_F (ConfigSnapshotExecuteTest, ALoadRunsSnapshotHoldsNoCollectionScopeSecret
     EXPECT_EQ (parsed["url"], echo.url () + "?sig=<redacted>");
     EXPECT_EQ (json::parse (parsed["body"]["content"].get<std::string> ()),
     (json{ { "sig", "<redacted>" }, { "q", "<redacted>" } }));
+}
+
+// A recursive scenario run composes each step through its own folder's chain
+// (#3248), so a secret on a sub-folder below the run collection reaches the
+// run's values while the run collection's chain does not hold it (#3270). The
+// payload carries both secrets in a top-level header, the part of a scenario
+// body the snapshot keeps verbatim apart from masking.
+// Mutation check: have `run_snapshot_secrets` read only the run collection's
+// chain (`load_script_variable_scopes (db, run.environment_id,
+// scenario->request.collection_id)`) and the sub-folder secret stays in the
+// header.
+TEST_F (ConfigSnapshotExecuteTest, AScenarioRunsSnapshotHoldsNoSubFolderSecret) {
+    const vayu::tests::EchoServer echo;
+    const std::string root_secret = "root-secret-4be8";
+    const std::string sub_secret  = "sub-folder-secret-d02f";
+
+    const auto folder = [this] (const std::string& id,
+                        std::optional<std::string> parent, const json& variables) {
+        vayu::db::Collection collection;
+        collection.id        = id;
+        collection.name      = id;
+        collection.parent_id = std::move (parent);
+        collection.variables = variables.dump ();
+        collection.auth      = "{}";
+        db_->create_collection (collection);
+    };
+    folder ("scen_root", std::nullopt,
+    { { "rootKey", { { "value", root_secret }, { "secret", true } } } });
+    folder ("scen_sub", "scen_root",
+    { { "subKey", { { "value", sub_secret }, { "secret", true } } } });
+
+    vayu::db::Request request;
+    request.id            = "req_sub";
+    request.collection_id = "scen_sub";
+    request.name          = "In the sub-folder";
+    request.method        = vayu::HttpMethod::GET;
+    request.url           = echo.url () + "?k={{subKey}}";
+    request.params        = "[]";
+    request.headers       = "[]";
+    request.body          = R"({"mode":"none"})";
+    request.body_type     = "none";
+    request.auth          = R"({"mode":"none"})";
+    db_->save_request (request);
+
+    start_run_and_wait ({ { "scenario",
+                          { { "source", "collection" }, { "collectionId", "scen_root" },
+                          { "recursive", true }, { "iterations", 1 } } },
+    { "headers", { { "X-Trace", root_secret + "/" + sub_secret } } } });
+
+    const std::string snapshot = stored_snapshot ();
+    ASSERT_FALSE (snapshot.empty ());
+    EXPECT_EQ (snapshot.find (root_secret), std::string::npos) << snapshot;
+    EXPECT_EQ (snapshot.find (sub_secret), std::string::npos) << snapshot;
+    EXPECT_EQ (json::parse (snapshot)["headers"]["X-Trace"], "<redacted>/<redacted>");
 }
 
 } // namespace

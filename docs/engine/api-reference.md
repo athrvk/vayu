@@ -11790,8 +11790,10 @@ into `sanitize_config_snapshot`.
 (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's `apikey` auth
 keeps its name with the value `"<redacted>"`, and every value of a variable
 marked secret in the payload's scopes (globals, `environmentId`, the collection
-chain of `requestId`'s request) is written as `<redacted>` wherever it landed in
-`url`, `params`, `headers` or `body`, in its raw, percent-encoded,
+chain of `requestId`'s request; for a scenario run, the chain of the run
+collection and of every folder a step sits in, so a recursive run masks a
+secret held on a sub-folder, issue #3270) is written as `<redacted>` wherever
+it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded,
 JSON-escaped and XML-escaped forms (a JSON body holds `pa"ss` as `pa\"ss`). A
 value under four characters is not masked. `result.trace` is the record of
 what was sent and keeps it all. A run stored before this change returns its

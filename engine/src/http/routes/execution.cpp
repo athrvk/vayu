@@ -24,6 +24,7 @@
 #include <functional>
 #include <optional>
 #include <regex>
+#include <set>
 #include <string>
 
 #include "vayu/core/constants.hpp"
@@ -814,7 +815,13 @@ const std::vector<std::string>& secret_values) {
 /**
  * @brief The secret-flagged variable values a `POST /runs` snapshot is masked
  *        against (#1803): globals, the run's environment, and the collection
- *        chain of the scenario's collection or of the request the run links.
+ *        chain of the request the run links - or, for a scenario, the chain of
+ *        every folder a step sits in plus the run collection's own (#3270).
+ *
+ * A recursive scenario composes each step through its own folder's chain
+ * (#3248), so a secret on a sub-folder below the run collection reaches the
+ * run's values and is not on the run collection's chain. The union is
+ * deduplicated by value; globals and the environment come with every load.
  *
  * Composition resolves an inline payload through a `collectionId` it does not
  * forward, so a run with no `requestId` and no scenario reads no collection
@@ -823,11 +830,21 @@ const std::vector<std::string>& secret_values) {
 std::vector<std::string> run_snapshot_secrets (vayu::db::Database& db,
 const vayu::db::Run& run,
 const vayu::core::ScenarioExecution* scenario) {
-    if (scenario != nullptr) {
-        return secret_variable_values (load_script_variable_scopes (
-        db, run.environment_id, scenario->request.collection_id));
+    if (scenario == nullptr) {
+        return secret_variable_values (load_script_variable_scopes (db, run));
     }
-    return secret_variable_values (load_script_variable_scopes (db, run));
+    const std::string& run_collection_id = scenario->request.collection_id;
+    std::set<std::string> folder_ids{ run_collection_id };
+    for (const auto& step : scenario->plan.steps) {
+        folder_ids.insert (vayu::core::load_step_collection_id (step, run_collection_id));
+    }
+    std::set<std::string> unique_values;
+    for (const auto& folder_id : folder_ids) {
+        const auto values = secret_variable_values (
+        load_script_variable_scopes (db, run.environment_id, folder_id));
+        unique_values.insert (values.begin (), values.end ());
+    }
+    return { unique_values.begin (), unique_values.end () };
 }
 
 /**
