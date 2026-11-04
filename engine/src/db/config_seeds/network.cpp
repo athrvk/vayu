@@ -161,9 +161,13 @@ void seed_network (ConfigSeeder& seed, int64_t now) {
 
     seed (keywords ({ "exclude", "whitelist", "intranet" }) (
     ConfigEntry{ "proxyBypass", "", "string", "Proxy bypass list",
-    "Hosts that skip the proxy, comma-separated. A leading dot matches a "
-    "domain and everything under it (.internal.example.com), and a single * "
-    "bypasses the proxy for every host. Under Manual this list is the whole "
+    "Hosts that skip the proxy, separated by commas, spaces or tabs. An entry "
+    "is an exact host (localhost), a leading dot for a domain and everything "
+    "under it (.internal.example.com), an IP address (127.0.0.1 or ::1), an "
+    "IP range (10.0.0.0/8), or a single * to bypass the proxy for every host. "
+    "A port (localhost:8080), a * inside an entry (*.example.com), a "
+    "bracketed address, a scheme and a path are refused. Under Manual this "
+    "list is the whole "
     "rule, so an empty one means nothing is exempt and any no_proxy the engine "
     "was started with is ignored. Under From environment it overrides that "
     "variable when set, and defers to it when empty. Under From system it "

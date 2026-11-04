@@ -106,6 +106,22 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
 std::optional<std::string> proxy_url_rejection (std::string_view url);
 
 /**
+ * @brief Why @p list cannot be a `proxyBypass` list, or nullopt when it can.
+ *
+ * The list is passed to libcurl's matcher, which reads exactly these entry
+ * forms, split on commas, spaces and tabs: an exact host, `.suffix` (the domain
+ * and everything under it), a bare suffix, `*` as the whole entry, an IPv4 or
+ * IPv6 literal (bracketless) and `ip/N` CIDR. Every other shape is accepted by
+ * libcurl as a hostname no transfer dials, so the exemption silently never
+ * applies; this refuses the ones people reach for - a `:port`, a `*` inside an
+ * entry (`*.example.com`, `local*`), a bracketed IPv6, a scheme, a path - naming
+ * the entry. Empty is valid (nothing exempt). The one copy of the rule:
+ * `POST /config` refuses with it, and the resolver drops an entry it refuses
+ * from a row that was hand-edited around the route.
+ */
+std::optional<std::string> proxy_bypass_rejection (std::string_view list);
+
+/**
  * @brief The shape a stored client identity is in (issue #833).
  *
  * A property of the *row*, not of the transfer: the applier runs on every
@@ -272,12 +288,13 @@ struct TransportPolicy {
 
     /**
      * Hosts that skip the proxy, comma-separated, passed to `CURLOPT_NOPROXY`
-     * verbatim but for a non-ASCII entry, which is written in the punycode
-     * form libcurl matches the dialled name on (`ascii_host`). curl's
-     * matching rules (leading-dot suffix match, `*` for
-     * everything) are documented rather than re-implemented here: a second
-     * implementation of host matching is a second set of bugs, and the one
-     * that ships in libcurl is the one the user's other tools already obey.
+     * but for a non-ASCII entry, which is written in the punycode form libcurl
+     * matches the dialled name on (`ascii_host`), and an entry
+     * `proxy_bypass_rejection` refuses, which is left out. curl's matching
+     * rules (leading-dot suffix match, `*` for everything) are documented
+     * rather than re-implemented here: a second implementation of host
+     * matching is a second set of bugs, and the one that ships in libcurl is
+     * the one the user's other tools already obey.
      */
     std::string proxy_bypass;
 

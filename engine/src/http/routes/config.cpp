@@ -325,6 +325,10 @@ std::string type_rejection (const vayu::db::ConfigEntry& entry, const std::strin
  * materialized, and reported as an unrelated verification failure on every
  * request afterwards (issue #706).
  *
+ * `proxyBypass` is judged entry by entry (`proxy_bypass_rejection`): libcurl
+ * reads a `localhost:8080` or a `*.example.com` as a hostname no transfer dials,
+ * so the exemption would be stored, shown in Settings and never apply.
+ *
  * `proxySystemUrl` the app writes from the operating system's answer (issue
  * #708), and the same rule applies to it as to a hand-typed `proxyUrl`: a shape
  * libcurl has no proxy support for would be stored, read under `system` mode,
@@ -348,6 +352,11 @@ std::string key_rejection (const vayu::db::ConfigEntry& entry, const std::string
     }
     if (entry.key == "proxySystemUrl" && !value.empty ()) {
         if (const auto rejection = vayu::http::proxy_url_rejection (value)) {
+            return "'" + entry.label + "' is not usable: " + *rejection;
+        }
+    }
+    if (entry.key == "proxyBypass") {
+        if (const auto rejection = vayu::http::proxy_bypass_rejection (value)) {
             return "'" + entry.label + "' is not usable: " + *rejection;
         }
     }

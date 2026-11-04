@@ -1104,6 +1104,36 @@ TEST_F (ConfigRouteTest, MalformedProxyUrlIs400EvenWhenTheModeIsOff) {
     EXPECT_EQ (status, 400) << body.dump ();
 }
 
+namespace {
+std::string bypass_body (const std::string& list) {
+    return nlohmann::json{ { "entries", { { "proxyBypass", list } } } }.dump ();
+}
+} // namespace
+
+TEST_F (ConfigRouteTest, ABypassEntryCurlCannotMatchIs400AndNamesTheForms) {
+    for (const char* list : { "localhost:8080", "*.example.com", "local*",
+         "[::1]", "https://example.com", "example.com/path" }) {
+        auto [status, body] =
+        vayu::http::routes::apply_config_update (*db_, bypass_body (list));
+        EXPECT_EQ (status, 400) << list << ": " << body.dump ();
+        const auto message = body["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("Proxy bypass list"), std::string::npos) << message;
+        EXPECT_NE (message.find ("'.suffix'"), std::string::npos) << message;
+        EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), "")
+        << list << " must not be stored";
+    }
+}
+
+TEST_F (ConfigRouteTest, EveryBypassFormCurlReadsIsStored) {
+    for (const char* list :
+    { ".example.com", "localhost, 10.0.0.0/8", "::1", "*", "", "127.0.0.1" }) {
+        auto [status, body] =
+        vayu::http::routes::apply_config_update (*db_, bypass_body (list));
+        EXPECT_EQ (status, 200) << list << ": " << body.dump ();
+        EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), list);
+    }
+}
+
 TEST_F (ConfigRouteTest, AStoredUrlSurvivesSwitchingTheModeOff) {
     // Keeping the proxy while turning it off is the ordinary thing to do, so
     // the "required" half of the rule must not fire outside manual mode.
