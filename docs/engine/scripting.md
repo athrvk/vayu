@@ -2324,7 +2324,10 @@ pm.cookies.count();             // number
 ```
 
 `pm.cookies` is what the engine is holding *for this request's URL* - matched on
-domain, path, `Secure` and expiry, exactly as it will be sent. It is what makes
+domain, path, `Secure` and expiry, exactly as it will be sent. A `Secure` cookie
+needs `https://`, except for `localhost`, `127.0.0.1` and `::1`: libcurl treats
+those as trustworthy and sends the cookie over `http://` too, so the jar reads
+(`get`, `getAll`, ...) report it there as well. It is what makes
 "log in once, reuse the session" work: a `Set-Cookie` on one request is carried
 to the next one automatically, with no header to set by hand.
 
