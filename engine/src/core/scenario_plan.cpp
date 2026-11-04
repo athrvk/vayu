@@ -528,6 +528,7 @@ nlohmann::json& raw_elements_out) {
     step.stored_url     = row.url;
     step.spec_operation = row.spec_operation.value_or (std::string ());
     step.data_template  = std::move (data_template);
+    step.collection_id  = row.collection_id;
     // A deferred step reaches an executor with a row behind it whenever it
     // needs one: the refusal above returns for a credential carrying a *data*
     // token in a run with no set. It does not for one carrying only the

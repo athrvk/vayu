@@ -145,6 +145,12 @@ struct ScenarioStep {
     /// was deferred, which `auth` above holds instead.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     nlohmann::json oauth2_config{};
+    /// The collection the step's request sits in (`requests.collection_id`):
+    /// the leaf of the chain its scripts and residual pass read, so a step of
+    /// a recursive run reads its own folder's variables, as a Send does
+    /// (#3248). Empty for a hand-built step, which reads no collection scope.
+    // NOLINTNEXTLINE(readability-redundant-member-init)
+    std::string collection_id{};
 };
 
 /** An ordered, immutable sequence of composed steps. */

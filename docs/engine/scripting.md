@@ -1900,7 +1900,12 @@ keep-the-flags behaviour described for `pm.environment` above.
 same merge `{{name}}` resolution uses: `get`, `has` and `toObject` take the
 nearest enabled definition, walking from the request's own collection up to the
 root. A variable defined on a parent collection therefore reads the same in a
-script as it substitutes in a URL.
+script as it substitutes in a URL. A step of a sequential collection run reads
+its own request's chain too, so a step in a sub-folder of the collection being
+run reads and writes that sub-folder, as a Send of it does (#3248), and a
+value one step writes into a folder is what later steps in that folder and
+below it read. `script.setup` and `script.teardown` read and write the
+collection being run.
 
 **Writes stay on the request's own collection.** `set`, `unset` and `clear`
 never reach an ancestor, so `set` on a descendant *shadows* an inherited name

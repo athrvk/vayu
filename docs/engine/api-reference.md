@@ -9401,8 +9401,16 @@ the same request does, and the two cannot drift apart.
 - **Variables.** The environment, globals and collection scopes are loaded once
   at run start, mutated in memory by every step's scripts, and written back
   **once, when the run ends** (through the same diff that keeps a Send from
-  rewriting a scope no script touched). The collection scope is the collection
-  being run.
+  rewriting a scope no script touched). The collection scope is each step's
+  own (#3248): the chain from the root collection, through the collection
+  being run, down to the folder the step's request sits in, that folder the
+  one a script's
+  `pm.collectionVariables.set` writes, as on a Send of the same request. Each
+  collection is read once, so what one step writes into a folder is what a
+  later step in that folder, or in a folder below it, reads; a sibling folder
+  does not see it. A `script.setup` and `script.teardown` read and write the
+  collection being run. Every collection a script changed is written back to
+  its own row in the one write at the end.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
@@ -9416,7 +9424,9 @@ the same request does, and the two cannot drift apart.
 > - **every** step keeps each name a scope answers written, scripted or not,
 > and each iteration resolves them immediately before that step's send,
 > against the scopes as every script and extractor up to and including the
-> step's own pre-request script left them. That is Postman's order: a login
+> step's own pre-request script left them, read through the step's own folder
+> chain (#3248), so a sub-folder's `{{name}}` in a recursive run is its
+> folder's value. That is Postman's order: a login
 > whose test script or extractor stores a new token is followed by a step whose
 > `Bearer {{token}}` carries that token, on every run and every iteration, and
 > not the one the environment held when the run started. The same four kinds of

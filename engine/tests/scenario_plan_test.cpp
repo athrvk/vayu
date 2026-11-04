@@ -257,6 +257,27 @@ TEST_F (ScenarioPlanTest, RecursiveDescentRunsEachChildWhereItSits) {
     (std::vector<std::string>{ "root_a", "a_1", "g_1", "root_b", "b_1" }));
 }
 
+// Each step names the folder its request sits in, not the collection being
+// run: the runner reads that folder's variable chain for the step (#3248).
+TEST_F (ScenarioPlanTest, EachStepNamesTheCollectionItsRequestSitsIn) {
+    seed_collection ("root", "");
+    seed_collection ("child", "root", /*order=*/1);
+    seed_collection ("grandchild", "child", /*order=*/1);
+    seed_request ("root_a", "root", /*order=*/0);
+    seed_request ("c_1", "child", /*order=*/0);
+    seed_request ("g_1", "grandchild");
+
+    const auto resolved = vayu::core::resolve_scenario (
+    *db_, block ("root", /*recursive=*/true), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    std::vector<std::string> collections;
+    collections.reserve (resolved.plan.steps.size ());
+    for (const auto& step : resolved.plan.steps) {
+        collections.push_back (step.collection_id);
+    }
+    EXPECT_EQ (collections, (std::vector<std::string>{ "root", "child", "grandchild" }));
+}
+
 // --- The cross-consumer order (fixture-driven) --------------------------------
 
 TEST_F (ScenarioPlanTest, RunOrderConformanceFixtureIsNonEmpty) {

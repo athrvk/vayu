@@ -459,6 +459,18 @@ void persist_scope (std::string_view what, const std::function<void ()>& write) 
 void persist_script_variables (vayu::db::Database& db,
 const ScriptVariableScopes& scopes,
 const std::function<void ()>& before_write) {
+    const ScriptVariableBaseline& baseline = scopes.baseline;
+    std::vector<CollectionScopeState> leaf;
+    if (!baseline.collection_id.empty ()) {
+        leaf.push_back ({ baseline.collection_id, baseline.collection, scopes.collection });
+    }
+    persist_script_variables (db, scopes, leaf, before_write);
+}
+
+void persist_script_variables (vayu::db::Database& db,
+const ScriptVariableScopes& scopes,
+std::span<const CollectionScopeState> collections,
+const std::function<void ()>& before_write) {
     const auto staged = [&before_write] {
         if (before_write) {
             before_write ();
@@ -486,16 +498,78 @@ const std::function<void ()>& before_write) {
             }
         });
 
-        if (!baseline.collection_id.empty ()) {
+        for (const auto& collection : collections) {
+            if (collection.current == collection.loaded) {
+                continue;
+            }
             persist_scope ("collection variables", [&] {
-                if (auto row = with_scope_delta (db.get_collection (baseline.collection_id),
-                    baseline.collection, scopes.collection)) {
+                if (auto row = with_scope_delta (db.get_collection (collection.collection_id),
+                    collection.loaded, collection.current)) {
                     staged ();
                     db.create_collection (*row);
                 }
             });
         }
     });
+}
+
+RunVariableScopes::RunVariableScopes (vayu::db::Database& db,
+const std::optional<std::string>& environment_id,
+std::span<const std::string> collection_ids)
+: scopes_ (load_script_variable_scopes (db, environment_id, std::string ())) {
+    std::unordered_map<std::string, size_t> position_of;
+    for (const auto& leaf_id : collection_ids) {
+        if (leaf_id.empty () || chains_.contains (leaf_id)) {
+            continue;
+        }
+        std::vector<size_t> chain;
+        for (const auto& collection : vayu::http::collection_chain (db, leaf_id)) {
+            auto [at, added] =
+            position_of.try_emplace (collection.id, collections_.size ());
+            if (added) {
+                auto variables = vayu::json::parse_variables (collection.variables);
+                collections_.push_back ({ collection.id, variables, variables });
+            }
+            chain.push_back (at->second);
+        }
+        chains_.emplace (leaf_id, std::move (chain));
+    }
+}
+
+void RunVariableScopes::stow_bound_leaf () {
+    if (bound_leaf_) {
+        collections_.at (*bound_leaf_).current = scopes_.collection;
+    }
+}
+
+ScriptVariableScopes& RunVariableScopes::bind (const std::string& collection_id) {
+    // Only a bound leaf changes, so a step in the collection already bound
+    // finds every scope as the last step left it.
+    if (collection_id == bound_id_) {
+        return scopes_;
+    }
+    stow_bound_leaf ();
+    bound_id_ = collection_id;
+    bound_leaf_.reset ();
+    scopes_.collection.clear ();
+    scopes_.collection_ancestors.clear ();
+    const auto chain = chains_.find (collection_id);
+    if (chain == chains_.end () || chain->second.empty ()) {
+        return scopes_;
+    }
+    const std::vector<size_t>& positions = chain->second;
+    for (size_t i = 0; i + 1 < positions.size (); ++i) {
+        scopes_.collection_ancestors.push_back (collections_.at (positions[i]).current);
+    }
+    bound_leaf_        = positions.back ();
+    scopes_.collection = collections_.at (*bound_leaf_).current;
+    return scopes_;
+}
+
+void RunVariableScopes::persist (vayu::db::Database& db,
+const std::function<void ()>& before_write) {
+    stow_bound_leaf ();
+    persist_script_variables (db, scopes_, collections_, before_write);
 }
 
 // Execute a script and handle exceptions uniformly

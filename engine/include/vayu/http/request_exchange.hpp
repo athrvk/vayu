@@ -34,6 +34,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -113,11 +114,9 @@ load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run);
 
 /**
  * The same scopes named directly, for a run whose collection scope does not
- * come from a single request row.
- *
- * A scenario run is exactly that case: it executes a whole collection, so the
- * scope its scripts read and write is the collection being run, not the
- * collection of some request the row happens to link. Pass an empty
+ * come from a single request row: a scenario load run's, which reads the
+ * collection being run. A sequential collection run reads each step's own
+ * folder instead (@ref RunVariableScopes, #3248). Pass an empty
  * @p collection_id for a run with no collection scope at all.
  */
 ScriptVariableScopes load_script_variable_scopes (vayu::db::Database& db,
@@ -150,6 +149,72 @@ std::vector<std::string> secret_variable_values (const ScriptVariableScopes& sco
 void persist_script_variables (vayu::db::Database& db,
 const ScriptVariableScopes& scopes,
 const std::function<void ()>& before_write = {});
+
+/**
+ * One collection's variables over a run whose steps read several (#3248): as
+ * the run read them and as its scripts left them.
+ */
+struct CollectionScopeState {
+    std::string collection_id;
+    vayu::Environment loaded;
+    vayu::Environment current;
+};
+
+/**
+ * @ref persist_script_variables for a run that holds several collection
+ * scopes: @p scopes' environment and globals, and each of @p collections by
+ * the same delta rule, all under the one `Database::with_lock`.
+ * `scopes.baseline`'s own collection is not read; @p collections replaces it.
+ * A collection the run left as it read it is not read again.
+ */
+void persist_script_variables (vayu::db::Database& db,
+const ScriptVariableScopes& scopes,
+std::span<const CollectionScopeState> collections,
+const std::function<void ()>& before_write = {});
+
+/**
+ * A sequential collection run's variable scopes (#3248).
+ *
+ * The environment, the globals and the run-local scope are one set for the
+ * whole run. The collection scope is each step's own: the chain
+ * `collection_chain` walks up from the collection the step's request sits in,
+ * that collection the writable leaf, which is what a Send of the same request
+ * reads. Every collection is read once, when the run starts, so a value one
+ * step's script writes into a folder is what every later step whose chain
+ * holds that folder reads.
+ */
+class RunVariableScopes {
+    public:
+    /// Reads the environment, the globals and the chain of each of
+    /// @p collection_ids, each collection once however many chains hold it.
+    RunVariableScopes (vayu::db::Database& db,
+    const std::optional<std::string>& environment_id,
+    std::span<const std::string> collection_ids);
+
+    /**
+     * The scopes a script or the residual pass reads for a request in
+     * @p collection_id, valid until the next call. What the previously bound
+     * leaf's scripts wrote is kept first. An id the constructor was not given,
+     * or one naming no collection, binds no collection scope.
+     */
+    ScriptVariableScopes& bind (const std::string& collection_id);
+
+    /// Every scope's change written back, by @ref persist_script_variables.
+    void persist (vayu::db::Database& db, const std::function<void ()>& before_write = {});
+
+    private:
+    /// Copy the bound leaf's variables back to its state.
+    void stow_bound_leaf ();
+
+    ScriptVariableScopes scopes_;
+    /// Every collection any chain holds, each once.
+    std::vector<CollectionScopeState> collections_;
+    /// A leaf id's chain as positions in `collections_`, root first.
+    std::unordered_map<std::string, std::vector<size_t>> chains_;
+    /// The id bound now and its leaf's position; no position when it binds none.
+    std::string bound_id_;
+    std::optional<size_t> bound_leaf_;
+};
 
 /**
  * Build the `trace_data` JSON one exchange persists (request + response, the

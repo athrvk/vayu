@@ -1158,11 +1158,15 @@ priority order, read from the top down. See
 
 The collection scope a script reads is the **whole chain**, the same one
 `{{name}}` merges (issue #234; `load_script_variable_scopes` in
-`execution.cpp` builds it from `collection_chain`). A variable defined on an
-ancestor collection therefore reads the same in `pm.collectionVariables.get`,
-`pm.variables.get` and `pm.variables.replaceIn("{{name}}")` as it substitutes
-in the URL (and `pm.collectionVariables.replaceIn`, which reads that scope
-alone).
+`engine/src/http/request_exchange.cpp` builds it from `collection_chain`). A
+variable defined on an ancestor collection therefore reads the same in
+`pm.collectionVariables.get`, `pm.variables.get` and
+`pm.variables.replaceIn("{{name}}")` as it substitutes in the URL (and
+`pm.collectionVariables.replaceIn`, which reads that scope alone). A step of a
+collection run reads the chain of its own request's folder, exactly as a Send
+of that request does, even when the run was started on a parent (#3248,
+`RunVariableScopes`); the run's `script.setup` and `script.teardown` read the
+collection being run.
 
 **Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
 only ever touch the request's own collection - the one

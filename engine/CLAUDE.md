@@ -1233,7 +1233,9 @@ any, and when one holds a kind the registry marks `writes_variables` (every
 composes with `VariableDeferral::Always`, an internal `compose_request_core`
 parameter, never a body field. So an unscripted step sends the token an earlier
 step's test script or extractor stored; a plan with no such element resolves at
-compose. A new kind that writes a variable sets the flag. Four things
+compose. Either way a step reads its own folder's chain, the one composition
+read: the sequential runner binds `RunVariableScopes` to
+`ScenarioStep::collection_id` per step (#3248), never one run-wide chain. A new kind that writes a variable sets the flag. Four things
 resolve at compose whatever a script does: `$` names (generators once, the
 iteration identity), the `data` namespace and bound columns, a name whose value
 reaches one of those, and a file path (`src`: the residual pass never resolves
