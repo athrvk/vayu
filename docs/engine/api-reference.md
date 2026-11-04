@@ -8525,8 +8525,8 @@ latency and a body look identical whether or not the protocol you asked for was
 granted. Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and
 every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215));
 nothing in the API said so. The same field is stored on a design run's
-`trace_data.response`, and load runs carry the whole-run count as
-`summary.httpVersionDowngraded` in
+`trace_data.response`, and load runs and collection runs carry the
+whole-run count as `summary.httpVersionDowngraded` in
 [`GET /runs/:runId/report`](#get-runsrunidreport).
 
 **One timing convention.** The eight phase keys above (`totalMs` through
