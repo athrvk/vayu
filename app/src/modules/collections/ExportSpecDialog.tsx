@@ -173,7 +173,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 								<p className="col-start-2 -mt-2 text-label text-muted-foreground">
 									{mode === "full"
 										? "Writes every change made in Vayu, new requests included."
-										: "Updates values and examples. The spec's structure stays as it is."}
+										: "Updates values and examples; operations no request here claims are removed."}
 								</p>
 							</>
 						)}
