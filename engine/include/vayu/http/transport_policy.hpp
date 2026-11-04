@@ -339,15 +339,28 @@ match_client_certificate (const TransportPolicy& policy, std::string_view host, 
 /**
  * @brief Why @p pem cannot be a CA bundle, or nullopt when it can.
  *
- * The one copy of the rule, shared by `POST /config` (which rejects a bad
- * paste outright) and the resolver (which re-checks a row edited around the
- * route). Deliberately shallow - it asks whether the text is PEM-shaped, not
- * whether the certificates inside it are valid or unexpired, because a
- * pasted-in-full chain that curl accepts must not be refused by a parser of
- * ours, and the certificate that fails to verify says so at handshake time
- * with libcurl's own error rather than a guess of ours at paste time.
+ * The resolver's check, and the first half of `ca_pem_parse_rejection`.
+ * Deliberately shallow - it asks whether the text is PEM-shaped, not whether
+ * the certificates inside it parse, are valid or are unexpired: a stored value
+ * with one bad block among good ones must still load the good ones
+ * (`resolve_transport_policy` cuts the bad block out), and a certificate that
+ * fails to verify says so at handshake time with libcurl's own error.
  */
 std::optional<std::string> ca_pem_rejection (std::string_view pem);
+
+/**
+ * @brief Why @p pem may not be stored as `customCaCertificates`, or nullopt.
+ *
+ * `ca_pem_rejection`, then every certificate block parsed with OpenSSL, the
+ * reader libcurl loads the bundle file with (#3256). OpenSSL aborts the whole
+ * file at the first block it cannot parse, so one bad block in a paste would
+ * make every https send fail. A refusal names the block, counted from 1 over
+ * the certificate blocks of the paste: "certificate 2 of 3 does not parse".
+ * Only the parse is asked, never validity or expiry. Text between blocks is
+ * ignored, and the legacy `X509 CERTIFICATE` and `TRUSTED CERTIFICATE` labels
+ * count as certificate blocks, because OpenSSL loads them.
+ */
+std::optional<std::string> ca_pem_parse_rejection (std::string_view pem);
 
 /**
  * @brief The trust anchors this platform verifies with today, as PEM text.

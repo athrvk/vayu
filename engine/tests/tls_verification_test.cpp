@@ -254,6 +254,26 @@ TEST_F (CustomCaVerificationTest, TheAddedCaExtendsTheStoreRatherThanReplacingIt
     EXPECT_EQ (response.status_code, 200);
 }
 
+TEST_F (CustomCaVerificationTest, AStoredBlockThatDoesNotParseDoesNotCostTheGoodCaItsTrust) {
+    // A value stored before `POST /config` parsed its paste (#3256). OpenSSL
+    // abandons a bundle file at its first bad block, which failed every https
+    // send - this one included, though the CA that signed it sits right beside.
+    TestCertificateAuthority ca;
+    TlsServer server (ca);
+    const std::string unparseable =
+    "-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n";
+
+    set_custom_ca (unparseable + ca.pem ());
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_FALSE (policy.ca_bundle_path.empty ());
+
+    const Response response = send_through (policy, server.url ("/hello"));
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "one bad block took the whole bundle with it: " << to_string (response.error_code)
+    << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+}
+
 // ---------------------------------------------------------------------------
 // An https:// proxy is verified like the origin (issue #2469)
 // ---------------------------------------------------------------------------
