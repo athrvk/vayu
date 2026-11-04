@@ -154,7 +154,10 @@ void SseParser::consume_line (std::string_view line, std::vector<SseEvent>& out)
 
 void SseParser::apply_field (std::string_view field, std::string_view value) {
     if (field == "data") {
-        has_data_ = true;
+        // A previous line that filled the cap had no room for its joining `\n`,
+        // so a further data line is content past the cap.
+        const bool join_lost = has_data_ && !data_.ends_with ('\n');
+        has_data_            = true;
         // The buffer carries the joining `\n` after every data line and loses
         // the last one at dispatch, exactly as the spec builds it - which is
         // what makes a leading empty `data:` line survive as a leading newline
@@ -164,16 +167,18 @@ void SseParser::apply_field (std::string_view field, std::string_view value) {
         // hold; counting it here is what lets a truncated event still report
         // the size the stream actually sent.
         data_bytes_ += value.size () + 1 + line_dropped_;
-        if (line_dropped_ > 0) {
+        if (line_dropped_ > 0 || join_lost) {
             data_truncated_ = true;
         }
         const std::size_t room =
         max_event_bytes_ > data_.size () ? max_event_bytes_ - data_.size () : 0;
-        if (value.size () + 1 > room) {
-            data_.append (value.substr (0, std::min (room, value.size ())));
+        // Only payload bytes make an event truncated: the joining `\n` is
+        // dropped at dispatch, so a value that exactly fills the cap is whole
+        // and merely has no room left for a join nobody will read.
+        data_.append (value.substr (0, std::min (room, value.size ())));
+        if (value.size () > room) {
             data_truncated_ = true;
-        } else {
-            data_.append (value);
+        } else if (data_.size () < max_event_bytes_) {
             data_.push_back ('\n');
         }
         return;

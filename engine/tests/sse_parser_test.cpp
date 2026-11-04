@@ -225,6 +225,27 @@ TEST (SseParser, TruncatesAnOversizedEventAndSaysSo) {
     EXPECT_EQ (events[0].data_bytes, 16u);
 }
 
+// The joining newline is shed at dispatch, so it is not payload and must not
+// count against the cap.
+TEST (SseParser, AnEventOfExactlyTheCapIsNotTruncated) {
+    SseParser parser (8);
+    const auto events = parser.feed ("data: 01234567\n\n");
+    ASSERT_EQ (events.size (), 1u);
+    EXPECT_FALSE (events[0].truncated);
+    EXPECT_EQ (events[0].data, "01234567");
+    EXPECT_EQ (events[0].data_bytes, 8u);
+}
+
+// The join that would have separated the two lines had no room, so the second
+// line is content the cap refused even though it holds no payload byte.
+TEST (SseParser, ALineAfterACapFillingLineIsTruncated) {
+    SseParser parser (8);
+    const auto events = parser.feed ("data: 01234567\ndata:\n\n");
+    ASSERT_EQ (events.size (), 1u);
+    EXPECT_TRUE (events[0].truncated);
+    EXPECT_EQ (events[0].data, "01234567");
+}
+
 // The unbounded-buffer case this cap exists for: a server that never sends a
 // line break at all. Before the cap this grew for as long as the server talked.
 TEST (SseParser, ANeverTerminatedLineIsBoundedByTheCap) {
