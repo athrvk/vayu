@@ -1233,7 +1233,11 @@ any, and when one holds a kind the registry marks `writes_variables` (every
 composes with `VariableDeferral::Always`, an internal `compose_request_core`
 parameter, never a body field. So an unscripted step sends the token an earlier
 step's test script or extractor stored; a plan with no such element resolves at
-compose. A new kind that writes a variable sets the flag. Four things
+compose. Either way a step reads its own folder's chain, the one composition
+read: the sequential runner binds `RunVariableScopes` to
+`ScenarioStep::collection_id` per step (#3248), and a scenario load run reads
+`LoadScopeBases::for_step` (one flattened base per collection, built before the
+first submission), never one run-wide chain. A new kind that writes a variable sets the flag. Four things
 resolve at compose whatever a script does: `$` names (generators once, the
 iteration identity), the `data` namespace and bound columns, a name whose value
 reaches one of those, and a file path (`src`: the residual pass never resolves
@@ -1279,10 +1283,13 @@ two rules read different reaches
 the names that still held a token. A data row whose header-name column is
 blank is refused at bind time (`core/scenario_data.cpp`). A scenario load
 run's `submit_one` now runs this pass too (#1495), against a per-VU view: the
-run's scopes flattened once (`vayu::http::routes::flatten_variable_scopes`)
+step's folder base flattened once (`vayu::http::routes::flatten_variable_scopes`)
 plus that VU's own small write layer (`ScopeOverlay`, on `VirtualUser`), so a
 value one VU's step 1 sets reaches that same VU's step 2 `{{token}}` without
-two VUs' writes ever landing in one shared map. Never refused under load,
+two VUs' writes ever landing in one shared map. The overlay keeps collection
+writes per collection id (`ScriptVariableScopes::collection_ancestor_ids`
+names the chain), so a folder's write reaches its own and its sub-folders'
+steps and no sibling's (#3248). Never refused under load,
 only counted, on the same #1503 rule the load path has always followed: an
 unresolved name or a header-name collision the pass produces goes on the wire
 regardless, a late credential included (`resolve_load_residuals`, the one

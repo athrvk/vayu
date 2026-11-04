@@ -809,8 +809,9 @@ const ResultAnnotations& annotations) {
         .pre_script_result  = pre_result,
         .post_script_result = unused_post_result,
         .set_variable =
-        [&] (std::string_view scope, const std::string& name,
-        const std::string& value) { overlay.set (scope, name, value); },
+        [&] (std::string_view scope, const std::string& name, const std::string& value) {
+            overlay.set (scope, name, value, context->lifecycle_scopes);
+        },
         .unset_variable =
         [&] (std::string_view scope, const std::string& name) {
             return overlay.unset (scope, name, context->lifecycle_scopes);
@@ -894,8 +895,9 @@ const ResultAnnotations& annotations) {
         .pre_script_result  = unused_pre_result,
         .post_script_result = post_result,
         .set_variable =
-        [&] (std::string_view scope, const std::string& name,
-        const std::string& value) { overlay.set (scope, name, value); },
+        [&] (std::string_view scope, const std::string& name, const std::string& value) {
+            overlay.set (scope, name, value, context->lifecycle_scopes);
+        },
         .unset_variable =
         [&] (std::string_view scope, const std::string& name) {
             return overlay.unset (scope, name, context->lifecycle_scopes);

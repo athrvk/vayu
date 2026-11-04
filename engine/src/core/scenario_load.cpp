@@ -28,6 +28,7 @@
 #include "vayu/core/script_config.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
 
@@ -462,6 +463,71 @@ nlohmann::json build_scenario_load_coverage (const ScenarioLoadState& state) {
     return state.coverage.build ();
 }
 
+std::string load_step_collection_id (const ScenarioStep& step,
+const std::string& run_collection_id) {
+    return step.collection_id.empty () ? run_collection_id : step.collection_id;
+}
+
+namespace {
+
+/// The scopes a step in @p leaf_id reads: @p run's environment and globals,
+/// and @p leaf_id's chain read from @p db, with @p run's own collection
+/// (@p run_collection_id) where the chain holds it, as setup left it.
+vayu::http::routes::ScriptVariableScopes folder_scopes (vayu::db::Database& db,
+const vayu::http::routes::ScriptVariableScopes& run,
+const std::string& run_collection_id,
+const std::string& leaf_id) {
+    vayu::http::routes::ScriptVariableScopes scopes;
+    scopes.environment = run.environment;
+    scopes.globals     = run.globals;
+    scopes.local       = run.local;
+    const auto chain   = vayu::http::collection_chain (db, leaf_id);
+    for (size_t i = 0; i < chain.size (); ++i) {
+        auto variables = chain[i].id == run_collection_id ?
+        run.collection :
+        vayu::json::parse_variables (chain[i].variables);
+        if (i + 1 == chain.size ()) {
+            scopes.collection = std::move (variables);
+        } else {
+            scopes.collection_ancestors.push_back (std::move (variables));
+            scopes.collection_ancestor_ids.push_back (chain[i].id);
+        }
+    }
+    scopes.baseline               = run.baseline;
+    scopes.baseline.collection_id = leaf_id;
+    scopes.baseline.collection    = scopes.collection;
+    return scopes;
+}
+
+LoadScopeBases::Base flattened (vayu::http::routes::ScriptVariableScopes scopes) {
+    auto vars = vayu::http::routes::flatten_variable_scopes (scopes);
+    return { std::move (scopes), std::move (vars) };
+}
+
+} // namespace
+
+LoadScopeBases::LoadScopeBases (vayu::db::Database& db,
+vayu::http::routes::ScriptVariableScopes run_collection_scopes,
+const ScenarioExecution& execution) {
+    const std::string& run_collection_id = execution.request.collection_id;
+    bases_.push_back (flattened (std::move (run_collection_scopes)));
+    std::unordered_map<std::string, size_t> base_of_collection{ { run_collection_id, 0 } };
+    base_of_step_.reserve (execution.plan.steps.size ());
+    for (const auto& step : execution.plan.steps) {
+        const std::string id = load_step_collection_id (step, run_collection_id);
+        const auto [at, added] = base_of_collection.try_emplace (id, bases_.size ());
+        if (added) {
+            auto scopes = folder_scopes (db, run_scopes (), run_collection_id, id);
+            bases_.push_back (flattened (std::move (scopes)));
+        }
+        base_of_step_.push_back (at->second);
+    }
+}
+
+const LoadScopeBases::Base& LoadScopeBases::for_step (size_t step) const {
+    return bases_.at (base_of_step_.at (step));
+}
+
 // ============================================================================
 // The virtual-user state machine
 // ============================================================================
@@ -570,7 +636,8 @@ const nlohmann::json* data_row) {
     if (!step.elements || step.elements->empty ()) {
         return {};
     }
-    const auto start = context->include_script_time ?
+    const LoadScopeBases::Base& base = state.scope_bases.for_step (step_index);
+    const auto start                 = context->include_script_time ?
     std::optional (std::chrono::steady_clock::now ()) :
     std::nullopt;
 
@@ -584,7 +651,7 @@ const nlohmann::json* data_row) {
         [&] (const std::string& script) {
             auto& engine =
             vayu::http::routes::script_engine_for_this_thread (state.script_config);
-            auto scopes = vu.scope_overlay.materialize (state.base_scopes);
+            auto scopes = vu.scope_overlay.materialize (base.scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_prerequest (request);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
@@ -596,18 +663,19 @@ const nlohmann::json* data_row) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Pre-request");
-            vu.scope_overlay.replace_from (scopes, state.base_scopes);
+            vu.scope_overlay.replace_from (scopes, base.scopes);
             return result;
         },
         .run_post_script    = nullptr,
         .pre_script_result  = pre_result,
         .post_script_result = unused_post_result,
         .set_variable =
-        [&] (std::string_view scope, const std::string& name,
-        const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        [&] (std::string_view scope, const std::string& name, const std::string& value) {
+            vu.scope_overlay.set (scope, name, value, base.scopes);
+        },
         .unset_variable =
         [&] (std::string_view scope, const std::string& name) {
-            return vu.scope_overlay.unset (scope, name, state.base_scopes);
+            return vu.scope_overlay.unset (scope, name, base.scopes);
         },
         .should_stop = nullptr,
         // This iteration's bound row, under its `data.*` namespace, beside
@@ -616,8 +684,8 @@ const nlohmann::json* data_row) {
         // `pm.variables.replaceIn` already gives it.
         .resolve_template =
         [&] (const std::string& text) {
-            vayu::http::VariableValues vars = state.base_vars;
-            vu.scope_overlay.apply_onto (vars, state.base_scopes);
+            vayu::http::VariableValues vars = base.vars;
+            vu.scope_overlay.apply_onto (vars, base.scopes);
             return vayu::http::resolve_template_with_optional_row (
             text, vars, data_row, vu.scope_overlay.local_values ());
         },
@@ -697,7 +765,8 @@ const nlohmann::json* data_row) {
     if (!step.elements || step.elements->empty ()) {
         return {};
     }
-    const auto start = context->include_script_time ?
+    const LoadScopeBases::Base& base = state.scope_bases.for_step (step_index);
+    const auto start                 = context->include_script_time ?
     std::optional (std::chrono::steady_clock::now ()) :
     std::nullopt;
 
@@ -712,7 +781,7 @@ const nlohmann::json* data_row) {
         [&] (const std::string& script) {
             auto& engine =
             vayu::http::routes::script_engine_for_this_thread (state.script_config);
-            auto scopes = vu.scope_overlay.materialize (state.base_scopes);
+            auto scopes = vu.scope_overlay.materialize (base.scopes);
             auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
             vayu::http::routes::bind_variable_scopes (script_ctx, scopes);
             context->script_send.apply (script_ctx);
@@ -724,23 +793,24 @@ const nlohmann::json* data_row) {
             };
             auto result = vayu::http::routes::execute_script (
             engine, script, script_ctx, "Post-request");
-            vu.scope_overlay.replace_from (scopes, state.base_scopes);
+            vu.scope_overlay.replace_from (scopes, base.scopes);
             return result;
         },
         .pre_script_result  = unused_pre_result,
         .post_script_result = post_result,
         .set_variable =
-        [&] (std::string_view scope, const std::string& name,
-        const std::string& value) { vu.scope_overlay.set (scope, name, value); },
+        [&] (std::string_view scope, const std::string& name, const std::string& value) {
+            vu.scope_overlay.set (scope, name, value, base.scopes);
+        },
         .unset_variable =
         [&] (std::string_view scope, const std::string& name) {
-            return vu.scope_overlay.unset (scope, name, state.base_scopes);
+            return vu.scope_overlay.unset (scope, name, base.scopes);
         },
         .should_stop = nullptr,
         .resolve_template =
         [&] (const std::string& text) {
-            vayu::http::VariableValues vars = state.base_vars;
-            vu.scope_overlay.apply_onto (vars, state.base_scopes);
+            vayu::http::VariableValues vars = base.vars;
+            vu.scope_overlay.apply_onto (vars, base.scopes);
             return vayu::http::resolve_template_with_optional_row (
             text, vars, data_row, vu.scope_overlay.local_values ());
         },
@@ -899,8 +969,9 @@ class ScenarioLoadDriver {
         }
         const int64_t pipeline_before_ms = before_result.elapsed_ms;
         {
-            vayu::http::VariableValues vars = state_->base_vars;
-            vu->scope_overlay.apply_onto (vars, state_->base_scopes);
+            const LoadScopeBases::Base& base = state_->scope_bases.for_step (step_index);
+            vayu::http::VariableValues vars = base.vars;
+            vu->scope_overlay.apply_onto (vars, base.scopes);
             const auto unresolved = vayu::http::routes::resolve_load_residuals (
             request, vars, std::move (late_auth));
             if (!unresolved.empty ()) {
@@ -1622,16 +1693,14 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     std::max<size_t> (1, static_cast<size_t> (config.value ("iterations", 1000))) :
     0;
 
-    // The run's shared variable scopes (issue #1495) - loaded and, since
-    // #1499, run through `script.setup` by `execute_load_test` before this
-    // function was even called, so a setup script's writes are already in
-    // `base_scopes` by the time it is handed in.
-
     vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
     script_config.allow_send_request = vayu::http::read_allow_script_requests (config);
 
+    // `base_scopes` already holds what `script.setup` wrote (#1499), so every
+    // folder base built from it does too.
     auto state            = std::make_shared<ScenarioLoadState> (plan, vu_count,
-    make_coverage_tally (execution), std::move (base_scopes), script_config);
+    make_coverage_tally (execution),
+    LoadScopeBases (db, std::move (base_scopes), execution), script_config);
     state->data_row_count = execution.data_rows.size ();
     state->scripts_mode   = context->scripts_override;
     // The same cycle guard the sequential run's own `setNextRequest` walk

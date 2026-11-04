@@ -62,6 +62,7 @@ function storedStep(
 		dataRowIndex?: number;
 		stepsNotRun?: number;
 		extractorMisses?: number;
+		unresolvedTokens?: number;
 	} = {}
 ): NonNullable<RunReport["results"]>[number] {
 	return {
@@ -74,6 +75,7 @@ function storedStep(
 			dataRowIndex: overrides.dataRowIndex,
 			stepsNotRun: overrides.stepsNotRun,
 			extractorMisses: overrides.extractorMisses,
+			unresolvedTokens: overrides.unresolvedTokens,
 			stepName: overrides.name ?? `Step ${stepIndex + 1}`,
 			requestId: `req_${stepIndex}`,
 			outcome,
@@ -541,6 +543,24 @@ describe("stepRowsFromReport", () => {
 		expect(rows[1]).not.toHaveProperty("extractorMisses");
 		// The engine omits a zero, so a stored one is not a claim either.
 		expect(rows[2]).not.toHaveProperty("extractorMisses");
+	});
+
+	it("carries a stored step's unresolved names (issue #3248)", () => {
+		// Mutation check: drop the `unresolvedTokens` spread in
+		// `stepRowFromResult` and the first expectation fails.
+		const rows = stepRowsFromReport(
+			report({
+				results: [
+					storedStep(0, 0, "passed", { unresolvedTokens: 2 }),
+					storedStep(0, 1),
+					storedStep(1, 0, "passed", { unresolvedTokens: 0 }),
+				],
+			})
+		);
+
+		expect(rows[0].unresolvedTokens).toBe(2);
+		expect(rows[1]).not.toHaveProperty("unresolvedTokens");
+		expect(rows[2]).not.toHaveProperty("unresolvedTokens");
 	});
 
 	it("carries the request the step ran, which is the way back to it", () => {

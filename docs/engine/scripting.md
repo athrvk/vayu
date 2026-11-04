@@ -1900,7 +1900,13 @@ keep-the-flags behaviour described for `pm.environment` above.
 same merge `{{name}}` resolution uses: `get`, `has` and `toObject` take the
 nearest enabled definition, walking from the request's own collection up to the
 root. A variable defined on a parent collection therefore reads the same in a
-script as it substitutes in a URL.
+script as it substitutes in a URL. A step of a collection run reads its own
+request's chain too, sequential or under load, so a step in a sub-folder of the
+collection being run reads and writes that sub-folder, as a Send of it does
+(#3248), and a value one step writes into a folder is what later steps in that
+folder and below it read (under load, that virtual user's later steps). A
+sibling folder does not see it. `script.setup` and `script.teardown` read and
+write the collection being run.
 
 **Writes stay on the request's own collection.** `set`, `unset` and `clear`
 never reach an ancestor, so `set` on a descendant *shadows* an inherited name
@@ -4185,8 +4191,9 @@ The **language** is current; what is missing is the **host environment**:
 deferred replay reads the run's own environment (the `environmentId` the run was
 started with), the globals, and the collection chain - the leaf plus its
 ancestors, exactly as a Send does, so an inherited name answers the same in both
-modes. A scenario load run's collection scope is the collection being *run*; a
-single-request run's is the collection of its linked request. Earlier engines
+modes. A scenario load run's step reads the chain of its own folder (#3248),
+as the run itself did, and one set of scopes per collection serves the pass;
+a single-request run's is the collection of its linked request. Earlier engines
 bound an empty environment and no other scope at all, so
 `pm.environment.get('region')` read `undefined` under load and the same test
 gave opposite verdicts on Send and under load.
@@ -4305,7 +4312,12 @@ lives as long as the VU (#3044), so a `control.once` login's token reaches
 every later iteration; only its run-local scope is emptied at the iteration
 boundary, where `pm.cookies`' per-VU jar is. An inline script's `unset()` or
 `clear()` of a name the run loaded hides that stored value from the same VU
-alone, until a later write sets the name again (#3088).
+alone, until a later write sets the name again (#3088). The base a step's
+overlay sits on is its own folder's (#3248): the environment and globals the
+run loaded and `script.setup` left, and the chain from the root down to the
+step's folder, read once before the first submission. The overlay keeps a
+collection write per folder, so it answers that VU's later steps in the same
+folder and in folders below it, and never a step in a sibling folder.
 
 **A single-request load run's `requestElements` dispatch the same way, per
 submission rather than per VU (issue #1594) - there is no persistent VU

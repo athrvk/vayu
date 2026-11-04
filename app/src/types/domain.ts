@@ -1370,6 +1370,12 @@ export interface ScenarioStepEvent {
 	 */
 	extractorMisses?: number;
 	/**
+	 * How many distinct `{{names}}` this step's request still held when it was
+	 * sent (issue #3248). Absent, never `0`, when none did - on the same terms
+	 * as the stored row's.
+	 */
+	unresolvedTokens?: number;
+	/**
 	 * The stored request this step ran (issue #831), the same id
 	 * `stamp_step_identity` writes onto the stored trace - so the way back to a
 	 * step's request exists while the run streams, which is when a step that has
@@ -1784,6 +1790,12 @@ export interface RunResultTrace {
 	 * stored before the engine counted them.
 	 */
 	extractorMisses?: number;
+	/**
+	 * How many distinct `{{names}}` this step's request still held when it was
+	 * sent (issue #3248). Absent, never `0`, on a step where none did, and on a
+	 * row stored before the engine counted them.
+	 */
+	unresolvedTokens?: number;
 }
 
 /**

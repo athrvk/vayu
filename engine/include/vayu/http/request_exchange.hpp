@@ -34,6 +34,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -86,6 +87,10 @@ struct ScriptVariableScopes {
     vayu::Environment globals;
     vayu::Environment collection;
     std::vector<vayu::Environment> collection_ancestors;
+    /// The id of each of `collection_ancestors`, in the same order; the
+    /// leaf's is `baseline.collection_id`. What lets a load run's
+    /// @ref ScopeOverlay tell one folder's writes from another's (#3248).
+    std::vector<std::string> collection_ancestor_ids;
     /**
      * The run-local scope `pm.variables.set` writes (#2564): read above every
      * other tier, a bound data row included, and never stored -
@@ -113,11 +118,9 @@ load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run);
 
 /**
  * The same scopes named directly, for a run whose collection scope does not
- * come from a single request row.
- *
- * A scenario run is exactly that case: it executes a whole collection, so the
- * scope its scripts read and write is the collection being run, not the
- * collection of some request the row happens to link. Pass an empty
+ * come from a single request row: the collection being run, which a scenario
+ * load run's `script.setup` and `script.teardown` read. Its steps, like a
+ * sequential collection run's, read their own folders (#3248). Pass an empty
  * @p collection_id for a run with no collection scope at all.
  */
 ScriptVariableScopes load_script_variable_scopes (vayu::db::Database& db,
@@ -150,6 +153,72 @@ std::vector<std::string> secret_variable_values (const ScriptVariableScopes& sco
 void persist_script_variables (vayu::db::Database& db,
 const ScriptVariableScopes& scopes,
 const std::function<void ()>& before_write = {});
+
+/**
+ * One collection's variables over a run whose steps read several (#3248): as
+ * the run read them and as its scripts left them.
+ */
+struct CollectionScopeState {
+    std::string collection_id;
+    vayu::Environment loaded;
+    vayu::Environment current;
+};
+
+/**
+ * @ref persist_script_variables for a run that holds several collection
+ * scopes: @p scopes' environment and globals, and each of @p collections by
+ * the same delta rule, all under the one `Database::with_lock`.
+ * `scopes.baseline`'s own collection is not read; @p collections replaces it.
+ * A collection the run left as it read it is not read again.
+ */
+void persist_script_variables (vayu::db::Database& db,
+const ScriptVariableScopes& scopes,
+std::span<const CollectionScopeState> collections,
+const std::function<void ()>& before_write = {});
+
+/**
+ * A sequential collection run's variable scopes (#3248).
+ *
+ * The environment, the globals and the run-local scope are one set for the
+ * whole run. The collection scope is each step's own: the chain
+ * `collection_chain` walks up from the collection the step's request sits in,
+ * that collection the writable leaf, which is what a Send of the same request
+ * reads. Every collection is read once, when the run starts, so a value one
+ * step's script writes into a folder is what every later step whose chain
+ * holds that folder reads.
+ */
+class RunVariableScopes {
+    public:
+    /// Reads the environment, the globals and the chain of each of
+    /// @p collection_ids, each collection once however many chains hold it.
+    RunVariableScopes (vayu::db::Database& db,
+    const std::optional<std::string>& environment_id,
+    std::span<const std::string> collection_ids);
+
+    /**
+     * The scopes a script or the residual pass reads for a request in
+     * @p collection_id, valid until the next call. What the previously bound
+     * leaf's scripts wrote is kept first. An id the constructor was not given,
+     * or one naming no collection, binds no collection scope.
+     */
+    ScriptVariableScopes& bind (const std::string& collection_id);
+
+    /// Every scope's change written back, by @ref persist_script_variables.
+    void persist (vayu::db::Database& db, const std::function<void ()>& before_write = {});
+
+    private:
+    /// Copy the bound leaf's variables back to its state.
+    void stow_bound_leaf ();
+
+    ScriptVariableScopes scopes_;
+    /// Every collection any chain holds, each once.
+    std::vector<CollectionScopeState> collections_;
+    /// A leaf id's chain as positions in `collections_`, root first.
+    std::unordered_map<std::string, std::vector<size_t>> chains_;
+    /// The id bound now and its leaf's position; no position when it binds none.
+    std::string bound_id_;
+    std::optional<size_t> bound_leaf_;
+};
 
 /**
  * Build the `trace_data` JSON one exchange persists (request + response, the
@@ -331,6 +400,14 @@ std::vector<vayu::http::CookieWrite>* writes);
  * reads back exactly as `pm.variables.get` would report it, and a name it
  * never touched still falls through to the run's shared value.
  *
+ * The collection entries are kept per collection id (#3248), because a
+ * scenario load run's steps read different folders: every method takes the
+ * base of the step at hand, a write lands on that base's leaf
+ * (`baseline.collection_id`), and a read takes the entries of every collection
+ * on its chain (`collection_ancestor_ids`). So what a step writes into its
+ * folder answers that folder's later steps and its sub-folders', never a
+ * sibling folder's, as in a sequential collection run.
+ *
  * The run-local scope (#2564) rides here too, which is what makes it per-VU:
  * it starts each iteration empty (a load run's base scopes hold no local,
  * `run_collection_setup` discards what `script.setup` set) and is the one
@@ -349,8 +426,12 @@ class ScopeOverlay {
     public:
     /// Mirrors `set_scope_variable`'s own target selection, so an `extract.*`
     /// element's `ElementContext::set_variable` call lands in the same slot
-    /// here it would in a design send's shared scopes.
-    void set (std::string_view scope, const std::string& name, const std::string& value);
+    /// here it would in a design send's shared scopes; a collection write
+    /// lands on @p base's leaf.
+    void set (std::string_view scope,
+    const std::string& name,
+    const std::string& value,
+    const ScriptVariableScopes& base);
 
     /// `unset_scope_variable`'s counterpart: drops this VU's own value of
     /// @p name and hides @p base's, answering whether the scope held one.
@@ -369,14 +450,13 @@ class ScopeOverlay {
      * `Variable`'s equality to find what changed. A tombstoned name the
      * copy holds was set by the script, so its tombstone goes; a name of
      * @p base's scope the copy lacks was unset, by the script or before it,
-     * and is tombstoned. @p base is the one `materialize` was given.
+     * and is tombstoned. @p base is the one `materialize` was given; only
+     * its leaf's collection entry is replaced, because a script cannot write
+     * an ancestor.
      */
     void replace_from (const ScriptVariableScopes& scopes, const ScriptVariableScopes& base);
 
-    [[nodiscard]] bool empty () const {
-        return environment_.empty () && collection_.empty () &&
-        globals_.empty () && local_.empty ();
-    }
+    [[nodiscard]] bool empty () const;
 
     /// Empty the run-local scope alone, at a VU's iteration boundary (#3044):
     /// a `pm.variables.set` value lasts one iteration, while what the VU saved
@@ -384,11 +464,11 @@ class ScopeOverlay {
     /// iterations, the way a sequential run keeps it.
     void clear_local ();
 
-    /// Applied lowest precedence first, so the highest-precedence overlay
-    /// entry a VU wrote is what survives on @p vars - the same order
-    /// `values_from_scopes` built @p vars in to begin with. @p vars is
-    /// @p base flattened; a tombstoned name is re-read from @p base's
-    /// scopes, because the flattened map cannot say which scope answered it.
+    /// Every name this VU wrote or unset on @p base's chain, re-read over
+    /// @p base's scopes as `materialize (base)` would answer it, so a write
+    /// in a lower scope stays under a higher scope's base value. @p vars is
+    /// @p base flattened, and the flattened map cannot say which scope
+    /// answered a name.
     void apply_onto (vayu::http::VariableValues& vars, const ScriptVariableScopes& base) const;
 
     /// This VU's local scope as text (#2564), for the one reader that must
@@ -400,10 +480,9 @@ class ScopeOverlay {
 
     /**
      * A full `ScriptVariableScopes` an inline script can run against: @p
-     * base's read-only ancestor chain verbatim, and its environment /
-     * collection / globals / local with this VU's overlay layered on top -
-     * the one place this issue pays a real copy, and only for a step whose
-     * `script.*` element actually opted into running inline.
+     * base's scopes, its read-only ancestors included, with this VU's overlay
+     * layered on top - the one place this issue pays a real copy, and only
+     * for a step whose `script.*` element actually opted into running inline.
      */
     [[nodiscard]] ScriptVariableScopes materialize (const ScriptVariableScopes& base) const;
 
@@ -419,15 +498,22 @@ class ScopeOverlay {
         }
     };
 
-    Layer& layer (std::string_view scope);
+    Layer& layer (std::string_view scope, const ScriptVariableScopes& base);
+    /// Collection @p id's overrides, or null when this VU holds none.
+    [[nodiscard]] const Layer* collection_layer (const std::string& id) const;
+    /// The overrides of @p base's ancestor @p position, or null when this VU
+    /// holds none or @p base does not name that ancestor.
+    [[nodiscard]] const Layer*
+    ancestor_layer (const ScriptVariableScopes& base, size_t position) const;
     /// What `values_from_scopes` would answer for @p name over
     /// `materialize (base)`, without the copy: nothing when no scope does.
     [[nodiscard]] std::optional<std::string>
     visible_value (const std::string& name, const ScriptVariableScopes& base) const;
 
     Layer environment_;
-    Layer collection_;
     Layer globals_;
+    /// Keyed by collection id.
+    std::unordered_map<std::string, Layer> collections_;
     vayu::Environment local_;
 };
 
@@ -646,6 +732,11 @@ struct ExchangeOutcome {
     /// carrying its sentence; empty otherwise. `POST /execute` answers it as
     /// `refusalCode`.
     std::string refusal_code;
+    /// Every `{{name}}` still on the request when it went to the transfer,
+    /// after the residual pass and the late auth (`unresolved_token_names`);
+    /// empty for a request refused before the transfer or skipped. A
+    /// collection run's step counts them (#3248).
+    std::vector<std::string> unresolved_tokens;
     /**
      * Whether the request was actually sent.
      *

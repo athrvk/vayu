@@ -9410,8 +9410,16 @@ the same request does, and the two cannot drift apart.
 - **Variables.** The environment, globals and collection scopes are loaded once
   at run start, mutated in memory by every step's scripts, and written back
   **once, when the run ends** (through the same diff that keeps a Send from
-  rewriting a scope no script touched). The collection scope is the collection
-  being run.
+  rewriting a scope no script touched). The collection scope is each step's
+  own (#3248): the chain from the root collection, through the collection
+  being run, down to the folder the step's request sits in, that folder the
+  one a script's
+  `pm.collectionVariables.set` writes, as on a Send of the same request. Each
+  collection is read once, so what one step writes into a folder is what a
+  later step in that folder, or in a folder below it, reads; a sibling folder
+  does not see it. A `script.setup` and `script.teardown` read and write the
+  collection being run. Every collection a script changed is written back to
+  its own row in the one write at the end.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
@@ -9425,7 +9433,9 @@ the same request does, and the two cannot drift apart.
 > - **every** step keeps each name a scope answers written, scripted or not,
 > and each iteration resolves them immediately before that step's send,
 > against the scopes as every script and extractor up to and including the
-> step's own pre-request script left them. That is Postman's order: a login
+> step's own pre-request script left them, read through the step's own folder
+> chain (#3248), so a sub-folder's `{{name}}` in a recursive run is its
+> folder's value. That is Postman's order: a login
 > whose test script or extractor stores a new token is followed by a step whose
 > `Bearer {{token}}` carries that token, on every run and every iteration, and
 > not the one the environment held when the run started. The same four kinds of
@@ -9719,7 +9729,12 @@ whose error ended its iteration short of the plan's end also carries
 `stepsNotRun`, defined under Outcomes below; it is absent, never `0`, on every
 other row. A step whose extractors found nothing carries `extractorMisses`
 (#3053), how many of them did, on the same absent-at-`0` terms (the rule is in
-[Elements](elements.md#kinds)). Bodies are
+[Elements](elements.md#kinds)). A step whose request still held a `{{name}}`
+when it went to the transfer carries `unresolvedTokens` (#3248), how many
+distinct names, on the same terms: the residual pass answers every name the
+step's scopes define, so a name counted here is one nothing defined, sent as
+written, never refused. A step refused or skipped before the transfer carries
+none. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -9902,6 +9917,14 @@ knob.
 - **Cookies are per virtual user**, empty at the start of each iteration, and
   the environment jar is untouched. One session shared between 1,000 virtual
   users is not the thing being measured.
+- **Variables are each step's own folder's** (#3248), as in a design-mode
+  collection run: the environment and globals the run loaded, and the chain
+  from the root collection down to the folder the step's request sits in, the
+  run collection's entry as `script.setup` left it. All of it is read once,
+  before the first request, so a recursive run sends a sub-folder's `{{name}}`
+  with that folder's value whether or not the plan carries a script. A
+  `script.setup` and `script.teardown` read the collection being run. Nothing
+  a load run's scripts write is saved.
 - **The element pipeline runs here too, per virtual user (issue #1495).**
   `extract.*` and `assert.*` always run - before the send (`step.before`) and
   after the response (`step.after`). A `script.pre` / `script.post` element
@@ -9912,7 +9935,9 @@ knob.
   its own overlay, never the run's shared scopes, so a name one user's step 1
   writes (an `extract.json`'s target, an inline script's
   `pm.environment.set`) is visible only to that same user's later steps, never
-  to another user's concurrent one. Those saved names outlive the iteration
+  to another user's concurrent one. A collection write stays on the step's own
+  folder (#3248): it answers that user's later steps in the folder and in
+  folders below it, not a step in a sibling folder. Those saved names outlive the iteration
   that wrote them (#3044): a `control.once` login's extracted token still
   answers every later iteration of that user. An extractor's miss with no
   `default` unsets its name the same way (#3053): for that user alone, a value
@@ -11098,6 +11123,7 @@ data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
        "requestId":"req_abc123",
        "tests":{"passed":2,"failed":0},"extractorMisses":1,
+       "unresolvedTokens":1,
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
                      "matchedContentType":"application/json",
                      "failures":[],"failuresTotal":0}}
@@ -11116,7 +11142,8 @@ and after a reload. `stepsNotRun` follows the same rule: present only on the
 step whose error ended its iteration short of the plan's end, with how many
 plan positions that cost (see Outcomes under [Scenario runs](#scenario-runs)),
 and absent rather than `0` everywhere else. `extractorMisses` is the stored
-row's count of extractions that found nothing (#3053), on the same terms.
+row's count of extractions that found nothing (#3053), on the same terms, and
+`unresolvedTokens` its count of names the step sent unresolved (#3248).
 `validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its

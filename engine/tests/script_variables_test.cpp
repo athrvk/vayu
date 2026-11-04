@@ -64,6 +64,7 @@ namespace {
 
 using vayu::http::routes::load_script_variable_scopes;
 using vayu::http::routes::persist_script_variables;
+using vayu::http::routes::RunVariableScopes;
 using vayu::http::routes::ScriptVariableScopes;
 
 // A blob in the shape the app writes: every field, including the ordering key.
@@ -613,7 +614,7 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheTypedValueToTheNextStep) 
     scopes_ = overlay.materialize (base);
     run ("pm.environment.set('n', pm.environment.get('n') + 1);");
     overlay.replace_from (scopes_, base);
-    overlay.set ("env", "list", "extracted");
+    overlay.set ("env", "list", "extracted", base);
 
     scopes_ = overlay.materialize (base);
     run (R"JS(
@@ -776,6 +777,35 @@ class PersistScriptVariablesTest : public ::testing::Test {
 
     ScriptVariableScopes load () {
         return load_script_variable_scopes (*db_, run_);
+    }
+
+    /// A folder under @p parent_id holding no variables.
+    void seed_folder (const std::string& id, const std::string& parent_id) {
+        vayu::db::Collection folder;
+        folder.id         = id;
+        folder.name       = "Folder " + id;
+        folder.parent_id  = parent_id;
+        folder.variables  = "{}";
+        folder.auth       = "{}";
+        folder.created_at = 1;
+        folder.updated_at = 1;
+        db_->create_collection (folder);
+    }
+
+    std::string stored_variables_of (const std::string& collection_id) {
+        auto c = db_->get_collection (collection_id);
+        EXPECT_TRUE (c.has_value ()) << collection_id;
+        return c ? c->variables : std::string ();
+    }
+
+    /// A collection run's scopes over `col_1` and the folders `fold_a` (with
+    /// `deep` under it) and `fold_b`, as the runner builds them (#3248).
+    RunVariableScopes load_run () {
+        seed_folder ("fold_a", "col_1");
+        seed_folder ("deep", "fold_a");
+        seed_folder ("fold_b", "col_1");
+        const std::vector<std::string> ids{ "col_1", "fold_a", "deep", "fold_b" };
+        return RunVariableScopes (*db_, run_.environment_id, ids);
     }
 
     static void run_script (ScriptVariableScopes& scopes, const std::string& source) {
@@ -1302,6 +1332,99 @@ TEST_F (PersistScriptVariablesTest, ACollectionDeletedDuringTheRunIsNotRecreated
     persist_script_variables (*db_, scopes);
 
     EXPECT_FALSE (db_->get_collection ("col_1").has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// RunVariableScopes - a collection run's per-step chains (#3248)
+// ---------------------------------------------------------------------------
+
+// Each folder a step wrote is written back to its own row, in the one persist
+// at the end; a collection no step wrote is not rewritten. Mutation check:
+// persist only the last bound leaf and `fold_a` keeps `{}`.
+TEST_F (PersistScriptVariablesTest, ARunWritesEachFoldersChangesToThatFoldersRow) {
+    auto run = load_run ();
+    run_script (run.bind ("fold_a"), "pm.collectionVariables.set('a', 'from-a');");
+    run_script (run.bind ("fold_b"), "pm.collectionVariables.set('b', 'from-b');");
+
+    run.persist (*db_);
+
+    const auto fold_a = parse_variables (stored_variables_of ("fold_a"));
+    const auto fold_b = parse_variables (stored_variables_of ("fold_b"));
+    ASSERT_EQ (fold_a.count ("a"), 1U) << stored_variables_of ("fold_a");
+    EXPECT_EQ (fold_a.at ("a").value, "from-a");
+    EXPECT_EQ (fold_a.count ("b"), 0U);
+    ASSERT_EQ (fold_b.count ("b"), 1U) << stored_variables_of ("fold_b");
+    EXPECT_EQ (fold_b.at ("b").value, "from-b");
+    EXPECT_EQ (stored_collection_variables (), APP_BLOB);
+    EXPECT_EQ (stored_collection_updated_at (), 1);
+}
+
+// A step's chain reads what an earlier step wrote into any collection in it:
+// its own folder bound again, and a parent folder seen from below. A sibling
+// folder is not in the chain, and the run collection rides every chain
+// read-only.
+TEST_F (PersistScriptVariablesTest, AStepsChainReadsWhatEarlierStepsWroteIntoIt) {
+    auto run = load_run ();
+    run_script (run.bind ("fold_a"), "pm.collectionVariables.set('a', 'from-a');");
+    run_script (run.bind ("fold_b"), R"(
+        if (pm.collectionVariables.get('a') !== undefined) throw new Error('sibling read');
+        if (pm.collectionVariables.get('token') !== 'abc') throw new Error('run collection');
+    )");
+    run_script (run.bind ("deep"), R"(
+        if (pm.collectionVariables.get('a') !== 'from-a') throw new Error('parent folder');
+    )");
+    run_script (run.bind ("fold_a"), R"(
+        if (pm.collectionVariables.get('a') !== 'from-a') throw new Error('own folder');
+    )");
+}
+
+// The run collection itself is bound for setup and teardown: its write lands
+// on `col_1` and is what every folder's chain reads after it.
+TEST_F (PersistScriptVariablesTest, ARunCollectionWriteReachesEveryFoldersChain) {
+    auto run = load_run ();
+    run_script (run.bind ("col_1"), "pm.collectionVariables.set('setup', 'ran');");
+    run_script (run.bind ("deep"), R"(
+        if (pm.collectionVariables.get('setup') !== 'ran') throw new Error('not inherited');
+    )");
+
+    run.persist (*db_);
+
+    EXPECT_EQ (parse_variables (stored_collection_variables ()).at ("setup").value, "ran");
+    EXPECT_EQ (stored_variables_of ("deep"), "{}");
+}
+
+// A folder deleted while the run was in flight stays deleted, and a sibling's
+// write in the same persist still lands.
+TEST_F (PersistScriptVariablesTest, AFolderDeletedDuringTheRunIsNotRecreated) {
+    auto run = load_run ();
+    run_script (run.bind ("fold_a"), "pm.collectionVariables.set('a', 'from-a');");
+    run_script (run.bind ("fold_b"), "pm.collectionVariables.set('b', 'from-b');");
+    db_->delete_collection ("fold_a");
+
+    run.persist (*db_);
+
+    EXPECT_FALSE (db_->get_collection ("fold_a").has_value ());
+    EXPECT_EQ (parse_variables (stored_variables_of ("fold_b")).count ("b"), 1U);
+}
+
+// A folder's read, merge and write sit inside the persist's one lock scope,
+// like every other scope's: another send persisting into the window waits and
+// is merged onto, not overwritten.
+TEST_F (PersistScriptVariablesTest, AnotherSendPersistingIntoAFoldersWindowIsNotLost) {
+    auto run = load_run ();
+    run_script (run.bind ("fold_b"), "pm.collectionVariables.set('b', 'from-the-run');");
+    auto other = load_script_variable_scopes (*db_, std::nullopt, "fold_b");
+    other.collection["session"].value = "from-the-other-send";
+
+    vayu::tests::CompetingWriter other_send (
+    [this, &other] { persist_script_variables (*db_, other); });
+    run.persist (*db_, other_send.probe ());
+    other_send.join ();
+
+    const auto stored_now = parse_variables (stored_variables_of ("fold_b"));
+    EXPECT_EQ (stored_now.count ("b"), 1U) << stored_variables_of ("fold_b");
+    EXPECT_EQ (stored_now.count ("session"), 1U)
+    << stored_variables_of ("fold_b");
 }
 
 // A trashed environment is no scope for a send (#2970): `POST /execute` and

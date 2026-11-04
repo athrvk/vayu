@@ -255,6 +255,41 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->create_collection (col);
     }
 
+    /// A folder under @p parent_id carrying its own @p variables, at @p order
+    /// among its parent's children.
+    void seed_folder (const std::string& id,
+    const std::string& parent_id,
+    const std::string& variables,
+    int order) {
+        vayu::db::Collection col;
+        col.id         = id;
+        col.name       = "Folder " + id;
+        col.parent_id  = parent_id;
+        col.variables  = variables;
+        col.order      = order;
+        col.created_at = 1;
+        col.updated_at = 1;
+        db_->create_collection (col);
+    }
+
+    /// File the seeded request @p id under @p collection_id instead of `col_1`.
+    void move_request (const std::string& id, const std::string& collection_id) {
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->collection_id = collection_id;
+        db_->save_request (*row);
+    }
+
+    /// The variables stored on collection @p id now.
+    vayu::Environment stored_collection_variables (const std::string& id) {
+        auto row = db_->get_collection (id);
+        if (!row) {
+            ADD_FAILURE () << "no collection " << id;
+            return {};
+        }
+        return vayu::json::parse_variables (row->variables);
+    }
+
     /// Override a seeded config value, keeping the rest of its row intact.
     void set_config (const std::string& key, const std::string& value) {
         auto entry = db_->get_config_entry (key);
@@ -405,6 +440,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
         if (iterations) {
             scenario["iterations"] = *iterations;
+        }
+        if (recursive_) {
+            scenario["recursive"] = true;
         }
         if (!data.is_null ()) {
             scenario["data"] = data;
@@ -562,6 +600,8 @@ class ScenarioRunnerTest : public ::testing::Test {
     vayu::core::RunManager manager_;
     vayu::http::CookieJar jar_;
     size_t runs_started_ = 0;
+    /// Runs `col_1` with its sub-folders (`scenario.recursive`).
+    bool recursive_ = false;
 };
 
 // ============================================================================
@@ -770,6 +810,104 @@ TEST_F (ScenarioRunnerTest, LocalSetSurvivesStepsOfARunAndEndsWithIt) {
     auto env = db_->get_environment ("env_1");
     ASSERT_HAS_VALUE (env);
     EXPECT_EQ (env->variables.find ("localToken"), std::string::npos) << env->variables;
+}
+
+// A recursive run of a parent reads each step's own folder (#3248). The
+// pre-request script on `req_a` makes the plan defer every step's names to
+// the send (#2521), so `req_b`'s `{{f}}` is answered by the residual pass, from
+// the folder's variables. Its script reads and writes the folder's scope, as a
+// Send of the same request does; the run collection is an ancestor, read
+// through. Mutation check: bind every step to the run collection
+// (`scopes.bind (asked.collection_id)` in `run_iteration`) and the wire carries
+// `{{f}}` and the marker reads `undefined`.
+TEST_F (ScenarioRunnerTest, ASubFolderStepSendsAndScriptsWithItsOwnFoldersVariables) {
+    seed_collection ("col_1", R"({"shared":{"value":"from-parent","enabled":true}})");
+    seed_folder ("fold", "col_1", R"({"f":{"value":"folder-value","enabled":true}})",
+    /*order=*/1);
+    seed_request ("req_a", 0, "/ok", "pm.variables.set('unused', '1');");
+    seed_request ("req_b", 0, "/ok?f={{f}}&s={{shared}}",
+    R"(pm.request.headers.add({key: "X-Marker", value: String(pm.collectionVariables.get("f"))});
+       pm.collectionVariables.set("written", "by-folder-step");)");
+    move_request ("req_b", "fold");
+
+    recursive_        = true;
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 2u);
+    EXPECT_EQ (seen[1].target, "/ok?f=folder-value&s=from-parent");
+    EXPECT_EQ (seen[1].marker, "folder-value");
+
+    EXPECT_EQ (stored_collection_variables ("fold").count ("written"), 1u)
+    << "the folder step's set did not land on its folder";
+    EXPECT_EQ (stored_collection_variables ("col_1").count ("written"), 0u)
+    << "the folder step's set landed on the run collection";
+}
+
+// What one folder's step writes is what a later step in that folder, and in a
+// folder below it, reads; a sibling folder never sees it.
+TEST_F (ScenarioRunnerTest, AFolderWriteReachesItsLaterStepsAndItsSubFoldersOnly) {
+    seed_collection ("col_1");
+    seed_folder ("fold", "col_1", "{}", /*order=*/0);
+    seed_folder ("deep", "fold", "{}", /*order=*/1);
+    seed_folder ("other", "col_1", "{}", /*order=*/1);
+    seed_request ("req_a", 0, "/ok", "pm.collectionVariables.set('token', 'from-fold');");
+    move_request ("req_a", "fold");
+    seed_request ("req_b", 0, "/ok", "", "", "", "",
+    R"([{"key":"X-Marker","value":"{{token}}","enabled":true}])");
+    move_request ("req_b", "deep");
+    seed_request ("req_c", 0, "/ok",
+    R"(pm.request.headers.add({key: "X-Marker", value: String(pm.collectionVariables.get("token"))});)");
+    move_request ("req_c", "other");
+
+    recursive_        = true;
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto seen = server_->requests ();
+    ASSERT_EQ (seen.size (), 3u);
+    EXPECT_EQ (seen[1].marker, "from-fold")
+    << "the sub-folder did not read its parent's write";
+    EXPECT_EQ (seen[2].marker, "undefined")
+    << "a sibling folder read another's write";
+    EXPECT_EQ (stored_collection_variables ("fold").count ("token"), 1u);
+    EXPECT_EQ (stored_collection_variables ("deep").count ("token"), 0u);
+}
+
+// A design run reports a name still unresolved when its step went out
+// (#3248): distinct names, on the stored row and the live frame alike, absent
+// on a step with none. `known` is deferred past the script and answered by the
+// residual pass, so it is not one. Mutation check: drop the `unresolvedTokens`
+// write in `store_step_record` and the stored half reddens.
+TEST_F (ScenarioRunnerTest, AStepSentWithANameNothingAnswersCountsItStoredAndLive) {
+    seed_collection ("col_1", R"({"known":{"value":"k","enabled":true}})");
+    seed_request ("req_a", 0, "/ok", "pm.variables.set('unused', '1');");
+    seed_request ("req_b", 1, "/ok", "", "", "", "",
+    R"([{"key":"X-Marker","value":"{{missing}}","enabled":true},
+        {"key":"X-Again","value":"{{missing}}","enabled":true},
+        {"key":"X-Known","value":"{{known}}","enabled":true},
+        {"key":"X-Other","value":"{{gone}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto unresolved_in = [] (const json& node) {
+        return node.contains ("unresolvedTokens") ?
+        node["unresolvedTokens"].get<int64_t> () :
+        -1;
+    };
+    std::vector<int64_t> stored;
+    for (const auto& row : db_->get_results (run_id)) {
+        stored.push_back (unresolved_in (json::parse (row.trace_data)));
+    }
+    std::vector<int64_t> live;
+    for (const auto& frame : step_frames (context_for (run_id))) {
+        live.push_back (
+        unresolved_in (json::parse (frame.substr (frame.find ("data: ") + 6))));
+    }
+    EXPECT_EQ (stored, (std::vector<int64_t>{ -1, 2 }));
+    EXPECT_EQ (live, (std::vector<int64_t>{ -1, 2 }));
 }
 
 TEST_F (ScenarioRunnerTest, ACookieSetByStepOneIsSentByStepTwo) {

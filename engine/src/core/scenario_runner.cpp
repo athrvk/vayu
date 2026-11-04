@@ -226,6 +226,13 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     }
 }
 
+/// How many different names @p names holds.
+size_t count_distinct (std::vector<std::string> names) {
+    std::sort (names.begin (), names.end ());
+    return static_cast<size_t> (
+    std::distance (names.begin (), std::unique (names.begin (), names.end ())));
+}
+
 /// The steps an iteration most recently executed, joined for the cycle-bound
 /// message. Bounded by the trail itself, not by the iteration: naming a hundred
 /// executions would bury the two or three that actually loop.
@@ -435,6 +442,10 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (const size_t misses = vayu::core::count_extractor_misses (record.elements);
     misses > 0) {
         data["extractorMisses"] = misses;
+    }
+    // As on the stored row (#3248).
+    if (record.unresolved_tokens > 0) {
+        data["unresolvedTokens"] = record.unresolved_tokens;
     }
     return build_sse_frame ("step", data.dump (), offset);
 }
@@ -758,9 +769,10 @@ ScenarioSummaryInputs& summary) {
     } else {
         classify_step (exchange, record);
     }
-    record.status_code = exchange.response.status_code;
-    record.status_text = exchange.response.status_text;
-    record.latency_ms  = exchange.response.timing.total_ms;
+    record.status_code       = exchange.response.status_code;
+    record.status_text       = exchange.response.status_text;
+    record.latency_ms        = exchange.response.timing.total_ms;
+    record.unresolved_tokens = count_distinct (exchange.unresolved_tokens);
     // The assertions this step made (issue #724), for the frame a
     // live watcher reads. A step whose row could not bind ran no
     // script and gets no tally - `exchange` is the default one.
@@ -935,6 +947,10 @@ ScenarioStepStore& store) {
     misses > 0) {
         record.trace["extractorMisses"] = misses;
     }
+    // Names the request carried to the wire unanswered (#3248), absent at 0.
+    if (record.unresolved_tokens > 0) {
+        record.trace["unresolvedTokens"] = record.unresolved_tokens;
+    }
 
     ++summary.steps_executed;
     // Only a step that actually sent counts towards coverage - or, on the
@@ -1092,7 +1108,7 @@ TransactionHistograms& transactions) {
 size_t run_iteration (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::CookieJar* cookie_jar,
 const std::string& cookie_scope,
-vayu::http::routes::ScriptVariableScopes& scopes,
+vayu::http::routes::RunVariableScopes& scopes,
 const StepContext& base,
 const ScenarioPlan& plan,
 const ScenarioStepIndex& step_index,
@@ -1116,9 +1132,9 @@ TransactionHistograms& transactions) {
         const auto& step = plan.steps[position];
 
         vayu::http::routes::ExchangeOutcome exchange;
-        const StepContext& step_ctx       = base;
-        const std::string data_bind_error = run_step_exchange (script_engine,
-        cookie_jar, cookie_scope, scopes, step_ctx, step, exchange);
+        const StepContext& step_ctx = base;
+        const std::string data_bind_error = run_step_exchange (script_engine, cookie_jar,
+        cookie_scope, scopes.bind (step.collection_id), step_ctx, step, exchange);
 
         ++steps_this_iteration;
         attempted[position] = true;
@@ -1291,6 +1307,19 @@ size_t stored_step_count (vayu::db::Database& db, const std::string& run_id) {
     }
 }
 
+/// The collections whose chains the run's scripts read: the run collection,
+/// for setup and teardown, and every step's own.
+std::vector<std::string>
+scope_collection_ids (const ScenarioRequest& asked, const ScenarioPlan& plan) {
+    std::vector<std::string> ids;
+    ids.reserve (plan.steps.size () + 1);
+    ids.push_back (asked.collection_id);
+    for (const auto& step : plan.steps) {
+        ids.push_back (step.collection_id);
+    }
+    return ids;
+}
+
 } // namespace
 
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
@@ -1343,11 +1372,11 @@ RunManager& manager) {
         const std::string cookie_scope =
         environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
-        // Loaded once, mutated by every step, persisted once at the end. The
-        // collection scope is the collection being run - a scenario has no
-        // single request row to derive one from.
-        auto scopes = vayu::http::routes::load_script_variable_scopes (
-        db, environment_id, asked.collection_id);
+        // Loaded once, mutated by every step, persisted once at the end. Each
+        // step reads its own folder's chain, as a Send of its request does
+        // (#3248); setup and teardown read the collection being run.
+        vayu::http::routes::RunVariableScopes scopes (
+        db, environment_id, scope_collection_ids (asked, plan));
 
         vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
         // Payload-level, exactly as `POST /execute` reads it: whether a script
@@ -1420,11 +1449,10 @@ RunManager& manager) {
         // `script.setup` / `script.teardown` (#1499): the collection's own
         // once-per-run elements - never inherited per step, which is what
         // `collection_only` refuses at write time - compiled once here and
-        // dispatched at both ends of the run, on the same `scopes` and
-        // `script_engine` every step's own scripts already share, so a
-        // setup write is visible to step 1 exactly as a prior step's would be
-        // and a teardown write persists with the rest at
-        // `persist_script_variables` below.
+        // dispatched at both ends of the run, on the run collection's
+        // binding of the same `scopes` and the `script_engine` every step's
+        // own scripts already share, so a setup write is visible to step 1
+        // exactly as a prior step's would be.
         std::vector<vayu::core::CompiledElement> collection_elements;
         if (auto collection_row = db.get_collection (asked.collection_id)) {
             auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
@@ -1434,7 +1462,8 @@ RunManager& manager) {
         }
 
         std::vector<vayu::core::ElementOutcome> setup_outcomes;
-        if (auto setup_failure = run_scenario_setup (script_engine, scopes,
+        if (auto setup_failure =
+            run_scenario_setup (script_engine, scopes.bind (asked.collection_id),
             script_send, collection_elements, setup_outcomes)) {
             throw std::runtime_error ("script.setup failed: " + *setup_failure);
         }
@@ -1473,7 +1502,7 @@ RunManager& manager) {
         // Once, at the end: per-step persistence would be N x M diff-and-write
         // cycles against the DB mutex for a value only this run's later steps
         // read. Best-effort, exactly as design mode's is.
-        vayu::http::routes::persist_script_variables (db, scopes);
+        scopes.persist (db);
 
         summary.steps_dropped = store.dropped ();
         summary.transactions  = transactions.build ();
@@ -1503,7 +1532,8 @@ RunManager& manager) {
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
-        auto teardown_outcomes = run_scenario_teardown (script_engine, scopes,
+        auto teardown_outcomes =
+        run_scenario_teardown (script_engine, scopes.bind (asked.collection_id),
         script_send, collection_elements, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);

@@ -452,7 +452,7 @@ struct RunContext {
 
     /// @ref lifecycle_scopes, flattened once (issue #1594) - the "base" every
     /// submission's own `ScopeOverlay` layers onto, on the same
-    /// `ScenarioLoadState::base_vars` precedent: flattened once per run,
+    /// `LoadScopeBases::Base::vars` precedent: flattened once per run,
     /// never per submission. Populated by `run_collection_setup` alongside
     /// `lifecycle_scopes` whenever @ref step_elements is non-empty, even for
     /// a run that declares no `lifecycleElements` at all.
@@ -544,7 +544,7 @@ struct RunContext {
 
     /// The scopes `run_collection_setup` loaded for a **single-request**
     /// run's own `lifecycleElements` (issue #1573) - a scenario run keeps its
-    /// own copy on `ScenarioLoadState::base_scopes` instead, since a scenario
+    /// own copy on `ScenarioLoadState::scope_bases` instead, since a scenario
     /// load run's VUs need it too; this member exists only so
     /// `run_collection_teardown` can read back the same scopes `script.setup`
     /// wrote into, for the one run shape with no `ScenarioLoadState` to hold
