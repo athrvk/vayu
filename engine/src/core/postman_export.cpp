@@ -30,6 +30,7 @@
 #include "vayu/core/query_encoding.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/sibling_order.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
@@ -81,6 +82,7 @@ enum class Loss : std::uint8_t {
     SpecBindings,
     SpecOperations,
     RowsWithoutKey,
+    TypedAuthHeaders,
     Count_,
 };
 
@@ -111,6 +113,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "spec_bindings", "OpenAPI bindings have no Postman equivalent" },
 { "spec_operations", "Links to OpenAPI operations have no Postman equivalent" },
 { "rows_without_key", "Rows with a value but no name were left out" },
+{ "typed_auth_headers", "Requests whose typed header overrides their auth were written with No Auth" },
 });
 
 static_assert (LOSS_TEXT.size () == static_cast<std::size_t> (Loss::Count_),
@@ -2054,6 +2057,69 @@ json request_auth_in_force (const json& own, const json& inherited) {
     return mode.empty () || mode == "inherit" ? inherited : own;
 }
 
+/// A header or credential name without the spaces and tabs a paste leaves
+/// around it: `apply_auth` and header composition both compare it trimmed.
+std::string_view trimmed_name (std::string_view name) {
+    return vayu::http::trim_optional_whitespace (name);
+}
+
+/**
+ * The header @p auth (the auth in force) writes when the request is sent, or
+ * "" when it writes none, by the rules of `apply_auth`: bearer and basic write
+ * `Authorization` (a blank bearer token writes nothing), OAuth 2.0 does unless
+ * it places its token in the query, and an API key writes its trimmed name
+ * unless it is in the query or has none. The API key's name is
+ * @p walk.apikey_headers, which `apikey_header_names` already filters.
+ */
+std::string_view header_written_by (const json& auth, const Walk& walk) {
+    static constexpr std::string_view AUTHORIZATION = "Authorization";
+    const std::string mode                          = text_of (auth, "mode");
+    if (mode == "basic") {
+        return AUTHORIZATION;
+    }
+    if (mode == "bearer") {
+        return trimmed_name (text_of (auth, "token")).empty () ? "" : AUTHORIZATION;
+    }
+    if (mode == "oauth2") {
+        const auto config = auth.find ("config");
+        const bool in_query =
+        config != auth.end () && text_of (*config, "tokenPlacement") == "query";
+        return in_query ? "" : AUTHORIZATION;
+    }
+    if (mode == "apikey" && !walk.apikey_headers.empty ()) {
+        return trimmed_name (walk.apikey_headers.front ());
+    }
+    return "";
+}
+
+/// Whether @p rows holds an enabled row named @p name, in any letter case.
+bool types_header (const json& rows, std::string_view name) {
+    if (name.empty () || !rows.is_array ()) {
+        return false;
+    }
+    return std::any_of (rows.begin (), rows.end (), [name] (const json& typed) {
+        return row_enabled (typed) &&
+        vayu::utils::ascii_lower_equal (trimmed_name (text_of (typed, "key")), name);
+    });
+}
+
+/**
+ * A request's Postman `auth`. A header the user typed under the name the auth
+ * in force would write wins in Vayu, because `apply_auth` skips a name the
+ * request already carries; postman-runtime lets the auth overwrite the header
+ * instead, so the auth is written as No Auth and the typed header keeps the
+ * wire the same (#3243).
+ */
+std::optional<json> request_auth_block (const PostmanExportRequest& request,
+const json& auth_in_force,
+Walk& walk) {
+    if (types_header (request.headers, header_written_by (auth_in_force, walk))) {
+        walk.lose (Loss::TypedAuthHeaders);
+        return std::make_optional (json{ { "type", "noauth" } });
+    }
+    return postman_auth (request.auth, AuthLevel::Request, walk);
+}
+
 json postman_request_item (const PostmanExportRequest& request,
 const json& inherited_auth,
 Walk& walk) {
@@ -2065,7 +2131,7 @@ Walk& walk) {
     const std::optional<json> body = postman_body (request.body, walk);
 
     json inner;
-    if (std::optional<json> auth = postman_auth (request.auth, AuthLevel::Request, walk)) {
+    if (std::optional<json> auth = request_auth_block (request, auth_in_force, walk)) {
         inner["auth"] = std::move (*auth);
     }
     const json core = request_core (request, body, walk);
