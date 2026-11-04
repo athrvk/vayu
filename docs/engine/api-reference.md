@@ -1923,7 +1923,10 @@ request-composition path reads a query row. `url` is the wire truth, so a query
 parameter that must reach the wire belongs **in `url`** - the app's Params table
 keeps the two in step by rewriting `url` on every edit, and stores disabled rows
 in `params` only. A raw API, MCP or import caller that puts the query only in
-`params` stores a request that sends none of it (issue #590).
+`params` stores a request that sends none of it (issue #590). The
+[Postman export](#post-exportpostman) writes the query the URL states as
+`url.query[]` even when `params` holds no row for it (issue #3242); a pair in
+`params` only is written there too, but it is still not sent.
 
 **A path row is the one row composition reads** (issue #1764). A row carrying
 `"in": "path"` is a Postman-style path variable: `key` is the name without its
@@ -4710,7 +4713,13 @@ kept as `rawLanguage`, none at all for `""`, while importing it again would stil
 give its stored mode), `graphql` is `graphql` with the
 variables as the pane's text, `x-www-form-urlencoded` is `urlencoded` and
 `form-data` is `formdata` with a file part's `src` and any part's `contentType`, `binary` is `file` with
-`file.src` (`file: {}` when no file is chosen); `script.pre` /
+`file.src` (`file: {}` when no file is chosen); `url.query[]` is every stored
+query row in stored order (a turned-off one `disabled: true`), then the pairs
+of the URL's own query that no enabled row states, in URL order, so a request
+created with its query only in `url` (every MCP request) keeps it - Postman and
+Newman read `query[]` over `raw`, and a row matches a pair by key and value (as
+the row is written into the URL), each row accounting for one pair so a repeated
+key is not doubled; `script.pre` /
 `script.post` are the `prerequest` / `test` events, one event per element in
 element order, a turned-off one written `disabled: true` (Postman's runtime
 skips it, as Vayu does); saved examples are

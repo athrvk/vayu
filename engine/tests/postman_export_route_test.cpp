@@ -188,6 +188,49 @@ TEST_F (PostmanExportRouteTest, ARequestsOwnTimeoutIsListedAsNotCarried) {
     EXPECT_EQ (body["notes"]["notCarried"][0]["count"], 1);
 }
 
+// #3242: a request created with its query only in `url` (every MCP request)
+// exports the `query[]` the same request created with Params rows does, and
+// importing that export keeps the URL the engine sends.
+// Mutation check: drop the `url_only_pairs` loop from `postman_url` and the
+// URL-only request exports no `query`.
+TEST_F (PostmanExportRouteTest, AUrlOnlyQueryExportsTheQueryTheSameRequestWithRowsDoes) {
+    using vayu::http::routes::create_collection_response;
+    using vayu::http::routes::create_request_response;
+    auto [collection_status, collection] =
+    create_collection_response (*db_, json{ { "name", "Query" } });
+    ASSERT_EQ (collection_status, 200) << collection.dump ();
+    const std::string id  = collection["id"].get<std::string> ();
+    const std::string url = "{{baseUrl}}/pets?limit=10&tag=a&tag=b&flag&empty=";
+    const json rows = json::parse (R"([{"key":"limit","value":"10","enabled":true},
+        {"key":"tag","value":"a","enabled":true},
+        {"key":"tag","value":"b","enabled":true},
+        {"key":"flag","value":"","enabled":true,"valueless":true},
+        {"key":"empty","value":"","enabled":true}])");
+    for (const auto& [name, params] :
+    { std::pair<std::string, json>{ "Url only", json::array () },
+    std::pair<std::string, json>{ "With rows", rows } }) {
+        auto [status, created] = create_request_response (*db_,
+        json{ { "collectionId", id }, { "name", name }, { "method", "GET" },
+        { "url", url }, { "params", params } });
+        ASSERT_EQ (status, 200) << created.dump ();
+    }
+
+    const std::string text   = export_text (id);
+    const ordered doc        = ordered::parse (text);
+    const ordered& url_only  = doc.at ("item").at (0).at ("request").at ("url");
+    const ordered& with_rows = doc.at ("item").at (1).at ("request").at ("url");
+    ASSERT_TRUE (url_only.contains ("query")) << text;
+    EXPECT_EQ (url_only.at ("query").dump (), with_rows.at ("query").dump ());
+    EXPECT_EQ (url_only.at ("query").size (), 5U);
+
+    const std::string again = import_text (text);
+    const auto reimported   = db_->get_requests_in_collection (again);
+    ASSERT_EQ (reimported.size (), 2U);
+    for (const auto& request : reimported) {
+        EXPECT_EQ (request.url, url) << request.name;
+    }
+}
+
 /// The exported `protocolProfileBehavior` of the root item named @p name, as
 /// the text it was written as (member order is the point).
 std::string exported_protocol_behavior (const std::string& text, const std::string& name) {

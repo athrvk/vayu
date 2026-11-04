@@ -318,6 +318,112 @@ TEST (PostmanExport, QueryRowsComeFromParamsAndKeepTurnedOffRows) {
     R"([{"key":"limit","value":"10","description":"Page size"},{"key":"trace","value":"on","disabled":true}])");
 }
 
+// ---------------------------------------------------------------------------
+// A query only `url` states (#3242): `url` is what the engine sends and Params
+// rows are display state, and Postman reads `query[]` over `raw`, so a pair
+// left out of `query[]` is a pair Postman and Newman do not send.
+// ---------------------------------------------------------------------------
+
+/// `url.query` of a request with @p url and @p rows, as the compact text.
+std::string exported_query (const std::string& url,
+const ordered& rows = ordered::array ()) {
+    PostmanExportRequest entry = request ("r", url);
+    entry.params               = rows;
+    ordered exported           = only_item (entry)["request"]["url"];
+    return exported.contains ("query") ? exported["query"].dump () : "absent";
+}
+
+// Mutation check: drop the `url_only_pairs` loop from `postman_url` and the
+// query is absent.
+TEST (PostmanExport, AQueryOnlyTheUrlStatesIsWrittenToQuery) {
+    EXPECT_EQ (exported_query ("https://h/x?a=1&b="),
+    R"([{"key":"a","value":"1"},{"key":"b","value":""}])");
+    EXPECT_EQ (exported_query ("https://h/x"), "absent");
+    EXPECT_EQ (exported_query ("https://h/x?"), "absent");
+    EXPECT_EQ (exported_query ("https://h/x?a=1#b=2"), R"([{"key":"a","value":"1"}])")
+    << "a fragment is not a query";
+}
+
+// A bare `flag` is Postman's null value and `flag=` its empty string; an empty
+// pair between two `&` is nothing.
+// Mutation check: make `postman_url_only_row` skip `valueless`.
+TEST (PostmanExport, AValuelessUrlPairIsNullAndAnEmptyOneIsAString) {
+    EXPECT_EQ (exported_query ("https://h/x?flag&e=&&x=1"),
+    R"([{"key":"flag","value":null},{"key":"e","value":""},{"key":"x","value":"1"}])");
+}
+
+// Mutation check: take the `claimed` branch out of `url_only_pairs` (keep
+// every pair) and the rows are written twice.
+TEST (PostmanExport, APairAnEnabledRowStatesIsNotWrittenTwice) {
+    ordered described        = row ("limit", "10");
+    described["description"] = "Page size";
+    EXPECT_EQ (exported_query ("https://h/x?limit=10&page=2",
+               ordered::array ({ described, row ("page", "2") })),
+    R"([{"key":"limit","value":"10","description":"Page size"},{"key":"page","value":"2"}])");
+}
+
+// The rows come first, in stored order with a turned-off one where it
+// stands, then the URL's own pairs in URL order. A turned-off row does not
+// state a pair the URL sends: the URL wins and the pair is written enabled.
+// Mutation check: let `url_only_pairs` collect disabled rows too.
+TEST (PostmanExport, UrlOnlyPairsFollowTheRowsInUrlOrder) {
+    EXPECT_EQ (exported_query ("https://h/x?z=26&a=1&m=13&trace=on",
+               ordered::array ({ row ("a", "1"), row ("trace", "on", false) })),
+    R"([{"key":"a","value":"1"},{"key":"trace","value":"on","disabled":true},{"key":"z","value":"26"},{"key":"m","value":"13"},{"key":"trace","value":"on"}])");
+}
+
+// A key may repeat, and each row accounts for one pair: the first of two equal
+// pairs is the row's, the second is the URL's.
+// Mutation check: do not erase the claimed row from `unclaimed`.
+TEST (PostmanExport, ARowAccountsForOnePairWhenAKeyRepeats) {
+    EXPECT_EQ (exported_query ("https://h/x?tag=a&tag=b&tag=a",
+               ordered::array ({ row ("tag", "a") })),
+    R"([{"key":"tag","value":"a"},{"key":"tag","value":"b"},{"key":"tag","value":"a"}])");
+    EXPECT_EQ (exported_query ("https://h/x?tag=a&tag=b",
+               ordered::array ({ row ("tag", "b"), row ("tag", "a") })),
+    R"([{"key":"tag","value":"b"},{"key":"tag","value":"a"}])")
+    << "matched by key and value, not by position";
+}
+
+// A path row is `url.variable[]`, not a query row, so it does not account for
+// a query pair that happens to share its name.
+// Mutation check: hand `url_only_pairs` every row instead of `query_rows`.
+TEST (PostmanExport, APathRowDoesNotAccountForAQueryPair) {
+    ordered path_row           = row ("id", "5");
+    path_row["in"]             = "path";
+    PostmanExportRequest entry = request ("r", "https://h/users/:id?id=5");
+    entry.params               = ordered::array ({ path_row });
+    ordered url                = only_item (entry)["request"]["url"];
+    EXPECT_EQ (url["query"].dump (), R"([{"key":"id","value":"5"}])");
+    EXPECT_EQ (url["variable"].size (), 1U);
+}
+
+// A row is joined into the URL by the request's encoding, so the pair it
+// writes is not always its text: Postman's rule writes a space as `%20`, and
+// `disableUrlEncoding` writes it as typed.
+// Mutation check: compare only the row's own text in `row_writes_pair`.
+TEST (PostmanExport, ARowIsRecognisedByTheTextItsJoinWritesIntoTheUrl) {
+    EXPECT_EQ (exported_query ("https://h/x?a%20b=c%20d|e",
+               ordered::array ({ row ("a b", "c d|e") })),
+    R"([{"key":"a b","value":"c d|e"}])");
+    EXPECT_EQ (
+    exported_query ("https://h/x?a b=c d", ordered::array ({ row ("a b", "c d") })),
+    R"([{"key":"a b","value":"c d"}])");
+    EXPECT_EQ (
+    exported_query ("https://h/x?q=a%2Bb", ordered::array ({ row ("q", "a+b") })),
+    R"([{"key":"q","value":"a+b"}])")
+    << "an OpenAPI import joins with encodeURIComponent";
+}
+
+// A `{{variable}}` holding a separator is one value, as the part-splitting of
+// the URL keeps it; the placeholder after the host's variable is the query's.
+// Mutation check: split `raw` in `url_query_pairs` without
+// `protect_variables`, or start `next` at zero.
+TEST (PostmanExport, AVariableHoldingASeparatorStaysInOnePair) {
+    EXPECT_EQ (exported_query ("{{base.url}}/x?a={{p&q}}&{{k=v}}=1&b=2#f?z=1"),
+    R"([{"key":"a","value":"{{p&q}}"},{"key":"{{k=v}}","value":"1"},{"key":"b","value":"2"}])");
+}
+
 /**
  * Path rows (issue #1764) are `url.variable[]`, written after `query` and
  * never into it; a row made in Vayu carries no `type`. Mutation check: drop
@@ -339,7 +445,8 @@ TEST (PostmanExport, PathRowsAreUrlVariablesAfterTheQueryRows) {
     EXPECT_EQ (url["variable"].dump (),
     R"([{"key":"id","value":"7","description":"The user"},{"key":"draft","value":"x","disabled":true}])");
 
-    // No query rows at all: `variable` still comes last.
+    // No query at all: `variable` still comes last.
+    entry.url    = "{{baseUrl}}/users/:id";
     entry.params = ordered::array ({ path_row });
     url          = only_item (entry)["request"]["url"];
     EXPECT_EQ (keys_of (url), (Keys{ "raw", "host", "path", "variable" }));
@@ -1556,6 +1663,42 @@ TEST (PostmanExport, AUrlsPasswordAndATurnedOffQueryRowAreCounted) {
     EXPECT_EQ (blanked.text.find ("OFF-SECRET"), std::string::npos);
     EXPECT_NE (blanked.text.find ("ada@api.test"), std::string::npos)
     << "the user name stays";
+}
+
+// The pairs are blanked before they are written, and a credential the URL
+// and a row both state is one withheld value, as before.
+// Mutation check: build the pairs from `raw_url` instead of the redacted
+// `raw` and the secrets reach the document.
+TEST (PostmanExport, AUrlOnlyCredentialPairIsBlankedAndCountedOnce) {
+    PostmanExportRequest entry = request (
+    "r", "https://h/x?api_key=URL-SECRET&page=2&access_token=OTHER-SECRET&ref={{token}}");
+    PostmanExportFolder root = collection ();
+    root.requests.push_back (entry);
+
+    const auto blanked = run (root, /*secrets=*/false);
+    EXPECT_EQ (blanked.notes.secrets_omitted, 2);
+    EXPECT_EQ (blanked.text.find ("URL-SECRET"), std::string::npos);
+    EXPECT_EQ (blanked.text.find ("OTHER-SECRET"), std::string::npos);
+    EXPECT_EQ (
+    ordered::parse (blanked.text)["item"][0]["request"]["url"]["query"].dump (),
+    R"([{"key":"api_key","value":""},{"key":"page","value":"2"},{"key":"access_token","value":""},{"key":"ref","value":"{{token}}"}])")
+    << "the pair and its name stay";
+
+    const auto kept = run (root, /*secrets=*/true);
+    EXPECT_EQ (kept.notes.secrets_omitted, 0);
+    EXPECT_EQ (occurrences (kept.text, "URL-SECRET"), 2U)
+    << "the raw URL and the pair";
+
+    // A row that mirrors the URL's credential is not a second pair, and not a
+    // second withheld value.
+    entry.params = ordered::array ({ row ("api_key", "URL-SECRET") });
+    entry.url    = "https://h/x?api_key=URL-SECRET";
+    root.requests.assign (1, entry);
+    const auto mirrored = run (root, /*secrets=*/false);
+    EXPECT_EQ (mirrored.notes.secrets_omitted, 1);
+    EXPECT_EQ (
+    ordered::parse (mirrored.text)["item"][0]["request"]["url"]["query"].dump (),
+    R"([{"key":"api_key","value":""}])");
 }
 
 // The header or parameter an API-key auth names is a credential for the

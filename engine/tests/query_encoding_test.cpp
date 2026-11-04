@@ -41,6 +41,7 @@ using vayu::core::encode_query_component;
 using vayu::core::ImportParse;
 using vayu::core::parse_import;
 using vayu::core::QueryPart;
+using vayu::core::split_query_pairs;
 
 constexpr const char* POSTMAN_SCHEMA =
 "https://schema.getpostman.com/json/collection/v2.1.0/collection.json";
@@ -151,6 +152,32 @@ json imported_request (const std::string& document) {
         return json::object ();
     }
     return parsed.result.at ("collections")[0].at ("requests")[0];
+}
+
+// The one reader of a query string (the import's rows and the export's
+// URL-only pairs both come from it): `&` then the first `=`, nothing decoded,
+// empty pairs dropped, and `a` (no `=`) is not `a=`.
+// Mutation check: split at the last `=`, or call a bare `a` empty-valued.
+TEST (SplitQueryPairs, SplitsOnAmpersandThenTheFirstEqualsWithoutDecoding) {
+    const auto pairs = split_query_pairs ("a=1&&b=&flag&c=x=y&d%20e=%2B&=v&");
+    ASSERT_EQ (pairs.size (), 6U);
+    EXPECT_EQ (pairs[0].key, "a");
+    EXPECT_EQ (pairs[0].value, "1");
+    EXPECT_FALSE (pairs[0].valueless);
+    EXPECT_EQ (pairs[1].key, "b");
+    EXPECT_EQ (pairs[1].value, "");
+    EXPECT_FALSE (pairs[1].valueless)
+    << "`b=` is an empty value, not a missing one";
+    EXPECT_EQ (pairs[2].key, "flag");
+    EXPECT_TRUE (pairs[2].valueless);
+    EXPECT_EQ (pairs[3].key, "c");
+    EXPECT_EQ (pairs[3].value, "x=y");
+    EXPECT_EQ (pairs[4].key, "d%20e");
+    EXPECT_EQ (pairs[4].value, "%2B");
+    EXPECT_EQ (pairs[5].key, "");
+    EXPECT_EQ (pairs[5].value, "v");
+    EXPECT_TRUE (split_query_pairs ("").empty ());
+    EXPECT_TRUE (split_query_pairs ("&&").empty ());
 }
 
 // Issue #1772's acceptance: `{flag, ""}` stores `flag=`, and a null value a

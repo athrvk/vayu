@@ -27,6 +27,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/oauth_client.hpp"
@@ -287,9 +288,10 @@ std::string blank_url_credentials (const std::string& raw, json& query_rows, Wal
 // URL
 // ---------------------------------------------------------------------------
 
-/// The characters that split a URL into parts. A `{{variable}}` holding one
-/// of them is kept whole, as Postman's parser keeps it.
-constexpr std::string_view URL_SEPARATORS = ".:/?#@&]";
+/// The characters that split a URL into parts, a query into pairs (`&`) and a
+/// pair into key and value (`=`). A `{{variable}}` holding one of them is kept
+/// whole, as Postman's parser keeps it.
+constexpr std::string_view URL_SEPARATORS = ".:/?#@&=]";
 
 /// A byte no URL separator is, standing in for a protected variable.
 constexpr char PLACEHOLDER = '\x01';
@@ -467,9 +469,86 @@ std::pair<json, json> split_params (const json& params) {
     return { std::move (query), std::move (path) };
 }
 
-/// The url object with the query rows, which come from Params rather than
-/// from `raw` so a turned-off row survives, and the path rows as
-/// `url.variable[]` - after everything else, where Postman writes it.
+/// The pairs of @p raw's query as the engine sends them: cut at the first `#`,
+/// then at the first `?`, with a `{{variable}}` holding a separator kept whole.
+std::vector<QueryPair> url_query_pairs (const std::string& raw) {
+    auto [rest, held]               = protect_variables (raw);
+    rest                            = rest.substr (0, rest.find ('#'));
+    const std::size_t question_mark = rest.find ('?');
+    if (question_mark == std::string::npos) {
+        return {};
+    }
+    // Placeholders restore in document order, and the head and path hold the
+    // first ones.
+    auto next = static_cast<std::size_t> (std::count (rest.begin (),
+    rest.begin () + static_cast<std::ptrdiff_t> (question_mark), PLACEHOLDER));
+    std::vector<QueryPair> pairs = split_query_pairs (rest.substr (question_mark + 1));
+    for (QueryPair& pair : pairs) {
+        pair.key   = restore (pair.key, held, next);
+        pair.value = restore (pair.value, held, next);
+    }
+    return pairs;
+}
+
+/// Whether @p row, joined into a URL, writes @p pair. The join depends on where
+/// the request came from (`QueryEncoding`: Postman's rule, `encodeURIComponent`
+/// for an OpenAPI, Insomnia or JMeter import, as typed under
+/// `disableUrlEncoding`) and a row does not record which, so any of the three
+/// counts.
+bool row_writes_pair (const json& row, const QueryPair& pair) {
+    const std::string key   = text_of (row, "key");
+    const std::string value = text_of (row, "value");
+    return std::ranges::any_of (std::array{ QueryEncoding::Postman,
+                                QueryEncoding::UriComponent, QueryEncoding::AsTyped },
+    [&] (QueryEncoding encoding) {
+        return js::query_part (key, QueryPart::Key, encoding) == pair.key &&
+        js::query_part (value, QueryPart::Value, encoding) == pair.value;
+    });
+}
+
+/// The pairs of the URL's query that no enabled, named row of @p rows states,
+/// in URL order. A row accounts for one pair, whichever comes first, because
+/// a key may repeat (`tag=a&tag=b`).
+std::vector<QueryPair> url_only_pairs (const json& rows, const std::string& raw) {
+    std::vector<const json*> unclaimed;
+    for (const json& row : rows) {
+        if (row.is_object () && row_enabled (row) && !text_of (row, "key").empty ()) {
+            unclaimed.push_back (&row);
+        }
+    }
+    std::vector<QueryPair> only;
+    for (QueryPair& pair : url_query_pairs (raw)) {
+        const auto claimed = std::ranges::find_if (unclaimed,
+        [&] (const json* row) { return row_writes_pair (*row, pair); });
+        if (claimed == unclaimed.end ()) {
+            only.push_back (std::move (pair));
+        } else {
+            unclaimed.erase (claimed);
+        }
+    }
+    return only;
+}
+
+/// A URL query pair no row states, as the `url.query[]` entry Postman writes
+/// for a row of that text.
+json postman_url_only_row (const QueryPair& pair) {
+    json row{ { "key", pair.key }, { "value", pair.value }, { "enabled", true } };
+    if (pair.valueless) {
+        row["valueless"] = true;
+    }
+    return postman_row (row, RowShape::Plain);
+}
+
+/// The url object with its query, and the path rows as `url.variable[]` -
+/// after everything else, where Postman writes it.
+///
+/// `url` is what the engine sends and Params rows are display state (they
+/// also hold the turned-off rows), and Postman reads `query[]` over `raw` when
+/// both exist. So `query[]` is every stored row in stored order, then the
+/// pairs of `raw`'s query that no enabled row states, in URL order: a request
+/// built from the URL alone (`POST /requests` with no `params`, every MCP
+/// request) keeps its query, and one the app built, whose rows already state
+/// every pair, gains nothing.
 json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
     auto [query_rows, path_rows] = split_params (params);
     const std::string raw = blank_url_credentials (raw_url, query_rows, walk);
@@ -479,9 +558,12 @@ json postman_url (const std::string& raw_url, const json& params, Walk& walk) {
         vayu_ext::blank_credential_param_rows (
         path_rows, walk.apikey_params, walk.secrets_omitted);
     }
-    json url         = postman_url_parts (raw);
-    const json query = postman_rows (query_rows, RowShape::Plain, walk);
-    json variable    = json::array ();
+    json url      = postman_url_parts (raw);
+    json query    = postman_rows (query_rows, RowShape::Plain, walk);
+    json variable = json::array ();
+    for (const QueryPair& pair : url_only_pairs (query_rows, raw)) {
+        query.push_back (postman_url_only_row (pair));
+    }
     for (const json& row : path_rows) {
         if (row.is_object () && !skip_unnamed (row, walk)) {
             variable.push_back (postman_path_variable (row));

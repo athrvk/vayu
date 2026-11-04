@@ -10,8 +10,9 @@
 /**
  * @file core/query_encoding.hpp
  * @brief How a query row's key and value are written into a URL, by Postman's
- *        own rule (issue #1771), and how URL text is encoded by the component
- *        it lands in (issues #1773, #2465).
+ *        own rule (issue #1771), how a query is read back into pairs, and how
+ *        URL text is encoded by the component it lands in (issues #1773,
+ *        #2465).
  *
  * Pinned to the app's copy (`request-builder/utils/query-encoding.ts`) by
  * `tests/fixtures/query-encoding-conformance.json`, read by
@@ -21,6 +22,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace vayu::core {
 
@@ -47,6 +49,27 @@ enum class QueryEncoding : std::uint8_t { UriComponent, Postman, AsTyped };
  * an escape already in the text passes and nothing is encoded twice.
  */
 [[nodiscard]] std::string encode_query_component (std::string_view text, QueryPart part);
+
+/// One `key[=value]` pair of a raw query, as written and not decoded.
+struct QueryPair {
+    std::string key;
+    std::string value;
+    /// No `=` at all (`a`), which is not the empty value of `a=`.
+    bool valueless = false;
+};
+
+/**
+ * @brief @p query (the text after `?`, before any `#`) as its pairs, in order.
+ *
+ * Split on `&` and then at the first `=`, as Postman's `QueryParam.parse`
+ * reads it (issue #1771); an empty pair (`a=1&&b=2`) is dropped. Nothing is
+ * decoded: a pair holds raw query text, so writing it back is byte for byte,
+ * where decoding first would turn `%2B` into a `+` a server reads as a space.
+ * The one reader of a query string, for the Postman import and the Postman
+ * export alike, so a row and the URL it came from cannot disagree about where
+ * a pair ends.
+ */
+[[nodiscard]] std::vector<QueryPair> split_query_pairs (std::string_view query);
 
 /**
  * Which part of a URL a point in its text sits in, for the rule text written
