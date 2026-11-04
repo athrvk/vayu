@@ -430,6 +430,11 @@ struct ScenarioSummaryInputs {
     /// request and is not in this map, on the same terms it is left out of
     /// `coverage` above.
     std::map<int, size_t> status_codes;
+    /// The sent steps whose response negotiated a lower protocol than the one
+    /// requested (`Response::http_version_downgraded`, #3262): requests, as in
+    /// the load path's `RunSummaryInputs::http_version_downgraded`, so the
+    /// report's "HTTP/2 fell back" reading counts the same unit in both modes.
+    size_t http_version_downgraded = 0;
     /// Every sent step's latency, in the order steps ran. Kept as a plain
     /// list rather than through `MetricsCollector`: that collector is
     /// shared, already ticking for the run's SSE frames, and built for a

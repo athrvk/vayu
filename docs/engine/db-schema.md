@@ -1818,7 +1818,7 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
 ```json
 {
   "total_requests": 5, "status_codes": { "0": 1, "200": 4 },
-  "test_duration": 1.8, "rps": 2.8,
+  "http_version_downgraded": 0, "test_duration": 1.8, "rps": 2.8,
   "latency": {
     "count": 5, "min": 12.0, "max": 240.0, "avg": 71.6,
     "p50": 40.0, "p75": 60.0, "p90": 240.0, "p95": 240.0, "p99": 240.0, "p999": 240.0
@@ -1841,7 +1841,10 @@ count the run's size, and count a skipped step's status-`0` row as a failure.
 `status_codes` is written even when empty: `{}` is a run in which no step sent,
 and a summary with no `status_codes` key (a run stored before the issue, whose
 `total_requests` is the step count) reports its split from the stored rows.
-`rps` is requests sent over `test_duration`. `steps_dropped` is what
+`http_version_downgraded` (#3262) is how many of those requests asked for
+HTTP/2 and negotiated something older, the load summary's key and unit, always
+written (a `0` is a run that counted and saw none, a missing key a run stored
+before the issue). `rps` is requests sent over `test_duration`. `steps_dropped` is what
 that cap thinned - always successes, never a failure. `steps_not_run` is the
 plan positions errors cost (issue #2526): for every iteration an `errored` step
 ended, the positions after it the iteration had not attempted; an iteration

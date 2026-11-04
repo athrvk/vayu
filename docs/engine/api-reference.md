@@ -9864,6 +9864,16 @@ script that then threw is an instruction from code that did not finish, so the
 iteration walks to the next plan position (see
 [scripting.md](scripting.md#flow-control-pmexecution)).
 
+**The run's summary also carries the HTTP/2 fallback count** (#3262). Every sent
+step's trace has `httpVersionDowngraded` (see [`POST /execute`](#post-execute)),
+and the runner adds those up into the stored summary's `http_version_downgraded`,
+the key a load run writes, so the report's `summary.httpVersionDowngraded` is the
+same figure in both run kinds. It counts requests, not steps: a step the plan
+skipped sent nothing and is never in it, and a request that asked for `http2`
+and got `HTTP/1.1` is one for every iteration it ran in. It is written as `0` for
+a run that counted and saw none, so only a summary stored before #3262 lacks the
+key.
+
 **`stopOnError`** is a top-level boolean on `POST /runs`, default `false`,
 type-checked before the run row is created (`null` reads as the default, and a
 non-boolean is a `400` `invalid_run_config` naming the field). Set, every
@@ -12740,7 +12750,10 @@ figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked
 for HTTP/2 and negotiated something older - see
-[`httpVersionDowngraded` on a response](#post-execute). It is the only figure in
+[`httpVersionDowngraded` on a response](#post-execute). A collection run counts
+its sent requests the same way (#3262, [Scenario runs](#scenario-runs)); a
+collection run stored by an engine older than that fix reads `0` here although
+its steps' traces may say otherwise. It is the only figure in
 `summary` that describes the report's *validity* rather than its performance:
 non-zero means the latency and throughput beside it were measured over a
 protocol other than the one `metadata.configuration.httpVersion` names.

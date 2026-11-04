@@ -513,6 +513,9 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     summary["rps"]            = inputs.duration_s > 0 ?
     static_cast<double> (requests_sent) / inputs.duration_s :
     0.0;
+    // Written at 0 too, as the load path does: the report reads a missing key
+    // as 0 either way, but a stored 0 says the run counted and found none.
+    summary["http_version_downgraded"] = inputs.http_version_downgraded;
 
     // The steps that sent, the same sample a latency budget judges. A run in
     // which none did stores only `count: 0`: a block of zeros would read as
@@ -964,6 +967,9 @@ ScenarioStepStore& store) {
     if (exchange.sent) {
         coverage.record (step.index, record.status_code);
         ++summary.status_codes[record.status_code];
+        if (exchange.response.http_version_downgraded) {
+            ++summary.http_version_downgraded;
+        }
         if (exchange.response.transfer_attempted) {
             summary.latencies.push_back (record.latency_ms);
         }
