@@ -4708,7 +4708,7 @@ was before these rules.
 |------|-----------------------------------|
 | `vayu_elements` | An element other than a pre-request or post-response script (assertion, extractor, timer, controller, metric, setup or teardown script) |
 | `script_settings` | A script with a name or the load-test `inline` setting |
-| `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body |
+| `jsonrpc_bodies` | A JSON-RPC body, written as a raw JSON body holding the completed frame (`jsonrpc` and `id` added as on send) |
 | `unsupported_bodies` | A body in a mode Postman has no equivalent for, left out |
 | `unsupported_auth` | An auth mode Postman has no equivalent for, left out |
 | `oauth2_settings` | An OAuth 2.0 turned-off automatic token fetch or refresh, a token query parameter name, or an empty header prefix (an `audience`, `resource` and the extra request parameter lists are written as Postman's `tokenRequestParams`, `authRequestParams` and `refreshRequestParams`) |

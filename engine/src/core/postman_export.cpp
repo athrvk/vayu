@@ -31,6 +31,7 @@
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/header_names.hpp"
+#include "vayu/http/jsonrpc_body.hpp"
 #include "vayu/http/oauth_client.hpp"
 #include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
@@ -96,7 +97,7 @@ struct LossText {
 constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "vayu_elements", "Assertions, extractors, timers, controllers, metrics and setup or teardown scripts have no Postman equivalent" },
 { "script_settings", "Script names and the run-inline setting have no Postman equivalent" },
-{ "jsonrpc_bodies", "JSON-RPC bodies were written as raw JSON" },
+{ "jsonrpc_bodies", "JSON-RPC bodies were written as the completed frame in raw JSON" },
 { "unsupported_bodies", "Bodies in a mode Postman lacks were left out" },
 { "unsupported_auth", "Auth in a mode Postman lacks was left out" },
 { "oauth2_settings", "Some OAuth 2.0 settings have no Postman equivalent" },
@@ -1130,7 +1131,8 @@ std::optional<json> postman_body (const json& body, Walk& walk) {
     }
     if (mode == "jsonrpc") {
         walk.lose (Loss::JsonRpcBodies);
-        return std::make_optional (raw_body (content, "json"));
+        return std::make_optional (
+        raw_body (vayu::http::jsonrpc_wire_body (content), "json"));
     }
     if (mode == "graphql") {
         return std::make_optional (graphql_body (content));
