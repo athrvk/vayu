@@ -310,6 +310,22 @@ describe("ScenarioRunService", () => {
 		invalidate.mockRestore();
 	});
 
+	it("refetches the variable scopes a run's scripts wrote, so the Variables pane is not left on the pre-run value (#3250)", async () => {
+		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+		vi.mocked(apiService.getRunReport).mockResolvedValue(
+			storedReport as unknown as Awaited<ReturnType<typeof apiService.getRunReport>>
+		);
+
+		scenarioRunService.startMonitoring("run_vars");
+		await closeStream();
+
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.environments.all });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.globals.all });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.collections.all });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.compose.all });
+		invalidate.mockRestore();
+	});
+
 	/**
 	 * Issue #1153. The engine's scenario loop is sequential with no pacing, so a
 	 * local target returns steps faster than the renderer can commit them one at
