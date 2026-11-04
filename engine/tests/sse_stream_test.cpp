@@ -1796,6 +1796,19 @@ TEST_F (StreamExecuteTest, AJsonErrorReplyIsStoredAsTheBody) {
     << trace["scripts"]["testResults"][0].value ("error", "");
 }
 
+/// One `data:` frame of @p payload_bytes copies of @p fill. Sized up front and
+/// overwritten in place: GCC 13 at -O3 reports a false -Warray-bounds on the
+/// `literal + std::string (n, c)` chain and on an append that grows past the
+/// small-string buffer, either of which fails the -Werror release leg.
+std::string sse_data_frame (std::size_t payload_bytes, char fill) {
+    constexpr std::string_view PREFIX = "data: ";
+    std::string frame (PREFIX.size () + payload_bytes + 2, fill);
+    frame.replace (0, PREFIX.size (), PREFIX);
+    frame[frame.size () - 2] = '\n';
+    frame[frame.size () - 1] = '\n';
+    return frame;
+}
+
 // An event stream's bytes are its events: the body stays empty and
 // `bodyBytes` says how much arrived. Mutation check: drop the `bodyBytes`
 // write in `build_result_trace` and the key is absent.
@@ -1803,12 +1816,7 @@ TEST_F (StreamExecuteTest, AnEventStreamStoresItsByteCountAndNoBody) {
     std::vector<std::string> chunks;
     std::size_t delivered = 0;
     for (int i = 0; i < 100; ++i) {
-        // Built by append: GCC 13 at -O3 misreads the `operator+` chain as an
-        // out-of-bounds copy under -Werror=array-bounds.
-        std::string frame = "data: ";
-        frame.append (94, static_cast<char> ('a' + (i % 26)));
-        frame += "\n\n";
-        chunks.push_back (std::move (frame));
+        chunks.push_back (sse_data_frame (94, static_cast<char> ('a' + (i % 26))));
         delivered += chunks.back ().size ();
     }
     ASSERT_EQ (delivered, 10200u);
