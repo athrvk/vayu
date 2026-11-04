@@ -3472,7 +3472,8 @@ and as the body's media type), and a request whose method or path no longer
 matches the operation it is stamped as is `operationsEdited` - its values still
 land, in the operation the document declares. A concrete path that fills the
 operation's template (`/users/1` for `/users/{id}`) still matches, by the rule
-the matcher stamped it with, and is not counted. A parameter the operation declares
+the matcher stamped it with, and is not counted; neither is one under a server base
+path the document declares (`/v1/users/1` with `servers: [{url: /v1}]`). A parameter the operation declares
 by `$ref`, or one the Path Item declares for every method under it, is declared:
 its name is read through the reference, so a row that has a home is never
 counted as one the document has no place for, and `sharedParametersLeft` is what

@@ -184,6 +184,17 @@ struct RequestUrlParts {
  */
 [[nodiscard]] bool fills_template (std::string_view path_shape, std::string_view template_shape);
 
+/**
+ * `fills_template`, or the same under any of the document's @p base_paths taken
+ * off the front of @p path_shape: the third pass of `match_operations` stamps
+ * `/v1/users/1` as `/users/{}` when the document declares `servers: [{url: /v1}]`,
+ * so asking whether a stamped request still is its operation must strip them too.
+ * @p base_paths are as `match_operations` reads them.
+ */
+[[nodiscard]] bool fills_template_under_base_paths (std::string_view path_shape,
+std::string_view template_shape,
+const std::vector<std::string>& base_paths);
+
 /** `GET /pets/{}` - the key both sides are bucketed by. */
 [[nodiscard]] std::string
 operation_shape_key (std::string_view method, std::string_view path_shape);
