@@ -194,6 +194,8 @@ bool segment_fills_template (std::string_view segment, std::string_view pattern)
     return cursor < segment.size () - tail.size ();
 }
 
+} // namespace
+
 /**
  * Whether a concrete path could be this template with its placeholders filled:
  * the same number of segments, and every segment filling its template segment.
@@ -225,8 +227,6 @@ bool fills_template (std::string_view path_shape, std::string_view template_shap
     }
     return false;
 }
-
-} // namespace
 
 std::optional<std::string> variable_token_name (std::string_view text) {
     if (text.size () < 5 || text.substr (0, 2) != "{{" ||

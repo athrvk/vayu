@@ -500,6 +500,25 @@ TEST (BoundExport, CountsTheEditsItHasNoWayToWriteIntoTheDocument) {
     EXPECT_EQ (operation_of (exported.document, "/pets", "get")["parameters"][0]["example"], "25");
 }
 
+TEST (BoundExport, DoesNotCountAConcreteUrlThatFillsTheTemplateItIsStampedAs) {
+    // `POST /specs/bind` stamps `/owners/42/pets` as `listOwnerPets`, so the
+    // export must not call that URL an edit to the contract (#3247).
+    std::vector<ExportRequest> requests = refs_requests ();
+    requests[1].url                     = "{{baseUrl}}/owners/42/pets";
+
+    for (const auto mode : { vayu::core::BoundMode::Contract, vayu::core::BoundMode::Full }) {
+        const ExportOutcome outcome = export_openapi (
+        petstore (), requests, refs_fixture (), ExportFormat::Json, mode);
+        ASSERT_TRUE (outcome.ok ()) << outcome.error;
+        EXPECT_EQ (outcome.notes.operations_edited, 0);
+    }
+
+    // A literal segment that is not the template's is still an edit, and so is
+    // a longer path, which no placeholder reaches across a `/` to fill.
+    requests[1].url = "{{baseUrl}}/owners/42/pets/toys";
+    EXPECT_EQ (export_json (requests, refs_fixture ()).notes.operations_edited, 1);
+}
+
 TEST (BoundExport, CountsNoUndeclaredRowForAParameterTheDocumentDeclaresByReference) {
     std::vector<ExportRequest> requests = bound_requests ();
     // `X-Trace-Id` is the fixture's `$ref` parameter, declared once in

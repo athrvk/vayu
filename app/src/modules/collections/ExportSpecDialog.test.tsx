@@ -350,7 +350,7 @@ describe("ExportSpecDialog", () => {
 			answer({ notes: notes({ boundMode: "full", operationsAdded: 2, secretsOmitted: 1 }) })
 		);
 		// The hint under the toggle says what the chosen mode does.
-		expect(screen.getByText(/The spec's structure stays as it is/)).toBeTruthy();
+		expect(screen.getByText(/operations no request here claims are removed/)).toBeTruthy();
 		fireEvent.click(screen.getByRole("radio", { name: "All edits" }));
 		await waitFor(() => expect(exportSpec).toHaveBeenCalledTimes(2));
 		expect(exportSpec.mock.calls[1][0]).toEqual({

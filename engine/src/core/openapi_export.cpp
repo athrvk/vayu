@@ -983,6 +983,9 @@ void count_unwritten_body (const ExportRequest& entry, ExportNotes& notes) {
 
 /**
  * A request whose method or path is no longer the operation it is stamped as.
+ * The path is judged as the matcher stamped it: `/users/1` still is
+ * `/users/{id}`, so a concrete URL that fills its operation's template is not
+ * an edit.
  *
  * The stamp is what finds the operation, so the request's values still land -
  * in the operation the document declares, under the method and path *it*
@@ -1001,7 +1004,7 @@ void count_edited_identity (const ExportRequest& entry, ExportNotes& notes) {
         return;
     }
     const std::optional<std::string> shape = request_path_shape (entry.url);
-    if (shape && *shape != spec_path_shape (identity->path)) {
+    if (shape && !fills_template (*shape, spec_path_shape (identity->path))) {
         notes.operations_edited += 1;
     }
 }
