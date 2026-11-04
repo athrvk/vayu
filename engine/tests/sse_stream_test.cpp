@@ -1796,10 +1796,16 @@ TEST_F (StreamExecuteTest, AJsonErrorReplyIsStoredAsTheBody) {
     << trace["scripts"]["testResults"][0].value ("error", "");
 }
 
-/// One `data:` frame of @p payload_bytes copies of @p fill. Sized up front and
-/// overwritten in place: GCC 13 at -O3 reports a false -Warray-bounds on the
-/// `literal + std::string (n, c)` chain and on an append that grows past the
-/// small-string buffer, either of which fails the -Werror release leg.
+/// One `data:` frame of @p payload_bytes copies of @p fill.
+///
+/// Kept out of line on GCC: inlined, the compiler knows the frame is 102 bytes
+/// and reads the move of it into the caller's vector as a copy of that many
+/// bytes out of a small-string buffer, a false -Warray-bounds that fails the
+/// -O3 -Werror release leg on Ubuntu 22.04. Building it by append or by
+/// `literal + std::string (n, c)` there fails the same way.
+#if defined(__GNUC__) && !defined(__clang__)
+[[gnu::noinline]]
+#endif
 std::string sse_data_frame (std::size_t payload_bytes, char fill) {
     constexpr std::string_view PREFIX = "data: ";
     std::string frame (PREFIX.size () + payload_bytes + 2, fill);
