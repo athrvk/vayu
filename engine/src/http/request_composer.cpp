@@ -368,16 +368,20 @@ constexpr std::array<DynamicVariable, 39> DYNAMIC_VARIABLES = { {
 } },
 } };
 
-std::string trim (const std::string& s) {
-    const auto begin = s.find_first_not_of (" \t\r\n");
-    if (begin == std::string::npos) {
+} // namespace
+
+std::string trim_variable_name (std::string_view written) {
+    const auto begin = written.find_first_not_of (" \t\r\n");
+    if (begin == std::string_view::npos) {
         return {};
     }
-    const auto end = s.find_last_not_of (" \t\r\n");
-    return s.substr (begin, end - begin + 1);
+    const auto end = written.find_last_not_of (" \t\r\n");
+    return std::string (written.substr (begin, end - begin + 1));
 }
 
-} // namespace
+bool is_addressable_variable_name (std::string_view key) {
+    return !key.empty () && trim_variable_name (key) == key;
+}
 
 bool is_dynamic_variable_name (const std::string& name) {
     return !name.empty () && name.front () == '$';
@@ -492,7 +496,7 @@ std::vector<std::string>& expanding) {
         out.append (input, last, static_cast<size_t> (match.position ()) - last);
         last = static_cast<size_t> (match.position () + match.length ());
 
-        std::string name = trim (match[1].str ());
+        std::string name = trim_variable_name (match[1].str ());
         // The cycle is answered before `resolve` runs, not after: the callbacks
         // record what they substituted (a header a value would forge, a column
         // no row has), and a name this pass is not going to substitute must not
@@ -582,7 +586,7 @@ const std::function<bool (const std::string&)>& keep) {
         for (; it != end; ++it) {
             const auto& match = *it;
             literal.append (input, last, static_cast<size_t> (match.position ()) - last);
-            std::string name = trim (match[1].str ());
+            std::string name = trim_variable_name (match[1].str ());
             if (keep (name)) {
                 split.literals.push_back (std::move (literal));
                 literal.clear ();

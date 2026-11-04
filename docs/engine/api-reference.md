@@ -520,6 +520,17 @@ credentials goes out bare. The write is therefore rejected rather than stored:
 `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
 stored value is left untouched.
 
+**A `variables` key must be one a `{{ name }}` token can reach (#3251).** A token
+is looked up with the spaces, tabs, CR and LF around its text cut, so a stored
+key that is empty, whitespace-only, or differs from its trim can never be
+referenced. The same `400` refuses it, naming the key: `Invalid 'variables': key
+' x ' has leading or trailing whitespace`, or `... key '' is empty or
+whitespace-only`. It applies to `POST`/`PUT /collections`,
+`POST`/`PUT /environments` and `POST /globals`, and the stored value is left
+untouched. Whitespace *inside* a key and dots are fine (`my var`, `a.b`).
+Variables a script writes are not checked. An import does not hit this: it
+trims the names it reads, see [`POST /import/parse`](#post-importparse).
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1548,7 +1559,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, or on a cycle (below); `409` if `parentId` names a collection in the
+`null`, if a `variables` key is blank or padded
+([#3251](#accepted-field-shapes)), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -1588,8 +1600,9 @@ list it just left. See [Ordering](#ordering).
 **Response:** The updated collection object, with its `ETag`.
 
 **Errors:** `404` if the collection does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name`, a malformed `If-Match` or
-on a cycle (below); `409` if `parentId` names a collection in the
+longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`,
+a blank or padded `variables` key ([#3251](#accepted-field-shapes)) or on a cycle
+(below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -4095,6 +4108,19 @@ WebSocket item is counted in `meta.skipped` as `grpc` / `websocket`, as in v4,
 and `cookieJar` and `certificates` are not imported. The member spellings are
 those of Insomnia's v5 schema; a member spelled otherwise reads as absent.
 
+**Variable names are trimmed (#3251).** `{{ name }}` looks a variable up trimmed,
+and the write routes refuse a stored name that is blank or differs from its trim
+([Accepted field shapes](#accepted-field-shapes)). The parse therefore trims
+every variable name it reads (Postman `variable[]` and `values[]`, an Insomnia
+environment's `data` keys, a dotted nested name as a whole) and skips a row whose
+name trims to nothing, uncounted, as an empty name always was. Two names that
+trim alike collide and the later row wins, as exact duplicates do. An
+`x-vayu-collection` / `x-vayu-folder` `variables` object carrying such a name is
+an invalid extension piece (`vayu_extension_invalid`) and the standard reading
+stands. `POST /import` writes the parsed globals through the same trimmed names.
+A hand-built `POST /import/apply` tree is not repaired: a padded name in it is the
+same `400`, and the whole atomic apply fails.
+
 **Request:**
 ```json
 {
@@ -5293,9 +5319,10 @@ the null-vs-absent rule.
 **Response:** The created environment object, carrying the engine-generated `id`.
 
 **Errors:** `400` if the body carries an `id`
-([the engine owns it](#the-engine-owns-every-id)), or if `name` is missing or
-`null`; `413` naming the field, its size and the cap, when a serialized
-`variables` is over the engine's
+([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
+`null`, or if a `variables` key is blank or padded
+([#3251](#accepted-field-shapes)); `413` naming the field, its size and the cap,
+when a serialized `variables` is over the engine's
 [field cap](#a-stored-json-field-has-a-write-time-cap).
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
@@ -5339,7 +5366,8 @@ it survives a restart and is shared by every client on the same database. See
 **Response:** The updated environment object, with its `ETag`.
 
 **Errors:** `404` if the environment does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name` or a malformed `If-Match`;
+longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`
+or a blank or padded `variables` key ([#3251](#accepted-field-shapes));
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -5419,8 +5447,9 @@ Set global variables.
 **Response:** The saved globals object, with its `ETag`.
 
 **Errors:** `412` if `If-Match` no longer names the stored row (the stored
-`updatedAt` rides inside the error); `400` on a malformed `If-Match` or a
-non-object `variables`. Neither writes anything.
+`updatedAt` rides inside the error); `400` on a malformed `If-Match`, a
+non-object `variables` or a blank or padded `variables` key
+([#3251](#accepted-field-shapes)). None writes anything.
 
 Globals is a singleton, so there is no create/update pair: a `POST` **replaces**
 the whole set rather than merging into it. Every write is therefore a create as

@@ -201,6 +201,13 @@ TEST (VayuExtensions, RefusesWhatAWriteRouteWouldRefuse) {
     EXPECT_FALSE (ext::data_schema_of (Json::parse (R"({"columns":["a","a"]})")));
     EXPECT_FALSE (ext::folder_path_of (Json::parse (R"(["a",""])")));
     EXPECT_FALSE (ext::variables_of (Json::parse (R"({"v":{"value":1}})")));
+    // A name the write routes refuse (#3251) is this piece's to drop, so the
+    // import falls back to the standard reading instead of failing the apply.
+    for (const char* bad : { R"({" v":{"value":"1"}})", R"({"v ":{"value":"1"}})",
+         R"({"":{"value":"1"}})", R"({"  ":{"value":"1"}})" }) {
+        EXPECT_FALSE (ext::variables_of (Json::parse (bad))) << bad;
+    }
+    EXPECT_TRUE (ext::variables_of (Json::parse (R"({"my v":{"value":"1"}})")));
 }
 
 // --- A saved example's `origin` (#2430) --------------------------------------

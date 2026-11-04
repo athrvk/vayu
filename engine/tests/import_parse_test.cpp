@@ -3656,6 +3656,75 @@ TEST (PostmanImport, KeepsCollectionVariableMetadataAndCountsWhatHasNoHome) {
 }
 
 /**
+ * Issue #3251: the write routes refuse a variable key that is blank or differs
+ * from its trim, and an import applies atomically, so one padded row in a
+ * document must not reach the apply as written. Each scope's parse trims the
+ * key and skips a row that trims to nothing, without counting it (an empty key
+ * never was); two keys that trim alike collide and the later row wins, as exact
+ * duplicates do. Mutation check: drop the trim in `to_var_record` and the
+ * padded names, the collision and the lookup by trimmed name all fail.
+ */
+TEST (PostmanImport, TrimsAVariableKeyAndSkipsABlankOne) {
+    const std::string values = R"([
+        {"key":" host ","value":"a"},
+        {"key":"\ttoken","value":"b"},
+        {"key":"   ","value":"skipped"},
+        {"key":"","value":"skipped"},
+        {"key":"dup","value":"first"},
+        {"key":" dup","value":"second"}])";
+
+    const auto check = [] (const json& variables) {
+        EXPECT_EQ (variables.size (), 3U) << variables.dump ();
+        EXPECT_EQ (variables.at ("host").at ("value"), "a");
+        EXPECT_EQ (variables.at ("token").at ("value"), "b");
+        EXPECT_EQ (variables.at ("dup").at ("value"), "second");
+        for (auto member = variables.begin (); member != variables.end (); ++member) {
+            EXPECT_TRUE (vayu::http::is_addressable_variable_name (member.key ()))
+            << "'" << member.key () << "'";
+        }
+    };
+
+    const ImportParse environment = parse_import (
+    R"({"_postman_variable_scope":"environment","name":"Prod","values":)" + values + "}",
+    {}, {});
+    ASSERT_TRUE (environment.ok ()) << environment.error;
+    check (environment.result.at ("environments")[0].at ("variables"));
+    EXPECT_TRUE (skip_counts (environment.result.at ("meta").at ("skipped")).empty ());
+
+    const ImportParse globals = parse_import (
+    R"({"_postman_variable_scope":"globals","values":)" + values + "}", {}, {});
+    ASSERT_TRUE (globals.ok ()) << globals.error;
+    check (globals.result.at ("globals"));
+    EXPECT_EQ (globals.result.at ("meta").at ("globalCount"), 3);
+
+    const ImportParse collection = parse_import (R"({"info":{"schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"item":[],"variable":)" + values + "}",
+    {}, {});
+    ASSERT_TRUE (collection.ok ()) << collection.error;
+    check (collection.result.at ("collections")[0].at ("variables"));
+}
+
+// The Insomnia counterpart of the above: an environment's `data` key is the
+// variable name, and a nested object extends it with a dot.
+TEST (InsomniaImport, TrimsAnEnvironmentVariableNameAndSkipsABlankOne) {
+    const ImportParse parsed = parse_import (R"({"_type":"export","__export_format":4,"resources":[
+        {"_id":"wrk","_type":"workspace","name":"W"},
+        {"_id":"env","_type":"environment","parentId":"wrk","name":"Base",
+            "data":{" host ":"a","  ":"skipped","":"skipped","nest":{"inner ":"b"}}}]})",
+    {}, {});
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& variables =
+    parsed.result.at ("environments")[0].at ("variables");
+    EXPECT_EQ (variables.at ("host").at ("value"), "a");
+    EXPECT_EQ (variables.at ("nest.inner").at ("value"), "b");
+    EXPECT_EQ (variables.size (), 2U) << variables.dump ();
+    for (auto member = variables.begin (); member != variables.end (); ++member) {
+        EXPECT_TRUE (vayu::http::is_addressable_variable_name (member.key ()))
+        << "'" << member.key () << "'";
+    }
+}
+
+/**
  * Three more Postman fields measured lossy after #1443 and left out of it
  * deliberately (issue #1460): an oauth2 block's `state` and `tokenName`, a
  * pre-fetched `accessToken` beside an explicit grant config, and a query

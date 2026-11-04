@@ -36,6 +36,7 @@
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/types.hpp"
@@ -332,6 +333,11 @@ bool is_vayu_variable_type (const std::string& type) {
 /**
  * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
  *
+ * A key is trimmed the way `{{ name }}` is (`trim_variable_name`), because the
+ * write routes refuse a padded one (#3251) and one such row would fail the
+ * whole atomic import; a key that trims to nothing is skipped like an empty
+ * one, uncounted. Two keys that trim alike collide, and the later wins.
+ *
  * `type: "secret"` is `secret: true`; `string`, `number` and `boolean` are
  * Vayu's own variable types of the same name and stored as `type`, which
  * casts the value for a script exactly as Postman's typed variable does.
@@ -354,6 +360,11 @@ json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_
     for (const json& row : *vars) {
         const json* record = as_record (&row);
         if (record == nullptr || !truthy (prop (record, "key"))) {
+            continue;
+        }
+        const std::string name =
+        vayu::http::trim_variable_name (as_string (prop (record, "key")));
+        if (name.empty ()) {
             continue;
         }
         const std::string* declared_type = as_str (prop (record, "type"));
@@ -384,7 +395,7 @@ json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_
         if (keep_description && truthy (description)) {
             value["description"] = as_string (description);
         }
-        out[as_string (prop (record, "key"))] = std::move (value);
+        out[name] = std::move (value);
     }
     return out;
 }
@@ -2892,6 +2903,9 @@ void insomnia_redirects (const json* resource, json& request) {
  * `a.b`, because the importer rewrites `{{ _.a.b }}` to `{{a.b}}` and the
  * composer looks up that whole name. An array, or an empty object, stays one
  * variable holding its JSON text.
+ *
+ * The finished name is trimmed, and one that trims to nothing is skipped, for
+ * the reason `to_var_record` gives (#3251).
  */
 void add_env_var (const std::string& name, const json& node, json& out) {
     if (node.is_object () && !node.empty ()) {
@@ -2900,7 +2914,11 @@ void add_env_var (const std::string& name, const json& node, json& out) {
         }
         return;
     }
-    out[name] =
+    const std::string trimmed = vayu::http::trim_variable_name (name);
+    if (trimmed.empty ()) {
+        return;
+    }
+    out[trimmed] =
     json{ { "value", normalize_vars (as_string (&node)) }, { "enabled", true } };
 }
 

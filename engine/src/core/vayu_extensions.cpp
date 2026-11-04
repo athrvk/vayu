@@ -15,6 +15,7 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/log_redact.hpp"
@@ -739,7 +740,8 @@ std::optional<Json> variables_of (const Json& value) {
     Json out = Json::object ();
     for (auto entry = value.begin (); entry != value.end (); ++entry) {
         const Json& variable = entry.value ();
-        if (!variable.is_object () || !is_string_member (variable, "value")) {
+        if (!vayu::http::is_addressable_variable_name (entry.key ()) ||
+        !variable.is_object () || !is_string_member (variable, "value")) {
             return std::nullopt;
         }
         const auto enabled = variable.find ("enabled");

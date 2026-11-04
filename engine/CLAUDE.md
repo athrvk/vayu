@@ -533,7 +533,11 @@ logged as a warning: it means a client skipped composition.
   engine-side, the `idMap` back, the whole tree in one transaction. The same
   per-resource appliers (`apply_collection_fields` / `apply_request_fields` /
   `apply_environment_fields`, declared in `routes.hpp`) back both paths, so a
-  field added there reaches bulk import too.
+  field added there reaches bulk import too. A `variables` blob goes through
+  `apply_variables_field` (`routes.hpp`, #3251), which also refuses a key that is
+  blank or differs from `trim_variable_name`, the trim `{{ name }}` is looked up
+  by, since such a key could never be referenced; the importers trim names
+  instead (`to_var_record`), so one padded row cannot fail an atomic import.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`

@@ -39,6 +39,7 @@
 #include "vayu/http/entity_tag.hpp"
 #include "vayu/http/grant_secret.hpp"
 #include "vayu/http/request_builder.hpp"
+#include "vayu/http/request_composer.hpp"
 // The `POST /execute` core - `ScriptVariableScopes`, the exchange itself - now
 // shared with the scenario runner and therefore declared where `vayu_core` can
 // see it. Included here so route TUs keep naming it through routes.hpp.
@@ -734,6 +735,41 @@ bool is_create) {
         dumped.size (), vayu::core::constants::json::MAX_FIELD_SIZE));
     }
     out = std::move (dumped);
+    return {};
+}
+
+/**
+ * `apply_json_field` for a `variables` blob, which also refuses a key no token
+ * can reach (#3251). `{{ name }}` is looked up as `trim_variable_name` cuts it,
+ * so a stored key that is blank or differs from its trim could never be
+ * referenced and would sit in the editor unusable. The rule is
+ * `is_addressable_variable_name`, the lookup's own trim, so the two agree. A
+ * bad key is a 400 naming it; nothing is applied to @p out.
+ *
+ * Its own function rather than a branch of `apply_json_field`, which also
+ * carries auth and body, whose keys are not names. The one call every route
+ * that stores variables makes (environments, globals, collections).
+ */
+[[nodiscard]] inline RouteResult
+apply_variables_field (const nlohmann::json& json, std::string& out, bool is_create) {
+    constexpr const char* KEY = "variables";
+    std::string applied       = out;
+    if (auto outcome = apply_json_field (json, KEY, applied, "{}", is_create); !outcome) {
+        return outcome;
+    }
+    if (json.contains (KEY) && json[KEY].is_object ()) {
+        for (const auto& member : json[KEY].items ()) {
+            const std::string& name = member.key ();
+            if (is_addressable_variable_name (name)) {
+                continue;
+            }
+            const bool blank = trim_variable_name (name).empty ();
+            return route_error (400,
+            std::format ("Invalid '{}': key '{}' {}", KEY, name,
+            blank ? "is empty or whitespace-only" : "has leading or trailing whitespace"));
+        }
+    }
+    out = std::move (applied);
     return {};
 }
 
