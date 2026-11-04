@@ -1091,6 +1091,35 @@ json script_element (const std::string& kind, const std::string& id, const std::
         { "config", { { "script", text } } } };
 }
 
+// A `script.teardown` runs after the last step, so the run's one write-back
+// has to come after it (#3249). Mutation check: move `scopes.persist (db)` in
+// `execute_scenario_run` back above `run_scenario_teardown` and neither
+// teardown variable is stored.
+TEST_F (ScenarioRunnerTest, ATeardownScriptsVariableWritesArePersisted) {
+    seed_collection_with_elements ("col_1", "",
+    json::array ({ script_element ("script.teardown", "el_teardown",
+    "pm.environment.set('teardown_var', 'x');"
+    "pm.globals.set('teardown_global', 'y');") }));
+    seed_environment ("env_1", "[]");
+    db_->save_globals ({ "globals", "[]", 1 });
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    auto env = db_->get_environment ("env_1");
+    ASSERT_HAS_VALUE (env);
+    const auto env_vars = vayu::json::parse_variables (env->variables);
+    ASSERT_EQ (env_vars.count ("teardown_var"), 1u) << env->variables;
+    EXPECT_EQ (env_vars.at ("teardown_var").value, "x");
+
+    auto globals = db_->get_globals ();
+    ASSERT_HAS_VALUE (globals);
+    const auto global_vars = vayu::json::parse_variables (globals->variables);
+    ASSERT_EQ (global_vars.count ("teardown_global"), 1u) << globals->variables;
+    EXPECT_EQ (global_vars.at ("teardown_global").value, "y");
+}
+
 // Probe XA: the collection's failing test used to be overwritten by the
 // request's passing one, and the step passed. Mutation check: assign instead
 // of folding in `script_kinds.cpp`'s `run_step_script` and the step passes.
