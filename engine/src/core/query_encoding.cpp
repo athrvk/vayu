@@ -10,6 +10,9 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_encode_sets.hpp"
 
+#include <cstddef>
+#include <utility>
+
 namespace vayu::core {
 
 namespace {
@@ -27,6 +30,29 @@ bool in_query_key_set (unsigned char byte) {
 std::string encode_query_component (std::string_view text, QueryPart part) {
     return encode_outside_tokens (
     text, part == QueryPart::Key ? in_query_key_set : in_query_value_set);
+}
+
+std::vector<QueryPair> split_query_pairs (std::string_view query) {
+    std::vector<QueryPair> pairs;
+    std::size_t start = 0;
+    while (start <= query.size ()) {
+        const std::size_t amp = query.find ('&', start);
+        const std::string_view pair =
+        query.substr (start, amp == std::string_view::npos ? amp : amp - start);
+        start = amp == std::string_view::npos ? query.size () + 1 : amp + 1;
+        if (pair.empty ()) {
+            continue;
+        }
+        const std::size_t equals = pair.find ('=');
+        QueryPair split;
+        split.key       = std::string (pair.substr (0, equals));
+        split.valueless = equals == std::string_view::npos;
+        if (!split.valueless) {
+            split.value = std::string (pair.substr (equals + 1));
+        }
+        pairs.push_back (std::move (split));
+    }
+    return pairs;
 }
 
 namespace {

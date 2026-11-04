@@ -601,6 +601,12 @@ export writes the edit.
   empty value comes back as `key=` and a `"value": null` row as a bare `key`,
   as Postman writes them: the row keeps the null as `valueless: true`. The
   `query[]` rows themselves come back as written, a null value as `null`.
+  A pair the stored URL sends that no enabled row states (a request created
+  through the API or MCP with its query only in `url`) is added to `query[]`
+  after the rows, in URL order, read by the same splitter the import uses
+  (`split_query_pairs`): Postman and Newman read `query[]` over `raw`, so
+  leaving it out would drop the pair from the sent request. Re-importing such
+  an export gives the request the rows it lacked and the URL it had.
 - **Variable order** within a collection or folder follows name order, the
   order the stored variables object keeps.
 - **A folder's or the collection's `protocolProfileBehavior`** is not written

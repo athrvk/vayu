@@ -30,6 +30,7 @@
 #include "vayu/core/path_template.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/core/postman_format.hpp"
+#include "vayu/core/query_encoding.hpp"
 #include "vayu/core/script_api_scan.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/db/sibling_order.hpp"
@@ -1354,31 +1355,16 @@ json pm_body (const json* body, PostmanCounts& counts) {
     return json{ { "mode", "none" } };
 }
 
-/// `queryEntries(query)`: a `k=v&k2=v2` string as rows, split on `&` and the
-/// first `=` and never decoded, as Postman's `QueryParam.parse` reads it
-/// (issue #1771): a pair with no `=` is `valueless`, one ending in `=` holds
-/// an empty value. A row holds raw query text, so the join writes it back
-/// byte for byte; decoding first would turn `%2B` into a `+` a server reads
-/// as a space, and `%2541` into `%41`.
+/// `queryEntries(query)`: a `k=v&k2=v2` string as rows, through the one
+/// splitter the export also reads a URL's query with
+/// (`vayu::core::split_query_pairs`): a pair with no `=` is `valueless`, one
+/// ending in `=` holds an empty value (issue #1771).
 json query_entries (const std::string& query) {
-    json out     = json::array ();
-    size_t start = 0;
-    while (start <= query.size ()) {
-        const size_t amp       = query.find ('&', start);
-        const std::string pair = query.substr (
-        start, amp == std::string::npos ? std::string::npos : amp - start);
-        start = amp == std::string::npos ? query.size () + 1 : amp + 1;
-        if (pair.empty ()) {
-            continue; // `.filter(Boolean)`
-        }
-        const size_t equals = pair.find ('=');
-        const std::string key =
-        equals == std::string::npos ? pair : pair.substr (0, equals);
-        const std::string value =
-        equals == std::string::npos ? std::string () : pair.substr (equals + 1);
-        json row = { { "key", key }, { "value", normalize_vars (value) },
-            { "enabled", true } };
-        if (equals == std::string::npos) {
+    json out = json::array ();
+    for (const QueryPair& pair : split_query_pairs (query)) {
+        json row = { { "key", pair.key },
+            { "value", normalize_vars (pair.value) }, { "enabled", true } };
+        if (pair.valueless) {
             row["valueless"] = true;
         }
         out.push_back (std::move (row));
