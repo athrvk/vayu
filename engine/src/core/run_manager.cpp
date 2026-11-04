@@ -464,6 +464,17 @@ RunContext::ScriptsOverrideMode scripts_mode) {
     return scripts;
 }
 
+/// The collections whose chains a scenario load run's steps read, one per
+/// step (#3248).
+std::vector<std::string> scenario_scope_collection_ids (const ScenarioExecution& execution) {
+    std::vector<std::string> ids;
+    ids.reserve (execution.plan.steps.size ());
+    for (const auto& step : execution.plan.steps) {
+        ids.push_back (load_step_collection_id (step, execution.request.collection_id));
+    }
+    return ids;
+}
+
 /**
  * The per-step replays of a scenario load run.
  *
@@ -473,7 +484,7 @@ RunContext::ScriptsOverrideMode scripts_mode) {
  * step's console lines stay on its own entry of `validation.steps`.
  */
 ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
-vayu::http::routes::ScriptVariableScopes& scopes,
+vayu::http::routes::RunVariableScopes& scopes,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 const vayu::runtime::ScriptSendInputs& send,
@@ -527,7 +538,10 @@ ReplayFailures& failures) {
         replay.sse_limits = sse_limits;
         replay.send       = send;
 
-        auto totals = run_replay (engine, scopes, replay, failures);
+        // The step's own folder, as the run read it (#3248).
+        auto& step_scopes = scopes.bind (
+        load_step_collection_id (step, context->scenario->request.collection_id));
+        auto totals = run_replay (engine, step_scopes, replay, failures);
         run_totals.sampled += totals.sampled;
         run_totals.passed += totals.passed;
         run_totals.failed += totals.failed;
@@ -647,11 +661,11 @@ vayu::db::Database& db) {
     // reported the target as broken.
     //
     // Which collection scope is the run's is the same question the two
-    // sequential paths answer: a scenario run's is the collection being run
-    // (`scenario_runner.cpp`), a single-request run's is the collection of the
-    // request it links (`load_script_variable_scopes(db, run)`). Read off the
-    // payload, which is what the run row itself was populated from, and where
-    // this function already reads `requestId` from.
+    // sequential paths answer: a scenario step's is its own folder's chain, as
+    // in the run itself (#3248), a single-request run's is the collection of
+    // the request it links (`load_script_variable_scopes(db, run)`). Read off
+    // the payload, which is what the run row itself was populated from, and
+    // where this function already reads `requestId` from.
     //
     // A database failure here is deliberately not caught: it propagates to
     // `execute_load_test`, which logs it and stores no `testValidation`
@@ -664,26 +678,18 @@ vayu::db::Database& db) {
         environment_id = it->get<std::string> ();
     }
 
-    std::string collection_id;
-    if (per_step) {
-        collection_id = context->scenario->request.collection_id;
-    } else if (linked_request) {
-        collection_id = linked_request->collection_id;
-    }
-
     // Loaded once and shared by every replay of the pass, so a `set()` is
     // readable by the samples replayed after it - the same within-a-run
     // visibility a sequential run gives. Never persisted:
     // `persist_script_variables` is design-mode only, and a reservoir sample is
     // not an iteration, so writing back whichever replay ran last would store a
     // value no ordering justifies.
-    auto scopes = vayu::http::routes::load_script_variable_scopes (
-    db, environment_id, collection_id);
-
     ScriptValidationTotals totals;
     ReplayFailures failures;
 
     if (per_step) {
+        vayu::http::routes::RunVariableScopes scopes (
+        db, environment_id, scenario_scope_collection_ids (*context->scenario));
         totals = replay_scenario_steps (
         engine, scopes, context, sse_limits, script_send, validation, failures);
         // Every scripted step drew a blank, so the run validated nothing.
@@ -716,6 +722,8 @@ vayu::db::Database& db) {
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
+        auto scopes = vayu::http::routes::load_script_variable_scopes (db, environment_id,
+        linked_request ? linked_request->collection_id : std::string ());
         totals = run_replay (engine, scopes, replay, failures);
     }
 

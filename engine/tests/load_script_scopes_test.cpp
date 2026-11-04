@@ -153,8 +153,12 @@ class LoadScriptScopesTest : public ::testing::Test {
         return scenario_run (vayu::tests::step_elements_with_post_script (step_script));
     }
 
+    /// @p run_collection_id is the collection being run; the step sits in
+    /// @p step_collection_id, or names none when it is empty.
     static std::shared_ptr<vayu::core::RunContext> scenario_run (
-    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements) {
+    std::shared_ptr<const std::vector<vayu::core::CompiledElement>> step_elements,
+    const std::string& run_collection_id  = "col_leaf",
+    const std::string& step_collection_id = "") {
         const json cfg = { { "response_sample_rate", 1 },
             { "max_response_samples", 100 }, { "environmentId", "env_eu" } };
         auto context =
@@ -162,11 +166,12 @@ class LoadScriptScopesTest : public ::testing::Test {
 
         auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
         execution->request.source        = "collection";
-        execution->request.collection_id = "col_leaf";
+        execution->request.collection_id = run_collection_id;
         execution->request.iterations    = 1;
 
         vayu::core::ScenarioStep step;
         step.index          = 0;
+        step.collection_id  = step_collection_id;
         step.request_id     = "req_1";
         step.name           = "List users";
         step.elements       = std::move (step_elements);
@@ -237,19 +242,44 @@ TEST_F (LoadScriptScopesTest, GlobalsAndTheWholeCollectionChainAreBoundToo) {
     EXPECT_EQ (validation.run->failed, 0u);
 }
 
-// A scenario load run's collection scope is the collection being *run*, not the
-// collection of some request the run row happens to link - the same rule the
-// design-mode runner applies. Mutation-check: resolve the scope from
-// `script_request_id` in both shapes and this fails, since a scenario run has
-// no run-level request id and the scope comes back empty.
-TEST_F (LoadScriptScopesTest, AScenarioStepReplayReadsTheRunningCollectionsScope) {
+// A step that names no folder of its own (a plan built by hand) reads the
+// collection being *run*, not the collection of some request the run row
+// happens to link. Mutation check: map such a step to no collection in
+// `load_step_collection_id` and `page_size` reads undefined.
+TEST_F (LoadScriptScopesTest, AStepNamingNoFolderReplaysWithTheRunningCollectionsScope) {
     auto context = scenario_run (R"(
+        pm.test('step scopes', function () {
+            pm.expect(pm.collectionVariables.get('page_size')).to.eql('25');
+            pm.expect(pm.collectionVariables.get('tenant')).to.eql('acme');
+        });
+    )");
+    context->metrics_collector->record_step_response_sample (
+    response_with ("{}"), 0,
+    vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });
+
+    const auto validation = vayu::core::validate_scripts (context, *db_);
+
+    ASSERT_EQ (validation.steps.size (), 1u);
+    const auto& first_step = validation.steps[0];
+    ASSERT_HAS_VALUE (first_step);
+    EXPECT_EQ (first_step->passed, 1u);
+    EXPECT_EQ (first_step->failed, 0u);
+}
+
+// A scenario step's replay reads the step's own folder (#3248), as the run
+// itself did: a run of `col_root` whose step sits in `col_leaf` reads the
+// leaf's `page_size` and the root's `tenant` above it. Mutation check: bind
+// every step's replay to the collection being run (`replay_scenario_steps`)
+// and `page_size` reads undefined.
+TEST_F (LoadScriptScopesTest, AScenarioStepReplayReadsItsOwnFoldersScope) {
+    auto context = scenario_run (vayu::tests::step_elements_with_post_script (R"(
         pm.test('step scopes', function () {
             pm.expect(pm.environment.get('region')).to.eql('EU');
             pm.expect(pm.collectionVariables.get('page_size')).to.eql('25');
             pm.expect(pm.collectionVariables.get('tenant')).to.eql('acme');
         });
-    )");
+    )"),
+    /*run_collection_id=*/"col_root", /*step_collection_id=*/"col_leaf");
     context->metrics_collector->record_step_response_sample (
     response_with ("{}"), 0,
     vayu::core::SampleIdentity{ /*iteration=*/0, /*vu=*/1, /*data_row_index=*/std::nullopt });

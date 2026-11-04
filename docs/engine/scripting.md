@@ -4191,8 +4191,9 @@ The **language** is current; what is missing is the **host environment**:
 deferred replay reads the run's own environment (the `environmentId` the run was
 started with), the globals, and the collection chain - the leaf plus its
 ancestors, exactly as a Send does, so an inherited name answers the same in both
-modes. A scenario load run's collection scope is the collection being *run*; a
-single-request run's is the collection of its linked request. Earlier engines
+modes. A scenario load run's step reads the chain of its own folder (#3248),
+as the run itself did, and one set of scopes per collection serves the pass;
+a single-request run's is the collection of its linked request. Earlier engines
 bound an empty environment and no other scope at all, so
 `pm.environment.get('region')` read `undefined` under load and the same test
 gave opposite verdicts on Send and under load.
