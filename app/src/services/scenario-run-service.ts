@@ -31,6 +31,7 @@ import { sseClient, type SSETerminalStatus } from "./sse-client";
 import { apiService } from "./api";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
+import { invalidateCompositions } from "@/queries/compose-invalidation";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
 import { useClientSettingsStore } from "@/stores";
 import { createThrottledBatcher } from "./throttled-batcher";
@@ -434,6 +435,17 @@ class ScenarioRunService {
 		// reach - and it is not polled at all, so without this it stays on
 		// "Running" for the rest of the session.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastCollectionRuns() });
+		// A run's scripts and extractors write environment, globals and
+		// collection variables at its end (#3250). Every other writer of those
+		// scopes refetches them (Send, history replay, the MCP map), and the
+		// cache never refreshes on its own (`refetchOnWindowFocus: false`), so the
+		// Variables pane, the `{{token}}` popover and the previews would keep
+		// the pre-run value while the next Send used the new one. Unconditional:
+		// a run that wrote nothing costs three GETs.
+		void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+		invalidateCompositions(queryClient);
 	}
 }
 
