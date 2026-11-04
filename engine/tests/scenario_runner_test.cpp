@@ -875,6 +875,41 @@ TEST_F (ScenarioRunnerTest, AFolderWriteReachesItsLaterStepsAndItsSubFoldersOnly
     EXPECT_EQ (stored_collection_variables ("deep").count ("token"), 0u);
 }
 
+// A design run reports a name still unresolved when its step went out
+// (#3248): distinct names, on the stored row and the live frame alike, absent
+// on a step with none. `known` is deferred past the script and answered by the
+// residual pass, so it is not one. Mutation check: drop the `unresolvedTokens`
+// write in `store_step_record` and the stored half reddens.
+TEST_F (ScenarioRunnerTest, AStepSentWithANameNothingAnswersCountsItStoredAndLive) {
+    seed_collection ("col_1", R"({"known":{"value":"k","enabled":true}})");
+    seed_request ("req_a", 0, "/ok", "pm.variables.set('unused', '1');");
+    seed_request ("req_b", 1, "/ok", "", "", "", "",
+    R"([{"key":"X-Marker","value":"{{missing}}","enabled":true},
+        {"key":"X-Again","value":"{{missing}}","enabled":true},
+        {"key":"X-Known","value":"{{known}}","enabled":true},
+        {"key":"X-Other","value":"{{gone}}","enabled":true}])");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto unresolved_in = [] (const json& node) {
+        return node.contains ("unresolvedTokens") ?
+        node["unresolvedTokens"].get<int64_t> () :
+        -1;
+    };
+    std::vector<int64_t> stored;
+    for (const auto& row : db_->get_results (run_id)) {
+        stored.push_back (unresolved_in (json::parse (row.trace_data)));
+    }
+    std::vector<int64_t> live;
+    for (const auto& frame : step_frames (context_for (run_id))) {
+        live.push_back (
+        unresolved_in (json::parse (frame.substr (frame.find ("data: ") + 6))));
+    }
+    EXPECT_EQ (stored, (std::vector<int64_t>{ -1, 2 }));
+    EXPECT_EQ (live, (std::vector<int64_t>{ -1, 2 }));
+}
+
 TEST_F (ScenarioRunnerTest, ACookieSetByStepOneIsSentByStepTwo) {
     seed_collection ("col_1");
     seed_environment ("env_1", "[]");

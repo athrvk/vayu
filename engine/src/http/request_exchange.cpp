@@ -1368,6 +1368,7 @@ ExchangeInputs inputs) {
         config.max_response_bytes  = inputs.max_response_bytes;
         config.truncate_over_limit = true;
         config.cancel              = inputs.cancel;
+        outcome.unresolved_tokens  = unresolved_token_names (outcome.request);
         vayu::http::Client client (config);
         outcome.response = client.send (outcome.request).value ();
     }

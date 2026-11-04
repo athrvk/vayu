@@ -110,6 +110,14 @@ struct StepRecord {
      */
     size_t steps_not_run = 0;
     /**
+     * How many distinct `{{names}}` this step's request still held when it
+     * went to the transfer (#3248), the residual pass having answered what
+     * the scopes could. 0 for a request with none and for one refused or
+     * skipped before the transfer, which the trace and the frame write as an
+     * absent key.
+     */
+    size_t unresolved_tokens = 0;
+    /**
      * What this step's response amounted to against the contract (issue #681).
      *
      * Absent - not an unchecked verdict - for a step of a collection bound to no

@@ -711,6 +711,11 @@ struct ExchangeOutcome {
     /// carrying its sentence; empty otherwise. `POST /execute` answers it as
     /// `refusalCode`.
     std::string refusal_code;
+    /// Every `{{name}}` still on the request when it went to the transfer,
+    /// after the residual pass and the late auth (`unresolved_token_names`);
+    /// empty for a request refused before the transfer or skipped. A
+    /// collection run's step counts them (#3248).
+    std::vector<std::string> unresolved_tokens;
     /**
      * Whether the request was actually sent.
      *

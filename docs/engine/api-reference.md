@@ -9720,7 +9720,12 @@ whose error ended its iteration short of the plan's end also carries
 `stepsNotRun`, defined under Outcomes below; it is absent, never `0`, on every
 other row. A step whose extractors found nothing carries `extractorMisses`
 (#3053), how many of them did, on the same absent-at-`0` terms (the rule is in
-[Elements](elements.md#kinds)). Bodies are
+[Elements](elements.md#kinds)). A step whose request still held a `{{name}}`
+when it went to the transfer carries `unresolvedTokens` (#3248), how many
+distinct names, on the same terms: the residual pass answers every name the
+step's scopes define, so a name counted here is one nothing defined, sent as
+written, never refused. A step refused or skipped before the transfer carries
+none. Bodies are
 capped by `maxTraceBodyBytes`; the row count is capped by
 `maxScenarioStoredSteps` as described above.
 
@@ -11099,6 +11104,7 @@ data: {"iteration":1,"stepIndex":0,"name":"Log in","outcome":"passed",
        "statusCode":200,"latencyMs":42.7,"dataRowIndex":1,
        "requestId":"req_abc123",
        "tests":{"passed":2,"failed":0},"extractorMisses":1,
+       "unresolvedTokens":1,
        "validation":{"checked":true,"valid":true,"matchedStatus":"200",
                      "matchedContentType":"application/json",
                      "failures":[],"failuresTotal":0}}
@@ -11117,7 +11123,8 @@ and after a reload. `stepsNotRun` follows the same rule: present only on the
 step whose error ended its iteration short of the plan's end, with how many
 plan positions that cost (see Outcomes under [Scenario runs](#scenario-runs)),
 and absent rather than `0` everywhere else. `extractorMisses` is the stored
-row's count of extractions that found nothing (#3053), on the same terms.
+row's count of extractions that found nothing (#3053), on the same terms, and
+`unresolvedTokens` its count of names the step sent unresolved (#3248).
 `validation` is the step's schema verdict (issue #681) in
 the same shape and on the same terms - absent for a step of an unbound
 collection and for one that sent nothing, and byte-identical to the node its

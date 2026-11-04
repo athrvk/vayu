@@ -226,6 +226,13 @@ void stamp_step_identity (nlohmann::json& trace, const StepRecord& record) {
     }
 }
 
+/// How many different names @p names holds.
+size_t count_distinct (std::vector<std::string> names) {
+    std::sort (names.begin (), names.end ());
+    return static_cast<size_t> (
+    std::distance (names.begin (), std::unique (names.begin (), names.end ())));
+}
+
 /// The steps an iteration most recently executed, joined for the cycle-bound
 /// message. Bounded by the trail itself, not by the iteration: naming a hundred
 /// executions would bury the two or three that actually loop.
@@ -435,6 +442,10 @@ std::string build_step_payload (const StepRecord& record, size_t offset) {
     if (const size_t misses = vayu::core::count_extractor_misses (record.elements);
     misses > 0) {
         data["extractorMisses"] = misses;
+    }
+    // As on the stored row (#3248).
+    if (record.unresolved_tokens > 0) {
+        data["unresolvedTokens"] = record.unresolved_tokens;
     }
     return build_sse_frame ("step", data.dump (), offset);
 }
@@ -758,9 +769,10 @@ ScenarioSummaryInputs& summary) {
     } else {
         classify_step (exchange, record);
     }
-    record.status_code = exchange.response.status_code;
-    record.status_text = exchange.response.status_text;
-    record.latency_ms  = exchange.response.timing.total_ms;
+    record.status_code       = exchange.response.status_code;
+    record.status_text       = exchange.response.status_text;
+    record.latency_ms        = exchange.response.timing.total_ms;
+    record.unresolved_tokens = count_distinct (exchange.unresolved_tokens);
     // The assertions this step made (issue #724), for the frame a
     // live watcher reads. A step whose row could not bind ran no
     // script and gets no tally - `exchange` is the default one.
@@ -934,6 +946,10 @@ ScenarioStepStore& store) {
     if (const size_t misses = vayu::core::count_extractor_misses (record.elements);
     misses > 0) {
         record.trace["extractorMisses"] = misses;
+    }
+    // Names the request carried to the wire unanswered (#3248), absent at 0.
+    if (record.unresolved_tokens > 0) {
+        record.trace["unresolvedTokens"] = record.unresolved_tokens;
     }
 
     ++summary.steps_executed;
