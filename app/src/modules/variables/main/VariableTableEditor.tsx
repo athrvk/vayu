@@ -77,6 +77,13 @@ import {
 } from "@/lib/variable-merge";
 import type { VariableScope } from "@/lib/agent-reference";
 import VariableRow from "./VariableRow";
+import {
+	NAME_PROBLEM_MESSAGE,
+	nameProblems,
+	type NameProblem,
+	trimVariableName,
+	withTrimmedNames,
+} from "./variableRowNames";
 
 export interface VariableRowData {
 	/**
@@ -95,6 +102,13 @@ export interface VariableRowData {
 	 */
 	id: string;
 	key: string;
+	/**
+	 * The name the server stores this row under, as of the last seed or save;
+	 * absent for a row never saved. `key` is what the user is typing, so a rename
+	 * or a cleared name loses track of which stored variable the row stands for,
+	 * and a save that did not know would delete it (#3251). Never persisted.
+	 */
+	baseKey?: string;
 	value: string;
 	enabled: boolean;
 	secret?: boolean;
@@ -161,6 +175,10 @@ function sameRows(a: VariableRowData[], b: VariableRowData[]): boolean {
 	});
 }
 
+function nameErrorFor(problem: NameProblem | undefined): string | undefined {
+	return problem && NAME_PROBLEM_MESSAGE[problem];
+}
+
 function toVariableValue(row: VariableRowData): VariableValue {
 	return {
 		...row.extra,
@@ -179,6 +197,7 @@ function rowFromValue(key: string, value: VariableValue, id?: string): VariableR
 	return {
 		id: id ?? nextRowId(),
 		key,
+		baseKey: key,
 		value: text,
 		enabled,
 		secret: secret ?? false,
@@ -194,15 +213,27 @@ function rowFromValue(key: string, value: VariableValue, id?: string): VariableR
  * never touch, which is what lets `mergeVariableChanges` carry a concurrent
  * write for it through untouched. A key present in `baseline` but no longer
  * among the rows is a deletion.
+ *
+ * A row with a name problem (`nameProblems`) writes nothing, and the variable it
+ * stands for is still present: only the explicit Delete removes a key, so a
+ * name the user is mid-way through fixing never costs them the variable (#3251).
+ * Names are trimmed here, so the payload key is the one the engine accepts
+ * whatever the row currently holds.
  */
 function computeUserChanges(rows: VariableRowData[], baseline: VariableMap): VariableChanges {
 	const changes: VariableChanges = {};
 	const seenKeys = new Set<string>();
+	const problems = nameProblems(rows);
 	rows.forEach((row) => {
-		if (!row.key || row.isNew) return;
-		seenKeys.add(row.key);
+		if (row.isNew) return;
+		if (problems.has(row.id)) {
+			if (row.baseKey !== undefined) seenKeys.add(row.baseKey);
+			return;
+		}
+		const key = trimVariableName(row.key);
+		seenKeys.add(key);
 		const value = toVariableValue(row);
-		if (!variableValuesEqual(baseline[row.key], value)) changes[row.key] = value;
+		if (!variableValuesEqual(baseline[key], value)) changes[key] = value;
 	});
 	Object.keys(baseline).forEach((key) => {
 		if (!seenKeys.has(key)) changes[key] = null;
@@ -310,6 +341,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const [hasPendingChanges, setHasPendingChanges] = useState(false);
 	const [conflicts, setConflicts] = useState<VariableConflict[]>([]);
 	const variablesRef = useRef<VariableRowData[]>([]);
+	// Shown beside each row. The save recomputes the same judgement from the ref,
+	// so a row is judged on what it holds when the save runs.
+	const rowProblems = useMemo(() => nameProblems(variables), [variables]);
 	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
 	/**
 	 * The map the user's edits are diffed against - the state a save last
@@ -404,16 +438,51 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * saved - the debounce and the blur handler both skip a clean editor - and
 	 * they never reached the engine. Staying dirty leaves the normal paths (blur,
 	 * Cmd+S, the quit flush) to write them.
+	 *
+	 * A row the save held back (`heldBack`, a name problem) is the same case: its
+	 * edit is on screen and in no payload, and a clean editor would reseed the row
+	 * away on the next cache echo (#3251). The Dock then says "Unsaved changes"
+	 * rather than "Saved", which the held row would make untrue.
 	 */
 	const finishSave = useCallback(
-		(snapshot: VariableRowData[]) => {
+		(snapshot: VariableRowData[], heldBack: boolean) => {
+			if (heldBack) {
+				markPendingSave();
+				return;
+			}
 			if (sameRows(variablesRef.current, snapshot)) {
 				hasPendingChangesRef.current = false;
 				setHasPendingChanges(false);
 			}
 			completeSaveThenIdle(contextId);
 		},
-		[completeSaveThenIdle, contextId]
+		[completeSaveThenIdle, markPendingSave, contextId]
+	);
+
+	/**
+	 * After a save lands, each row it wrote is stored under the name it carried,
+	 * which is what `baseKey` records. Without it a renamed row keeps pointing at
+	 * its old name and, if its name is later cleared, the save would delete the
+	 * wrong variable. Matched by row id against the live rows, so an edit typed
+	 * while the save was in flight is kept; a row nothing changed for keeps its
+	 * object, so `VariableRow`'s memo holds.
+	 */
+	const recordStoredNames = useCallback(
+		(saved: VariableRowData[], problems: Map<string, unknown>) => {
+			const storedAs = new Map<string, string>();
+			saved.forEach((row) => {
+				if (!row.isNew && !problems.has(row.id)) storedAs.set(row.id, row.key);
+			});
+			const current = variablesRef.current;
+			const next = current.map((row) => {
+				const key = storedAs.get(row.id);
+				return key === undefined || row.baseKey === key ? row : { ...row, baseKey: key };
+			});
+			if (next.every((row, i) => row === current[i])) return;
+			variablesRef.current = next;
+			setVariables(next);
+		},
+		[]
 	);
 
 	// Auto-save function. Sends the freshest known map (`dataVariables`, kept
@@ -423,7 +492,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// back to its pre-agent value (#1439). Payload order is by `createdAt` so
 	// the round trip preserves display order.
 	const performSave = useCallback(async () => {
-		const varsToSave = variablesRef.current;
+		// Names are trimmed on commit, not per keystroke: a trailing space typed
+		// mid-name has to survive until the user leaves the field (#3251).
+		const varsToSave = withTrimmedNames(variablesRef.current);
+		if (varsToSave !== variablesRef.current) {
+			variablesRef.current = varsToSave;
+			setVariables(varsToSave);
+		}
+		const problems = nameProblems(varsToSave);
 		const changes = computeUserChanges(varsToSave, baselineRef.current);
 		const merged = mergeVariableChanges(dataVariables, changes);
 		const sorted = sortByCreatedAt(Object.entries(merged));
@@ -444,7 +520,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					// conflict with itself.
 					baselineRef.current = variablesObj;
 					setConflicts([]);
-					finishSave(varsToSave);
+					recordStoredNames(varsToSave, problems);
+					finishSave(varsToSave, problems.size > 0);
 					resolve();
 				},
 				onError: (error: unknown) => {
@@ -485,6 +562,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		updateEnvironmentMutation,
 		updateCollectionMutation,
 		startSaving,
+		recordStoredNames,
 		finishSave,
 		failSave,
 	]);
@@ -619,7 +697,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 			if (
 				newVariables[index].isNew &&
-				(newVariables[index].key || newVariables[index].value)
+				(trimVariableName(newVariables[index].key) || newVariables[index].value)
 			) {
 				newVariables[index].isNew = false;
 				// This runs from an input event, not from render: the stamp orders newly
@@ -900,6 +978,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 								onRemove={removeVariable}
 								onBlur={handleBlur}
 								scope={referenceScope}
+								nameError={nameErrorFor(rowProblems.get(variable.id))}
 							/>
 						))}
 					</tbody>
@@ -910,7 +989,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			{!embedded && (
 				<div className="px-4 py-2 border-t border-border bg-muted/50 text-xs text-muted-foreground">
 					{(() => {
-						const savedCount = variables.filter((v) => v.key && !v.isNew).length;
+						const savedCount = variables.filter(
+							(v) => !v.isNew && !rowProblems.has(v.id)
+						).length;
 						return `${savedCount} ${pluralize(savedCount, "variable")}`;
 					})()}
 				</div>
