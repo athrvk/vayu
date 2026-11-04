@@ -1705,6 +1705,13 @@ recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
 `"error"` outcome and the thrown message.
 
+**What `script.teardown` writes is saved only by a design run** (#3249). A
+collection run writes its variable scopes back once, after teardown, so a
+`pm.environment.set` or `pm.globals.set` there reaches the stored environment
+and globals along with every step's; `pm.variables.set` is the run's local
+scope and is never saved. A load run saves no variable at all, so a teardown
+write there ends with the run.
+
 **Neither script's own time counts toward the run's duration figures.** Setup
 runs, and is timed out of the way, before either run mode captures its own
 `test_start`, which is also where a load run's live `elapsedSeconds` starts

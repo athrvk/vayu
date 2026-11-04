@@ -1499,11 +1499,6 @@ RunManager& manager) {
             }
         }
 
-        // Once, at the end: per-step persistence would be N x M diff-and-write
-        // cycles against the DB mutex for a value only this run's later steps
-        // read. Best-effort, exactly as design mode's is.
-        scopes.persist (db);
-
         summary.steps_dropped = store.dropped ();
         summary.transactions  = transactions.build ();
         auto rows             = store.take ();
@@ -1537,6 +1532,12 @@ RunManager& manager) {
         script_send, collection_elements, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
+
+        // Once, at the very end and after teardown, so its variable writes are
+        // saved with every step's (#3249): per-step persistence would be N x M
+        // diff-and-write cycles against the DB mutex for a value only this
+        // run's later steps read. Best-effort, exactly as design mode's is.
+        scopes.persist (db);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "Scenario run error",
         { { "runId", context->run_id },

@@ -9472,7 +9472,9 @@ the same request does, and the two cannot drift apart.
   later step in that folder, or in a folder below it, reads; a sibling folder
   does not see it. A `script.setup` and `script.teardown` read and write the
   collection being run. Every collection a script changed is written back to
-  its own row in the one write at the end.
+  its own row in the one write at the end, which comes after `script.teardown`
+  (#3249): a teardown's `pm.environment.set` / `pm.globals.set` is saved with
+  the steps' writes. A load run persists no variable, a teardown's included.
 - **Cookies.** The environment's jar, unchanged - so a step that logs in leaves
   a session the next step sends.
 
