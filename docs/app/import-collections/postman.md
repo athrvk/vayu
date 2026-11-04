@@ -517,6 +517,12 @@ auth and scripts - and the dialog offers **Copy** or **Download**, saving
 `<collection name>.postman_collection.json`. Nothing is sent anywhere, and
 nothing is written: an export is a read of what the collection already is.
 
+**A JSON-RPC body is exported as the frame Vayu sends** (issue
+[#3244](https://github.com/athrvk/vayu/issues/3244)). Postman has no JSON-RPC
+mode, so the body is written as raw JSON, with the `jsonrpc` and `id` members
+Vayu adds on send already in it; a body that already carries a full frame is
+written unchanged. The export still counts it under `jsonrpc_bodies`.
+
 **Credentials stay out by default.** With **Include credentials** off, auth
 secrets and variables marked secret are written empty, and so are the
 credentials typed outside an auth block: a request header such as

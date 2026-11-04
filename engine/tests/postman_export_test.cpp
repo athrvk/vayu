@@ -594,6 +594,18 @@ TEST (PostmanExport, JsonRpcIsARawJsonBodyAndANote) {
     EXPECT_EQ (losses (outcome), (json{ { "jsonrpc_bodies", 1 } }));
 }
 
+// The engine completes the envelope at send, so the export writes the frame
+// the server receives (#3244); a full frame passes through byte for byte.
+TEST (PostmanExport, JsonRpcBodyIsWrittenAsTheCompletedFrame) {
+    const ordered bare =
+    body_of ({ { "mode", "jsonrpc" }, { "content", R"({"method":"m"})" } });
+    const std::string raw = bare["raw"].get<std::string> ();
+    EXPECT_NE (raw.find (R"("jsonrpc":"2.0")"), std::string::npos) << raw;
+    EXPECT_NE (raw.find (R"("id":1)"), std::string::npos) << raw;
+    const std::string full = R"({"jsonrpc":"2.0","method":"m","id":7})";
+    EXPECT_EQ (body_of ({ { "mode", "jsonrpc" }, { "content", full } })["raw"], full);
+}
+
 TEST (PostmanExport, GraphqlVariablesAreThePanesText) {
     ordered object_vars = body_of ({ { "mode", "graphql" },
     { "content", R"({"query":"{ me }","variables":{"id":1},"operationName":"Me"})" } });
