@@ -28,6 +28,7 @@
 namespace {
 
 using nlohmann::json;
+using vayu::core::fills_template;
 using vayu::core::match_operations;
 using vayu::core::MatchableOperation;
 using vayu::core::MatchableRequest;
@@ -131,6 +132,17 @@ TEST (RequestPathShape, FlattensBothTemplateSyntaxesToTheSamePlaceholder) {
     // A renamed path parameter is the same endpoint, so the names must not
     // enter the comparison.
     EXPECT_EQ (spec_path_shape ("/pets/{id}/toys"), spec_path_shape ("/pets/{petId}/toys"));
+}
+
+TEST (FillsTemplate, AcceptsAConcretePathOnlyForTheTemplateItFills) {
+    EXPECT_TRUE (fills_template ("/pets/42", "/pets/{}"));
+    EXPECT_TRUE (fills_template ("/pets/{}", "/pets/{}"));
+    EXPECT_TRUE (fills_template ("/files/a.json", "/files/{}.json"));
+    EXPECT_FALSE (fills_template ("/pets/42/toys", "/pets/{}"));
+    EXPECT_FALSE (fills_template ("/pets", "/pets/{}"));
+    EXPECT_FALSE (fills_template ("/animals/42", "/pets/{}"));
+    // Not symmetric: a template does not fill a concrete path.
+    EXPECT_FALSE (fills_template ("/pets/{}", "/pets/42"));
 }
 
 TEST (RequestPathShape, ReadsAnUnclosedBraceAsTextRatherThanAPlaceholder) {

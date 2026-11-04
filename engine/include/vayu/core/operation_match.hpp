@@ -171,6 +171,19 @@ struct RequestUrlParts {
  */
 [[nodiscard]] std::string spec_path_shape (std::string_view path);
 
+/**
+ * Whether a concrete path shape could be this template shape with its
+ * placeholders filled: the same number of segments, and every segment filling
+ * its template segment. Both are shapes as `request_path_shape` and
+ * `spec_path_shape` write them, and the order matters - `/users/1` fills
+ * `/users/{}`, not the other way round.
+ *
+ * This is the predicate the matcher stamps a request by, so anything asking
+ * whether a stamped request still is its operation must use it rather than
+ * compare shapes for equality.
+ */
+[[nodiscard]] bool fills_template (std::string_view path_shape, std::string_view template_shape);
+
 /** `GET /pets/{}` - the key both sides are bucketed by. */
 [[nodiscard]] std::string
 operation_shape_key (std::string_view method, std::string_view path_shape);
