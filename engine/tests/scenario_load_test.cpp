@@ -1814,6 +1814,104 @@ TEST_F (ScenarioLoadTest, AStepWithAnUnresolvedTokenCountsAndWarnsWithoutRefusin
     EXPECT_EQ (summary["errored"], 0);
 }
 
+// A recursive scenario load run reads each step's own folder (#3248). The
+// writer's inline `script.pre` makes the plan defer every step's names to the
+// send (#2521), so the residual pass answers them from the step's folder: the
+// writer's `{{f}}` is its folder's, `{{shared}}` the run collection's above
+// it, and its `pm.collectionVariables` reads and writes that folder. The write
+// answers the later step in its sub-folder and not the one in a sibling
+// folder, where `{{seen}}` is a genuine miss and is counted as one. Mutation
+// check: give every step the run collection's base (`LoadScopeBases::for_step`
+// answering `bases_.front ()`) and the writer sends `/row/{{f}}`.
+TEST_F (ScenarioLoadTest, ARecursiveRunSendsAndScriptsEachStepWithItsOwnFoldersVariables) {
+    ScenarioMockServer server;
+    const auto folder = [this] (const std::string& id, std::optional<std::string> parent,
+                        const std::string& variables, int order) {
+        vayu::db::Collection collection;
+        collection.id         = id;
+        collection.name       = id;
+        collection.parent_id  = std::move (parent);
+        collection.variables  = variables;
+        collection.order      = order;
+        collection.created_at = 1;
+        collection.updated_at = 1;
+        db_->create_collection (collection);
+    };
+    folder ("col_test", std::nullopt,
+    R"({"shared":{"value":"from-parent","enabled":true}})", 0);
+    folder ("fold", "col_test", R"({"f":{"value":"folder-value","enabled":true}})", 0);
+    folder ("deep", "fold", "{}", 1);
+    folder ("other", "col_test", "{}", 1);
+
+    const auto save = [&] (const std::string& id,
+                      const std::string& collection_id, const std::string& path,
+                      const std::string& bearer, const json& elements) {
+        vayu::db::Request request;
+        request.id            = id;
+        request.collection_id = collection_id;
+        request.name          = id;
+        request.method        = vayu::HttpMethod::GET;
+        request.url           = server.url (path);
+        request.headers       = json::array (
+        { { { "key", "Authorization" }, { "value", bearer }, { "enabled", true } } })
+                          .dump ();
+        request.elements   = elements.dump ();
+        request.created_at = 1;
+        request.updated_at = 1;
+        db_->save_request (request);
+    };
+    save ("writer", "fold", "/row/{{f}}", "Bearer {{shared}}",
+    json::array ({ vayu::tests::script_element_json ("el_pre",
+    "script.pre", "pm.collectionVariables.set('seen', String(pm.collectionVariables.get('f')));",
+    /*inline_script=*/true) }));
+    save ("reader", "deep", "/row/deep", "Bearer {{seen}}", json::array ());
+    save ("sibling", "other", "/row/other", "Bearer {{seen}}", json::array ());
+
+    vayu::core::ScenarioResolveOptions options;
+    options.timeout_ms           = 5000;
+    options.limits.max_steps     = 10;
+    options.limits.max_data_rows = 100;
+    options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+    auto resolved = vayu::core::resolve_scenario (*db_,
+    json{ { "source", "collection" }, { "collectionId", "col_test" }, { "recursive", true } },
+    options);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    vayu::core::ScenarioExecution execution;
+    execution.request = std::move (resolved.request);
+    execution.plan    = std::move (resolved.plan);
+    ASSERT_EQ (execution.plan.steps.size (), 3u);
+
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 } };
+    auto state        = run (config, execution, /*pool_size=*/1);
+
+    const auto writer  = server.hits_for ("/row/folder-value");
+    const auto reader  = server.hits_for ("/row/deep");
+    const auto sibling = server.hits_for ("/row/other");
+    std::string sent;
+    for (const auto& hit : server.hits ()) {
+        sent += hit.path + " ";
+    }
+    ASSERT_EQ (writer.size (), 1u)
+    << "the writer did not send its folder's {{f}}: " << sent;
+    ASSERT_EQ (reader.size (), 1u);
+    ASSERT_EQ (sibling.size (), 1u);
+    EXPECT_EQ (writer[0].authorization, "Bearer from-parent");
+    EXPECT_EQ (reader[0].authorization, "Bearer folder-value")
+    << "the sub-folder did not read its parent folder's write";
+    EXPECT_EQ (sibling[0].authorization, "Bearer {{seen}}")
+    << "a sibling folder read another's write";
+
+    const auto summary =
+    vayu::core::build_scenario_load_summary (*state, execution.plan);
+    EXPECT_EQ (summary["steps"][0]["unresolvedTokens"], 0);
+    EXPECT_EQ (summary["steps"][1]["unresolvedTokens"], 0);
+    EXPECT_EQ (summary["steps"][2]["unresolvedTokens"], 1);
+    const auto names = context_->metrics_collector->unresolved_token_names ();
+    ASSERT_EQ (names.size (), 1u);
+    EXPECT_EQ (names[0], "seen");
+}
+
 // An un-inlined pre-request script never runs under load (see this file's
 // header comment on the executor); the breakdown says so per step instead of
 // leaving the report silent about it, and a step with no script carries no

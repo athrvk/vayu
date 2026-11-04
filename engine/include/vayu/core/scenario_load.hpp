@@ -446,6 +446,58 @@ struct ScenarioStepLabel {
 [[nodiscard]] std::vector<ScenarioStepLabel> scenario_step_labels (const ScenarioPlan& plan);
 
 /**
+ * @brief The collection whose chain @p step reads in a scenario load run of
+ *        @p run_collection_id (#3248): the one its request sits in, or, for a
+ *        step that names none (a plan built by hand), the collection being run.
+ */
+[[nodiscard]] std::string load_step_collection_id (const ScenarioStep& step,
+const std::string& run_collection_id);
+
+/**
+ * @brief A scenario load run's variable scopes, one base per collection its
+ *        steps sit in (#3248).
+ *
+ * Built once, before the first submission, from the run collection's scopes
+ * as `script.setup` left them: every base shares their environment and
+ * globals, and holds the chain from the root down to its own collection, the
+ * run collection's entry in it the one setup wrote. A step in a sub-folder of
+ * a recursive run therefore sends and scripts with that folder's variables,
+ * as a Send of its request does. Read-only for the run: a virtual user's
+ * writes are on its own `ScopeOverlay`, which keeps them per folder.
+ */
+class LoadScopeBases {
+    public:
+    /// One collection's scopes, and the same flattened once: the map every
+    /// submission's residual pass copies before layering its VU's overlay on
+    /// it, rather than re-walking the chain per submission.
+    struct Base {
+        vayu::http::routes::ScriptVariableScopes scopes;
+        vayu::http::VariableValues vars;
+    };
+
+    /// @p run_collection_scopes are the scopes of
+    /// `execution.request.collection_id`; each other collection a step names
+    /// has its chain read from @p db here.
+    LoadScopeBases (vayu::db::Database& db,
+    vayu::http::routes::ScriptVariableScopes run_collection_scopes,
+    const ScenarioExecution& execution);
+
+    /// Plan step @p step's base.
+    [[nodiscard]] const Base& for_step (size_t step) const;
+
+    /// The run collection's scopes, which `script.teardown` reads.
+    [[nodiscard]] const vayu::http::routes::ScriptVariableScopes& run_scopes () const {
+        return bases_.front ().scopes;
+    }
+
+    private:
+    /// The run collection's first, then each other collection once.
+    std::vector<Base> bases_;
+    /// Per plan step, its position in `bases_`.
+    std::vector<size_t> base_of_step_;
+};
+
+/**
  * @brief Everything a scenario load run accumulates, shared with its callbacks.
  *
  * Held by `shared_ptr` and captured by value into every completion callback,
@@ -459,17 +511,15 @@ struct ScenarioLoadState {
     ScenarioLoadState (const ScenarioPlan& plan,
     size_t virtual_users,
     CoverageTally coverage,
-    vayu::http::routes::ScriptVariableScopes base_scopes,
+    LoadScopeBases scope_bases,
     vayu::runtime::ScriptConfig script_config)
     : steps (plan.steps.size ()), step_labels (scenario_step_labels (plan)),
       element_spans (compute_element_spans (plan)), transactions (plan),
       element_tallies (plan), step_index (build_step_index (plan)),
       shared_throughput (plan), shared_pacing (shared_pacing_element_ids (plan)),
       shared_throughput_budgets (shared_throughput_element_ids (plan)),
-      base_scopes (std::move (base_scopes)),
-      base_vars (vayu::http::routes::flatten_variable_scopes (this->base_scopes)),
-      script_config (script_config), coverage (std::move (coverage)),
-      virtual_users (virtual_users) {
+      scope_bases (std::move (scope_bases)), script_config (script_config),
+      coverage (std::move (coverage)), virtual_users (virtual_users) {
     }
 
     StepHistograms steps;
@@ -543,21 +593,15 @@ struct ScenarioLoadState {
     std::atomic<size_t> inline_tests_passed{ 0 };
     std::atomic<size_t> inline_tests_failed{ 0 };
     /**
-     * This run's shared variable scopes (issue #1495) - the same shape and
-     * source a design send's would be, loaded once here rather than per
-     * submission. An inline `script.*` element materializes a per-VU copy of
-     * this through `VirtualUser::scope_overlay` before running; never mutated
+     * This run's shared variable scopes (issue #1495), one base per
+     * collection a step sits in (#3248) - the same shape and source a design
+     * send's would be, loaded once rather than per submission. An inline
+     * `script.*` element materializes a per-VU copy of its step's base
+     * through `VirtualUser::scope_overlay` before running; never mutated
      * directly - a load run's writes are all per-VU, on the overlay, which is
-     * the isolation this issue exists to add.
+     * the isolation #1495 exists to add.
      */
-    vayu::http::routes::ScriptVariableScopes base_scopes;
-    /**
-     * @ref base_scopes, flattened once: every submission's residual-token
-     * pass starts from a copy of this map plus its own VU's small
-     * `ScopeOverlay`, rather than re-walking the collection-ancestor chain
-     * per submission the way a design send's single exchange does.
-     */
-    vayu::http::VariableValues base_vars;
+    LoadScopeBases scope_bases;
     /// This run's script configuration (timeout, memory, stack, console,
     /// `pm.sendRequest`), resolved once and handed to
     /// `vayu::http::routes::script_engine_for_this_thread` by every inline
@@ -657,10 +701,12 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * permanently shrinks effective concurrency, the same failure `handle_result`'s
  * error branch already guards against.
  *
- * @param base_scopes The run's scopes, already loaded and already run through
- *        `script.setup` (#1499) by `execute_load_test` - loaded there rather
- *        than here so a setup script's own time is spent before `test_start`
- *        is captured, never inside the run's own duration figures.
+ * @param base_scopes The run collection's scopes, already loaded and already
+ *        run through `script.setup` (#1499) by `execute_load_test` - loaded
+ *        there rather than here so a setup script's own time is spent before
+ *        `test_start` is captured, never inside the run's own duration
+ *        figures. Each step's own folder base is built from them here
+ *        (@ref LoadScopeBases), before the first submission.
  */
 [[nodiscard]] std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,

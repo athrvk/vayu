@@ -2128,13 +2128,16 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
 
     std::vector<vayu::core::CompiledElement> collection_elements;
     vayu::http::routes::ScriptVariableScopes* scopes = nullptr;
+    // A copy: the run's bases are read-only, and a load run persists nothing.
+    vayu::http::routes::ScriptVariableScopes run_collection_scopes;
     if (context->scenario) {
         if (!scenario_state) {
             return teardown_outcomes;
         }
         collection_elements =
         compile_collection_elements (db, context->scenario->request.collection_id);
-        scopes = &scenario_state->base_scopes;
+        run_collection_scopes = scenario_state->scope_bases.run_scopes ();
+        scopes                = &run_collection_scopes;
     } else {
         collection_elements = compile_run_lifecycle_elements (context->config);
         scopes              = &context->lifecycle_scopes;

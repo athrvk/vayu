@@ -353,7 +353,8 @@ sequential run's iteration loop, and before `execute_load_test` captures the loa
 `test_start` - so a setup script's own time is never folded into either mode's duration figures, and a
 load run's live `elapsedSeconds` reads `0` until setup ends (issue #2395) - and
 writes through the same `ScriptVariableScopes` (`scopes` / `base_scopes`) every other script of the
-run shares, so its writes are visible from the very first step or submission. A throwing setup fails
+run shares, so its writes are visible from the very first step or submission (a scenario load
+run's folder bases are built from what it left, #3248). A throwing setup fails
 the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
 `ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
@@ -537,7 +538,10 @@ the name reads as absent for this VU alone - in the residual pass, a controller'
 writes, through the iteration boundary and an inline script's replace. A script's own
 `pm.environment.unset`, `pm.collectionVariables.unset` or `pm.globals.unset` (or `clear`) of a
 base name is kept the same way (#3088): the replace tombstones every base name of a scope the
-script's copy no longer holds.
+script's copy no longer holds. The shared scopes are one base per collection a step sits in
+(`LoadScopeBases`, #3248), so a step in a sub-folder of a recursive run reads that folder's
+chain, and the overlay keeps its collection writes per collection id: a folder's write answers
+the VU's later steps in that folder and below it, never a sibling folder's.
 
 **One `ScriptEngine` per thread, not a shared pool.** Every load run's worker threads - the
 strategy thread and each event-loop worker - are spawned fresh for that run and joined before

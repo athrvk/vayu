@@ -614,7 +614,7 @@ TEST_F (ScriptVariablesTest, ALoadRunsOverlayCarriesTheTypedValueToTheNextStep) 
     scopes_ = overlay.materialize (base);
     run ("pm.environment.set('n', pm.environment.get('n') + 1);");
     overlay.replace_from (scopes_, base);
-    overlay.set ("env", "list", "extracted");
+    overlay.set ("env", "list", "extracted", base);
 
     scopes_ = overlay.materialize (base);
     run (R"JS(

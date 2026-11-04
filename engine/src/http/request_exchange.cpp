@@ -330,9 +330,11 @@ const std::string& collection_id) {
         if (!chain.empty ()) {
             scopes.collection = vayu::json::parse_variables (chain.back ().variables);
             scopes.collection_ancestors.reserve (chain.size () - 1);
+            scopes.collection_ancestor_ids.reserve (chain.size () - 1);
             for (size_t i = 0; i + 1 < chain.size (); ++i) {
                 scopes.collection_ancestors.push_back (
                 vayu::json::parse_variables (chain[i].variables));
+                scopes.collection_ancestor_ids.push_back (chain[i].id);
             }
         }
     }
@@ -553,13 +555,16 @@ ScriptVariableScopes& RunVariableScopes::bind (const std::string& collection_id)
     bound_leaf_.reset ();
     scopes_.collection.clear ();
     scopes_.collection_ancestors.clear ();
+    scopes_.collection_ancestor_ids.clear ();
     const auto chain = chains_.find (collection_id);
     if (chain == chains_.end () || chain->second.empty ()) {
         return scopes_;
     }
     const std::vector<size_t>& positions = chain->second;
     for (size_t i = 0; i + 1 < positions.size (); ++i) {
-        scopes_.collection_ancestors.push_back (collections_.at (positions[i]).current);
+        const CollectionScopeState& ancestor = collections_.at (positions[i]);
+        scopes_.collection_ancestors.push_back (ancestor.current);
+        scopes_.collection_ancestor_ids.push_back (ancestor.collection_id);
     }
     bound_leaf_        = positions.back ();
     scopes_.collection = collections_.at (*bound_leaf_).current;
@@ -988,18 +993,35 @@ enabled_value (const vayu::Environment& scope, const std::string& name) {
 
 } // namespace
 
-ScopeOverlay::Layer& ScopeOverlay::layer (std::string_view scope) {
+ScopeOverlay::Layer&
+ScopeOverlay::layer (std::string_view scope, const ScriptVariableScopes& base) {
     if (scope == "env") {
         return environment_;
     }
     if (scope == "globals") {
         return globals_;
     }
-    return collection_;
+    return collections_[base.baseline.collection_id];
 }
 
-void ScopeOverlay::set (std::string_view scope, const std::string& name, const std::string& value) {
-    Layer& target = layer (scope);
+const ScopeOverlay::Layer* ScopeOverlay::collection_layer (const std::string& id) const {
+    const auto found = collections_.find (id);
+    return found == collections_.end () ? nullptr : &found->second;
+}
+
+const ScopeOverlay::Layer*
+ScopeOverlay::ancestor_layer (const ScriptVariableScopes& base, size_t position) const {
+    if (position >= base.collection_ancestor_ids.size ()) {
+        return nullptr;
+    }
+    return collection_layer (base.collection_ancestor_ids[position]);
+}
+
+void ScopeOverlay::set (std::string_view scope,
+const std::string& name,
+const std::string& value,
+const ScriptVariableScopes& base) {
+    Layer& target = layer (scope, base);
     target.unset.erase (name);
     vayu::Variable variable;
     variable.value       = value;
@@ -1009,7 +1031,7 @@ void ScopeOverlay::set (std::string_view scope, const std::string& name, const s
 bool ScopeOverlay::unset (std::string_view scope,
 const std::string& name,
 const ScriptVariableScopes& base) {
-    Layer& target         = layer (scope);
+    Layer& target         = layer (scope, base);
     const bool wrote_it   = target.written.erase (name) > 0;
     const bool base_has   = scope_named (base, scope).contains (name);
     const bool was_hidden = target.unset.contains (name);
@@ -1037,9 +1059,15 @@ const ScriptVariableScopes& base) {
         }
     };
     adopt (environment_, scopes.environment, base.environment);
-    adopt (collection_, scopes.collection, base.collection);
+    adopt (collections_[base.baseline.collection_id], scopes.collection, base.collection);
     adopt (globals_, scopes.globals, base.globals);
     local_ = scopes.local;
+}
+
+bool ScopeOverlay::empty () const {
+    return environment_.empty () && globals_.empty () && local_.empty () &&
+    std::ranges::all_of (collections_,
+    [] (const auto& collection) { return collection.second.empty (); });
 }
 
 void ScopeOverlay::clear_local () {
@@ -1055,13 +1083,22 @@ const ScriptVariableScopes& base) const {
             vars.erase (name);
         }
     };
-    for (const Layer* saved : { &environment_, &collection_, &globals_ }) {
+    const auto settle_layer = [&settle] (const Layer* saved) {
+        if (saved == nullptr) {
+            return;
+        }
         for (const auto& [name, variable] : saved->written) {
             settle (name);
         }
         for (const auto& name : saved->unset) {
             settle (name);
         }
+    };
+    settle_layer (&environment_);
+    settle_layer (&globals_);
+    settle_layer (collection_layer (base.baseline.collection_id));
+    for (size_t i = 0; i < base.collection_ancestors.size (); ++i) {
+        settle_layer (ancestor_layer (base, i));
     }
     for (const auto& [name, variable] : local_) {
         settle (name);
@@ -1072,11 +1109,17 @@ std::optional<std::string> ScopeOverlay::visible_value (const std::string& name,
 const ScriptVariableScopes& base) const {
     // One saved scope's answer: this VU's write (none when it is disabled,
     // as `materialize` would leave it), else the base's unless the VU unset it.
-    const auto from = [&name] (const Layer& saved, const vayu::Environment& shared) {
-        if (const auto own = saved.written.find (name); own != saved.written.end ()) {
-            return own->second.enabled ? std::optional (own->second.value) : std::nullopt;
+    const auto from = [&name] (const Layer* saved, const vayu::Environment& shared) {
+        if (saved != nullptr) {
+            if (const auto own = saved->written.find (name);
+            own != saved->written.end ()) {
+                return own->second.enabled ? std::optional (own->second.value) : std::nullopt;
+            }
+            if (saved->unset.contains (name)) {
+                return std::optional<std::string> ();
+            }
         }
-        return saved.unset.contains (name) ? std::nullopt : enabled_value (shared, name);
+        return enabled_value (shared, name);
     };
     // Highest precedence first: `values_from_scopes`'s order, reversed.
     if (auto value = enabled_value (local_, name)) {
@@ -1085,19 +1128,18 @@ const ScriptVariableScopes& base) const {
     if (auto value = enabled_value (base.local, name)) {
         return value;
     }
-    if (auto value = from (environment_, base.environment)) {
+    if (auto value = from (&environment_, base.environment)) {
         return value;
     }
-    if (auto value = from (collection_, base.collection)) {
+    if (auto value = from (collection_layer (base.baseline.collection_id), base.collection)) {
         return value;
     }
-    for (auto ancestor = base.collection_ancestors.rbegin ();
-    ancestor != base.collection_ancestors.rend (); ++ancestor) {
-        if (auto value = enabled_value (*ancestor, name)) {
+    for (size_t i = base.collection_ancestors.size (); i-- > 0;) {
+        if (auto value = from (ancestor_layer (base, i), base.collection_ancestors[i])) {
             return value;
         }
     }
-    return from (globals_, base.globals);
+    return from (&globals_, base.globals);
 }
 
 vayu::http::VariableValues ScopeOverlay::local_values () const {
@@ -1113,14 +1155,25 @@ ScriptVariableScopes ScopeOverlay::materialize (const ScriptVariableScopes& base
             scope[name] = variable;
         }
     };
+    const auto overlay_collection = [&overlay] (vayu::Environment& scope, const Layer* saved) {
+        if (saved != nullptr) {
+            overlay (scope, *saved);
+        }
+    };
     ScriptVariableScopes scopes;
-    scopes.collection_ancestors = base.collection_ancestors; // read-only, never overlaid
-    scopes.environment = base.environment;
-    scopes.collection  = base.collection;
-    scopes.globals     = base.globals;
-    scopes.local       = base.local;
+    scopes.collection_ancestors    = base.collection_ancestors;
+    scopes.collection_ancestor_ids = base.collection_ancestor_ids;
+    scopes.environment             = base.environment;
+    scopes.collection              = base.collection;
+    scopes.globals                 = base.globals;
+    scopes.local                   = base.local;
     overlay (scopes.environment, environment_);
-    overlay (scopes.collection, collection_);
+    overlay_collection (scopes.collection, collection_layer (base.baseline.collection_id));
+    // An ancestor stays read-only to the script; what is layered on it is
+    // what an earlier step in that folder wrote (#3248).
+    for (size_t i = 0; i < scopes.collection_ancestors.size (); ++i) {
+        overlay_collection (scopes.collection_ancestors[i], ancestor_layer (base, i));
+    }
     overlay (scopes.globals, globals_);
     for (const auto& [name, variable] : local_) {
         scopes.local[name] = variable;

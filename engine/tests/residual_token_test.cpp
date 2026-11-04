@@ -664,11 +664,11 @@ TEST (ScopeOverlayTest, AnUnwrittenOverlayChangesNothing) {
 
 TEST (ScopeOverlayTest, AWrittenNameShadowsTheRunsOwnValueForThisVuAlone) {
     ScopeOverlay overlay;
-    overlay.set ("env", "token", "vu-own");
+    const auto base = environment_with ("token", "base");
+    overlay.set ("env", "token", "vu-own", base);
     EXPECT_FALSE (overlay.empty ());
 
-    const auto base = environment_with ("token", "base");
-    auto vars       = flatten_variable_scopes (base);
+    auto vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "vu-own");
 
@@ -686,13 +686,13 @@ TEST (ScopeOverlayTest, AWrittenNameShadowsTheRunsOwnValueForThisVuAlone) {
 // and this reds.
 TEST (ScopeOverlayTest, ThreeScopesResolveInCompositionsPrecedenceOrder) {
     ScopeOverlay overlay;
-    overlay.set ("globals", "name", "from-globals");
-    overlay.set ("collection", "name", "from-collection");
+    overlay.set ("globals", "name", "from-globals", {});
+    overlay.set ("collection", "name", "from-collection", {});
     auto vars = flatten_variable_scopes ({});
     overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["name"], "from-collection");
 
-    overlay.set ("env", "name", "from-env");
+    overlay.set ("env", "name", "from-env", {});
     vars = flatten_variable_scopes ({});
     overlay.apply_onto (vars, {});
     EXPECT_EQ (vars["name"], "from-env");
@@ -731,7 +731,7 @@ TEST (ScopeOverlayTest, MaterializeLayersTheOverlayOntoARealCopyOfTheBaseScopes)
     base.collection["kept"]   = value_of ("still-here");
 
     ScopeOverlay overlay;
-    overlay.set ("env", "token", "written");
+    overlay.set ("env", "token", "written", base);
     auto materialized = overlay.materialize (base);
 
     EXPECT_EQ (materialized.environment["token"].value, "written");
@@ -750,7 +750,7 @@ TEST (ScopeOverlayTest, MaterializeLayersTheOverlayOntoARealCopyOfTheBaseScopes)
 // already started as base-plus-this-VU's-prior-overlay.
 TEST (ScopeOverlayTest, ReplaceFromAdoptsWhateverTheMaterializedCopyEndedAs) {
     ScopeOverlay overlay;
-    overlay.set ("env", "keep", "first-write");
+    overlay.set ("env", "keep", "first-write", {});
 
     ScriptVariableScopes mutated;
     mutated.environment["keep"] = value_of ("first-write"); // unchanged by the script
@@ -803,7 +803,7 @@ TEST (ScopeOverlayTest, AnUnsetNameHidesItsOwnScopesBaseValueAndNoOtherScopes) {
 TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAgain) {
     const auto base = environment_with ("token", "stored");
     ScopeOverlay overlay;
-    overlay.set ("env", "token", "extracted");
+    overlay.set ("env", "token", "extracted", base);
     EXPECT_TRUE (overlay.unset ("env", "token", base));
 
     overlay.clear_local ();
@@ -824,7 +824,7 @@ TEST (ScopeOverlayTest, AnUnsetOutlivesTheIterationAndAScriptUntilTheNameIsSetAg
     EXPECT_EQ (vars["token"], "from-script");
 
     EXPECT_TRUE (overlay.unset ("env", "token", base));
-    overlay.set ("env", "token", "next");
+    overlay.set ("env", "token", "next", base);
     vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["token"], "next");
@@ -909,7 +909,7 @@ TEST (ScopeOverlayTest, AScriptsUnsetOfABaseNameSticksForThatVuUntilASetBringsIt
 TEST (ScopeOverlayTest, AWriteUnderAHigherScopesStoredValueStaysUnderIt) {
     const auto base = environment_with ("host", "env.test");
     ScopeOverlay overlay;
-    overlay.set ("collection", "host", "vu-collection");
+    overlay.set ("collection", "host", "vu-collection", base);
 
     auto vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
@@ -921,6 +921,58 @@ TEST (ScopeOverlayTest, AWriteUnderAHigherScopesStoredValueStaysUnderIt) {
     vars = flatten_variable_scopes (base);
     overlay.apply_onto (vars, base);
     EXPECT_EQ (vars["host"], "vu-collection");
+}
+
+namespace {
+
+/// The scopes a step in folder @p id reads, under @p ancestor_ids (root
+/// first), each collection empty.
+ScriptVariableScopes folder_base (const std::string& id,
+const std::vector<std::string>& ancestor_ids) {
+    ScriptVariableScopes base;
+    base.baseline.collection_id  = id;
+    base.collection_ancestor_ids = ancestor_ids;
+    base.collection_ancestors = std::vector<vayu::Environment> (ancestor_ids.size ());
+    return base;
+}
+
+} // namespace
+
+// A scenario load VU writes per folder (#3248): what a step in `fold` set
+// answers `fold`'s and its sub-folder's steps, as an ancestor the sub-folder's
+// script reads through and does not write, and never a sibling's; the
+// sub-folder's own value of the name is nearer and wins. Mutation check: key
+// every collection on one id (`ScopeOverlay::layer` and `collection_layer`)
+// and the sibling reads "from-fold".
+TEST (ScopeOverlayTest, AFolderWriteAnswersItsSubFoldersAndNoSibling) {
+    const auto fold  = folder_base ("fold", { "root" });
+    auto deep        = folder_base ("deep", { "root", "fold" });
+    const auto other = folder_base ("other", { "root" });
+
+    ScopeOverlay overlay;
+    overlay.set ("collection", "token", "from-fold", fold);
+
+    const auto read = [&overlay] (const ScriptVariableScopes& base) {
+        auto vars = flatten_variable_scopes (base);
+        overlay.apply_onto (vars, base);
+        return vars.contains ("token") ? vars.at ("token") : std::string ("<absent>");
+    };
+    EXPECT_EQ (read (fold), "from-fold");
+    EXPECT_EQ (read (deep), "from-fold")
+    << "the sub-folder did not read its parent's write";
+    EXPECT_EQ (read (other), "<absent>")
+    << "a sibling folder read another's write";
+
+    const auto materialized = overlay.materialize (deep);
+    EXPECT_FALSE (materialized.collection.contains ("token"))
+    << "the parent's write landed on the sub-folder's own scope";
+    ASSERT_EQ (materialized.collection_ancestors.size (), 2u);
+    EXPECT_EQ (materialized.collection_ancestors[1].at ("token").value, "from-fold");
+    EXPECT_FALSE (overlay.materialize (other).collection_ancestors[0].contains ("token"))
+    << "the shared root took a folder's write";
+
+    deep.collection["token"] = value_of ("deep-own");
+    EXPECT_EQ (read (deep), "deep-own");
 }
 
 // --- the exchange, on the wire -----------------------------------------------

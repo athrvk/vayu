@@ -1165,8 +1165,8 @@ variable defined on an ancestor collection therefore reads the same in
 `pm.collectionVariables.replaceIn`, which reads that scope alone). A step of a
 collection run reads the chain of its own request's folder, exactly as a Send
 of that request does, even when the run was started on a parent (#3248,
-`RunVariableScopes`); the run's `script.setup` and `script.teardown` read the
-collection being run.
+`RunVariableScopes` for a sequential run, `LoadScopeBases` for a load run);
+the run's `script.setup` and `script.teardown` read the collection being run.
 
 **Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
 only ever touch the request's own collection - the one
