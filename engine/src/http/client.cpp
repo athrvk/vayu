@@ -632,14 +632,15 @@ void mark_failed (Response& response, const Error& error) {
     response.error_message = error.message;
 }
 
-/// Marks @p response failed when the completed transfer is a forwarding
-/// proxy's 407 (#3257); false leaves it untouched.
-bool mark_failed_if_proxy_refused (Response& response, CURL* curl, long status) {
-    const auto refusal = detail::proxy_authentication_refusal (curl, status);
-    if (refusal) {
+/// Turns a completed transfer that is a forwarding proxy's 407 into a failed
+/// response (#3257), dropping the proxy's body; any other response is left as
+/// it is.
+void fail_if_proxy_refused (Response& response, CURL* curl, long status) {
+    if (const auto refusal = detail::proxy_authentication_refusal (curl, status)) {
         mark_failed (response, *refusal);
+        response.body.clear ();
+        response.body_size = 0;
     }
-    return refusal.has_value ();
 }
 
 } // namespace
@@ -938,12 +939,6 @@ Result<Response> Client::send (const Request& request) {
     long http_code = 0;
     get_info<CURLINFO_RESPONSE_CODE> (curl, &http_code);
 
-    // A forwarding proxy's 407 completes as an ordinary response; the proxy
-    // answered, not the target (#3257). The status survives in the message.
-    if (mark_failed_if_proxy_refused (response, curl, http_code)) {
-        return response;
-    }
-
     response.status_code = static_cast<int> (http_code);
     // Prefer the wire reason phrase captured by header_callback. Only fall
     // back to the code→phrase lookup when the server (or HTTP/2+ stack)
@@ -963,6 +958,9 @@ Result<Response> Client::send (const Request& request) {
     response.body_size      = response.body.size ();
     response.body_truncated = keep_truncated_body;
 
+    // A forwarding proxy's 407 completes as an ordinary response; the proxy
+    // answered, not the target (#3257). The status survives in the message.
+    fail_if_proxy_refused (response, curl, http_code);
     return response;
 }
 
