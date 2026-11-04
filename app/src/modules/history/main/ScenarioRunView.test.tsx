@@ -489,6 +489,48 @@ describe("thinned results", () => {
 	});
 });
 
+describe("HTTP/2 fallback", () => {
+	const withDowngraded = (httpVersionDowngraded: number | undefined) => {
+		const base = report({
+			results: [storedStep(0, 0, "passed")],
+			scenario: {
+				iterations: 1,
+				iterationsCompleted: 1,
+				stepsExecuted: 1,
+				passed: 1,
+				failed: 0,
+				skipped: 0,
+				errored: 0,
+				stepsStored: 1,
+				stepsDropped: 0,
+			},
+		});
+		reportQuery.data = { ...base, summary: { ...base.summary, httpVersionDowngraded } };
+	};
+
+	it("counts the requests that fell back when there were any", () => {
+		withDowngraded(40);
+
+		render(<ScenarioRunView run={RUN} />);
+
+		const note = screen.getByText("HTTP/2 not negotiated");
+		expect(note.closest("[title]")?.getAttribute("title")).toContain(
+			"40 of this run's requests"
+		);
+	});
+
+	it.each([
+		["none fell back", 0],
+		["the report predates the count", undefined],
+	])("says nothing when %s", (_case, count) => {
+		withDowngraded(count);
+
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(screen.queryByText("HTTP/2 not negotiated")).toBeNull();
+	});
+});
+
 /** A collection run whose snapshot manifest names the data file that drove it (#2051). */
 function runWithDataFile(file: {
 	dataFileName?: string;

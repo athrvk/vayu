@@ -54,6 +54,7 @@ import { Callout, ExtractorMisses, SentBodyFileNote } from "@/components/shared"
 import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
+	HttpVersionDowngradeNote,
 	SampledExchange,
 	TestsChip,
 	UnifiedResponseViewer,
@@ -355,6 +356,10 @@ function ScenarioStepCard({
 							Only the first {formatSize(heldBodySize(response))} of{" "}
 							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept.
 						</Callout>
+					)}
+					{/* The viewer below has no status bar to carry it (#3262). */}
+					{response.httpVersionDowngraded && (
+						<HttpVersionDowngradeNote httpVersion={response.httpVersion} />
 					)}
 					<UnifiedResponseViewer
 						response={{

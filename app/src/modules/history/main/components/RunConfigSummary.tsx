@@ -134,7 +134,14 @@ function requestedProtocolLabel(config: RunConfiguration): string | undefined {
  * HTTP/1.1. This is the correction, drawn only when the engine counted a
  * downgrade - see summary.httpVersionDowngraded.
  */
-function NotNegotiated({ count }: { count: number }) {
+export function NotNegotiated({
+	count,
+	label = "not negotiated",
+}: {
+	count: number;
+	/** Said alone, with no "Protocol: HTTP/2" beside it to read against. */
+	label?: string;
+}) {
 	return (
 		<span
 			className="flex items-center gap-1.5 text-status-warning-text"
@@ -145,7 +152,7 @@ function NotNegotiated({ count }: { count: number }) {
 			}
 		>
 			<AlertTriangle className="size-icon shrink-0" />
-			not negotiated
+			{label}
 		</span>
 	);
 }

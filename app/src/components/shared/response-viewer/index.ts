@@ -58,6 +58,10 @@ export type { LargeBodyNoticeProps } from "./LargeBodyNotice";
 // seven tabs from live context, three from a stored run - so these are the
 // parts that were genuinely identical, not an attempt to merge the shells.
 export { ResponseStatusBar } from "./ResponseStatusBar";
+// The "HTTP/1.1, not HTTP/2" line the bar draws, for a surface whose viewer has
+// no bar: a collection run's step card (#3262).
+export { HttpVersionDowngradeNote } from "./HttpVersionDowngradeNote";
+export type { HttpVersionDowngradeNoteProps } from "./HttpVersionDowngradeNote";
 export { ResponseActions } from "./ResponseActions";
 export type { ResponseStatusBarProps } from "./ResponseStatusBar";
 export type { ResponseActionsProps } from "./ResponseActions";

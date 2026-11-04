@@ -68,6 +68,7 @@ import {
 } from "@/components/shared";
 import { cn } from "@/lib/utils";
 import ScenarioStepCard from "./components/ScenarioStepCard";
+import { NotNegotiated } from "./components/RunConfigSummary";
 import { finishedRunFiguresText, liveRunProgressText } from "./scenario-run-header";
 import {
 	emptyStepListReason,
@@ -186,6 +187,9 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 		: null;
 	const finishedFigures =
 		!isLive && report && scenario ? finishedRunFiguresText(report.summary) : null;
+	// Steps that asked for HTTP/2 and ran on something older (#3262). 0 and absent
+	// both draw nothing, as in `LoadTestDetail`.
+	const downgradedRequests = (!isLive && report?.summary.httpVersionDowngraded) || 0;
 
 	// One iteration is the common case and "Iteration 1" on every row is noise;
 	// more than one and which pass a step belongs to is the whole point.
@@ -320,6 +324,12 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 
 				{finishedFigures && (
 					<span className="text-xs text-muted-foreground">{finishedFigures}</span>
+				)}
+
+				{downgradedRequests > 0 && (
+					<span className="text-xs">
+						<NotNegotiated count={downgradedRequests} label="HTTP/2 not negotiated" />
+					</span>
 				)}
 
 				{/* A sibling, not a clause of the tally: a run that did less than
