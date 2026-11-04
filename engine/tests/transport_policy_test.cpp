@@ -406,7 +406,11 @@ TEST (CaPemParseValidation, AcceptsTheLabelsOpenSslLoadsBesideAPlainBlock) {
     const auto relabel = [] (std::string pem, const std::string& label) {
         for (const std::string edge : { "BEGIN ", "END " }) {
             const std::string plain = "-----" + edge + "CERTIFICATE-----";
-            pem.replace (pem.find (plain), plain.size (), "-----" + edge + label + "-----");
+            std::string relabeled   = "-----";
+            relabeled += edge;
+            relabeled += label;
+            relabeled += "-----";
+            pem.replace (pem.find (plain), plain.size (), relabeled);
         }
         return pem;
     };
