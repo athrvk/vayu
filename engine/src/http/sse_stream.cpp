@@ -516,8 +516,13 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     // Whatever the server left unterminated still arrived - dispatch it before
     // the ring closes, or a well-behaved-but-abrupt server loses its last event.
-    for (auto& event : parser.finish ()) {
-        context.record_event (event);
+    // Not after the event cap: the write callback stopped mid-chunk, so the
+    // parser's tail is an event the cap already refused, and flushing it would
+    // store the cap plus one with the ones between skipped.
+    if (state.abort_reason != SseEndReason::MaxEvents) {
+        for (auto& event : parser.finish ()) {
+            context.record_event (event);
+        }
     }
 
     const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);

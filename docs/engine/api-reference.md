@@ -7636,7 +7636,7 @@ timeout happened to fire":
 |--------|---------------|
 | `completed` | The server closed the stream |
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
-| `maxStreamEvents` | The event cap was reached |
+| `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
 | `maxStreamDurationMs` | The duration cap elapsed |
 | `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made |
 

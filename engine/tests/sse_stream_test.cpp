@@ -484,6 +484,25 @@ TEST (SseConsumer, EndsOnTheEventCapAndNamesIt) {
     EXPECT_EQ (context.total_events (), 5);
 }
 
+// Three events arrive in one write: the cap stops the callback mid-chunk, and
+// the parser still holds the unterminated `c`. Flushing it at the end would
+// store [a, c] - the cap plus one, with `b` skipped.
+TEST (SseConsumer, TheEventCapStoresExactlyTheFirstEventsOfAOneWritePack) {
+    StreamServer server ({ "data: a\n\ndata: b\n\ndata: c" });
+    auto spec       = spec_for (server.url ("/scripted"), brisk_limits ());
+    spec.max_events = 1;
+    SseStreamContext context ("run_test", brisk_limits ());
+    vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::MaxEvents);
+    EXPECT_EQ (context.total_events (), 1);
+
+    const auto payloads = ring_payloads (context);
+    // The `open` frame, then the one event.
+    ASSERT_EQ (payloads.size (), 2u);
+    EXPECT_EQ (payloads[1]["data"], "a");
+}
+
 TEST (SseConsumer, EndsOnTheDurationCapAndNamesIt) {
     StreamServer server;
     auto spec            = spec_for (server.url ("/endless"), brisk_limits ());
