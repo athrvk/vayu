@@ -1803,8 +1803,12 @@ TEST_F (StreamExecuteTest, AnEventStreamStoresItsByteCountAndNoBody) {
     std::vector<std::string> chunks;
     std::size_t delivered = 0;
     for (int i = 0; i < 100; ++i) {
-        chunks.push_back (
-        "data: " + std::string (94, static_cast<char> ('a' + (i % 26))) + "\n\n");
+        // Built by append: GCC 13 at -O3 misreads the `operator+` chain as an
+        // out-of-bounds copy under -Werror=array-bounds.
+        std::string frame = "data: ";
+        frame.append (94, static_cast<char> ('a' + (i % 26)));
+        frame += "\n\n";
+        chunks.push_back (std::move (frame));
         delivered += chunks.back ().size ();
     }
     ASSERT_EQ (delivered, 10200u);
