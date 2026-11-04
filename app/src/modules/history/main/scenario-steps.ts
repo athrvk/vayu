@@ -76,6 +76,11 @@ export interface ScenarioStepRow {
 	 */
 	extractorMisses?: number;
 	/**
+	 * How many distinct `{{names}}` this step sent unresolved (issue #3248).
+	 * Both sources carry it, on the terms {@link stepsNotRun} is carried on.
+	 */
+	unresolvedTokens?: number;
+	/**
 	 * The stored request this step executed, so a step that failed has a way
 	 * back to the request that sent it (issue #730).
 	 *
@@ -439,6 +444,9 @@ function stepRowFromResult(result: RunResultSample): ScenarioStepRow | null {
 			: {}),
 		...(typeof trace.extractorMisses === "number" && trace.extractorMisses > 0
 			? { extractorMisses: trace.extractorMisses }
+			: {}),
+		...(typeof trace.unresolvedTokens === "number" && trace.unresolvedTokens > 0
+			? { unresolvedTokens: trace.unresolvedTokens }
 			: {}),
 		// The one thing the trace carried that nothing read (issue #730). A row
 		// written before the runner stamped it has none, and the card offers no

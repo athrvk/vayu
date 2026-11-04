@@ -378,6 +378,8 @@ describe("parseStepEvent", () => {
 		{ field: "stepsNotRun", value: 3, malformed: ["3", 0, -1] },
 		// Absent at 0 from the engine (issue #3053), so 0 is no claim either.
 		{ field: "extractorMisses", value: 2, malformed: ["2", 0, -1] },
+		// Absent at 0 from the engine too (issue #3248).
+		{ field: "unresolvedTokens", value: 2, malformed: ["2", 0, -1] },
 	])(
 		"carries $field when present, and omits the key when absent or malformed",
 		({ field, value, malformed }) => {

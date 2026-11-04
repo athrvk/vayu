@@ -178,6 +178,10 @@ export function parseStepEvent(raw: unknown): ScenarioStepEvent | null {
 		...(typeof e.extractorMisses === "number" && e.extractorMisses > 0
 			? { extractorMisses: e.extractorMisses }
 			: {}),
+		// Names the step sent unresolved (issue #3248), on the same terms.
+		...(typeof e.unresolvedTokens === "number" && e.unresolvedTokens > 0
+			? { unresolvedTokens: e.unresolvedTokens }
+			: {}),
 		// The request this step ran (issue #831), so a live row offers the same
 		// way back to it that a stored one does. Left absent unless the frame
 		// carries a non-empty id: the step card keys the action off its
