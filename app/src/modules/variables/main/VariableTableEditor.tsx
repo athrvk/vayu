@@ -79,6 +79,7 @@ import type { VariableScope } from "@/lib/agent-reference";
 import VariableRow from "./VariableRow";
 import {
 	NAME_PROBLEM_MESSAGE,
+	isAddressableName,
 	nameProblems,
 	type NameProblem,
 	trimVariableName,
@@ -217,6 +218,10 @@ function rowFromValue(key: string, value: VariableValue, id?: string): VariableR
  * A row with a name problem (`nameProblems`) writes nothing, and the variable it
  * stands for is still present: only the explicit Delete removes a key, so a
  * name the user is mid-way through fixing never costs them the variable (#3251).
+ * The exception is a stored name the engine would refuse (a legacy blank or
+ * padded key): keeping it would make every save a 400, and `{{ name }}` could
+ * never reach it, so it is dropped from the blob while the row stays on screen
+ * to be named.
  * Names are trimmed here, so the payload key is the one the engine accepts
  * whatever the row currently holds.
  */
@@ -227,7 +232,9 @@ function computeUserChanges(rows: VariableRowData[], baseline: VariableMap): Var
 	rows.forEach((row) => {
 		if (row.isNew) return;
 		if (problems.has(row.id)) {
-			if (row.baseKey !== undefined) seenKeys.add(row.baseKey);
+			if (row.baseKey !== undefined && isAddressableName(row.baseKey)) {
+				seenKeys.add(row.baseKey);
+			}
 			return;
 		}
 		const key = trimVariableName(row.key);

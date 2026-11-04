@@ -228,7 +228,6 @@ describe("a variable name the editor cannot write", () => {
 
 	it("remembers the name a saved rename stored, so clearing it later deletes nothing", () => {
 		const { rerenderWith } = mount();
-		// The query cache echoing a landed save back, which the mocked mutation does not do.
 		const echoLastSave = () => rerenderWith(collectionOf(lastPayload()));
 		// A held row keeps the editor dirty, so no reseed re-derives the stored names.
 		const values = screen.getAllByLabelText("Variable value") as HTMLInputElement[];
@@ -393,5 +392,56 @@ describe("the explicit Delete", () => {
 		const sent = lastPayload();
 		expect(sent.token).toBeUndefined();
 		expect(sent.host?.value).toBe("example.com");
+	});
+});
+
+describe("a legacy stored name the engine would refuse", () => {
+	// Written before the engine began refusing a blank or padded name: `foo ` can
+	// never be referenced, and sending it back is a 400 for every save.
+	const legacy = (): Record<string, VariableValue> => ({
+		foo: variable("kept", 1000),
+		other: variable("o", 2000),
+		"foo ": variable("padded", 3000),
+		"": variable("blank", 4000),
+	});
+	const isAddressable = (name: string) => name !== "" && name === name.trim();
+
+	beforeEach(() => {
+		updateCollection.mockClear();
+		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		useToastStore.setState({ toasts: [] });
+	});
+
+	it("is left out of an unrelated save, which deletes nothing addressable", () => {
+		mount(collectionOf(legacy()));
+
+		typeAndLeave(screen.getByDisplayValue("kept"), "edited");
+		landSave();
+
+		const sent = lastPayload();
+		expect(Object.keys(sent).every(isAddressable)).toBe(true);
+		expect(Object.keys(sent).sort()).toEqual(["foo", "other"]);
+		expect(sent.foo.value).toBe("edited");
+		expect(sent.other.value).toBe("o");
+	});
+
+	it("stays on screen, flagged and unsaved, so it can still be named", () => {
+		const { rerenderWith } = mount(collectionOf(legacy()));
+
+		typeAndLeave(screen.getByDisplayValue("kept"), "edited");
+		landSave();
+		rerenderWith(collectionOf(lastPayload()));
+
+		expect(screen.getByDisplayValue("padded")).toBeInTheDocument();
+		expect(screen.getByDisplayValue("blank")).toBeInTheDocument();
+		expectShowsError(nameFields()[2], "Name already used");
+		expectShowsError(nameFields()[3], "Needs a name");
+		expect(editorContext()?.hasPendingChanges).toBe(true);
+
+		typeAndLeave(nameFields()[3], "fresh");
+		landSave();
+
+		expect(lastPayload().fresh?.value).toBe("blank");
+		expect(Object.keys(lastPayload()).every(isAddressable)).toBe(true);
 	});
 });

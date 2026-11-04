@@ -32,6 +32,11 @@ export function trimVariableName(name: string): string {
 	return name.replace(NAME_PADDING, "");
 }
 
+/** Whether the engine accepts `name` as a stored variable name (`is_addressable_variable_name`). */
+export function isAddressableName(name: string): boolean {
+	return name !== "" && trimVariableName(name) === name;
+}
+
 /**
  * The rows that cannot be saved as they stand, by row id; a row absent from the
  * map is fine.
