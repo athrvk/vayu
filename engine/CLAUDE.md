@@ -1007,7 +1007,14 @@ logged as a warning: it means a client skipped composition.
   system anchors plus the user's. A proxy-hop failure is
   `ErrorCode::ProxyError`, distinct from the target's `ConnectionFailed`;
   `curl_to_error` takes the handle because only `CURLINFO_HTTP_CONNECTCODE`
-  remembers a proxy's 407. The handle answers a second question (#802): an
+  remembers a proxy's 407 on a CONNECT, and only `CURLINFO_USED_PROXY` says
+  whether a `CURLE_COULDNT_CONNECT` was the proxy's socket (#3257, read in
+  every mode, `environment` included, where `configured_proxy` knows nothing).
+  The other 407, a forwarding proxy's answer to a plain `http://` request,
+  completes as `CURLE_OK`: `Client::send` alone turns it into a `ProxyError`
+  response (`proxy_authentication_refusal`) when a proxy carried the transfer
+  and no CONNECT tunnel did. The event loop and SSE do not, so a load run counts
+  that 407 as a status. The handle answers a second question (#802): an
   https transfer that failed for an unmapped code, or for one of the
   target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, otherwise
   `ConnectionFailed`; a redirect loop and an undecodable body are not among

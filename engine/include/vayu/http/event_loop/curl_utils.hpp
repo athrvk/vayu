@@ -47,9 +47,11 @@ class DnsCache;
  * @param curl The handle the transfer ran on, read for the proxy detail curl
  *             only exposes through `curl_easy_getinfo` - a 407 answered to a
  *             CONNECT comes back as a plain `CURLE_RECV_ERROR` and is
- *             indistinguishable from an upstream one without it. May be null
- *             where no handle is available; the mapping then falls back to the
- *             code alone.
+ *             indistinguishable from an upstream one without it, and
+ *             `CURLE_COULDNT_CONNECT` is the proxy's when a proxy was in the
+ *             path (`CURLINFO_USED_PROXY`, #3257) and the target's otherwise.
+ *             May be null where no handle is available; the mapping then
+ *             falls back to the code alone.
  *
  * A redirect loop and an undecodable body get their own codes
  * (`TooManyRedirects`, `BadContentEncoding`, issue #2462) and a message that
@@ -72,6 +74,21 @@ CURLcode code,
 const CurlErrorBuffer& errors,
 const Request* request               = nullptr,
 const ConnectedPeerCheck* peer_check = nullptr);
+
+/**
+ * @brief The proxy's refusal when a transfer that completed is a forwarding
+ *        proxy's 407, otherwise nothing (#3257).
+ *
+ * A proxy that is sent a plain `http://` request answers an unauthenticated one
+ * with an ordinary 407 response, which libcurl returns as `CURLE_OK`; read as
+ * the target's answer, it sends the user to the server's credentials. It is the
+ * proxy's when @p curl routed the transfer through one (`CURLINFO_USED_PROXY`)
+ * and no tunnel stands between them: a 407 an origin sends inside a CONNECT
+ * tunnel, or on a direct transfer, is the origin's own and stays a response.
+ * A null handle reads as no proxy. Only the single-request client calls this;
+ * a load run keeps counting a proxy's 407 as a status.
+ */
+[[nodiscard]] std::optional<Error> proxy_authentication_refusal (CURL* curl, long status);
 
 /**
  * @brief Whether a transfer libcurl finished with @p code reached the network,

@@ -715,10 +715,12 @@ enum class ErrorCode : std::uint8_t {
     /// holds, so the existing ones cannot move.
     DataBindingFailed,
     /// The proxy hop failed, not the target: an unresolvable proxy host, a
-    /// SOCKS handshake failure, or a 4xx answered to the CONNECT. Distinct
-    /// because reporting these as `ConnectionFailed` or `InternalError` sent
-    /// users debugging an endpoint that was never reached (issue #705).
-    /// Appended for the same reason `DataBindingFailed` was.
+    /// proxy nothing listens on, a SOCKS handshake failure, a 4xx answered to
+    /// the CONNECT, or a forwarding proxy's 407 on a plain `http://` request
+    /// (issue #3257). Distinct because reporting these as `ConnectionFailed`
+    /// or `InternalError` sent users debugging an endpoint that was never
+    /// reached (issue #705). Appended for the same reason `DataBindingFailed`
+    /// was.
     ProxyError,
     /// The response was refused because it was larger than the bound the caller
     /// set for this transfer (`ClientConfig::max_response_bytes`, issue #784) -
