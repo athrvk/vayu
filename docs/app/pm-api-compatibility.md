@@ -1199,7 +1199,9 @@ evaluated to `undefined` would report PASS against a broken API.
 Postman has no equivalent: it has no streaming request type, so nothing in its
 `pm` surface names one. A request sent with the **Event stream** setting on gets
 three extra properties on `pm.response`, and the post-request script runs once,
-after the stream has terminated:
+after the stream has terminated. A reply that is not `text/event-stream` (a
+JSON error, NDJSON) keeps its body, so `pm.response.text()` and `json()` read
+it; an event stream's `text()` is `""`:
 
 ```javascript
 const events = pm.response.events || [];
