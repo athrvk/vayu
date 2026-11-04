@@ -632,6 +632,16 @@ void mark_failed (Response& response, const Error& error) {
     response.error_message = error.message;
 }
 
+/// Marks @p response failed when the completed transfer is a forwarding
+/// proxy's 407 (#3257); false leaves it untouched.
+bool mark_failed_if_proxy_refused (Response& response, CURL* curl, long status) {
+    const auto refusal = detail::proxy_authentication_refusal (curl, status);
+    if (refusal) {
+        mark_failed (response, *refusal);
+    }
+    return refusal.has_value ();
+}
+
 } // namespace
 
 // ============================================================================
@@ -930,8 +940,7 @@ Result<Response> Client::send (const Request& request) {
 
     // A forwarding proxy's 407 completes as an ordinary response; the proxy
     // answered, not the target (#3257). The status survives in the message.
-    if (const auto refusal = detail::proxy_authentication_refusal (curl, http_code)) {
-        mark_failed (response, *refusal);
+    if (mark_failed_if_proxy_refused (response, curl, http_code)) {
         return response;
     }
 
