@@ -49,8 +49,7 @@ bool is_create) {
         return outcome;
     }
     apply_string_field (json, "description", e.description, "", is_create);
-    if (auto outcome = apply_json_field (json, "variables", e.variables, "{}", is_create);
-    !outcome) {
+    if (auto outcome = apply_variables_field (json, e.variables, is_create); !outcome) {
         return outcome;
     }
     apply_bool_field (json, "isActive", e.is_active, false, is_create);

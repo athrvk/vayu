@@ -223,6 +223,8 @@ UrlOmitted& omitted);
 [[nodiscard]] std::optional<Json> auth_of (const Json& value, bool collection);
 
 /// A variables object (`name -> {value, enabled, secret?, type?}`), or nothing.
+/// A name the write routes would refuse (blank or padded, #3251) makes the
+/// whole object invalid, like any other malformed member.
 [[nodiscard]] std::optional<Json> variables_of (const Json& value);
 
 /**

@@ -203,6 +203,41 @@ class ResourceWriteRouteTest : public ::testing::Test {
         return values;
     }
 
+    /** A key no `{{ }}` token can reach (#3251) and the words its 400 uses. */
+    struct UnaddressableKey {
+        std::string key;
+        std::string reason;
+    };
+    static const std::vector<UnaddressableKey>& unaddressable_keys () {
+        static const std::vector<UnaddressableKey> keys{
+            { " x ", "leading or trailing whitespace" },
+            { "x ", "leading or trailing whitespace" },
+            { "\tx", "leading or trailing whitespace" },
+            { "x\r\n", "leading or trailing whitespace" },
+            { "", "empty or whitespace-only" },
+            { "   ", "empty or whitespace-only" },
+        };
+        return keys;
+    }
+
+    static json variables_named (const std::string& key) {
+        json variables = json::object ();
+        variables[key] = { { "value", "v" }, { "enabled", true } };
+        return json{ { "variables", variables } };
+    }
+
+    /** The 400 for @p bad: it says why and quotes the key it refused. */
+    static void expect_refused_key (int status, const json& body, const UnaddressableKey& bad) {
+        EXPECT_EQ (status, 400) << "key = '" << bad.key << "'";
+        if (status != 400) {
+            return; // an accepted write has no error body to read
+        }
+        const std::string message = body["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("'variables'"), std::string::npos) << message;
+        EXPECT_NE (message.find ("key '" + bad.key + "'"), std::string::npos) << message;
+        EXPECT_NE (message.find (bad.reason), std::string::npos) << message;
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -448,6 +483,45 @@ TEST_F (ResourceWriteRouteTest, CollectionCreateWrongShapeObjectFieldIsRejected)
     }
     EXPECT_TRUE (db_->get_collections ().empty ())
     << "a rejected create must not leave a record behind";
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionUpdateUnaddressableVariableKeyIsRejected) {
+    const std::string id = make_collection ();
+    ASSERT_EQ (update_collection_response (*db_, id, variables_named ("token")).first, 200);
+    const auto before_row = db_->get_collection (id);
+    ASSERT_HAS_VALUE (before_row);
+    const std::string before = before_row->variables;
+
+    for (const auto& bad : unaddressable_keys ()) {
+        auto [status, body] =
+        update_collection_response (*db_, id, variables_named (bad.key));
+        expect_refused_key (status, body, bad);
+    }
+
+    const auto after_row = db_->get_collection (id);
+    ASSERT_HAS_VALUE (after_row);
+    EXPECT_EQ (after_row->variables, before)
+    << "a rejected write must not reach the column";
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionCreateUnaddressableVariableKeyIsRejected) {
+    for (const auto& bad : unaddressable_keys ()) {
+        json body_in        = variables_named (bad.key);
+        body_in["name"]     = "N";
+        auto [status, body] = create_collection_response (*db_, body_in);
+        expect_refused_key (status, body, bad);
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ())
+    << "a rejected create must not leave a record behind";
+}
+
+// A name with whitespace inside, or a dot, is reachable: only the ends are cut.
+TEST_F (ResourceWriteRouteTest, CollectionCreateAcceptsInnerWhitespaceAndDotsInAVariableKey) {
+    for (const char* key : { "my var", "a.b", "x-1" }) {
+        json body_in    = variables_named (key);
+        body_in["name"] = "N";
+        EXPECT_EQ (create_collection_response (*db_, body_in).first, 200) << key;
+    }
 }
 
 // --- The declared data contract (issue #599) ---------------------------------
@@ -1795,6 +1869,48 @@ TEST_F (ResourceWriteRouteTest, EnvironmentCreateWrongShapeVariablesIsRejected) 
     }
     EXPECT_TRUE (db_->get_environments ().empty ())
     << "a rejected create must not leave a record behind";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentUpdateUnaddressableVariableKeyIsRejected) {
+    json seed                      = variables_named ("token");
+    seed["name"]                   = "Env";
+    auto [created_status, created] = create_environment_response (*db_, seed);
+    ASSERT_EQ (created_status, 200);
+    const std::string id  = created["id"].get<std::string> ();
+    const auto before_row = db_->get_environment (id);
+    ASSERT_HAS_VALUE (before_row);
+    const std::string before = before_row->variables;
+
+    for (const auto& bad : unaddressable_keys ()) {
+        auto [status, body] =
+        update_environment_response (*db_, id, variables_named (bad.key));
+        expect_refused_key (status, body, bad);
+    }
+
+    const auto after_row = db_->get_environment (id);
+    ASSERT_HAS_VALUE (after_row);
+    EXPECT_EQ (after_row->variables, before)
+    << "a rejected write must not reach the column";
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentCreateUnaddressableVariableKeyIsRejected) {
+    for (const auto& bad : unaddressable_keys ()) {
+        json body_in        = variables_named (bad.key);
+        body_in["name"]     = "Env";
+        auto [status, body] = create_environment_response (*db_, body_in);
+        expect_refused_key (status, body, bad);
+    }
+    EXPECT_TRUE (db_->get_environments ().empty ())
+    << "a rejected create must not leave a record behind";
+}
+
+// A name with whitespace inside, or a dot, is reachable: only the ends are cut.
+TEST_F (ResourceWriteRouteTest, EnvironmentCreateAcceptsInnerWhitespaceAndDotsInAVariableKey) {
+    for (const char* key : { "my var", "a.b", "x-1" }) {
+        json body_in    = variables_named (key);
+        body_in["name"] = "Env";
+        EXPECT_EQ (create_environment_response (*db_, body_in).first, 200) << key;
+    }
 }
 
 TEST_F (ResourceWriteRouteTest, EnvironmentNullNameIsRejected) {

@@ -33,6 +33,7 @@ import {
 	SecretInput,
 	TooltipIconButton,
 } from "@/components/ui";
+import { FieldError } from "@/components/shared/FieldError";
 import { TimeMarker } from "@/components/shared/TimeValue";
 import { useCopy } from "@/hooks/useCopy";
 import { variableReference, type VariableScope } from "@/lib/agent-reference";
@@ -40,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { parseTimeValue } from "@/lib/time-value";
 import type { VariableType } from "@/lib/variable-cast";
 import type { VariableRowData } from "./VariableTableEditor";
+import { trimVariableName } from "./variableRowNames";
 
 const VARIABLE_TYPES: { value: VariableType; label: string }[] = [
 	{ value: "string", label: "String" },
@@ -64,6 +66,11 @@ interface VariableRowProps {
 	 * so it never defeats `memo`.
 	 */
 	scope: VariableScope | null;
+	/**
+	 * Why this row cannot be saved under its name, or undefined. A string rather
+	 * than the problem object so it is compared by value and never defeats `memo`.
+	 */
+	nameError?: string;
 }
 
 function VariableRow({
@@ -74,6 +81,7 @@ function VariableRow({
 	onRemove,
 	onBlur,
 	scope,
+	nameError,
 }: VariableRowProps) {
 	const { copy, copied } = useCopy({ feedback: "icon" });
 	/*
@@ -93,14 +101,16 @@ function VariableRow({
 	 * unnamed row names nothing at all. The line is built from `{ name }` alone,
 	 * never the row, so the value cannot ride along.
 	 */
-	const referenceScope = !variable.secret && !variable.isNew && variable.key ? scope : null;
+	const name = trimVariableName(variable.key);
+	const referenceScope = !variable.secret && !variable.isNew && !nameError && name ? scope : null;
+	const nameErrorId = `${variable.id}-name-error`;
 	/*
 	 * Every control in the row is named by the variable it edits, with a
 	 * generic fallback for the unnamed blank row: a screen reader walking the
 	 * table otherwise hears a column of identical anonymous controls. A
 	 * placeholder is not a name (#2284).
 	 */
-	const valueLabel = variable.key ? `Value of ${variable.key}` : "Variable value";
+	const valueLabel = name ? `Value of ${name}` : "Variable value";
 
 	return (
 		/*
@@ -134,7 +144,7 @@ function VariableRow({
 					}}
 					className={cn("size-target", checkboxColor)}
 					disabled={variable.isNew && !variable.key}
-					aria-label={variable.key ? `Enable ${variable.key}` : "Enable this row"}
+					aria-label={name ? `Enable ${name}` : "Enable this row"}
 				/>
 			</td>
 			<td className="py-1 px-2">
@@ -146,11 +156,17 @@ function VariableRow({
 					onBlur={onBlur}
 					placeholder="variable_name"
 					aria-label="Variable name"
+					aria-invalid={nameError ? true : undefined}
+					aria-describedby={nameError ? nameErrorId : undefined}
 					className={cn(
 						"text-primary",
-						!variable.enabled && !variable.isNew && "text-muted-foreground bg-muted"
+						!variable.enabled && !variable.isNew && "text-muted-foreground bg-muted",
+						nameError && "border-destructive"
 					)}
 				/>
+				<FieldError id={nameErrorId} className="mt-1">
+					{nameError}
+				</FieldError>
 			</td>
 			<td className="py-1 px-2">
 				{/*
@@ -198,7 +214,7 @@ function VariableRow({
 						{showsTime && (
 							<TimeMarker
 								value={variable.value}
-								label={variable.key || "This value"}
+								label={name || "This value"}
 								className="absolute right-0 top-0 h-full w-9"
 							/>
 						)}
@@ -216,7 +232,7 @@ function VariableRow({
 					}}
 				>
 					<SelectTrigger
-						aria-label={variable.key ? `Type of ${variable.key}` : "Variable type"}
+						aria-label={name ? `Type of ${name}` : "Variable type"}
 						className={cn(
 							"h-control-sm text-xs px-2",
 							!variable.enabled && !variable.isNew && "opacity-60"
@@ -281,12 +297,9 @@ function VariableRow({
 							variant="rowAction"
 							size="icon"
 							onClick={() =>
-								void copy(
-									variableReference({ name: variable.key }, referenceScope),
-									"Reference"
-								)
+								void copy(variableReference({ name }, referenceScope), "Reference")
 							}
-							aria-label={`Copy ${variable.key} for agent`}
+							aria-label={`Copy ${name} for agent`}
 							title="Copy for agent"
 							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						>
@@ -306,7 +319,7 @@ function VariableRow({
 							variant="rowActionDestructive"
 							size="icon"
 							onClick={() => onRemove(variable.id)}
-							aria-label={variable.key ? `Delete ${variable.key}` : "Delete variable"}
+							aria-label={name ? `Delete ${name}` : "Delete variable"}
 							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
 						>
 							<Trash2 className="size-icon" />

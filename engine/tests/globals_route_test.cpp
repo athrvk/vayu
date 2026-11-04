@@ -151,6 +151,48 @@ TEST_F (GlobalsRouteTest, WrongShapeVariablesIsRejected) {
     << "a rejected write must not reach the column";
 }
 
+// Issue #3251: `{{ name }}` is looked up trimmed, so a key that is blank or
+// differs from its trim is a global no token can reach. Refused at the write.
+TEST_F (GlobalsRouteTest, UnaddressableVariableKeyIsRejected) {
+    save_globals_response (*db_, json{ { "variables", { { "token", "abc" } } } });
+    const std::string before = stored_variables ();
+
+    struct Bad {
+        std::string key;
+        std::string reason;
+    };
+    const std::vector<Bad> bad_keys{
+        { " x ", "leading or trailing whitespace" },
+        { "x ", "leading or trailing whitespace" },
+        { "\tx", "leading or trailing whitespace" },
+        { "", "empty or whitespace-only" },
+        { "  ", "empty or whitespace-only" },
+    };
+    for (const auto& bad : bad_keys) {
+        json variables     = json::object ();
+        variables[bad.key] = "v";
+        auto [status, body] =
+        save_globals_response (*db_, json{ { "variables", variables } });
+        EXPECT_EQ (status, 400) << "key = '" << bad.key << "'";
+        if (status != 400) {
+            continue; // an accepted write has no error body to read
+        }
+        const std::string message = body["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("key '" + bad.key + "'"), std::string::npos) << message;
+        EXPECT_NE (message.find (bad.reason), std::string::npos) << message;
+    }
+
+    EXPECT_EQ (stored_variables (), before)
+    << "a rejected write must not reach the column";
+}
+
+TEST_F (GlobalsRouteTest, InnerWhitespaceAndDotsInAVariableKeyAreAccepted) {
+    auto [status, body] = save_globals_response (
+    *db_, json{ { "variables", { { "my var", "1" }, { "a.b", "2" } } } });
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["variables"].size (), 2U);
+}
+
 // ---------------------------------------------------------------------------
 // If-Match on the whole-blob save (issue #2988)
 // ---------------------------------------------------------------------------

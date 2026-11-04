@@ -81,6 +81,22 @@ VariableValues build_variable_values (const vayu::Environment& globals,
 const std::vector<vayu::Environment>& chain,
 const vayu::Environment& environment);
 
+/**
+ * The name a `{{ name }}` token is looked up under: @p written with spaces,
+ * tabs, CR and LF cut from both ends. Both token scanners
+ * (`substitute_tokens`, `split_tokens`) read a name through this, and
+ * `is_addressable_variable_name` is judged by it, so the write rule and the
+ * lookup cannot disagree.
+ */
+std::string trim_variable_name (std::string_view written);
+
+/**
+ * True when a variable stored under @p key can be referenced by a token: the
+ * key is not blank and is its own trim, since the lookup trims what a token
+ * spells and so can never produce a padded key (#3251).
+ */
+bool is_addressable_variable_name (std::string_view key);
+
 /** True for a name written as a dynamic variable (`$...`), known or not. */
 bool is_dynamic_variable_name (const std::string& name);
 

@@ -69,7 +69,7 @@ export function variablesInput(subject: string) {
 		.record(z.string(), VARIABLE_INPUT)
 		.optional()
 		.describe(
-			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on (the user can ${REVEAL_SETTING_TOKEN}). Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
+			`Variables to set on ${subject}, as a name -> value map. A value is either a string (sets the value, keeps every flag) or an object {value, secret, type, enabled} whose omitted fields keep their stored setting. A stored secret stays a secret: secret=false over one is refused unless Reveal secrets to agents is on (the user can ${REVEAL_SETTING_TOKEN}). A blank or whitespace-padded name is refused with a 400 naming the key. Merges: variables not named here are left alone. ${VARIABLE_PRECEDENCE_SENTENCE} A name defined in a higher tier shadows what you write here - see ${VARIABLE_RESOLUTION_URI}.`
 		);
 }
 
@@ -183,7 +183,7 @@ export function removeVariablesInput(subject: string) {
 		.array(z.string())
 		.optional()
 		.describe(
-			`Variable names to delete from ${subject} outright. Setting a variable to an empty string leaves the name resolving to nothing; this removes it. A name that is not there is reported, not an error.`
+			`Variable names to delete from ${subject} outright. Setting a variable to an empty string leaves the name resolving to nothing; this removes it. A name that is not there is reported, not an error. A legacy blank or padded name is removed by its exact spelling.`
 		);
 }
 

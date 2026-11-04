@@ -149,6 +149,11 @@
  * (`testValidation.console`, a scenario step's `tests.console`) added 85 B to
  * every row, taking them to 148,339 / 145,613 / 218,101 / 213,704 B: inside
  * the four caps above, which stay.
+ *
+ * #3251's sentences on a blank or padded variable name (the shared `variables`
+ * and `removeVariables` arguments, and `update_globals`) added 647 B to the
+ * writes-on rows, taking them to 218,748 / 214,351 B; those two caps went to
+ * 219,000 / 214,600 and the writes-off rows are untouched.
  */
 
 import { describe, it, expect } from "vitest";
@@ -170,8 +175,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_400 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_700 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 218_200 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 213_800 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_000 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 214_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -60,9 +60,7 @@ const std::function<void ()>& before_write) {
 
     vayu::db::Globals g;
     g.id = GLOBALS_ID;
-    if (auto outcome =
-        apply_json_field (json, "variables", g.variables, "{}", /*is_create=*/true);
-    !outcome) {
+    if (auto outcome = apply_variables_field (json, g.variables, /*is_create=*/true); !outcome) {
         return as_response (outcome.error ());
     }
     g.updated_at = next_updated_at (stored_updated_at);

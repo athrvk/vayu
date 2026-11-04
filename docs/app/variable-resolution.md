@@ -69,6 +69,21 @@ the empty string. One rule, both sides: the engine enforces it in
 `parse_variables`, the renderer in `lib/variable-resolution.ts`, and the
 fixture varies both fields so a divergence cannot hide.
 
+**A variable's name is what the token spells, trimmed (#3251).** `{{ host }}`
+looks up `host`: the engine cuts spaces, tabs, CR and LF from both ends of the
+token's text before the lookup (`trim_variable_name`,
+`engine/src/http/request_composer.cpp`). A stored name that is blank or differs
+from its trim - `" host"`, `"host "` - could therefore never be referenced, so
+the engine refuses to store one: `POST`/`PUT /environments`, `POST /globals` and
+`POST`/`PUT /collections` answer `400` naming the key
+([accepted field shapes](../engine/api-reference.md#accepted-field-shapes)). A
+space or dot *inside* a name (`my var`, `a.b`) is a name like any other. An
+import trims the names it reads and skips a row whose name trims to nothing, so
+a padded row in a document never fails the import. The variables table trims a
+name when it is saved and holds back a row that has no name or repeats one, so
+it never sends the engine a key it would refuse (`variableRowNames.ts`).
+Variables a script writes (`pm.environment.set`) are not checked here.
+
 ## Priority order (lowest → highest)
 
 ```

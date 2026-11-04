@@ -348,8 +348,7 @@ bool is_create) {
         c.order = db.next_sibling_order (c.parent_id, c.id);
     }
 
-    if (auto outcome = apply_json_field (json, "variables", c.variables, "{}", is_create);
-    !outcome) {
+    if (auto outcome = apply_variables_field (json, c.variables, is_create); !outcome) {
         return outcome;
     }
     // Collection auth is never 'inherit' - a collection is the root of a chain.
