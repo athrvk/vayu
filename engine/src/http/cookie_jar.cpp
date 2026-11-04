@@ -60,6 +60,15 @@ bool is_ip_literal (std::string_view host) {
     });
 }
 
+/// The hosts libcurl treats as a trustworthy origin (RFC 6265bis §4.1.2.5), so
+/// it sends a Secure cookie to them over http://. The matcher has to agree, or
+/// pm.cookies omits a cookie the request carries. `url_scope_of` hands IPv6
+/// back bracketed; the bare spelling is accepted for a caller that has none.
+bool is_loopback_host (std::string_view host) {
+    return hosts_equal (host, "localhost") || host == "127.0.0.1" ||
+    host == "[::1]" || host == "::1";
+}
+
 std::string_view without_trailing_dot (std::string_view host) {
     if (host.ends_with (".")) {
         host.remove_suffix (1);
@@ -258,7 +267,7 @@ std::string_view host,
 std::string_view path,
 bool secure_transport,
 int64_t now_seconds) {
-    if (cookie.secure && !secure_transport) {
+    if (cookie.secure && !secure_transport && !is_loopback_host (host)) {
         return false;
     }
     // 0 is a session cookie: no expiry, valid for as long as the jar lives.

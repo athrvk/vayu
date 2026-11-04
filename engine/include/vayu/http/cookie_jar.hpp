@@ -139,7 +139,9 @@ struct JarCookie {
  * The read views' matcher, not the wire's - see the file comment. @p host and
  * @p path come from the request URL, @p secure_transport is whether its scheme
  * is https, and @p now_seconds is the current unix time (passed in so a test
- * can place a cookie's expiry on either side of it without sleeping).
+ * can place a cookie's expiry on either side of it without sleeping). A Secure
+ * cookie also matches `localhost`, `127.0.0.1` and `::1` over cleartext, because
+ * libcurl sends it there.
  */
 [[nodiscard]] bool cookie_matches (const JarCookie& cookie,
 std::string_view host,

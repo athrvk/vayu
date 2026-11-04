@@ -5548,6 +5548,11 @@ a client cannot mistake it for an id. `expires` is unix seconds, or `0` for a
 session cookie (one that lives until the engine exits). A scope with no cookies
 left is not reported.
 
+This route lists what a jar holds, not what a URL would carry. The URL-scoped
+reads of the script API (`pm.cookies`, `jar().getAll(url)`) match a `secure`
+cookie over `https://`, and over `http://` only for `localhost`, `127.0.0.1`
+and `::1`, which libcurl sends it to as trustworthy origins.
+
 ### DELETE /cookies
 
 Clear one jar, or all of them.

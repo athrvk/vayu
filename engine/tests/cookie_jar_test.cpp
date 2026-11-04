@@ -319,6 +319,26 @@ TEST (CookieJarMatch, SecureNeedsHttpsAndAnExpiryInThePast) {
     EXPECT_TRUE (vayu::http::cookie_matches (session, "example.com", "/", false, NOW));
 }
 
+TEST (CookieJarMatch, SecureCookieMatchesCleartextLoopback) {
+    // libcurl treats these hosts as trustworthy origins and sends a Secure
+    // cookie to them over http://; the matcher behind pm.cookies must agree.
+    // "[::1]" is the spelling url_scope_of produces for an IPv6 host.
+    for (const std::string host : { "127.0.0.1", "localhost", "LocalHost", "::1", "[::1]" }) {
+        auto secure   = cookie_for (host, false, "/");
+        secure.secure = true;
+        EXPECT_TRUE (vayu::http::cookie_matches (secure, host, "/", false, NOW)) << host;
+    }
+
+    auto remote   = cookie_for ("example.com", false, "/");
+    remote.secure = true;
+    EXPECT_FALSE (vayu::http::cookie_matches (remote, "example.com", "/", false, NOW));
+    // A name that merely contains one is not loopback.
+    auto lookalike   = cookie_for ("localhost.example.com", false, "/");
+    lookalike.secure = true;
+    EXPECT_FALSE (
+    vayu::http::cookie_matches (lookalike, "localhost.example.com", "/", false, NOW));
+}
+
 TEST (CookieJarMatch, TwoHostsAreRelatedWhenOneIsTheOthersDotBoundarySubdomain) {
     using vayu::http::hosts_domain_related;
     EXPECT_TRUE (hosts_domain_related ("example.com", "example.com"));
@@ -1114,10 +1134,10 @@ TEST (CookieJarWrite, ASecureFlagOnAWrittenCookieIsStoredAndHonouredByTheReadVie
     EXPECT_EQ (held["scopes"][0]["cookies"][0]["secure"], true)
     << "the Secure flag did not survive the write";
 
-    // And the matcher behind pm.cookies refuses it over cleartext, exactly as
-    // it does for a received Secure cookie.
+    // And the matcher behind pm.cookies agrees with the wire: a loopback host
+    // is a trustworthy origin, so the cookie matches over http as well.
     const std::string host = "127.0.0.1";
-    EXPECT_TRUE (jar.matching ("env_a", "http://" + host + "/").empty ());
+    EXPECT_FALSE (jar.matching ("env_a", "http://" + host + "/").empty ());
     EXPECT_FALSE (jar.matching ("env_a", "https://" + host + "/").empty ());
 }
 
