@@ -402,6 +402,21 @@ TEST (ProxyUrlValidation, DoesNotCountAnAtSignPastTheAuthority) {
     EXPECT_FALSE (proxy_url_rejection ("http://proxy.example:8080/a@b@c").has_value ());
 }
 
+// The authority also ends at '?' and '#', so an '@' there is query or fragment
+// text; a raw second '@' ahead of either is still in the password.
+TEST (ProxyUrlValidation, EndsTheAuthorityAtAQueryOrFragment) {
+    for (const char* url : { "http://proxy.example:8080?a@b@c", "http://proxy.example:8080#a@b@c",
+         "http://u:pw@proxy.example:8080?a@b", "http://u:pw@proxy.example:8080#a@b" }) {
+        EXPECT_FALSE (proxy_url_rejection (url).has_value ()) << url;
+    }
+    for (const char* url :
+    { "http://u:p@ss@proxy.example:8080?q", "http://u:p@ss@proxy.example:8080#f" }) {
+        const auto rejection = proxy_url_rejection (url);
+        ASSERT_HAS_VALUE (rejection) << url;
+        EXPECT_NE (rejection->find ("%40"), std::string::npos) << *rejection;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Bypass list validation - libcurl reads an entry it has no form for as a
 // hostname no transfer dials, so the exemption is stored and never applies
@@ -451,6 +466,25 @@ TEST (ProxyBypassValidation, RefusesABracketedAddressASchemeAndAPath) {
     EXPECT_NE (path->find ("path"), std::string::npos) << *path;
     EXPECT_TRUE (proxy_bypass_rejection ("localhost:8080/24").has_value ())
     << "a name before the slash is not a CIDR range";
+}
+
+// The list splits on commas, spaces and tabs only: any other whitespace or
+// control character would sit inside one entry curl matches against no host.
+TEST (ProxyBypassValidation, RefusesAnEntryHoldingANonSeparatorWhitespaceOrControl) {
+    for (const char* list : { "localhost\nexample.com",
+         "localhost\r\nexample.com", "example.com\n", "a\vb", "a\fb",
+         "a\x01"
+         "b",
+         "a\x7f"
+         "b" }) {
+        const auto rejection = proxy_bypass_rejection (list);
+        ASSERT_HAS_VALUE (rejection) << list;
+        EXPECT_NE (rejection->find ("commas, spaces or tabs"), std::string::npos)
+        << *rejection;
+        EXPECT_NE (rejection->find ("exact host"), std::string::npos) << *rejection;
+    }
+    const std::string with_nul ("a\0b", 3);
+    EXPECT_TRUE (proxy_bypass_rejection (with_nul).has_value ());
 }
 
 TEST (ProxyBypassValidation, HoldsACidrPrefixToItsAddressFamily) {

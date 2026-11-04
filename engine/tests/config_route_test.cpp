@@ -1125,6 +1125,17 @@ TEST_F (ConfigRouteTest, ABypassEntryCurlCannotMatchIs400AndNamesTheForms) {
     }
 }
 
+TEST_F (ConfigRouteTest, ABypassEntryHoldingANewlineIs400) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, bypass_body ("localhost\nexample.com"));
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find (
+               "commas, spaces or tabs"),
+    std::string::npos)
+    << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), "");
+}
+
 TEST_F (ConfigRouteTest, EveryBypassFormCurlReadsIsStored) {
     for (const char* list :
     { ".example.com", "localhost, 10.0.0.0/8", "::1", "*", "", "127.0.0.1" }) {

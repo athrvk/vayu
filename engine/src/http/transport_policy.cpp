@@ -171,6 +171,16 @@ std::optional<std::string> proxy_bypass_entry_rejection (std::string_view entry)
         " (curl takes an exact host, '.suffix', a bare suffix, '*' alone, "
         "an IP address or an IP/CIDR range)");
     };
+    // The list splits on commas, spaces and tabs only, so any other
+    // whitespace or control character stays inside one entry that curl then
+    // matches against no host.
+    if (std::any_of (entry.begin (), entry.end (), [] (unsigned char c) {
+            return std::isspace (c) != 0 || std::iscntrl (c) != 0;
+        })) {
+        return refuse (
+        "carries a whitespace or control character - separate entries with "
+        "commas, spaces or tabs");
+    }
     if (entry.find ('*') != std::string_view::npos) {
         return refuse (
         "carries a '*' - the only wildcard is '*' alone; write '.example.com' "
@@ -479,9 +489,10 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
         authority = url.substr (scheme_end + 3);
     }
 
-    // Anything past the authority (a path curl ignores on a proxy URL) is not
-    // part of it, and an '@' there is not userinfo.
-    authority = authority.substr (0, authority.find ('/'));
+    // The authority ends at the first '/', '?' or '#' (as in url_host_span):
+    // a path or query curl ignores on a proxy URL is not part of it, and an
+    // '@' there is not userinfo.
+    authority = authority.substr (0, authority.find_first_of ("/?#"));
     // libcurl ends the userinfo at the *first* '@', so a second one is not part
     // of the password: it makes the rest of the password the start of the host.
     const auto userinfo_end = authority.find ('@');
