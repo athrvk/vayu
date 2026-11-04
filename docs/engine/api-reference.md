@@ -4699,10 +4699,21 @@ was before these rules.
 | `spec_bindings` | A collection or folder bound to an OpenAPI document |
 | `spec_operations` | A request stamped as an OpenAPI operation |
 | `rows_without_key` | A header, param or form row with a value but no name, left out |
+| `typed_auth_headers` | A request with an enabled header row named like the header its auth in force writes (`Authorization` for bearer, basic and an OAuth 2.0 token placed in the header; the key of an API key in a header), written with `noauth` - counted once per request |
 
 An auth a Postman import kept its original block for (`auth.postman`, see
 `docs/engine/db-schema.md`) is written as that block, while it still maps to
 the stored auth; everything below describes the rest.
+
+A header the user typed under the name the auth in force writes wins in Vayu
+(`apply_auth` skips a name the request already carries, case-insensitively and
+whatever its value), while postman-runtime lets the auth overwrite the header.
+The request is therefore written with `auth: {"type": "noauth"}` (also over an
+imported `auth.postman` block) and counted as `typed_auth_headers`, so the
+header Postman sends is the one Vayu sends. Nothing is written for an auth that
+writes no header (a blank bearer token, an API key with no name or placed in
+the query, an OAuth 2.0 token placed in the query) or for a disabled row; a
+folder's or collection's auth is left as it is.
 
 What maps where: folders are item groups (a folder's sub-folders and requests
 are written as one list in sibling order, a folder first on a tie); a request's `inherit` auth is an absent `auth` and its `none` is

@@ -556,6 +556,13 @@ of its own to match it to (the last run shown again after a restart, or a
 response opened from History), has no such record and exports regenerated from
 the request as it is at export time.
 
+**A typed auth header wins, and the export says so.** When a request has its own
+`Authorization` (or the API key's header) typed in Headers, Vayu sends that
+header and skips the auth. Postman does the opposite - its auth overwrites the
+header - so such a request is exported with **No Auth**, which makes Postman
+send what Vayu sends. The dialog counts these requests; a folder's or the
+collection's auth is left as it is.
+
 **What Postman has no place for is listed, not dropped.** Before you download,
 the dialog states how many requests and folders the file carries and names each
 kind of thing the export could not carry, with a count, in the engine's words.

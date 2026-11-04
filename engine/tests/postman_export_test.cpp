@@ -892,6 +892,173 @@ TEST (PostmanExport, UnknownAuthModeIsANote) {
     EXPECT_EQ (losses (outcome), (json{ { "unsupported_auth", 1 } }));
 }
 
+ordered inherit_auth () {
+    return ordered{ { "mode", "inherit" } };
+}
+
+/// One request with @p entry's auth and headers set as given, alone in a
+/// collection holding @p root_auth, exported.
+vayu::core::PostmanExportOutcome
+export_in_collection (const ordered& root_auth, PostmanExportRequest entry) {
+    PostmanExportFolder root = collection ();
+    root.auth                = root_auth;
+    root.requests.push_back (std::move (entry));
+    return run (root);
+}
+
+/// A request that inherits its auth and types @p headers, under a collection
+/// whose auth is @p root_auth.
+vayu::core::PostmanExportOutcome
+export_inheriting (const ordered& root_auth, const ordered& headers) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth                 = inherit_auth ();
+    entry.headers              = headers;
+    return export_in_collection (root_auth, std::move (entry));
+}
+
+/// A request with auth @p request_auth and typed @p headers, under a collection
+/// with no auth.
+vayu::core::PostmanExportOutcome
+export_own_auth (const ordered& request_auth, const ordered& headers) {
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth                 = request_auth;
+    entry.headers              = headers;
+    return export_in_collection (ordered::object (), std::move (entry));
+}
+
+ordered exported_request (const vayu::core::PostmanExportOutcome& outcome) {
+    return ordered::parse (outcome.text)["item"][0]["request"];
+}
+
+TEST (PostmanExport, TypedAuthorizationOverBearerIsWrittenAsNoAuth) {
+    // Vayu sends the typed header and skips the auth; postman-runtime lets the
+    // auth overwrite the header, so No Auth keeps the wire the same.
+    const auto outcome =
+    export_inheriting (ordered{ { "mode", "bearer" }, { "token", "t" } },
+    ordered::array ({ row ("Authorization", "Bearer abc") }));
+    const ordered exported = exported_request (outcome);
+    EXPECT_EQ (exported.at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (exported["header"][0]["value"], "Bearer abc");
+    EXPECT_EQ (losses (outcome), (json{ { "typed_auth_headers", 1 } }));
+}
+
+TEST (PostmanExport, TypedHeaderMatchesTheAuthHeaderInAnyLetterCase) {
+    const ordered basic =
+    ordered{ { "mode", "basic" }, { "username", "u" }, { "password", "p" } };
+    const auto lower = export_inheriting (
+    basic, ordered::array ({ row ("authorization", "Basic xyz") }));
+    EXPECT_EQ (exported_request (lower).at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (losses (lower), (json{ { "typed_auth_headers", 1 } }));
+
+    const ordered key = ordered{ { "mode", "apikey" }, { "key", " X-Api-Key " },
+        { "value", "v" }, { "in", "header" } };
+    const auto padded =
+    export_inheriting (key, ordered::array ({ row ("x-api-key", "typed") }));
+    EXPECT_EQ (exported_request (padded).at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (losses (padded), (json{ { "typed_auth_headers", 1 } }));
+}
+
+TEST (PostmanExport, TypedHeaderOverTheRequestsOwnAuthIsWrittenAsNoAuth) {
+    // The request's own auth, not only an inherited one, and an OAuth 2.0 token
+    // placed in the header.
+    const auto outcome = export_own_auth (
+    ordered{ { "mode", "oauth2" }, { "config", { { "grantType", "client_credentials" } } } },
+    ordered::array ({ row ("Authorization", "Bearer abc") }));
+    EXPECT_EQ (exported_request (outcome).at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (losses (outcome), (json{ { "typed_auth_headers", 1 } }));
+}
+
+TEST (PostmanExport, TypedHeaderOverAnImportedAuthBlockIsWrittenAsNoAuth) {
+    // The verbatim Postman block an import kept must not survive the override.
+    const ordered source = ordered::parse (
+    R"({"type":"bearer","bearer":[{"key":"token","value":"tok-1","type":"string"}]})");
+    const auto outcome = export_own_auth (
+    ordered{ { "mode", "bearer" }, { "token", "tok-1" }, { "postman", source } },
+    ordered::array ({ row ("Authorization", "Bearer abc") }));
+    EXPECT_EQ (exported_request (outcome).at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (losses (outcome), (json{ { "typed_auth_headers", 1 } }));
+}
+
+TEST (PostmanExport, TypedApiKeyHeaderOverApiKeyAuthIsWrittenAsNoAuth) {
+    const auto outcome =
+    export_inheriting (ordered{ { "mode", "apikey" }, { "key", "X-Api-Key" },
+                       { "value", "v" }, { "in", "header" } },
+    ordered::array ({ row ("X-Api-Key", "typed") }));
+    EXPECT_EQ (exported_request (outcome).at ("auth").dump (), R"({"type":"noauth"})");
+    EXPECT_EQ (losses (outcome), (json{ { "typed_auth_headers", 1 } }));
+}
+
+TEST (PostmanExport, TypedAuthHeadersAreCountedPerRequest) {
+    PostmanExportFolder root = collection ();
+    root.auth = ordered{ { "mode", "bearer" }, { "token", "t" } };
+    for (const char* name : { "a", "b" }) {
+        PostmanExportRequest entry = request (name, "u");
+        entry.auth                 = inherit_auth ();
+        entry.headers              = ordered::array (
+        { row ("Authorization", "typed"), row ("authorization", "again") });
+        root.requests.push_back (entry);
+    }
+    root.requests.push_back (request ("c", "u"));
+    const auto outcome = run (root);
+    EXPECT_EQ (losses (outcome), (json{ { "typed_auth_headers", 2 } }));
+    EXPECT_FALSE (ordered::parse (outcome.text)["item"][2]["request"].contains ("auth"));
+}
+
+TEST (PostmanExport, AuthIsKeptWhenNoTypedHeaderOverridesIt) {
+    const ordered bearer    = ordered{ { "mode", "bearer" }, { "token", "t" } };
+    const ordered api_key   = ordered{ { "mode", "apikey" },
+        { "key", "X-Api-Key" }, { "value", "v" }, { "in", "header" } };
+    const ordered query_key = ordered{ { "mode", "apikey" },
+        { "key", "X-Api-Key" }, { "value", "v" }, { "in", "query" } };
+    const ordered query_token = ordered{ { "mode", "oauth2" },
+        { "config", { { "grantType", "client_credentials" }, { "tokenPlacement", "query" } } } };
+
+    struct Case {
+        const char* name;
+        ordered auth;
+        ordered headers;
+    };
+    const std::vector<Case> cases = {
+        { "no typed header", bearer, ordered::array ({ row ("Accept", "*/*") }) },
+        { "a disabled row", bearer,
+        ordered::array ({ row ("Authorization", "typed", false) }) },
+        { "a header for another auth", api_key,
+        ordered::array ({ row ("Authorization", "typed") }) },
+        { "an API key in the query", query_key,
+        ordered::array ({ row ("X-Api-Key", "typed") }) },
+        { "an OAuth 2.0 token in the query", query_token,
+        ordered::array ({ row ("Authorization", "typed") }) },
+        { "a blank bearer token", ordered{ { "mode", "bearer" }, { "token", " " } },
+        ordered::array ({ row ("Authorization", "typed") }) },
+        { "an API key with no name",
+        ordered{ { "mode", "apikey" }, { "key", " " }, { "value", "v" }, { "in", "header" } },
+        ordered::array ({ row ("Authorization", "typed") }) },
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE (c.name);
+        const auto outcome     = export_inheriting (c.auth, c.headers);
+        const ordered exported = exported_request (outcome);
+        // The request inherits, so an untouched one writes no `auth` at all.
+        EXPECT_FALSE (exported.contains ("auth"));
+        EXPECT_FALSE (losses (outcome).contains ("typed_auth_headers"));
+    }
+}
+
+TEST (PostmanExport, AFolderKeepsItsAuthBesideTypedHeaders) {
+    PostmanExportFolder folder = collection ("Folder");
+    folder.auth = ordered{ { "mode", "bearer" }, { "token", "t" } };
+    PostmanExportRequest entry = request ("r", "u");
+    entry.auth                 = inherit_auth ();
+    entry.headers = ordered::array ({ row ("Authorization", "typed") });
+    folder.requests.push_back (entry);
+    PostmanExportFolder root = collection ();
+    root.folders.push_back (folder);
+    const auto outcome = run (root);
+    const ordered doc  = ordered::parse (outcome.text);
+    EXPECT_EQ (doc["item"][0]["auth"]["type"], "bearer");
+    EXPECT_EQ (doc["item"][0]["item"][0]["request"].at ("auth").dump (), R"({"type":"noauth"})");
+}
+
 TEST (PostmanExport, DataOnlyAuthTypesAreTheirPostmanType) {
     PostmanExportRequest entry = request ("r", "u");
     entry.auth                 = ordered{ { "mode", "hawk" },
