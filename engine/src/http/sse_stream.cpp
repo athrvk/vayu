@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "vayu/core/run_manager.hpp"
+#include "vayu/core/sample_capture.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
@@ -295,11 +296,58 @@ struct TransferState {
     int64_t max_events      = 0;
     int64_t max_duration_ms = 0;
     std::chrono::steady_clock::time_point started_at;
+    /// Body bytes the current hop delivered, kept or not. Reset per hop, so it
+    /// ends as the final response's count.
+    std::size_t delivered_bytes = 0;
+    /// Whether the current hop's bytes are also kept as `Response::body`.
+    /// Decided at the hop's first body byte, from its own `Content-Type`.
+    std::optional<bool> keeps_body;
 };
+
+/// Whether @p headers announce an event stream, whose bytes are its events
+/// rather than a body. A missing `Content-Type` is not one.
+bool announces_event_stream (const Headers& headers) {
+    const auto found = headers.find ("content-type");
+    return found != headers.end () && vayu::core::media_type (found->second) == "text/event-stream";
+}
+
+/// Whether the current hop's bytes are kept as a body. Read at a body byte,
+/// when the hop's header block is complete, and decided once per hop.
+bool hop_keeps_body (TransferState& state) {
+    if (!state.keeps_body) {
+        state.keeps_body = !announces_event_stream (state.response->headers);
+    }
+    return *state.keeps_body;
+}
+
+/// Append @p bytes to the body up to the request's bound, marking the body a
+/// prefix once a byte is refused.
+void hold_body_bytes (TransferState& state, std::string_view bytes) {
+    vayu::Response& response = *state.response;
+    const std::size_t bound  = state.request->max_body_bytes;
+    const std::size_t room   = bound - std::min (bound, response.body.size ());
+    if (bytes.size () > room) {
+        response.body_truncated = true;
+    }
+    response.body.append (bytes.substr (0, room));
+}
+
+/// Forget what an earlier hop (a followed redirect, a 1xx) left behind, so
+/// the response describes the final hop alone.
+void begin_response_hop (TransferState& state) {
+    vayu::Response& response = *state.response;
+    response.headers.clear ();
+    response.header_lines.clear ();
+    response.body.clear ();
+    response.body_truncated = false;
+    state.delivered_bytes   = 0;
+    state.keeps_body.reset ();
+}
 
 size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* state             = static_cast<TransferState*> (userdata);
     const size_t total_size = size * nmemb;
+    const std::string_view bytes (ptr, total_size);
 
     // The header block is complete by the time the first body byte arrives, so
     // this is where the run learns what it connected to - published as the
@@ -312,7 +360,15 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
         state->response->status_text, state->response->headers);
     }
 
-    for (auto& event : state->parser->feed (std::string_view (ptr, total_size))) {
+    // A reply that is not an event stream (a JSON 404, NDJSON) still goes
+    // through the parser below, so a server that streams SSE under the wrong
+    // type keeps working; what it gains is a body to read (#3238).
+    state->delivered_bytes += total_size;
+    if (hop_keeps_body (*state)) {
+        hold_body_bytes (*state, bytes);
+    }
+
+    for (auto& event : state->parser->feed (bytes)) {
         state->context->record_event (event);
         if (state->context->total_events () >= state->max_events) {
             state->abort_reason = SseEndReason::MaxEvents;
@@ -361,10 +417,10 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
                 response->status_code = *parsed;
             }
         }
-        // Headers are cleared between redirect hops so the final hop's set is
-        // what the run reports - the same rule client.cpp's callback follows.
-        response->headers.clear ();
-        response->header_lines.clear ();
+        // Cleared between redirect hops so the final hop's headers and body
+        // are what the run reports - the same rule client.cpp's callback
+        // follows for headers.
+        begin_response_hop (*state);
         return total_size;
     }
     vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
@@ -530,6 +586,8 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
     detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
     response.transfer_attempted = detail::curl_transfer_attempted (curl, result);
+    response.body_size         = response.body.size ();
+    response.stream_body_bytes = state.delivered_bytes;
 
     long negotiated_version = 0;
     get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);

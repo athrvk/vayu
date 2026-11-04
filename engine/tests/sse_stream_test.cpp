@@ -84,7 +84,10 @@ json script_elements (const std::string& pre, const std::string& post = "") {
 /**
  * Serves three shapes of `text/event-stream` a test needs and a live endpoint
  * cannot be asked for: a finite scripted stream, one that never stops talking,
- * and one that connects and then says nothing at all.
+ * and one that connects and then says nothing at all. Beside them, `/canned`
+ * answers whatever status, `Content-Type` and chunks `can()` was given - the
+ * reply a stream asked for and did not get (a JSON 404, NDJSON) - and `/hop`
+ * redirects to it with a JSON body of its own, for the per-hop rules.
  *
  * `/scripted` writes whatever chunks it was built with, so a test supplies the
  * shape it needs - several events in one write, one event split across two,
@@ -158,6 +161,28 @@ class StreamServer {
             std::chrono::milliseconds (token_delay_ms_.load ()));
             res.set_content (R"({"access_token":"tok-1","token_type":"Bearer","expires_in":3600})",
             "application/json");
+        });
+
+        svr_.Get ("/canned", [this] (const httplib::Request& req, httplib::Response& res) {
+            note_request (req);
+            const Canned canned = canned_reply ();
+            res.status          = canned.status;
+            res.set_chunked_content_provider (canned.content_type,
+            [chunks = canned.chunks] (size_t, httplib::DataSink& sink) {
+                for (const auto& chunk : chunks) {
+                    if (!sink.write (chunk.data (), chunk.size ())) {
+                        return false;
+                    }
+                }
+                sink.done ();
+                return true;
+            });
+        });
+
+        svr_.Get ("/hop", [this] (const httplib::Request&, httplib::Response& res) {
+            res.status = 302;
+            res.set_header ("Location", url ("/canned"));
+            res.set_content (R"({"hop":"first"})", "application/json");
         });
 
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
@@ -235,7 +260,24 @@ class StreamServer {
         set_cookie_ = std::move (value);
     }
 
+    /// What `/canned` answers from now on: @p chunks, one write each.
+    void can (int status, std::string content_type, std::vector<std::string> chunks) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        canned_ = Canned{ status, std::move (content_type), std::move (chunks) };
+    }
+
     private:
+    struct Canned {
+        int status = 200;
+        std::string content_type{ "text/plain" };
+        std::vector<std::string> chunks;
+    };
+
+    Canned canned_reply () const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        return canned_;
+    }
+
     std::string set_cookie_value () const {
         std::lock_guard<std::mutex> lock (received_mutex_);
         return set_cookie_;
@@ -259,6 +301,7 @@ class StreamServer {
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
     std::string set_cookie_;
+    Canned canned_;
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
     std::atomic<int> token_delay_ms_{ 0 };
@@ -608,6 +651,92 @@ TEST (SseConsumer, RecordsTheInitialResponseHeaders) {
 
     EXPECT_EQ (response.status_code, 200);
     EXPECT_EQ (response.headers.at ("x-fixture"), "silent");
+}
+
+// ---------------------------------------------------------------------------
+// What the reply's bytes become (issue #3238)
+//
+// An event stream's bytes are its events; any other reply's are also its body,
+// up to the design bound. Every stream counts what it was delivered.
+// ---------------------------------------------------------------------------
+
+// Mutation check: drop the `hold_body_bytes` call in `stream_write_callback`
+// and the body reads "".
+TEST (SseConsumer, AReplyThatIsNotAnEventStreamKeepsItsBody) {
+    StreamServer server;
+    server.can (200, "application/x-ndjson", { "{\"n\":1}\n", "{\"n\":2}\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/canned"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Completed);
+    EXPECT_EQ (response.body, "{\"n\":1}\n{\"n\":2}\n");
+    EXPECT_EQ (response.body_size, response.body.size ());
+    EXPECT_FALSE (response.body_truncated);
+    ASSERT_HAS_VALUE (response.stream_body_bytes);
+    EXPECT_EQ (*response.stream_body_bytes, 16u);
+    // NDJSON lines are no SSE field the parser knows, so nothing dispatches.
+    EXPECT_EQ (context.total_events (), 0);
+}
+
+// Mutation check: move the `delivered_bytes` count under the `hop_keeps_body`
+// branch and the event stream reads 0.
+TEST (SseConsumer, EveryStreamCountsWhatItWasDelivered) {
+    StreamServer server ({ "data: a\n\n", "data: bb\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/scripted"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.total_events (), 2);
+    EXPECT_TRUE (response.body.empty ());
+    ASSERT_HAS_VALUE (response.stream_body_bytes);
+    EXPECT_EQ (*response.stream_body_bytes, 19u);
+
+    StreamServer plain;
+    plain.can (200, "text/plain", { "0123456789", "abcdef" });
+    auto spec           = spec_for (plain.url ("/canned"), brisk_limits ());
+    spec.max_body_bytes = 4;
+    SseStreamContext plain_context ("run_test", brisk_limits ());
+    const auto cut = vayu::http::consume_sse_stream (spec, plain_context);
+
+    EXPECT_EQ (cut.body, "0123");
+    EXPECT_EQ (cut.body_size, 4u);
+    EXPECT_TRUE (cut.body_truncated);
+    ASSERT_HAS_VALUE (cut.stream_body_bytes);
+    EXPECT_EQ (*cut.stream_body_bytes, 16u);
+}
+
+// The media type, not the header's spelling, decides. Mutation check: compare
+// the raw header value with "text/event-stream" in `announces_event_stream`
+// and the body keeps the frame.
+TEST (SseConsumer, AnEventStreamIsKnownByItsMediaTypeWhateverItsCaseOrCharset) {
+    StreamServer server;
+    server.can (200, "Text/Event-Stream; charset=UTF-8", { "data: a\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/canned"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.total_events (), 1);
+    EXPECT_TRUE (response.body.empty ()) << response.body;
+}
+
+// The final hop's type decides, not the redirect's: `/hop` answers 302 as
+// JSON and the stream it lands on is SSE. libcurl never hands a followed hop's
+// body to the write callback, so the count is the final hop's either way.
+// Mutation check: drop `response.headers.clear ()` from `begin_response_hop`
+// and the folded type reads as JSON, so the event bytes are kept as a body.
+TEST (SseConsumer, TheFinalHopsContentTypeDecides) {
+    StreamServer server;
+    server.can (200, "text/event-stream", { "data: a\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/hop"), brisk_limits ()), context);
+
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (context.total_events (), 1);
+    EXPECT_TRUE (response.body.empty ()) << response.body;
+    ASSERT_HAS_VALUE (response.stream_body_bytes);
+    EXPECT_EQ (*response.stream_body_bytes, 9u);
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,10 +1267,11 @@ class StreamExecuteTest : public ::testing::Test {
         origin_->pace (2);
     }
 
-    /// Send @p payload as a streaming execute and return the run id it created.
-    std::string start (json payload) {
+    /// Send @p payload as a streaming execute of @p path on the origin and
+    /// return the run id it created.
+    std::string start (json payload, const std::string& path = "/scripted") {
         payload["method"] = "GET";
-        payload["url"]    = origin_->url ("/scripted");
+        payload["url"]    = origin_->url (path);
         payload["stream"] = true;
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
@@ -1630,6 +1760,101 @@ TEST_F (StreamExecuteTest, MalformedFramesAreDroppedAndTheRunStillCompletes) {
     EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
     << trace["scripts"]["testResults"][0].value ("error", "");
     EXPECT_EQ (trace["events"]["endReason"], "completed");
+}
+
+// ---------------------------------------------------------------------------
+// The stored body of a stream (issue #3238)
+//
+// What the route stores, through the real handler: the design bound reaches
+// the transfer from the config table, and the trace's `bodyBytes` survives
+// the storage cap. The transfer's own rules are the `SseConsumer` cases above.
+// ---------------------------------------------------------------------------
+
+// A stream pointed at an endpoint that answered with an error document keeps
+// that document, for the trace and for the post-request script. Mutation
+// check: drop the `hold_body_bytes` call and the stored body is "" and the
+// script's `json()` fails.
+TEST_F (StreamExecuteTest, AJsonErrorReplyIsStoredAsTheBody) {
+    origin_ = std::make_unique<StreamServer> ();
+    origin_->can (404, "application/json", { R"({"error":"x"})" });
+    const auto run_id = start (json{ { "elements", script_elements ("", R"JS(
+        pm.test('the error document is readable', function () {
+            pm.expect(pm.response.code).to.equal(404);
+            pm.expect(pm.response.json().error).to.equal('x');
+        });
+    )JS") } },
+    "/canned");
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"], R"({"error":"x"})") << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), size_t{ 13 });
+    EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
+    EXPECT_EQ (trace["events"]["totalEvents"], 0);
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    EXPECT_TRUE (trace["scripts"]["testResults"][0]["passed"].get<bool> ())
+    << trace["scripts"]["testResults"][0].value ("error", "");
+}
+
+// An event stream's bytes are its events: the body stays empty and
+// `bodyBytes` says how much arrived. Mutation check: drop the `bodyBytes`
+// write in `build_result_trace` and the key is absent.
+TEST_F (StreamExecuteTest, AnEventStreamStoresItsByteCountAndNoBody) {
+    std::vector<std::string> chunks;
+    std::size_t delivered = 0;
+    for (int i = 0; i < 100; ++i) {
+        chunks.push_back (
+        "data: " + std::string (94, static_cast<char> ('a' + (i % 26))) + "\n\n");
+        delivered += chunks.back ().size ();
+    }
+    ASSERT_EQ (delivered, 10200u);
+    origin_           = std::make_unique<StreamServer> (std::move (chunks));
+    const auto run_id = start (json::object ());
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"], "") << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), delivered);
+    EXPECT_EQ (trace["events"]["totalEvents"], 100);
+}
+
+// Past `maxDesignResponseBodyBytes` the body is a prefix and says so, and the
+// count keeps going. Mutation check: drop the `spec.max_body_bytes` line in
+// `run_streaming_execution` and the whole 3000 bytes are kept, uncapped.
+TEST_F (StreamExecuteTest, AReplyPastTheDesignBoundIsCappedAndStillCounted) {
+    set_config ("maxDesignResponseBodyBytes", "1024");
+    origin_ = std::make_unique<StreamServer> ();
+    const std::string chunk (1000, 'x');
+    origin_->can (200, "text/plain", { chunk, chunk, chunk });
+    const auto run_id = start (json::object (), "/canned");
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"].get<std::string> ().size (), 1024u)
+    << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyCapped", false), true);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), size_t{ 3000 });
+    EXPECT_FALSE (trace["response"].contains ("bodyTruncated"));
+}
+
+// Both cuts on one body: the design bound holds 2048 of 5000 bytes and the
+// storage cap keeps 1024 of those. `bodyBytes` stays what the server sent.
+// Mutation check: write `bodyBytes` unconditionally in `mark_body_cut` and it
+// reads 2048, the held length.
+TEST_F (StreamExecuteTest, TheStorageCapKeepsTheStreamsByteCount) {
+    set_config ("maxDesignResponseBodyBytes", "2048");
+    set_config ("maxTraceBodyBytes", "1024");
+    origin_ = std::make_unique<StreamServer> ();
+    origin_->can (200, "text/plain", { std::string (5000, 'y') });
+    const auto run_id = start (json::object (), "/canned");
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto trace = trace_for (run_id);
+    EXPECT_EQ (trace["response"]["body"].get<std::string> ().size (), 1024u)
+    << trace.dump (2);
+    EXPECT_EQ (trace["response"].value ("bodyCapped", false), true);
+    EXPECT_EQ (trace["response"].value ("bodyTruncated", false), true);
+    EXPECT_EQ (trace["response"].value ("bodyBytes", size_t{ 0 }), size_t{ 5000 });
 }
 
 // ---------------------------------------------------------------------------

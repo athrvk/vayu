@@ -2065,11 +2065,11 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     // would be the per-path divergence this issue removed.
     const auto default_headers = vayu::http::resolve_default_header_policy (
     ctx.db, vayu::http::DefaultHeaderScope::Design);
-    // What either script's `pm.sendRequest` may read (issue #1188). The stream
-    // itself is bounded by its event and duration caps rather than by a byte
-    // total, but a script's auxiliary fetch is an ordinary buffered read and
-    // takes the design bound the buffered path's scripts take - resolved once
-    // here for the same reason `transport` is.
+    // The design bound, resolved once here for the same reason `transport` is:
+    // what either script's `pm.sendRequest` may read (issue #1188), and what a
+    // stream whose reply is not `text/event-stream` keeps as its body (#3238).
+    // The stream itself still ends by its event and duration caps, never by a
+    // byte total.
     const size_t script_response_bound = design_response_body_bound (ctx.db);
     // A script's fetch takes the send's resolved timeout (#2833), copied out
     // here because the stream itself sets no whole-transfer deadline and the
@@ -2177,6 +2177,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
     const bool jar_off   = send.request.disable_cookies;
     spec.request         = std::move (send.request);
     spec.limits          = vayu::http::read_sse_limits (ctx.db);
+    spec.max_body_bytes  = script_response_bound;
     spec.transport       = transport;
     spec.default_headers = default_headers;
     spec.max_duration_ms = send.stream.max_duration_ms;

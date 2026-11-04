@@ -558,9 +558,12 @@ the wire. An empty body reports `0`, not an absent property.
 ### `pm.response.events` - a streamed run's events
 
 A request sent with the **Event stream** setting on (`"stream": true` on
-`POST /execute`) has no single response body; it has a list of events. The
-post-request script runs **once, after the stream has terminated**, and reads
-that list:
+`POST /execute`) has no single response body when the server answers
+`text/event-stream`; it has a list of events, and `pm.response.text()` is `""`.
+A reply of any other type (a JSON error, NDJSON) keeps its bytes as the body
+too, up to `maxDesignResponseBodyBytes`, so `text()` and `json()` read it as on
+a buffered send (issue #3238). The post-request script runs **once, after the
+stream has terminated**, and reads the event list:
 
 ```javascript
 const events = pm.response.events || [];

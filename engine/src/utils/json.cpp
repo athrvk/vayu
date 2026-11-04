@@ -244,6 +244,16 @@ const std::vector<vayu::db::Result>& results) {
 
 namespace {
 
+// Mark @p node's `body` a stored prefix of @p held_bytes. A `bodyBytes` the
+// node already carries is a stream's wire count (#3238), which is at least
+// what was held, so it stays: `bodyBytes` is what the server delivered.
+void mark_body_cut (nlohmann::json& node, size_t held_bytes) {
+    node["bodyTruncated"] = true;
+    if (!node.contains ("bodyBytes")) {
+        node["bodyBytes"] = held_bytes;
+    }
+}
+
 // Cap a base64 `body` by the bytes it decodes to. Four characters carry three
 // bytes, so keeping a whole number of groups needs no decode: the prefix of the
 // text *is* the encoding of the prefix of the bytes. Every character before the
@@ -257,8 +267,7 @@ void cap_base64_node_body (nlohmann::json& node, size_t max_body_bytes) {
     }
     const size_t kept_groups = max_body_bytes / 3;
     node["body"]             = text.substr (0, kept_groups * 4);
-    node["bodyTruncated"]    = true;
-    node["bodyBytes"]        = decoded_bytes;
+    mark_body_cut (node, decoded_bytes);
 }
 
 // Cap a single trace node's `body` string in place. Records bodyTruncated +
@@ -274,9 +283,8 @@ void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
     }
     const std::string body = node["body"].get<std::string> ();
     if (body.size () > max_body_bytes) {
-        node["body"]          = body.substr (0, max_body_bytes);
-        node["bodyTruncated"] = true;
-        node["bodyBytes"]     = body.size ();
+        node["body"] = body.substr (0, max_body_bytes);
+        mark_body_cut (node, body.size ());
     }
 }
 

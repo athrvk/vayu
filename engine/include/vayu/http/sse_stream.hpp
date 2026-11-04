@@ -295,6 +295,11 @@ struct SseStreamRequest {
     /// The composed, auth-resolved request, exactly as `POST /execute` built it.
     vayu::Request request;
     SseLimits limits;
+    /// What a reply that is not `text/event-stream` may hold as its body
+    /// (`maxDesignResponseBodyBytes`, issue #3238): the route resolves it
+    /// beside `limits`. Bytes past it are still counted, and still parsed as
+    /// events, but not kept; `Response::body_truncated` says so.
+    std::size_t max_body_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
     /// Per-request caps, already validated. Absent means the configured default.
     std::optional<int64_t> max_duration_ms;
     std::optional<int64_t> max_events;
@@ -414,8 +419,11 @@ class SseStreamManager {
  * stream terminates; this is the body of the worker thread, exposed so a test
  * can drive it on its own thread against an in-process fixture.
  *
- * @return The response the exchange produced: the initial status line, headers
- *         and timings, with the error fields set when the transfer failed.
+ * @return The response the exchange produced: the final hop's status line,
+ *         headers and timings, with the error fields set when the transfer
+ *         failed. `stream_body_bytes` counts what that hop delivered; `body`
+ *         holds it only when the hop did not announce `text/event-stream`,
+ *         since an event stream's bytes are its events.
  *         Never an `Error` - `Client::send`'s contract, which every `/execute`
  *         caller relies on, holds on this path too.
  */

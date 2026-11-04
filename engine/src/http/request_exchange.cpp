@@ -279,6 +279,14 @@ const vayu::Response& response) {
         if (response.body_truncated) {
             trace["response"]["bodyCapped"] = true;
         }
+
+        // What a stream delivered, which its `body` cannot say: an event
+        // stream keeps none, and any other reply at most the bound (#3238).
+        // Written before `cap_trace_bodies`, which keeps it rather than
+        // restating it as the held length when it cuts the body.
+        if (response.stream_body_bytes) {
+            trace["response"]["bodyBytes"] = *response.stream_body_bytes;
+        }
     } else {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;

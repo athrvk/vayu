@@ -941,6 +941,21 @@ TEST (JsonTest, TheStoredSystemHeaderOptOutsJoinThePerSendOnes) {
     .is_error ());
 }
 
+// A stream's trace states `bodyBytes` before the cap runs (#3238): the wire
+// count, which a body held at the design bound is shorter than. The cut marks
+// the body a prefix and keeps that count. Mutation check: write `bodyBytes`
+// unconditionally in `mark_body_cut` and this reads 12, the held length.
+TEST (CapTraceBodies, AStatedBodyBytesSurvivesTheCut) {
+    auto trace = make_trace ("x", "RESPONSEBODY"); // 12 held
+    trace["response"]["bodyBytes"] = 5000;         // delivered
+
+    cap_trace_bodies (trace, 8);
+
+    EXPECT_EQ (trace["response"]["body"], "RESPONSE");
+    EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5000u);
+}
+
 TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
     // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
     // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.

@@ -7662,6 +7662,19 @@ The worker parses SSE frames into a bounded in-memory ring that
 `events` node into the run's stored trace when the stream ends, so History
 restores the timeline.
 
+What the reply's bytes become depends on the final response's `Content-Type`
+(issue #3238), read per redirect hop, compared without case and without its
+parameters. A `text/event-stream` reply's bytes are its events and the stored
+`response.body` stays empty. Any other reply (a JSON `404`, NDJSON, chunked
+text) also keeps its bytes as `response.body`, up to
+`maxDesignResponseBodyBytes`, the bound a buffered send reads under. Past it
+the body is a prefix and the trace says so with `bodyCapped: true`, as on a
+buffered send; the stream itself still ends only by the rules below. Such a
+reply is still fed to the SSE parser, so a server that streams SSE under the
+wrong type still delivers its events. Either way the stored `response`
+carries `bodyBytes`, the body bytes the server delivered, whatever was kept:
+the relay carries no body, so the stored trace is where it lands.
+
 A UTF-8 byte-order mark at the very start of the stream is dropped, as the
 EventSource specification requires (issue #1917); without that the first line's
 field name would carry the mark and the first event would be lost. One mark is
@@ -11767,6 +11780,13 @@ to fetch the whole body. A `trace.response` with `"bodyEncoding": "base64"`
 (see [`POST /execute`](#post-execute)) is measured in decoded bytes: its `body`
 is the base64 of the first `maxTraceBodyBytes` bytes rounded down to a multiple
 of three, so the slice still decodes, and `bodyBytes` counts decoded bytes.
+
+A streaming run's `trace.response` carries `bodyBytes` whether or not it was
+cut (issue #3238): the body bytes the server delivered, which its `body` can
+be shorter than (an event stream stores none, any other reply at most
+`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A storage
+cut keeps that count rather than restating it as the length held, so
+`bodyBytes` always means what arrived.
 
 `configSnapshot.body` is capped the same way, independently of the trace
 (issue #1486): `content` over `maxTraceBodyBytes` is cut to that length and the

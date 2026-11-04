@@ -176,7 +176,9 @@ const std::vector<vayu::db::Result>& results);
  * `error_handler_t::replace` in case the slice splits a UTF-8 sequence. A node
  * whose `bodyEncoding` is `base64` is capped by its decoded bytes instead, cut
  * at a multiple of three so the slice is still whole base64, and `bodyBytes`
- * counts decoded bytes too (issue #2458).
+ * counts decoded bytes too (issue #2458). A node that already carries
+ * `bodyBytes` (a stream's wire count, issue #3238) keeps it, since the body
+ * it holds can be shorter than what the server delivered.
  *
  * The request node's `rawRequest` ends with that same body, so it is capped to
  * the same limit - body half only, header block kept whole, since the headers
