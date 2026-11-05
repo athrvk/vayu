@@ -1,0 +1,107 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_2b7a90",
+    "reference": "Vayu run \"Silent events\" (run_2b7a90) - load test, GET /events, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187830000,
+    "name": "Silent events",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "no_budgets"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/events",
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "30s",
+      "concurrency": 20,
+      "timeout": "30s",
+      "followRedirects": false,
+      "maxRedirects": 0,
+      "httpVersion": "h2",
+      "acceptEncoding": false
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 3,
+      "successfulRequests": 3,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 30.0,
+      "avgRps": 0.1,
+      "testDuration": 30.0,
+      "sendRate": 0.1,
+      "throughput": 0.1,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 20,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 300,
+      "bytesReceived": 0,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 0,
+      "droppedRequests": 0
+    },
+    "latency": {
+      "min": 300.0,
+      "max": 900.0,
+      "avg": 600.0,
+      "median": 600.0,
+      "p50": 600.0,
+      "p75": 700.0,
+      "p90": 850.0,
+      "p95": 880.0,
+      "p99": 900.0,
+      "p999": 900.0
+    },
+    "statusCodes": {
+      "200": 3
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "stream": {
+      "completions": 3,
+      "totalEvents": 0,
+      "capped": 0,
+      "eventsPerSecond": 0.0,
+      "events": {
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0,
+        "count": 3
+      }
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

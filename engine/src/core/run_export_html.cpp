@@ -298,6 +298,12 @@ std::string paragraphs_markup (std::initializer_list<const ReportText*> lines) {
     return out;
 }
 
+Section stream_section (const ReportStream& stream) {
+    return section_of ("stream", "Stream",
+    paragraphs_markup ({ &stream.note }) + table_markup (stream.totals, "stream-h") +
+    "\n" + table_markup (stream.distribution, "stream-h"));
+}
+
 Section capacity_section (const ReportCapacity& capacity) {
     std::string body = "<p><strong>" + text_of (capacity.stop) +
     "</strong> - " + text_of (capacity.headline) + "</p>\n" +
@@ -334,6 +340,9 @@ std::vector<Section> view_sections (const ReportView& view) {
     section_of ("results", "Results", table_markup (view.results, "results-h")));
     sections.push_back (
     section_of ("latency", "Latency", table_markup (view.latency, "latency-h")));
+    if (view.stream) {
+        sections.push_back (stream_section (*view.stream));
+    }
     if (view.capacity) {
         sections.push_back (capacity_section (*view.capacity));
     }

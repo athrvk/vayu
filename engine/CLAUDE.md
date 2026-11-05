@@ -1033,8 +1033,9 @@ logged as a warning: it means a client skipped composition.
   and no CONNECT tunnel did. The event loop and SSE do not, so a load run counts
   that 407 as a status. The handle answers a second question (#802): an
   https transfer that failed for an unmapped code, or for one of the
-  target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, otherwise
-  `ConnectionFailed`; a redirect loop and an undecodable body are not among
+  target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, among them
+  `CURLE_PARTIAL_FILE`, a chunked reply closed without its final chunk, #3240;
+  otherwise `ConnectionFailed`; a redirect loop and an undecodable body are not among
   them, they are `TooManyRedirects` and `BadContentEncoding`, #2462), with no
   response line is an `SslError`, which is where every client-certificate
   refusal lands under TLS 1.3. The rule is the shape,

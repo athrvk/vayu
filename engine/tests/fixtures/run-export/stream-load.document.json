@@ -1,0 +1,114 @@
+{
+  "schema": "vayu.run-report",
+  "schemaVersion": 1,
+  "generatedAt": 1791191400000,
+  "engineVersion": "1.14.0",
+  "run": {
+    "id": "run_9e4d1b",
+    "reference": "Vayu run \"Events\" (run_9e4d1b) - load test, GET /events, 2026-10-05T08:10:00Z, completed",
+    "type": "load",
+    "status": "completed",
+    "startTime": 1791187800000,
+    "endTime": 1791187830000,
+    "name": "Events",
+    "comment": null,
+    "baseline": false
+  },
+  "verdict": {
+    "state": "not_judged",
+    "stoppedEarly": false,
+    "reason": "no_budgets"
+  },
+  "config": {
+    "method": "GET",
+    "url": "https://api.example.test/events",
+    "headerNames": [],
+    "paramNames": [],
+    "body": {
+      "mode": "none",
+      "bytes": null
+    },
+    "auth": {
+      "mode": "none"
+    },
+    "configuration": {
+      "mode": "constant_concurrency",
+      "duration": "30s",
+      "concurrency": 20,
+      "timeout": "30s",
+      "followRedirects": false,
+      "maxRedirects": 0,
+      "httpVersion": "h2",
+      "acceptEncoding": false
+    }
+  },
+  "report": {
+    "summary": {
+      "totalRequests": 120,
+      "successfulRequests": 120,
+      "failedRequests": 0,
+      "httpErrorRequests": 0,
+      "noResponseRequests": 0,
+      "cancelledRequests": 0,
+      "errorRate": 0.0,
+      "totalDurationSeconds": 30.0,
+      "avgRps": 4.0,
+      "testDuration": 30.0,
+      "sendRate": 4.0,
+      "throughput": 4.0,
+      "setupOverhead": 0.2,
+      "cleanupOverhead": 0.05,
+      "peakConcurrency": 20,
+      "avgQueueWaitMs": 0.1,
+      "bytesSent": 12000,
+      "bytesReceived": 3168000,
+      "httpVersionDowngraded": 0,
+      "throughputBytesPerSec": 105600,
+      "droppedRequests": 0
+    },
+    "latency": {
+      "min": 1200.0,
+      "max": 29800.0,
+      "avg": 8900.0,
+      "median": 7800.0,
+      "p50": 7800.0,
+      "p75": 11000.0,
+      "p90": 14000.0,
+      "p95": 21500.0,
+      "p99": 29000.0,
+      "p999": 29800.0
+    },
+    "statusCodes": {
+      "200": 120
+    },
+    "errors": {
+      "total": 0,
+      "withDetails": 0,
+      "types": {}
+    },
+    "stream": {
+      "completions": 120,
+      "totalEvents": 14400,
+      "capped": 4,
+      "eventsPerSecond": 480.0,
+      "events": {
+        "min": 20,
+        "max": 310,
+        "p50": 118,
+        "p90": 180,
+        "p95": 200,
+        "p99": 290,
+        "count": 120
+      },
+      "timeToFirstEvent": {
+        "p50": 42.5,
+        "p95": 180.0,
+        "p99": 640.0,
+        "max": 1250.4,
+        "count": 120
+      }
+    }
+  },
+  "comparison": null,
+  "notCarried": []
+}

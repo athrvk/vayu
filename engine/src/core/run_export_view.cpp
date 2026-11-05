@@ -9,9 +9,10 @@
  * @file core/run_export_view.cpp
  * @brief The run-report document read into the sections every text renderer
  *        shares (#2131, #2135): a verdict, the run, the headline numbers,
- *        latency against budgets, a capacity search's result, the contract
- *        coverage and schema checks (#3036), a scenario's sequence and
- *        transactions, errors, the comparison and the warnings (#2819).
+ *        latency against budgets, a streaming run's events (#3240), a capacity
+ *        search's result, the contract coverage and schema checks (#3036), a
+ *        scenario's sequence and transactions, errors, the comparison and the
+ *        warnings (#2819).
  */
 
 #include "vayu/core/run_export_view.hpp"
@@ -820,20 +821,94 @@ constexpr auto LATENCY_ROWS = std::to_array<LatencyRow> ({
 { "max", "" },
 });
 
-Table latency_table (const ordered& document) {
-    const ordered& latency = at_path (document, { "report", "latency" });
-    Table table{ { "Measure", "Latency (ms)", "Budget" }, {} };
+const ordered& stream_of (const ordered& document) {
+    return at_path (document, { "report", "stream" });
+}
+
+/// A stream's latency is its whole transfer, which grows with the events the
+/// server chooses to send, not the time to a first one.
+ReportText stream_latency_caption () {
+    return "Each stream's full duration.";
+}
+
+ReportText latency_caption (const ordered& document) {
+    ReportText caption;
     // A scenario run has one histogram for every step; the per-step ones are
     // the Sequence table's.
     if (scenario_of (document).is_object ()) {
-        table.caption = "All steps pooled.";
+        caption = "All steps pooled.";
     }
+    if (stream_of (document).is_object ()) {
+        caption += caption.empty () ? stream_latency_caption () :
+                                      " " + stream_latency_caption ();
+    }
+    return caption;
+}
+
+Table latency_table (const ordered& document) {
+    const ordered& latency = at_path (document, { "report", "latency" });
+    Table table{ { "Measure", "Latency (ms)", "Budget" }, {} };
+    table.caption = latency_caption (document);
     for (const LatencyRow& row : LATENCY_ROWS) {
         table.rows.push_back (metric_row (row.key,
         figure_text (number_at (latency, { row.key }), format_run_figure),
         row.budget.empty () ? cell (absent ()) : budget_cell (document, row.budget)));
     }
     return table;
+}
+
+// --- stream ------------------------------------------------------------------------------------------------
+
+constexpr auto STREAM_DISTRIBUTION_ROWS =
+std::to_array<std::string_view> ({ "p50", "p95", "p99", "max" });
+
+Table stream_totals_table (const ordered& stream) {
+    const auto count_row = [&stream] (std::string_view label, std::string_view key) {
+        return field_row (label, figure_text (number_at (stream, { key }), format_run_count));
+    };
+    Table table{ { "Metric", "Value" }, {} };
+    table.rows.push_back (count_row ("Streams", "completions"));
+    table.rows.push_back (count_row ("Events", "totalEvents"));
+    table.rows.push_back (field_row ("Events per second",
+    figure_text (number_at (stream, { "eventsPerSecond" }), format_run_figure, " events/s")));
+    table.rows.push_back (count_row ("Streams ended at a cap", "capped"));
+    return table;
+}
+
+/// Events are whole counts, so they take the request-count spelling; the time to
+/// a first event is a latency and takes the latency's.
+Table stream_distribution_table (const ordered& stream) {
+    const ordered& events      = member (stream, "events");
+    const ordered& first_event = member (stream, "timeToFirstEvent");
+    const bool timed           = first_event.is_object ();
+    Table table{ { "Measure", "Events per stream" }, {} };
+    if (timed) {
+        table.headers.emplace_back ("Time to first event (ms)");
+    }
+    for (const std::string_view key : STREAM_DISTRIBUTION_ROWS) {
+        Row row{ plain_cell (std::string (key)),
+            cell (figure_text (number_at (events, { key }), format_run_count)) };
+        if (timed) {
+            row.push_back (
+            cell (figure_text (number_at (first_event, { key }), format_run_figure)));
+        }
+        table.rows.push_back (std::move (row));
+    }
+    return table;
+}
+
+/// Empty for a run whose document has no `report.stream`.
+std::optional<ReportStream> stream_report_of (const ordered& document) {
+    const ordered& stream = stream_of (document);
+    if (!stream.is_object ()) {
+        return std::nullopt;
+    }
+    ReportStream out;
+    out.note   = "The Latency table above is each stream's full duration, not "
+                 "the time to its first event.";
+    out.totals = stream_totals_table (stream);
+    out.distribution = stream_distribution_table (stream);
+    return out;
 }
 
 // --- errors ------------------------------------------------------------------------------------------------------
@@ -1832,6 +1907,7 @@ ReportView build_run_report_view (const ordered& document) {
     view.run       = run_table (document);
     view.results   = results_table (document);
     view.latency   = latency_table (document);
+    view.stream    = stream_report_of (document);
     view.capacity  = capacity_of (document);
     view.contract  = contract_of (document);
     view.sequence  = sequence_of (document);
