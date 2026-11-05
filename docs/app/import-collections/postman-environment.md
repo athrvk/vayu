@@ -54,7 +54,7 @@ That position is not load-bearing. An environment export carries neither `info` 
 
 `POST /globals` **replaces** the whole set - the engine has no merge verb (see [api-reference.md](../../engine/api-reference.md#post-globals)). Writing the imported record straight to it would delete every global the user already had, so `ImportOrchestrator.applyGlobals` reads the current set first and writes the union.
 
-`POST /import` merges the same way engine-side, and there a replaced global keeps its stored `createdAt` (or its lack of one): the import stamps every row it reads, and an existing variable is never restamped ([db-schema.md](../../engine/db-schema.md#variablevalue-shape)).
+`POST /import` merges the same way engine-side, and there a replaced global keeps its stored `createdAt` (or its lack of one): the import stamps every row it reads, and an existing variable is never restamped ([db-schema.md](../../engine/db-schema.md#variablevalue-shape)). `ImportOrchestrator.applyGlobals` does the same on the app's path, so re-importing a globals file does not move a variable it already had to the end of the Variables tab.
 
 On a name collision **the imported value wins**. The user explicitly asked for this file's variables, and silently keeping the old value would be the no-op outcome this import path exists to avoid. The preview states it: *"Same-named globals will be overwritten."*
 

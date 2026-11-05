@@ -21,6 +21,7 @@
  */
 
 import { useCollectionsQuery } from "@/queries";
+import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import { SectionEmpty, SectionLoading } from "./Section";
 import { VariableRow } from "./VariableRow";
 import { useVariableCommit } from "./variable-commit";
@@ -36,11 +37,11 @@ export function CollectionVariablesSection({ tab }: ContextBarSectionProps) {
 	if (isLoading && !collection) return <SectionLoading />;
 	if (!collection) return <SectionEmpty>This collection is no longer available</SectionEmpty>;
 
-	// Stored order, which is the order the Variables tab shows: its save payload
-	// is written oldest-`createdAt` first precisely so the round trip preserves
-	// it (`VariableTableEditor`). Re-sorting here would be a second copy of that
-	// rule, free to drift from it.
-	const entries = Object.entries(collection.variables ?? {});
+	// The engine keeps a variables object in name order, so the stored key order
+	// says nothing about how the user wrote the rows. The Variables tab lists
+	// them oldest-`createdAt` first; the same function here keeps the two lists
+	// in the same order (#3252).
+	const entries = sortVariableEntriesByCreatedAt(Object.entries(collection.variables ?? {}));
 
 	if (entries.length === 0) {
 		return <SectionEmpty>This collection defines no variables</SectionEmpty>;

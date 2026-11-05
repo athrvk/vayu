@@ -478,6 +478,43 @@ describe("ImportOrchestrator", () => {
 			expect(globals.writes[0].token).toEqual({ value: "imported", enabled: true });
 		});
 
+		it("keeps a replaced global's stored createdAt and takes the stamp of a new one", async () => {
+			// The parse stamps every imported row. An existing global that took the new
+			// stamp would jump to the bottom of the Variables tab (#3252).
+			const { api, globals } = fakeApi({
+				existingGlobals: {
+					token: { value: "old", enabled: true, createdAt: 100 },
+					host: { value: "h", enabled: true, createdAt: 200 },
+				},
+			});
+			await new ImportOrchestrator(api).run(
+				globalsFixture({
+					token: { value: "imported", enabled: true, createdAt: 9000 },
+					fresh: { value: "new", enabled: true, createdAt: 9001 },
+				}),
+				opts
+			);
+			expect(globals.writes[0]).toEqual({
+				token: { value: "imported", enabled: true, createdAt: 100 },
+				host: { value: "h", enabled: true, createdAt: 200 },
+				fresh: { value: "new", enabled: true, createdAt: 9001 },
+			});
+		});
+
+		it("leaves a replaced global unstamped when the stored row never had a createdAt", async () => {
+			// Stamping it now would pull a row that sorts as "oldest" out of the
+			// unstamped block at the top.
+			const { api, globals } = fakeApi({
+				existingGlobals: { token: { value: "old", enabled: true } },
+			});
+			await new ImportOrchestrator(api).run(
+				globalsFixture({ token: { value: "imported", enabled: true, createdAt: 9000 } }),
+				opts
+			);
+			expect(globals.writes[0].token).toEqual({ value: "imported", enabled: true });
+			expect("createdAt" in globals.writes[0].token).toBe(false);
+		});
+
 		it("neither reads nor writes globals when the result has none", async () => {
 			// Every other format lands here; an import must not touch the globals scope.
 			const { api, globals } = fakeApi();

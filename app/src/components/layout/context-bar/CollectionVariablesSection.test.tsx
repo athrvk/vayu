@@ -26,6 +26,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CollectionVariablesSection } from "./CollectionVariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
+import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import type { Collection, VariableValue } from "@/types";
 
 const collectionMutate = vi.fn();
@@ -98,6 +99,29 @@ describe("CollectionVariablesSection - what it lists", () => {
 			"child.example.com"
 		);
 		expect(screen.getByRole("textbox", { name: "Value of token" })).toHaveValue("t");
+	});
+
+	it("lists definitions oldest createdAt first, as the Variables tab does", () => {
+		// The stored object is in name order (the engine keeps it so); the
+		// `createdAt` stamps are the order the rows were written in (#3252). The
+		// unstamped row sorts as oldest, ahead of every stamped one.
+		const variables = {
+			alpha: def("a", { createdAt: 3000 }),
+			bravo: def("b", { createdAt: 1000 }),
+			charlie: def("c"),
+			delta: def("d", { createdAt: 2000 }),
+		};
+		collections = [collection("col_1", variables)];
+		renderSection();
+
+		const shown = screen
+			.getAllByRole("textbox")
+			.map((input) => input.getAttribute("aria-label")?.replace("Value of ", ""));
+		const expected = sortVariableEntriesByCreatedAt(Object.entries(variables)).map(
+			([name]) => name
+		);
+		expect(expected).toEqual(["charlie", "bravo", "delta", "alpha"]);
+		expect(shown).toEqual(expected);
 	});
 
 	it("keeps a disabled definition on screen and says it is off", () => {
