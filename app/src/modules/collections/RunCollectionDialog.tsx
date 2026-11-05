@@ -63,7 +63,8 @@
  * engine's default and Postman's: a step whose script threw is reported on its
  * step and the iteration walks on.
  *
- * **The stream caps** are the seventh (issue #3235), shown only when a request
+ * **Pass/fail budgets** are the seventh (issue #1564, at their state below),
+ * and **the stream caps** the eighth (issue #3235), shown only when a request
  * the run sends has `stream` set, load test or not. Whether a step streams is
  * read off each stored request by the engine, so the run sends no `stream`
  * (a `400` on a collection run) and carries only the two caps, top-level, which

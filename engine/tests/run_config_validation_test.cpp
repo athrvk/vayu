@@ -588,8 +588,8 @@ TEST (RunConfigValidation, ACollectionRunsCapOutOfRangeIsRejected) {
     expect_rejected (text, "maxStreamEvents");
 }
 
-// Accepted and ignored before #3235: neither value can change which steps
-// stream, so a caller sending one is refused rather than misled.
+// Each step streams by its stored request (#3235), so neither value can change
+// which steps stream, and a caller sending one is refused rather than misled.
 TEST (RunConfigValidation, StreamIsRefusedOnACollectionRun) {
     for (const bool value : { true, false }) {
         auto config      = collection_run_config ();
