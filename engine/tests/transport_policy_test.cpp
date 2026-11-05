@@ -47,6 +47,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "log_capture.hpp"
 #include "optional_assert.hpp"
 #include "proxy_server.hpp"
 #include "scoped_env.hpp"
@@ -226,6 +227,33 @@ TEST_F (TransportPolicyDbTest, AnInternationalizedBypassEntryIsWrittenInItsPunyc
     EXPECT_EQ (policy.proxy_bypass, "localhost, .xn--bcher-kva.example,xn--fa-hia.de");
 }
 
+// A hand-edited row can hold an entry POST /config would have refused. It is
+// left out, named in the log, and the entries beside it stay in force.
+TEST_F (TransportPolicyDbTest, AStoredBadBypassEntryIsDroppedAndTheRestKept) {
+    const vayu::tests::LogCapture log;
+    set_config ("proxyMode", "manual");
+    set_config ("proxyUrl", "http://proxy.example:8080");
+    set_config ("proxyBypass", "localhost,local*, .internal.example.com");
+
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (policy.proxy_mode, ProxyMode::Manual);
+    EXPECT_EQ (policy.proxy_bypass.find ("local*"), std::string::npos) << policy.proxy_bypass;
+    EXPECT_NE (policy.proxy_bypass.find ("localhost"), std::string::npos)
+    << policy.proxy_bypass;
+    EXPECT_NE (policy.proxy_bypass.find (".internal.example.com"), std::string::npos)
+    << policy.proxy_bypass;
+
+    const auto warnings = log.with_msg_prefix ("Config 'proxyBypass'");
+    ASSERT_EQ (warnings.size (), 1U);
+    EXPECT_EQ (warnings.front ().at ("level"), "warn");
+    EXPECT_NE (
+    warnings.front ().at ("msg").get<std::string> ().find ("'local*'"), std::string::npos)
+    << warnings.front ().dump ();
+
+    set_config ("proxyBypass", "host:8080");
+    EXPECT_TRUE (resolve_transport_policy (*db_).proxy_bypass.empty ());
+}
+
 // libcurl has no IDN support, so the proxy host is dialled by its punycode
 // name; one with no ASCII name is unusable, which manual mode answers with Off.
 TEST_F (TransportPolicyDbTest, ANonAsciiProxyHostIsDialledByItsPunycodeName) {
@@ -363,6 +391,123 @@ TEST (ProxyUrlValidation, RejectsTheShapesThatAreAlwaysMistakes) {
     EXPECT_TRUE (proxy_url_rejection ("ftp://proxy.example:8080").has_value ());
     EXPECT_TRUE (proxy_url_rejection ("http://:8080").has_value ());
     EXPECT_TRUE (proxy_url_rejection ("http://").has_value ());
+}
+
+// libcurl ends the userinfo at the first '@', so `p@ss@proxy` would make
+// "ss@proxy.example" the host: refused, with the spelling that works.
+TEST (ProxyUrlValidation, RefusesARawAtSignInThePasswordAndNamesTheEncoding) {
+    for (const char* url : { "http://u:p@ss@proxy.example:8080",
+         "u:p@ss@proxy.example:8080", "http://u:@@proxy.example:8080" }) {
+        const auto rejection = proxy_url_rejection (url);
+        ASSERT_HAS_VALUE (rejection) << url;
+        EXPECT_NE (rejection->find ("%40"), std::string::npos) << *rejection;
+    }
+}
+
+TEST (ProxyUrlValidation, DoesNotCountAnAtSignPastTheAuthority) {
+    EXPECT_FALSE (proxy_url_rejection ("http://u:pw@proxy.example:8080/a@b").has_value ());
+    EXPECT_FALSE (proxy_url_rejection ("http://proxy.example:8080/a@b@c").has_value ());
+}
+
+// The authority also ends at '?' and '#', so an '@' there is query or fragment
+// text; a raw second '@' ahead of either is still in the password.
+TEST (ProxyUrlValidation, EndsTheAuthorityAtAQueryOrFragment) {
+    for (const char* url : { "http://proxy.example:8080?a@b@c", "http://proxy.example:8080#a@b@c",
+         "http://u:pw@proxy.example:8080?a@b", "http://u:pw@proxy.example:8080#a@b" }) {
+        EXPECT_FALSE (proxy_url_rejection (url).has_value ()) << url;
+    }
+    for (const char* url :
+    { "http://u:p@ss@proxy.example:8080?q", "http://u:p@ss@proxy.example:8080#f" }) {
+        const auto rejection = proxy_url_rejection (url);
+        ASSERT_HAS_VALUE (rejection) << url;
+        EXPECT_NE (rejection->find ("%40"), std::string::npos) << *rejection;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bypass list validation - libcurl reads an entry it has no form for as a
+// hostname no transfer dials, so the exemption is stored and never applies
+// ---------------------------------------------------------------------------
+
+TEST (ProxyBypassValidation, AcceptsEveryFormCurlsMatcherReads) {
+    for (const char* list : { "", "   ", ",", "localhost", ".example.com",
+         "example.com", "*", "127.0.0.1", "::1", "fe80::1", "10.0.0.0/8",
+         "fd00::/8", "10.0.0.0/32", "::1/128", "localhost, 10.0.0.0/8",
+         "a.example\t.b.example,c.example", ".Bücher.example" }) {
+        EXPECT_FALSE (proxy_bypass_rejection (list).has_value ())
+        << "'" << list << "' is a list curl matches";
+    }
+}
+
+TEST (ProxyBypassValidation, RefusesAPortAndNamesTheForms) {
+    const auto rejection = proxy_bypass_rejection ("localhost:8080");
+    ASSERT_HAS_VALUE (rejection);
+    EXPECT_NE (rejection->find ("localhost:8080"), std::string::npos) << *rejection;
+    EXPECT_NE (rejection->find ("port"), std::string::npos) << *rejection;
+    for (const char* form : { "exact host", ".suffix", "bare suffix", "'*' alone", "CIDR" }) {
+        EXPECT_NE (rejection->find (form), std::string::npos) << form << ": " << *rejection;
+    }
+    EXPECT_TRUE (proxy_bypass_rejection ("127.0.0.1:3000").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("host:1:2").has_value ())
+    << "several colons are only an IPv6 literal when every character fits one";
+}
+
+TEST (ProxyBypassValidation, RefusesAStarAnywhereButTheWholeEntry) {
+    for (const char* entry : { "*.example.com", "local*", "a*b", "**", "http://*" }) {
+        const auto rejection = proxy_bypass_rejection (entry);
+        ASSERT_HAS_VALUE (rejection) << entry;
+        EXPECT_NE (rejection->find ("'*' alone"), std::string::npos) << *rejection;
+    }
+}
+
+TEST (ProxyBypassValidation, RefusesABracketedAddressASchemeAndAPath) {
+    EXPECT_TRUE (proxy_bypass_rejection ("[::1]").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("[::1]:8080").has_value ());
+    // Each is named for what it is: a scheme also carries a '/', and "path"
+    // would send the user looking at the wrong half of what they pasted.
+    const auto scheme = proxy_bypass_rejection ("https://example.com");
+    ASSERT_HAS_VALUE (scheme);
+    EXPECT_NE (scheme->find ("scheme"), std::string::npos) << *scheme;
+    const auto path = proxy_bypass_rejection ("example.com/path");
+    ASSERT_HAS_VALUE (path);
+    EXPECT_NE (path->find ("path"), std::string::npos) << *path;
+    EXPECT_TRUE (proxy_bypass_rejection ("localhost:8080/24").has_value ())
+    << "a name before the slash is not a CIDR range";
+}
+
+// The list splits on commas, spaces and tabs only: any other whitespace or
+// control character would sit inside one entry curl matches against no host.
+TEST (ProxyBypassValidation, RefusesAnEntryHoldingANonSeparatorWhitespaceOrControl) {
+    for (const char* list : { "localhost\nexample.com",
+         "localhost\r\nexample.com", "example.com\n", "a\vb", "a\fb",
+         "a\x01"
+         "b",
+         "a\x7f"
+         "b" }) {
+        const auto rejection = proxy_bypass_rejection (list);
+        ASSERT_HAS_VALUE (rejection) << list;
+        EXPECT_NE (rejection->find ("commas, spaces or tabs"), std::string::npos)
+        << *rejection;
+        EXPECT_NE (rejection->find ("exact host"), std::string::npos) << *rejection;
+    }
+    const std::string with_nul ("a\0b", 3);
+    EXPECT_TRUE (proxy_bypass_rejection (with_nul).has_value ());
+}
+
+TEST (ProxyBypassValidation, HoldsACidrPrefixToItsAddressFamily) {
+    EXPECT_FALSE (proxy_bypass_rejection ("10.0.0.0/32").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("10.0.0.0/33").has_value ());
+    EXPECT_FALSE (proxy_bypass_rejection ("::1/128").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("::1/129").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("10.0.0.0/").has_value ());
+    EXPECT_TRUE (proxy_bypass_rejection ("10.0.0.0/-1").has_value ());
+}
+
+TEST (ProxyBypassValidation, NamesTheFirstBadEntryOfAList) {
+    const auto rejection =
+    proxy_bypass_rejection ("localhost, .ok.example,local* ,other:80");
+    ASSERT_HAS_VALUE (rejection);
+    EXPECT_NE (rejection->find ("'local*'"), std::string::npos) << *rejection;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1107,6 +1108,60 @@ TEST_F (ConfigRouteTest, MalformedProxyUrlIs400EvenWhenTheModeIsOff) {
     auto [status, body] = vayu::http::routes::apply_config_update (
     *db_, R"({"entries":{"proxyUrl":"htp://proxy.example:8080"}})");
     EXPECT_EQ (status, 400) << body.dump ();
+}
+
+namespace {
+std::string bypass_body (const std::string& list) {
+    return nlohmann::json{ { "entries", { { "proxyBypass", list } } } }.dump ();
+}
+} // namespace
+
+TEST_F (ConfigRouteTest, ABypassEntryCurlCannotMatchIs400AndNamesTheForms) {
+    for (const char* list : { "localhost:8080", "*.example.com", "local*",
+         "[::1]", "https://example.com", "example.com/path" }) {
+        auto [status, body] =
+        vayu::http::routes::apply_config_update (*db_, bypass_body (list));
+        EXPECT_EQ (status, 400) << list << ": " << body.dump ();
+        const auto message = body["error"]["message"].get<std::string> ();
+        EXPECT_NE (message.find ("Proxy bypass list"), std::string::npos) << message;
+        EXPECT_NE (message.find ("'.suffix'"), std::string::npos) << message;
+        EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), "")
+        << list << " must not be stored";
+    }
+}
+
+TEST_F (ConfigRouteTest, ABypassEntryHoldingANewlineIs400) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, bypass_body ("localhost\nexample.com"));
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find (
+               "commas, spaces or tabs"),
+    std::string::npos)
+    << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), "");
+}
+
+TEST_F (ConfigRouteTest, EveryBypassFormCurlReadsIsStored) {
+    for (const char* list :
+    { ".example.com", "localhost, 10.0.0.0/8", "::1", "*", "", "127.0.0.1" }) {
+        auto [status, body] =
+        vayu::http::routes::apply_config_update (*db_, bypass_body (list));
+        EXPECT_EQ (status, 200) << list << ": " << body.dump ();
+        EXPECT_EQ (db_->get_config_string ("proxyBypass", "x"), list);
+    }
+}
+
+TEST_F (ConfigRouteTest, ARawAtSignInTheProxyPasswordIs400ButPercentEncodedIsStored) {
+    auto [status, body] = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":"http://bob:p@ss@proxy:8080"}})");
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("%40"), std::string::npos)
+    << body.dump ();
+
+    std::tie (status, body) = vayu::http::routes::apply_config_update (
+    *db_, R"({"entries":{"proxyUrl":"http://bob:p%40ss@proxy:8080"}})");
+    EXPECT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (db_->get_config_string ("proxyUrl", ""), "http://bob:p%40ss@proxy:8080");
 }
 
 TEST_F (ConfigRouteTest, AStoredUrlSurvivesSwitchingTheModeOff) {

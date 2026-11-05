@@ -37,6 +37,7 @@
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http {
 
@@ -103,22 +104,137 @@ std::string ascii_host_pattern (std::string_view pattern) {
                    std::string (pattern);
 }
 
-/// `proxyBypass` with each entry through `ascii_host_pattern`: libcurl matches
-/// the list against the punycode name it dials, so a Unicode entry would
-/// exempt nothing. Separators, and every ASCII entry, are kept byte for byte.
-std::string ascii_bypass_list (std::string_view list) {
-    std::string out;
+/// Calls @p visit with each entry of a `proxyBypass` list and the separator
+/// that follows it (`'\0'` after the last), in the splitting libcurl applies:
+/// commas, spaces and tabs. An empty entry is visited too, so a caller that
+/// rebuilds the list keeps its separators byte for byte.
+template <typename Visit>
+void for_each_bypass_entry (std::string_view list, Visit&& visit) {
     std::size_t begin = 0;
     for (std::size_t at = 0; at <= list.size (); ++at) {
         if (at < list.size () && list[at] != ',' && list[at] != ' ' && list[at] != '\t') {
             continue;
         }
-        out += ascii_host_pattern (list.substr (begin, at - begin));
-        if (at < list.size ()) {
-            out += list[at];
-        }
+        visit (list.substr (begin, at - begin), at < list.size () ? list[at] : '\0');
         begin = at + 1;
     }
+}
+
+/// `proxyBypass` with each entry through `ascii_host_pattern`: libcurl matches
+/// the list against the punycode name it dials, so a Unicode entry would
+/// exempt nothing. Separators, and every ASCII entry, are kept byte for byte.
+std::string ascii_bypass_list (std::string_view list) {
+    std::string out;
+    for_each_bypass_entry (list, [&] (std::string_view entry, char separator) {
+        out += ascii_host_pattern (entry);
+        if (separator != '\0') {
+            out += separator;
+        }
+    });
+    return out;
+}
+
+/// Whether @p text is an IPv4 or IPv6 literal, bracketless. Shallow like
+/// `is_address_literal`, but a colon form must be all hex digits, colons and
+/// dots - `localhost:8080` carries a colon and is not an address.
+bool is_ip_literal (std::string_view text) {
+    if (text.find (':') == std::string_view::npos) {
+        return is_address_literal (text);
+    }
+    return std::all_of (text.begin (), text.end (), [] (unsigned char c) {
+        return std::isxdigit (c) != 0 || c == ':' || c == '.';
+    });
+}
+
+/// `ip/N`, with N a prefix length the address family has.
+bool is_cidr_range (std::string_view entry) {
+    const auto slash = entry.find ('/');
+    if (slash == std::string_view::npos) {
+        return false;
+    }
+    const auto address = entry.substr (0, slash);
+    if (!is_ip_literal (address)) {
+        return false;
+    }
+    const auto prefix = vayu::utils::parse_number<int> (entry.substr (slash + 1));
+    const int longest = address.find (':') == std::string_view::npos ? 32 : 128;
+    return prefix && *prefix >= 0 && *prefix <= longest;
+}
+
+/// Why one non-empty `proxyBypass` entry is not a form libcurl's matcher
+/// reads, or nothing. Each refusal is a shape that is stored and then never
+/// matches - libcurl takes `localhost:8080` or `*.example.com` as a literal
+/// hostname no transfer dials - so the host stays on the proxy with no sign
+/// the exemption was ever ignored.
+std::optional<std::string> proxy_bypass_entry_rejection (std::string_view entry) {
+    if (entry == "*") {
+        return std::nullopt;
+    }
+    const auto refuse = [&] (std::string_view reason) {
+        return std::optional<std::string> ("proxy bypass entry '" +
+        std::string (entry) + "' " + std::string (reason) +
+        " (curl takes an exact host, '.suffix', a bare suffix, '*' alone, "
+        "an IP address or an IP/CIDR range)");
+    };
+    // The list splits on commas, spaces and tabs only, so any other
+    // whitespace or control character stays inside one entry that curl then
+    // matches against no host.
+    if (std::any_of (entry.begin (), entry.end (), [] (unsigned char c) {
+            return std::isspace (c) != 0 || std::iscntrl (c) != 0;
+        })) {
+        return refuse (
+        "carries a whitespace or control character - separate entries with "
+        "commas, spaces or tabs");
+    }
+    if (entry.find ('*') != std::string_view::npos) {
+        return refuse (
+        "carries a '*' - the only wildcard is '*' alone; write '.example.com' "
+        "to cover a domain and everything under it");
+    }
+    if (entry.find ("://") != std::string_view::npos) {
+        return refuse (
+        "carries a scheme - write 'example.com', not 'https://example.com'");
+    }
+    if (entry.find_first_of ("[]") != std::string_view::npos) {
+        return refuse ("is bracketed - write an IPv6 address bare, e.g. '::1'");
+    }
+    if (entry.find ('/') != std::string_view::npos) {
+        return is_cidr_range (entry) ?
+        std::nullopt :
+        refuse ("carries a path - only an IP range such as '10.0.0.0/8' may "
+                "contain '/'");
+    }
+    const auto colons = std::count (entry.begin (), entry.end (), ':');
+    if (colons == 1) {
+        return refuse ("carries a port - the list matches hosts, never ports");
+    }
+    if (colons > 1 && !is_ip_literal (entry)) {
+        return refuse (
+        "is not an IP address - a colon belongs only in an IPv6 literal");
+    }
+    return std::nullopt;
+}
+
+/// @p list without the entries `proxy_bypass_entry_rejection` refuses, each
+/// named in the log. Only a hand-edited row reaches this - `POST /config`
+/// refuses the list - and the other entries stay in force, so one typo does
+/// not also drop the exemptions beside it.
+std::string usable_bypass_list (std::string_view list) {
+    std::string out;
+    for_each_bypass_entry (list, [&] (std::string_view entry, char separator) {
+        const auto rejection =
+        entry.empty () ? std::nullopt : proxy_bypass_entry_rejection (entry);
+        if (rejection) {
+            vayu::utils::log_warning ("client",
+            "Config 'proxyBypass' holds an unusable entry (" + *rejection +
+            "); that entry is ignored");
+        } else {
+            out += entry;
+        }
+        if (separator != '\0') {
+            out += separator;
+        }
+    });
     return out;
 }
 
@@ -519,22 +635,38 @@ std::optional<std::string> proxy_url_rejection (std::string_view url) {
         authority = url.substr (scheme_end + 3);
     }
 
-    // Userinfo is optional and may itself contain '@' in an encoded password,
-    // so the host starts after the *last* one.
-    const auto userinfo_end = authority.rfind ('@');
+    // The authority ends at the first '/', '?' or '#' (as in url_host_span):
+    // a path or query curl ignores on a proxy URL is not part of it, and an
+    // '@' there is not userinfo.
+    authority = authority.substr (0, authority.find_first_of ("/?#"));
+    // libcurl ends the userinfo at the *first* '@', so a second one is not part
+    // of the password: it makes the rest of the password the start of the host.
+    const auto userinfo_end = authority.find ('@');
     if (userinfo_end != std::string_view::npos) {
+        if (authority.find ('@', userinfo_end + 1) != std::string_view::npos) {
+            return std::string (
+            "proxy URL has more than one '@' before the host - "
+            "percent-encode @ in the password as %40");
+        }
         authority = authority.substr (userinfo_end + 1);
     }
-    // Anything past the authority (a path curl ignores on a proxy URL) is not
-    // part of the host.
-    const auto host = authority.substr (0, authority.find ('/'));
-    if (host.empty () || host.front () == ':') {
+    if (authority.empty () || authority.front () == ':') {
         return std::string ("proxy URL names no host");
     }
     if (auto problem = vayu::http::unsendable_host (url)) {
         return problem;
     }
     return std::nullopt;
+}
+
+std::optional<std::string> proxy_bypass_rejection (std::string_view list) {
+    std::optional<std::string> first;
+    for_each_bypass_entry (list, [&] (std::string_view entry, char) {
+        if (!first && !entry.empty ()) {
+            first = proxy_bypass_entry_rejection (entry);
+        }
+    });
+    return first;
 }
 
 std::string client_cert_label (const ClientCertRule& rule) {
@@ -954,8 +1086,8 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         "'; using '" + to_string (policy.proxy_mode) + "'");
     }
 
-    policy.proxy_bypass =
-    ascii_bypass_list (db.get_config_string ("proxyBypass", ""));
+    policy.proxy_bypass = ascii_bypass_list (
+    usable_bypass_list (db.get_config_string ("proxyBypass", "")));
 
     if (policy.proxy_mode == ProxyMode::System) {
         // What the app resolved from the operating system (issue #708). Empty
