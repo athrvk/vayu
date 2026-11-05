@@ -119,7 +119,7 @@ describe("the Settings tab's hierarchy", () => {
 		expect(screen.getAllByText("Protocol")).toHaveLength(1);
 	});
 
-	it("states the scope once, and the Event stream row says a load run streams too", () => {
+	it("states the scope once, and the Event stream row says a load run and a collection run stream too", () => {
 		render(<SettingsPanel />);
 
 		// It was on all three sections, in two variants. The one row with
@@ -127,7 +127,7 @@ describe("the Settings tab's hierarchy", () => {
 		expect(screen.getAllByText(/every Send and every load test/)).toHaveLength(1);
 		expect(
 			screen.getByText(
-				/Applies to Send and to load tests; a load run's stream ends at the caps set in its dialog\./
+				/Applies to Send, to load tests and to collection runs; a run's stream ends at the caps set in its dialog\./
 			)
 		).toBeTruthy();
 		expect(screen.queryByText(/always buffers/)).toBeNull();

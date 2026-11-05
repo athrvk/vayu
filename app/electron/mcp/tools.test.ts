@@ -5385,6 +5385,75 @@ describe("run_collection", () => {
 	});
 
 	/**
+	 * The stream caps (#3235): the engine runs a stored streaming request as a
+	 * stream and bounds it by these two top-level numbers, accepted without
+	 * `stream` (which is a 400 on a collection run, so it is never sent).
+	 */
+	describe("stream caps", () => {
+		async function payloadFor(args: Record<string, unknown>) {
+			const client = scenarioClient();
+			const res = await dispatchTool(
+				"run_collection",
+				{ collectionId: "c1", ...args },
+				ctxWith(client, { allowlist: ["api.example.com"] })
+			);
+			expect(res.isError).toBeFalsy();
+			return (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+				string,
+				unknown
+			>;
+		}
+
+		test("reach POST /runs top-level, without a stream flag", async () => {
+			const payload = await payloadFor({ maxStreamDurationMs: 20_000, maxStreamEvents: 50 });
+			expect(payload.maxStreamDurationMs).toBe(20_000);
+			expect(payload.maxStreamEvents).toBe(50);
+			expect(payload).not.toHaveProperty("stream");
+			expect(payload.scenario).not.toHaveProperty("maxStreamEvents");
+		});
+
+		test("are absent when the caller named none", async () => {
+			const payload = await payloadFor({});
+			expect(payload).not.toHaveProperty("maxStreamDurationMs");
+			expect(payload).not.toHaveProperty("maxStreamEvents");
+		});
+
+		test("take exactly the engine's ranges and no `stream` argument", () => {
+			const parseArgs = (args: Record<string, unknown>) =>
+				z
+					.object(
+						TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
+							string,
+							z.ZodType
+						>
+					)
+					.parse(args);
+			for (const ok of [
+				{ maxStreamDurationMs: 1000 },
+				{ maxStreamDurationMs: 86_400_000 },
+				{ maxStreamEvents: 1 },
+				{ maxStreamEvents: 10_000_000 },
+			]) {
+				expect(() => parseArgs({ collectionId: "c1", ...ok })).not.toThrow();
+			}
+			for (const bad of [
+				{ maxStreamDurationMs: 999 },
+				{ maxStreamDurationMs: 86_400_001 },
+				{ maxStreamEvents: 0 },
+				{ maxStreamEvents: 10_000_001 },
+				{ maxStreamEvents: 2.5 },
+			]) {
+				expect(() => parseArgs({ collectionId: "c1", ...bad })).toThrow();
+			}
+			const shape = TOOLS.find((t) => t.name === "run_collection")!.inputSchema as Record<
+				string,
+				z.ZodType
+			>;
+			expect(shape).not.toHaveProperty("stream");
+		});
+	});
+
+	/**
 	 * Pass/fail budgets (issue #1564): the engine now judges a design-mode
 	 * collection run against `thresholds` exactly as it always has a load run,
 	 * so this tool takes the same argument `start_load_run` does and forwards
@@ -5659,6 +5728,54 @@ describe("start_load_run scenario runs", () => {
 		expect(res.isError).toBeFalsy();
 		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
 		expect(payload.elements).toEqual({ timers: "off", scripts: "allInline" });
+	});
+
+	test("forwards the stream caps on a scenario run, which bound its streaming steps", async () => {
+		// Accepted without `stream` here (#3235): whether a step streams is its
+		// saved request's own setting, and only the bounds belong to the run.
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{
+				scenario: { collectionId: "c1" },
+				maxStreamDurationMs: 20_000,
+				maxStreamEvents: 50,
+				confirmed: true,
+			},
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBeFalsy();
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload.maxStreamDurationMs).toBe(20_000);
+		expect(payload.maxStreamEvents).toBe(50);
+		expect(payload).not.toHaveProperty("stream");
+	});
+
+	test("sends no stream cap on a scenario run when the agent named none", async () => {
+		const client = scenarioLoadClient();
+		await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		const payload = (client.startRun as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		expect(payload).not.toHaveProperty("maxStreamDurationMs");
+		expect(payload).not.toHaveProperty("maxStreamEvents");
+	});
+
+	test("still refuses `stream` on a scenario run, and says where it is set", async () => {
+		const client = scenarioLoadClient();
+		const res = await dispatchTool(
+			"start_load_run",
+			{ scenario: { collectionId: "c1" }, stream: true, maxStreamEvents: 5, confirmed: true },
+			ctxWith(client, allowed)
+		);
+		expect(res.isError).toBe(true);
+		expect(firstText(res)).toContain('"stream"');
+		expect(firstText(res)).toMatch(/saved request's Event stream setting/);
+		// The cap beside it is accepted, so the refusal does not name it.
+		expect(firstText(res)).not.toContain('"maxStreamEvents"');
+		expect(client.startRun).not.toHaveBeenCalled();
 	});
 
 	test("sends no elements key when none was declared", () => {

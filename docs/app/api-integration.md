@@ -2233,6 +2233,12 @@ engine's default is the user's `sseMaxStreamDurationMs` setting, which the
 dialog does not show, so eliding would leave the run bounded by a number the
 user was never told about while two others were on screen.
 
+A collection run takes the caps without `stream` (issue #3235): the engine reads
+the flag off each stored request, so `RunCollectionDialog` sends top-level
+`maxStreamDurationMs` / `maxStreamEvents` (seconds converted to ms) only when a
+request it runs streams, for a design run and a load run alike, and never
+`stream`, which is a `400` there.
+
 Under load a stream is bounded by construction, and **reaching a cap is a
 successful completion, not a timeout** - so a streaming run's clean error rate
 is not evidence the caps went unused. The report answers that with a `stream`
