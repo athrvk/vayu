@@ -6619,7 +6619,7 @@ holds wherever a script can run between the build and the send:
 | `POST /execute` (buffered and `stream: true`) | the pre-request script |
 | A collection run's step | that step's pre-request script, each iteration |
 | A collection **load** run's step | that submission's `step.before` elements (an `inline` `script.pre`) and the residual pass over its virtual user's scope |
-| A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
+| A single-request load run declaring `requestElements` whose submissions are copied (a `step.before` kind, data rows, a bind token or deferred auth) | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
 
 A single-request load run without `requestElements` has no such pass. When it
 names an `environmentId` or a `requestId`, the build leaves such credentials

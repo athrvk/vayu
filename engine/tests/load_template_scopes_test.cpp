@@ -247,7 +247,7 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
 
 // The issue's case: an environment answers a bare `{{base}}` in a run that
 // declares no `requestElements`, and the run reports nothing unresolved.
-// Mutation check: drop the `resolve_template_against_stored_scopes` call from
+// Mutation check: drop the `resolve_against_stored_scopes` call from
 // `build_load_request` and the URL goes out as `{{base}}/x` - nothing reaches
 // the echo server and the warning names `base`.
 TEST_F (LoadTemplateScopesRunTest, ARawRunNamingAnEnvironmentSendsTheResolvedUrl) {
@@ -373,7 +373,7 @@ TEST_F (LoadTemplateScopesRunTest, ASetupWriteIsNotSeenWithoutRequestElements) {
 // reads what `script.setup` wrote: the start-of-run pass must not answer the
 // name first from the stored value. Mutation check: drop the
 // `submissions_run_the_residual_pass` skip in
-// `resolve_template_against_stored_scopes` and this sends `/echo/stored/x`.
+// `resolve_against_stored_scopes` and this sends `/echo/stored/x`.
 TEST_F (LoadTemplateScopesRunTest, ARunDeclaringRequestElementsKeepsItsPerSubmissionPass) {
     save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
     auto config                 = payload ("{{base}}/x");
