@@ -13,7 +13,7 @@
 
 import { z } from "zod";
 import { checkAllowlist } from "../safety.js";
-import { secretsShape, withheldPointer, withholdDiagnoseCredentials } from "../withhold.js";
+import { withholdDiagnoseCredentials } from "../withhold.js";
 import type { McpTool } from "./contract.js";
 import {
 	callEngine,
@@ -47,9 +47,8 @@ export const CONNECTION_TOOLS: McpTool[] = [
 		name: "diagnose_connection",
 		category: "execute",
 		invalidates: [],
-		description: (config) =>
-			"Test whether Vayu can reach a URL under the proxy, custom CA and client-certificate settings in force, and say which hop failed. Sends one HEAD with certificate verification on, redirects off and a 10-second deadline, and returns `outcome` (ok, proxy_failed, tls_failed, timed_out, failed), the proxy mode and URL used, the client certificate that answered for the host (\"\" when none), and on failure the engine's error code and libcurl's message. Use it when requests fail with connection or TLS errors, before concluding the API is down. Never returns a response body or headers." +
-			withheldPointer(config) +
+		description:
+			"Test whether Vayu can reach a URL under the proxy, custom CA and client-certificate settings in force, and say which hop failed. Sends one HEAD with certificate verification on, redirects off and a 10-second deadline, and returns `outcome` (ok, proxy_failed, tls_failed, timed_out, failed), the proxy mode and URL used (the engine never includes its credentials), the client certificate that answered for the host (\"\" when none), and on failure the engine's error code and libcurl's message. Use it when requests fail with connection or TLS errors, before concluding the API is down. Never returns a response body or headers." +
 			" GUARDED: the URL's host must be on Vayu's MCP allowlist.",
 		annotations: {
 			title: "Diagnose a connection",
@@ -76,7 +75,7 @@ export const CONNECTION_TOOLS: McpTool[] = [
 			const hint =
 				typeof outcome === "string" ? CONNECTION_OUTCOME_HINTS[outcome] : undefined;
 			return withCaveat(
-				jsonResult(secretsShape(ctx, withholdDiagnoseCredentials)(answer)),
+				jsonResult(withholdDiagnoseCredentials(answer)),
 				hint ? `\n\n${resolveRemedyTokens(hint, ctx.host)}` : ""
 			);
 		},

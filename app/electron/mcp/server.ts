@@ -175,8 +175,7 @@ function revealGateSentence(host: McpHost): string {
 		"the one the API-key auth places in the query) in place " +
 		"(`?api_key=&page=2`), and a `params` row naming one reads `valueWithheld: true`. An " +
 		"empty value or a pure {{variable}} reference is shown as written. A proxy URL's " +
-		"user:password is stripped, with `credentialsWithheld: true` on the config entry or " +
-		"the connection diagnosis's `proxy`. An OpenAPI diff's `headers`, `url` or `params` " +
+		"user:password is stripped, with `credentialsWithheld: true` on the config entry. An OpenAPI diff's `headers`, `url` or `params` " +
 		"change whose current value could carry a credential (such a header with a value, a " +
 		"`user:password@` or a url cut short before its host ends, a credential-named query " +
 		"or params value) reads `currentWithheld: true` in place of `current`. An auth block " +
