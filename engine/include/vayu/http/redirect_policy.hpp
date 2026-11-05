@@ -80,7 +80,9 @@ struct RedirectedRequest {
  * libcurl's `CURLFOLLOW_ALL` rule: a 301, 302 or 303 drops the body, and a
  * `POST` among them becomes a `GET`; every other verb keeps its name, because
  * libcurl kept sending a custom method string. Any other 3xx (307 and 308
- * above all) keeps the method and the body.
+ * above all) keeps the method and the body. One deliberate difference: libcurl
+ * re-sent a streamed (`CURLOPT_UPLOAD`) body on a 301 or 302 with its verb; the
+ * rule here drops it, as it does every other body (#3300).
  */
 [[nodiscard]] RedirectedRequest redirected_request (int status, HttpMethod method);
 

@@ -8452,7 +8452,7 @@ from this block, line by line in wire order, so the tab shows the whole wire whi
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
 `301`, `302` or `303` is re-sent as a body-less `GET` (any other method keeps
-its name and loses its body), without the `Content-Type` and `Content-Length`
+its name and loses its body, a streamed file body included), without the `Content-Type` and `Content-Length`
 lines that described the body, so the body it started with is not shown on a
 request that never carried it (issue #2462). `307` and `308` keep the method
 and the body, and so does the view.
