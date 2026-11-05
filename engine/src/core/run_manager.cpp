@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -58,6 +59,16 @@ void raise_pacing_thread_priority () {
         "Could not raise the load-run pacing thread's scheduling priority; "
         "continuing at the default priority");
     }
+}
+
+/// @p config's @p key when it is a non-empty string, the one shape the route
+/// lets an id through as (`requestId`, `environmentId`); nothing otherwise.
+std::optional<std::string> named_id (const nlohmann::json& config, const char* key) {
+    const auto it = config.find (key);
+    if (it == config.end () || !it->is_string () || it->get<std::string> ().empty ()) {
+        return std::nullopt;
+    }
+    return it->get<std::string> ();
 }
 
 /**
@@ -672,11 +683,7 @@ vayu::db::Database& db) {
     // section. Tallies computed against scopes that failed to load would be
     // the silently wrong verdicts this issue is about, and "never judged" must
     // not be reported as "judged and passed".
-    std::optional<std::string> environment_id;
-    if (auto it = context->config.find ("environmentId"); it != context->config.end () &&
-    it->is_string () && !it->get<std::string> ().empty ()) {
-        environment_id = it->get<std::string> ();
-    }
+    const auto environment_id = named_id (context->config, "environmentId");
 
     // Loaded once and shared by every replay of the pass, so a `set()` is
     // readable by the samples replayed after it - the same within-a-run
@@ -1518,7 +1525,68 @@ int default_max_per_host) {
     context->publish_event_loop (std::move (event_loop));
 }
 
+/** The collection scope a single-request run's own `lifecycleElements`
+ *  scripts read and write (issue #1573) - the same rule the deferred `tests`
+ *  replay already follows (`read_run_script_identity`'s collection-scope
+ *  reader, above): the collection of the request the run links, or none for
+ *  a bare URL run with no collection to inherit from. */
+std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
+const nlohmann::json& config) {
+    auto request_id = config.find ("requestId");
+    if (request_id == config.end () || !request_id->is_string () ||
+    request_id->get<std::string> ().empty ()) {
+        return "";
+    }
+    if (auto linked_request = db.get_request (request_id->get<std::string> ())) {
+        return linked_request->collection_id;
+    }
+    return "";
+}
+
 namespace {
+
+/**
+ * A single-request run that names stored scopes - an `environmentId`, or a
+ * `requestId` whose collection chain they then include - reads its `{{names}}`
+ * against them as `POST /execute` does (#3253), in one pass over the template
+ * every submission shares (`resolve_load_template_tokens`), before it is split.
+ *
+ * Nothing is read for a template holding no token, so a token-free run pays
+ * nothing (#992). A run declaring `requestElements` is skipped: each of its
+ * submissions runs the residual pass against these scopes and what
+ * `script.setup` wrote into them. This pass runs before `script.setup`, so a
+ * run without `requestElements` never sees a setup write in its request, as
+ * before. Credentials were applied by the build already: one written into a
+ * header line resolves with that header, one encoded first does not.
+ *
+ * Counted, never fatal (#1503): a refusal leaves what it refused written, for
+ * the run's unresolved scan to name, and is logged here with its reason.
+ */
+void resolve_template_against_stored_scopes (vayu::db::Database& db,
+const RunContext& context,
+vayu::Request& request) {
+    if (context.step_elements && !context.step_elements->empty ()) {
+        return;
+    }
+    const auto environment_id = named_id (context.config, "environmentId");
+    if (!environment_id && !named_id (context.config, "requestId")) {
+        return;
+    }
+    if (vayu::http::routes::unresolved_token_names (request).empty ()) {
+        return;
+    }
+    const auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+    environment_id, single_request_lifecycle_collection_id (db, context.config));
+    const auto refusal = vayu::http::routes::resolve_load_template_tokens (request,
+    vayu::http::routes::flatten_variable_scopes (scopes),
+    context.load_data ? context.load_data->bound_columns : vayu::http::BoundColumnNames{});
+    if (refusal) {
+        vayu::utils::log_warning ("run",
+        "Load test: a stored variable was not resolved into the request",
+        { { "runId", context.run_id },
+        { "reason", vayu::utils::bounded_log_text (refusal->error.message) } });
+    }
+}
 
 /**
  * Starts one refresh watchdog per credential in @p credentials, publishing into
@@ -1599,6 +1667,11 @@ vayu::Request& request) {
         return false;
     }
     request = std::move (built.request);
+
+    // Before the split and the scan below: what a stored scope answers is
+    // finished text by then, so the split sees only the bind's tokens and the
+    // scan names only what is left.
+    resolve_template_against_stored_scopes (db, *context, request);
 
     // Split once, here, so no submission re-scans the request's fields: a load
     // run binds at its full rate, which is the same reason a plan step is split
@@ -1979,24 +2052,6 @@ const nlohmann::json& config) {
     return vayu::core::compile_elements (stamped);
 }
 
-/** The collection scope a single-request run's own `lifecycleElements`
- *  scripts read and write (issue #1573) - the same rule the deferred `tests`
- *  replay already follows (`read_run_script_identity`'s collection-scope
- *  reader, above): the collection of the request the run links, or none for
- *  a bare URL run with no collection to inherit from. */
-std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
-const nlohmann::json& config) {
-    auto request_id = config.find ("requestId");
-    if (request_id == config.end () || !request_id->is_string () ||
-    request_id->get<std::string> ().empty ()) {
-        return "";
-    }
-    if (auto linked_request = db.get_request (request_id->get<std::string> ())) {
-        return linked_request->collection_id;
-    }
-    return "";
-}
-
 /**
  * `script.setup` (#1499): dispatched by `execute_load_test`, before it
  * captures `test_start`, so a setup script's own time is never folded into
@@ -2018,11 +2073,7 @@ std::optional<std::string> run_collection_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
 vayu::http::routes::ScriptVariableScopes& base_scopes) {
     std::vector<vayu::core::CompiledElement> collection_elements;
-    std::optional<std::string> environment_id;
-    if (auto it = context->config.find ("environmentId"); it != context->config.end () &&
-    it->is_string () && !it->get<std::string> ().empty ()) {
-        environment_id = it->get<std::string> ();
-    }
+    const auto environment_id = named_id (context->config, "environmentId");
 
     if (context->scenario) {
         base_scopes = vayu::http::routes::load_script_variable_scopes (

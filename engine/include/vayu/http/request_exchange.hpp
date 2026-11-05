@@ -845,6 +845,23 @@ resolve_residual_tokens (vayu::Request& request, const ScriptVariableScopes& sco
 resolve_residual_tokens (vayu::Request& request, const vayu::http::VariableValues& vars);
 
 /**
+ * The same pass over a single-request load run's shared template, once, before
+ * it is split for the per-iteration bind (#3253): what makes a raw `POST /runs`
+ * naming an `environmentId` or a `requestId` read its `{{names}}` as
+ * `POST /execute` does, while a token-free run's fast path (#992) stays free.
+ *
+ * It leaves every token the bind owns written as it stands - `{{data.*}}`,
+ * the `{{$vu}}` / `{{$iteration}}` identity, a generator such as `{{$guid}}`
+ * (`DynamicResolution::Defer`) and a bare name in @p bound_columns, which the
+ * row answers ahead of any scope (#1007) - and writes into the URL only the
+ * path values it answered (`PathSettle::Answered`), the rest waiting on the
+ * bind. The refusals are the pass's own.
+ */
+[[nodiscard]] std::optional<ResidualRefusal> resolve_load_template_tokens (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+const vayu::http::BoundColumnNames& bound_columns);
+
+/**
  * Apply auth the build deferred because a credential holds a name only the
  * variable scopes answer (`core::credentials_await_scripts`, issue #2473) -
  * one nothing answered at composition, or any name of a request a pre-request

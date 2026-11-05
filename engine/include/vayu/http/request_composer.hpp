@@ -425,10 +425,16 @@ struct HeaderTextRefusal {
  * The residual pass resolves a header through this too (#2521): a request a
  * pre-request script runs before keeps its variables written through
  * composition, so this is where such a variable is first seen.
+ *
+ * @p bound_columns and @p dynamic as on @ref resolve_template; a load run's
+ * pass over its shared template (`routes::resolve_load_template_tokens`)
+ * passes both so the per-iteration bind keeps its tokens.
  */
 std::string resolve_header_template (const std::string& input,
 const VariableValues& vars,
-std::optional<HeaderTextRefusal>& refusal);
+std::optional<HeaderTextRefusal>& refusal,
+const BoundColumnNames& bound_columns = {},
+DynamicResolution dynamic             = DynamicResolution::Generate);
 
 /// The refusal a header-bound variable carrying an unspellable byte reads as,
 /// answered under `UNSENDABLE_HEADER_CODE` (`http/header_text.hpp`).

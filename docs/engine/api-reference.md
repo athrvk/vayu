@@ -531,6 +531,18 @@ untouched. Whitespace *inside* a key and dots are fine (`my var`, `a.b`).
 Variables a script writes are not checked. An import does not hit this: it
 trims the names it reads, see [`POST /import/parse`](#post-importparse).
 
+### Blank names
+
+A collection's or environment's `name` that is empty or only spaces, tabs, CR
+and LF is a `400` on `POST`/`PUT /collections` and `POST`/`PUT /environments`
+(#3253): `Invalid 'name': is empty or whitespace-only`. The row is not written.
+A `PUT` that does not state `name` keeps the stored one, so a row that is
+already blank stays editable. A name with content is stored as written,
+surrounding spaces included. `POST /import/apply` and `POST /specs/sync` are
+not held to this: they carry names an importer wrote, and a blank one imports
+as it always did. The MCP `create_` and `update_` tools for both resources
+refuse the same name as an input error before calling the engine.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1588,7 +1600,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, if a `variables` key is blank or padded
+`null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
+`variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1629,7 +1642,8 @@ list it just left. See [Ordering](#ordering).
 **Response:** The updated collection object, with its `ETag`.
 
 **Errors:** `404` if the collection does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`,
+longer names the stored row; `400` on a `null` or empty or whitespace-only
+`name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
@@ -5379,7 +5393,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, or if a `variables` key is blank or padded
+`null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), or if a
+`variables` key is blank or padded
 ([#3251](#accepted-field-shapes)); `413` naming the field, its size and the cap,
 when a serialized `variables` is over the engine's
 [field cap](#a-stored-json-field-has-a-write-time-cap).
@@ -5425,8 +5440,9 @@ it survives a restart and is shared by every client on the same database. See
 **Response:** The updated environment object, with its `ETag`.
 
 **Errors:** `404` if the environment does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`
-or a blank or padded `variables` key ([#3251](#accepted-field-shapes));
+longer names the stored row; `400` on a `null` or empty or whitespace-only
+`name` ([#3253](#blank-names)), a malformed `If-Match` or a blank or padded
+`variables` key ([#3251](#accepted-field-shapes));
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -6606,7 +6622,10 @@ holds wherever a script can run between the build and the send:
 | A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
 
 A single-request load run without `requestElements` has no such pass, so the
-build encodes the name as written. Under load a name nothing answers is never a
+build encodes the name as written; when the run names an `environmentId` or a
+`requestId`, its start-of-run pass ([`POST /runs`](#post-runs)) then resolves a
+bearer token or header-placed api key with the header line it was written into,
+but not a basic pair or a query-placed key, already encoded. Under load a name nothing answers is never a
 refusal: it is sent as written and counted like any other unresolved token
 (#1503), except inside a basic pair's base64, where it never was countable.
 
@@ -7349,7 +7368,9 @@ own `params` is consumed, never echoed). `/execute`, `/runs` and a scenario
 plan step (which is composed through this same path) read that `params` back
 and write each waiting value into its `:name` segment once it is answered, at
 the latest just before the send: a run with no residual pass writes it after
-the bind, or once at the start for a load run that binds nothing. A caller
+the bind, or once at the start for a load run that binds nothing (a raw
+run naming an `environmentId` or `requestId` writes the values its start-of-run
+pass answered there, the rest after the bind). A caller
 posting its own `params` path rows to `/execute` or `/runs` gets the same
 writing.
 
@@ -8697,7 +8718,7 @@ Start a load test run (Vayu Mode).
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
-  "environmentId": "env_1234567890",  // Optional
+  "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "targetPolicy": { "allowAll": false, "allowedHosts": ["api.example.com"] },  // Optional, the hosts this run may reach - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
@@ -8739,6 +8760,26 @@ is a `400` naming the field and the valid values, the same validation
 **`requestId` / `environmentId` on `POST /runs`** are read exactly as on
 [`POST /execute`](#post-execute): a non-string is a `400` naming the field
 (`'environmentId' must be a string (got boolean)`) and no run row is created.
+A single-request run that names either resolves a `{{name}}` still in its URL,
+path values, headers or body against the same scopes a Send reads (the
+environment, the linked request's collection chain, globals) (#3253). It is one
+pass at run start, over the request every submission shares, never one per
+submission, so a request holding no `{{` costs nothing more. An
+id naming nothing is an empty scope, as on `POST /execute`, never a refusal.
+The pass leaves every token the per-submission bind owns: `{{data.*}}` and a
+bare column of the run's `data`, `{{$vu}}` / `{{$iteration}}`, and a
+generator such as `{{$guid}}`, generated per submission. It runs before
+`script.setup`, so without `requestElements` a setup write does not reach the
+request. A run declaring `requestElements` skips it, leaving its request to
+the per-submission residual pass described under
+[the `requestElements` array](#the-requestelements-array-a-single-request-runs-own-step-level-elements),
+which reads what `script.setup` wrote. Auth is applied
+when the request is built, before this pass: a bearer token or a header-placed
+api key resolves with the header it was written into, while a basic pair or a
+query-placed api key is already encoded and goes out as written (compose the
+payload, or declare `requestElements`, to resolve one). A name nothing answers
+is sent as written and counted in the report's `unresolved_tokens` warning,
+never refused.
 
 **`origin` on `POST /runs`** is the same object, read by the same reader and
 under the same rules as on [`POST /execute`](#post-execute) (#1817): who started
@@ -9288,11 +9329,10 @@ script of the run shares - the environment named by `environmentId`, and the
 collection scope of the request `requestId` links, when the run links one;
 a bare URL run with no `requestId` gets no collection scope. Unlike a
 collection-backed run, `script.setup` / `script.teardown` alone do not make
-those scopes reach the request: the residual-token pass a `requestElements`
-entry gets (see above) only runs when `requestElements` is itself non-empty,
-because that pass reads the same base scopes `run_collection_setup` only
-loads once one of the two arrays is present, and `lifecycleElements` alone
-still leaves `method` / `url` / `headers` / `body` reading nothing back. So a
+what a script writes reach the request: the stored values do, through the
+start-of-run pass ([`POST /runs`](#post-runs), #3253), but that pass runs
+before `script.setup`, and the residual-token pass a `requestElements` entry
+gets (see above) only runs when `requestElements` is itself non-empty. So a
 `pm.environment.set` in `script.setup` reaches a later `{{token}}` only when
 the run also declares `requestElements`; with `lifecycleElements` alone,
 `pm.sendRequest` (external side effects) and the `lifecycle` outcomes in the
@@ -12538,9 +12578,14 @@ completions behind each distribution and is identical across the five.
 
 **`warnings` (issue #1503) is what the run did not do**, even though it
 finished and its other numbers may look fine: a request sent with a
-`{{token}}` composition never resolved (no mode runs a residual pass under
-load, so a value a pre-request script would have set goes on the wire
-literally), or a step whose pre-request script this mode never executes -
+`{{token}}` composition never resolved (a scenario load run, and a
+single-request run that declares `requestElements`, re-resolve what
+composition left against the executing virtual user's or submission's own
+scopes before sending, so a name an inline script or extractor set is
+answered; a single-request run without `requestElements` resolves its request
+once, at run start, against the scopes an `environmentId` or `requestId`
+names, and runs no pass at all when it names neither, so either way a value a
+pre-request script would have set goes on the wire literally), or a step whose pre-request script this mode never executes -
 one that did not run inline (issue #1938: `elements.scripts: "allInline"`, or
 the element's own `inline: true` under `asMarked`, runs it and raises no
 warning). Neither refuses the run - a literal `{{` can be deliberate in a body -

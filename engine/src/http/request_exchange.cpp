@@ -736,17 +736,40 @@ ResidualRefusal unsendable_header_refusal (const vayu::http::HeaderTextRefusal& 
 }
 
 /**
+ * What one residual pass resolves against, and what it leaves for later. The
+ * pass after a pre-request script leaves only what no scope answers; a load
+ * run's pass over its shared template (`resolve_load_template_tokens`) also
+ * leaves every token the per-iteration bind owns, and every path value still
+ * waiting on one.
+ */
+struct ResidualLookup {
+    const vayu::http::VariableValues& vars;
+    const vayu::http::BoundColumnNames& bound_columns;
+    vayu::http::DynamicResolution dynamic;
+    vayu::core::PathSettle settle;
+};
+
+/// @p text resolved as header text under @p lookup, the first unspellable
+/// variable recorded in @p unspellable.
+std::string resolve_header_text_with (const std::string& text,
+const ResidualLookup& lookup,
+std::optional<vayu::http::HeaderTextRefusal>& unspellable) {
+    return vayu::http::resolve_header_template (
+    text, lookup.vars, unspellable, lookup.bound_columns, lookup.dynamic);
+}
+
+/**
  * Every header value holding a token resolved, into copies first, so a refusal
  * leaves the values as it found them.
  */
-std::optional<ResidualRefusal> resolve_header_values (vayu::HeaderList& headers,
-const vayu::http::VariableValues& vars) {
+std::optional<ResidualRefusal>
+resolve_header_values (vayu::HeaderList& headers, const ResidualLookup& lookup) {
     std::vector<std::string> resolved;
     resolved.reserve (headers.size ());
     std::optional<vayu::http::HeaderTextRefusal> unspellable;
     for (const auto& line : headers) {
         resolved.push_back (holds_a_token (line.value) ?
-        vayu::http::resolve_header_template (line.value, vars, unspellable) :
+        resolve_header_text_with (line.value, lookup, unspellable) :
         line.value);
         if (unspellable) {
             return unsendable_header_refusal (*unspellable);
@@ -787,8 +810,8 @@ const vayu::http::VariableValues& vars) {
  * @return the first refusal, the headers left as they were; nothing, and the
  *         lines rebuilt, when no name collides, comes out empty or is invalid.
  */
-std::optional<ResidualRefusal> resolve_header_names (vayu::HeaderList& headers,
-const vayu::http::VariableValues& vars) {
+std::optional<ResidualRefusal>
+resolve_header_names (vayu::HeaderList& headers, const ResidualLookup& lookup) {
     if (!a_header_name_needs_reading (headers)) {
         return std::nullopt;
     }
@@ -798,7 +821,7 @@ const vayu::http::VariableValues& vars) {
     std::optional<vayu::http::HeaderTextRefusal> unspellable;
     for (const auto& [name, value] : headers) {
         std::string resolved_name = std::string (vayu::http::trim_optional_whitespace (
-        vayu::http::resolve_header_template (name, vars, unspellable)));
+        resolve_header_text_with (name, lookup, unspellable)));
         // First, as composition orders it: a line break is the nearer fault.
         if (unspellable) {
             return unsendable_header_refusal (*unspellable);
@@ -848,14 +871,9 @@ vayu::http::VariableValues values_from_scopes (const ScriptVariableScopes& scope
     return values;
 }
 
-} // namespace
-
-vayu::http::VariableValues flatten_variable_scopes (const ScriptVariableScopes& scopes) {
-    return values_from_scopes (scopes);
-}
-
-std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
-const vayu::http::VariableValues& vars) {
+/// The residual pass under @p lookup; see `resolve_residual_tokens`.
+std::optional<ResidualRefusal>
+resolve_residuals (vayu::Request& request, const ResidualLookup& lookup) {
     const auto all_targets   = resolvable_strings (request);
     const bool anything_left = a_header_name_needs_reading (request.headers) ||
     std::any_of (all_targets.begin (), all_targets.end (),
@@ -866,13 +884,13 @@ const vayu::http::VariableValues& vars) {
         // A path value still waiting holds a token, so it is not this branch;
         // one that arrived token-free (a raw `/execute` payload's own path
         // rows) is written in all the same.
-        vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
+        vayu::core::settle_path_variables (request, lookup.settle);
         return std::nullopt;
     }
 
     // First, before anything is rewritten, so the one refusal a value can
     // carry leaves the request as it was found.
-    if (auto refusal = resolve_header_values (request.headers, vars)) {
+    if (auto refusal = resolve_header_values (request.headers, lookup)) {
         return refusal;
     }
     for (std::string* text : resolvable_strings_off_header_lines (request)) {
@@ -882,8 +900,10 @@ const vayu::http::VariableValues& vars) {
         // The URL by its own rule: a value is encoded by the component it
         // lands in, the way composition encodes one (issues #1773, #2465).
         *text = text == &request.url ?
-        vayu::http::resolve_url_template (*text, vars, !request.disable_url_encoding) :
-        vayu::http::resolve_template (*text, vars);
+        vayu::http::resolve_url_template (*text, lookup.vars,
+        !request.disable_url_encoding, lookup.bound_columns, lookup.dynamic) :
+        vayu::http::resolve_template (
+        *text, lookup.vars, lookup.bound_columns, lookup.dynamic);
     }
     // Last: it rebuilds the header lines. The refusal already carries the
     // pre-send gate's shape, because this is a refusal of the same send and
@@ -892,13 +912,37 @@ const vayu::http::VariableValues& vars) {
     // than a transfer (see `validate_transferable` in
     // `event_loop/curl_utils.cpp`), beside the code a streaming caller answers
     // its still-open route with.
-    if (auto refusal = resolve_header_names (request.headers, vars)) {
+    if (auto refusal = resolve_header_names (request.headers, lookup)) {
         return refusal;
     }
-    // The last pass before the send: every path value is written now, a token
-    // nothing answered kept verbatim in its segment as composition keeps one.
-    vayu::core::settle_path_variables (request, vayu::core::PathSettle::All);
+    // The pass just before a send writes every path value, a token nothing
+    // answered kept verbatim in its segment as composition keeps one; a load
+    // run's template pass writes only the answered ones, the rest still
+    // waiting on the per-iteration bind.
+    vayu::core::settle_path_variables (request, lookup.settle);
     return std::nullopt;
+}
+
+} // namespace
+
+vayu::http::VariableValues flatten_variable_scopes (const ScriptVariableScopes& scopes) {
+    return values_from_scopes (scopes);
+}
+
+std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,
+const vayu::http::VariableValues& vars) {
+    const vayu::http::BoundColumnNames no_columns;
+    return resolve_residuals (request,
+    ResidualLookup{ vars, no_columns, vayu::http::DynamicResolution::Generate,
+    vayu::core::PathSettle::All });
+}
+
+std::optional<ResidualRefusal> resolve_load_template_tokens (vayu::Request& request,
+const vayu::http::VariableValues& vars,
+const vayu::http::BoundColumnNames& bound_columns) {
+    return resolve_residuals (request,
+    ResidualLookup{ vars, bound_columns, vayu::http::DynamicResolution::Defer,
+    vayu::core::PathSettle::Answered });
 }
 
 std::optional<ResidualRefusal> resolve_residual_tokens (vayu::Request& request,

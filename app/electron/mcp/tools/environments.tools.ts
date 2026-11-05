@@ -23,6 +23,8 @@ import {
 	errorResult,
 	isRecord,
 	mergeAndWrite,
+	optionalName,
+	requireName,
 	requireStr,
 	str,
 	textResult,
@@ -69,7 +71,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const name = requireStr(args, "name");
+			const name = requireName(args);
 			const patch = isRecord(args.variables) ? args.variables : undefined;
 			if (args.variables !== undefined && patch === undefined) {
 				return errorResult(
@@ -132,7 +134,7 @@ export const ENVIRONMENT_TOOLS: McpTool[] = [
 				);
 			}
 			const removals = removalNames(args);
-			const rename = str(args, "name");
+			const rename = optionalName(args);
 			if (patch === undefined && removals.length === 0 && rename === undefined) {
 				return errorResult(
 					'Pass at least one change: "variables", "removeVariables" or "name".',

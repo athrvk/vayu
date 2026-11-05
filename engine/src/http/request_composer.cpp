@@ -821,11 +821,13 @@ std::optional<HeaderTextRefusal>& refusal) {
 
 std::string resolve_header_template (const std::string& input,
 const VariableValues& vars,
-std::optional<HeaderTextRefusal>& refusal) {
+std::optional<HeaderTextRefusal>& refusal,
+const BoundColumnNames& bound_columns,
+DynamicResolution dynamic) {
     return resolve_header_text (
     input,
-    [&vars] (const std::string& name) {
-        return lookup_variable (name, vars, no_bound_columns (), DynamicResolution::Generate);
+    [&vars, &bound_columns, dynamic] (const std::string& name) {
+        return lookup_variable (name, vars, bound_columns, dynamic);
     },
     refusal);
 }
