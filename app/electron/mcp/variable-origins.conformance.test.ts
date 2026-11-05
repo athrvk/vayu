@@ -290,11 +290,16 @@ describe("origin accumulation", () => {
 		]);
 	});
 
-	test("D17: absent enabled counts as enabled, a non-string value reads as empty", () => {
+	test("D17: absent enabled counts as enabled, a non-string value reads as its JSON text (#3245)", () => {
 		const origins = buildVariableOrigins({
-			globals: { a: { value: "x" }, b: { value: 42, enabled: true } },
+			globals: {
+				a: { value: "x" },
+				b: { value: 42, enabled: true },
+				c: { value: null, enabled: true },
+			},
 		});
 		expect(origins.a[0].enabled).toBe(true);
-		expect(origins.b[0].value).toBe("");
+		expect(origins.b[0].value).toBe("42");
+		expect(origins.c[0].value).toBe("");
 	});
 });
