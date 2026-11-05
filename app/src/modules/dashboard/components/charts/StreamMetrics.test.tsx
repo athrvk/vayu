@@ -111,4 +111,42 @@ describe("StreamMetrics", () => {
 		);
 		expect(screen.getByText(/3 of 10 streams were ended by a cap/i)).toBeInTheDocument();
 	});
+
+	describe("time to first event (issue #3234)", () => {
+		const base = { completions: 4, totalEvents: 40, capped: 0, eventsPerSecond: 4, events };
+
+		it("shows the p50, p95, p99 and max of the first event, in milliseconds", () => {
+			render(
+				<StreamMetrics
+					report={report({
+						...base,
+						timeToFirstEvent: { p50: 412, p95: 655, p99: 803, max: 910, count: 4 },
+					})}
+				/>
+			);
+			const row = screen.getByText("first event").parentElement;
+			expect(row).toHaveTextContent("412ms655ms803ms910ms");
+		});
+
+		it("reads a first event past a second in seconds", () => {
+			render(
+				<StreamMetrics
+					report={report({
+						...base,
+						timeToFirstEvent: { p50: 1500, p95: 2000, p99: 2500, max: 3000, count: 4 },
+					})}
+				/>
+			);
+			expect(screen.getByText("first event").parentElement).toHaveTextContent(
+				"1.50s2.00s2.50s3.00s"
+			);
+		});
+
+		it("draws no row when the report carries none, rather than a first event of 0ms", () => {
+			render(<StreamMetrics report={report(base)} />);
+			expect(screen.queryByText("first event")).not.toBeInTheDocument();
+			// The per-stream row is untouched.
+			expect(screen.getByText("per stream")).toBeInTheDocument();
+		});
+	});
 });

@@ -265,9 +265,10 @@ export default function PerformanceTab({
 				</Card>
 			)}
 
-			{/* Streaming runs only. Read against the First byte row above, which is
-			    the same run's time to first event; absent for every run that did
-			    not stream, as the engine omits the section rather than write zeros. */}
+			{/* Streaming runs only. Its first-event row is not the First byte row
+			    above, which ends at the response headers; absent for every run that
+			    did not stream, as the engine omits the section rather than write
+			    zeros. */}
 			{report.stream && (
 				<Card className="enter-fade">
 					<CardHeader>

@@ -3356,9 +3356,10 @@ export interface RunReport {
 	 * of them means the run measured its own bounds, not the target: the
 	 * dashboard says so rather than leaving it to be inferred.
 	 *
-	 * Time-to-first-event needs no field here: it **is** `phases.firstByte` in
-	 * {@link timingBreakdown}, since the first byte of a stream is its first
-	 * event's first byte. A second copy would be a second number to keep true.
+	 * `timeToFirstEvent` is **not** `phases.firstByte`, which ends at the response
+	 * headers: a gateway that answers 200 at once and then thinks reads fast
+	 * there and slow here (issue #3234). It is absent when no stream delivered a
+	 * timed event, while `stream` itself is present.
 	 */
 	stream?: {
 		completions: number;
@@ -3372,6 +3373,14 @@ export interface RunReport {
 			p90: number;
 			p95: number;
 			p99: number;
+			count: number;
+		};
+		/** Milliseconds, over the completions that delivered a timed event (`count`). */
+		timeToFirstEvent?: {
+			p50: number;
+			p95: number;
+			p99: number;
+			max: number;
 			count: number;
 		};
 	};

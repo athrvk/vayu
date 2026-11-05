@@ -79,10 +79,10 @@ export function PhasePercentiles({
 						{phase.label}
 						<InfoChip tip={phase.tip} />
 					</span>
-					<PhaseValue value={phase.percentiles.p50} />
-					<PhaseValue value={phase.percentiles.p95} />
-					<PhaseValue value={phase.percentiles.p99} emphasis />
-					<PhaseValue value={phase.percentiles.max} />
+					<DurationValue value={phase.percentiles.p50} />
+					<DurationValue value={phase.percentiles.p95} />
+					<DurationValue value={phase.percentiles.p99} emphasis />
+					<DurationValue value={phase.percentiles.max} />
 				</div>
 			))}
 
@@ -165,7 +165,8 @@ function isTailHeavy(phase: ResolvedPhasePercentiles): boolean {
 	return ratio === null ? p50 === 0 : ratio >= TAIL_RATIO_THRESHOLD;
 }
 
-function PhaseValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
+/** A millisecond figure with its unit, ms below a second and s above. */
+export function DurationValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
 	const duration = formatPhaseDuration(value);
 	return (
 		<span className="text-right font-mono tabular-nums text-label">
