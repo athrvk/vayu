@@ -790,10 +790,12 @@ payload posted straight to `/execute` with a literal `{{...}}` in it is no
 longer inert - if the run's scopes define that name, the send now carries its
 value. A name nothing defines still goes out written as it stands, and a load
 run runs the pass per submission only where it has scopes to read, and counts
-rather than refuses; a single-request run with no `requestElements` that names
-an `environmentId` or `requestId` runs it once instead, at start, over the
-request every submission shares (`resolve_load_template_tokens`, #3253),
-leaving the bind's own tokens for each submission. An OAuth 2.0 config defers like the rest on a Send and a
+rather than refuses; a single-request run whose submissions are not copied
+(no `requestElements`, or only response-reading ones with nothing to bind or
+apply per submission, #3288) that names an `environmentId` or `requestId` runs
+it once instead, at start, over the request every submission shares
+(`resolve_load_template_tokens`, #3253), leaving the bind's own tokens for each
+submission. An OAuth 2.0 config defers like the rest on a Send and a
 sequential run's step: it is resolved after the script and its token acquired
 then (`apply_late_auth`, with the token cache), so a script reaches the token
 request. A load run acquires once, before any script. What the pass can *refuse* is what resolving a

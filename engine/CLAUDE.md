@@ -645,8 +645,10 @@ logged as a warning: it means a client skipped composition.
   kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
   (#1573), dispatched by the same `run_collection_setup` /
   `run_collection_teardown` a collection-backed run uses; a script written
-  there resolves into the run's own submissions only when `requestElements`
-  is also declared (the residual pass on this path reads
+  there resolves into the run's own submissions only on a run whose
+  submissions are copied (`submissions_run_the_residual_pass`:
+  `requestElements` declared, and a `step.before` kind, data rows, a bind
+  token or deferred auth; the residual pass reads
   `RunContext::step_base_vars`, populated whenever `step_elements` is
   non-empty, not merely because `lifecycleElements` is) - otherwise it can
   only reach the network itself (`pm.sendRequest`) and gate or report on the
@@ -1321,13 +1323,17 @@ regardless, a late credential included (`resolve_load_residuals`, the one
 copy both load paths call). Since #1594, the single-request load path
 (`load_strategy.cpp`) runs the same pass too, against a per-submission
 `ScopeOverlay` rather than a per-VU one - see the element-pipeline bullet
-above - but only when the run declares `requestElements`. A run without them
-that names an `environmentId` or `requestId` instead resolves its shared
-template once, in `build_load_request` before the split (#3253,
-`resolve_load_template_tokens`: `DynamicResolution::Defer` plus the run's bound
-columns, so every token the bind owns survives, and `PathSettle::Answered`); a
-template holding no `{{` reads no scope, so the #992 fast path pays nothing. It
-runs before `script.setup`, so a setup write never reaches such a run's request.
+above - but only on a run whose submissions are copied
+(`submissions_run_the_residual_pass`, `load_strategy.hpp`). Any other run that
+names an `environmentId` or `requestId`, a `requestElements` run sending the
+shared request included (#3288), instead resolves its shared template once, in
+`build_load_request` before the split (#3253, `resolve_load_template_tokens`:
+`DynamicResolution::Defer` plus the run's bound columns, so every token the
+bind owns survives, and `PathSettle::Answered`); a template holding no `{{`
+reads no scope, so the #992 fast path pays nothing. It runs before
+`script.setup`, so a setup write never reaches such a run's request. Which run
+is which is asked of the request before that pass, so a stored value that is
+itself a generator moves a run onto the copy path with its name answered.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token

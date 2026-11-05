@@ -8769,11 +8769,19 @@ id naming nothing is an empty scope, as on `POST /execute`, never a refusal.
 The pass leaves every token the per-submission bind owns: `{{data.*}}` and a
 bare column of the run's `data`, `{{$vu}}` / `{{$iteration}}`, and a
 generator such as `{{$guid}}`, generated per submission. It runs before
-`script.setup`, so without `requestElements` a setup write does not reach the
-request. A run declaring `requestElements` skips it, leaving its request to
-the per-submission residual pass described under
+`script.setup`, so a setup write does not reach a request it resolved. A run
+whose submissions are copied skips it, leaving its request to the
+per-submission residual pass described under
 [the `requestElements` array](#the-requestelements-array-a-single-request-runs-own-step-level-elements),
-which reads what `script.setup` wrote. Auth is applied
+which reads what `script.setup` wrote: one whose `requestElements` hold a
+`step.before` kind (a `script.pre`, the only one this path admits), or that
+declares `requestElements` beside `data` rows, a token the bind owns, or a
+credential waiting on the scripts. A run whose `requestElements` only read the
+response (`assert.status`, `step.after` kinds) and has none of those sends one
+shared request, and takes this pass (#3288). Which of the two a run is gets decided
+on its request before this pass, so a stored value that is itself a generator
+moves the run onto the copy path having already answered the name it filled,
+and a setup write to that name is lost. Auth is applied
 when the request is built, before this pass: a bearer token or a header-placed
 api key resolves with the header it was written into, while a basic pair or a
 query-placed api key is already encoded and goes out as written (compose the
@@ -9266,9 +9274,11 @@ on a worker thread, so a request-level timer costs no new thread the way the
 scenario load path's per-VU wait does.
 
 **A `script.pre` element's edits reach the wire, and its scope's writes reach
-later `{{tokens}}` in the same submission.** When `requestElements` is
-non-empty, each submission resolves against a small, request-scoped variable
-overlay (`vayu::http::routes::ScopeOverlay`) layered over the run's
+later `{{tokens}}` in the same submission.** When a run's submissions are
+copied (its `requestElements` hold a `script.pre`, or sit beside `data` rows, a
+token the bind owns or a credential waiting on the scripts; see
+[`POST /runs`](#post-runs) for the shared-request run that is not), each
+submission resolves against a small, request-scoped variable overlay (`vayu::http::routes::ScopeOverlay`) layered over the run's
 flattened base scopes, and the residual-token pass
 (`resolve_residual_tokens`, [Request composition](#post-compose)) runs
 against that view before the transfer - so a `pm.environment.set` (or a
@@ -9331,10 +9341,13 @@ a bare URL run with no `requestId` gets no collection scope. Unlike a
 collection-backed run, `script.setup` / `script.teardown` alone do not make
 what a script writes reach the request: the stored values do, through the
 start-of-run pass ([`POST /runs`](#post-runs), #3253), but that pass runs
-before `script.setup`, and the residual-token pass a `requestElements` entry
-gets (see above) only runs when `requestElements` is itself non-empty. So a
-`pm.environment.set` in `script.setup` reaches a later `{{token}}` only when
-the run also declares `requestElements`; with `lifecycleElements` alone,
+before `script.setup`, and the residual-token pass (see above) runs only on a
+run whose submissions are copied. So a `pm.environment.set` in `script.setup`
+reaches a later `{{token}}` only when the run declares `requestElements` and
+its submissions are copied (a `script.pre` among them, or `data` rows, a token
+the bind owns or a credential waiting on the scripts beside them); a run whose
+`requestElements` only read the response sends the stored value. With
+`lifecycleElements` alone,
 `pm.sendRequest` (external side effects) and the `lifecycle` outcomes in the
 report are the only things observable from this run shape's own
 script.setup/teardown. See [elements.md](elements.md#kinds) for the shared

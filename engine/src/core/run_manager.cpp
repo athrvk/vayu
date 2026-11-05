@@ -1552,12 +1552,16 @@ namespace {
  * every submission shares (`resolve_load_template_tokens`), before it is split.
  *
  * Nothing is read for a template holding no token, so a token-free run pays
- * nothing (#992). A run declaring `requestElements` is skipped: each of its
- * submissions runs the residual pass against these scopes and what
- * `script.setup` wrote into them. This pass runs before `script.setup`, so a
- * run without `requestElements` never sees a setup write in its request, as
- * before. Credentials were applied by the build already: one written into a
- * header line resolves with that header, one encoded first does not.
+ * nothing (#992). A run whose submissions run the residual pass
+ * (`submissions_run_the_residual_pass`) is skipped: each copy is resolved
+ * against these scopes and what `script.setup` wrote into them. Every other
+ * run, a `requestElements` run that sends the shared request included (#3288),
+ * resolves here, before `script.setup`, so a setup write never reaches its
+ * request. That is asked of the request before this pass, so a stored value
+ * that is itself a bind token (`{{$guid}}`) still moves the run onto the copy
+ * path, where a setup write to the name it answered is lost. Credentials were
+ * applied by the build already: one written into a header line resolves with
+ * that header, one encoded first does not.
  *
  * Counted, never fatal (#1503): a refusal leaves what it refused written, for
  * the run's unresolved scan to name, and is logged here with its reason.
@@ -1565,9 +1569,6 @@ namespace {
 void resolve_template_against_stored_scopes (vayu::db::Database& db,
 const RunContext& context,
 vayu::Request& request) {
-    if (context.step_elements && !context.step_elements->empty ()) {
-        return;
-    }
     const auto environment_id = named_id (context.config, "environmentId");
     if (!environment_id && !named_id (context.config, "requestId")) {
         return;
@@ -1575,11 +1576,17 @@ vayu::Request& request) {
     if (vayu::http::routes::unresolved_token_names (request).empty ()) {
         return;
     }
-    const auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+    const vayu::http::BoundColumnNames no_columns;
+    const auto& bound_columns =
+    context.load_data ? context.load_data->bound_columns : no_columns;
+    if (submissions_run_the_residual_pass (
+        context, tokenize_bindable_fields (request, bound_columns))) {
+        return;
+    }
+    const auto scopes  = vayu::http::routes::load_script_variable_scopes (db,
     environment_id, single_request_lifecycle_collection_id (db, context.config));
-    const auto refusal = vayu::http::routes::resolve_load_template_tokens (request,
-    vayu::http::routes::flatten_variable_scopes (scopes),
-    context.load_data ? context.load_data->bound_columns : vayu::http::BoundColumnNames{});
+    const auto refusal = vayu::http::routes::resolve_load_template_tokens (
+    request, vayu::http::routes::flatten_variable_scopes (scopes), bound_columns);
     if (refusal) {
         vayu::utils::log_warning ("run",
         "Load test: a stored variable was not resolved into the request",

@@ -31,10 +31,12 @@
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/routes.hpp"
 #include "wait_until.hpp"
 
 namespace {
@@ -166,8 +168,20 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
             { "iterations", iterations }, { "concurrency", 1 }, { "timeout", 5000 } };
     }
 
-    /// Runs @p config to its terminal status and answers the stored row.
+    /// Runs @p config to its terminal status and answers the stored row. Its
+    /// `data` rows and credential plan are read by the route's own reader, as
+    /// `POST /runs` reads them, so a run that binds them is the run the route
+    /// would start.
     std::optional<vayu::db::Run> run (const json& config) {
+        vayu::core::ScenarioLimits limits;
+        limits.max_data_rows  = vayu::core::constants::scenario::MAX_DATA_ROWS;
+        limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        auto read = vayu::http::routes::read_load_data_set (config, limits, false);
+        if (!read.ok) {
+            ADD_FAILURE () << "the route refused the payload: " << read.error;
+            return std::nullopt;
+        }
+
         const std::string run_id = "run_template_scopes";
         vayu::db::Run row;
         row.id              = run_id;
@@ -180,7 +194,8 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
         row.end_time   = row.start_time;
         db_->create_run (row);
 
-        if (!manager_.start_run (run_id, config, *db_)) {
+        if (!manager_.start_run (run_id, config, *db_, nullptr,
+            std::move (read.set), std::move (read.auth))) {
             ADD_FAILURE () << "start_run refused the payload";
             return std::nullopt;
         }
@@ -207,6 +222,21 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
     static bool names (const json& warning, const std::string& name) {
         const auto& listed = warning.at ("names");
         return std::find (listed.begin (), listed.end (), name) != listed.end ();
+    }
+
+    /// A `lifecycleElements` array whose `script.setup` points `base` at the
+    /// echo server's `/setup`.
+    json setup_writing_base () const {
+        return json::array (
+        { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
+        { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    }
+
+    /// A `requestElements` array holding only `assert.status`, a `step.after`
+    /// kind: it reads the response and never writes into the request.
+    static json response_reading_elements () {
+        return json::array ({ json{ { "id", "el_status" }, { "kind", "assert.status" },
+        { "enabled", true }, { "config", { { "in", json::array ({ 200 }) } } } } });
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -329,9 +359,7 @@ TEST_F (LoadTemplateScopesRunTest, ASetupWriteIsNotSeenWithoutRequestElements) {
     save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
     auto config                 = payload ("{{base}}/x");
     config["environmentId"]     = "env_eu";
-    config["lifecycleElements"] = json::array (
-    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
-    { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    config["lifecycleElements"] = setup_writing_base ();
 
     const auto stored = run (config);
 
@@ -340,17 +368,16 @@ TEST_F (LoadTemplateScopesRunTest, ASetupWriteIsNotSeenWithoutRequestElements) {
     EXPECT_EQ (echo_.path (), "/echo/stored/x");
 }
 
-// A run declaring `requestElements` keeps its per-submission pass, which reads
-// what `script.setup` wrote: the start-of-run pass must not answer the name
-// first from the stored value. Mutation check: drop the `step_elements` skip
-// in `resolve_template_against_stored_scopes` and this sends `/echo/stored/x`.
+// A run whose submissions are copied keeps its per-submission pass, which
+// reads what `script.setup` wrote: the start-of-run pass must not answer the
+// name first from the stored value. Mutation check: drop the
+// `submissions_run_the_residual_pass` skip in
+// `resolve_template_against_stored_scopes` and this sends `/echo/stored/x`.
 TEST_F (LoadTemplateScopesRunTest, ARunDeclaringRequestElementsKeepsItsPerSubmissionPass) {
     save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
     auto config                 = payload ("{{base}}/x");
     config["environmentId"]     = "env_eu";
-    config["lifecycleElements"] = json::array (
-    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
-    { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    config["lifecycleElements"] = setup_writing_base ();
     // An inline `script.pre` is a `step.before` kind, which is what puts every
     // submission on the path that runs the residual pass.
     config["requestElements"] = json::array (
@@ -362,6 +389,98 @@ TEST_F (LoadTemplateScopesRunTest, ARunDeclaringRequestElementsKeepsItsPerSubmis
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
     EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+// #3288: a run whose `requestElements` only read the response sends the shared
+// request and runs no per-submission pass, so the start-of-run pass is the only
+// thing that can answer `{{base}}`. Mutation check: skip the pass whenever
+// `step_elements` is non-empty, as before #3288, and the URL goes out as
+// `{{base}}/x` - nothing reaches the echo server and the warning names `base`.
+TEST_F (LoadTemplateScopesRunTest, AResponseReadingRequestElementsRunSendsTheResolvedUrl) {
+    save_environment ("env_eu", { { "base", variable (echo_.url ()) } });
+    auto config               = payload ("{{base}}/x");
+    config["environmentId"]   = "env_eu";
+    config["requestElements"] = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 2);
+    EXPECT_EQ (echo_.path (), "/echo/x");
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// The token-free half of the same run shape sends what it always sent. As for a
+// run without `requestElements`, the scope read the pass skips is not
+// observable on the wire; the run's bytes, its count and its clean report are.
+TEST_F (LoadTemplateScopesRunTest, ATokenFreeResponseReadingRunSendsItsUrlAsWritten) {
+    save_environment ("env_eu", { { "base", variable ("https://elsewhere.test") } });
+    auto config               = payload (echo_.url () + "/plain?q=1", 3);
+    config["environmentId"]   = "env_eu";
+    config["requestElements"] = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 3);
+    EXPECT_EQ (echo_.target (), "/echo/plain?q=1");
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// Each reason other than a `step.before` kind that copies every submission
+// keeps the per-submission pass, and with it the setup write, on a run whose
+// `requestElements` only read the response: a bind token, data rows, and a
+// credential waiting on the scripts. Mutation check: skip the start-of-run
+// pass on `step_elements_have_step_before` alone and each sends
+// `/echo/stored/...`.
+TEST_F (LoadTemplateScopesRunTest, ABindTokenRunKeepsTheSetupWrite) {
+    save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
+    auto config                 = payload ("{{base}}/x?vu={{$vu}}");
+    config["environmentId"]     = "env_eu";
+    config["lifecycleElements"] = setup_writing_base ();
+    config["requestElements"]   = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+TEST_F (LoadTemplateScopesRunTest, ADataRowRunKeepsTheSetupWrite) {
+    save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
+    auto config                 = payload ("{{base}}/x");
+    config["environmentId"]     = "env_eu";
+    config["data"]              = json::array ({ json{ { "id", "a" } } });
+    config["lifecycleElements"] = setup_writing_base ();
+    config["requestElements"]   = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+TEST_F (LoadTemplateScopesRunTest, ACredentialWaitingOnTheScriptsKeepsTheSetupWrite) {
+    save_environment ("env_eu",
+    { { "base", variable (echo_.url () + "/stored") }, { "token", variable ("t-1") } });
+    auto config             = payload ("{{base}}/x");
+    config["environmentId"] = "env_eu";
+    config["auth"] = { { "mode", "bearer" }, { "token", "{{token}}" } };
+    config["lifecycleElements"] = setup_writing_base ();
+    config["requestElements"]   = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+    const auto authorization = echo_.header_per_request ("Authorization");
+    ASSERT_EQ (authorization.size (), 2u);
+    EXPECT_EQ (authorization[0], "Bearer t-1");
 }
 
 } // namespace

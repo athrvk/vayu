@@ -129,6 +129,20 @@ vayu::Request& request,
 const LoadDataSet* data);
 
 /**
+ * @brief Whether each submission of a single-request run copies the request
+ * and runs the residual pass over the copy (#1594), given @p bind_template,
+ * the per-iteration tokens its request splits into.
+ *
+ * The rule `submit_one_request` follows, stated once: the run declares
+ * `requestElements` and does not send the shared request. Taking the template
+ * as a parameter lets `build_load_request` ask before it has split the request
+ * (#3288), to leave such a run's names to that pass, which reads what
+ * `script.setup` wrote.
+ */
+[[nodiscard]] bool submissions_run_the_residual_pass (const RunContext& context,
+const StepDataTemplate& bind_template);
+
+/**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the
  * in-flight deficit toward target(t) - woken per completion via refill_cv with
  * a `CONTROLLER_TICK_MS` safety-net timeout (drives ramp growth + bounds stop
