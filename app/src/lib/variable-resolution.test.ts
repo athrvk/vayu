@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildVariableValues, resolveTemplate } from "./variable-resolution";
+import { buildVariableValues, coerceVariableValue, resolveTemplate } from "./variable-resolution";
 
 const ENVIRONMENT = buildVariableValues({
 	environment: {
@@ -47,5 +47,17 @@ describe("a bound data row's bare column names", () => {
 		expect(resolveTemplate("{{greeting}}", lookup, new Set(["username"]))).toBe(
 			"hello {{username}}"
 		);
+	});
+});
+
+describe("coerceVariableValue (#3245)", () => {
+	it("reads a stored value as the text a send uses", () => {
+		expect(coerceVariableValue("x")).toBe("x");
+		expect(coerceVariableValue(5)).toBe("5");
+		expect(coerceVariableValue(true)).toBe("true");
+		expect(coerceVariableValue({ a: 1 })).toBe('{"a":1}');
+		expect(coerceVariableValue([1, "x"])).toBe('[1,"x"]');
+		expect(coerceVariableValue(null)).toBe("");
+		expect(coerceVariableValue(undefined)).toBe("");
 	});
 });

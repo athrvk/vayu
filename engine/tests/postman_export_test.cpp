@@ -1390,6 +1390,21 @@ TEST (PostmanExport, VariablesKeepTheirStateAndPostmanTypes) {
     EXPECT_EQ (losses (outcome), (json{ { "variable_types", 1 } }));
 }
 
+TEST (PostmanExport, ANonStringVariableValueExportsAsTheTextASendUses) {
+    PostmanExportFolder root = collection ();
+    root.variables = ordered{ { "n", { { "value", 5 }, { "enabled", true } } },
+        { "b", { { "value", true }, { "enabled", true } } },
+        { "o", { { "value", { { "a", 1 } } }, { "enabled", true } } },
+        { "z", { { "value", nullptr }, { "enabled", true } } } };
+    const auto outcome = run (root);
+    const auto rows    = ordered::parse (outcome.text)["variable"];
+    ASSERT_EQ (rows.size (), 4U);
+    EXPECT_EQ (rows[0]["value"], "5");
+    EXPECT_EQ (rows[1]["value"], "true");
+    EXPECT_EQ (rows[2]["value"], "{\"a\":1}");
+    EXPECT_EQ (rows[3]["value"], "");
+}
+
 // ---------------------------------------------------------------------------
 // Examples
 // ---------------------------------------------------------------------------

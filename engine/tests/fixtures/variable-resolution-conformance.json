@@ -1,5 +1,5 @@
 {
-  "$comment": "Cross-language conformance fixture for {{variable}} resolution (issue #226). Read by BOTH the engine gtest suite (request_composer_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/lib/variable-resolution.conformance.test.ts) - the engine owns execution-time resolution, the renderer's copy is preview-only, and this table is what keeps the two from drifting. Each scope is a raw stored-variables bag exactly as it sits in SQLite, so deliberately malformed entries (non-string values, absent or non-boolean 'enabled') exercise the D17 rules on both sides: a definition with absent 'enabled' is enabled, and a non-string 'value' reads as empty string. 'chain' is the collection ancestor chain, root first. A case may carry 'boundColumns': the bare column names a bound data row will substitute (issue #1007), which composition leaves written as they stand for the per-row bind - absent means no dataset is bound, which is what every case written before it assumes.",
+  "$comment": "Cross-language conformance fixture for {{variable}} resolution (issue #226). Read by BOTH the engine gtest suite (request_composer_test.cpp, via VAYU_ENGINE_SOURCE_DIR) and the app's vitest suite (app/src/lib/variable-resolution.conformance.test.ts) - the engine owns execution-time resolution, the renderer's copy is preview-only, and this table is what keeps the two from drifting. Each scope is a raw stored-variables bag exactly as it sits in SQLite, so deliberately malformed entries (non-string values, absent or non-boolean 'enabled') exercise the D17 rules on both sides: a definition with absent 'enabled' is enabled, and a number, boolean, object or array 'value' reads as its JSON text while null reads as empty string (issue #3245). 'chain' is the collection ancestor chain, root first. A case may carry 'boundColumns': the bare column names a bound data row will substitute (issue #1007), which composition leaves written as they stand for the per-row bind - absent means no dataset is bound, which is what every case written before it assumes.",
   "dynamicVariableNames": [
     "$guid",
     "$randomUUID",
@@ -100,18 +100,37 @@
       "expected": "loose.test"
     },
     {
-      "name": "D17: a numeric stored value reads as empty string",
+      "name": "#3245: a numeric stored value reads as its JSON text",
       "scopes": { "environment": { "port": { "value": 8080, "enabled": true } } },
       "input": "p={{port}}",
-      "expected": "p="
+      "expected": "p=8080"
     },
     {
-      "name": "D17: an object stored value reads as empty string",
+      "name": "#3245: a boolean stored value reads as true or false",
       "scopes": {
-        "environment": { "blob": { "value": { "nested": true }, "enabled": true } }
+        "environment": {
+          "yes": { "value": true, "enabled": true },
+          "no": { "value": false, "enabled": true }
+        }
+      },
+      "input": "{{yes}}/{{no}}",
+      "expected": "true/false"
+    },
+    {
+      "name": "#3245: an object stored value reads as compact JSON text",
+      "scopes": {
+        "environment": { "blob": { "value": { "a": 1 }, "enabled": true } }
       },
       "input": "b={{blob}}",
-      "expected": "b="
+      "expected": "b={\"a\":1}"
+    },
+    {
+      "name": "#3245: an array stored value reads as compact JSON text",
+      "scopes": {
+        "environment": { "list": { "value": [1, "x"], "enabled": true } }
+      },
+      "input": "l={{list}}",
+      "expected": "l=[1,\"x\"]"
     },
     {
       "name": "D17: a null stored value reads as empty string",
@@ -123,7 +142,7 @@
       "name": "D17: one malformed definition does not discard its siblings",
       "scopes": {
         "environment": {
-          "bad": { "value": 42, "enabled": true },
+          "bad": { "value": null, "enabled": "nope" },
           "good": { "value": "kept", "enabled": true }
         }
       },

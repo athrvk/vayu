@@ -31,6 +31,7 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/text_escape.hpp"
+#include "vayu/utils/variable_text.hpp"
 
 namespace vayu::json {
 
@@ -779,15 +780,15 @@ namespace {
  * One stored variable, field by field.
  *
  * Per-field tolerance is the D17 rule of issue #226, decided once here for
- * every reader: a non-string `value` reads as "" and a non-boolean `enabled`
- * counts as enabled (absent already did). `Json::value()` would instead throw on
- * the first malformed field, and the catch in `parse_variables` then discarded
+ * every reader: a non-boolean `enabled` counts as enabled (absent already
+ * did), and a `value` reads through `variable_value_text` (issue #3245).
+ * `Json::value()` would instead throw on the first malformed field, and the catch in `parse_variables` then discarded
  * the whole scope - one bad variable silently emptied every other one.
  */
 vayu::Variable read_variable (const Json& value) {
     vayu::Variable var;
-    if (auto it = value.find ("value"); it != value.end () && it->is_string ()) {
-        var.value = it->get<std::string> ();
+    if (auto it = value.find ("value"); it != value.end ()) {
+        var.value = vayu::utils::variable_value_text (*it);
     }
     if (auto it = value.find ("enabled"); it != value.end () && it->is_boolean ()) {
         var.enabled = it->get<bool> ();

@@ -4861,8 +4861,10 @@ kept, uncounted. `true` writes every value as stored.
   "environment"}`: `id` is the environment's id, `values` holds one
   `{key, value, type, enabled}` row per variable in the stored order, and no
   export timestamp is written. A row has no `description`.
-- A row's `value` is the stored value as text, spelled as JavaScript's `String()`
-  would (a stored number `5` is `"5"`, an absent or `null` value `""`). Its `type` is `secret` for a secret variable, else the stored `string`,
+- A row's `value` is the stored value as the text a send uses (#3245): a string
+  verbatim, a number or boolean as its JSON text (`5` is `"5"`, `true` is
+  `"true"`), an object or array as compact JSON (`{"a":1}`), an absent or `null`
+  value `""`. Its `type` is `secret` for a secret variable, else the stored `string`,
   `number` or `boolean`, else `default`, Postman's unset marker. `enabled` is the
   stored flag, `true` when absent.
 - `fileName` is `<environment name>.postman_environment.json`, with every

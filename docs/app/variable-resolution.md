@@ -64,8 +64,10 @@ this one. `constants/variable-pattern-single-source.test.ts` fails on a fifth.
 
 **Malformed stored data (the D17 rules, decided in #226).** A definition whose
 `enabled` is **absent** (or not a boolean) counts as **enabled** - only an
-explicit `enabled: false` disables. A **non-string stored `value`** reads as
-the empty string. One rule, both sides: the engine enforces it in
+explicit `enabled: false` disables. A stored `value` that is not a string reads as
+its JSON text (#3245): a number or boolean as `5` / `true`, an object or array
+as compact JSON (`{"a":1}`), and `null` as the empty string. The Postman
+environment export writes the same text. One rule, both sides: the engine enforces it in
 `parse_variables`, the renderer in `lib/variable-resolution.ts`, and the
 fixture varies both fields so a divergence cannot hide.
 
