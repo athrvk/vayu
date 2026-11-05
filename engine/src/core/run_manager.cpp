@@ -2934,28 +2934,9 @@ nlohmann::json build_run_summary_payload (const RunSummaryInputs& inputs) {
     // What a streaming run's completions delivered (issue #576). Omitted for
     // every run that streamed nothing, so an absent section reads as "this run
     // was not a stream" rather than as a stream that carried no events.
-    //
-    // `eventsPerSecond` is derived here rather than stored, from the same
-    // `test_duration` the report's `rps` uses - two rates a reader compares
-    // must come off one clock. `timeToFirstEvent` (#3234) is omitted when no
-    // stream delivered a timed event, on the section's own absent-not-zeros
-    // rule.
     if (inputs.stream.has_value ()) {
-        const auto& stream      = *inputs.stream;
-        summary["stream"]       = { { "completions", stream.completions },
-            { "totalEvents", stream.total_events }, { "capped", stream.capped },
-            { "eventsPerSecond", stream.events_per_second (inputs.test_duration_s) },
-            { "events",
-            { { "min", stream.events.min }, { "max", stream.events.max },
-            { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
-            { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
-            { "count", stream.events.count } } } };
-        const auto& first_event = stream.time_to_first_event;
-        if (first_event.count > 0) {
-            summary["stream"]["timeToFirstEvent"] = { { "p50", first_event.p50 },
-                { "p95", first_event.p95 }, { "p99", first_event.p99 },
-                { "max", first_event.max }, { "count", first_event.count } };
-        }
+        summary["stream"] =
+        build_stream_summary_payload (*inputs.stream, inputs.test_duration_s);
     }
     // What this run did not do (issue #1503). Omitted entirely for a run
     // with nothing to report, so the report's `warnings` key reads as "this
