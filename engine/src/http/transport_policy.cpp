@@ -579,7 +579,7 @@ const std::filesystem::path& directory) {
 std::string environment_proxy_url (std::string_view target_url) {
     // libcurl's own lookup (`proxy_detect_proxy` in lib/proxy.c): the scheme's
     // variable first, then `all_proxy`. The names differ by scheme on purpose:
-    // `HTTP_PROXY` is never read (a CGI server can set it from a request
+    // `HTTP_PROXY` is never read on POSIX (a CGI server can set it from a request
     // header), while `HTTPS_PROXY` and `ALL_PROXY` are, after their lowercase
     // spelling.
     constexpr std::array<const char*, 4> HTTPS_ORDER = { "https_proxy",

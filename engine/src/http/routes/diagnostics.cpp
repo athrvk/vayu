@@ -85,15 +85,23 @@ const char* outcome_for (ErrorCode code) {
 /// A proxy URL carries `user:pass@` and this body reaches a person's screen and
 /// an agent's context alike, so every `url` leaves with its userinfo removed.
 /// The policy's own URL (`manual`, or `system` once the app resolved one) is
-/// reported as configured. With none, `environment` and an unresolved `system`
+/// reported as configured, unless the probe finished without a proxy
+/// (`bypassed`: a `proxyBypass` entry sent it direct). A probe that failed is
+/// not judged, since a failure at the proxy hop may leave `proxy_used` unset.
+/// With none, `environment` and an unresolved `system`
 /// leave `CURLOPT_PROXY` null and libcurl picks from the environment: a proxy is
 /// named then only when it carried the probe (`proxy_used`,
 /// `CURLINFO_USED_PROXY`, so a `no_proxy` exemption reads as direct), marked
 /// `source: "environment"`. Absent `source` means `url` is the setting in force.
-nlohmann::json
-proxy_node (const TransportPolicy& policy, std::string_view target_url, bool proxy_used) {
+nlohmann::json proxy_node (const TransportPolicy& policy,
+std::string_view target_url,
+bool proxy_used,
+bool completed) {
     nlohmann::json node{ { "mode", to_string (policy.proxy_mode) } };
     if (!policy.proxy_url.empty ()) {
+        if (completed && !proxy_used) {
+            return node;
+        }
         node["url"] = vayu::utils::strip_url_secrets (policy.proxy_url);
         return node;
     }
@@ -170,8 +178,9 @@ const std::atomic<bool>* cancel) {
     auto result = client.send (probe);
 
     const bool proxy_used = result.is_ok () && result.value ().proxy_used;
+    const bool completed  = result.is_ok () && !result.value ().has_error ();
     nlohmann::json body{ { "url", url },
-        { "proxy", proxy_node (transport, url, proxy_used) } };
+        { "proxy", proxy_node (transport, url, proxy_used, completed) } };
 
     if (!result.is_ok ()) {
         // The client could not even start - a URL libcurl refuses, a handle it

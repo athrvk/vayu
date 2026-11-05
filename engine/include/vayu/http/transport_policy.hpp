@@ -104,7 +104,7 @@ std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
  * not whether it did: `no_proxy` is not consulted, and the caller pairs it with
  * `CURLINFO_USED_PROXY`. The variables and their order are libcurl's:
  * `https_proxy` for `https://`, `http_proxy` for `http://` (never the
- * uppercase spelling), each then `all_proxy`; an empty value is unset.
+ * uppercase spelling on POSIX; Windows names are case-insensitive), each then `all_proxy`; an empty value is unset.
  */
 std::string environment_proxy_url (std::string_view target_url);
 

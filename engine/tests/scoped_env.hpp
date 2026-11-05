@@ -116,7 +116,7 @@ class ScopedEnv {
 /// that exports none is not decided by the machine's own (CI containers and a
 /// developer's shell export them). Both spellings, because libcurl reads
 /// `https_proxy`/`HTTPS_PROXY`, `all_proxy`/`ALL_PROXY` and
-/// `no_proxy`/`NO_PROXY`; `http_proxy` has no uppercase reader.
+/// `no_proxy`/`NO_PROXY`; `http_proxy` has no uppercase reader on POSIX.
 class ScopedProxyEnvironmentCleared {
     private:
     ScopedEnv http_{ "http_proxy", "" };

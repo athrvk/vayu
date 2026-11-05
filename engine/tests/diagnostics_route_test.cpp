@@ -216,6 +216,27 @@ TEST_F (ConnectionTestEnvironment, OmitsTheProxyWhenTheProbeWentDirect) {
     EXPECT_FALSE (body["proxy"].contains ("source"));
 }
 
+TEST_F (ConnectionTestEnvironment, OmitsAConfiguredProxyThatProxyBypassSkipped) {
+    // A `manual` proxy whose bypass list names the target: libcurl goes direct,
+    // so naming the configured proxy would report a hop the probe never took.
+    // Mutation check: drop the `completed && !proxy_used` return in
+    // `proxy_node` and the configured URL is named.
+    MockTarget target;
+    MockProxy proxy;
+    TransportPolicy policy;
+    policy.proxy_mode   = ProxyMode::Manual;
+    policy.proxy_url    = proxy.url ();
+    policy.proxy_bypass = "127.0.0.1";
+
+    auto [status, body] = connection_test (test_body (target.url ("/ok")), policy);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "ok");
+    EXPECT_EQ (proxy.count (), 0u);
+    EXPECT_EQ (body["proxy"]["mode"].get<std::string> (), "manual");
+    EXPECT_FALSE (body["proxy"].contains ("url"));
+}
+
 TEST_F (ConnectionTestEnvironment, OmitsAnExportedProxyThatNoProxyExempted) {
     // The variable is set and names a live proxy, but `no_proxy` sends this
     // target direct: naming the exported proxy would report a hop the probe
