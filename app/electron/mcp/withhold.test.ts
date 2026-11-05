@@ -35,7 +35,7 @@ import {
 } from "./withhold.js";
 
 describe("withholdDiagnoseCredentials", () => {
-	test("strips userinfo from proxy.url and marks the proxy node", () => {
+	test("strips userinfo from proxy.url and marks the proxy node, the backstop behind the engine's own strip", () => {
 		const answer = {
 			outcome: "ok",
 			proxy: { mode: "manual", url: "socks5h://bob:pw@sys.proxy:1080" },
@@ -55,6 +55,13 @@ describe("withholdDiagnoseCredentials", () => {
 		[
 			"a proxy.url with no credentials",
 			{ outcome: "ok", proxy: { mode: "manual", url: "http://proxy.corp:8080" } },
+		],
+		[
+			"the bare environment proxy the engine reports",
+			{
+				outcome: "ok",
+				proxy: { mode: "system", source: "environment", url: "http://proxy.corp:8080" },
+			},
 		],
 		["a non-object answer", "proxy_failed"],
 		["a null answer", null],

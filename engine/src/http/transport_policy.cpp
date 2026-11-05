@@ -411,24 +411,32 @@ std::string read_file (const std::filesystem::path& path) {
     return buffer.str ();
 }
 
+/// The value of the environment variable @p name, or null when it is unset or
+/// empty. The one `getenv` in this file, and so the one place the exemption in
+/// `tests/reentrant_test.cpp` is spent.
+const char* environment_text (const char* name) {
+    // An mt-unsafe call with no reentrant spelling to move to (#945).
+    // `getenv` races only against a *write* to the environment, and the
+    // engine's one write - `take_grant_secret_from_environment` removing
+    // `VAYU_GRANT_SECRET` - runs at start, before any thread exists; no
+    // other `setenv`, `unsetenv`, `putenv` or `_putenv_s` is in `src`,
+    // which `tests/reentrant_test.cpp` scans for and keeps true. Caching the
+    // answer in a function-local static would silence the check and cost
+    // more than it buys: the resolved value would then be fixed for the
+    // process, so a `CURL_CA_BUNDLE` exported for a later run would go
+    // unread with nothing to say why.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    const char* value = std::getenv (name);
+    return value != nullptr && *value != '\0' ? value : nullptr;
+}
+
 /// The file libcurl itself would verify against, or an empty path when this
 /// build has none. Environment first, because a user who exports
 /// `CURL_CA_BUNDLE` has already told every curl on the machine where their
 /// anchors are and ours must not be the one tool that ignores it.
 std::filesystem::path system_ca_bundle_path () {
     for (const char* variable : { "CURL_CA_BUNDLE", "SSL_CERT_FILE" }) {
-        // An mt-unsafe call with no reentrant spelling to move to (#945).
-        // `getenv` races only against a *write* to the environment, and the
-        // engine's one write - `take_grant_secret_from_environment` removing
-        // `VAYU_GRANT_SECRET` - runs at start, before any thread exists; no
-        // other `setenv`, `unsetenv`, `putenv` or `_putenv_s` is in `src`,
-        // which `tests/reentrant_test.cpp` scans for and keeps true. Caching the
-        // answer in a function-local static would silence the check and cost
-        // more than it buys: the resolved bundle would then be fixed for the
-        // process, so a `CURL_CA_BUNDLE` exported for a later run would go
-        // unread with nothing to say why.
-        // NOLINTNEXTLINE(concurrency-mt-unsafe)
-        if (const char* value = std::getenv (variable); value != nullptr && *value != '\0') {
+        if (const char* value = environment_text (variable)) {
             std::error_code ec;
             if (std::filesystem::is_regular_file (value, ec)) {
                 return { value };
@@ -567,6 +575,29 @@ const std::filesystem::path& directory) {
 }
 
 } // namespace
+
+std::string environment_proxy_url (std::string_view target_url) {
+    // libcurl's own lookup (`proxy_detect_proxy` in lib/proxy.c): the scheme's
+    // variable first, then `all_proxy`. The names differ by scheme on purpose:
+    // `HTTP_PROXY` is never read on POSIX (a CGI server can set it from a request
+    // header), while `HTTPS_PROXY` and `ALL_PROXY` are, after their lowercase
+    // spelling.
+    constexpr std::array<const char*, 4> HTTPS_ORDER = { "https_proxy",
+        "HTTPS_PROXY", "all_proxy", "ALL_PROXY" };
+    constexpr std::array<const char*, 3> HTTP_ORDER = { "http_proxy", "all_proxy", "ALL_PROXY" };
+
+    const bool https = target_url.size () >= 8 &&
+    vayu::utils::ascii_lower_equal (target_url.substr (0, 8), "https://");
+    const auto lookup = [] (const auto& names) -> std::string {
+        for (const char* name : names) {
+            if (const char* value = environment_text (name)) {
+                return value;
+            }
+        }
+        return {};
+    };
+    return https ? lookup (HTTPS_ORDER) : lookup (HTTP_ORDER);
+}
 
 std::array<ProxyMode, 4> all_proxy_modes () {
     return { ProxyMode::Environment, ProxyMode::System, ProxyMode::Manual, ProxyMode::Off };

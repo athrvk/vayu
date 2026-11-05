@@ -791,10 +791,11 @@ export function withholdConfigCredentials(answer: unknown): unknown {
 }
 
 /**
- * A connection diagnosis (`POST /diagnostics/connection`) with the credentials
- * in `proxy.url` withheld. The engine reports the URL in force verbatim, so a
- * `manual` proxy's `user:password@` would reach the agent here as it does not
- * through {@link withholdConfigCredentials}.
+ * A connection diagnosis (`POST /diagnostics/connection`) with any credentials
+ * in `proxy.url` withheld. The engine strips them before it answers (#3258), so
+ * this finds nothing today; it is the backstop that keeps a regression there
+ * from reaching an agent. It is not behind {@link secretsShape}: revealing
+ * secrets to agents does not apply to a URL the engine never reports with them.
  */
 export function withholdDiagnoseCredentials(answer: unknown): unknown {
 	if (!isRecord(answer) || !isRecord(answer.proxy)) return answer;

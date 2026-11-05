@@ -27,10 +27,12 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/utils/log_redact.hpp"
 #include "vayu/utils/logger.hpp"
 
 #include <atomic>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace vayu::http::routes {
@@ -78,14 +80,38 @@ const char* outcome_for (ErrorCode code) {
 }
 
 /// What the test routed through, so the card can say where the bytes went
-/// without re-deriving the mode's rules for itself. The URL is the one in
-/// force, which under `system` is what the app resolved and under `environment`
-/// is unknown to this engine - libcurl reads those variables itself - so an
-/// absent `url` means "not this engine's to say", never "no proxy".
-nlohmann::json proxy_node (const TransportPolicy& policy) {
+/// without re-deriving the mode's rules for itself.
+///
+/// A proxy URL carries `user:pass@` and this body reaches a person's screen and
+/// an agent's context alike, so every `url` leaves with its userinfo removed.
+/// The policy's own URL (`manual`, or `system` once the app resolved one) is
+/// reported as configured, unless the probe finished without a proxy
+/// (`bypassed`: a `proxyBypass` entry sent it direct). A probe that failed is
+/// not judged, since a failure at the proxy hop may leave `proxy_used` unset.
+/// With none, `environment` and an unresolved `system`
+/// leave `CURLOPT_PROXY` null and libcurl picks from the environment: a proxy is
+/// named then only when it carried the probe (`proxy_used`,
+/// `CURLINFO_USED_PROXY`, so a `no_proxy` exemption reads as direct), marked
+/// `source: "environment"`. Absent `source` means `url` is the setting in force.
+nlohmann::json proxy_node (const TransportPolicy& policy,
+std::string_view target_url,
+bool proxy_used,
+bool completed) {
     nlohmann::json node{ { "mode", to_string (policy.proxy_mode) } };
     if (!policy.proxy_url.empty ()) {
-        node["url"] = policy.proxy_url;
+        if (completed && !proxy_used) {
+            return node;
+        }
+        node["url"] = vayu::utils::strip_url_secrets (policy.proxy_url);
+        return node;
+    }
+    if (!proxy_used) {
+        return node;
+    }
+    node["source"]        = "environment";
+    const std::string url = environment_proxy_url (target_url);
+    if (!url.empty ()) {
+        node["url"] = vayu::utils::strip_url_secrets (url);
     }
     return node;
 }
@@ -151,7 +177,10 @@ const std::atomic<bool>* cancel) {
 
     auto result = client.send (probe);
 
-    nlohmann::json body{ { "url", url }, { "proxy", proxy_node (transport) } };
+    const bool proxy_used = result.is_ok () && result.value ().proxy_used;
+    const bool completed  = result.is_ok () && !result.value ().has_error ();
+    nlohmann::json body{ { "url", url },
+        { "proxy", proxy_node (transport, url, proxy_used, completed) } };
 
     if (!result.is_ok ()) {
         // The client could not even start - a URL libcurl refuses, a handle it

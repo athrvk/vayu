@@ -488,7 +488,7 @@ Key endpoints:
 | POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
 | POST | `/import/apply` | Persist a whole parsed import atomically; returns a temp-id -> real-id map |
-| POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (#708); outcome only, never a body |
+| POST | `/diagnostics/connection` | One policy-honouring send, reported as which hop answered (#708); outcome only, never a body; names the proxy it went through with the `user:pass@` stripped, and the environment's own (`proxy.source`) only when libcurl used it (#3258) |
 | GET | `/requests/:id/examples` | A request's saved example responses (#481), in stored order |
 | POST | `/specs` | Store an OpenAPI document (#637) and derive its operation index (#853); `GET`/`DELETE /specs/:id` read and remove it, `GET /specs/:id/meta` describes it without sending it (#712) |
 | POST | `/specs/sync` | Apply a re-fetched document to the collection bound to it (#655): new document, moved binding and the created/updated/deleted requests in one transaction |

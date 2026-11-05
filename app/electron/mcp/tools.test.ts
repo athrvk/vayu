@@ -15847,15 +15847,33 @@ describe("secret withholding", () => {
 		expect(body.outcome).toBe("proxy_failed");
 	});
 
-	test("diagnose_connection returns the proxy URL as the engine reported it with reveal on", async () => {
+	test("diagnose_connection strips the credentials with reveal on too, as the backstop", async () => {
+		// The engine strips a proxy URL's userinfo before it answers (#3258), so
+		// the fixture above is a regression, not a real answer. Reveal is for
+		// stored secrets and cannot lift a withholding the engine never made.
 		const client = fakeClient({ diagnoseConnection: vi.fn().mockResolvedValue(DIAGNOSIS) });
-		const { body } = await read(
+		const { text, body } = await read(
 			"diagnose_connection",
 			client,
 			{ ...ALLOW_API, ...REVEAL },
 			{ url: "https://api.example.com/" }
 		);
-		expect(body).toEqual(DIAGNOSIS);
+		for (const secret of ["alice", "pa@ss", "w0rd"]) {
+			expect(text).not.toContain(secret);
+		}
+		expect(body.proxy.url).toBe("http://proxy.corp:8080");
+	});
+
+	test("diagnose_connection passes the engine's own answer through untouched", async () => {
+		const answer = {
+			...DIAGNOSIS,
+			proxy: { mode: "system", source: "environment", url: "http://proxy.corp:8080" },
+		};
+		const client = fakeClient({ diagnoseConnection: vi.fn().mockResolvedValue(answer) });
+		const { body } = await read("diagnose_connection", client, ALLOW_API, {
+			url: "https://api.example.com/",
+		});
+		expect(body).toEqual(answer);
 	});
 
 	test("update_engine_config's echo of the config table withholds the same credentials", async () => {

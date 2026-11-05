@@ -87,14 +87,30 @@ const OUTCOME: Record<ConnectionTestOutcome, { label: string; chip: string; hint
 /** A URL that is plausibly reachable and belongs to nobody in particular. */
 const DEFAULT_TEST_URL = "https://api.github.com/";
 
-/** What the engine's `proxy` node means on screen, per mode. */
+/**
+ * What the engine's `proxy` node means on screen.
+ *
+ * A proxy the app did not configure is named by `source: "environment"`, and
+ * only when libcurl really sent the probe through it - so a missing `url`
+ * without a `source` is a direct send, and `no_proxy` exemptions read as one.
+ */
 function proxyLine(proxy: ConnectionTestResult["proxy"]): string {
+	if (proxy.source === "environment") return environmentProxyLine(proxy);
 	if (proxy.url) return `Through ${proxy.url} (${proxy.mode})`;
 	if (proxy.mode === "off") return "Sent direct - the proxy is switched off";
 	if (proxy.mode === "environment")
-		return "Whatever http_proxy and https_proxy name, which Vayu's engine does not read itself";
-	if (proxy.mode === "system") return "Sent direct - nothing resolved from this system";
+		return "Sent direct - the environment named no proxy for this URL";
+	if (proxy.mode === "system")
+		return "Sent direct - nothing resolved from this system, and the environment named no proxy for this URL";
 	return "Sent direct";
+}
+
+function environmentProxyLine(proxy: ConnectionTestResult["proxy"]): string {
+	const subject =
+		proxy.mode === "system"
+			? "Nothing resolved from this system, so the environment's proxy was used"
+			: "Through the environment's proxy";
+	return proxy.url ? `${subject}: ${proxy.url}` : `${subject} (its address could not be read)`;
 }
 
 export function ConnectionTestCard() {

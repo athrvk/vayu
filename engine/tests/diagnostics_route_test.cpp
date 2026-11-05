@@ -25,6 +25,7 @@
 
 #include "nested_json.hpp"
 #include "proxy_server.hpp"
+#include "scoped_env.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/transport_policy.hpp"
 
@@ -77,6 +78,22 @@ class MockTarget {
 std::string test_body (const std::string& url) {
     return nlohmann::json{ { "url", url } }.dump ();
 }
+
+constexpr const char* PROXY_PASSWORD = "s3cret";
+
+/// @p proxy_url with a `user:password@` authority, the shape a corporate proxy
+/// is configured in and the shape that must never come back out.
+std::string with_credentials (const std::string& proxy_url) {
+    const std::string scheme = "http://";
+    return scheme + "alice:" + PROXY_PASSWORD + "@" + proxy_url.substr (scheme.size ());
+}
+
+/// The fixture for a test that sets a proxy variable or reads the absence of
+/// one.
+class ConnectionTestEnvironment : public ::testing::Test {
+    private:
+    vayu::tests::ScopedProxyEnvironmentCleared cleared_;
+};
 
 TEST (ConnectionTest, RejectsInvalidJson) {
     auto [status, body] = connection_test ("not json", TransportPolicy{});
@@ -168,22 +185,27 @@ TEST (ConnectionTest, ReportsAProxyRefusalAsAProxyFailure) {
 TEST (ConnectionTest, NamesTheProxyTheTestWentThrough) {
     // The card has to be able to say where the bytes went without re-deriving
     // each mode's rules - so the mode always travels, and the URL travels
-    // whenever this engine is the one that knows it.
+    // whenever a proxy was in force. The URL comes back without its userinfo:
+    // the body reaches a screen and an agent's context. Mutation check: drop
+    // the `strip_url_secrets` in `proxy_node` and the password is in the body.
     MockProxy proxy;
     TransportPolicy policy;
     policy.proxy_mode = ProxyMode::Manual;
-    policy.proxy_url  = proxy.url ();
+    policy.proxy_url  = with_credentials (proxy.url ());
 
     auto [status, body] = connection_test (test_body ("https://127.0.0.1:1/x"), policy);
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["proxy"]["mode"].get<std::string> (), "manual");
     EXPECT_EQ (body["proxy"]["url"].get<std::string> (), proxy.url ());
+    EXPECT_FALSE (body["proxy"].contains ("source"))
+    << "the URL is the setting in force, not something the environment "
+       "supplied";
+    EXPECT_EQ (body.dump ().find (PROXY_PASSWORD), std::string::npos);
 }
 
-TEST (ConnectionTest, OmitsTheProxyUrlWhenTheEngineDoesNotKnowIt) {
-    // `environment` is libcurl's own variable pickup: this engine never reads
-    // those variables, so it must not print a URL it does not have. An absent
-    // key means "not this engine's to say", never "no proxy".
+TEST_F (ConnectionTestEnvironment, OmitsTheProxyWhenTheProbeWentDirect) {
+    // `environment` with nothing exported: libcurl sent the probe straight to
+    // the target, so there is no proxy to name.
     MockTarget target;
     auto [status, body] =
     connection_test (test_body (target.url ("/ok")), TransportPolicy{});
@@ -191,6 +213,88 @@ TEST (ConnectionTest, OmitsTheProxyUrlWhenTheEngineDoesNotKnowIt) {
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["proxy"]["mode"].get<std::string> (), "environment");
     EXPECT_FALSE (body["proxy"].contains ("url"));
+    EXPECT_FALSE (body["proxy"].contains ("source"));
+}
+
+TEST_F (ConnectionTestEnvironment, OmitsAConfiguredProxyThatProxyBypassSkipped) {
+    // A `manual` proxy whose bypass list names the target: libcurl goes direct,
+    // so naming the configured proxy would report a hop the probe never took.
+    // Mutation check: drop the `completed && !proxy_used` return in
+    // `proxy_node` and the configured URL is named.
+    MockTarget target;
+    MockProxy proxy;
+    TransportPolicy policy;
+    policy.proxy_mode   = ProxyMode::Manual;
+    policy.proxy_url    = proxy.url ();
+    policy.proxy_bypass = "127.0.0.1";
+
+    auto [status, body] = connection_test (test_body (target.url ("/ok")), policy);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "ok");
+    EXPECT_EQ (proxy.count (), 0u);
+    EXPECT_EQ (body["proxy"]["mode"].get<std::string> (), "manual");
+    EXPECT_FALSE (body["proxy"].contains ("url"));
+}
+
+TEST_F (ConnectionTestEnvironment, OmitsAnExportedProxyThatNoProxyExempted) {
+    // The variable is set and names a live proxy, but `no_proxy` sends this
+    // target direct: naming the exported proxy would report a hop the probe
+    // never took. Mutation check: drop the `proxy_used` guard in `proxy_node`
+    // and the exported proxy is named.
+    MockTarget target;
+    MockProxy proxy;
+    vayu::tests::ScopedEnv exported ("http_proxy", proxy.url ());
+    vayu::tests::ScopedEnv exempt ("no_proxy", "127.0.0.1");
+
+    auto [status, body] =
+    connection_test (test_body (target.url ("/ok")), TransportPolicy{});
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "ok");
+    EXPECT_EQ (proxy.count (), 0u);
+    EXPECT_FALSE (body["proxy"].contains ("url"));
+    EXPECT_FALSE (body["proxy"].contains ("source"));
+}
+
+TEST_F (ConnectionTestEnvironment, NamesTheEnvironmentsProxyWhenSystemResolvedNothing) {
+    // `system` with an empty `proxySystemUrl` leaves CURLOPT_PROXY null, so the
+    // proxy is whatever the environment exports - which the engine reports as
+    // such, credentials removed. Mutation check: report no `source` or `url`
+    // here (the old `proxy_node`) and both assertions fail.
+    MockTarget target;
+    MockProxy proxy;
+    proxy.forward_every_target_to (target.url (""));
+    vayu::tests::ScopedEnv exported ("http_proxy", with_credentials (proxy.url ()));
+
+    TransportPolicy policy;
+    policy.proxy_mode = ProxyMode::System;
+
+    auto [status, body] = connection_test (test_body (target.url ("/ok")), policy);
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "ok");
+    EXPECT_EQ (proxy.count (), 1u) << "the probe has to have gone through it";
+    EXPECT_EQ (body["proxy"]["mode"].get<std::string> (), "system");
+    EXPECT_EQ (body["proxy"]["source"].get<std::string> (), "environment");
+    EXPECT_EQ (body["proxy"]["url"].get<std::string> (), proxy.url ());
+    EXPECT_EQ (body.dump ().find (PROXY_PASSWORD), std::string::npos);
+}
+
+TEST_F (ConnectionTestEnvironment, ReadsTheVariableTheTargetsSchemeSelects) {
+    // An https target tunnels through `https_proxy`; the `http_proxy` beside it
+    // names a host nothing listens on, so naming it would be the wrong hop.
+    MockProxy proxy;
+    vayu::tests::ScopedEnv unused ("http_proxy", "http://wrong-hop.invalid:1");
+    vayu::tests::ScopedEnv exported ("https_proxy", proxy.url ());
+
+    auto [status, body] =
+    connection_test (test_body ("https://127.0.0.1:1/x"), TransportPolicy{});
+
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "proxy_failed");
+    EXPECT_EQ (body["proxy"]["source"].get<std::string> (), "environment");
+    EXPECT_EQ (body["proxy"]["url"].get<std::string> (), proxy.url ());
 }
 
 TEST (ConnectionTest, ReportsAnUnresolvableProxyAsAProxyFailure) {

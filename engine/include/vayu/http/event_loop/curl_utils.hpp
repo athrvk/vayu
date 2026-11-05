@@ -76,6 +76,17 @@ const Request* request               = nullptr,
 const ConnectedPeerCheck* peer_check = nullptr);
 
 /**
+ * @brief Whether libcurl routed the transfer on @p curl through a proxy,
+ *        whichever way the proxy was chosen (`CURLINFO_USED_PROXY`, #3257).
+ *
+ * libcurl's own answer, so it covers the environment pickup (where
+ * `configured_proxy` has nothing to say, the variables being libcurl's to read)
+ * and a `no_proxy` bypass alike. A null handle and an unreadable value both
+ * read as no proxy. Read before anything else reuses the handle.
+ */
+[[nodiscard]] bool proxy_was_used (CURL* curl);
+
+/**
  * @brief The proxy's refusal when a transfer that completed is a forwarding
  *        proxy's 407, otherwise nothing (#3257).
  *

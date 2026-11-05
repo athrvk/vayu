@@ -11,9 +11,9 @@
  * @file tests/scoped_env.hpp
  * @brief `ScopedEnv`: one environment variable pinned for a test's length.
  *
- * Shared by `transport_policy_test.cpp` (the proxy variables libcurl reads per
- * transfer) and `file_grants_route_test.cpp` (the grant secret the daemon
- * takes at start).
+ * Shared by `transport_policy_test.cpp` and `diagnostics_route_test.cpp` (the
+ * proxy variables libcurl reads per transfer) and `file_grants_route_test.cpp`
+ * (the grant secret the daemon takes at start).
  */
 
 #include <cstdlib>
@@ -109,6 +109,23 @@ class ScopedEnv {
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
+};
+
+/// Every variable libcurl reads a proxy decision from, unset for the test's
+/// length, so a test that exports one is the only thing deciding and a test
+/// that exports none is not decided by the machine's own (CI containers and a
+/// developer's shell export them). Both spellings, because libcurl reads
+/// `https_proxy`/`HTTPS_PROXY`, `all_proxy`/`ALL_PROXY` and
+/// `no_proxy`/`NO_PROXY`; `http_proxy` has no uppercase reader on POSIX.
+class ScopedProxyEnvironmentCleared {
+    private:
+    ScopedEnv http_{ "http_proxy", "" };
+    ScopedEnv https_lower_{ "https_proxy", "" };
+    ScopedEnv https_upper_{ "HTTPS_PROXY", "" };
+    ScopedEnv all_lower_{ "all_proxy", "" };
+    ScopedEnv all_upper_{ "ALL_PROXY", "" };
+    ScopedEnv no_lower_{ "no_proxy", "" };
+    ScopedEnv no_upper_{ "NO_PROXY", "" };
 };
 
 } // namespace vayu::tests

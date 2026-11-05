@@ -347,7 +347,7 @@ describe("server instructions, per host", () => {
 			"`params` row naming one reads `valueWithheld: true`",
 			"a smoke test row's, composed or else stored",
 			"`endpoint`, though never the schema",
-			"`credentialsWithheld: true` on the config entry or the connection diagnosis's `proxy`",
+			"`credentialsWithheld: true` on the config entry. An OpenAPI diff's",
 			"reads `currentWithheld: true` in place of `current`",
 			"a url cut short before its host ends",
 			"inbox captures, mock activity) reads `<redacted>`",
