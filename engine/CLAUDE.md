@@ -538,6 +538,10 @@ logged as a warning: it means a client skipped composition.
   blank or differs from `trim_variable_name`, the trim `{{ name }}` is looked up
   by, since such a key could never be referenced; the importers trim names
   instead (`to_var_record`), so one padded row cannot fail an atomic import.
+  A collection's or environment's blank `name` is refused by
+  `reject_blank_name` (`routes.hpp`, #3253), which the four create/update
+  cores call and the appliers do not, because an importer can write a blank
+  name that `POST /import/apply` and `POST /specs/sync` store today.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`

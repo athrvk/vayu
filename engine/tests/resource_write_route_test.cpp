@@ -426,6 +426,62 @@ TEST_F (ResourceWriteRouteTest, CollectionNullNameIsRejected) {
     EXPECT_EQ (stored_collection->name, "Keep me");
 }
 
+// A name that trims to nothing is an unlabelled row (#3253). Spaces, tabs, CR
+// and LF count as blank, the set `{{ name }}` lookup trims.
+const std::array<const char*, 3>& blank_names () {
+    static const std::array<const char*, 3> names{ "", "  ", "\t\r\n " };
+    return names;
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionBlankNameIsRejected) {
+    const std::string id = make_collection ("Keep me");
+    for (const char* blank : blank_names ()) {
+        auto [create_status, create_body] =
+        create_collection_response (*db_, json{ { "name", blank } });
+        EXPECT_EQ (create_status, 400) << "create '" << blank << "'";
+        EXPECT_NE (
+        create_body["error"]["message"].get<std::string> ().find ("name"), std::string::npos);
+
+        auto [update_status, update_body] =
+        update_collection_response (*db_, id, json{ { "name", blank } });
+        EXPECT_EQ (update_status, 400) << "update '" << blank << "'";
+    }
+    EXPECT_EQ (db_->get_collections ().size (), 1U)
+    << "a refused create stores nothing";
+    const auto stored_collection = db_->get_collection (id);
+    ASSERT_HAS_VALUE (stored_collection);
+    EXPECT_EQ (stored_collection->name, "Keep me");
+}
+
+// Only a name with no content is refused; one with content is stored as written.
+TEST_F (ResourceWriteRouteTest, CollectionNameWithContentKeepsItsSurroundingSpaces) {
+    auto [create_status, created] =
+    create_collection_response (*db_, json{ { "name", "  Padded  " } });
+    ASSERT_EQ (create_status, 200);
+    EXPECT_EQ (created["name"], "  Padded  ");
+
+    auto [update_status, updated] = update_collection_response (
+    *db_, created["id"].get<std::string> (), json{ { "name", " Renamed " } });
+    ASSERT_EQ (update_status, 200);
+    EXPECT_EQ (updated["name"], " Renamed ");
+}
+
+// The rule is on what the body states: a row already stored blank (an import
+// wrote it) stays editable by a PUT that says nothing about `name`.
+TEST_F (ResourceWriteRouteTest, CollectionPutWithoutNameKeepsAStoredBlankName) {
+    const std::string id = make_collection ("Soon blank");
+    auto row             = db_->get_collection (id);
+    ASSERT_HAS_VALUE (row);
+    row->name = "";
+    db_->create_collection (*row);
+
+    auto [status, body] =
+    update_collection_response (*db_, id, json{ { "description", "edited" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["description"], "edited");
+    EXPECT_EQ (body["name"], "");
+}
+
 TEST_F (ResourceWriteRouteTest, CollectionCreateNullMeansDefault) {
     auto [status, body] = create_collection_response (*db_,
     json{ { "name", "N" }, { "variables", nullptr }, { "auth", nullptr },
@@ -1925,6 +1981,59 @@ TEST_F (ResourceWriteRouteTest, EnvironmentNullNameIsRejected) {
     const auto stored_environment = db_->get_environment (id);
     ASSERT_HAS_VALUE (stored_environment);
     EXPECT_EQ (stored_environment->name, "Keep me");
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentBlankNameIsRejected) {
+    auto [created_status, created] =
+    create_environment_response (*db_, json{ { "name", "Keep me" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+
+    for (const char* blank : blank_names ()) {
+        auto [create_status, create_body] =
+        create_environment_response (*db_, json{ { "name", blank } });
+        EXPECT_EQ (create_status, 400) << "create '" << blank << "'";
+        EXPECT_NE (
+        create_body["error"]["message"].get<std::string> ().find ("name"), std::string::npos);
+
+        auto [update_status, update_body] =
+        update_environment_response (*db_, id, json{ { "name", blank } });
+        EXPECT_EQ (update_status, 400) << "update '" << blank << "'";
+    }
+    EXPECT_EQ (db_->get_environments ().size (), 1U)
+    << "a refused create stores nothing";
+    const auto stored_environment = db_->get_environment (id);
+    ASSERT_HAS_VALUE (stored_environment);
+    EXPECT_EQ (stored_environment->name, "Keep me");
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentNameWithContentKeepsItsSurroundingSpaces) {
+    auto [create_status, created] =
+    create_environment_response (*db_, json{ { "name", "  Padded  " } });
+    ASSERT_EQ (create_status, 200);
+    EXPECT_EQ (created["name"], "  Padded  ");
+
+    auto [update_status, updated] = update_environment_response (
+    *db_, created["id"].get<std::string> (), json{ { "name", " Renamed " } });
+    ASSERT_EQ (update_status, 200);
+    EXPECT_EQ (updated["name"], " Renamed ");
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentPutWithoutNameKeepsAStoredBlankName) {
+    auto [created_status, created] =
+    create_environment_response (*db_, json{ { "name", "Soon blank" } });
+    ASSERT_EQ (created_status, 200);
+    const std::string id = created["id"].get<std::string> ();
+    auto row             = db_->get_environment (id);
+    ASSERT_HAS_VALUE (row);
+    row->name = "";
+    db_->save_environment (*row);
+
+    auto [status, body] =
+    update_environment_response (*db_, id, json{ { "description", "edited" } });
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (body["description"], "edited");
+    EXPECT_EQ (body["name"], "");
 }
 
 // ---------------------------------------------------------------------------

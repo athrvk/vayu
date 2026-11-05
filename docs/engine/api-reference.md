@@ -531,6 +531,18 @@ untouched. Whitespace *inside* a key and dots are fine (`my var`, `a.b`).
 Variables a script writes are not checked. An import does not hit this: it
 trims the names it reads, see [`POST /import/parse`](#post-importparse).
 
+### Blank names
+
+A collection's or environment's `name` that is empty or only spaces, tabs, CR
+and LF is a `400` on `POST`/`PUT /collections` and `POST`/`PUT /environments`
+(#3253): `Invalid 'name': is empty or whitespace-only`. The row is not written.
+A `PUT` that does not state `name` keeps the stored one, so a row that is
+already blank stays editable. A name with content is stored as written,
+surrounding spaces included. `POST /import/apply` and `POST /specs/sync` are
+not held to this: they carry names an importer wrote, and a blank one imports
+as it always did. The MCP `create_` and `update_` tools for both resources
+refuse the same name as an input error before calling the engine.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1559,7 +1571,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, if a `variables` key is blank or padded
+`null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
+`variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1600,7 +1613,8 @@ list it just left. See [Ordering](#ordering).
 **Response:** The updated collection object, with its `ETag`.
 
 **Errors:** `404` if the collection does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`,
+longer names the stored row; `400` on a `null` or empty or whitespace-only
+`name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
@@ -5342,7 +5356,8 @@ the null-vs-absent rule.
 
 **Errors:** `400` if the body carries an `id`
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
-`null`, or if a `variables` key is blank or padded
+`null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), or if a
+`variables` key is blank or padded
 ([#3251](#accepted-field-shapes)); `413` naming the field, its size and the cap,
 when a serialized `variables` is over the engine's
 [field cap](#a-stored-json-field-has-a-write-time-cap).
@@ -5388,8 +5403,9 @@ it survives a restart and is shared by every client on the same database. See
 **Response:** The updated environment object, with its `ETag`.
 
 **Errors:** `404` if the environment does not exist; `412` if `If-Match` no
-longer names the stored row; `400` on a `null` `name`, a malformed `If-Match`
-or a blank or padded `variables` key ([#3251](#accepted-field-shapes));
+longer names the stored row; `400` on a `null` or empty or whitespace-only
+`name` ([#3253](#blank-names)), a malformed `If-Match` or a blank or padded
+`variables` key ([#3251](#accepted-field-shapes));
 `413` naming the field, its size and the cap, when a serialized `variables` is
 over the engine's [field cap](#a-stored-json-field-has-a-write-time-cap).
 
@@ -12488,9 +12504,12 @@ completions behind each distribution and is identical across the five.
 
 **`warnings` (issue #1503) is what the run did not do**, even though it
 finished and its other numbers may look fine: a request sent with a
-`{{token}}` composition never resolved (no mode runs a residual pass under
-load, so a value a pre-request script would have set goes on the wire
-literally), or a step whose pre-request script this mode never executes -
+`{{token}}` composition never resolved (a scenario load run, and a
+single-request run that declares `requestElements`, re-resolve what
+composition left against the executing virtual user's or submission's own
+scopes before sending, so a name an inline script or extractor set is
+answered; a single-request run with neither runs no residual pass, so a value a
+pre-request script would have set goes on the wire literally), or a step whose pre-request script this mode never executes -
 one that did not run inline (issue #1938: `elements.scripts: "allInline"`, or
 the element's own `inline: true` under `asMarked`, runs it and raises no
 warning). Neither refuses the run - a literal `{{` can be deliberate in a body -
