@@ -188,9 +188,9 @@ compute_element_spans (const ScenarioPlan& plan);
 
 /**
  * The bounds of @p plan's longest-running streaming step (#3235), or none
- * when no step streams: what a load run's natural end sizes its drain by
- * (`natural_end_drain_ms`), so a healthy stream is not cancelled before its
- * cap.
+ * when no step streams: what a load run's natural end sizes its streams'
+ * share of the drain by (`collection_natural_end_drain_ms`), so a healthy
+ * stream is not cancelled before its cap.
  */
 [[nodiscard]] std::optional<vayu::StreamBounds> longest_stream_bounds (
 const ScenarioPlan& plan);

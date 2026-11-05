@@ -8921,7 +8921,9 @@ land in the report's `stream` section, its stored exchange keeps its event
 count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
 connect phase - the whole-transfer timeout is the duration cap plus the 5s
 backstop. A load run's natural end waits for the longest streaming step's cap
-plus that backstop before cancelling what is still in flight. A sequential
+plus that backstop, or for the run's `timeout` where that is longer (its
+ordinary steps are still bounded by it), before cancelling what is still in
+flight. A sequential
 (design-mode) collection run sends a streaming step through the single-request
 client by the same rules: a cap or the server's close ends it as a pass, its
 own `timeout` bounds only its connect phase, and a `POST /runs/:runId/stop`
@@ -10893,7 +10895,8 @@ flight after its effective timeout (the run's `timeout`, else the
 `defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
 streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
 stream backstop plus the same 2s, issue #2834), so a stream still within its
-cap is never cut. A non-stream request cancelled there never answered: it stays
+cap is never cut. A collection run with a streaming step waits for whichever
+of the two bounds is longer (issue #3235). A non-stream request cancelled there never answered: it stays
 an error, under status code `0`, and its stored error record carries
 `error_type` `cancelled` (`errors.types` in the report).
 

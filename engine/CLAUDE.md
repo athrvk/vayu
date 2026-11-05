@@ -734,7 +734,8 @@ logged as a warning: it means a client skipped composition.
   (`vayu::http::resolve_stream_bounds`, the one resolution both run shapes
   use); its caps stand without `stream` (`read_collection_run_stream_caps`),
   a top-level `stream` there is a `400`, and a load run's natural end drains
-  for the longest step's cap (`longest_stream_bounds`). A sequential run sends
+  for the longest step's cap (`longest_stream_bounds`) or the run's timeout,
+  whichever is longer (`collection_natural_end_drain_ms`). A sequential run sends
   the step through `Client`, which honours `stream_bounds` by the same rules
   through the one `StreamTally` (`http/stream_tally.hpp`) both drivers keep;
   its stop ends the stream (`ExchangeInputs::cancel` is `should_stop` for a

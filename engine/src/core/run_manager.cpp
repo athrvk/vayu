@@ -2613,12 +2613,12 @@ RunManager& manager) {
         if (context->should_stop) {
             context->event_loop->stop (false);
         } else {
-            // A collection run's streams are its steps' (#3235), so the
-            // longest of them sizes the wait.
-            const int64_t drain_ms = natural_end_drain_ms (context->scenario ?
-            longest_stream_bounds (context->scenario->plan) :
-            context->stream_bounds,
-            timeout_ms);
+            // A collection run's streams are its steps' (#3235), beside the
+            // ordinary steps its timeout bounds.
+            const int64_t drain_ms = context->scenario ?
+            collection_natural_end_drain_ms (
+            longest_stream_bounds (context->scenario->plan), timeout_ms) :
+            natural_end_drain_ms (context->stream_bounds, timeout_ms);
             context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
         }
 
