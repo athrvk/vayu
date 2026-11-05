@@ -260,18 +260,18 @@ TEST (InboxParseUpdate, AbsentFieldKeepsTheLiveValueAndInvalidStatusIsRejected) 
 // ---------------------------------------------------------------------------
 
 TEST (InboxLiveResumePoint, AbsentMeansFromTheStartAndTheHeaderWinsOverTheParam) {
-    const auto absent = vayu::http::parse_live_resume_point ("", "");
+    const auto absent = vayu::http::parse_live_resume_point ("", "", "capture");
     ASSERT_HAS_VALUE (absent);
     EXPECT_EQ (*absent, 0);
 
     // The query parameter is the app's own reconnect - EventSource cannot set a
     // header on a fresh connection - and is read exactly like the header.
-    const auto from_param = vayu::http::parse_live_resume_point ("", "42");
+    const auto from_param = vayu::http::parse_live_resume_point ("", "42", "capture");
     ASSERT_HAS_VALUE (from_param);
     EXPECT_EQ (*from_param, 42);
 
     // The browser's reconnect header is the more recent of the two.
-    const auto from_header = vayu::http::parse_live_resume_point ("77", "42");
+    const auto from_header = vayu::http::parse_live_resume_point ("77", "42", "capture");
     ASSERT_HAS_VALUE (from_header);
     EXPECT_EQ (*from_header, 77);
 }
@@ -280,7 +280,7 @@ TEST (InboxLiveResumePoint, RejectsAValueThatIsNotACaptureId) {
     for (const char* bad : { "abc", "12x", "", "-1", " 7", "1.5" }) {
         const std::string value = bad;
         // Empty is absence, not a bad value - it is in this list to pin that.
-        const auto resume_point = vayu::http::parse_live_resume_point ("", value);
+        const auto resume_point = vayu::http::parse_live_resume_point ("", value, "capture");
         if (value.empty ()) {
             ASSERT_HAS_VALUE (resume_point);
             EXPECT_EQ (*resume_point, 0);
@@ -293,6 +293,18 @@ TEST (InboxLiveResumePoint, RejectsAValueThatIsNotACaptureId) {
         EXPECT_EQ (resume_point.error ().http_status, 400) << bad;
         EXPECT_EQ (resume_point.error ().code, "invalid_last_event_id") << bad;
     }
+}
+
+// The same parser answers two routes whose ids mean different things, so the
+// refusal names what the caller's id identifies and which input was unreadable.
+TEST (InboxLiveResumePoint, TheRefusalNamesTheCallersIdAndTheInputThatFailed) {
+    const auto from_param = vayu::http::parse_live_resume_point ("", "abc", "capture");
+    ASSERT_FALSE (from_param.has_value ());
+    EXPECT_EQ (from_param.error ().message, "lastEventId must be a non-negative capture id");
+
+    const auto from_header = vayu::http::parse_live_resume_point ("abc", "", "event");
+    ASSERT_FALSE (from_header.has_value ());
+    EXPECT_EQ (from_header.error ().message, "Last-Event-ID must be a non-negative event id");
 }
 
 // ---------------------------------------------------------------------------
@@ -1683,6 +1695,15 @@ TEST_F (InboxRouteTest, ABodyWithAZeroByteListsAsAllItsBytes) {
     EXPECT_EQ (*decoded, sent);
     EXPECT_EQ (data[0]["bodyBytes"], 7);
     EXPECT_FALSE (data[0]["bodyTruncated"].get<bool> ());
+}
+
+TEST_F (InboxRouteTest, AGarbledLiveResumePointIsRefusedAsACaptureId) {
+    auto response = management ().Get ("/inbox/" + inbox_id_ + "/live?lastEventId=abc");
+    ASSERT_TRUE (response);
+    EXPECT_EQ (response->status, 400);
+    const auto error = json::parse (response->body).at ("error");
+    EXPECT_EQ (error.at ("code"), "invalid_last_event_id");
+    EXPECT_EQ (error.at ("message"), "lastEventId must be a non-negative capture id");
 }
 
 TEST_F (InboxRouteTest, ABinaryCaptureDoesNotStallTheLiveStreamBehindIt) {

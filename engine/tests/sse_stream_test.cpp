@@ -1236,6 +1236,9 @@ TEST_F (RelayTest, AGarbledResumePointIs400RatherThanASilentReplay) {
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 400);
     EXPECT_NE (response->body.find ("invalid_last_event_id"), std::string::npos);
+    // A run's frames are events, not the inbox's captures.
+    EXPECT_EQ (json::parse (response->body).at ("error").at ("message"),
+    "lastEventId must be a non-negative event id");
 }
 
 // Each stream parks a cpp-httplib pool thread for its whole life, so a second
