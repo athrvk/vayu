@@ -734,7 +734,12 @@ logged as a warning: it means a client skipped composition.
   (`vayu::http::resolve_stream_bounds`, the one resolution both run shapes
   use); its caps stand without `stream` (`read_collection_run_stream_caps`),
   a top-level `stream` there is a `400`, and a load run's natural end drains
-  for the longest step's cap (`longest_stream_bounds`). Reaching a cap is a
+  for the longest step's cap (`longest_stream_bounds`). A sequential run sends
+  the step through `Client`, which honours `stream_bounds` by the same rules
+  through the one `StreamTally` (`http/stream_tally.hpp`) both drivers keep;
+  its stop ends the stream (`ExchangeInputs::cancel` is `should_stop` for a
+  streaming step alone) and its summary stores the load path's `stream`
+  section (`build_stream_summary_payload`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample

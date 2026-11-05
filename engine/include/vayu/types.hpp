@@ -481,11 +481,12 @@ inline const std::vector<HttpVersion>& all_http_versions () {
 constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
 
 /**
- * @brief The caps that end a streaming transfer under load (issue #576).
+ * @brief The caps that end a bounded streaming transfer (issue #576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
  * load event loop, or a collection run's step whose stored request streams
- * (#3235; the plan sets it for either executor). Absent everywhere else -
+ * (#3235; the plan sets it, and the event loop or, for a sequential run,
+ * `Client` honours it through `StreamTally`). Absent everywhere else -
  * including on `POST /execute`'s stream, which `SseStreamManager` manages and
  * ends by rules of its own.
  *
@@ -1099,8 +1100,9 @@ struct Response {
      * every connection before the first event is exactly the one where telling
      * them apart matters.
      *
-     * Counted by `SseFrameCounter` on the write callback, which agrees with
-     * `SseParser` on what an event is - see that header.
+     * Counted by `SseFrameCounter` on the write callback (through
+     * `StreamTally`, on either curl driver), which agrees with `SseParser` on
+     * what an event is - see that header.
      */
     std::optional<std::size_t> stream_events;
 
@@ -1132,7 +1134,7 @@ struct Response {
      *        transfer, rather than the server closing the stream (issue #576).
      *
      * Both are successful completions - reaching the cap *is* a bounded
-     * stream's intended end under load - so the status code cannot tell them
+     * stream's intended end - so the status code cannot tell them
      * apart and this is what the report's `capped` tally counts.
      */
     bool stream_capped = false;

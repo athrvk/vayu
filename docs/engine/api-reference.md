@@ -8902,8 +8902,17 @@ count (so `GET /runs/:runId/samples` reads its `events` back), and the step's ow
 connect phase - the whole-transfer timeout is the duration cap plus the 5s
 backstop. A load run's natural end waits for the longest streaming step's cap
 plus that backstop before cancelling what is still in flight. A sequential
-(design-mode) collection run carries the same caps on the step but does not
-send it as a stream yet.
+(design-mode) collection run sends a streaming step through the single-request
+client by the same rules: a cap or the server's close ends it as a pass, its
+own `timeout` bounds only its connect phase, and a `POST /runs/:runId/stop`
+ends the stream in flight rather than waiting out its cap (a stream the server
+had not yet answered is a cancelled step). The body is the `text/event-stream`
+bytes, held to `maxDesignResponseBodyBytes` like any step's (reaching it ends
+the stream, with `bodyCapped`); the step's stored trace carries the parsed
+`events` node (`items`, `totalEvents`, `eventsTruncated`) a load sample's does,
+and the run's summary and report gain the same `stream` section, which its
+`stream*` budgets judge. A duration cap that passes before any status line is a
+`timeout` error naming the cap.
 
 #### The `data` rows (a data-driven load run)
 
