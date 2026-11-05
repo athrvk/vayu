@@ -864,6 +864,7 @@ Result<Response> Client::send (const Request& request) {
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
     detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
     response.transfer_attempted = detail::curl_transfer_attempted (curl, res);
+    response.proxy_used         = detail::proxy_was_used (curl);
 
     // Negotiated protocol (try to get even on errors, same as timing above -
     // a transfer that fails after the connection was established still knows

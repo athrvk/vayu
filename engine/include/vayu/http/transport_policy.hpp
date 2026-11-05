@@ -93,6 +93,22 @@ const char* proxy_mode_label (ProxyMode mode);
 std::optional<ProxyMode> proxy_mode_from_string (std::string_view value);
 
 /**
+ * @brief The proxy URL libcurl reads from this process's environment for a
+ *        transfer to @p target_url, as exported - credentials included - or
+ *        empty when none of its variables is set.
+ *
+ * What `ProxyMode::Environment` leaves to libcurl, and `System` with nothing
+ * resolved falls back to. The transfer never needs this (the null
+ * `CURLOPT_PROXY` makes libcurl read it); it exists so the connection test can
+ * *name* the proxy a transfer went through. It says what libcurl would pick,
+ * not whether it did: `no_proxy` is not consulted, and the caller pairs it with
+ * `CURLINFO_USED_PROXY`. The variables and their order are libcurl's:
+ * `https_proxy` for `https://`, `http_proxy` for `http://` (never the
+ * uppercase spelling), each then `all_proxy`; an empty value is unset.
+ */
+std::string environment_proxy_url (std::string_view target_url);
+
+/**
  * @brief Why @p url cannot be a proxy URL, or nullopt when it can.
  *
  * The one copy of the rule: `POST /config` rejects a bad value with it, and

@@ -1395,6 +1395,74 @@ TEST (TransportPolicyModes, AReusedHandleDoesNotKeepAnEarlierProxy) {
 }
 
 // ---------------------------------------------------------------------------
+// The proxy libcurl picked from the environment, which the policy never names
+// ---------------------------------------------------------------------------
+
+class EnvironmentProxy : public ::testing::Test {
+    private:
+    vayu::tests::ScopedProxyEnvironmentCleared cleared_;
+};
+
+TEST_F (EnvironmentProxy, IsEmptyWhenNothingIsExported) {
+    EXPECT_EQ (environment_proxy_url ("http://example.test/x"), "");
+    EXPECT_EQ (environment_proxy_url ("https://example.test/x"), "");
+}
+
+TEST_F (EnvironmentProxy, TakesTheSchemesVariableBeforeAllProxy) {
+    ScopedEnv http ("http_proxy", "http://http-hop:1");
+    ScopedEnv https ("https_proxy", "http://https-hop:2");
+    ScopedEnv all ("all_proxy", "http://all-hop:3");
+
+    EXPECT_EQ (environment_proxy_url ("http://example.test/x"), "http://http-hop:1");
+    EXPECT_EQ (environment_proxy_url ("https://example.test/x"), "http://https-hop:2");
+}
+
+TEST_F (EnvironmentProxy, FallsBackToAllProxyForEitherScheme) {
+    ScopedEnv all ("all_proxy", "http://all-hop:3");
+
+    EXPECT_EQ (environment_proxy_url ("http://example.test/x"), "http://all-hop:3");
+    EXPECT_EQ (environment_proxy_url ("https://example.test/x"), "http://all-hop:3");
+}
+
+TEST_F (EnvironmentProxy, DoesNotCrossSchemes) {
+    // `https_proxy` is not an answer for a plain http:// target, and the
+    // reverse: libcurl would send either one direct.
+    {
+        ScopedEnv https ("https_proxy", "http://https-hop:2");
+        EXPECT_EQ (environment_proxy_url ("http://example.test/x"), "");
+    }
+    ScopedEnv http ("http_proxy", "http://http-hop:1");
+    EXPECT_EQ (environment_proxy_url ("https://example.test/x"), "");
+}
+
+TEST_F (EnvironmentProxy, ReportsTheValueAsExportedCredentialsIncluded) {
+    // The helper is libcurl's lookup, not a redaction point: the route strips.
+    ScopedEnv http ("http_proxy", "http://user:pw@hop:1");
+    EXPECT_EQ (environment_proxy_url ("http://example.test/x"), "http://user:pw@hop:1");
+}
+
+TEST_F (EnvironmentProxy, ClientRecordsWhetherLibcurlProxiedTheTransfer) {
+    // `Response::proxy_used` is `CURLINFO_USED_PROXY`: the only way the engine
+    // learns that a proxy it never configured carried a transfer.
+    MockUpstream upstream;
+    MockProxy proxy;
+    ScopedEnv exported ("http_proxy", proxy.url ());
+
+    ClientConfig environment; // default policy: ProxyMode::Environment
+    Client through (environment);
+    auto proxied = through.send (get_request (upstream.url ("/hello")));
+    ASSERT_TRUE (proxied.is_ok ());
+    EXPECT_TRUE (proxied.value ().proxy_used);
+
+    ClientConfig off;
+    off.transport.proxy_mode = ProxyMode::Off;
+    Client direct (off);
+    auto sent_direct = direct.send (get_request (upstream.url ("/hello")));
+    ASSERT_TRUE (sent_direct.is_ok ());
+    EXPECT_FALSE (sent_direct.value ().proxy_used);
+}
+
+// ---------------------------------------------------------------------------
 // A proxy failure is reported as a proxy failure
 // ---------------------------------------------------------------------------
 

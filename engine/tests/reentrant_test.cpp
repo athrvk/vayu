@@ -222,7 +222,8 @@ struct ExemptSite {
 };
 
 /// The sites where one of them stays, each silenced at the line with its
-/// reason: reading `CURL_CA_BUNDLE` has no reentrant spelling to move to, and
+/// reason: reading `CURL_CA_BUNDLE` and the proxy variables (one `getenv`, in
+/// `transport_policy.cpp`) has no reentrant spelling to move to, and
 /// the grant secret is read and removed once at start (#2356). Per
 /// (file, call) rather than per file, so exempting the read does not also
 /// exempt a write nobody noticed being added beside it.

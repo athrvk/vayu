@@ -5933,7 +5933,8 @@ never named and report its proxy and certificate as this one's) and a fixed
 |-------|---------|
 | `outcome` | `ok`, `proxy_failed`, `tls_failed`, `timed_out` or `failed`. Deliberately coarser than `ErrorCode`: these are the answers that lead a reader to a different setting. `proxy_failed` covers every `PROXY_ERROR`: an unresolvable or down proxy, a refused `CONNECT`, and a forwarding proxy's `407` on an `http://` target. |
 | `proxy.mode` | The `proxyMode` in force. Always present. |
-| `proxy.url` | The proxy that was used, **absent when the engine does not know it** - every `environment`-mode test, since libcurl reads those variables itself. Absent means "not the engine's to say", never "no proxy". |
+| `proxy.url` | The proxy the probe went through, **with its `user:password@` removed** (the body reaches a screen and an agent's context). Absent when the probe went direct. Under `manual`, and `system` with a resolved URL, it is the setting in force. Under `environment`, and `system` with nothing resolved, it is what libcurl read from `http_proxy` / `https_proxy` / `all_proxy` for the target's scheme - reported only when libcurl really proxied the probe (`CURLINFO_USED_PROXY`), so a `no_proxy` exemption reads as direct. |
+| `proxy.source` | `"environment"` when `proxy.url` is not a Vayu setting: libcurl chose the proxy from the process environment. Absent otherwise. With `source` set and no `url`, the probe was proxied but the variable could not be read back. |
 | `clientCertificate` | The registry entry that answered for this host, `""` when none did. Always present, like `POST /execute`'s. |
 | `status` | The status line. Present only on `ok`. |
 | `errorCode` / `detail` | The engine's `ErrorCode` spelling and the message: libcurl's own, or for a forwarding proxy's `407` on an `http://` target (#3257) the engine's sentence naming the proxy. Absent on `ok`. |

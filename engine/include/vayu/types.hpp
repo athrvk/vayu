@@ -1010,6 +1010,17 @@ struct Response {
     bool transfer_attempted = false;
 
     /**
+     * @brief True when libcurl routed this transfer through a proxy, however
+     *        the proxy was chosen (`detail::proxy_was_used`).
+     *
+     * Set by `Client::send` only, and the one place the engine learns that an
+     * environment-picked proxy (`http_proxy`, `all_proxy`) was in the path:
+     * the policy names none. The connection test reads it to say whether to
+     * report the environment's proxy at all.
+     */
+    bool proxy_used = false;
+
+    /**
      * @brief The protocol actually negotiated for this transfer, e.g.
      * "HTTP/1.1" or "HTTP/2" - read from CURLINFO_HTTP_VERSION after the
      * transfer completes.

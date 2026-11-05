@@ -806,22 +806,6 @@ bool proxy_refused_tunnel (CURL* curl) {
     return connect_code >= 400;
 }
 
-/// Whether libcurl routed this transfer through a proxy, whichever way the
-/// proxy was chosen: `CURLINFO_USED_PROXY` is libcurl's own answer, so it
-/// covers the environment mode (where `configured_proxy` has nothing to say,
-/// the variables being libcurl's to read) and a `no_proxy` bypass alike. Null
-/// handle and an unreadable value both read as no proxy.
-bool proxy_was_used (CURL* curl) {
-    if (!curl) {
-        return false;
-    }
-    long used = 0;
-    if (get_info<CURLINFO_USED_PROXY> (curl, &used) != CURLE_OK) {
-        return false;
-    }
-    return used != 0;
-}
-
 namespace {
 
 /**
@@ -1450,6 +1434,17 @@ bool reached_a_peer (CURL* curl) {
 
 bool curl_transfer_attempted (CURL* curl, CURLcode code) {
     return !refused_before_connecting (code) || reached_a_peer (curl);
+}
+
+bool proxy_was_used (CURL* curl) {
+    if (!curl) {
+        return false;
+    }
+    long used = 0;
+    if (get_info<CURLINFO_USED_PROXY> (curl, &used) != CURLE_OK) {
+        return false;
+    }
+    return used != 0;
 }
 
 const ClientCertRule* apply_transport_policy (CURL* curl,
