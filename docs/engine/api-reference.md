@@ -7797,9 +7797,7 @@ Refused with a **400** rather than silently reinterpreted:
 - a non-boolean `stream` (`'stream' must be a boolean`);
 - `"stream": true` with `"transient": true` - a stream **is** its run row: the
   row is what `eventsUrl` names, what carries the status, and what a stop
-  finds, and a transient execution creates none;
-- `stream` on `POST /runs` (`errorCode: "invalid_run_config"`) - a load run's
-  completion accounting has no place for a response that never ends.
+  finds, and a transient execution creates none.
 
 **Scripts run on a streaming request** (issue #575), and were refused until they
 did. The pre-request script runs before the transfer starts, exactly as on a
@@ -8880,6 +8878,12 @@ counts, its latency histogram and its status-code distribution like any other
 Events are counted on the write path by a frame counter that agrees with the
 design path's parser about what an event is: a frame carrying no `data` field
 is not one, so comment-only keep-alives do not inflate the tally.
+
+The same count reaches the [live frames](#get-runsrunidlive) as the events
+arrive (issue #3236): `streamEvents`, `eventsPerSecond` and `streamsOpen` on
+every frame, and `streamTimeToFirstEvent` on gate frames, so a run of long
+streams shows its progress before the first one ends rather than zero
+completions until then.
 
 `stream` is refused beside `transient` (as on a send) and each cap is refused
 without `stream` - a cap on a non-streaming run reads as a bound the caller
@@ -10506,7 +10510,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -11402,7 +11406,7 @@ The payload is byte-identical to one `data[]` entry of
 history overlay are drawn from the same rows. A scrape that read nothing emits
 no frame.
 
-**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys and a capacity run's `capacity`, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases`, `statusSeconds` and `scenario` keys, which it adds on a gate tick):
+**Field reference** (every key of a `metrics` frame; `MetricsCollector::get_current_stats()` builds all but the trailing-window keys (`eventsPerSecond` among them) and a capacity run's `capacity`, which the metrics thread adds on every tick, and the `second*`, `cumulativeLatency`, `cumulativePhases`, `streamTimeToFirstEvent`, `statusSeconds` and `scenario` keys, which it adds on a gate tick):
 
 | Field | Meaning |
 |-------|---------|
@@ -11427,6 +11431,9 @@ no frame.
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
+| `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streams open at the sample, which is `activeConnections` because every transfer of such a run is a stream. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
+| `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
+| `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
 | `requestsSent` / `requestsExpected` | Progress for bounded modes (drives ETA). A scenario `iterations` run starts `requestsExpected` at iterations x steps per iteration, an upper bound while it runs because an abandoned iteration never sends its later steps; a natural end settles it to the sent count, so the final frame reads 100%. A stopped run keeps the upper bound (issue #2914) |
 | `capacity` | **Capacity runs only** (issue #2928), on every frame from tick 0: where the search stands, `{level, levelElapsedMs, levelsJudged, stopReason?}`. `level` is the concurrency being measured, `0` until the first level opens (tick 0 is emitted before it does). `levelElapsedMs` is the time since that level opened, `0` while `level` is `0`, and held at the moment the search ended once it has. `levelsJudged` counts the levels judged so far, a re-measured level once per measurement, so the report's [`capacity.levels`](#get-runsrunidreport) holds that many rows. `stopReason` appears once the search has ended, with the value the report's `capacity.stopReason` carries, `stopped` included, and is absent while it runs. The four are published together, so one frame never pairs a level with another level's time or count. Absent from every other run's frames, never zeroed |

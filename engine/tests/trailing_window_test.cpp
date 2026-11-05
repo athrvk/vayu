@@ -224,3 +224,27 @@ TEST (TrailingWindow, HoldsOneWindowOfSamplesNotTheRun) {
     }
     EXPECT_EQ (window.size (), static_cast<size_t> ((WINDOW_MS / TICK_MS) + 1));
 }
+
+// A streaming run's `eventsPerSecond` (#3236) rides the same window as
+// `currentRps`, off the events counted as they arrive, so a run whose streams
+// have completed nothing yet still reads its rate. Mutation check: read the
+// rate off `completed` instead of `stream_events` in `reading_between` and the
+// two 100s read 0.
+TEST (TrailingWindow, EventsPerSecondIsTheWindowsEventsOverItsSpan) {
+    TrailingWindow window (WINDOW_MS);
+    auto at = [] (int64_t ms, size_t events) {
+        auto counters          = counters_at (ms, 0);
+        counters.stream_events = events;
+        return counters;
+    };
+    EXPECT_DOUBLE_EQ (window.push (at (0, 40)).events_per_s, 0.0)
+    << "a first sample has no time to divide by";
+    EXPECT_DOUBLE_EQ (window.push (at (WINDOW_MS / 2, 90)).events_per_s, 100.0);
+    EXPECT_DOUBLE_EQ (window.push (at (WINDOW_MS, 140)).events_per_s, 100.0);
+    // A stall reads zero one window later, as a completion rate does.
+    WindowReading reading;
+    for (int64_t ms = WINDOW_MS + TICK_MS; ms <= 3 * WINDOW_MS; ms += TICK_MS) {
+        reading = window.push (at (ms, 140));
+    }
+    EXPECT_DOUBLE_EQ (reading.events_per_s, 0.0);
+}

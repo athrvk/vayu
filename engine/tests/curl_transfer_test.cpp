@@ -757,10 +757,13 @@ TEST_F (CurlTransferTest, ALoadStreamTimesOutAHungHandshakeAtTheRequestTimeout) 
     vayu::tests::SilentListener listener;
     ASSERT_NE (listener.port (), 0);
     vayu::Request request;
-    request.method        = vayu::HttpMethod::GET;
-    request.url           = listener.url ("https");
-    request.timeout_ms    = 1000;
-    request.stream_bounds = vayu::StreamBounds{ 10000, 1000 };
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = listener.url ("https");
+    request.timeout_ms = 1000;
+    vayu::StreamBounds bounds;
+    bounds.max_duration_ms = 10000;
+    bounds.max_events      = 1000;
+    request.stream_bounds  = bounds;
 
     auto result = run_once (request);
 
