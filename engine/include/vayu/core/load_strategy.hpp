@@ -100,9 +100,12 @@ struct LoadAuthPlan {
      * submission then joins its row into a copy of @ref auth without applying
      * it and applies it after that pass (`routes::resolve_load_residuals`).
      *
-     * False on a run without `requestElements`: nothing after the build
-     * answers such a name there, so the build encodes it as written, as it
-     * always did, and the run keeps sending one shared request.
+     * False on a run without `requestElements`, which keeps sending one shared
+     * request: when it names an `environmentId` or `requestId`,
+     * `build_load_request` defers the build itself and resolves and applies
+     * the credentials once, after its start-of-run pass over the stored
+     * scopes (#3288); otherwise nothing answers such a name, and the build
+     * encodes it as written, as it always did.
      */
     bool after_scripts = false;
 
@@ -127,6 +130,20 @@ struct LoadAuthPlan {
 [[nodiscard]] std::optional<std::string> plan_load_files (vayu::http::FilePlan& files,
 vayu::Request& request,
 const LoadDataSet* data);
+
+/**
+ * @brief Whether each submission of a single-request run copies the request
+ * and runs the residual pass over the copy (#1594), given @p bind_template,
+ * the per-iteration tokens its request splits into.
+ *
+ * The rule `submit_one_request` follows, stated once: the run declares
+ * `requestElements` and does not send the shared request. Taking the template
+ * as a parameter lets `build_load_request` ask before it has split the request
+ * (#3288), to leave such a run's names to that pass, which reads what
+ * `script.setup` wrote.
+ */
+[[nodiscard]] bool submissions_run_the_residual_pass (const RunContext& context,
+const StepDataTemplate& bind_template);
 
 /**
  * @brief Closed-loop concurrency controller. Seeds target(0), then refills the

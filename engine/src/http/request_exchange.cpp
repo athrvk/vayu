@@ -950,6 +950,40 @@ const ScriptVariableScopes& scopes) {
     return resolve_residual_tokens (request, values_from_scopes (scopes));
 }
 
+namespace {
+
+/**
+ * Every credential of @p auth resolved against @p vars, the names in
+ * @p bound_columns left for the bind; the first value that cannot be spelled
+ * in the header line its credential is written into is answered.
+ */
+std::optional<vayu::http::HeaderTextRefusal> resolve_auth_credentials (vayu::http::Auth& auth,
+const vayu::http::VariableValues& vars,
+const vayu::http::BoundColumnNames& bound_columns) {
+    // Resolved raw: `apply_auth` encodes what each destination needs (base64
+    // for a basic pair, the query rule for an api key in the query). One it
+    // writes into a header line as it stands is held to the header rule.
+    std::optional<vayu::http::HeaderTextRefusal> unspellable;
+    vayu::http::walk_auth_credentials (auth,
+    [&] (std::string& field, vayu::http::CredentialDestination destination) {
+        field = destination == vayu::http::CredentialDestination::HeaderLine ?
+        vayu::http::resolve_header_template (field, vars, unspellable, bound_columns) :
+        vayu::http::resolve_template (field, vars, bound_columns);
+    });
+    return unspellable;
+}
+
+} // namespace
+
+std::optional<ResidualRefusal> resolve_load_auth_tokens (vayu::http::Auth& auth,
+const vayu::http::VariableValues& vars,
+const vayu::http::BoundColumnNames& bound_columns) {
+    if (auto unspellable = resolve_auth_credentials (auth, vars, bound_columns)) {
+        return unsendable_header_refusal (*unspellable);
+    }
+    return std::nullopt;
+}
+
 std::optional<ResidualRefusal> apply_late_auth (vayu::Request& request,
 vayu::http::Auth auth,
 const vayu::http::VariableValues& vars,
@@ -960,16 +994,7 @@ LateTokenAcquisition* acquisition) {
     if (request.auth_from_script) {
         return std::nullopt;
     }
-    // Resolved raw: `apply_auth` encodes what each destination needs (base64
-    // for a basic pair, the query rule for an api key in the query). One it
-    // writes into a header line as it stands is held to the header rule.
-    std::optional<vayu::http::HeaderTextRefusal> unspellable;
-    vayu::http::walk_auth_credentials (auth,
-    [&vars, &unspellable] (std::string& field, vayu::http::CredentialDestination destination) {
-        field = destination == vayu::http::CredentialDestination::HeaderLine ?
-        vayu::http::resolve_header_template (field, vars, unspellable) :
-        vayu::http::resolve_template (field, vars);
-    });
+    const auto unspellable = resolve_auth_credentials (auth, vars, {});
     // Before `apply_auth`, which computes the cache key from it (D10).
     if (auto* oauth2 = std::get_if<vayu::http::OAuth2Auth> (&auth)) {
         oauth2->config = vayu::http::resolve_json_strings (oauth2->config, vars);

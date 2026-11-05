@@ -789,8 +789,10 @@ struct RunContext {
      * Beside @ref load_data rather than inside it, because a credential
      * carrying the identity defers on a run that has no rows at all - the set
      * exists only where rows do, so a set is the wrong place to keep what every
-     * run shape can carry. Written once by `start_run`, read on the run's
-     * worker thread afterwards.
+     * run shape can carry. Written by `start_run`, and once more by
+     * `build_load_request` when its credentials resolve against the stored
+     * scopes at start (#3288), both before the first submission; read on the
+     * run's worker thread afterwards.
      */
     LoadAuthPlan load_auth;
 

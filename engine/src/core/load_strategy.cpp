@@ -695,13 +695,18 @@ inline void update_peak (const std::shared_ptr<RunContext>& context) {
 // enters the swap at all: `current()` is then short-circuited on a null state.
 /**
  * Whether every submission of this run sends the shared request as it stands:
- * nothing to bind, no credential to apply, no `step.before` kind to write into
- * it - so no per-submission copy, and no residual pass either.
+ * nothing to bind (@p bind_template is the run's split), no credential to
+ * apply, no `step.before` kind to write into it - so no per-submission copy,
+ * and no residual pass either.
  */
-bool sends_the_shared_request (const RunContext& context) {
-    return context.load_data == nullptr && context.load_template.empty () &&
+bool sends_the_shared_request (const RunContext& context, const StepDataTemplate& bind_template) {
+    return context.load_data == nullptr && bind_template.empty () &&
     context.load_auth.auth_resolution () == vayu::http::AuthResolution::Apply &&
     !context.step_elements_have_step_before;
+}
+
+bool sends_the_shared_request (const RunContext& context) {
+    return sends_the_shared_request (context, context.load_template);
 }
 
 class SubmissionRequest {
@@ -1156,6 +1161,12 @@ SubmissionRequest& live) {
 }
 
 } // namespace
+
+bool submissions_run_the_residual_pass (const RunContext& context,
+const StepDataTemplate& bind_template) {
+    return context.step_elements && !context.step_elements->empty () &&
+    !sends_the_shared_request (context, bind_template);
+}
 
 // Declared in load_strategy.hpp - the scenario load executor drives the same
 // loop with a different submit_one. See the header for the contract.

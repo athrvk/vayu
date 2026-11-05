@@ -862,6 +862,20 @@ const vayu::http::VariableValues& vars,
 const vayu::http::BoundColumnNames& bound_columns);
 
 /**
+ * The same run's credentials, held back from the build, resolved once against
+ * @p vars at start (#3288) and not applied: the caller applies them, or the
+ * per-iteration bind does when a token it owns is left. Each credential is
+ * resolved as @ref apply_late_auth resolves it (a generator generated once, as
+ * composition generates one in an auth block, #995), except that `{{data.*}}`,
+ * the identity and a bare name in @p bound_columns survive for the bind. A
+ * value that cannot be spelled in the header line its credential is written
+ * into is resolved anyway and answered as `unsendable_header`.
+ */
+[[nodiscard]] std::optional<ResidualRefusal> resolve_load_auth_tokens (vayu::http::Auth& auth,
+const vayu::http::VariableValues& vars,
+const vayu::http::BoundColumnNames& bound_columns);
+
+/**
  * Apply auth the build deferred because a credential holds a name only the
  * variable scopes answer (`core::credentials_await_scripts`, issue #2473) -
  * one nothing answered at composition, or any name of a request a pre-request

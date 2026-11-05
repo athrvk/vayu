@@ -31,10 +31,13 @@
 #include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/request_exchange.hpp"
+#include "vayu/http/routes.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "wait_until.hpp"
 
 namespace {
@@ -166,8 +169,20 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
             { "iterations", iterations }, { "concurrency", 1 }, { "timeout", 5000 } };
     }
 
-    /// Runs @p config to its terminal status and answers the stored row.
+    /// Runs @p config to its terminal status and answers the stored row. Its
+    /// `data` rows and credential plan are read by the route's own reader, as
+    /// `POST /runs` reads them, so a run that binds them is the run the route
+    /// would start.
     std::optional<vayu::db::Run> run (const json& config) {
+        vayu::core::ScenarioLimits limits;
+        limits.max_data_rows  = vayu::core::constants::scenario::MAX_DATA_ROWS;
+        limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+        auto read = vayu::http::routes::read_load_data_set (config, limits, false);
+        if (!read.ok) {
+            ADD_FAILURE () << "the route refused the payload: " << read.error;
+            return std::nullopt;
+        }
+
         const std::string run_id = "run_template_scopes";
         vayu::db::Run row;
         row.id              = run_id;
@@ -180,7 +195,8 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
         row.end_time   = row.start_time;
         db_->create_run (row);
 
-        if (!manager_.start_run (run_id, config, *db_)) {
+        if (!manager_.start_run (run_id, config, *db_, nullptr,
+            std::move (read.set), std::move (read.auth))) {
             ADD_FAILURE () << "start_run refused the payload";
             return std::nullopt;
         }
@@ -209,6 +225,21 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
         return std::find (listed.begin (), listed.end (), name) != listed.end ();
     }
 
+    /// A `lifecycleElements` array whose `script.setup` points `base` at the
+    /// echo server's `/setup`.
+    json setup_writing_base () const {
+        return json::array (
+        { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
+        { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    }
+
+    /// A `requestElements` array holding only `assert.status`, a `step.after`
+    /// kind: it reads the response and never writes into the request.
+    static json response_reading_elements () {
+        return json::array ({ json{ { "id", "el_status" }, { "kind", "assert.status" },
+        { "enabled", true }, { "config", { { "in", json::array ({ 200 }) } } } } });
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     vayu::core::RunManager manager_;
     vayu::tests::EchoServer echo_;
@@ -216,7 +247,7 @@ class LoadTemplateScopesRunTest : public ::testing::Test {
 
 // The issue's case: an environment answers a bare `{{base}}` in a run that
 // declares no `requestElements`, and the run reports nothing unresolved.
-// Mutation check: drop the `resolve_template_against_stored_scopes` call from
+// Mutation check: drop the `resolve_against_stored_scopes` call from
 // `build_load_request` and the URL goes out as `{{base}}/x` - nothing reaches
 // the echo server and the warning names `base`.
 TEST_F (LoadTemplateScopesRunTest, ARawRunNamingAnEnvironmentSendsTheResolvedUrl) {
@@ -329,9 +360,7 @@ TEST_F (LoadTemplateScopesRunTest, ASetupWriteIsNotSeenWithoutRequestElements) {
     save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
     auto config                 = payload ("{{base}}/x");
     config["environmentId"]     = "env_eu";
-    config["lifecycleElements"] = json::array (
-    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
-    { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    config["lifecycleElements"] = setup_writing_base ();
 
     const auto stored = run (config);
 
@@ -340,17 +369,16 @@ TEST_F (LoadTemplateScopesRunTest, ASetupWriteIsNotSeenWithoutRequestElements) {
     EXPECT_EQ (echo_.path (), "/echo/stored/x");
 }
 
-// A run declaring `requestElements` keeps its per-submission pass, which reads
-// what `script.setup` wrote: the start-of-run pass must not answer the name
-// first from the stored value. Mutation check: drop the `step_elements` skip
-// in `resolve_template_against_stored_scopes` and this sends `/echo/stored/x`.
+// A run whose submissions are copied keeps its per-submission pass, which
+// reads what `script.setup` wrote: the start-of-run pass must not answer the
+// name first from the stored value. Mutation check: drop the
+// `submissions_run_the_residual_pass` skip in
+// `resolve_against_stored_scopes` and this sends `/echo/stored/x`.
 TEST_F (LoadTemplateScopesRunTest, ARunDeclaringRequestElementsKeepsItsPerSubmissionPass) {
     save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
     auto config                 = payload ("{{base}}/x");
     config["environmentId"]     = "env_eu";
-    config["lifecycleElements"] = json::array (
-    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
-    { "config", { { "script", "pm.environment.set('base', '" + echo_.url () + "/setup');" } } } } });
+    config["lifecycleElements"] = setup_writing_base ();
     // An inline `script.pre` is a `step.before` kind, which is what puts every
     // submission on the path that runs the residual pass.
     config["requestElements"] = json::array (
@@ -362,6 +390,208 @@ TEST_F (LoadTemplateScopesRunTest, ARunDeclaringRequestElementsKeepsItsPerSubmis
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
     EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+// #3288: a run whose `requestElements` only read the response sends the shared
+// request and runs no per-submission pass, so the start-of-run pass is the only
+// thing that can answer `{{base}}`. Mutation check: skip the pass whenever
+// `step_elements` is non-empty, as before #3288, and the URL goes out as
+// `{{base}}/x` - nothing reaches the echo server and the warning names `base`.
+TEST_F (LoadTemplateScopesRunTest, AResponseReadingRequestElementsRunSendsTheResolvedUrl) {
+    save_environment ("env_eu", { { "base", variable (echo_.url ()) } });
+    auto config               = payload ("{{base}}/x");
+    config["environmentId"]   = "env_eu";
+    config["requestElements"] = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 2);
+    EXPECT_EQ (echo_.path (), "/echo/x");
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// The token-free half of the same run shape sends what it always sent. As for a
+// run without `requestElements`, the scope read the pass skips is not
+// observable on the wire; the run's bytes, its count and its clean report are.
+TEST_F (LoadTemplateScopesRunTest, ATokenFreeResponseReadingRunSendsItsUrlAsWritten) {
+    save_environment ("env_eu", { { "base", variable ("https://elsewhere.test") } });
+    auto config               = payload (echo_.url () + "/plain?q=1", 3);
+    config["environmentId"]   = "env_eu";
+    config["requestElements"] = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 3);
+    EXPECT_EQ (echo_.target (), "/echo/plain?q=1");
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// Each reason other than a `step.before` kind that copies every submission
+// keeps the per-submission pass, and with it the setup write, on a run whose
+// `requestElements` only read the response: a bind token, data rows, and a
+// credential waiting on the scripts. Mutation check: skip the start-of-run
+// pass on `step_elements_have_step_before` alone and each sends
+// `/echo/stored/...`.
+TEST_F (LoadTemplateScopesRunTest, ABindTokenRunKeepsTheSetupWrite) {
+    save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
+    auto config                 = payload ("{{base}}/x?vu={{$vu}}");
+    config["environmentId"]     = "env_eu";
+    config["lifecycleElements"] = setup_writing_base ();
+    config["requestElements"]   = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+TEST_F (LoadTemplateScopesRunTest, ADataRowRunKeepsTheSetupWrite) {
+    save_environment ("env_eu", { { "base", variable (echo_.url () + "/stored") } });
+    auto config                 = payload ("{{base}}/x");
+    config["environmentId"]     = "env_eu";
+    config["data"]              = json::array ({ json{ { "id", "a" } } });
+    config["lifecycleElements"] = setup_writing_base ();
+    config["requestElements"]   = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+}
+
+// The credential itself is applied after each submission's residual pass,
+// so it reads the setup write too, rather than being resolved at start from
+// the stored value (#3288). Mutation check: drop the `after_scripts` term of
+// `credentials_resolve_at_start` and both submissions send `Bearer t-stored`.
+TEST_F (LoadTemplateScopesRunTest, ACredentialWaitingOnTheScriptsKeepsTheSetupWrite) {
+    save_environment ("env_eu",
+    { { "base", variable (echo_.url () + "/stored") }, { "token", variable ("t-stored") } });
+    auto config             = payload ("{{base}}/x");
+    config["environmentId"] = "env_eu";
+    config["auth"] = { { "mode", "bearer" }, { "token", "{{token}}" } };
+    config["lifecycleElements"] = json::array (
+    { json{ { "id", "el_setup" }, { "kind", "script.setup" }, { "enabled", true },
+    { "config",
+    { { "script",
+    "pm.environment.set('base', '" + echo_.url () +
+    "/setup'); pm.environment.set('token', 't-setup');" } } } } });
+    config["requestElements"] = response_reading_elements ();
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.path (), "/echo/setup/x");
+    EXPECT_EQ (echo_.header_per_request ("Authorization"),
+    (std::vector<std::string>{ "Bearer t-setup", "Bearer t-setup" }));
+}
+
+// #3288: a basic pair is base64-encoded when it is applied, so a name in it has
+// to be answered first. The build holds the credentials back and the
+// start-of-run pass resolves and applies them once, to the shared request.
+// Mutation check: build with `load_auth.auth_resolution ()` alone in
+// `build_load_request`, applying the auth before the pass, and both
+// submissions carry the base64 of `{{user}}:{{pass}}`.
+TEST_F (LoadTemplateScopesRunTest, ABasicPairNamingStoredVariablesIsEncodedResolved) {
+    save_environment (
+    "env_eu", { { "user", variable ("ada") }, { "pass", variable ("pw") } });
+    auto config             = payload (echo_.url () + "/b");
+    config["environmentId"] = "env_eu";
+    config["auth"]          = { { "mode", "basic" }, { "username", "{{user}}" },
+        { "password", "{{pass}}" } };
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    const auto expected = "Basic " + vayu::utils::base64_encode ("ada:pw");
+    EXPECT_EQ (echo_.header_per_request ("Authorization"),
+    (std::vector<std::string>{ expected, expected }));
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// A query-placed api key went out resolved before #3288 too: the build wrote
+// `{{key}}` into the URL, braces unencoded, and the template pass answered it
+// there. It is now applied once, after that pass. Mutation check: build with
+// `load_auth.auth_resolution ()` alone in `build_load_request` and the key is
+// written twice, `?api_key=k-1&api_key=k-1`.
+TEST_F (LoadTemplateScopesRunTest, AQueryApiKeyNamingAStoredVariableIsSentResolved) {
+    save_environment ("env_eu", { { "key", variable ("k-1") } });
+    auto config             = payload (echo_.url () + "/q");
+    config["environmentId"] = "env_eu";
+    config["auth"]          = { { "mode", "apikey" }, { "key", "api_key" },
+        { "value", "{{key}}" }, { "in", "query" } };
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 2);
+    EXPECT_EQ (echo_.target (), "/echo/q?api_key=k-1");
+}
+
+// A bearer token went out resolved before #3288, through its header line; it
+// still does, now applied by the same start-of-run step as the rest.
+TEST_F (LoadTemplateScopesRunTest, ABearerTokenNamingAStoredVariableIsStillSentResolved) {
+    save_environment ("env_eu", { { "token", variable ("t-1") } });
+    auto config             = payload (echo_.url () + "/t");
+    config["environmentId"] = "env_eu";
+    config["auth"] = { { "mode", "bearer" }, { "token", "{{token}}" } };
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (echo_.header_per_request ("Authorization"),
+    (std::vector<std::string>{ "Bearer t-1", "Bearer t-1" }));
+}
+
+// A credential holding no token is applied by the build, as it always was: the
+// run naming an environment changes nothing about it.
+TEST_F (LoadTemplateScopesRunTest, ATokenFreeCredentialIsAppliedByTheBuild) {
+    save_environment ("env_eu", { { "user", variable ("someone-else") } });
+    auto config             = payload (echo_.url () + "/s", 3);
+    config["environmentId"] = "env_eu";
+    config["auth"] = { { "mode", "basic" }, { "username", "ada" }, { "password", "pw" } };
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (echo_.requests_seen (), 3);
+    const auto expected = "Basic " + vayu::utils::base64_encode ("ada:pw");
+    EXPECT_EQ (echo_.header ("Authorization"), expected);
+    EXPECT_TRUE (unresolved_warning (*stored).is_null ()) << stored->summary;
+}
+
+// A pair holding a name the stored scopes answer beside a token the bind owns,
+// in one field and in the other, is still bound per submission, with the
+// stored names answered first. Mutation check: skip re-splitting
+// `load_auth.credentials` after the pass and the bind writes the username it
+// split before, `{{prefix}}` included.
+TEST_F (LoadTemplateScopesRunTest, ACredentialAlsoHoldingABindTokenIsBoundWithTheStoredValue) {
+    save_environment (
+    "env_eu", { { "prefix", variable ("u") }, { "pass", variable ("pw") } });
+    auto config             = payload (echo_.url () + "/m");
+    config["environmentId"] = "env_eu";
+    config["auth"]          = { { "mode", "basic" },
+        { "username", "{{prefix}}-{{$iteration}}" }, { "password", "{{pass}}" } };
+
+    const auto stored = run (config);
+
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    auto sent = echo_.header_per_request ("Authorization");
+    std::vector<std::string> expected{ "Basic " + vayu::utils::base64_encode ("u-0:pw"),
+        "Basic " + vayu::utils::base64_encode ("u-1:pw") };
+    std::sort (sent.begin (), sent.end ());
+    std::sort (expected.begin (), expected.end ());
+    EXPECT_EQ (sent, expected);
 }
 
 } // namespace
