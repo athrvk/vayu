@@ -7331,7 +7331,9 @@ own `params` is consumed, never echoed). `/execute`, `/runs` and a scenario
 plan step (which is composed through this same path) read that `params` back
 and write each waiting value into its `:name` segment once it is answered, at
 the latest just before the send: a run with no residual pass writes it after
-the bind, or once at the start for a load run that binds nothing. A caller
+the bind, or once at the start for a load run that binds nothing (a raw
+run naming an `environmentId` or `requestId` writes the values its start-of-run
+pass answered there, the rest after the bind). A caller
 posting its own `params` path rows to `/execute` or `/runs` gets the same
 writing.
 

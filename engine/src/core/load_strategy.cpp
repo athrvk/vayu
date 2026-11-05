@@ -1139,8 +1139,9 @@ SubmissionRequest& live) {
             context->metrics_collector->record_unresolved_token (unresolved);
         }
     } else {
-        // No residual pass on this run, so the bind above was the last thing
-        // to answer a path value (issue #1764): whatever still waits is
+        // No per-submission residual pass on this run (the start-of-run pass,
+        // #3253, ran once before the split), so the bind above was the last
+        // thing to answer a path value (issue #1764): whatever still waits is
         // written now, its token verbatim.
         settle_path_variables (request, PathSettle::All);
         if (auto names = vayu::http::routes::unresolved_token_names (request);
