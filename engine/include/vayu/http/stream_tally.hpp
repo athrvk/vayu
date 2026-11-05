@@ -38,7 +38,7 @@ class StreamTally {
 
     /// Bound this transfer by @p bounds, timed from @p started_at, the instant
     /// the transfer's latency is measured from. A tally never started is
-    /// inactive, and its owner calls nothing else on it.
+    /// inactive, and its owner calls nothing but `report` on it.
     void start (const StreamBounds& bounds, Clock::time_point started_at) {
         active_     = true;
         max_events_ = bounds.max_events;
@@ -90,8 +90,13 @@ class StreamTally {
      * mid-way still delivered the events it delivered. Counts an unterminated
      * last frame the close completed, which leaves the first-event time unset
      * when it was the only one: no write delivered it at a time to measure.
+     * An inactive tally reports nothing, so an ordinary transfer's
+     * `stream_events` stays absent rather than zero.
      */
     void report (Response& response) {
+        if (!active_) {
+            return;
+        }
         counter_.finish ();
         response.stream_events         = counter_.events ();
         response.stream_capped         = cap_reached_;

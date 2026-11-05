@@ -1782,9 +1782,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // transfer the server killed mid-stream still delivered the events it
     // delivered, and dropping the count on the error path would make a partial
     // stream indistinguishable from one that carried nothing.
-    if (data->stream.active ()) {
-        data->stream.report (response);
-    }
+    data->stream.report (response);
 
     // A cap ended this stream, which is what a bounded stream under load is
     // *supposed* to do (issue #576), so it completes successfully rather than

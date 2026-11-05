@@ -31,6 +31,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/status.hpp"
+#include "vayu/http/stream_tally.hpp"
 #include "vayu/http/url_parts.hpp"
 
 #include <curl/curl.h>
@@ -144,25 +145,54 @@ struct BodySink {
     /// re-scanning the header list per 16 KiB chunk would be work for nothing.
     std::optional<uint64_t> declared_total;
     bool total_resolved = false;
+    /// The bounded stream this transfer is (`Request::stream_bounds`, #3235),
+    /// inactive for every other one.
+    StreamTally stream;
 };
 
-/// The flag a cancellable transfer watches (`ClientConfig::cancel`, issue
-/// #2683), and whether the progress callback acted on it.
-struct CancelWatch {
-    const std::atomic<bool>* flag = nullptr;
-    /// Set when the callback aborted, so the completion reports a cancel rather
-    /// than libcurl's generic `CURLE_ABORTED_BY_CALLBACK`, which the
-    /// reserved-port refusal also raises.
-    bool fired = false;
+/// What the progress callback ends a transfer for: the flag a cancellable
+/// transfer watches (`ClientConfig::cancel`, issue #2683), and a bounded
+/// stream's duration cap, which a quiet stream delivers no write to check
+/// from.
+struct ProgressWatch {
+    const std::atomic<bool>* cancel = nullptr;
+    /// Set when the callback aborted for @ref cancel, so the completion
+    /// reports a cancel rather than libcurl's generic
+    /// `CURLE_ABORTED_BY_CALLBACK`, which the reserved-port refusal also
+    /// raises.
+    bool cancelled = false;
+    /// The sink's tally; its `cap_reached` says the duration cap fired.
+    StreamTally* stream = nullptr;
 };
 
-int cancel_progress_callback (void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
-    auto* watch = static_cast<CancelWatch*> (clientp);
-    if (!watch->flag->load (std::memory_order_acquire)) {
-        return 0;
+/// libcurl calls this at least once a second, so a cancel or the duration cap
+/// lands within about that. Non-zero aborts with CURLE_ABORTED_BY_CALLBACK.
+int progress_callback (void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t);
+
+/// Installs `progress_callback` on @p curl over @p watch, when a cancel is
+/// watched or @p request streams; every other transfer runs without one.
+void watch_progress (CURL* curl, ProgressWatch& watch, const Request& request) {
+    if (watch.cancel == nullptr && !request.stream_bounds) {
+        return;
     }
-    watch->fired = true;
-    return 1; // Non-zero aborts with CURLE_ABORTED_BY_CALLBACK.
+    set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
+    set_opt<CURLOPT_XFERINFOFUNCTION> (curl, progress_callback);
+    set_opt<CURLOPT_XFERINFODATA> (curl, &watch);
+}
+
+int progress_callback (void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    auto* watch = static_cast<ProgressWatch*> (clientp);
+    if (watch->cancel != nullptr && watch->cancel->load (std::memory_order_acquire)) {
+        watch->cancelled = true;
+        return 1;
+    }
+    StreamTally* stream = watch->stream;
+    if (stream != nullptr && stream->active () &&
+    stream->deadline_passed (std::chrono::steady_clock::now ())) {
+        stream->mark_cap_reached ();
+        return 1;
+    }
+    return 0;
 }
 
 /// Forward declaration: the write callback below resolves the declared length,
@@ -190,6 +220,13 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* sink        = static_cast<BodySink*> (userdata);
     size_t total_size = size * nmemb;
 
+    // A bounded stream counts what it received before the byte bound is
+    // applied, as the event loop's callback does: the events in this chunk
+    // are on the wire whether or not the bound keeps their bytes.
+    if (sink->stream.active () && sink->stream.feed (std::string_view (ptr, total_size))) {
+        sink->stream.mark_cap_reached ();
+    }
+
     if (sink->max_bytes > 0) {
         const size_t remaining =
         sink->max_bytes - std::min (sink->max_bytes, sink->body.size ());
@@ -201,6 +238,13 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     }
 
     sink->body.append (ptr, total_size);
+
+    // The event cap, ended by the short count the bound uses and read as a
+    // success by `stream_ended_by_rule`. One byte short rather than zero, so
+    // the chunk just buffered stays whole: the body is the events.
+    if (sink->stream.cap_reached ()) {
+        return total_size > 0 ? total_size - 1 : 0;
+    }
 
     // Reported after the append, so `received` is the body a reader would see
     // and not the one that is about to exist. A refusal is a short count for
@@ -643,6 +687,55 @@ void fail_if_proxy_refused (Response& response, CURL* curl, long status) {
     }
 }
 
+/**
+ * @brief Whether a bounded stream ended the way one is meant to, once the
+ *        server had answered: at a cap, or at a stop (`ClientConfig::cancel`).
+ *
+ * Either is a **success** whatever libcurl calls the abort that delivered it,
+ * the event loop's reading of a cap, and a stop is the end a design stream's
+ * `POST /runs/:id/stop` names (`SseEndReason::Stopped`), not a failure of the
+ * request. Before a status line there is no response to report, and the
+ * error branch says why.
+ */
+bool stream_ended_by_rule (const StreamTally& stream, const ProgressWatch& watch, CURL* curl) {
+    if (!stream.active () || !(stream.cap_reached () || watch.cancelled)) {
+        return false;
+    }
+    long status = 0;
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
+    return status > 0;
+}
+
+/**
+ * @brief The error for a transfer this engine ended itself, or none when
+ *        libcurl's own reading of the failure stands.
+ *
+ * A refused body is not a network failure, and curl's own word for it says
+ * nothing a caller can act on: the write callback's short count surfaces as a
+ * generic CURLE_WRITE_ERROR. So it is recognized here and reported as the
+ * condition it is, which `/import/fetch` answers with a 413 rather than a 502.
+ * A cancel is this engine's own abort too, and so is a stream's duration cap
+ * that passed before the server answered.
+ */
+std::optional<Error> engine_abort_error (const BodySink& sink,
+const ProgressWatch& watch,
+const Request& request) {
+    if (watch.cancelled) {
+        return Error{ ErrorCode::Cancelled, "Request cancelled" };
+    }
+    if (sink.limit_exceeded) {
+        return Error{ ErrorCode::ResponseTooLarge,
+            too_large_message (*sink.headers, sink.max_bytes) };
+    }
+    const auto& bounds = request.stream_bounds;
+    if (sink.stream.cap_reached () && bounds) {
+        return Error{ ErrorCode::Timeout,
+            "No response before the stream's " + std::to_string (bounds->max_duration_ms) +
+            " ms duration cap (maxStreamDurationMs)" };
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 // ============================================================================
@@ -772,17 +865,17 @@ Result<Response> Client::send (const Request& request) {
         set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
         static_cast<long> (server_limits::connect_timeout_ms (impl_->config.stall_timeout_ms)));
     } else {
-        set_opt<CURLOPT_TIMEOUT_MS> (curl, static_cast<long> (request.timeout_ms));
+        // A bounded stream's is the backstop around its duration cap, so its
+        // own timeout bounds the connect phase alone, as under load.
+        set_opt<CURLOPT_TIMEOUT_MS> (curl, detail::whole_transfer_timeout_ms (request));
         set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
         static_cast<long> (server_limits::connect_timeout_ms (request.timeout_ms)));
     }
 
-    CancelWatch cancel_watch{ impl_->config.cancel };
-    if (cancel_watch.flag != nullptr) {
-        set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
-        set_opt<CURLOPT_XFERINFOFUNCTION> (curl, cancel_progress_callback);
-        set_opt<CURLOPT_XFERINFODATA> (curl, &cancel_watch);
-    }
+    ProgressWatch progress_watch;
+    progress_watch.cancel = impl_->config.cancel;
+    progress_watch.stream = &sink.stream;
+    watch_progress (curl, progress_watch, request);
 
     // Set redirect options
     if (request.follow_redirects) {
@@ -838,8 +931,11 @@ Result<Response> Client::send (const Request& request) {
     // libcurl does on this thread. For single-shot sends there is no generator
     // queue, so queue_wait_ms will be near zero - that's the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
-    CURLcode res      = curl_easy_perform (curl);
-    auto completion   = std::chrono::steady_clock::now ();
+    if (const auto& bounds = request.stream_bounds) {
+        sink.stream.start (*bounds, submitted_at);
+    }
+    CURLcode res    = curl_easy_perform (curl);
+    auto completion = std::chrono::steady_clock::now ();
     flush_transfer_debug (transfer_debug);
 
     // Cleanup headers, which had to outlive the transfer that just finished;
@@ -912,27 +1008,21 @@ Result<Response> Client::send (const Request& request) {
     // and not a failure to report.
     const bool keep_truncated_body = sink.limit_exceeded && impl_->config.truncate_over_limit;
 
+    // What a bounded stream delivered, on every path below.
+    sink.stream.report (response);
+    const bool stream_ended = stream_ended_by_rule (sink.stream, progress_watch, curl);
+
     // Check for errors
-    if (res != CURLE_OK && !keep_truncated_body) {
-        // A refused body is not a network failure, and curl's own word for it
-        // says nothing a caller can act on: the write callback's short count
-        // surfaces as a generic CURLE_WRITE_ERROR. So it is recognized here and
-        // reported as the condition it is, which `/import/fetch` answers with a
-        // 413 rather than a 502. A cancel is this engine's own abort too.
-        Error error;
-        if (cancel_watch.fired) {
-            error = Error{ ErrorCode::Cancelled, "Request cancelled" };
-        } else if (sink.limit_exceeded) {
-            error = Error{ ErrorCode::ResponseTooLarge,
-                too_large_message (response.headers, sink.max_bytes) };
-        } else {
+    if (res != CURLE_OK && !keep_truncated_body && !stream_ended) {
+        auto error = engine_abort_error (sink, progress_watch, request);
+        if (!error) {
             error = detail::curl_to_error (curl, res, impl_->errors, &request, &peer_check);
         }
 
         // Return Response object with error details (Postman-compatible approach).
         // raw_request and timing are already populated above; headers and body
         // stay as the transfer left them (empty when nothing answered).
-        mark_failed (response, error);
+        mark_failed (response, *error);
         return response;
     }
 

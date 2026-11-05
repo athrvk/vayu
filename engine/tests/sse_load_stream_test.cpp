@@ -7,7 +7,9 @@
 
 /**
  * @file sse_load_stream_test.cpp
- * @brief Bounded streams on the load event loop (issue #576).
+ * @brief Bounded streams on the load event loop (issue #576), and on the
+ *        single-request client a collection run's sequential steps send
+ *        through (#3235).
  *
  * The invariant under test is not "the count is right" - `sse_frame_counter_test`
  * owns that - it is that **a stream-flagged transfer always completes, exactly
@@ -30,13 +32,17 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "optional_assert.hpp"
 #include "vayu/core/constants.hpp"
+#include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
 
@@ -129,6 +135,15 @@ class LoadStreamServer {
 
         svr_.Get ("/plain", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("not a stream", "text/plain");
+        });
+
+        // Accepts the request and sends no status line until the server
+        // stops: a duration cap that passes here has no response to report.
+        svr_.Get ("/mute", [this] (const httplib::Request&, httplib::Response& res) {
+            while (!stopping_.load ()) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+            res.set_content ("too late", "text/plain");
         });
 
         port_   = svr_.bind_to_any_port ("127.0.0.1");
@@ -391,4 +406,121 @@ TEST (SseLoadStreamTest, BalancedAccountingUnderConcurrency) {
     EXPECT_EQ (loop.active_count (), 0u);
 
     loop.stop ();
+}
+
+// ---------------------------------------------------------------------------
+// The same bounds on the single-request client (#3235)
+// ---------------------------------------------------------------------------
+
+// A collection run's sequential steps send through `Client`, so a stored
+// streaming request reaches it bounded, and it ends by the event loop's
+// rules. One send, the way the runner makes it.
+namespace {
+vayu::Response
+send_one (const vayu::Request& request, vayu::http::ClientConfig config = {}) {
+    vayu::http::Client client (std::move (config));
+    return client.send (request).value ();
+}
+} // namespace
+
+// Healthy, the silent stream ends at its 1200 ms cap as a capped 200. With
+// the bounds ignored it fails at its own 300 ms timeout, which is the
+// mutation check: send `timeout_ms` as `CURLOPT_TIMEOUT_MS` in `Client::send`
+// again and every assertion below fails.
+TEST (SseClientStreamTest, ADurationCapEndsAStreamHeldPastItsTimeoutAsASuccess) {
+    LoadStreamServer server;
+    auto request       = stream_request (server.url ("/silent"), 1000000, 1200);
+    request.timeout_ms = 300;
+
+    const auto response = send_one (request);
+
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.stream_capped);
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 0u);
+}
+
+TEST (SseClientStreamTest, AnEventCapEndsAnEndlessStreamAsASuccessWithItsBody) {
+    LoadStreamServer server;
+    const auto response = send_one (stream_request (server.url ("/endless"), 5, 30000));
+
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.stream_capped);
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_GE (*response.stream_events, 5u);
+    EXPECT_NE (response.body.find ("data: tick"), std::string::npos)
+    << "the body is the events, as a load sample's is";
+    EXPECT_FALSE (response.body_truncated);
+}
+
+TEST (SseClientStreamTest, AServerClosedStreamCompletesUncappedAndTimesItsFirstEvent) {
+    LoadStreamServer server;
+    const auto finite = send_one (stream_request (server.url ("/finite"), 1000, 30000));
+    EXPECT_FALSE (finite.has_error ()) << finite.error_message;
+    ASSERT_HAS_VALUE (finite.stream_events);
+    EXPECT_EQ (*finite.stream_events, 3u);
+    EXPECT_FALSE (finite.stream_capped);
+
+    // A lower bound only, as `TheFirstEventIsTimedFromSubmissionNotFromTheHeaders`
+    // above: healthy it reads at least the 300 ms the server holds the event.
+    const auto delayed = send_one (stream_request (server.url ("/delayed"), 1000, 30000));
+    ASSERT_HAS_VALUE (delayed.stream_first_event_ms);
+    EXPECT_GE (*delayed.stream_first_event_ms,
+    static_cast<double> (FIRST_EVENT_DELAY.count ()));
+}
+
+// A stop ends a stream the server answered, as `POST /runs/:id/stop` ends a
+// design stream, rather than failing it. The cancel is raised from the first
+// body write, so the stream is known to be open. Mutation check: drop
+// `watch.cancelled` from `stream_ended_by_rule` and the response is a
+// `Cancelled` error.
+TEST (SseClientStreamTest, ACancelEndsAnAnsweredStreamWithWhatItDelivered) {
+    LoadStreamServer server;
+    std::atomic<bool> cancel{ false };
+    vayu::http::ClientConfig config;
+    config.cancel           = &cancel;
+    config.on_body_progress = [&cancel] (uint64_t, std::optional<uint64_t>) {
+        cancel.store (true);
+        return true;
+    };
+
+    const auto response = send_one (
+    stream_request (server.url ("/endless"), 10000000, 30000), std::move (config));
+
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_FALSE (response.stream_capped) << "the stop ended it, not a cap";
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_GT (*response.stream_events, 0u);
+}
+
+// Before a status line there is no response to report, so a cap that passes
+// there is an error that names the cap rather than a status-0 success.
+TEST (SseClientStreamTest, ADurationCapBeforeAnyAnswerIsATimeoutNamingTheCap) {
+    LoadStreamServer server;
+    const auto response = send_one (stream_request (server.url ("/mute"), 1000, 1000));
+
+    ASSERT_TRUE (response.has_error ());
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout);
+    EXPECT_NE (response.error_message.find ("1000 ms duration cap"), std::string::npos)
+    << response.error_message;
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 0u);
+}
+
+TEST (SseClientStreamTest, AnOrdinarySendCarriesNoEventCount) {
+    LoadStreamServer server;
+    vayu::Request request;
+    request.method     = vayu::HttpMethod::GET;
+    request.url        = server.url ("/plain");
+    request.timeout_ms = 10000;
+
+    const auto response = send_one (request);
+
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (response.body, "not a stream");
+    EXPECT_FALSE (response.stream_events.has_value ());
+    EXPECT_FALSE (response.stream_capped);
 }
