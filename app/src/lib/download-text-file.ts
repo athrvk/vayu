@@ -76,3 +76,8 @@ export async function downloadTextFile(
 	if (!save) return clickDownloadAnchor(new Blob([text], { type: mimeType }), fileName);
 	return saveThroughBridge(save, text, fileName);
 }
+
+/** What a toast says for a save that `failed`: the file and the system's reason. */
+export function saveFailedMessage(fileName: string, message: string): string {
+	return `Couldn't save ${fileName} - ${message}`;
+}

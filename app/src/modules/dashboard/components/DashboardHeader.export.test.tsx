@@ -43,7 +43,10 @@ vi.mock("@/queries", () => ({
 	},
 }));
 vi.mock("@/services/api", () => ({ apiService: { exportRunReport: vi.fn() } }));
-vi.mock("@/lib/download-text-file", () => ({ downloadTextFile: vi.fn() }));
+vi.mock("@/lib/download-text-file", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/download-text-file")>()),
+	downloadTextFile: vi.fn(async () => ({ outcome: "saved" })),
+}));
 
 function mount(patch: Partial<DashboardHeaderProps>) {
 	return render(
