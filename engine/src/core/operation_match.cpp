@@ -526,6 +526,21 @@ const std::vector<bool>& request_claimed) {
 
 } // namespace
 
+bool fills_template_under_base_paths (std::string_view path_shape,
+std::string_view template_shape,
+const std::vector<std::string>& base_paths) {
+    if (fills_template (path_shape, template_shape)) {
+        return true;
+    }
+    for (const std::string& base : base_path_shapes (base_paths)) {
+        const std::optional<std::string> rest = strip_base_path (path_shape, base);
+        if (rest && fills_template (*rest, template_shape)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 MatchResult match_operations (const std::vector<MatchableRequest>& requests,
 const std::vector<MatchableOperation>& operations,
 const std::vector<std::string>& base_paths) {

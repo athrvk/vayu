@@ -18,6 +18,7 @@
 #include "vayu/core/openapi_export.hpp"
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/openapi_document.hpp"
 #include "vayu/core/operation_match.hpp"
 #include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/file_ref.hpp"
@@ -985,7 +986,7 @@ void count_unwritten_body (const ExportRequest& entry, ExportNotes& notes) {
  * A request whose method or path is no longer the operation it is stamped as.
  * The path is judged as the matcher stamped it: `/users/1` still is
  * `/users/{id}`, so a concrete URL that fills its operation's template is not
- * an edit.
+ * an edit, and so is one under a server base path the matcher stripped.
  *
  * The stamp is what finds the operation, so the request's values still land -
  * in the operation the document declares, under the method and path *it*
@@ -994,7 +995,9 @@ void count_unwritten_body (const ExportRequest& entry, ExportNotes& notes) {
  * user to diff the file. A URL that states no path at all is not compared:
  * there is nothing to compare it with.
  */
-void count_edited_identity (const ExportRequest& entry, ExportNotes& notes) {
+void count_edited_identity (const ExportRequest& entry,
+ExportNotes& notes,
+const std::vector<std::string>& base_paths) {
     const auto& identity = entry.spec_operation;
     if (!identity) {
         return;
@@ -1004,7 +1007,8 @@ void count_edited_identity (const ExportRequest& entry, ExportNotes& notes) {
         return;
     }
     const std::optional<std::string> shape = request_path_shape (entry.url);
-    if (shape && !fills_template (*shape, spec_path_shape (identity->path))) {
+    if (shape &&
+    !fills_template_under_base_paths (*shape, spec_path_shape (identity->path), base_paths)) {
         notes.operations_edited += 1;
     }
 }
@@ -2391,6 +2395,8 @@ struct BoundWrite {
     BoundMode mode = BoundMode::Contract;
     OperationContext context;
     BoundSchemes* schemes = nullptr;
+    /// `base_paths_of` the document: the paths the matcher stripped when it stamped.
+    std::vector<std::string> base_paths;
 };
 
 /**
@@ -2630,7 +2636,7 @@ const BoundWrite& write) {
     const DeclaredParameters declared = patch_parameters (operation, document,
     entry, std::move (inherited), notes, /*counts_withheld=*/!full,
     vocabulary == Vocabulary::V3 ? "example" : "x-example");
-    count_edited_identity (entry, notes);
+    count_edited_identity (entry, notes, write.base_paths);
     if (full) {
         write_everything (operation, entry, declared, notes, write);
     } else {
@@ -3006,7 +3012,7 @@ BoundMode mode) {
         OperationContext{ vocabulary,
         /*responses_required=*/vocabulary == Vocabulary::V2 || version.starts_with ("3.0"),
         disposition_of (collection.auth) },
-        &schemes };
+        &schemes, base_paths_of (assembly.document) };
 
     std::unordered_map<std::string, size_t> by_operation_id;
     std::unordered_map<std::string, size_t> by_method_path;

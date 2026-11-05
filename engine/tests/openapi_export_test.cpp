@@ -519,6 +519,27 @@ TEST (BoundExport, DoesNotCountAConcreteUrlThatFillsTheTemplateItIsStampedAs) {
     EXPECT_EQ (export_json (requests, refs_fixture ()).notes.operations_edited, 1);
 }
 
+TEST (BoundExport, DoesNotCountARequestStampedThroughTheServersBasePath) {
+    // The fixture declares `servers: [{url: https://api.example.com/v1}]`, so
+    // the matcher's third pass stamps `/v1/pets` as `/pets` (#3276).
+    std::vector<ExportRequest> requests = bound_requests ();
+    requests[0].url                     = "{{baseUrl}}/v1/pets";
+    requests[2].url                     = "{{baseUrl}}/v1/pets/42";
+
+    for (const auto mode : { vayu::core::BoundMode::Contract, vayu::core::BoundMode::Full }) {
+        const ExportOutcome outcome = export_openapi (
+        petstore (), requests, bound_fixture (), ExportFormat::Json, mode);
+        ASSERT_TRUE (outcome.ok ()) << outcome.error;
+        EXPECT_EQ (outcome.notes.operations_edited, 0);
+    }
+
+    // A path the base path does not explain is still an edit: `/v10` is not
+    // `/v1` and `/v2/pets` sits under no declared base path.
+    requests[0].url = "{{baseUrl}}/v10/pets";
+    requests[2].url = "{{baseUrl}}/v2/pets/42";
+    EXPECT_EQ (export_json (requests, bound_fixture ()).notes.operations_edited, 2);
+}
+
 TEST (BoundExport, CountsNoUndeclaredRowForAParameterTheDocumentDeclaresByReference) {
     std::vector<ExportRequest> requests = bound_requests ();
     // `X-Trace-Id` is the fixture's `$ref` parameter, declared once in
