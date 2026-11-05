@@ -199,13 +199,11 @@ struct EngineDefaults {
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 
-    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents` - the same
-    /// two the design path's stream defaults from, read here so a load stream
-    /// the caller gave no caps is bounded by the user's own settings rather
-    /// than by a second set of numbers that happen to live in the load code
-    /// (issue #576).
-    int64_t stream_max_duration_ms = constants::sse::MAX_STREAM_DURATION_MS;
-    int64_t stream_max_events      = constants::sse::MAX_STREAM_EVENTS;
+    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
+    /// (`vayu::http::default_stream_bounds`), so a load stream the caller gave
+    /// no caps is bounded by the user's own settings (issue #576).
+    vayu::StreamBounds stream_defaults{ constants::sse::MAX_STREAM_DURATION_MS,
+        constants::sse::MAX_STREAM_EVENTS };
 
     /// Config key `maxElementBodyBytes` (issue #1514's reopen):
     /// `ElementContext::max_body_bytes` for a scenario load run's own

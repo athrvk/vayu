@@ -895,15 +895,10 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
 
     // The caps a streaming run's transfers are bounded by. `stream` has already
     // been validated by `read_stream_flag` in the route, so a value here is a
-    // boolean and each cap is an integer in range - this only has to choose
-    // between the caller's number and the engine setting's.
+    // boolean.
     if (config.value ("stream", false)) {
-        vayu::StreamBounds bounds;
-        bounds.max_duration_ms =
-        config.value ("maxStreamDurationMs", engine_defaults.stream_max_duration_ms);
-        bounds.max_events =
-        config.value ("maxStreamEvents", engine_defaults.stream_max_events);
-        stream_bounds = bounds;
+        stream_bounds =
+        vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
     }
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
@@ -1348,12 +1343,8 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_RESPONSE_SAMPLE_BYTES)));
         // The same two settings the design path's stream reads, so a user who
         // tightened them once has tightened them for both (issue #576).
-        engine_defaults.stream_max_duration_ms =
-        db.get_config_int ("sseMaxStreamDurationMs",
-        static_cast<int> (vayu::core::constants::sse::MAX_STREAM_DURATION_MS));
-        engine_defaults.stream_max_events =
-        db.get_config_int ("sseMaxStreamEvents",
-        static_cast<int> (vayu::core::constants::sse::MAX_STREAM_EVENTS));
+        engine_defaults.stream_defaults =
+        vayu::http::default_stream_bounds (vayu::http::read_sse_limits (db));
 
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",

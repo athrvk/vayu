@@ -116,6 +116,24 @@ struct SseLimits {
 [[nodiscard]] SseLimits read_sse_limits (vayu::db::Database& db);
 
 /**
+ * The caps a stream the load event loop drives defaults to: the
+ * `sseMaxStreamDurationMs` / `sseMaxStreamEvents` settings @p limits holds,
+ * the same two a design stream defaults from (#576).
+ */
+[[nodiscard]] vayu::StreamBounds default_stream_bounds (const SseLimits& limits);
+
+/**
+ * The caps a run's streams are bounded by: @p config's own
+ * `maxStreamDurationMs` / `maxStreamEvents` where it names one, @p defaults
+ * otherwise. A single-request run applies them to its request when it sets
+ * `stream`; a collection run, to each step whose stored request streams
+ * (#3235). `POST /runs` has range-checked both caps before a run exists, so
+ * this only chooses; `null` is absent, as the check reads it.
+ */
+[[nodiscard]] vayu::StreamBounds resolve_stream_bounds (const nlohmann::json& config,
+const vayu::StreamBounds& defaults);
+
+/**
  * One live stream: the ring its events land in, its termination reason, and the
  * single-watcher slot its relay claims.
  *

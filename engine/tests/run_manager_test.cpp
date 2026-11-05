@@ -221,6 +221,22 @@ TEST (NaturalEndDrainMs, AStreamWaitsItsCapPlusTheBackstopAndTheGrace) {
     EXPECT_EQ (natural_end_drain_ms (bounds, 0), 4000 + 5000 + 2000);
 }
 
+// The route reads a `null` cap as absent, so the run must too: it is read
+// after the run row exists, where a throw strands the row `pending`.
+// Mutation check: read the caps with `config.value (key, default)` again and
+// this throws `type_error`.
+TEST (RunContextStreamBounds, ANullCapFallsBackToTheSetting) {
+    EngineDefaults defaults;
+    defaults.stream_defaults = vayu::StreamBounds{ 45000, 12 };
+    const nlohmann::json config{ { "stream", true },
+        { "maxStreamDurationMs", nullptr }, { "maxStreamEvents", 3 } };
+    const RunContext context ("r", config,
+    vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS, defaults);
+    ASSERT_HAS_VALUE (context.stream_bounds);
+    EXPECT_EQ (context.stream_bounds->max_duration_ms, 45000);
+    EXPECT_EQ (context.stream_bounds->max_events, 3);
+}
+
 TEST (NaturalEndDrainMs, ATimeoutThatIsNotPositiveFallsBackToTheDefault) {
     const int64_t expected =
     vayu::core::constants::server::DEFAULT_TIMEOUT_MS + int64_t{ 2000 };
