@@ -11,29 +11,12 @@
 #include <chrono>
 #include <string>
 #include <string_view>
-#include <utility>
 
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 
 namespace vayu::http::detail {
-
-namespace {
-
-/// Stamp the first event's arrival on the clock latency is read from (#3234).
-/// libcurl cannot answer this: its start-transfer time ends at the response
-/// headers, which a stream sends long before its first event.
-void stamp_first_event (TransferData& data) {
-    if (data.stream_first_event_ms || data.stream_counter.events () == 0) {
-        return;
-    }
-    data.stream_first_event_ms = std::chrono::duration<double, std::milli> (
-    std::chrono::steady_clock::now () - data.submitted_at)
-                                 .count ();
-}
-
-} // namespace
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
@@ -57,17 +40,8 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     // refusal to buffer and stays an error. Deciding it after would report a
     // stream that ended exactly as asked as a failed one whenever its final
     // chunk also crossed the byte cap.
-    //
-    // The whole chunk is counted before the cap is tested: those events are on
-    // the wire either way, and a tally that stopped mid-chunk would under-report
-    // the stream it exists to measure.
-    bool stream_cap_hit = false;
-    if (data->stream_bounds) {
-        data->stream_counter.feed (std::string_view (ptr, total_size));
-        stamp_first_event (*data);
-        stream_cap_hit = std::cmp_greater_equal (
-        data->stream_counter.events (), data->stream_bounds->max_events);
-    }
+    const bool stream_cap_hit = data->stream.active () &&
+    data->stream.feed (std::string_view (ptr, total_size));
 
     // Bounded buffering. Without this a large or streaming response grows the
     // buffer as concurrency x body-size until allocation fails - and a
@@ -95,11 +69,11 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     data->response_body.append (ptr, total_size);
 
     if (stream_cap_hit) {
-        data->stream_cap_reached = true;
-        // Short count: the same documented abort, read as a success by
-        // `stream_cap_reached`. One byte short rather than zero so the buffered
-        // chunk above stays whole - the body is the events, and the cap is
-        // about how many arrived, not about discarding the last one.
+        data->stream.mark_cap_reached ();
+        // Short count: the same documented abort, read as a success by the
+        // tally's `cap_reached`. One byte short rather than zero so the
+        // buffered chunk above stays whole - the body is the events, and the
+        // cap is about how many arrived, not about discarding the last one.
         return total_size > 0 ? total_size - 1 : 0;
     }
 
@@ -180,10 +154,11 @@ curl_off_t /*ulnow*/) {
     // cap is honoured within about that of its expiry.
     //
     // A non-zero return is the documented abort (CURLE_ABORTED_BY_CALLBACK);
-    // `stream_cap_reached` is what makes the completion read it as the stream's
-    // intended end rather than as a failure.
-    if (data->stream_bounds && std::chrono::steady_clock::now () >= data->stream_deadline) {
-        data->stream_cap_reached = true;
+    // The tally's `cap_reached` is what makes the completion read it as the
+    // stream's intended end rather than as a failure.
+    if (data->stream.active () &&
+    data->stream.deadline_passed (std::chrono::steady_clock::now ())) {
+        data->stream.mark_cap_reached ();
         return 1;
     }
     return 0;
