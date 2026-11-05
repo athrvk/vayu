@@ -100,11 +100,14 @@ function isEnabledDefinition(def: StoredVariableLike | undefined): boolean {
 }
 
 /**
- * D17: the raw stored string substitutes; a non-string stored `value` reads as
- * "" rather than being stringified.
+ * D17 and #3245: a stored string substitutes verbatim; a number or boolean as
+ * its JSON text, an object or array as compact JSON, `null` as "". Matches
+ * the engine's `variable_value_text` and the renderer's `coerceVariableValue`.
  */
 function coerceVariableValue(value: unknown): string {
-	return typeof value === "string" ? value : "";
+	if (typeof value === "string") return value;
+	if (value === null || value === undefined) return "";
+	return JSON.stringify(value) ?? "";
 }
 
 /** The optional `type` hint, kept only when it is actually a string. */

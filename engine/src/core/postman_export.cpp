@@ -38,6 +38,7 @@
 #include "vayu/utils/ascii_case.hpp"
 #include "vayu/utils/ordered_json.hpp"
 #include "vayu/utils/parse.hpp"
+#include "vayu/utils/variable_text.hpp"
 
 #include <curl/curl.h>
 
@@ -1245,8 +1246,8 @@ std::optional<json> postman_events (const json& elements, EventOwner owner, Walk
 /// A stored variable's `value` as Postman's string: absent and `null` are "".
 std::string variable_value_text (const json& variable) {
     const auto value = variable.find ("value");
-    return value == variable.end () || value->is_null () ? std::string () :
-                                                           js::js_string_of (*value);
+    return value == variable.end () ? std::string () :
+                                      vayu::utils::variable_value_text (*value);
 }
 
 std::optional<json> postman_variables (const json& stored, Walk& walk) {

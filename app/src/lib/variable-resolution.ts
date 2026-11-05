@@ -70,13 +70,15 @@ export function isEnabledDefinition(def: StoredVariableLike | undefined): boolea
 }
 
 /**
- * D17: the raw stored string substitutes; a non-string stored `value` reads as
- * "" rather than being stringified (`42` printing as "42" in one client and
- * `undefined` printing as "undefined" in another is how this divergence was
- * found).
+ * D17 and #3245: a stored string substitutes verbatim; a number or boolean
+ * substitutes as its JSON text (`5`, `true`), an object or array as compact
+ * JSON text, and `null` or an absent value as "". The engine reads the same way
+ * (`variable_value_text`), and the Postman export writes that text.
  */
 export function coerceVariableValue(value: unknown): string {
-	return typeof value === "string" ? value : "";
+	if (typeof value === "string") return value;
+	if (value === null || value === undefined) return "";
+	return JSON.stringify(value) ?? "";
 }
 
 /**
