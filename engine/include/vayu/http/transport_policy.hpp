@@ -340,7 +340,8 @@ struct TransportPolicy {
      * pre-selected certificate, because one policy serves many hosts: a load
      * run has one target but a scenario run walks a collection, a script's
      * `pm.sendRequest` dials wherever it likes, and a redirect can leave the
-     * host the run started on. Matching therefore happens per transfer
+     * host the run started on. Matching therefore happens per transfer, and
+     * per redirect hop on a design send, which follows one transfer per hop
      * (`match_client_certificate`) while the *reading* happens once - which is
      * the load path's rule from #704 decision 3 kept without giving the hot
      * path a database.

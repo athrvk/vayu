@@ -5578,11 +5578,12 @@ the next. **One jar per environment**, plus one for requests sent with no
 environment selected; in memory only, for the life of the engine process, and
 never written to disk. Load runs neither read nor write it.
 
-Cookies set *during* a redirect chain follow curl's cross-origin rule rather
-than the jar's - see [POST /execute](#post-execute) for what a redirect that
-changes origin does to them. The `Set-Cookie` lines of those intermediate hops
-are reported on the answer's `redirects` member, whether or not curl applied
-them.
+A cookie set *during* a redirect chain stays with the origin that set it: it
+is stored in the jar as any other, and a later hop of the same send carries it
+only when that hop goes to the same origin - see [POST /execute](#post-execute)
+for what a redirect that changes origin does to cookies. The `Set-Cookie` lines
+of those intermediate hops are reported on the answer's `redirects` member,
+whether or not a later hop carried them.
 
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
@@ -5676,6 +5677,16 @@ proxy, a load run and a collection run read the registry **once at run start**
 and hold it, because libcurl reuses a pooled connection only when its TLS
 identity matches.
 
+**A redirect is matched hop by hop on a design send.** `POST /execute`, the
+`pm.sendRequest` calls inside it, the OAuth token fetch and a typed
+`POST /import/fetch` follow a redirect one transfer per hop, and the
+registry is asked about each hop's own host and port: a send that starts at
+`http://host` and is redirected to an mTLS `https://host` presents the entry
+that answers for the second, and a hop no entry answers for presents nothing.
+A load run and an SSE stream still let libcurl follow, and libcurl gives the
+certificate only to the origin the transfer started at, so there a redirect to
+another origin goes without one.
+
 **Matching is by host, and most specific wins.** A `host` is either an exact
 name (`api.example.com`) or the one wildcard form, `*.example.com`, which is
 read as a label suffix: it answers for `api.example.com` and `a.b.example.com`,
@@ -5711,9 +5722,9 @@ fails at handshake time as an SSL error against the endpoint, which reads as
 "the API is broken" rather than "this setting is wrong".
 
 A cert-authenticated exchange says so. `POST /execute` returns
-`clientCertificate` on the response (`""` when none matched) and the stored
-trace carries the same value under the same name, so a restored response names
-the entry a live one named.
+`clientCertificate` on the response, the entry the **final** hop presented
+(`""` when none matched it), and the stored trace carries the same value under
+the same name, so a restored response names the entry a live one named.
 
 **The row says what format its certificate is in, and the engine tells libcurl
 so.** `certFormat` is `pem` - a PEM certificate with its key in a second file -
@@ -6702,9 +6713,10 @@ origin, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the origin the redirect leads to, **including
 over `http` after an `https` hop**. That is a documented exception, not an
-oversight: the engine does not run its own redirect loop, so it cannot hold a
-header back where libcurl does not. It applies to all three drivers (a design
-send, a load run and a stream). A query-located
+oversight: it is libcurl's rule, kept as it was on all three drivers. A load
+run and a stream let libcurl follow; a design send runs the engine's own
+redirect loop, which withholds exactly what libcurl withheld, so the three
+cannot disagree about what reaches the next origin. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
 `Location` names, so the key reaches it only if that URL repeats it. Set
 `followRedirects: false` on a request whose key must not leave the origin it was
@@ -8094,21 +8106,25 @@ skips both the chain and the hostname check (`CURLOPT_SSL_VERIFYPEER` and
 To keep verification on for a host with an internal authority, add the CA under
 [TLS trust settings](#tls-trust-settings) instead.
 
-**A redirect that crosses origins drops the cookies the hop set.** Since
-**curl 8.21.0** (`http: don't pass on set cookies to new origins`, which the
-engine picked up with the vcpkg baseline bump of #679), a `Set-Cookie` returned
-by one origin is not applied to the follow-up request when the `Location`
-points at a different one; a same-origin hop is unchanged. This is upstream
-security hardening, inherited deliberately, and it is not configurable - the
-engine sets `CURLOPT_FOLLOWLOCATION` per request wherever `followRedirects` is
-true, so it holds on `POST /execute`, on load runs and on streaming requests
-alike. A flow that depended on a cookie surviving a cross-origin hop (a login
-that bounces through an identity provider is the usual shape) now sends the
-follow-up request without it. Nothing about the [cookie jar](#cookies) itself
-changed: it is domain-scoped as before, so a cookie is still stored under the
-origin that set it and still sent on a later request back to that origin. A
-hop's `Set-Cookie` is reported in `redirects` whether or not curl applied it,
-so the member says what the server sent, not what the jar stored.
+**A redirect that crosses origins drops the cookies the hop set.** On a design
+send, a `Set-Cookie` returned by one hop is not applied to a later hop of the
+same send whose origin (scheme, host and port) is a different one; a
+same-origin hop is unchanged, and a hop back to the origin that set the cookie
+carries it again. This is Vayu's own rule, held by the engine's redirect loop,
+and it is not configurable. The reason is the one behind **curl 8.21.0**'s
+hardening (`http: don't pass on set cookies to new origins`, which the engine
+picked up with the vcpkg baseline bump of #679): what one origin handed the
+client is not the next origin's to read. libcurl's cookie engine matches by host
+and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride
+a redirect to `127.0.0.1:9090`. A load run and a streaming request still let
+libcurl follow, and there a hop's cookie is matched by libcurl's engine. A flow
+that depended on a cookie surviving a cross-origin hop (a login that bounces
+through an identity provider is the usual shape) sends the follow-up request
+without it. Nothing about the [cookie jar](#cookies) itself changed: it is
+domain-scoped as before, so a cookie is still stored under the origin that set
+it and still sent on a later request back to that origin. A hop's `Set-Cookie`
+is reported in `redirects` whether or not a later hop carried it, so the member
+says what the server sent, not what went on to the next origin.
 
 **Protocol.** `httpVersion` selects which HTTP version curl attempts:
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
@@ -8406,16 +8422,17 @@ for each later one (userinfo is removed), with the value of the request's auth-w
 of any query parameter named like a credential, blanked; `""` when libcurl
 reported none. `schemeDowngrade` is true when that
 request went over `https` and the next one over `http`: the one hop on which an
-API-key header, which libcurl does not withhold, travels in clear text (see the
+API-key header, which a redirect does not withhold, travels in clear text (see the
 Redirects paragraph under [Authentication](#authentication)). A row stored before these two members
 existed lacks them. Only 3xx responses are hops: a `1xx` interim response
 such as `100 Continue` is not. It is always present on a design answer, an empty
 array when nothing was followed (`followRedirects: false` always gives an empty
-one, the 3xx being the answer), and holds at most `maxRedirects` entries, so a
-loop that ends in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
+one, the 3xx being the answer), and holds at most `maxRedirects` entries (every
+hop when `maxRedirects` is negative, which sets no limit), so a loop that ends
+in `TOO_MANY_REDIRECTS` reports the hops it made. The stored
 `trace_data.response` carries it too, written only when non-empty; a load-run
 sample records none. It reports what the server sent: see the cross-origin
-paragraph above for why a hop's cookie is not necessarily one the jar kept. A post-request script reads
+paragraph above for why a hop's cookie is not necessarily one a later hop carried. A post-request script reads
 the same hops as
 [`pm.response.redirects`](scripting.md#pmresponseredirects---the-hops-a-send-followed)
 (`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where
@@ -8434,9 +8451,11 @@ drops a typed `Authorization`. The app's Headers tab lists the sent request
 from this block, line by line in wire order, so the tab shows the whole wire while the
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
-`301`, `302` or `303` is re-sent as a body-less `GET`, so the body it started
-with is not shown on a request that never carried it (issue #2462). `307` and
-`308` keep the method and the body, and so does the view.
+`301`, `302` or `303` is re-sent as a body-less `GET` (any other method keeps
+its name and loses its body), without the `Content-Type` and `Content-Length`
+lines that described the body, so the body it started with is not shown on a
+request that never carried it (issue #2462). `307` and `308` keep the method
+and the body, and so does the view.
 
 **`requestHeaders` is the sent record**: the composed headers as the transfer
 issued them on its **first hop**. After a followed redirect that changes the

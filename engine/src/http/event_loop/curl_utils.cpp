@@ -422,6 +422,23 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
     }
 }
 
+void apply_bodyless_method (CURL* curl, HttpMethod method, BodySource& source) {
+    // `HTTPGET` puts libcurl back on a body-less GET (no upload, no POST), and
+    // the custom verb a previous hop named is cleared, so what follows starts
+    // from nothing. The body options themselves stay on the handle unread.
+    set_opt<CURLOPT_CUSTOMREQUEST> (curl, static_cast<const char*> (nullptr));
+    set_opt<CURLOPT_HTTPGET> (curl, 1L);
+    Request bodyless;
+    bodyless.method = method;
+    apply_method_and_body (curl, bodyless, source);
+}
+
+void rewind_body_source (BodySource& source) {
+    // A form part's reader is rewound by libcurl through its seek callback at
+    // the start of each transfer; a streamed upload's read callback is not.
+    source.stream.offset = 0;
+}
+
 std::string body_content_type_value (const Request& request) {
     std::string implied = vayu::http::implied_content_type (request);
     if (implied.empty ()) {
@@ -739,6 +756,19 @@ CurlPhaseTimes read_phase_times (CURL* curl) {
     get_info<CURLINFO_PRETRANSFER_TIME> (curl, &times.pretransfer);
     get_info<CURLINFO_STARTTRANSFER_TIME> (curl, &times.starttransfer);
     return times;
+}
+
+void add_phase_times (CurlPhaseTimes& total, const CurlPhaseTimes& hop) {
+    total.total += hop.total;
+    total.queue += hop.queue;
+    total.namelookup += hop.namelookup;
+    total.connect += hop.connect;
+    // A hop with no TLS reports no appconnect; its handshake ends at the
+    // connect, the reading `apply_phase_timings` gives a single transfer, so a
+    // plain hop does not shrink a TLS hop's share of the sum.
+    total.appconnect += hop.appconnect > 0.0 ? hop.appconnect : hop.connect;
+    total.pretransfer += hop.pretransfer;
+    total.starttransfer += hop.starttransfer;
 }
 
 double curl_queue_seconds (const CurlPhaseTimes& times) {

@@ -297,8 +297,11 @@ the Linux AppImage then download it in the background; macOS and the Linux
 On a redirect to a different scheme, host name or port the engine drops
 `Authorization` and `Cookie`, as curl does; every other header you set,
 including API-key headers, follows the redirect - over `http` too, after an
-`https` hop - and a configured client certificate stays attached. A design
-send's answer marks such a hop (`redirects[].schemeDowngrade`). The API Key
+`https` hop. A design send follows a redirect one hop at a time and presents
+the client certificate registered for each hop's own host, none where no entry
+matches it; a load run and a streaming request present the certificate only to
+the host they started at. A design send's answer marks a downgrading hop
+(`redirects[].schemeDowngrade`). The API Key
 editor says so; turn off follow-redirects on a request whose key must stay on
 one origin.
 The MCP host allowlist is checked against the URL you send, not against where it
