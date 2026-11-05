@@ -60,13 +60,14 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     //
     // The whole chunk is counted before the cap is tested: those events are on
     // the wire either way, and a tally that stopped mid-chunk would under-report
-    // the stream it exists to measure.
+    // the stream it exists to measure. Counted here rather than at completion
+    // so the live tick sees a stream's events while it is still open (#3236).
     bool stream_cap_hit = false;
     if (data->stream_bounds) {
-        data->stream_counter.feed (std::string_view (ptr, total_size));
+        const int64_t max_events = data->stream_bounds->max_events;
+        data->count_stream_chunk (std::string_view (ptr, total_size));
         stamp_first_event (*data);
-        stream_cap_hit = std::cmp_greater_equal (
-        data->stream_counter.events (), data->stream_bounds->max_events);
+        stream_cap_hit = std::cmp_greater_equal (data->stream_counter.events (), max_events);
     }
 
     // Bounded buffering. Without this a large or streaming response grows the

@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1341,6 +1343,79 @@ TEST (LoadDrain, AStreamingRunsNaturalEndWaitsForTheStreamsCap) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #3236: a streaming run's live frames count its events while its one stream
+// is still open, and settle on the report's total once it closes. `/sse-held`
+// sends three events and the start of a fourth, then holds until released, so
+// the mid-stream tick is taken while nothing has completed; the fourth event
+// is the unterminated frame only the close completes. Mutation checks: count
+// only at completion (publish nothing from `count_stream_chunk` and the whole
+// count from `finish_stream_count`) and the mid-stream wait runs out; drop the
+// delta `finish_stream_count` publishes and the settled frame reads 3, not 4.
+TEST (LoadStream, ATickWhileTheStreamIsOpenCarriesItsEvents) {
+    const std::string db_path = "test_load_stream_live.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        vayu::tests::SlowMockServer server;
+
+        const nlohmann::json config{ { "method", "GET" },
+            { "url", server.sse_held_url () }, { "mode", "iterations" },
+            { "iterations", 1 }, { "concurrency", 1 }, { "timeout", 5000 },
+            { "workers", 1 }, { "stream", true }, { "maxStreamDurationMs", 20000 } };
+        const std::string run_id = "run_load_stream_live";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db));
+        const auto context = manager.get_run (run_id);
+        ASSERT_NE (context, nullptr);
+
+        nlohmann::json open_frame;
+        EXPECT_TRUE (vayu::tests::wait_until ([&] () {
+            const auto frames = live_frames (*context);
+            if (frames.empty () || frames.back ().value ("streamEvents", size_t{ 0 }) == 0) {
+                return false;
+            }
+            open_frame = frames.back ();
+            return true;
+        }))
+        << "no tick counted an event while the stream was open";
+        server.released.store (true, std::memory_order_relaxed);
+
+        if (!open_frame.is_null ()) {
+            EXPECT_EQ (open_frame.at ("streamsOpen").get<size_t> (), 1u)
+            << open_frame.dump ();
+            EXPECT_EQ (open_frame.at ("totalRequests").get<size_t> (), 0u)
+            << "the stream had not completed, so its events were counted live: "
+            << open_frame.dump ();
+            EXPECT_TRUE (open_frame.contains ("eventsPerSecond")) << open_frame.dump ();
+        }
+
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+        ASSERT_TRUE (
+        vayu::tests::wait_until ([&] () { return context->closed.load (); }))
+        << "the metrics thread never emitted its settled frame";
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto total_events = report.at ("stream").at ("totalEvents").get<size_t> ();
+        EXPECT_EQ (total_events, 4u) << report.dump ();
+        const auto frames = live_frames (*context);
+        ASSERT_FALSE (frames.empty ());
+        EXPECT_EQ (frames.back ().at ("streamEvents").get<size_t> (), total_events)
+        << "the settled live total is the report's: " << frames.back ().dump ();
+        EXPECT_EQ (frames.back ().at ("streamsOpen").get<size_t> (), 0u);
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2385: a stored row is its whole second, not the last 100 ms window of it,
 // and the gate frame of the same tick carries the same figures as `second*`.
 // At 20 rps a second holds about 20 completions, so its p99 is its slowest and
@@ -1787,6 +1862,114 @@ TEST (CollectMetrics, TheGateFrameAndItsStoredRowShareOneTrailingWindow) {
     << "no live frame carried the stored row's timestamp";
 
     vayu::tests::remove_database_files (db_path);
+}
+
+namespace {
+
+/// Every live frame of a bare run started from @p cfg, ticked by
+/// `collect_metrics` until @p settled holds of the frames so far, plus the
+/// final settled one. @p settled is polled, so it may also feed the run.
+template <typename Settled>
+std::vector<nlohmann::json>
+frames_until (const std::string& run_id, const nlohmann::json& cfg, Settled settled) {
+    const std::string db_path = "test_collect_metrics_" + run_id + ".db";
+    vayu::tests::remove_database_files (db_path);
+    std::vector<nlohmann::json> frames;
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        vayu::db::Run run;
+        run.id              = run_id;
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Running;
+        run.start_time      = 1;
+        run.config_snapshot = cfg.dump ();
+        db.create_run (run);
+
+        auto ctx        = std::make_shared<RunContext> (run.id, cfg);
+        ctx->is_running = true;
+        vayu::tests::stamp_load_start (*ctx);
+        std::thread metrics ([&] () { collect_metrics (ctx, &db); });
+        EXPECT_TRUE (vayu::tests::wait_until ([&] () { return settled (*ctx); }))
+        << "the frames never settled for " << run_id;
+        ctx->is_running = false;
+        metrics.join ();
+        frames = live_frames (*ctx);
+    }
+    vayu::tests::remove_database_files (db_path);
+    return frames;
+}
+
+/// The live stream keys @p frame carries, by name, for a readable failure.
+std::string stream_keys_in (const nlohmann::json& frame) {
+    std::string present;
+    for (const auto* key :
+    { "streamEvents", "streamsOpen", "eventsPerSecond", "streamTimeToFirstEvent" }) {
+        if (frame.contains (key)) {
+            present += std::string (present.empty () ? "" : ", ") + key;
+        }
+    }
+    return present;
+}
+
+} // namespace
+
+// #3236: a streaming run's frames carry the tally its transfers count into, as
+// `streamEvents`, and that tally's trailing-window rate, as `eventsPerSecond`.
+// The tally is fed by hand here as the write callback would, through the
+// bounds every request of the run is given. Mutation checks: drop the
+// `live_events` assignment from the RunContext constructor and the wiring
+// assertion fails; leave `stream_events` out of `put_trailing_window`'s
+// counters and the wait for a positive rate runs out.
+TEST (CollectMetrics, AStreamingRunsFramesCarryItsEventsAndTheirRate) {
+    const nlohmann::json cfg{ { "stream", true } };
+    std::shared_ptr<std::atomic<size_t>> tally;
+    const auto frames = frames_until ("stream_rate", cfg, [&] (RunContext& ctx) {
+        if (!tally) {
+            EXPECT_TRUE (ctx.stream_bounds.has_value ());
+            tally = ctx.stream_bounds ? ctx.stream_bounds->live_events : nullptr;
+            EXPECT_NE (tally, nullptr) << "the run's requests carry no tally";
+            EXPECT_EQ (tally, ctx.metrics_collector->live_stream_event_counter ());
+            if (!tally) {
+                return true;
+            }
+        }
+        tally->fetch_add (5);
+        const auto seen = live_frames (ctx);
+        return std::ranges::any_of (seen, [] (const nlohmann::json& frame) {
+            return frame.value ("eventsPerSecond", 0.0) > 0.0;
+        });
+    });
+    ASSERT_NE (tally, nullptr);
+    ASSERT_FALSE (frames.empty ());
+
+    for (const auto& frame : frames) {
+        for (const auto* key : { "streamEvents", "streamsOpen", "eventsPerSecond" }) {
+            EXPECT_TRUE (frame.contains (key)) << key << ": " << frame.dump ();
+        }
+    }
+    EXPECT_EQ (frames.back ().at ("streamEvents").get<size_t> (), tally->load ())
+    << "the settled frame reads the whole tally";
+}
+
+// Absent, not zero: a run that does not stream (with `stream_metrics` at its
+// default, on) and a stream with `stream_metrics: false` carry none of the
+// stream keys on any frame, the final gate frame included. Mutation check:
+// allocate the tally whenever `stream_metrics` is on and the first run fails.
+TEST (CollectMetrics, OnlyAStreamingRunWithStreamMetricsCarriesTheStreamKeys) {
+    const auto two_ticks = [] (RunContext& ctx) {
+        return ctx.published_count.load () >= 2;
+    };
+    const nlohmann::json plain = nlohmann::json::object ();
+    const nlohmann::json metrics_off{ { "stream", true }, { "stream_metrics", false } };
+    for (const auto& [name, cfg] :
+    { std::pair{ "plain", plain }, std::pair{ "stream_metrics_off", metrics_off } }) {
+        const auto frames = frames_until (name, cfg, two_ticks);
+        ASSERT_FALSE (frames.empty ()) << name;
+        for (const auto& frame : frames) {
+            EXPECT_EQ (stream_keys_in (frame), "") << name << ": " << frame.dump ();
+        }
+    }
 }
 
 namespace {

@@ -275,4 +275,8 @@ export interface DisplayMetrics {
 	requests_expected?: number;
 	// A capacity run's search state (#2928); live only.
 	capacity?: LiveCapacityState;
+	// A streaming run's events so far (#3236); live only, absent on any other run.
+	stream_events?: number;
+	streams_open?: number;
+	events_per_second?: number;
 }

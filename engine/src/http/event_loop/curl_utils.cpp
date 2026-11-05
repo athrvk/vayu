@@ -1788,7 +1788,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // delivered, and dropping the count on the error path would make a partial
     // stream indistinguishable from one that carried nothing.
     if (data->stream_bounds) {
-        data->stream_counter.finish ();
+        data->finish_stream_count ();
         response.stream_events         = data->stream_counter.events ();
         response.stream_capped         = data->stream_cap_reached;
         response.stream_first_event_ms = data->stream_first_event_ms;

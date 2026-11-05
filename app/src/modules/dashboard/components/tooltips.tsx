@@ -132,6 +132,10 @@ export const TOOLTIPS = {
 		"How many events each stream delivered, as a distribution over the run's streams - not the run's total. A p50 sitting exactly on the event cap means the cap, rather than the target, decided when every stream ended.",
 	streamFirstEvent:
 		"How long each stream took to deliver its first event, counted from submitting the request. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here. Only streams that delivered an event are counted.",
+	liveStream:
+		"Events delivered by the run's streams so far, counted as they arrive rather than when a stream finishes, so a run of long streams does not read zero until the first one ends. Events/sec is the rate over the last second or more; open streams is how many transfers are streaming right now.",
+	liveStreamFirstEvent:
+		"How long each finished stream took to deliver its first event, counted from submitting the request. A stream still open is not counted, so the tile appears once one has finished and delivered an event. It is not the First byte row: that ends at the response headers, so a server that answers at once and then waits reads fast there and slow here.",
 } satisfies Record<string, ReactNode>;
 
 export type TooltipKey = keyof typeof TOOLTIPS;

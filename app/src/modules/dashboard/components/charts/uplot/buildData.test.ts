@@ -13,6 +13,7 @@ import {
 	rebucket,
 	pickThroughput,
 	pickSendRate,
+	pickEventsPerSecond,
 	hasSendRate,
 	pickErrorRate,
 } from "./buildData";
@@ -361,5 +362,22 @@ describe("the throughput series the chart, the detector and the export read", ()
 		expect(dipped.length).toBeGreaterThan(0);
 		expect(drop!.startSeconds).toBeLessThanOrEqual(Math.min(...dipped));
 		expect(drop!.endSeconds).toBeGreaterThanOrEqual(Math.max(...dipped));
+	});
+});
+
+describe("pickEventsPerSecond", () => {
+	it("keeps a measured 0 as a point and an absent figure as a gap (issue #3236)", () => {
+		expect(pickEventsPerSecond(tick({ events_per_second: 0 }))).toBe(0);
+		expect(pickEventsPerSecond(tick({ events_per_second: 320.5 }))).toBe(320.5);
+		expect(pickEventsPerSecond(tick({}))).toBeNull();
+	});
+
+	it("buckets a mixed run into a line with a gap where a frame holds none", () => {
+		const history = [
+			tick({ elapsed_seconds: 0, events_per_second: 0 }),
+			tick({ elapsed_seconds: 1 }),
+			tick({ elapsed_seconds: 2, events_per_second: 40 }),
+		];
+		expect(bucketColumns(history, [pickEventsPerSecond]).cols[0]).toEqual([0, null, 40]);
 	});
 });

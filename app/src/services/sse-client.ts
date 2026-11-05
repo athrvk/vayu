@@ -22,6 +22,7 @@ import type {
 	StatusSecondEntry,
 	StepOutcome,
 	StepTestTally,
+	StreamTimeToFirstEvent,
 } from "@/types";
 
 /** Raw camelCase metrics blob as emitted by the engine SSE stream. */
@@ -76,6 +77,11 @@ interface RawSseMetrics {
 	statusSeconds?: StatusSecondEntry[];
 	/** Capacity runs only (issue #2928); absent from every other run's frames. */
 	capacity?: LiveCapacityState;
+	/** Streaming runs only (issue #3236): every frame; `streamTimeToFirstEvent` on gate frames. */
+	streamEvents?: number;
+	streamsOpen?: number;
+	eventsPerSecond?: number;
+	streamTimeToFirstEvent?: StreamTimeToFirstEvent;
 	/** Issue #1500 - see `LoadTestMetrics.custom_metrics`. */
 	customMetrics?: LoadTestMetrics["custom_metrics"];
 }
@@ -140,6 +146,14 @@ export function mapSseMetrics(m: RawSseMetrics): LoadTestMetrics {
 		status_seconds: m.statusSeconds,
 		// As sent: absent is "not a capacity run", never a zeroed level.
 		capacity: m.capacity,
+		// As sent: absent is "not a streaming run" (or, for the first-event
+		// figure, "not a gate frame" or "no stream has delivered one"), and a real
+		// 0 is a measured zero. A `|| 0` would draw a "0 events/sec" card on every
+		// ordinary load run.
+		stream_events: m.streamEvents,
+		streams_open: m.streamsOpen,
+		events_per_second: m.eventsPerSecond,
+		stream_time_to_first_event: m.streamTimeToFirstEvent,
 		custom_metrics: m.customMetrics,
 	};
 }

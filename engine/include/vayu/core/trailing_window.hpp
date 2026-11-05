@@ -28,16 +28,19 @@ struct CumulativeCounters {
     size_t latency_samples   = 0; // MetricsCollector::latency_samples
     double latency_sum_ms    = 0.0;
     double queue_wait_sum_ms = 0.0;
+    size_t stream_events = 0; // MetricsCollector::live_stream_events, 0 if none
 };
 
 /**
  * @brief What the run did over the trailing window ending at one tick
  *        (#2393): the live frame's `currentRps` / `currentSendRate` /
- *        `windowAvg*` keys and the stored row's snake_case twins.
+ *        `windowAvg*` keys and the stored row's snake_case twins, and a
+ *        streaming run's live-only `eventsPerSecond` (#3236).
  */
 struct WindowReading {
     double completed_per_s = 0.0;
     double sent_per_s      = 0.0;
+    double events_per_s    = 0.0;
     /// Mean requests in flight over the window (#2821), by Little's law: the
     /// latency the window's completions carried over its span. A request is
     /// in flight from submission to completion, its queue wait included, so a
@@ -94,6 +97,8 @@ class TrailingWindow {
         reading.completed_per_s =
         static_cast<double> (now.completed - base.completed) / seconds;
         reading.sent_per_s = static_cast<double> (now.sent - base.sent) / seconds;
+        reading.events_per_s =
+        static_cast<double> (now.stream_events - base.stream_events) / seconds;
         const double latency_ms = now.latency_sum_ms - base.latency_sum_ms;
         reading.avg_in_flight   = latency_ms / static_cast<double> (span_ms);
 

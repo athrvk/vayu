@@ -363,6 +363,9 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
             ": failed to initialize the stream first-event histogram; the "
             "report will carry no time to first event");
         }
+        if (config_.streams) {
+            allocate_live_stream_metrics ();
+        }
     }
 
     // Pre-allocate vectors to avoid reallocation during test
@@ -433,6 +436,24 @@ MetricsCollector::~MetricsCollector () {
         hdr_close (stream_first_event_histogram_);
         stream_first_event_histogram_ = nullptr;
     }
+}
+
+void MetricsCollector::allocate_live_stream_metrics () {
+    live_stream_events_ = std::make_shared<std::atomic<size_t>> (0);
+    if (stream_first_event_histogram_ == nullptr) {
+        return;
+    }
+    struct hdr_histogram* snapshot = nullptr;
+    if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+        constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES, &snapshot) != 0 ||
+    snapshot == nullptr) {
+        vayu::utils::log_warning ("run",
+        "Run " + run_id_ +
+        ": failed to initialize the live first-event snapshot; the live "
+        "frames will carry no time to first event");
+        return;
+    }
+    stream_first_event_snapshot_.reset (snapshot);
 }
 
 void MetricsCollector::atomic_add_double (std::atomic<double>& target, double value) {
@@ -1011,6 +1032,16 @@ void MetricsCollector::put_gate_distributions (nlohmann::json& frame) {
         frame["cumulativePhases"] =
         phase_distributions (phase_histograms_, *phase_snapshot_);
     }
+    if (stream_first_event_snapshot_ != nullptr) {
+        snapshot_histogram (*stream_first_event_histogram_, *stream_first_event_snapshot_);
+        const Percentiles first_event =
+        percentiles_of (stream_first_event_snapshot_.get ());
+        if (first_event.count > 0) {
+            frame["streamTimeToFirstEvent"] = { { "p50", first_event.p50 },
+                { "p95", first_event.p95 }, { "p99", first_event.p99 },
+                { "max", first_event.max }, { "count", first_event.count } };
+        }
+    }
 }
 
 MetricsCollector::CustomMetricSlot*
@@ -1191,6 +1222,17 @@ std::optional<double> first_event_ms) {
         hdr_record_value_atomic (stream_first_event_histogram_,
         histogram_latency_us (*first_event_ms, 1));
     }
+}
+
+std::shared_ptr<std::atomic<size_t>> MetricsCollector::live_stream_event_counter () const {
+    return live_stream_events_;
+}
+
+std::optional<size_t> MetricsCollector::live_stream_events () const {
+    if (live_stream_events_ == nullptr) {
+        return std::nullopt;
+    }
+    return live_stream_events_->load (std::memory_order_relaxed);
 }
 
 std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals () const {
@@ -1541,6 +1583,15 @@ const Percentiles* window_percentiles) const {
     stats["skippedRequests"] = skipped_requests ();
     stats["stalledMs"]       = stalled_ms ();
     stats["avgQueueWaitMs"]  = average_queue_wait ();
+
+    // A streaming run's events so far and its open streams (#3236), counted
+    // as the events arrive, so a run of long streams is not blank until the
+    // first one ends. Absent rather than zero on every other run, the
+    // report's `stream` rule.
+    if (const auto stream_events = live_stream_events ()) {
+        stats["streamEvents"] = *stream_events;
+        stats["streamsOpen"]  = current_active;
+    }
 
     // This run's custom metrics so far (issue #1500), on the same tick the
     // built-in phases ride rather than a second endpoint - they advance on

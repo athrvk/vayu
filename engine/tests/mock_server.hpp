@@ -149,6 +149,23 @@ class SlowMockServer {
             });
         });
 
+        // Three events and the start of a fourth, then nothing until the test
+        // sets `released`: a stream provably mid-flight for as long as a test
+        // needs, whose last event only the close completes.
+        svr.Get ("/sse-held", [this] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                const std::string body =
+                "data: one\n\ndata: two\n\ndata: three\n\ndata: last";
+                if (!sink.write (body.data (), body.size ())) {
+                    return false;
+                }
+                hold_until_released ();
+                sink.done ();
+                return true;
+            });
+        });
+
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
 
@@ -207,6 +224,10 @@ class SlowMockServer {
 
     std::string sse_ticks_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/sse-ticks";
+    }
+
+    std::string sse_held_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/sse-held";
     }
 
     std::string vitals_url () const {

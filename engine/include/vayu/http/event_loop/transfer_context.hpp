@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vayu/http/curl_error_buffer.hpp"
@@ -94,7 +95,8 @@ struct TransferData {
     /// what keeps the counter and both cap checks off the ordinary hot path.
     std::optional<StreamBounds> stream_bounds;
     /// Events delivered so far. Fed by write_callback, finished and read once
-    /// at completion.
+    /// at completion, both through the two members below so the run's live
+    /// tally sees every event the counter does.
     SseFrameCounter stream_counter;
     /// Milliseconds from `submitted_at` to the write that completed the first
     /// event (issue #3234), stamped once by write_callback. An event only
@@ -139,6 +141,14 @@ struct TransferData {
     /// reader a large binary body streams through), released with the rest of
     /// this transfer's curl state.
     BodySource body;
+
+    /// Feed @p chunk to `stream_counter`, adding the events it completed to
+    /// `stream_bounds->live_events` as they arrive (issue #3236).
+    void count_stream_chunk (std::string_view chunk);
+    /// Finish `stream_counter` at completion, adding the unterminated last
+    /// frame it may count to the same tally, so the live total settles on the
+    /// report's.
+    void finish_stream_count ();
 
     TransferData () = default;
     ~TransferData ();

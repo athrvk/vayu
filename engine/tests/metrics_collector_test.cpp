@@ -2205,3 +2205,96 @@ TEST_F (MetricsCollectorTest, StreamMetricsOffRecordsNothing) {
     // the counters behind it must not tick either.
     EXPECT_FALSE (off.stream_totals ().has_value ());
 }
+
+// ============================================================================
+// The live stream keys (issue #3236)
+// ============================================================================
+
+namespace {
+
+/// Every live stream key a frame can carry, the gate frame's included.
+constexpr auto LIVE_STREAM_KEYS = std::to_array<const char*> (
+{ "streamEvents", "streamsOpen", "eventsPerSecond", "streamTimeToFirstEvent" });
+
+MetricsCollectorConfig streaming_config (bool stream_metrics) {
+    MetricsCollectorConfig config;
+    config.streams        = true;
+    config.stream_metrics = stream_metrics;
+    return config;
+}
+
+/// Names of the live stream keys @p frame carries, for a readable failure.
+std::string live_stream_keys_in (const nlohmann::json& frame) {
+    std::string present;
+    for (const auto* key : LIVE_STREAM_KEYS) {
+        if (frame.contains (key)) {
+            present += std::string (present.empty () ? "" : ", ") + key;
+        }
+    }
+    return present;
+}
+
+} // namespace
+
+// The tally the write callback counts into is what the tick reads, and every
+// transfer of a streaming run is a stream, so the active count is the open
+// streams. Mutation check: read `stream_events_total_` (completions only) into
+// `streamEvents` and the first assertion reads 0.
+TEST_F (MetricsCollectorTest, AStreamingRunsTickCarriesTheLiveTallyAndItsOpenStreams) {
+    MetricsCollector streaming ("stream_live", streaming_config (true));
+    const auto tally = streaming.live_stream_event_counter ();
+    ASSERT_NE (tally, nullptr)
+    << "a streaming run with stream_metrics has a tally";
+    tally->fetch_add (7);
+
+    const auto stats = streaming.get_current_stats (3, 1.0, 3);
+
+    EXPECT_EQ (stats.at ("streamEvents").get<size_t> (), 7u) << stats.dump ();
+    EXPECT_EQ (stats.at ("streamsOpen").get<size_t> (), 3u) << stats.dump ();
+    EXPECT_EQ (stats.at ("totalRequests").get<size_t> (), 0u)
+    << "nothing completed, and the events are on the frame anyway";
+}
+
+// Absent, not zero, on both runs that are not a reporting stream: one that does
+// not stream (the default `stream_metrics: true` included) and a stream with
+// `stream_metrics: false`. Neither has a tally for a transfer to count into.
+TEST_F (MetricsCollectorTest, ATickCarriesNoStreamKeysUnlessTheRunStreamsWithStreamMetrics) {
+    MetricsCollector plain ("plain", MetricsCollectorConfig{});
+    MetricsCollector metrics_off ("stream_off_live", streaming_config (false));
+
+    for (auto* run : { &plain, &metrics_off }) {
+        run->record_stream_completion (4, false, 25.0);
+        EXPECT_EQ (run->live_stream_event_counter (), nullptr);
+        EXPECT_FALSE (run->live_stream_events ().has_value ());
+        auto stats = run->get_current_stats (1, 1.0, 1);
+        run->put_gate_distributions (stats);
+        EXPECT_EQ (live_stream_keys_in (stats), "") << stats.dump ();
+    }
+}
+
+// The live time to first event covers the streams completed so far, so it is
+// absent until one completes with a timed event and then reads that one.
+// Mutation check: drop the snapshot read from `put_gate_distributions` and
+// the second half fails; emit the key on a zero count and the first does.
+TEST_F (MetricsCollectorTest, TheGateFrameCarriesTimeToFirstEventOnceAStreamCompleted) {
+    MetricsCollector streaming ("stream_first_live", streaming_config (true));
+
+    nlohmann::json before;
+    streaming.put_gate_distributions (before);
+    streaming.record_stream_completion (0, false, std::nullopt);
+    streaming.put_gate_distributions (before);
+    EXPECT_FALSE (before.contains ("streamTimeToFirstEvent")) << before.dump ();
+
+    streaming.record_stream_completion (3, false, 120.0);
+    nlohmann::json after;
+    streaming.put_gate_distributions (after);
+    ASSERT_TRUE (after.contains ("streamTimeToFirstEvent")) << after.dump ();
+    const auto& first_event = after.at ("streamTimeToFirstEvent");
+    // hdr keeps three significant figures of the microseconds recorded.
+    EXPECT_NEAR (first_event.at ("p50").get<double> (), 120.0, 0.5);
+    EXPECT_NEAR (first_event.at ("max").get<double> (), 120.0, 0.5);
+    EXPECT_EQ (first_event.at ("count").get<size_t> (), 1u);
+    for (const auto* key : { "p95", "p99" }) {
+        EXPECT_TRUE (first_event.contains (key)) << key;
+    }
+}

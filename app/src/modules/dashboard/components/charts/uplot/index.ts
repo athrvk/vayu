@@ -28,6 +28,7 @@ export { ResponseTimeVsConcurrencyChart, HdrPercentileChart } from "./ScatterAnd
 export { fmtVitals, fmtMs, fmtRate, fmtPct } from "./formatters";
 export { StatusCodesOverTimeChart } from "./StatusCodesOverTimeChart";
 export { CustomMetricsChart } from "./CustomMetricsChart";
+export { StreamRateChart } from "./StreamRateChart";
 export {
 	RunP95TrendChart,
 	RunThroughputTrendChart,

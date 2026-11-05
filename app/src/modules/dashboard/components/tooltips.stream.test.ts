@@ -24,4 +24,16 @@ describe("stream tooltips", () => {
 		expect(tip).toContain("not the First byte row");
 		expect(tip).toContain("response headers");
 	});
+
+	it("says the live first-event tile is not the First byte row, and that open streams are not counted (issue #3236)", () => {
+		const tip = String(TOOLTIPS.liveStreamFirstEvent);
+		expect(tip).toContain("not the First byte row");
+		expect(tip).toContain("response headers");
+		expect(tip).toMatch(/still open is not counted/);
+	});
+
+	it("explains that the live card counts events as they arrive (issue #3236)", () => {
+		expect(String(TOOLTIPS.liveStream)).toMatch(/as they arrive/);
+		expect(String(TOOLTIPS.liveStream)).not.toMatch(/first byte/i);
+	});
 });
