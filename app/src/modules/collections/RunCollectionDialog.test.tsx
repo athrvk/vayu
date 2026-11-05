@@ -32,7 +32,10 @@ import {
 import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import type { Collection, Environment, OAuth2Config, Request, RequestAuth } from "@/types";
-import { BUDGETS_EXPLAINER } from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
+import {
+	BUDGETS_EXPLAINER,
+	STREAM_LATENCY_NOTE,
+} from "@/modules/request-builder/components/LoadTestConfigDialog/budgets";
 
 const mutate = vi.fn();
 const startRunState = {
@@ -1062,6 +1065,15 @@ describe("pass/fail budgets", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
 
 		expect(mutate.mock.calls[0][0]).not.toHaveProperty("thresholds");
+	});
+
+	it("never offers a stream budget: a collection run has no stream section to judge (#3234)", () => {
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		openBudgets();
+		expect(screen.getByLabelText(/error rate/i)).toBeInTheDocument();
+		expect(screen.queryByLabelText(/time to first event/i)).not.toBeInTheDocument();
+		expect(screen.queryByLabelText(/events per second/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(STREAM_LATENCY_NOTE)).not.toBeInTheDocument();
 	});
 
 	it("sends every declared budget under the engine's own key", () => {

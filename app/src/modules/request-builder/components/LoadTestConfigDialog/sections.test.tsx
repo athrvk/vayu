@@ -22,6 +22,7 @@ import { BudgetsSection } from "./BudgetsSection";
 import {
 	CAPACITY_BUDGETS_NOTE,
 	CAPACITY_SEED_HINT,
+	STREAM_LATENCY_NOTE,
 	emptyBudgetDraft,
 	emptyCustomBudgetRow,
 } from "./budgets";
@@ -35,10 +36,12 @@ function renderBudgets(
 		mode = "constant_concurrency",
 		budgets = emptyBudgetDraft(),
 		budgetSources = {},
+		isStreamingRequest = false,
 	}: {
 		mode?: LoadTestConfig["mode"];
 		budgets?: ReturnType<typeof emptyBudgetDraft>;
 		budgetSources?: ComponentProps<typeof BudgetsSection>["budgetSources"];
+		isStreamingRequest?: boolean;
 	} = {}
 ) {
 	render(
@@ -52,6 +55,7 @@ function renderBudgets(
 			failRun={false}
 			onFailRunChange={() => {}}
 			disabled={disabled}
+			isStreamingRequest={isStreamingRequest}
 		/>
 	);
 	fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
@@ -70,6 +74,41 @@ describe("BudgetsSection", () => {
 		renderBudgets(false);
 		expect(screen.getByLabelText(/custom budget 1 metric name/i)).toBeEnabled();
 		expect(screen.getByRole("button", { name: /add custom metric budget/i })).toBeEnabled();
+	});
+
+	describe("stream budgets (issue #3234)", () => {
+		const remembered = {
+			...emptyBudgetDraft(),
+			streamTimeToFirstEventP95Ms: "800",
+			streamEventsPerSecondMin: "200",
+		};
+
+		it("offers both, and the note on what the latency budgets measure, for a streaming request", () => {
+			renderBudgets(false, { isStreamingRequest: true });
+			expect(screen.getByLabelText(/^time to first event p95 at most/i)).toBeInTheDocument();
+			expect(screen.getByLabelText(/^events per second at least/i)).toBeInTheDocument();
+			expect(screen.getByText(STREAM_LATENCY_NOTE)).toBeInTheDocument();
+		});
+
+		it("offers neither, nor the note, for a request that does not stream", () => {
+			renderBudgets(false, { isStreamingRequest: false });
+			expect(screen.queryByLabelText(/time to first event/i)).not.toBeInTheDocument();
+			expect(screen.queryByLabelText(/events per second/i)).not.toBeInTheDocument();
+			expect(screen.queryByText(STREAM_LATENCY_NOTE)).not.toBeInTheDocument();
+		});
+
+		it("counts a remembered stream budget on the closed card only when the request streams", () => {
+			renderBudgets(false, { budgets: remembered, isStreamingRequest: true });
+			expect(screen.getByRole("button", { name: /pass\/fail budgets/i })).toHaveTextContent(
+				"2 budgets active"
+			);
+			cleanup();
+
+			renderBudgets(false, { budgets: remembered, isStreamingRequest: false });
+			expect(screen.getByRole("button", { name: /pass\/fail budgets/i })).toHaveTextContent(
+				"No budgets"
+			);
+		});
 	});
 
 	describe("in Capacity discovery (issue #2816)", () => {

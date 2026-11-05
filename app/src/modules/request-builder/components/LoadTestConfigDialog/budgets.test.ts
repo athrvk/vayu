@@ -24,6 +24,7 @@ import {
 	CUSTOM_BUDGET_STATS,
 	MAX_CUSTOM_METRIC_NAME_LENGTH,
 	budgetError,
+	budgetFieldsFor,
 	buildThresholds,
 	customBudgetRowError,
 	customBudgetsError,
@@ -281,9 +282,66 @@ describe("the payload the dialog builds", () => {
 		// The table drives the fields, the validation and the payload; a key
 		// that is not in RunThresholds would render a control and send nothing.
 		const built = buildThresholds(
-			draft(Object.fromEntries(BUDGET_FIELDS.map((f) => [f.key, "1"])) as BudgetDraft)
+			draft(Object.fromEntries(BUDGET_FIELDS.map((f) => [f.key, "1"])) as BudgetDraft),
+			false,
+			[],
+			true
 		);
 		expect(Object.keys(built ?? {})).toHaveLength(BUDGET_FIELDS.length);
+	});
+});
+
+describe("stream budgets (issue #3234)", () => {
+	const streamDraft = draft({
+		streamTimeToFirstEventP95Ms: "800",
+		streamEventsPerSecondMin: "200",
+	});
+
+	it("are the only fields a non-streaming run does not have", () => {
+		const streamOnly = BUDGET_FIELDS.filter((field) => field.streamOnly).map((f) => f.key);
+		expect(streamOnly).toEqual(["streamTimeToFirstEventP95Ms", "streamEventsPerSecondMin"]);
+		expect(budgetFieldsFor(true)).toHaveLength(BUDGET_FIELDS.length);
+		expect(budgetFieldsFor(false).map((f) => f.key)).toEqual(
+			BUDGET_FIELDS.filter((f) => !f.streamOnly).map((f) => f.key)
+		);
+	});
+
+	it("round-trips into the engine's keys for a streaming request", () => {
+		expect(buildThresholds(streamDraft, false, [], true)).toEqual({
+			streamTimeToFirstEventP95Ms: 800,
+			streamEventsPerSecondMin: 200,
+		});
+	});
+
+	it("sends none of them for a request that does not stream", () => {
+		expect(buildThresholds(streamDraft, true, [], false)).toBeUndefined();
+		expect(buildThresholds({ ...streamDraft, latencyP99Ms: "50" })).toEqual({
+			latencyP99Ms: 50,
+		});
+	});
+
+	it("keeps the engine's ranges: positive, the first event at most a day, the rate at most 1e9", () => {
+		const bad = (values: Partial<BudgetDraft>) => budgetError(draft(values), true);
+		expect(bad({ streamTimeToFirstEventP95Ms: "0" })).toMatch(/time to first event p95/i);
+		expect(bad({ streamTimeToFirstEventP95Ms: "86400001" })).toMatch(/at most 86400000ms/);
+		expect(bad({ streamTimeToFirstEventP95Ms: "86400000" })).toBeNull();
+		expect(bad({ streamEventsPerSecondMin: "0" })).toMatch(/events per second/i);
+		expect(bad({ streamEventsPerSecondMin: "1000000001" })).toMatch(/events\/s/);
+		expect(bad({ streamEventsPerSecondMin: "1000000000" })).toBeNull();
+	});
+
+	it("does not refuse a remembered value the run will not carry", () => {
+		const stale = draft({ streamEventsPerSecondMin: "0" });
+		expect(budgetError(stale, true)).not.toBeNull();
+		expect(budgetError(stale, false)).toBeNull();
+	});
+
+	it("counts on the closed card only when the request streams", () => {
+		expect(summariseBudgets(streamDraft, [], true)).toBe("2 budgets active");
+		expect(summariseBudgets(streamDraft, [], false)).toBe("No budgets");
+		expect(summariseBudgets(draft({ streamEventsPerSecondMin: "200" }), [], true)).toBe(
+			"1 budget active - Events per second at least 200 events/s"
+		);
 	});
 });
 

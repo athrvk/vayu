@@ -43,6 +43,7 @@ import { buildNotices } from "./notices";
 import {
 	budgetsChanged,
 	budgetsToRemember,
+	carriedForRun,
 	carriedThresholdKeys,
 	clearCarried,
 	describeCarried,
@@ -259,6 +260,7 @@ export default function LoadTestConfigDialog({
 		monitor,
 		maxSeries: monitorSettings.maxSeries,
 		scenarioOnly: scenarioOnlyElements,
+		isStreamingRequest,
 	});
 	// A file the parser refused leaves no rows behind, so starting the run would
 	// send the request with its `{{data.*}}` tokens written as they stand - the
@@ -279,7 +281,7 @@ export default function LoadTestConfigDialog({
 
 	// The carried fields the user has not edited since the dialog opened.
 	const carried = stillCarried(
-		initial.carried,
+		carriedForRun(initial.carried, isStreamingRequest),
 		{ budgets: initial.budgets, customBudgets: initial.customBudgets },
 		{ budgets, customBudgets }
 	);
@@ -501,6 +503,7 @@ export default function LoadTestConfigDialog({
 								referenceOwner={referenceOwner}
 								mode={profile.mode}
 								budgetSources={carried.fixed}
+								isStreamingRequest={isStreamingRequest}
 							/>
 
 							<MonitoringSection

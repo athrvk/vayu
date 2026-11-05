@@ -139,7 +139,7 @@ describe("Copy for agent on a custom budget row", () => {
 });
 
 describe("Copy for agent on a fixed budget field", () => {
-	function renderSection(referenceOwner?: ThresholdOwner) {
+	function renderSection(referenceOwner?: ThresholdOwner, isStreamingRequest = true) {
 		render(
 			<BudgetsSection
 				mode="constant_concurrency"
@@ -152,6 +152,7 @@ describe("Copy for agent on a fixed budget field", () => {
 				onFailRunChange={() => {}}
 				disabled={false}
 				referenceOwner={referenceOwner}
+				isStreamingRequest={isStreamingRequest}
 			/>
 		);
 		fireEvent.click(screen.getByRole("button", { name: /budgets/i }));

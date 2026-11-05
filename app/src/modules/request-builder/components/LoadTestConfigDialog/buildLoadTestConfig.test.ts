@@ -77,6 +77,20 @@ describe("buildLoadTestConfig", () => {
 		expect(build({ maxInFlight: 50 })).not.toHaveProperty("max_in_flight");
 	});
 
+	it("sends a stream budget only for a streaming request (#3234)", () => {
+		const budgets = { ...emptyBudgetDraft(), streamEventsPerSecondMin: "200" };
+		expect(build({ budgets, isStreamingRequest: true }).thresholds).toEqual({
+			streamEventsPerSecondMin: 200,
+		});
+		const config = build({
+			budgets,
+			isStreamingRequest: false,
+			carriedBudgets: ["streamEventsPerSecondMin"],
+		});
+		expect(config.thresholds).toBeUndefined();
+		expect(config).not.toHaveProperty("carriedBudgets");
+	});
+
 	it("sends the stream caps only for a streaming request", () => {
 		expect(build({ isStreamingRequest: true })).toMatchObject({
 			stream_duration_seconds: 20,

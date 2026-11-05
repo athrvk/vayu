@@ -106,7 +106,7 @@ import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
 import {
 	BUDGETS_EXPLAINER,
-	BUDGET_FIELDS,
+	budgetFieldsFor,
 	summariseBudgets,
 	type BudgetDraft,
 	type CustomBudgetDraft,
@@ -750,7 +750,8 @@ export default function RunCollectionDialog({
 						<p className="text-label leading-relaxed text-muted-foreground">
 							{BUDGETS_EXPLAINER}
 						</p>
-						{BUDGET_FIELDS.map((field) => (
+						{/* A collection run never streams, so it has no stream section to judge. */}
+						{budgetFieldsFor(false).map((field) => (
 							<NumberField
 								key={field.key}
 								id={`run-collection-${field.id}`}
