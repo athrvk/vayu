@@ -80,15 +80,17 @@ using vayu::utils::escape_html;
 
 /// Every document the Markdown goldens use, so the page is exercised on stopped
 /// runs, collection runs, comparisons and hostile text as well as the goldens.
-constexpr auto ALL_CASES = std::to_array<std::string_view> ({ "healthy-passed",
-"errors-and-budget-failed", "stopped-early", "vs-baseline-regressed", "no-budgets",
-"collection-load", "hostile-text", "status-seconds", "skipped-requests",
-"capacity-slo-exceeded", "scenario-sequence", "contract-bound" });
+constexpr auto ALL_CASES =
+std::to_array<std::string_view> ({ "healthy-passed", "errors-and-budget-failed",
+"stopped-early", "vs-baseline-regressed", "no-budgets", "collection-load",
+"hostile-text", "status-seconds", "skipped-requests", "capacity-slo-exceeded",
+"scenario-sequence", "contract-bound", "stream-load", "stream-no-first-event" });
 
 /// The cases whose rendered page is pinned byte for byte.
-constexpr auto GOLDEN_CASES = std::to_array<std::string_view> (
-{ "healthy-passed", "errors-and-budget-failed", "status-seconds", "skipped-requests",
-"capacity-slo-exceeded", "scenario-sequence", "contract-bound" });
+constexpr auto GOLDEN_CASES =
+std::to_array<std::string_view> ({ "healthy-passed", "errors-and-budget-failed",
+"status-seconds", "skipped-requests", "capacity-slo-exceeded",
+"scenario-sequence", "contract-bound", "stream-load", "stream-no-first-event" });
 
 constexpr std::size_t SIZE_LIMIT_BYTES = 300000;
 
@@ -321,6 +323,8 @@ ordered_json full_document () {
     read_document ("capacity-slo-exceeded")["report"]["capacity"];
     document["report"]["scenario"] =
     read_document ("scenario-sequence")["report"]["scenario"];
+    document["report"]["stream"] =
+    read_document ("stream-load")["report"]["stream"];
     for (const char* key : { "coverage", "schemaValidation" }) {
         document["report"][key] = read_document ("contract-bound")["report"][key];
     }
@@ -480,8 +484,8 @@ std::string section_html (const std::string& html, std::string_view id) {
     return html.substr (open, html.find ("</section>", open) - open);
 }
 
-constexpr auto SEARCH_AND_SEQUENCE_SECTIONS = std::to_array<std::string_view> (
-{ "capacity", "contract", "sequence", "transactions" });
+constexpr auto OPTIONAL_SECTIONS = std::to_array<std::string_view> (
+{ "stream", "capacity", "contract", "sequence", "transactions" });
 
 // Mutation check: drop the capacity push from `view_sections` and this fails,
 // as does the golden.
@@ -539,6 +543,35 @@ TEST (RunExportHtmlTest, AContractIsASectionOfItsSentencesAndItsOperations) {
     EXPECT_NE (contract.find ("<table aria-labelledby=\"contract-h\">"), std::string::npos);
 }
 
+// Mutation check: drop the stream push from `view_sections` and this fails, as
+// do the goldens.
+TEST (RunExportHtmlTest, AStreamingRunIsASectionOfItsTotalsAndItsDistributions) {
+    const std::string html =
+    render_run_export_html (read_document ("stream-load"));
+    const std::string stream = section_html (html, "stream");
+    ASSERT_FALSE (stream.empty ());
+    EXPECT_NE (html.find ("<li><a href=\"#stream\">Stream</a></li>"), std::string::npos);
+    for (const std::string_view cell :
+    { "<th scope=\"row\">Streams</th><td>120</td>", "<td>14,400</td>",
+    "<td>480 events/s</td>", "<th scope=\"row\">Streams ended at a cap</th><td>4</td>",
+    "<th scope=\"col\">Time to first event (ms)</th>",
+    "<tr><th scope=\"row\">max</th><td>310</td><td>1,250</td></tr>" }) {
+        EXPECT_NE (stream.find (cell), std::string::npos) << cell << " in:\n"
+                                                          << stream;
+    }
+    EXPECT_NE (section_html (html, "latency").find ("<caption>Each stream&#39;s full duration.</caption>"),
+    std::string::npos);
+}
+
+TEST (RunExportHtmlTest, TheTimeToFirstEventColumnIsThereOnlyWhenTheDocumentHasIt) {
+    const std::string stream = section_html (
+    render_run_export_html (read_document ("stream-no-first-event")), "stream");
+    ASSERT_FALSE (stream.empty ());
+    EXPECT_EQ (stream.find ("Time to first event"), std::string::npos) << stream;
+    EXPECT_NE (stream.find ("<tr><th scope=\"row\">max</th><td>0</td></tr>"), std::string::npos)
+    << stream;
+}
+
 TEST (RunExportHtmlTest, AHostileOperationIsTextInItsRow) {
     ordered_json document  = read_document ("contract-bound");
     auto& first            = document["report"]["coverage"]["operations"][0];
@@ -593,7 +626,7 @@ TEST (RunExportHtmlTest, APlainLoadRunDrawsNeitherSearchNorSequenceNorCaption) {
     for (const std::string_view name :
     { "healthy-passed", "errors-and-budget-failed", "stopped-early", "no-budgets" }) {
         const std::string html = render_run_export_html (read_document (name));
-        for (const std::string_view id : SEARCH_AND_SEQUENCE_SECTIONS) {
+        for (const std::string_view id : OPTIONAL_SECTIONS) {
             EXPECT_EQ (html.find ("<section id=\"" + std::string (id) + "\""),
             std::string::npos)
             << name << ": " << id;
@@ -1018,8 +1051,9 @@ TEST (RunExportHtmlTest, SectionsComeInTheMarkdownReportsOrderThenChartsThenFoot
     std::size_t from       = 0;
     for (const std::string_view marker : { "<h1>", "<section id=\"verdict\"",
          "<section id=\"run\"", "<section id=\"results\"", "<section id=\"latency\"",
-         "<section id=\"capacity\"", "<section id=\"contract\"", "<section id=\"sequence\"",
-         "<section id=\"transactions\"", "<section id=\"errors\"", "<section id=\"comparison\"",
+         "<section id=\"stream\"", "<section id=\"capacity\"", "<section id=\"contract\"",
+         "<section id=\"sequence\"", "<section id=\"transactions\"",
+         "<section id=\"errors\"", "<section id=\"comparison\"",
          "<section id=\"warnings\"", "<section id=\"charts\"", "<footer>" }) {
         const auto at = html.find (marker, from);
         ASSERT_NE (at, std::string::npos) << marker << " after offset " << from;

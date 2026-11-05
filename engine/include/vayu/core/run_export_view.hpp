@@ -179,10 +179,24 @@ struct ReportSequence {
     ReportTable steps;
 };
 
+/// What a streaming run's streams delivered (`report.stream`, #3240). Every
+/// figure the document lacks reads "-".
+struct ReportStream {
+    /// What the Latency table above measures (each stream's full duration), so
+    /// a reader does not take it for a time to first event.
+    ReportText note;
+    /// Streams, events, events per second and streams that ended at a cap.
+    ReportTable totals;
+    /// p50, p95, p99 and max of the events each stream delivered, and of the time
+    /// to its first event; that column only when the document has one, since a
+    /// run in which no stream delivered an event has none to report.
+    ReportTable distribution;
+};
+
 /// The sections of a report, each already worded. A section the document has
 /// no data for is empty (`errors.rows`, `capacity`, `sequence`, `comparison`,
-/// `warnings`, `contract`) so a renderer omits it; the rest read "-" for what
-/// the document lacks.
+/// `warnings`, `contract`, `stream`) so a renderer omits it; the rest read "-"
+/// for what the document lacks.
 struct ReportView {
     ReportText title;
     ReportText reference;
@@ -193,7 +207,10 @@ struct ReportView {
     std::vector<ReportText> notices;
     ReportTable run;
     ReportTable results;
+    /// A streaming run's caption says what its latency is of (`ReportStream::note`).
     ReportTable latency;
+    /// Empty for a run that did not stream.
+    std::optional<ReportStream> stream;
     /// Empty for a run that is not a capacity search.
     std::optional<ReportCapacity> capacity;
     /// Empty for a run whose collection binds no OpenAPI document.
