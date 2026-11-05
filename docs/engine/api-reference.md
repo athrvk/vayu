@@ -6621,11 +6621,12 @@ holds wherever a script can run between the build and the send:
 | A collection **load** run's step | that submission's `step.before` elements (an `inline` `script.pre`) and the residual pass over its virtual user's scope |
 | A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
 
-A single-request load run without `requestElements` has no such pass, so the
-build encodes the name as written; when the run names an `environmentId` or a
-`requestId`, its start-of-run pass ([`POST /runs`](#post-runs)) then resolves a
-bearer token or header-placed api key with the header line it was written into,
-but not a basic pair or a query-placed key, already encoded. Under load a name nothing answers is never a
+A single-request load run without `requestElements` has no such pass. When it
+names an `environmentId` or a `requestId`, the build leaves such credentials
+alone and its start-of-run pass ([`POST /runs`](#post-runs)) resolves and
+applies them once, after the request's own names, so a basic pair and a
+query-placed api key are encoded with their values (#3288); without either, the
+build encodes the name as written. Under load a name nothing answers is never a
 refusal: it is sent as written and counted like any other unresolved token
 (#1503), except inside a basic pair's base64, where it never was countable.
 
@@ -8781,13 +8782,18 @@ response (`assert.status`, `step.after` kinds) and has none of those sends one
 shared request, and takes this pass (#3288). Which of the two a run is gets decided
 on its request before this pass, so a stored value that is itself a generator
 moves the run onto the copy path having already answered the name it filled,
-and a setup write to that name is lost. Auth is applied
-when the request is built, before this pass: a bearer token or a header-placed
-api key resolves with the header it was written into, while a basic pair or a
-query-placed api key is already encoded and goes out as written (compose the
-payload, or declare `requestElements`, to resolve one). A name nothing answers
-is sent as written and counted in the report's `unresolved_tokens` warning,
-never refused.
+and a setup write to that name is lost. Credentials holding a name these
+scopes may answer are held back from the build on a run whose submissions do
+not wait on their scripts for them, and resolved and applied by this pass after
+the request's own names (#3288), so a bearer token, an api key in a header or
+the query and a basic pair all go out with their values; one whose credential
+also holds a token the bind owns (`{{$iteration}}`) has its stored names
+answered here and is bound per submission. A credential holding no token is
+applied when the request is built, as before. A name nothing answers is sent as
+written and counted in the report's `unresolved_tokens` warning, never refused;
+a credential the pass cannot apply (an api-key header name that resolves to
+something that is not a header name, a value a header line cannot carry) is
+counted the same way and the run goes on.
 
 **`origin` on `POST /runs`** is the same object, read by the same reader and
 under the same rules as on [`POST /execute`](#post-execute) (#1817): who started

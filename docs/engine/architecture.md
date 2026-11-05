@@ -693,8 +693,11 @@ applied to the outgoing request rather than being left to the UI. This lives in
   sequential run and by `resolve_load_residuals` on the load run), and a
   single-request load run once, only when it declares `requestElements`
   (`LoadAuthPlan::after_scripts`), the one shape with a residual pass per
-  submission. A step or run whose credentials hold no such name pays nothing
-  per iteration.
+  submission. One without `requestElements` that names an `environmentId` or
+  `requestId` defers the build too, and its start-of-run pass resolves the
+  credentials against those scopes and applies them once to the shared
+  request (#3288). A step or run whose credentials hold no such name pays
+  nothing per iteration.
   `plan_auth_refresh` decides afterwards
   whether the credential a single-request *load* run just resolved can be kept
   current past its expiry, and `plan_scenario_auth_refresh`

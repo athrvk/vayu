@@ -100,9 +100,12 @@ struct LoadAuthPlan {
      * submission then joins its row into a copy of @ref auth without applying
      * it and applies it after that pass (`routes::resolve_load_residuals`).
      *
-     * False on a run without `requestElements`: nothing after the build
-     * answers such a name there, so the build encodes it as written, as it
-     * always did, and the run keeps sending one shared request.
+     * False on a run without `requestElements`, which keeps sending one shared
+     * request: when it names an `environmentId` or `requestId`,
+     * `build_load_request` defers the build itself and resolves and applies
+     * the credentials once, after its start-of-run pass over the stored
+     * scopes (#3288); otherwise nothing answers such a name, and the build
+     * encodes it as written, as it always did.
      */
     bool after_scripts = false;
 

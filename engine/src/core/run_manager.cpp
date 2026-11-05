@@ -1545,54 +1545,126 @@ const nlohmann::json& config) {
 
 namespace {
 
+/// The bare column names @p context's rows bind (#1007), or none without rows.
+const vayu::http::BoundColumnNames& run_bound_columns (const RunContext& context) {
+    static const vayu::http::BoundColumnNames none;
+    return context.load_data ? context.load_data->bound_columns : none;
+}
+
+/// Whether a single-request run names stored scopes: an `environmentId`, or a
+/// `requestId` whose collection chain they then include.
+bool names_stored_scopes (const nlohmann::json& config) {
+    return named_id (config, "environmentId") || named_id (config, "requestId");
+}
+
 /**
- * A single-request run that names stored scopes - an `environmentId`, or a
- * `requestId` whose collection chain they then include - reads its `{{names}}`
- * against them as `POST /execute` does (#3253), in one pass over the template
- * every submission shares (`resolve_load_template_tokens`), before it is split.
- *
- * Nothing is read for a template holding no token, so a token-free run pays
- * nothing (#992). A run whose submissions run the residual pass
- * (`submissions_run_the_residual_pass`) is skipped: each copy is resolved
- * against these scopes and what `script.setup` wrote into them. Every other
- * run, a `requestElements` run that sends the shared request included (#3288),
- * resolves here, before `script.setup`, so a setup write never reaches its
- * request. That is asked of the request before this pass, so a stored value
- * that is itself a bind token (`{{$guid}}`) still moves the run onto the copy
- * path, where a setup write to the name it answered is lost. Credentials were
- * applied by the build already: one written into a header line resolves with
- * that header, one encoded first does not.
- *
- * Counted, never fatal (#1503): a refusal leaves what it refused written, for
- * the run's unresolved scan to name, and is logged here with its reason.
+ * Whether a single-request run's credentials hold a name only a variable scope
+ * answers that only the start-of-run pass will answer (#3288): the run names
+ * stored scopes and its submissions do not hold the credentials for their own
+ * scripts (`LoadAuthPlan::after_scripts`). The build then leaves them alone, as
+ * it does for a bind (#591), so `apply_auth` does not encode the name first.
  */
-void resolve_template_against_stored_scopes (vayu::db::Database& db,
-const RunContext& context,
-vayu::Request& request) {
-    const auto environment_id = named_id (context.config, "environmentId");
-    if (!environment_id && !named_id (context.config, "requestId")) {
-        return;
+bool credentials_resolve_at_start (const RunContext& context) {
+    return !context.load_auth.after_scripts && names_stored_scopes (context.config) &&
+    credentials_await_scripts (context.load_auth.auth, run_bound_columns (context));
+}
+
+/**
+ * Whether the start-of-run pass resolves the request itself: it holds a token
+ * and its submissions do not run the residual pass
+ * (`submissions_run_the_residual_pass`), which resolves each copy against these
+ * scopes and what `script.setup` wrote into them. Every other run, a
+ * `requestElements` run that sends the shared request included (#3288),
+ * resolves here, before `script.setup`, so a setup write never reaches its
+ * request. That is asked of the request before the pass, so a stored value that
+ * is itself a bind token (`{{$guid}}`) still moves the run onto the copy path,
+ * where a setup write to the name it answered is lost.
+ */
+bool template_resolves_at_start (const RunContext& context, vayu::Request& request) {
+    return !vayu::http::routes::unresolved_token_names (request).empty () &&
+    !submissions_run_the_residual_pass (
+    context, tokenize_bindable_fields (request, run_bound_columns (context)));
+}
+
+/**
+ * The credentials the build held back for the start-of-run pass, resolved
+ * against @p vars and split again for the bind: applied to the shared request
+ * when no token the bind owns is left in them, so the run keeps its one shared
+ * request, and otherwise left for the bind to apply per submission. Answers a
+ * refusal's message.
+ */
+std::optional<std::string> resolve_credentials_at_start (RunContext& context,
+vayu::Request& request,
+const vayu::http::VariableValues& vars) {
+    auto& plan          = context.load_auth;
+    const auto& columns = run_bound_columns (context);
+    auto refusal = vayu::http::routes::resolve_load_auth_tokens (plan.auth, vars, columns);
+    plan.credentials = tokenize_auth_fields (plan.auth, columns);
+    std::optional<std::string> message;
+    if (refusal) {
+        message = std::move (refusal->error.message);
     }
-    if (vayu::http::routes::unresolved_token_names (request).empty ()) {
-        return;
+    if (!plan.credentials.empty ()) {
+        return message;
     }
-    const vayu::http::BoundColumnNames no_columns;
-    const auto& bound_columns =
-    context.load_data ? context.load_data->bound_columns : no_columns;
-    if (submissions_run_the_residual_pass (
-        context, tokenize_bindable_fields (request, bound_columns))) {
-        return;
+    // Applied even past a refusal, as `apply_late_auth` applies a header line
+    // its value cannot be spelled in: the run sends it, and the pre-send gate
+    // stops the line rather than the request going out with no credential.
+    auto applied = vayu::http::apply_auth (request, plan.auth, nullptr);
+    if (!message && !applied.ok) {
+        message = std::move (applied.message);
     }
-    const auto scopes  = vayu::http::routes::load_script_variable_scopes (db,
-    environment_id, single_request_lifecycle_collection_id (db, context.config));
-    const auto refusal = vayu::http::routes::resolve_load_template_tokens (
-    request, vayu::http::routes::flatten_variable_scopes (scopes), bound_columns);
+    return message;
+}
+
+/**
+ * A single-request run that names stored scopes reads its `{{names}}` against
+ * them as `POST /execute` does (#3253), in one pass at start over the template
+ * every submission shares (`resolve_load_template_tokens`), before it is split,
+ * when `template_resolves_at_start` says so. Nothing is read for a template
+ * holding no token and credentials holding none, so a token-free run pays
+ * nothing (#992).
+ *
+ * Credentials the build held back (@p credentials_at_start, #3288) resolve
+ * after the template, in the residual pass's order, so a basic pair or a
+ * query-placed api key is encoded only once its names are answered.
+ *
+ * Counted, never fatal (#1503): a template refusal leaves what it refused
+ * written, for the run's unresolved scan to name; a credential's is answered,
+ * for the caller to count beside that scan. Both are logged here.
+ */
+std::optional<std::string> resolve_against_stored_scopes (vayu::db::Database& db,
+RunContext& context,
+vayu::Request& request,
+bool credentials_at_start) {
+    const bool template_at_start = names_stored_scopes (context.config) &&
+    template_resolves_at_start (context, request);
+    if (!template_at_start && !credentials_at_start) {
+        return std::nullopt;
+    }
+    const auto vars = vayu::http::routes::flatten_variable_scopes (
+    vayu::http::routes::load_script_variable_scopes (db, named_id (context.config, "environmentId"),
+    single_request_lifecycle_collection_id (db, context.config)));
+    if (template_at_start) {
+        if (auto refusal = vayu::http::routes::resolve_load_template_tokens (
+            request, vars, run_bound_columns (context))) {
+            vayu::utils::log_warning ("run",
+            "Load test: a stored variable was not resolved into the request",
+            { { "runId", context.run_id },
+            { "reason", vayu::utils::bounded_log_text (refusal->error.message) } });
+        }
+    }
+    if (!credentials_at_start) {
+        return std::nullopt;
+    }
+    auto refusal = resolve_credentials_at_start (context, request, vars);
     if (refusal) {
         vayu::utils::log_warning ("run",
-        "Load test: a stored variable was not resolved into the request",
+        "Load test: a stored variable was not resolved into the credentials",
         { { "runId", context.run_id },
-        { "reason", vayu::utils::bounded_log_text (refusal->error.message) } });
+        { "reason", vayu::utils::bounded_log_text (*refusal) } });
     }
+    return refusal;
 }
 
 /**
@@ -1654,8 +1726,10 @@ vayu::Request& request) {
     // (issue #591), so a run whose credentials carry one tells the build to
     // defer and `bind_iteration` applies them per submission. So does a run
     // whose credentials wait on its `requestElements` scripts (issue #2473),
-    // applied after each submission's residual pass. Every other run resolves
-    // its auth here exactly as it always did.
+    // applied after each submission's residual pass, and a run whose
+    // credentials wait on the stored scopes it names (#3288), applied by the
+    // start-of-run pass below. Every other run resolves its auth here exactly
+    // as it always did.
     //
     // Asked of the credentials rather than of the run's rows (issue #1055):
     // `{{$vu}}` binds off the iteration, so a run sent without `data` at all
@@ -1663,9 +1737,12 @@ vayu::Request& request) {
     // to send an identity token in a credential base64-encoded as written.
     // The route's pre-flight judged the token endpoints already; judged again
     // here so no caller of the run reaches one the policy refuses (#2521).
-    const auto& target_policy = context->target_policy;
+    const auto& target_policy       = context->target_policy;
+    const bool credentials_at_start = credentials_resolve_at_start (*context);
     auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
-    context->load_auth.auth_resolution (), target_policy ? &*target_policy : nullptr);
+    credentials_at_start ? vayu::http::AuthResolution::Defer :
+                           context->load_auth.auth_resolution (),
+    target_policy ? &*target_policy : nullptr);
     if (!built.ok) {
         vayu::utils::log_error ("run",
         built.parse_failed ? std::string ("Load test: invalid request format") :
@@ -1678,7 +1755,8 @@ vayu::Request& request) {
     // Before the split and the scan below: what a stored scope answers is
     // finished text by then, so the split sees only the bind's tokens and the
     // scan names only what is left.
-    resolve_template_against_stored_scopes (db, *context, request);
+    auto credential_refusal =
+    resolve_against_stored_scopes (db, *context, request, credentials_at_start);
 
     // Split once, here, so no submission re-scans the request's fields: a load
     // run binds at its full rate, which is the same reason a plan step is split
@@ -1705,6 +1783,11 @@ vayu::Request& request) {
     // scan is one-time because the fast path's bytes never change between
     // submissions.
     context->load_unresolved_tokens = vayu::http::routes::unresolved_token_names (request);
+    // Counted per submission as the residual pass counts a late credential's
+    // refusal (`resolve_load_residuals`), never fatal (#1503).
+    if (credential_refusal) {
+        context->load_unresolved_tokens.push_back (std::move (*credential_refusal));
+    }
 
     // A streaming run's caps ride on the request itself, because the
     // event loop is what enforces them and the request is all it sees.
