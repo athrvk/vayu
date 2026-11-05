@@ -1233,11 +1233,20 @@ export interface ConnectionTestResult {
 		/** The `proxyMode` in force - `environment`, `system`, `manual` or `off`. */
 		mode: string;
 		/**
-		 * The proxy URL, absent when the engine does not know it - which is
-		 * every `environment`-mode test, since libcurl reads those variables
-		 * itself. Absent means "not the engine's to say", never "no proxy".
+		 * The proxy the probe went through, without its `user:pass@` - the
+		 * engine strips credentials, so this is safe to show. Absent when the
+		 * probe went direct.
 		 */
 		url?: string;
+		/**
+		 * `"environment"` when the proxy was not configured in Vayu: `environment`
+		 * mode, or `system` with nothing resolved, where libcurl read
+		 * `http_proxy` / `https_proxy` / `all_proxy` itself and did send the probe
+		 * through one. `url` is then what it read, and absent only if that could
+		 * not be read back. Absent when `url` is the setting in force or the probe
+		 * went direct.
+		 */
+		source?: "environment";
 	};
 	/** The registry entry that answered for this host, `""` when none did. */
 	clientCertificate: string;
