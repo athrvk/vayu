@@ -54,6 +54,8 @@ That position is not load-bearing. An environment export carries neither `info` 
 
 `POST /globals` **replaces** the whole set - the engine has no merge verb (see [api-reference.md](../../engine/api-reference.md#post-globals)). Writing the imported record straight to it would delete every global the user already had, so `ImportOrchestrator.applyGlobals` reads the current set first and writes the union.
 
+`POST /import` merges the same way engine-side, and there a replaced global keeps its stored `createdAt` (or its lack of one): the import stamps every row it reads, and an existing variable is never restamped ([db-schema.md](../../engine/db-schema.md#variablevalue-shape)). `ImportOrchestrator.applyGlobals` does the same on the app's path, so re-importing a globals file does not move a variable it already had to the end of the Variables tab.
+
 On a name collision **the imported value wins**. The user explicitly asked for this file's variables, and silently keeping the old value would be the no-op outcome this import path exists to avoid. The preview states it: *"Same-named globals will be overwritten."*
 
 Globals are written **last**, after the bulk `POST /import/apply` has landed and its id-map has been checked. That ordering is load-bearing: it is the one write here that can destroy data the import did not create, so nothing may fail behind it. A failed apply therefore never leaves globals half-rewritten.
@@ -81,6 +83,7 @@ A globals export carries a `name` (the workspace's). Vayu's globals scope is a s
 | `enabled` / `disabled` | `disabled` wins if present, else `enabled`, else `true`. |
 | `type === "secret"` | Sets `secret: true`. Any other `type` omits the flag entirely (not `secret: false`). |
 | `type` of `"string"` / `"number"` / `"boolean"` | Stored as the variable's `type`, Vayu's own type of the same name. |
+| The entry's position in `values[]` | Stamped as `createdAt`: one clock reading per import plus the position, so the stamps ascend in file order (#3252). The stored blob keeps its keys sorted, and the variables editor lists a scope by `createdAt`, so this is what keeps the file's order. |
 
 `"default"` is Postman's unset marker and stores nothing. `"any"` or a custom `type`, and a `description` (the environment exporter writes none, so there is nothing to read back), are dropped and counted as `variable_metadata`.
 
@@ -138,9 +141,9 @@ The toast has a single action slot. When the file also has an import report, **R
 
 ## Export (inverse)
 
-`POST /export/postman-environment` (`export_postman_environment`, `core/postman_export.cpp`; wire contract in the [API reference](../../engine/api-reference.md#post-exportpostman-environment)) writes one environment back as this format: `{id, name, values: [{key, value, type, enabled}], _postman_variable_scope: "environment"}`, rows in the stored key order. It reverses the table above: a secret variable is `type: "secret"` (its value blanked unless `includeSecrets`), a stored `string` / `number` / `boolean` type is written as itself, anything else is `"default"`, and `enabled` is the stored flag. Importing the result gives back the same names, values, enabled flags, secret flags and types.
+`POST /export/postman-environment` (`export_postman_environment`, `core/postman_export.cpp`; wire contract in the [API reference](../../engine/api-reference.md#post-exportpostman-environment)) writes one environment back as this format: `{id, name, values: [{key, value, type, enabled}], _postman_variable_scope: "environment"}`, rows in the stored key order. It reverses the table above: a secret variable is `type: "secret"` (its value blanked unless `includeSecrets`), a stored `string` / `number` / `boolean` type is written as itself, anything else is `"default"`, and `enabled` is the stored flag. Importing the result gives back the same names, values, enabled flags and secret flags, and the types of every variable that is neither `json` nor a secret: Postman's row has one `type` slot, and a secret's goes to `secret`.
 
-What Postman has no place for is reported in `notes.notCarried`, not dropped silently: a variable typed `json` is written as `default` and counted under `variable_types`. The document carries no `description` and no export timestamp. Only environments export; there is no globals exporter.
+What Postman has no place for is reported in `notes.notCarried`, not dropped silently: a variable typed `json` is written as `default`, and a secret typed `number`, `boolean` or `json` is written as `secret`, each counted once under `variable_types`. The document carries no `description`, no `createdAt` and no export timestamp. Only environments export; there is no globals exporter.
 
 ## Not covered
 
@@ -148,8 +151,8 @@ What Postman has no place for is reported in `notes.notCarried`, not dropped sil
 
 ## Tests
 
-- `engine/tests/import_parse_test.cpp` - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced), the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
-- `engine/tests/postman_export_route_test.cpp` (`PostmanEnvironmentExportTest`) - the export: secrets blanked by default, the document shape and key order, the round trip back through `parse_import`, the `variable_types` note, and the refusals.
+- `engine/tests/import_parse_test.cpp` - detection for both scopes, the mapping (against the corpus recorded from the parser this replaced, less the clock's `createdAt`), the file-order `createdAt` stamps (`StampsEachVariableRowInFileOrder`), a re-imported global keeping its stamp, the secret flag, the dropped workspace name, and the `importEnvironments: false` path for each scope.
+- `engine/tests/postman_export_route_test.cpp` (`PostmanEnvironmentExportTest`) - the export: secrets blanked by default, the document shape and key order, the round trip back through `parse_import`, the `variable_types` note (a typed secret included), and the refusals.
 - `app/src/services/importers/orchestrator.test.ts` - the merge, the collision rule, that a result with no globals neither reads nor writes the scope, the `importEnvironments: false` skip, that a failed apply never reaches the globals write, that a failed globals write surfaces with the tree already committed, and the globals-last ordering.
 - `app/src/queries/import.test.ts` - `getGlobals` / `updateGlobals` delegation, the globals cache invalidation and `environmentIds` on the mutation's result.
 - `app/src/modules/collections/import-environment.test.ts` and `ImportModal.success.test.tsx` - the activation rule and each toast outcome above.

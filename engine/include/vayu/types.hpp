@@ -1498,7 +1498,7 @@ struct ScriptValue {
  * round-trip through every read/write of a stored variables blob, or the app's
  * ordering is destroyed (issue #135). `std::nullopt` means "unknown", which the
  * app sorts as older than everything; the engine never invents a value for an
- * existing variable, only for one a script creates.
+ * existing variable, only for one a script creates or an import creates (#3252).
  *
  * Every field here except `script_value` is serialized by
  * `vayu::json::serialize_variables`; adding one without adding it there

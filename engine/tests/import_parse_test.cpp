@@ -33,6 +33,9 @@
  *   along. Which responses there are, and what each carries, must still agree
  *   exactly.
  *
+ * One more is the engine's own: a Postman variable's `createdAt` is a clock
+ * reading (#3252), so it is removed from both sides rather than recorded.
+ *
  * The cases below the fixture are the rules a fixture cannot state: what the
  * route refuses, and what a document no format claims is answered with.
  */
@@ -41,6 +44,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -199,8 +203,31 @@ void sort_examples (json& collections) {
     }
 }
 
+/// @p variables without each row's `createdAt`: a Postman import stamps it from
+/// the clock (#3252), so no recorded answer can hold it.
+/// `PostmanImport.StampsEachVariableRowInFileOrder` pins the stamps instead.
+json without_created_at (json variables) {
+    for (auto row = variables.begin (); row != variables.end (); ++row) {
+        if (row->is_object ()) {
+            row->erase ("createdAt");
+        }
+    }
+    return variables;
+}
+
+void strip_collection_created_at (json& collections) {
+    for (json& collection : collections) {
+        if (collection.contains ("variables")) {
+            collection["variables"] =
+            without_created_at (collection.at ("variables"));
+        }
+        strip_collection_created_at (collection.at ("children"));
+    }
+}
+
 /// The comparable form of a result: plain `json` (whose objects compare by key,
-/// not by insertion order) with the two normalisations above applied.
+/// not by insertion order) with the two normalisations above applied, and
+/// every variable's clock stamp removed.
 json comparable (const nlohmann::ordered_json& result) {
     json out               = json::parse (result.dump ());
     out["meta"]["skipped"] = skip_counts (out.at ("meta").at ("skipped"));
@@ -209,6 +236,12 @@ json comparable (const nlohmann::ordered_json& result) {
     out["meta"].erase ("nonExecutableAuthCollection");
     out["meta"].erase ("unsupportedScriptApis");
     sort_examples (out.at ("collections"));
+    strip_collection_created_at (out.at ("collections"));
+    for (json& environment : out.at ("environments")) {
+        environment["variables"] =
+        without_created_at (environment.at ("variables"));
+    }
+    out["globals"] = without_created_at (out.at ("globals"));
     return out;
 }
 
@@ -3656,6 +3689,54 @@ TEST (PostmanImport, KeepsCollectionVariableMetadataAndCountsWhatHasNoHome) {
 }
 
 /**
+ * Issue #3252: the stored variables blob comes back with its keys sorted, and
+ * the app lists a scope by `createdAt`, so the stamp is what keeps a file's
+ * order. Each scope's rows are stamped strictly ascending in document order,
+ * whatever their names; only the relative order is asserted, never the clock.
+ * Mutation check: drop the `createdAt` line in `to_var_record` and every scope
+ * fails.
+ */
+TEST (PostmanImport, StampsEachVariableRowInFileOrder) {
+    const std::string values = R"([
+        {"key":"zeta","value":"z"},
+        {"key":"alpha","value":"a"},
+        {"key":"mid","value":"m"}])";
+
+    const auto check = [] (const json& variables, const char* scope) {
+        std::vector<std::int64_t> stamps;
+        for (const char* name : { "zeta", "alpha", "mid" }) {
+            const json& row = variables.at (name);
+            ASSERT_TRUE (row.contains ("createdAt") &&
+            row.at ("createdAt").is_number_integer ())
+            << scope << ": " << variables.dump ();
+            stamps.push_back (row.at ("createdAt").get<std::int64_t> ());
+        }
+        EXPECT_LT (stamps.at (0), stamps.at (1)) << scope;
+        EXPECT_LT (stamps.at (1), stamps.at (2)) << scope;
+    };
+
+    const ImportParse environment = parse_import (
+    R"({"_postman_variable_scope":"environment","name":"Prod","values":)" + values + "}",
+    {}, {});
+    ASSERT_TRUE (environment.ok ()) << environment.error;
+    check (environment.result.at ("environments")[0].at ("variables"), "environment");
+
+    const ImportParse globals = parse_import (
+    R"({"_postman_variable_scope":"globals","values":)" + values + "}", {}, {});
+    ASSERT_TRUE (globals.ok ()) << globals.error;
+    check (globals.result.at ("globals"), "globals");
+
+    const ImportParse collection = parse_import (R"({"info":{"schema":")" +
+    std::string (POSTMAN_SCHEMA) + R"("},"variable":)" + values +
+    R"(,"item":[{"name":"F","item":[],"variable":)" + values + "}]}",
+    {}, {});
+    ASSERT_TRUE (collection.ok ()) << collection.error;
+    const json& root = collection.result.at ("collections")[0];
+    check (root.at ("variables"), "collection");
+    check (root.at ("children")[0].at ("variables"), "folder");
+}
+
+/**
  * Issue #3251: the write routes refuse a variable key that is blank or differs
  * from its trim, and an import applies atomically, so one padded row in a
  * document must not reach the apply as written. Each scope's parse trims the
@@ -4949,9 +5030,11 @@ TEST_F (ImportParseRoute, WritesAGlobalsExportIntoTheGlobalScopeAndMergesASecond
         R"({"_postman_variable_scope":"globals","values":)" + values + "}" } });
         EXPECT_EQ (status, 200) << body.dump ();
     };
+    // Without the import's `createdAt` stamps, which
+    // `AReimportedGlobalKeepsItsStoredCreatedAt` pins.
     const auto stored = [this] {
         const auto row = db_->get_globals ();
-        return row ? json::parse (row->variables) : json::object ();
+        return without_created_at (row ? json::parse (row->variables) : json::object ());
     };
 
     import_globals (R"([{"key":"host","value":"a"},{"key":"token","value":"b"}])");
@@ -4997,9 +5080,40 @@ TEST_F (ImportParseRoute, KeepsAGlobalsSaveThatLandsDuringTheMerge) {
 
     const auto row = db_->get_globals ();
     ASSERT_HAS_VALUE (row);
-    EXPECT_EQ (json::parse (row->variables),
+    EXPECT_EQ (without_created_at (json::parse (row->variables)),
     (json{ { "host", { { "value", "a" }, { "enabled", true } } },
     { "session", { { "value", "s" }, { "enabled", true } } } }));
+}
+
+/**
+ * A re-import replaces a global's value but not its place in the list (#3252):
+ * the parse stamps every row it reads, and an existing variable is never
+ * restamped, so a stored row keeps its `createdAt` and a row stored without
+ * one stays without. Only a new name takes the import's stamp. Mutation check:
+ * merge the imported row over the stored one whole in `merge_globals_locked`
+ * and the first two assertions fail.
+ */
+TEST_F (ImportParseRoute, AReimportedGlobalKeepsItsStoredCreatedAt) {
+    const auto [saved, saved_body] = vayu::http::routes::save_globals_response (*db_,
+    json{ { "variables",
+    { { "host", { { "value", "a" }, { "enabled", true }, { "createdAt", 5 } } },
+    { "legacy", { { "value", "l" }, { "enabled", true } } } } } });
+    ASSERT_EQ (saved, 200) << saved_body.dump ();
+
+    auto [status, body] = vayu::http::routes::import_response (
+    *db_, json{ { "content", R"({"_postman_variable_scope":"globals","values":[
+        {"key":"host","value":"z"},{"key":"legacy","value":"m"},{"key":"extra","value":"c"}]})" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto row = db_->get_globals ();
+    ASSERT_HAS_VALUE (row);
+    const json stored = json::parse (row->variables);
+    EXPECT_EQ (stored.at ("host").at ("createdAt"), 5) << stored.dump ();
+    EXPECT_FALSE (stored.at ("legacy").contains ("createdAt")) << stored.dump ();
+    EXPECT_EQ (stored.at ("host").at ("value"), "z");
+    EXPECT_EQ (stored.at ("legacy").at ("value"), "m");
+    EXPECT_TRUE (stored.at ("extra").at ("createdAt").is_number_integer ())
+    << stored.dump ();
 }
 
 TEST_F (ImportParseRoute, RefusesBytesThatAreNotADocument) {

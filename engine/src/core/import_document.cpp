@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -345,6 +346,13 @@ bool variable_row_enabled (const json* record) {
     return true;
 }
 
+/// Milliseconds since the epoch, the base of an import's `createdAt` stamps.
+std::int64_t import_clock_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+
 /**
  * `toVarRecord(vars)`: a variable array as Vayu's `{name: {value, enabled}}`.
  *
@@ -366,14 +374,25 @@ bool variable_row_enabled (const json* record) {
  * @p skipped_variable_metadata counts a row whose `description` (when not
  * kept) or a declared `type` Vayu has no counterpart for (`"any"`, a custom
  * string) was read and discarded, once per row however many it carried.
+ *
+ * Each row is stamped `createdAt = created_base + its position in the array`
+ * (#3252): the stored blob's keys come back sorted, and the app lists a scope
+ * by `createdAt`, so the stamp is the only carrier of the file's order. The
+ * caller reads the clock once per import (`import_clock_ms`), which keeps the
+ * stamps strictly increasing however fast the loop runs.
  */
-json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_description) {
+json to_var_record (const json* vars,
+int& skipped_variable_metadata,
+bool keep_description,
+std::int64_t created_base) {
     json out = json::object ();
     if (vars == nullptr || !vars->is_array ()) {
         return out;
     }
+    std::int64_t position = 0;
     for (const json& row : *vars) {
-        const json* record = as_record (&row);
+        const std::int64_t created_at = created_base + position++;
+        const json* record            = as_record (&row);
         if (record == nullptr || !truthy (prop (record, "key"))) {
             continue;
         }
@@ -400,7 +419,8 @@ json to_var_record (const json* vars, int& skipped_variable_metadata, bool keep_
         if (keep_description && truthy (description)) {
             value["description"] = as_string (description);
         }
-        out[name] = std::move (value);
+        value["createdAt"] = created_at;
+        out[name]          = std::move (value);
     }
     return out;
 }
@@ -1188,6 +1208,10 @@ std::string to_method (const json* declared, bool* unsupported = nullptr) {
 /// What a Postman parse accumulates across its recursive walk.
 struct PostmanCounts : OAuth2ImportLosses {
     ImportOptions options;
+    // The `createdAt` base every variable scope of this import is stamped
+    // from (`to_var_record`).
+    std::int64_t created_at_base = 0;
+
     int requests = 0;
     int folders  = 0;
     // Whole-file bodies, imported as `binary` references the user relinks.
@@ -2223,8 +2247,8 @@ json pm_folder (const json* node, const json& inherited, PostmanCounts& counts) 
     collection["description"] = pm_description_text (text, nested);
     note_unapplied_folder_behavior (
     own_behavior, collection["name"].get<std::string> (), counts);
-    collection["variables"] =
-    to_var_record (prop (node, "variable"), counts.skipped_variable_metadata, true);
+    collection["variables"] = to_var_record (prop (node, "variable"),
+    counts.skipped_variable_metadata, true, counts.created_at_base);
     collection["auth"] =
     collection_auth (prop (node, "auth"), counts.skipped_unsupported_auth, counts);
     if (counts.options.import_scripts) {
@@ -2339,9 +2363,10 @@ void set_data_only_auth_meta (json& meta, DataOnlyAuthFound lost) {
 
 json parse_postman (const json& parsed, const ImportOptions& options, const char* format) {
     PostmanCounts counts;
-    counts.options   = options;
-    const json empty = json::object ();
-    json collections = json::array ();
+    counts.options         = options;
+    counts.created_at_base = import_clock_ms ();
+    const json empty       = json::object ();
+    json collections       = json::array ();
     collections.push_back (
     pm_folder (as_record (&parsed) == nullptr ? &empty : &parsed, empty, counts));
 
@@ -2415,7 +2440,8 @@ json parse_postman_variables (const json& parsed, const ImportOptions& options, 
     // reads "Import environments & variables", and globals are variables.
     int skipped_variable_metadata = 0;
     const json variables          = options.import_environments ?
-    to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false) :
+    to_var_record (prop (&parsed, "values"), skipped_variable_metadata, false,
+    import_clock_ms ()) :
     json::object ();
 
     json environments = json::array ();

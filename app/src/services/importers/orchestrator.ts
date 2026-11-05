@@ -145,14 +145,41 @@ export class ImportOrchestrator {
 	 * On a key collision the imported value wins: the user explicitly asked for this
 	 * file's variables, and skipping them would be the silent no-op the issue calls
 	 * the worst outcome. Documented in `docs/app/import-collections/postman-environment.md`.
+	 *
+	 * A replaced global keeps the stored row's `createdAt` (or its absence): the
+	 * parse stamped every imported row, and taking that stamp would move an
+	 * existing variable to the bottom of the Variables tab (#3252). Mirrors
+	 * `keep_stored_created_at` in `engine/src/http/routes/import.cpp`.
 	 */
 	private async applyGlobals(result: ImportResult, opts: ImportApplyOptions): Promise<void> {
 		if (!opts.importEnvironments) return;
 		// No read, no write - every other format lands here and must not touch the scope.
 		if (Object.keys(result.globals).length === 0) return;
 		const existing = await this.api.getGlobals();
-		await this.api.updateGlobals({ ...existing.variables, ...result.globals });
+		await this.api.updateGlobals(mergeGlobals(existing.variables, result.globals));
 	}
+}
+
+function mergeGlobals(
+	existing: Record<string, VariableValue>,
+	imported: Record<string, VariableValue>
+): Record<string, VariableValue> {
+	const replaced = Object.entries(imported).map(
+		([name, variable]) =>
+			[
+				name,
+				Object.prototype.hasOwnProperty.call(existing, name)
+					? keepStoredCreatedAt(existing[name], variable)
+					: variable,
+			] as const
+	);
+	return { ...existing, ...Object.fromEntries(replaced) };
+}
+
+/** `imported` carrying `stored`'s `createdAt`, or none when `stored` never had one. */
+function keepStoredCreatedAt(stored: VariableValue, imported: VariableValue): VariableValue {
+	const { createdAt: _stamped, ...rest } = imported;
+	return stored.createdAt === undefined ? rest : { ...rest, createdAt: stored.createdAt };
 }
 
 /**

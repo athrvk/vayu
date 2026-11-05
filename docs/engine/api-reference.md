@@ -4171,6 +4171,13 @@ stands. `POST /import` writes the parsed globals through the same trimmed names.
 A hand-built `POST /import/apply` tree is not repaired: a padded name in it is the
 same `400`, and the whole atomic apply fails.
 
+**A Postman variable carries its file position as `createdAt` (#3252).** A
+stored variables object keeps its keys in name order, and the app lists a scope
+by `createdAt` ([VariableValue shape](db-schema.md#variablevalue-shape)), so
+every row of a Postman `variable[]` or `values[]` is stamped with one clock
+reading per parse plus its position in the array: strictly ascending in the
+file's order, in epoch milliseconds.
+
 **Request:**
 ```json
 {
@@ -4444,7 +4451,9 @@ the one write outside it, and they run **last** and **merge**: `POST /globals`
 replaces the whole set, so running it in front of a write that can still fail
 would leave a user's globals half-rewritten by an import that then failed. On a
 key collision the imported value wins - the caller asked for this file's
-variables, and skipping them would be a silent no-op. A Postman import's
+variables, and skipping them would be a silent no-op - but the stored row keeps
+its `createdAt` (or its lack of one), so a replaced global keeps its place in
+the list (#3252). A Postman import's
 **`clientCertificates`** candidates (issue #1656) are also outside the tree's
 transaction, applied best-effort inside `POST /import/apply` itself after it
 commits; a candidate `POST /import/apply` cannot register is skipped, never
@@ -4767,7 +4776,7 @@ was before these rules.
 | `mock_response_mode` | A mock response mode other than `first` |
 | `truncated_examples` | An example saved from a cut-off response, written with the partial body |
 | `example_content_types` | An example content type no Content-Type header row states |
-| `variable_types` | A variable typed `json` (`number` and `boolean` are written as Postman's own types) |
+| `variable_types` | A variable typed `json`, or a secret typed `number`, `boolean` or `json`, whose one `type` slot holds `secret` (`number` and `boolean` are otherwise written as Postman's own types); each row counted once |
 | `data_contracts` | A collection or folder data-file contract |
 | `spec_bindings` | A collection or folder bound to an OpenAPI document |
 | `spec_operations` | A request stamped as an OpenAPI operation |
@@ -4895,7 +4904,7 @@ kept, uncounted. `true` writes every value as stored.
     "secretsOmitted": 1,
     "notCarried": [
       { "code": "variable_types", "count": 2,
-        "message": "JSON variable types have no Postman equivalent" }
+        "message": "JSON variable types have no Postman equivalent, and typed secrets were written as secret" }
     ]
   }
 }
@@ -4917,9 +4926,12 @@ kept, uncounted. `true` writes every value as stored.
   left of the name).
 - `variablesExported` counts the rows written. A stored variables column that
   does not parse as an object exports as no variables.
-- `notCarried` holds one `variable_types` entry when variables are typed `json`,
-  which Postman has no type for: they are written as `default` and the entry's
-  `count` is how many. No entry means every type was carried.
+- `notCarried` holds one `variable_types` entry for the types a row could not
+  carry: a variable typed `json`, which Postman has no type for, is written as
+  `default`, and a secret typed `number`, `boolean` or `json` is written as
+  `secret`, Postman's row having one `type` slot (#3252). The entry's `count` is
+  how many rows, each counted once. No entry means every type was carried. A
+  stored `createdAt` is not written; Postman's row has no place for it.
 
 **Errors:**
 - `400` `Invalid body: must be an object`.

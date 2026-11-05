@@ -217,8 +217,9 @@ struct PostmanEnvironmentExportNotes {
     /// Rows written, which is every stored variable that is an object.
     int variables_exported = 0;
     int secrets_omitted    = 0;
-    /// Only `variable_types`, and only when a `json`-typed variable was
-    /// written as `default`.
+    /// Only `variable_types`, counting each row whose type Postman's one
+    /// `type` slot could not carry: a `json`-typed variable written as
+    /// `default`, and a `number` or `boolean` secret written as `secret`.
     std::vector<PostmanNotCarried> not_carried;
 };
 
@@ -234,8 +235,9 @@ struct PostmanEnvironmentExportOutcome {
 /**
  * @brief @p environment as a Postman environment export, the inverse of the
  *        environment half of `parse_postman_variables`: re-importing it gives
- *        the same variable names, values, enabled flags, secret flags and (bar
- *        `json`) types.
+ *        the same variable names, values, enabled flags, secret flags and
+ *        types, bar a `json` type and a secret's type (both counted under
+ *        `variable_types`).
  *
  * Writes no export timestamp: nothing in the collection export does either.
  */

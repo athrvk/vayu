@@ -476,7 +476,8 @@ Collection- and folder-level `variable[]` arrays map to `CollectionDraft.variabl
 - the value is coerced to a string (`as_string`) and run through `normalize_template_vars`;
 - `type: "secret"` sets `secret: true`; `"string"`, `"number"` and `"boolean"` are Vayu's own variable types and are stored as `type` (a script reads a `number` variable as a number, as in Postman); `"default"` is Postman's unset marker and stores nothing;
 - a `description` is stored on the variable for the Postman export to write back (the variables editor does not show it);
-- any other declared `type` (`"any"`, a custom string) has no Vayu counterpart and is dropped, counted once per row as `variable_metadata`.
+- any other declared `type` (`"any"`, a custom string) has no Vayu counterpart and is dropped, counted once per row as `variable_metadata`;
+- each row is stamped `createdAt`, one clock reading per import plus its position in the array (issue [#3252](https://github.com/athrvk/vayu/issues/3252)). The stored variables object keeps its keys in name order, so the stamp is what carries the file's order: the variables editor and the collection tab's context-bar section list a scope by `createdAt` (`lib/variable-order.ts`).
 
 Postman **collection** files do not embed environments, so this parser always returns `environments: []` and `meta.environmentCount: 0`. Postman exports environments as separate files, which [`import_document.cpp`](./postman-environment.md) reads.
 

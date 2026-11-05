@@ -110,7 +110,7 @@ constexpr auto LOSS_TEXT = std::to_array<LossText> ({
 { "mock_response_mode", "Mock response choices have no Postman equivalent" },
 { "truncated_examples", "Examples saved from a cut-off response were written partial" },
 { "example_content_types", "Example content types without a Content-Type header were left out" },
-{ "variable_types", "JSON variable types have no Postman equivalent" },
+{ "variable_types", "JSON variable types have no Postman equivalent, and typed secrets were written as secret" },
 { "data_contracts", "Data-file contracts have no Postman equivalent" },
 { "spec_bindings", "OpenAPI bindings have no Postman equivalent" },
 { "spec_operations", "Links to OpenAPI operations have no Postman equivalent" },
@@ -1250,6 +1250,17 @@ std::string variable_value_text (const json& variable) {
                                       vayu::utils::variable_value_text (*value);
 }
 
+/// Whether Postman's one `type` slot cannot say a stored variable's type: a
+/// `json` type has no Postman counterpart, and a secret's `number` or
+/// `boolean` type gives way to `secret`. Counted once per row either way.
+bool variable_type_lost (const json& variable) {
+    const std::string type = text_of (variable, "type");
+    if (type == "json") {
+        return true;
+    }
+    return flag_of (variable, "secret", false) && (type == "number" || type == "boolean");
+}
+
 std::optional<json> postman_variables (const json& stored, Walk& walk) {
     if (!stored.is_object () || stored.empty ()) {
         return std::nullopt;
@@ -1272,7 +1283,7 @@ std::optional<json> postman_variables (const json& stored, Walk& walk) {
         } else if (type == "string" || type == "number" || type == "boolean") {
             row["type"] = type;
         }
-        if (type == "json") {
+        if (variable_type_lost (variable)) {
             walk.lose (Loss::VariableTypes);
         }
         if (const std::string description = text_of (variable, "description");
@@ -2441,20 +2452,20 @@ const PostmanExportEnvironment& environment) {
     vayu_ext::redact_variables (stored, outcome.notes.secrets_omitted);
 
     json values    = json::array ();
-    int json_typed = 0;
+    int types_lost = 0;
     for (auto entry = variables.begin (); entry != variables.end (); ++entry) {
         if (!entry.value ().is_object ()) {
             continue;
         }
         values.push_back (environment_row (entry.key (), entry.value ()));
-        json_typed += text_of (entry.value (), "type") == "json" ? 1 : 0;
+        types_lost += variable_type_lost (entry.value ()) ? 1 : 0;
     }
     outcome.notes.variables_exported = static_cast<int> (values.size ());
-    if (json_typed > 0) {
+    if (types_lost > 0) {
         const LossText& loss =
         LOSS_TEXT.at (static_cast<std::size_t> (Loss::VariableTypes));
         outcome.notes.not_carried.push_back (
-        { std::string (loss.code), json_typed, std::string (loss.message) });
+        { std::string (loss.code), types_lost, std::string (loss.message) });
     }
 
     json document;

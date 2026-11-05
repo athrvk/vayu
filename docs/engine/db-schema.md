@@ -2772,9 +2772,14 @@ variables editor does not show it.
 oldest-first. It is **optional** - a row written before the field existed, or stripped by an
 engine older than the fix for issue #135, simply has none, and the app sorts an absent value as
 older than everything. Neither side may backfill it on an existing variable: stamping a legacy
-row at save time is what made it leapfrog the row the user had just added. Only the two places
-that genuinely create a variable stamp it - the app when the user types a new row, and the
-engine's `pm.*.set()` when a script introduces a key that did not exist.
+row at save time is what made it leapfrog the row the user had just added. Only the three places
+that genuinely create a variable stamp it - the app when the user types a new row, the engine's
+`pm.*.set()` when a script introduces a key that did not exist, and the Postman importer
+(`to_var_record`, #3252), which stamps each row of a collection's, folder's, environment's or
+globals' variable array with one clock reading per import plus the row's position, so the
+file's order survives the sorted blob. A re-import into the globals scope through
+`POST /import` keeps a replaced global's stored `createdAt`, or its absence
+(`merge_globals_locked`).
 
 The engine round-trips the whole shape through `vayu::json::parse_variables` /
 `serialize_variables` (`engine/src/utils/json.cpp`) when `POST /execute` persists script-set

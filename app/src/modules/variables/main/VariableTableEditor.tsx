@@ -66,6 +66,7 @@ import {
 import { Callout, DetailSkeleton, ErrorState } from "@/components/shared";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
+import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import type { VariableType } from "@/lib/variable-cast";
 import {
 	mergeVariableChanges,
@@ -414,21 +415,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		variablesRef.current = variables;
 	}, [variables]);
 
-	// Sort by createdAt ascending (oldest first, newest at bottom); tie-break by
-	// key. A missing createdAt sorts as 0 - "older than everything" - so rows
-	// with no known creation time stay together at the top instead of drifting
-	// one at a time as they happen to be saved.
-	const sortByCreatedAt = useCallback(
-		(entries: [string, VariableValue][]) =>
-			[...entries].sort(([ka, a], [kb, b]) => {
-				const ta = a.createdAt ?? 0;
-				const tb = b.createdAt ?? 0;
-				if (ta !== tb) return ta - tb;
-				return ka.localeCompare(kb, undefined, { sensitivity: "base" });
-			}),
-		[]
-	);
-
 	// Every edit goes through here so the ref and the state can never disagree.
 	const markDirty = useCallback(() => {
 		hasPendingChangesRef.current = true;
@@ -509,7 +495,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		const problems = nameProblems(varsToSave);
 		const changes = computeUserChanges(varsToSave, baselineRef.current);
 		const merged = mergeVariableChanges(dataVariables, changes);
-		const sorted = sortByCreatedAt(Object.entries(merged));
+		const sorted = sortVariableEntriesByCreatedAt(Object.entries(merged));
 		const variablesObj: Record<string, VariableValue> = {};
 		sorted.forEach(([key, val]) => {
 			variablesObj[key] = val;
@@ -564,7 +550,6 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		environment,
 		collection,
 		dataVariables,
-		sortByCreatedAt,
 		updateGlobalsMutation,
 		updateEnvironmentMutation,
 		updateCollectionMutation,
@@ -675,7 +660,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			});
 		}
 		if (dataVariables && Object.keys(dataVariables).length > 0) {
-			const entries = sortByCreatedAt(Object.entries(dataVariables));
+			const entries = sortVariableEntriesByCreatedAt(Object.entries(dataVariables));
 			const rows: VariableRowData[] = entries.map(([key, val]) =>
 				rowFromValue(key, val, carriedIds.get(key))
 			);
@@ -684,7 +669,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		} else {
 			setVariables([blankRow(carriedBlankId)]);
 		}
-	}, [contextId, dataVariables, sortByCreatedAt]);
+	}, [contextId, dataVariables]);
 
 	/*
 	 * Id-based and ref-backed, with an empty-ish dep list (`[markDirty]`,

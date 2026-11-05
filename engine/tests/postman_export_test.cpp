@@ -1390,6 +1390,21 @@ TEST (PostmanExport, VariablesKeepTheirStateAndPostmanTypes) {
     EXPECT_EQ (losses (outcome), (json{ { "variable_types", 1 } }));
 }
 
+// The collection-variable side of `ATypedSecretIsWrittenAsSecretAndCounted`
+// (#3252): `secret` takes the one `type` slot, a `json` secret counts once.
+TEST (PostmanExport, ATypedSecretVariableIsWrittenAsSecretAndCounted) {
+    PostmanExportFolder root = collection ();
+    root.variables =
+    ordered{ { "port", { { "value", "1" }, { "secret", true }, { "type", "number" } } },
+        { "blob", { { "value", "{}" }, { "secret", true }, { "type", "json" } } },
+        { "key", { { "value", "k" }, { "secret", true }, { "type", "string" } } } };
+    const auto outcome = run (root);
+    for (const auto& row : ordered::parse (outcome.text)["variable"]) {
+        EXPECT_EQ (row["type"], "secret") << row.dump ();
+    }
+    EXPECT_EQ (losses (outcome), (json{ { "variable_types", 2 } }));
+}
+
 TEST (PostmanExport, ANonStringVariableValueExportsAsTheTextASendUses) {
     PostmanExportFolder root = collection ();
     root.variables = ordered{ { "n", { { "value", 5 }, { "enabled", true } } },

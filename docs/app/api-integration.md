@@ -592,7 +592,8 @@ variable's row and name and writes its value `""`, counted in
 `notes.secretsOmitted`). The answer is the Postman environment text, a
 `<name>.postman_environment.json` file name and notes with `variablesExported`
 plus `notCarried`, whose one kind is `variable_types`: `json`-typed variables,
-which Postman has no type for, written as `default`. The renderer's only caller
+which Postman has no type for, written as `default`, and typed secrets, whose
+type gives way to `secret` (#3252). The renderer's only caller
 is the environment row's **Export as Postman Environment** item, which sends the
 id alone, saves `text` as `fileName` and, once the file is written, puts
 `secretsOmitted` and the `variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).

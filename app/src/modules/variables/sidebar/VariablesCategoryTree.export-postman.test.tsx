@@ -163,11 +163,11 @@ describe("Export as Postman Environment on an environment row", () => {
 		);
 	});
 
-	it("says how many JSON variables were written as default, singular too", async () => {
+	it("says how many variable types were left out, singular too", async () => {
 		exportPostmanEnvironment.mockResolvedValue(
 			answer({
 				secretsOmitted: 1,
-				notCarried: [{ code: "variable_types", count: 1, message: "JSON types" }],
+				notCarried: [{ code: "variable_types", count: 1, message: "Variable types" }],
 			})
 		);
 
@@ -175,7 +175,7 @@ describe("Export as Postman Environment on an environment row", () => {
 
 		await waitFor(() =>
 			expect(showToast).toHaveBeenCalledWith(
-				"Exported Staging.postman_environment.json - 1 secret value left blank, 1 JSON variable written as default",
+				"Exported Staging.postman_environment.json - 1 secret value left blank, 1 variable type left out",
 				"success"
 			)
 		);

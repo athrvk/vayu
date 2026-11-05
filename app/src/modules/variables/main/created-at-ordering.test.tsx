@@ -32,6 +32,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, screen } from "@testing-library/react";
 import VariableTableEditor from "./VariableTableEditor";
+import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import { TooltipProvider } from "@/components/ui";
 import type { Collection, VariableValue } from "@/types";
 
@@ -164,5 +165,34 @@ describe("variables editor - createdAt ordering", () => {
 		// user-visible claim: the row just added sits at the bottom, the
 		// untimestamped row stays at the top.
 		expect(Object.keys(addVariableAndSave("fresh"))).toEqual(["stripped", "kept", "fresh"]);
+	});
+
+	it("shows the rows in the order the context bar lists them", () => {
+		// Names are alphabetical against the stamps on purpose: a list sorted by
+		// name, or left in stored order, reads differently from one sorted by
+		// `createdAt`. The collection tab's section sorts through the same
+		// function (`CollectionVariablesSection.test.tsx`).
+		const variables: Record<string, VariableValue> = {
+			alpha: { value: "a", enabled: true, createdAt: 3000 },
+			bravo: { value: "b", enabled: true, createdAt: 1000 },
+			charlie: { value: "c", enabled: true },
+			delta: { value: "d", enabled: true, createdAt: 2000 },
+		};
+		render(
+			<TooltipProvider>
+				<VariableTableEditor
+					config={{ type: "collection", collection: { ...collection, variables } }}
+				/>
+			</TooltipProvider>
+		);
+
+		const shown = screen
+			.getAllByPlaceholderText("variable_name")
+			.map((input) => (input as HTMLInputElement).value)
+			.filter((name) => name !== "");
+		expect(shown).toEqual(
+			sortVariableEntriesByCreatedAt(Object.entries(variables)).map(([n]) => n)
+		);
+		expect(shown).toEqual(["charlie", "bravo", "delta", "alpha"]);
 	});
 });
