@@ -160,6 +160,10 @@
  * share, so they are paid twice (361 B each). The rows measure 149,061 /
  * 146,335 / 219,470 / 215,073 B, and the four caps went to 149,200 / 146,500 /
  * 219,600 / 215,200.
+ *
+ * #3236's streaming-keys sentence in `get_live_metrics` is paid once per row.
+ * The rows measure 149,222 / 146,626 / 219,631 / 215,364 B, and the four caps
+ * went to 149,500 / 146,900 / 219,900 / 215,700.
  */
 
 import { describe, it, expect } from "vitest";
@@ -179,10 +183,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 149_200 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 146_500 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 215_200 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 149_300 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 146_700 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 215_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

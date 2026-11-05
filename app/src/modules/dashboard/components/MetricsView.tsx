@@ -15,6 +15,8 @@
  *                             throughput-led modes add a p95/p99 latency card)
  *   Row 1.5 - LiveSequencePanel  (a scenario load run only: iterations and each
  *                             step's counts, from the latest gate frame)
+ *   Row 1.6 - LiveStreamPanel    (a streaming load run only: events so far, events/sec,
+ *                             open streams, time to first event, events/sec over time)
  *   Row 2   - Throughput over time   (+ ramp overlay for ramp_up)
  *   Row 2.5 - Latency over time      (average latency vs wire time, queue-wait gap)
  *   Row 2.7 - Percentiles over time  (ramp_up and capacity: Response-time-vs-concurrency scatter)
@@ -55,6 +57,7 @@ import { errorBreakdown } from "../utils/errorBreakdown";
 import { liveDispatchStatus } from "../utils/dispatchLag";
 import { liveRateFidelity } from "../utils/rateFidelity";
 import { latestScenarioProgress } from "../utils/liveScenario";
+import { isStreamFrame, latestStreamFirstEvent } from "../utils/liveStream";
 import { pooledTitle } from "../utils/pooledLatency";
 import { HeroRow } from "./hero/HeroRow";
 import { ModeStatsRow } from "./stats/ModeStatsRow";
@@ -78,6 +81,7 @@ import {
 import { hasSendRate } from "./charts/uplot/buildData";
 import { LiveDistributionRow } from "./LiveDistributionRow";
 import LiveSequencePanel from "./LiveSequencePanel";
+import LiveStreamPanel from "./LiveStreamPanel";
 
 function MetricsView({
 	metrics,
@@ -201,6 +205,14 @@ function MetricsView({
 	const sequence = useMemo(() => latestScenarioProgress(historicalMetrics), [historicalMetrics]);
 	const isSequence = sequence !== undefined;
 
+	// A streaming run's frames all carry `stream_events`, so the newest one gates
+	// the panel; the first-event block rides gate frames alone, hence the scan.
+	const isStream = isStreamFrame(metrics);
+	const streamFirstEvent = useMemo(
+		() => (isStream ? latestStreamFirstEvent(historicalMetrics) : undefined),
+		[isStream, historicalMetrics]
+	);
+
 	// Derived bundle - computed once, consumed by HeroRow + ModeStatsRow.
 	const derived = useMemo<DashboardDerived | null>(() => {
 		if (!metrics || typeof metrics.requests_completed === "undefined") return null;
@@ -299,6 +311,15 @@ function MetricsView({
 
 			{/* Row 1.5 - the sequence, for a scenario load run */}
 			{sequence && <LiveSequencePanel progress={sequence} />}
+
+			{/* Row 1.6 - the stream's events so far, for a streaming load run */}
+			{metrics && isStream && (
+				<LiveStreamPanel
+					metrics={metrics}
+					history={historicalMetrics}
+					firstEvent={streamFirstEvent}
+				/>
+			)}
 
 			{/* Row 2 - Throughput over time */}
 			{chartWindow.length > 1 && (

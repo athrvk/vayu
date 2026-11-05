@@ -2688,6 +2688,15 @@ export interface LiveCapacityState {
 	stopReason?: string;
 }
 
+/** Milliseconds over the streams that delivered a timed first event (`count` of them). */
+export interface StreamTimeToFirstEvent {
+	p50: number;
+	p95: number;
+	p99: number;
+	max: number;
+	count: number;
+}
+
 export interface LoadTestMetrics {
 	timestamp: number;
 	elapsed_seconds: number;
@@ -2825,6 +2834,24 @@ export interface LoadTestMetrics {
 	 * `get_live_metrics`, which forwards frames raw.
 	 */
 	capacity?: LiveCapacityState;
+	/**
+	 * A streaming load run's events so far (issue #3236): `stream_events` is
+	 * cumulative, `streams_open` the streams open at the sample and
+	 * `events_per_second` the rate over the same trailing window as `current_rps`.
+	 * All three ride every live frame of such a run and are absent from every
+	 * other run's, so a `0` here is a measured zero and absent is "not measured".
+	 * A stored tick never carries them.
+	 */
+	stream_events?: number;
+	streams_open?: number;
+	events_per_second?: number;
+	/**
+	 * Time to first event over the streams completed so far, on a gate frame only
+	 * and absent until a stream with a timed first event has completed, so a
+	 * reader takes the latest frame that carries it (`utils/liveStream.ts`). Not
+	 * the First byte phase: that ends at the response headers.
+	 */
+	stream_time_to_first_event?: StreamTimeToFirstEvent;
 	/**
 	 * Custom trends, counters and rates recorded so far, riding the same tick
 	 * as the built-in phases above (issue #1500). Absent until the run has
@@ -3387,13 +3414,7 @@ export interface RunReport {
 			count: number;
 		};
 		/** Milliseconds, over the completions that delivered a timed event (`count`). */
-		timeToFirstEvent?: {
-			p50: number;
-			p95: number;
-			p99: number;
-			max: number;
-			count: number;
-		};
+		timeToFirstEvent?: StreamTimeToFirstEvent;
 	};
 	testValidation?: {
 		samplesTested: number;

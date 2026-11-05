@@ -113,6 +113,13 @@ export const pickSendRate = (m: LoadTestMetrics): Sample => m.current_send_rate 
  */
 export const hasSendRate = (history: LoadTestMetrics[]): boolean =>
 	history.some((m) => m.current_send_rate != null);
+/**
+ * A streaming run's events per second over the tick's trailing window, or
+ * `null` where the tick holds none (a run that did not stream, or a frame that
+ * predates the figure). A real `0` is a window with no event and stays a point
+ * on the line; only absent is a gap.
+ */
+export const pickEventsPerSecond = (m: LoadTestMetrics): Sample => m.events_per_second ?? null;
 export const pickConcurrency = (m: LoadTestMetrics): number => m.current_concurrency ?? 0;
 /**
  * The tick's mean requests on the wire over its trailing window. The instant
