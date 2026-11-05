@@ -308,6 +308,8 @@ constexpr auto BUDGET_METRICS = std::to_array<BudgetMetric> ({
 { "maxErrorRatePct", "error rate", "%", false, format_run_percent },
 { "minThroughputRps", "throughput", " req/s", true, format_run_figure },
 { "maxAssertionFailureRatePct", "assertion failures", "%", false, format_run_percent },
+{ "streamTimeToFirstEventP95Ms", "time to first event p95", " ms", false, format_run_figure },
+{ "streamEventsPerSecondMin", "event rate", " events/s", true, format_run_figure },
 });
 
 const BudgetMetric* find_budget_metric (std::string_view key) {

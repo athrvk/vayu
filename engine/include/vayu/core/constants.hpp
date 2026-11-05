@@ -821,9 +821,10 @@ constexpr int64_t HISTOGRAM_MAX_LATENCY_US = 3600LL * 1000LL * 1000LL;
 /// see docs/engine/benchmarks.md for the measured cost.
 constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 
-/// Whether a streaming load run feeds the per-completion event histogram
-/// (run config `stream_metrics`, issue #576). On by default: it is one atomic
-/// histogram record per completion, paid only by runs that stream, and it is
+/// Whether a streaming load run feeds the per-completion event and
+/// time-to-first-event histograms (run config `stream_metrics`, issues #576
+/// and #3234). On by default: it is two atomic histogram records per
+/// completion, paid only by runs that stream, and it is
 /// the whole point of running a stream under load - events/sec is the number
 /// such a run exists to produce.
 constexpr bool DEFAULT_STREAM_METRICS = true;

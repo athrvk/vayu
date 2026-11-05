@@ -17,6 +17,7 @@
 import type { LoadTestConfig } from "@/types";
 import {
 	BUDGET_FIELDS,
+	budgetFieldsFor,
 	customBudgetKey,
 	describeCustomBudget,
 	describeFixedBudget,
@@ -60,6 +61,22 @@ export function isUnsentSeed(
 	fixed: CarriedBudgets["fixed"]
 ): boolean {
 	return mode === "capacity" && fixed[SLO_SEEDED_KEY] === "slo";
+}
+
+/**
+ * The carried set restricted to the fields this run can declare. The memo is
+ * one global record, so a stream budget remembered from a streaming request
+ * comes back on a request that does not stream, where the field is not shown
+ * and the value is not sent: it is not carried into that run, and the notice
+ * must not name a budget the run will not judge.
+ */
+export function carriedForRun(carried: CarriedBudgets, streaming: boolean): CarriedBudgets {
+	const fixed: CarriedBudgets["fixed"] = {};
+	for (const { key } of budgetFieldsFor(streaming)) {
+		const source = carried.fixed[key];
+		if (source) fixed[key] = source;
+	}
+	return { ...carried, fixed };
 }
 
 /** The carried set as this mode will send it: the dormant seed is not carried, it is not there. */

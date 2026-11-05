@@ -38,6 +38,18 @@ const validate = (
 		monitor: { ...emptyMonitorDraft(), url: monitorUrl },
 		maxSeries: 10,
 		scenarioOnly,
+		isStreamingRequest: false,
+	});
+
+const validateStreamBudget = (isStreamingRequest: boolean) =>
+	validateLoadTestDraft({
+		profile: PROFILE,
+		budgets: { ...emptyBudgetDraft(), streamEventsPerSecondMin: "0" },
+		customBudgets: [],
+		monitor: emptyMonitorDraft(),
+		maxSeries: 10,
+		scenarioOnly: [],
+		isStreamingRequest,
 	});
 
 const NONE: DraftErrors = {
@@ -51,6 +63,12 @@ const NONE: DraftErrors = {
 };
 
 describe("validateLoadTestDraft", () => {
+	it("checks a stream budget only for a request that streams (#3234)", () => {
+		expect(validateStreamBudget(true).budgetsError).toMatch(/events per second/i);
+		// Not shown and not sent, so a value left in the memo is nobody's mistake.
+		expect(validateStreamBudget(false).budgetsError).toBeNull();
+	});
+
 	it("passes a valid draft", () => {
 		expect(validate()).toEqual(NONE);
 	});

@@ -34,6 +34,17 @@ export const THRESHOLD_METRICS: Record<string, ThresholdMetricMeta> = {
 		short: "assertion failures",
 		unit: "%",
 	},
+	streamTimeToFirstEventP95Ms: {
+		label: "Time to first event p95",
+		short: "time to first event p95",
+		unit: "ms",
+	},
+	streamEventsPerSecondMin: {
+		label: "Events per second",
+		short: "event rate",
+		unit: "events/s",
+		floor: true,
+	},
 };
 
 /** The short name of a budget in running text; an unknown metric keeps its raw key. */

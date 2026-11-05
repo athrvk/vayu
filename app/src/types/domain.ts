@@ -2142,7 +2142,7 @@ export type LoadTestMode =
 
 /**
  * The fixed budget keys, split out from {@link RunThresholds} so they stay a
- * closed set of named fields: `keyof` this is the six metrics and nothing else,
+ * closed set of named fields: `keyof` this is the fixed metrics and nothing else,
  * which is what lets the dialogs drive their fields, their validation and their
  * payload from one table (`budgets.ts`). `keyof RunThresholds` cannot say that,
  * because that type also carries the dynamic `custom.*` family below.
@@ -2159,6 +2159,17 @@ export interface RunThresholdBudgets {
 	 * `pm.test` calls alike - allowed to fail, 0-100 (issue #1497).
 	 */
 	maxAssertionFailureRatePct?: number;
+	/**
+	 * Ceiling on the p95 of `RunReport.stream.timeToFirstEvent`, in ms (issue
+	 * #3234). Streaming runs only: on a run with no stream section the engine
+	 * reports it not evaluated, which counts as failed.
+	 */
+	streamTimeToFirstEventP95Ms?: number;
+	/**
+	 * Floor on `RunReport.stream.eventsPerSecond` (issue #3234). Streaming
+	 * runs only, judged like {@link streamTimeToFirstEventP95Ms}.
+	 */
+	streamEventsPerSecondMin?: number;
 }
 
 /**
@@ -2184,7 +2195,7 @@ export interface RunThresholds extends RunThresholdBudgets {
 	 * `<stat>` one of `p50`, `p95`, `p99`, `max`, `value`, `rate`. Always a
 	 * ceiling, always a non-negative number.
 	 *
-	 * A *pattern* index signature rather than a blanket `[key: string]`: the six
+	 * A *pattern* index signature rather than a blanket `[key: string]`: the fixed
 	 * fields above keep their own types, `failRun` keeps its `boolean` (it does
 	 * not match the pattern, so nothing has to be widened to accommodate it),
 	 * and a mistyped fixed key is still a type error rather than being swallowed
@@ -3356,9 +3367,10 @@ export interface RunReport {
 	 * of them means the run measured its own bounds, not the target: the
 	 * dashboard says so rather than leaving it to be inferred.
 	 *
-	 * Time-to-first-event needs no field here: it **is** `phases.firstByte` in
-	 * {@link timingBreakdown}, since the first byte of a stream is its first
-	 * event's first byte. A second copy would be a second number to keep true.
+	 * `timeToFirstEvent` is **not** `phases.firstByte`, which ends at the response
+	 * headers: a gateway that answers 200 at once and then thinks reads fast
+	 * there and slow here (issue #3234). It is absent when no stream delivered a
+	 * timed event, while `stream` itself is present.
 	 */
 	stream?: {
 		completions: number;
@@ -3372,6 +3384,14 @@ export interface RunReport {
 			p90: number;
 			p95: number;
 			p99: number;
+			count: number;
+		};
+		/** Milliseconds, over the completions that delivered a timed event (`count`). */
+		timeToFirstEvent?: {
+			p50: number;
+			p95: number;
+			p99: number;
+			max: number;
 			count: number;
 		};
 	};

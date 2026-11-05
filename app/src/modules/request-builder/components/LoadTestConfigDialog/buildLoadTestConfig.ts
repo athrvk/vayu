@@ -95,7 +95,12 @@ function carriedInThresholds(
 export function buildLoadTestConfig(draft: LoadTestDraft): LoadTestConfig {
 	const { profile, dataFile } = draft;
 	const budgets = budgetsToSend(draft.budgets, profile.mode, draft.budgetSources);
-	const thresholds = buildThresholds(budgets, draft.failRun, draft.customBudgets);
+	const thresholds = buildThresholds(
+		budgets,
+		draft.failRun,
+		draft.customBudgets,
+		draft.isStreamingRequest
+	);
 	const carriedBudgets = carriedInThresholds(draft.carriedBudgets, thresholds);
 
 	const config: LoadTestConfig = {

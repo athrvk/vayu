@@ -96,6 +96,11 @@ struct TransferData {
     /// Events delivered so far. Fed by write_callback, finished and read once
     /// at completion.
     SseFrameCounter stream_counter;
+    /// Milliseconds from `submitted_at` to the write that completed the first
+    /// event (issue #3234), stamped once by write_callback. An event only
+    /// `SseFrameCounter::finish` counts, an unterminated last frame the close
+    /// completed, leaves it unset: no write delivered it at a time to measure.
+    std::optional<double> stream_first_event_ms;
     /// When the duration cap expires. Computed at configure time from
     /// `stream_bounds->max_duration_ms`, so the clock is read once per transfer
     /// rather than once per callback.

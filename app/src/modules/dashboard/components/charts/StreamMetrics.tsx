@@ -9,6 +9,7 @@ import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
 import { pluralize } from "../../utils/format";
+import { DurationValue } from "./PhasePercentiles";
 
 /**
  * What a streaming load run's transfers delivered - from `report.stream`
@@ -21,16 +22,20 @@ import { pluralize } from "../../utils/format";
  *
  * Two rates, deliberately. `eventsPerSecond` is the run's throughput and the
  * per-completion distribution is its shape, and one long stream and 250 short
- * ones can share a rate while being completely different runs. Time-to-first-
- * event is not repeated here: it *is* the First byte row of Phase percentiles,
- * since a stream's first byte is its first event's - a second copy would be a
- * second number to keep true.
+ * ones can share a rate while being completely different runs. The first-event
+ * row is its own figure, not the First byte row of Phase percentiles: that ends
+ * at the response headers, and a gateway that answers 200 at once and then
+ * thinks reads fast there (issue #3234). The row is absent when the report
+ * carries no `timeToFirstEvent`, which is a run whose streams delivered no timed
+ * event, not a first event that took 0ms.
  */
 export function StreamMetrics({ report }: { report: RunReport | null }) {
 	const stream = report?.stream;
 	if (!stream) {
 		return null;
 	}
+
+	const firstEvent = stream.timeToFirstEvent;
 
 	// Every completion the caps ended rather than the server. All of them is
 	// not a failure - it is the honest reading that this run measured its own
@@ -67,6 +72,18 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				<EventValue value={stream.events.p99} emphasis />
 				<EventValue value={stream.events.max} />
 			</div>
+			{firstEvent && (
+				<div className="grid grid-cols-[68px_repeat(4,1fr)] items-center gap-2.5">
+					<span className="text-label text-muted-foreground flex items-center">
+						first event
+						<InfoChip tip={TOOLTIPS.streamFirstEvent} />
+					</span>
+					<DurationValue value={firstEvent.p50} />
+					<DurationValue value={firstEvent.p95} />
+					<DurationValue value={firstEvent.p99} emphasis />
+					<DurationValue value={firstEvent.max} />
+				</div>
+			)}
 
 			{allCapped ? (
 				<p className="text-label text-warning-text">

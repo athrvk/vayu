@@ -8739,7 +8739,7 @@ Start a load test run (Vayu Mode).
   "stream": false,           // Optional - consume each response as text/event-stream; see below
   "maxStreamDurationMs": 600000,  // Optional, streaming only - see below
   "maxStreamEvents": 100000,      // Optional, streaming only - see below
-  "stream_metrics": true     // Optional - feed the event histogram behind the report's `stream` section
+  "stream_metrics": true     // Optional - feed the histograms behind the report's `stream` section
 }
 ```
 
@@ -8974,6 +8974,8 @@ its report has no such section at all.
     "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
     "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
+    "streamTimeToFirstEventP95Ms": 800, // ceiling, ms, streaming runs; > 0 and <= 86400000
+    "streamEventsPerSecondMin": 200,    // floor, events per second, streaming runs; > 0
     "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
@@ -9027,6 +9029,15 @@ percentile, when the run made no assertion at all - a run with no `assert.*`
 element and no test script is unaffected by declaring this budget - and then
 the population keys are absent too, as `actual` is.
 
+`streamTimeToFirstEventP95Ms` and `streamEventsPerSecondMin` (issue #3234)
+judge a streaming run's [`stream`](#get-runsrunidreport) section:
+`timeToFirstEvent.p95` and `eventsPerSecond`, the same figures the report
+prints. Both are unevaluated, and so count toward `failed`, on a run with no
+`stream` section (one that did not stream, or ran with `stream_metrics: false`),
+because a run that streamed nothing measured neither; a floor read as `0`
+there would fail for the wrong reason. The time-to-first-event budget is also
+unevaluated when no completion delivered a timed event.
+
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
 evaluate the same `thresholds` block against their own numbers and store the
@@ -9051,7 +9062,7 @@ field as `value`, spelled for a rate metric):
 { "thresholds": { "custom.ttfb2.p95": 50 } } // ceiling, always - >= 0
 ```
 
-Unlike the six fixed keys, this is a dynamic key family: the route checks the
+Unlike the fixed keys, this is a dynamic key family: the route checks the
 shape (`custom.` prefix, a non-empty name, a stat from the list above) and that
 the value is a non-negative number, not that `ttfb2` is a name this run's plan
 actually declares - a `metric.record` on a step the run never reaches, or a
@@ -9066,7 +9077,7 @@ is evaluated with `actual: 0`, which is what lets
 never goes negative: `pm.metrics.counter` throws on a negative or non-finite
 increment, and `metric.record` reports `error` for one and records nothing.
 **Every run mode is judged**, the same
-rule the six fixed keys follow (#1564): `execute_scenario_run` folds
+rule the fixed keys follow (#1564): `execute_scenario_run` folds
 `summary.custom_metrics` into the same `RunSummaryInputs` it evaluates
 thresholds against for a collection (sequential, design-mode) run, not only a
 load run.
@@ -10483,7 +10494,7 @@ default, and whose message names the offending field and why the bound exists:
 | `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
 | `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
 | `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event histogram. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -12655,7 +12666,8 @@ teardown failure is reported, not fatal.
   "totalEvents": 19200,
   "capped": 480,
   "eventsPerSecond": 320.0,
-  "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 }
+  "events": { "min": 40, "max": 40, "p50": 40, "p90": 40, "p95": 40, "p99": 40, "count": 480 },
+  "timeToFirstEvent": { "p50": 412.0, "p95": 655.0, "p99": 803.0, "max": 910.0, "count": 480 }
 }
 ```
 
@@ -12676,9 +12688,18 @@ example above every stream hit the event cap - the `events` percentiles all
 sitting exactly on it is the tell - so those counts measure the caps, not the
 target.
 
-**Time to first event needs no field of its own**: it *is*
-`timingBreakdown.phases.firstByte`, since a stream's first byte is its first
-event's first byte. A second copy would be a second number to keep true.
+`timeToFirstEvent` (issue #3234) is the per-completion distribution, in
+milliseconds, of how long each stream took to deliver its first event: from
+the moment the request was submitted, the origin `latency` is measured from,
+to the write that completed the first frame carrying a `data` field. It is not
+`timingBreakdown.phases.firstByte`, which ends at the response headers: an LLM
+gateway answers `200` at once and then thinks, so its wait lands in the
+download phase and `firstByte` reads fast for a stream whose first token was
+slow. `count` is the completions that delivered an event, so a stream the
+target closed before its first event, a silent one a cap ended, and one whose
+only event was an unterminated frame the close completed are all left out (the
+last arrived at the close, and no time for it was measured). The object is
+absent when no completion delivered a timed event.
 
 **A capacity run adds a `capacity` section** and no other mode carries one:
 

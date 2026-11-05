@@ -154,6 +154,12 @@
  * and `removeVariables` arguments, and `update_globals`) added 647 B to the
  * writes-on rows, taking them to 218,748 / 214,351 B; those two caps went to
  * 219,000 / 214,600 and the writes-off rows are untouched.
+ *
+ * #3234's two stream budgets in `thresholdsInput` (two keys and one sentence)
+ * sit in the `thresholds` argument that `run_collection` and `start_load_run`
+ * share, so they are paid twice (361 B each). The rows measure 149,061 /
+ * 146,335 / 219,470 / 215,073 B, and the four caps went to 149,200 / 146,500 /
+ * 219,600 / 215,200.
  */
 
 import { describe, it, expect } from "vitest";
@@ -173,10 +179,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 148_400 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 145_700 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_000 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 214_600 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 149_200 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 146_500 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 215_200 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

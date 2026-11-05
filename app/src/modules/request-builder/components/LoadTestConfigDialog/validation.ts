@@ -43,6 +43,8 @@ interface DraftToValidate {
 	maxSeries: number;
 	/** The enabled scenario-only elements the run would carry (`scenarioOnlyElements`). */
 	scenarioOnly: readonly ResolvedElement[];
+	/** Whether the request streams, which is what puts the stream budgets in play. */
+	isStreamingRequest: boolean;
 }
 
 export function validateLoadTestDraft({
@@ -52,6 +54,7 @@ export function validateLoadTestDraft({
 	monitor,
 	maxSeries,
 	scenarioOnly,
+	isStreamingRequest,
 }: DraftToValidate): DraftErrors {
 	const { mode, duration, concurrency, rampDuration, startConcurrency } = profile;
 	return {
@@ -64,7 +67,7 @@ export function validateLoadTestDraft({
 		capacityRangeError: validateCapacityRange(mode, startConcurrency, concurrency),
 		// One message slot for both budget families: a custom row is refused on the
 		// same terms a fixed field is, so the notice reads the same either way.
-		budgetsError: budgetError(budgets) ?? customBudgetsError(customBudgets),
+		budgetsError: budgetError(budgets, isStreamingRequest) ?? customBudgetsError(customBudgets),
 		monitoringError: monitorError(monitor, maxSeries),
 		scenarioOnlyError: scenarioOnlyError(scenarioOnly),
 	};

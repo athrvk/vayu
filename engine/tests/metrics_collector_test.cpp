@@ -2136,9 +2136,9 @@ TEST_F (MetricsCollectorTest, StreamTotalsAbsentWithoutStreamCompletions) {
 }
 
 TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
-    collector->record_stream_completion (10, true);
-    collector->record_stream_completion (20, true);
-    collector->record_stream_completion (30, false);
+    collector->record_stream_completion (10, true, std::nullopt);
+    collector->record_stream_completion (20, true, std::nullopt);
+    collector->record_stream_completion (30, false, std::nullopt);
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2157,7 +2157,7 @@ TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
 // exactly the population ("every connection closed before the first event") a
 // report most needs to show.
 TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
-    collector->record_stream_completion (0, false);
+    collector->record_stream_completion (0, false, std::nullopt);
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
@@ -2165,12 +2165,41 @@ TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
     EXPECT_EQ (totals->total_events, 0u);
 }
 
+// Time to first event (#3234) is the distribution over the completions that
+// delivered a timed event, in milliseconds. A stream with none still counts as
+// a completion and stays out of the distribution rather than reading as 0ms.
+// Mutation check: record `first_event_ms.value_or (0)` unconditionally and the
+// count reads 3; drop the record and it reads 0.
+TEST_F (MetricsCollectorTest, StreamTimeToFirstEventCountsOnlyTimedCompletions) {
+    collector->record_stream_completion (3, false, 120.0);
+    collector->record_stream_completion (3, true, 480.0);
+    collector->record_stream_completion (0, false, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->completions, 3u);
+    EXPECT_EQ (totals->time_to_first_event.count, 2u);
+    // hdr keeps three significant figures of the microseconds recorded.
+    EXPECT_NEAR (totals->time_to_first_event.p50, 120.0, 0.5);
+    EXPECT_NEAR (totals->time_to_first_event.max, 480.0, 0.5);
+}
+
+TEST_F (MetricsCollectorTest, StreamTimeToFirstEventIsEmptyWhenNoStreamWasTimed) {
+    collector->record_stream_completion (0, true, std::nullopt);
+    collector->record_stream_completion (1, false, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->completions, 2u);
+    EXPECT_EQ (totals->time_to_first_event.count, 0u);
+}
+
 TEST_F (MetricsCollectorTest, StreamMetricsOffRecordsNothing) {
     MetricsCollectorConfig config;
     config.stream_metrics = false;
     MetricsCollector off ("stream_off", config);
 
-    off.record_stream_completion (25, true);
+    off.record_stream_completion (25, true, 40.0);
 
     // Off means the report has no section at all, not a section of zeros - so
     // the counters behind it must not tick either.

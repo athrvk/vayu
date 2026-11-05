@@ -58,6 +58,13 @@ export interface BudgetField {
 	 * would be false there.
 	 */
 	seededHint?: string;
+	/**
+	 * Judged on a stream section, which only a streaming load run has: the
+	 * engine reports it not evaluated, and so failed, on any other run. The
+	 * collection runner never streams and the load dialog shows these only for
+	 * a streaming request - use {@link budgetFieldsFor}, not the whole table.
+	 */
+	streamOnly?: boolean;
 }
 
 /** A day. Past it no request completes, so no ceiling above it is a budget. */
@@ -126,7 +133,46 @@ export const BUDGET_FIELDS: readonly BudgetField[] = [
 		max: 100,
 		hint: "Counts every assert.* element on every response, and pm.test calls in the responses the script ran on.",
 	},
+	{
+		key: "streamTimeToFirstEventP95Ms",
+		id: "lt-budget-stream-first-event",
+		label: "Time to first event p95 at most",
+		unit: "ms",
+		min: 0,
+		minInclusive: false,
+		max: MAX_LATENCY_MS,
+		hint: "From sending the request to a stream's first event, so a server that answers at once and then waits still counts. Streams that never delivered an event are left out.",
+		streamOnly: true,
+	},
+	{
+		key: "streamEventsPerSecondMin",
+		id: "lt-budget-stream-event-rate",
+		label: "Events per second at least",
+		unit: "events/s",
+		min: 0,
+		minInclusive: false,
+		max: 1_000_000_000,
+		hint: "Events delivered by all streams together, per second of the run.",
+		streamOnly: true,
+	},
 ];
+
+/**
+ * The fields a run of this kind can declare: every fixed budget, less the
+ * stream ones unless the run streams. A stream budget on any other run is
+ * "not evaluated" in the report and so counts as missed, which is why a
+ * non-streaming run must neither offer one nor send one.
+ */
+export function budgetFieldsFor(streaming: boolean): readonly BudgetField[] {
+	return streaming ? BUDGET_FIELDS : BUDGET_FIELDS.filter((field) => !field.streamOnly);
+}
+
+/** The note under the latency budgets of a streaming run: what their clock measures. */
+export const STREAM_LATENCY_NOTE =
+	"For a streaming request, a latency budget is judged on each stream's full duration, from sending the request to the stream closing.";
+
+/** The latency field the {@link STREAM_LATENCY_NOTE} sits under: the last of the three. */
+export const STREAM_LATENCY_NOTE_AFTER = "latencyP99Ms" satisfies BudgetKey;
 
 /** What the user has typed, per budget. Blank means "not declared". */
 export type BudgetDraft = Record<BudgetKey, string>;
@@ -139,6 +185,8 @@ export function emptyBudgetDraft(): BudgetDraft {
 		maxErrorRatePct: "",
 		minThroughputRps: "",
 		maxAssertionFailureRatePct: "",
+		streamTimeToFirstEventP95Ms: "",
+		streamEventsPerSecondMin: "",
 	};
 }
 
@@ -164,10 +212,12 @@ export const CAPACITY_SEED_HINT =
  * Blank is always fine - budgets are opt-in, and clearing a field is how a user
  * declines one. Anything else must be a number in range: a value that is not
  * gets said out loud rather than dropped from the payload, because silently
- * sending four of the five budgets someone typed is the worse failure.
+ * sending most of the budgets someone typed is the worse failure. A field
+ * the run cannot declare (`streaming` false, a stream budget) is not checked: it
+ * is not shown and not sent, so a remembered value in it is no one's mistake.
  */
-export function budgetError(draft: BudgetDraft): string | null {
-	for (const field of BUDGET_FIELDS) {
+export function budgetError(draft: BudgetDraft, streaming = false): string | null {
+	for (const field of budgetFieldsFor(streaming)) {
 		const raw = draft[field.key].trim();
 		if (raw === "") continue;
 
@@ -298,15 +348,18 @@ export function customBudgetsError(rows: readonly CustomBudgetDraft[]): string |
  * row with a blank half. `failRun` is folded in only when at least one budget
  * was declared - the engine rejects `{ failRun: true }` alone, and a lone
  * flag with no budget to judge means the same thing here. A custom budget
- * counts as one: it is judged exactly as a fixed one is.
+ * counts as one: it is judged exactly as a fixed one is. A stream budget is
+ * sent only when `streaming`: a remembered one on a request that does not
+ * stream would be reported not evaluated, and so missed.
  */
 export function buildThresholds(
 	draft: BudgetDraft,
 	failRun = false,
-	customBudgets: readonly CustomBudgetDraft[] = []
+	customBudgets: readonly CustomBudgetDraft[] = [],
+	streaming = false
 ): RunThresholds | undefined {
 	const thresholds: RunThresholds = {};
-	for (const field of BUDGET_FIELDS) {
+	for (const field of budgetFieldsFor(streaming)) {
 		const raw = draft[field.key].trim();
 		if (raw === "") continue;
 		const value = Number(raw);
@@ -350,12 +403,13 @@ export function isDeclaredCustomBudget(row: CustomBudgetDraft): boolean {
  */
 export function summariseBudgets(
 	draft: BudgetDraft,
-	customBudgets: readonly CustomBudgetDraft[] = []
+	customBudgets: readonly CustomBudgetDraft[] = [],
+	streaming = false
 ): string {
 	const declared = [
-		...BUDGET_FIELDS.filter((field) => draft[field.key].trim() !== "").map((field) =>
-			describeFixedBudget(field, draft[field.key])
-		),
+		...budgetFieldsFor(streaming)
+			.filter((field) => draft[field.key].trim() !== "")
+			.map((field) => describeFixedBudget(field, draft[field.key])),
 		...customBudgets.filter(isDeclaredCustomBudget).map(describeCustomBudget),
 	];
 	if (declared.length === 0) return "No budgets";

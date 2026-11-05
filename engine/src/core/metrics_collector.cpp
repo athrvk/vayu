@@ -354,6 +354,15 @@ MetricsCollector::MetricsCollector (std::string run_id, MetricsCollectorConfig c
             "will "
             "carry event totals only");
         }
+        if (hdr_init (1, constants::metrics_collector::HISTOGRAM_MAX_LATENCY_US,
+            constants::metrics_collector::HISTOGRAM_SIGNIFICANT_FIGURES,
+            &stream_first_event_histogram_) != 0) {
+            stream_first_event_histogram_ = nullptr;
+            vayu::utils::log_warning ("run",
+            "Run " + run_id_ +
+            ": failed to initialize the stream first-event histogram; the "
+            "report will carry no time to first event");
+        }
     }
 
     // Pre-allocate vectors to avoid reallocation during test
@@ -419,6 +428,10 @@ MetricsCollector::~MetricsCollector () {
     if (stream_events_histogram_ != nullptr) {
         hdr_close (stream_events_histogram_);
         stream_events_histogram_ = nullptr;
+    }
+    if (stream_first_event_histogram_ != nullptr) {
+        hdr_close (stream_first_event_histogram_);
+        stream_first_event_histogram_ = nullptr;
     }
 }
 
@@ -1149,7 +1162,9 @@ const MetricsCollector::Percentiles& interval) {
     stats[name + "P99Ms"] = interval.p99;
 }
 
-void MetricsCollector::record_stream_completion (size_t events, bool capped) {
+void MetricsCollector::record_stream_completion (size_t events,
+bool capped,
+std::optional<double> first_event_ms) {
     if (!config_.stream_metrics) {
         // Off means the report has no `stream` section at all, not a section of
         // zeros - so the counters behind it must not tick either. Checked here
@@ -1171,6 +1186,10 @@ void MetricsCollector::record_stream_completion (size_t events, bool capped) {
         // show.
         hdr_record_value_atomic (stream_events_histogram_,
         static_cast<int64_t> (std::max<size_t> (1, events)));
+    }
+    if (first_event_ms && stream_first_event_histogram_ != nullptr) {
+        hdr_record_value_atomic (stream_first_event_histogram_,
+        histogram_latency_us (*first_event_ms, 1));
     }
 }
 
@@ -1199,6 +1218,7 @@ std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals ()
         totals.events.p99 = static_cast<double> (hdr_value_at_percentile (h, 99.0));
         totals.events.p999 = static_cast<double> (hdr_value_at_percentile (h, 99.9));
     }
+    totals.time_to_first_event = percentiles_of (stream_first_event_histogram_);
     return totals;
 }
 

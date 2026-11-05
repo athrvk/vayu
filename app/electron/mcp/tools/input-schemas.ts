@@ -358,6 +358,8 @@ export const thresholdsInput = z
 		maxErrorRatePct: z.number().min(0).max(100).optional(),
 		minThroughputRps: z.number().positive().max(1_000_000_000).optional(),
 		maxAssertionFailureRatePct: z.number().min(0).max(100).optional(),
+		streamTimeToFirstEventP95Ms: z.number().positive().max(86_400_000).optional(),
+		streamEventsPerSecondMin: z.number().positive().max(1_000_000_000).optional(),
 		// Not a budget - whether a missed one fails the run, not itself
 		// measured against anything, so it is excluded from the
 		// at-least-one-budget refinement below.
@@ -382,7 +384,7 @@ export const thresholdsInput = z
 	})
 	.optional()
 	.describe(
-		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. `maxAssertionFailureRatePct` judges the worse of the exact inline assertions and the sampled `pm.test` replay; its check names both (`assertionsExact`, `assertionsSampled`, `sampleRate`). Omit for a run that is measured but not judged."
+		"Pass/fail budgets for this run. The report comes back with `thresholdValidation`: one check per budget plus a verdict of passed/failed. Also accepts `custom.<name>.<stat>` for a declared metric.record name, `<stat>` one of p50/p95/p99/max/rate/value. `maxAssertionFailureRatePct` judges the worse of the exact inline assertions and the sampled `pm.test` replay; its check names both (`assertionsExact`, `assertionsSampled`, `sampleRate`). `streamTimeToFirstEventP95Ms` (ceiling, ms) and `streamEventsPerSecondMin` (floor) judge a streaming run's `stream` section; on any other run they are not evaluated and count as failed. Omit for a run that is measured but not judged."
 	);
 
 export const streamInput = z

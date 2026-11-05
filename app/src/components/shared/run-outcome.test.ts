@@ -91,6 +91,17 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ outcome: "failed", reason: "1 of 2 budgets missed: p95" },
 	],
 	[
+		"a missed stream budget is named by its short name (#3234)",
+		{
+			status: "completed",
+			thresholdValidation: budgets(
+				["streamTimeToFirstEventP95Ms", false],
+				["streamEventsPerSecondMin", false, false]
+			),
+		},
+		{ outcome: "failed", reason: "2 of 2 budgets missed: time to first event p95, event rate" },
+	],
+	[
 		"every budget met and no errors",
 		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0 },
 		{ outcome: "passed", reason: "All 3 budgets met" },

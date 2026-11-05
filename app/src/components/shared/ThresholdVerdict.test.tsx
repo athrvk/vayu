@@ -117,6 +117,55 @@ describe("ThresholdVerdict", () => {
 		expect(screen.getByText(/≤ 0%/)).toBeInTheDocument();
 	});
 
+	describe("stream budgets (issue #3234)", () => {
+		it("labels the first-event ceiling in milliseconds", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({
+						checks: [
+							{
+								metric: "streamTimeToFirstEventP95Ms",
+								limit: 800,
+								actual: 950,
+								passed: false,
+							},
+						],
+						passed: 0,
+						failed: 1,
+						verdict: "failed",
+					})}
+				/>
+			);
+			expect(screen.getByText(/Time to first event p95/)).toBeInTheDocument();
+			expect(screen.getByText(/≤ 800ms/)).toBeInTheDocument();
+			expect(screen.getByText("950ms")).toBeInTheDocument();
+		});
+
+		it("prints the event rate as a floor, and a stream budget on a run with no stream as unmeasured", () => {
+			render(
+				<ThresholdVerdict
+					verdict={verdict({
+						checks: [
+							{
+								metric: "streamEventsPerSecondMin",
+								limit: 200,
+								actual: 0,
+								passed: false,
+								evaluated: false,
+							},
+						],
+						passed: 0,
+						failed: 1,
+						verdict: "failed",
+					})}
+				/>
+			);
+			expect(screen.getByText(/Events per second/)).toBeInTheDocument();
+			expect(screen.getByText(/≥ 200events\/s/)).toBeInTheDocument();
+			expect(screen.getByText("no samples")).toBeInTheDocument();
+		});
+	});
+
 	it("shows a metric it has no label for rather than dropping it", () => {
 		// The counts come from the engine. A check rendered away would leave
 		// "1 of 2 budgets met" above a single row and no way to see the other.

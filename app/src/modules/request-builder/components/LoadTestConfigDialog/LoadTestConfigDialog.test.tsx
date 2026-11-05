@@ -37,6 +37,7 @@ import {
 	LOAD_TEST_DEFAULTS,
 } from "@/constants/load-test";
 import { LOAD_TEST_MODES } from "@/constants/load-test-modes";
+import { STREAM_LATENCY_NOTE } from "./budgets";
 import { bindDataFile } from "@/test/file-bindings.testkit";
 
 /**
@@ -1162,6 +1163,99 @@ describe("pass/fail budgets", () => {
 	const openBudgets = () =>
 		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
 	const p99 = () => screen.getByLabelText(/^p99 latency/i) as HTMLInputElement;
+
+	/*
+	 * The stream budgets (issue #3234) are judged on a stream section only a
+	 * streaming run has, so the engine reports one on any other run as not
+	 * evaluated - a miss. They are offered, validated and sent only for a
+	 * request that streams, whatever the one global memo holds.
+	 */
+	describe("stream budgets (#3234)", () => {
+		const firstEvent = () => screen.queryByLabelText(/^time to first event p95 at most/i);
+		const eventRate = () => screen.queryByLabelText(/^events per second at least/i);
+		const seedStreamMemo = () =>
+			localStorage.setItem(
+				STORAGE_KEYS.LAST_LOAD_TEST_CONFIG,
+				JSON.stringify({
+					budgets: {
+						latencyP99Ms: "",
+						streamTimeToFirstEventP95Ms: "800",
+						streamEventsPerSecondMin: "200",
+					},
+				})
+			);
+
+		it("offers both fields, and the latency note, for a streaming request", () => {
+			open({ isStreamingRequest: true });
+			openBudgets();
+			expect(firstEvent()).toBeInTheDocument();
+			expect(eventRate()).toBeInTheDocument();
+			expect(screen.getByText(STREAM_LATENCY_NOTE)).toBeInTheDocument();
+		});
+
+		it("offers neither for a request that does not stream", () => {
+			open({ isStreamingRequest: false });
+			openBudgets();
+			expect(firstEvent()).not.toBeInTheDocument();
+			expect(eventRate()).not.toBeInTheDocument();
+			expect(screen.queryByText(STREAM_LATENCY_NOTE)).not.toBeInTheDocument();
+		});
+
+		it("sends what a streaming request typed under the engine's own keys", () => {
+			const { onStart } = open({ isStreamingRequest: true });
+			openBudgets();
+			fireEvent.change(firstEvent()!, { target: { value: "800" } });
+			fireEvent.change(eventRate()!, { target: { value: "200" } });
+			expect(started(onStart).thresholds).toMatchObject({
+				streamTimeToFirstEventP95Ms: 800,
+				streamEventsPerSecondMin: 200,
+			});
+		});
+
+		it("holds Start back on an out-of-range stream budget", () => {
+			open({ isStreamingRequest: true });
+			openBudgets();
+			fireEvent.change(eventRate()!, { target: { value: "0" } });
+			expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
+			expect(
+				screen.getAllByText(/events per second at least must be more than 0/i)
+			).not.toHaveLength(0);
+		});
+
+		it("carries a remembered stream budget into a streaming request and says so", () => {
+			seedStreamMemo();
+			const { onStart } = open({ isStreamingRequest: true });
+			expect(screen.getByText(/time to first event p95 at most 800 ms/i)).toBeInTheDocument();
+			const config = started(onStart);
+			expect(config.thresholds).toMatchObject({
+				streamTimeToFirstEventP95Ms: 800,
+				streamEventsPerSecondMin: 200,
+			});
+			expect(config.carriedBudgets).toEqual(
+				expect.arrayContaining(["streamTimeToFirstEventP95Ms", "streamEventsPerSecondMin"])
+			);
+		});
+
+		it("neither sends, names nor carries a remembered one on a request that does not stream", () => {
+			seedStreamMemo();
+			const { onStart } = open({ isStreamingRequest: false });
+			expect(screen.queryByText(/time to first event/i)).not.toBeInTheDocument();
+			expect(screen.queryByText(/budgets (carried over|prefilled)/i)).not.toBeInTheDocument();
+			const config = started(onStart);
+			expect(config.thresholds).toBeUndefined();
+			expect(config.carriedBudgets).toBeUndefined();
+		});
+
+		it("keeps the remembered stream budgets for the next streaming request", () => {
+			seedStreamMemo();
+			const { onStart } = open({ isStreamingRequest: false });
+			started(onStart);
+			const memo = JSON.parse(
+				localStorage.getItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG) ?? "{}"
+			) as { budgets: Record<string, string> };
+			expect(memo.budgets.streamTimeToFirstEventP95Ms).toBe("800");
+		});
+	});
 
 	it("prefills the p99 budget from the capacity SLO rather than inventing a default", () => {
 		// `sloThresholdMs` existed as a chart annotation and never reached the

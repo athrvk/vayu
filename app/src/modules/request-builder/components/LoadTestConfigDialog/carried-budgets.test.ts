@@ -13,6 +13,7 @@ import {
 	budgetsChanged,
 	budgetsToRemember,
 	budgetsToSend,
+	carriedForRun,
 	carriedThresholdKeys,
 	clearCarried,
 	describeCarried,
@@ -52,6 +53,24 @@ describe("findCarriedBudgets", () => {
 	it("carries the custom rows that name a metric and a ceiling", () => {
 		const rows = [row({ id: "a" }), row({ id: "b", value: "" }), row({ id: "c", name: "" })];
 		expect(findCarriedBudgets({ latencyP99Ms: "" }, rows).customIds).toEqual(["a"]);
+	});
+});
+
+describe("carriedForRun (issue #3234)", () => {
+	const carried: CarriedBudgets = {
+		fixed: { latencyP99Ms: "memo", streamEventsPerSecondMin: "memo" },
+		customIds: ["c1"],
+	};
+
+	it("keeps a carried stream budget for a streaming request", () => {
+		expect(carriedForRun(carried, true)).toEqual(carried);
+	});
+
+	it("drops it for a request that does not stream, and keeps the rest", () => {
+		expect(carriedForRun(carried, false)).toEqual({
+			fixed: { latencyP99Ms: "memo" },
+			customIds: ["c1"],
+		});
 	});
 });
 

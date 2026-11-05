@@ -2236,9 +2236,13 @@ Under load a stream is bounded by construction, and **reaching a cap is a
 successful completion, not a timeout** - so a streaming run's clean error rate
 is not evidence the caps went unused. The report answers that with a `stream`
 section (`RunReport.stream`): the per-completion event distribution, the totals,
-a derived `eventsPerSecond`, and `capped` - how many streams a cap ended rather
-than the server. `StreamMetrics` (`modules/dashboard/components/charts`) renders
-it, and says plainly when *every* stream was capped, because those counts then
+a derived `eventsPerSecond`, `capped` - how many streams a cap ended rather
+than the server - and `timeToFirstEvent` (issue #3234), the wait from submitting
+the request to each stream's first event. That is not `phases.firstByte`, which
+ends at the response headers: a gateway that answers `200` at once and then
+thinks reads fast there and slow here. It is absent when no stream delivered a
+timed event. `StreamMetrics` (`modules/dashboard/components/charts`) renders
+it, as its own first-event row, and says plainly when *every* stream was capped, because those counts then
 measure the caps rather than the target. The section is `undefined` for a run
 that did not stream, which is not the same claim as a stream that delivered
 nothing, so a report without it renders exactly as it did before.
@@ -2274,7 +2278,7 @@ computed the same either way. The list is cut at the engine's 64-entry cap
 (each key may be up to 512 bytes of UTF-8). It is omitted when nothing was carried, and
 `RunCollectionDialog` and MCP never send it.
 
-`maxAssertionFailureRatePct` (issue #1497) is the sixth budget. It is judged
+`maxAssertionFailureRatePct` (issue #1497) is the assertion budget. It is judged
 against two populations kept apart (issue #2892), not `testValidation`'s
 per-response view: the **exact** tally of every `assert.*` element outcome,
 unmatched required `extract.*` and inline `pm.test` call, and the **sampled**
@@ -2306,19 +2310,33 @@ rendering apply whichever executor ran the sequence. See
 how a collection run's error rate, latency percentiles and throughput are
 derived from the steps it actually sent.
 
-**`custom.<name>.<stat>` budgets** (issue #1579) are the seventh thing the
-block can carry, and the only dynamic one: a ceiling on a value the run records
+**Stream budgets** (issue #3234): `streamTimeToFirstEventP95Ms` (a ceiling on
+`stream.timeToFirstEvent.p95`, ms) and `streamEventsPerSecondMin` (a floor on
+`stream.eventsPerSecond`) judge the report's `stream` section, which only a
+streaming load run has. On any other run the engine reports them not evaluated,
+and that counts as failed, so the dialog treats them as a property of the
+request: `BUDGET_FIELDS` marks them `streamOnly`, and `budgetFieldsFor(streaming)`
+is the one list the load dialog's fields, validation, closed-card summary and
+payload read. A request that does not stream is offered neither, validates and
+sends neither (a value the global memo holds for them stays in the memo for the
+next streaming request, and is not named as carried over), and
+`RunCollectionDialog` never offers them. A streaming request's latency budgets
+read on each stream's full duration, from sending the request to the stream
+closing, and the section says so under the p99 field.
+
+**`custom.<name>.<stat>` budgets** (issue #1579) are the only dynamic thing the
+block can carry: a ceiling on a value the run records
 itself through a `metric.record` element or a `pm.metrics` call, keyed by the
 name it was recorded under and one of `p50`, `p95`, `p99`, `max`, `value`,
 `rate`. `RunThresholds` holds them as a *pattern* index signature
-(`` [key: `custom.${string}`]: number | undefined ``), so the six fixed fields
+(`` [key: `custom.${string}`]: number | undefined ``), so the fixed fields
 keep their own types and `failRun` keeps its `boolean`. Both dialogs declare
 them as free-text rows (`CustomBudgetRows.tsx`) rather than as a picker of
 recorded names: the engine checks the key's shape and the value's sign and does
 **not** cross-check the name against the run's own `metric.record` elements - an
 unmatched name is reported `evaluated: false` rather than refused - which is the
 call MCP's `thresholdsInput` already made for this family (`catchall`). Like the
-six fixed keys, these are **not** gated by `RunCollectionDialog`'s Load test
+fixed keys, these are **not** gated by `RunCollectionDialog`'s Load test
 switch either - `execute_scenario_run` evaluates a design-mode run's custom
 metrics against the same declared budgets a load run's are judged against.
 

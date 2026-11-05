@@ -396,7 +396,9 @@ Streaming under load puts a second thing on the write callback's hot path: an
 loop over a few-byte state machine with no allocation and no string building -
 a scan, not a parse - and it runs **only** for transfers carrying
 `stream_bounds`, so an ordinary load run pays one `std::optional` check per
-callback and nothing else.
+callback and nothing else. The same branch stamps the first event (issue
+#3234): one more `std::optional` test per callback, and one clock read per
+stream, at the write that completes its first event.
 
 **There is no number here yet, and this section exists to say so rather than to
 imply one.** The measurement belongs with the other hot-path figures on this

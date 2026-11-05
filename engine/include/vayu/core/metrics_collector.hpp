@@ -1038,6 +1038,19 @@ class MetricsCollector {
         size_t capped = 0;
         /// Per-completion event-count distribution; counts, not milliseconds.
         Percentiles events;
+        /// Per-completion wait from submission to the first event, in
+        /// milliseconds (issue #3234). Its `count` is the completions that
+        /// delivered a timed event, so it is 0 for a run whose streams all
+        /// stayed silent.
+        Percentiles time_to_first_event;
+
+        /// The run's event rate over @p duration_s, the duration the report's
+        /// `rps` is read off; 0 for a zero-length run rather than an infinity
+        /// JSON cannot hold. Whatever reads the report's `eventsPerSecond`
+        /// reads it here, so the figures cannot drift apart.
+        [[nodiscard]] double events_per_second (double duration_s) const {
+            return duration_s > 0.0 ? static_cast<double> (total_events) / duration_s : 0.0;
+        }
     };
 
     [[nodiscard]] std::optional<StreamTotals> stream_totals () const;
@@ -1049,8 +1062,12 @@ class MetricsCollector {
      * an event count, success or failure alike: a stream the target killed
      * halfway still delivered what it delivered, and excluding it would report
      * a run's throughput off the streams that happened to survive.
+     *
+     * @p first_event_ms is `Response::stream_first_event_ms`; absent, the
+     * completion counts toward everything but the time-to-first-event
+     * distribution.
      */
-    void record_stream_completion (size_t events, bool capped);
+    void record_stream_completion (size_t events, bool capped, std::optional<double> first_event_ms);
 
     /**
      * @brief Sample the rolling (windowed) latency percentiles for the interval
@@ -1385,6 +1402,9 @@ class MetricsCollector {
     // stream. Counts rather than microseconds - it shares nothing with the
     // latency histograms but their precision.
     struct hdr_histogram* stream_events_histogram_ = nullptr;
+    // Time to first event (issue #3234): a duration, so microseconds on the
+    // latency histograms' scale. Null on the same rule as the one above.
+    struct hdr_histogram* stream_first_event_histogram_ = nullptr;
     std::atomic<size_t> stream_completions_{ 0 };
     std::atomic<size_t> stream_events_total_{ 0 };
     std::atomic<size_t> stream_capped_{ 0 };

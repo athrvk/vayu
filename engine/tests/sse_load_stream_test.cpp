@@ -42,6 +42,9 @@
 
 namespace {
 
+/// How long `/delayed` holds its first event after the headers.
+constexpr std::chrono::milliseconds FIRST_EVENT_DELAY{ 300 };
+
 /**
  * Two shapes of stream a cap has to end: one that never stops sending, and one
  * that connects and then says nothing at all.
@@ -92,6 +95,32 @@ class LoadStreamServer {
             "text/event-stream", [] (size_t, httplib::DataSink& sink) {
                 const std::string body =
                 "data: a\n\n: ping\n\ndata: b\n\ndata: c\n\n";
+                sink.write (body.data (), body.size ());
+                sink.done ();
+                return true;
+            });
+        });
+
+        // Headers and a keep-alive at once, the first event FIRST_EVENT_DELAY
+        // later: the shape of a gateway that answers 200 and then thinks.
+        svr_.Get ("/delayed", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string keep_alive = ": thinking\n\n";
+                sink.write (keep_alive.data (), keep_alive.size ());
+                std::this_thread::sleep_for (FIRST_EVENT_DELAY);
+                const std::string event = "data: first\n\n";
+                sink.write (event.data (), event.size ());
+                sink.done ();
+                return true;
+            });
+        });
+
+        // One event whose frame the close completes, never a blank line.
+        svr_.Get ("/unterminated", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                const std::string body = "data: last";
                 sink.write (body.data (), body.size ());
                 sink.done ();
                 return true;
@@ -201,6 +230,8 @@ TEST (SseLoadStreamTest, DurationCapEndsASilentStreamAsASuccess) {
     ASSERT_HAS_VALUE (response.stream_events);
     EXPECT_EQ (*response.stream_events, 0u)
     << "a silent stream delivered nothing, and says so";
+    EXPECT_FALSE (response.stream_first_event_ms.has_value ())
+    << "no event arrived, so there is no time to first event (#3234)";
     // Ended by the cap, well before the backstop timeout that sits
     // LOAD_STREAM_TIMEOUT_GRACE_MS past it.
     EXPECT_LT (elapsed.count (), 1200 + vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS);
@@ -230,6 +261,57 @@ TEST (SseLoadStreamTest, AServerClosedStreamCompletesUncappedWithItsEvents) {
     loop.stop ();
 }
 
+// ---------------------------------------------------------------------------
+// Time to first event (issue #3234)
+// ---------------------------------------------------------------------------
+
+// The headers and a keep-alive arrive at once, the event 300ms later. Healthy,
+// the stamp reads at least 300ms; read off libcurl's start-transfer time it
+// reads the few milliseconds the headers took. A lower bound only, so a slow
+// runner cannot fail it. Mutation check: copy `timing.first_byte_ms` into
+// `stream_first_event_ms` in `curl_utils.cpp` and the first bound fails.
+TEST (SseLoadStreamTest, TheFirstEventIsTimedFromSubmissionNotFromTheHeaders) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+
+    auto result = run_one (loop, stream_request (server.url ("/delayed"), 1000, 30000));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 1u);
+    ASSERT_HAS_VALUE (response.stream_first_event_ms);
+    const double first_event_ms = *response.stream_first_event_ms;
+    EXPECT_GE (first_event_ms, static_cast<double> (FIRST_EVENT_DELAY.count ()));
+    EXPECT_LE (first_event_ms, response.timing.total_ms)
+    << "the first event cannot arrive after the transfer completed";
+    EXPECT_LT (response.timing.first_byte_ms, first_event_ms)
+    << "the headers came before the event, which is the gap this measures";
+
+    loop.stop ();
+}
+
+// An event the close completed was counted by `finish` at completion, so no
+// write said when it arrived and no time is invented for it.
+TEST (SseLoadStreamTest, AnEventOnlyTheCloseCompletedIsCountedButNotTimed) {
+    LoadStreamServer server;
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+
+    auto result =
+    run_one (loop, stream_request (server.url ("/unterminated"), 1000, 30000));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    ASSERT_HAS_VALUE (response.stream_events);
+    EXPECT_EQ (*response.stream_events, 1u);
+    EXPECT_FALSE (response.stream_first_event_ms.has_value ());
+
+    loop.stop ();
+}
+
 TEST (SseLoadStreamTest, AnOrdinaryTransferCarriesNoEventCount) {
     // The absent-not-zero rule at its source: a non-streaming request must
     // leave `stream_events` unset, or every ordinary load run grows a `stream`
@@ -249,6 +331,7 @@ TEST (SseLoadStreamTest, AnOrdinaryTransferCarriesNoEventCount) {
     EXPECT_EQ (result.value ().status_code, 200);
     EXPECT_FALSE (result.value ().stream_events.has_value ());
     EXPECT_FALSE (result.value ().stream_capped);
+    EXPECT_FALSE (result.value ().stream_first_event_ms.has_value ());
 
     loop.stop ();
 }
