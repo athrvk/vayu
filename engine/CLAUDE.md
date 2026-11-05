@@ -1307,8 +1307,13 @@ regardless, a late credential included (`resolve_load_residuals`, the one
 copy both load paths call). Since #1594, the single-request load path
 (`load_strategy.cpp`) runs the same pass too, against a per-submission
 `ScopeOverlay` rather than a per-VU one - see the element-pipeline bullet
-above - but only when the run declares `requestElements`; a bare URL run
-with no step-level elements at all skips it exactly as before.
+above - but only when the run declares `requestElements`. A run without them
+that names an `environmentId` or `requestId` instead resolves its shared
+template once, in `build_load_request` before the split (#3253,
+`resolve_load_template_tokens`: `DynamicResolution::Defer` plus the run's bound
+columns, so every token the bind owns survives, and `PathSettle::Answered`); a
+template holding no `{{` reads no scope, so the #992 fast path pays nothing. It
+runs before `script.setup`, so a setup write never reaches such a run's request.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token

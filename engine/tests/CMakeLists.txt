@@ -123,6 +123,7 @@ add_executable(vayu_tests
     load_strategy_test.cpp
     load_data_test.cpp
     load_identity_test.cpp
+    load_template_scopes_test.cpp
     refill_deficit_test.cpp
     trailing_window_test.cpp
     status_seconds_test.cpp
@@ -445,6 +446,7 @@ set(vayu_scratch_database_suites
     ScenarioIdentityTest
     LoadReplayEventsTest
     LoadScriptScopesTest
+    LoadTemplateScopesRunTest
     LoadFailureDedupTest
     LoadStrategyTest
     MetricsCollectorFlushTest

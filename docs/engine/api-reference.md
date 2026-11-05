@@ -6585,7 +6585,10 @@ holds wherever a script can run between the build and the send:
 | A single-request load run declaring `requestElements` | that submission's `step.before` elements and the residual pass over the run's scopes (a `script.setup` included) |
 
 A single-request load run without `requestElements` has no such pass, so the
-build encodes the name as written. Under load a name nothing answers is never a
+build encodes the name as written; when the run names an `environmentId` or a
+`requestId`, its start-of-run pass ([`POST /runs`](#post-runs)) then resolves a
+bearer token or header-placed api key with the header line it was written into,
+but not a basic pair or a query-placed key, already encoded. Under load a name nothing answers is never a
 refusal: it is sent as written and counted like any other unresolved token
 (#1503), except inside a basic pair's base64, where it never was countable.
 
@@ -8676,7 +8679,7 @@ Start a load test run (Vayu Mode).
   "maxInFlight": 10000,      // Optional; see "maxInFlight" note below - constant_rps only
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
-  "environmentId": "env_1234567890",  // Optional
+  "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "targetPolicy": { "allowAll": false, "allowedHosts": ["api.example.com"] },  // Optional, the hosts this run may reach - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
@@ -8718,6 +8721,26 @@ is a `400` naming the field and the valid values, the same validation
 **`requestId` / `environmentId` on `POST /runs`** are read exactly as on
 [`POST /execute`](#post-execute): a non-string is a `400` naming the field
 (`'environmentId' must be a string (got boolean)`) and no run row is created.
+A single-request run that names either resolves a `{{name}}` still in its URL,
+path values, headers or body against the same scopes a Send reads (the
+environment, the linked request's collection chain, globals) (#3253). It is one
+pass at run start, over the request every submission shares, never one per
+submission, so a request holding no `{{` costs nothing more. An
+id naming nothing is an empty scope, as on `POST /execute`, never a refusal.
+The pass leaves every token the per-submission bind owns: `{{data.*}}` and a
+bare column of the run's `data`, `{{$vu}}` / `{{$iteration}}`, and a
+generator such as `{{$guid}}`, generated per submission. It runs before
+`script.setup`, so without `requestElements` a setup write does not reach the
+request. A run declaring `requestElements` skips it, leaving its request to
+the per-submission residual pass described under
+[the `requestElements` array](#the-requestelements-array-a-single-request-runs-own-step-level-elements),
+which reads what `script.setup` wrote. Auth is applied
+when the request is built, before this pass: a bearer token or a header-placed
+api key resolves with the header it was written into, while a basic pair or a
+query-placed api key is already encoded and goes out as written (compose the
+payload, or declare `requestElements`, to resolve one). A name nothing answers
+is sent as written and counted in the report's `unresolved_tokens` warning,
+never refused.
 
 **`origin` on `POST /runs`** is the same object, read by the same reader and
 under the same rules as on [`POST /execute`](#post-execute) (#1817): who started
@@ -9267,11 +9290,10 @@ script of the run shares - the environment named by `environmentId`, and the
 collection scope of the request `requestId` links, when the run links one;
 a bare URL run with no `requestId` gets no collection scope. Unlike a
 collection-backed run, `script.setup` / `script.teardown` alone do not make
-those scopes reach the request: the residual-token pass a `requestElements`
-entry gets (see above) only runs when `requestElements` is itself non-empty,
-because that pass reads the same base scopes `run_collection_setup` only
-loads once one of the two arrays is present, and `lifecycleElements` alone
-still leaves `method` / `url` / `headers` / `body` reading nothing back. So a
+what a script writes reach the request: the stored values do, through the
+start-of-run pass ([`POST /runs`](#post-runs), #3253), but that pass runs
+before `script.setup`, and the residual-token pass a `requestElements` entry
+gets (see above) only runs when `requestElements` is itself non-empty. So a
 `pm.environment.set` in `script.setup` reaches a later `{{token}}` only when
 the run also declares `requestElements`; with `lifecycleElements` alone,
 `pm.sendRequest` (external side effects) and the `lifecycle` outcomes in the
@@ -12508,7 +12530,9 @@ finished and its other numbers may look fine: a request sent with a
 single-request run that declares `requestElements`, re-resolve what
 composition left against the executing virtual user's or submission's own
 scopes before sending, so a name an inline script or extractor set is
-answered; a single-request run with neither runs no residual pass, so a value a
+answered; a single-request run without `requestElements` resolves its request
+once, at run start, against the scopes an `environmentId` or `requestId`
+names, and runs no pass at all when it names neither, so either way a value a
 pre-request script would have set goes on the wire literally), or a step whose pre-request script this mode never executes -
 one that did not run inline (issue #1938: `elements.scripts: "allInline"`, or
 the element's own `inline: true` under `asMarked`, runs it and raises no
