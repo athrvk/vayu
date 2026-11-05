@@ -31,6 +31,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/header_text.hpp"
 #include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -1186,21 +1187,21 @@ bool tls_connection_never_answered (CURL* curl) {
 }
 
 /**
- * The sentence that opens a redirect-limit failure, ahead of libcurl's own text.
+ * The sentence that opens a redirect-limit failure of a transfer libcurl
+ * followed itself, ahead of libcurl's own text.
  *
  * The limit is read off the handle (`CURLINFO_REDIRECT_COUNT`) rather than the
  * request, which this function never sees: libcurl raises
  * `CURLE_TOO_MANY_REDIRECTS` exactly when the hops followed reach
- * `CURLOPT_MAXREDIRS`, so the count at failure is the limit. When the handle
- * cannot say, the sentence names no number rather than guess one.
+ * `CURLOPT_MAXREDIRS`, so the count at failure is the limit.
  */
 std::string too_many_redirects_message (CURL* curl, const std::string& curl_text) {
-    long followed    = -1;
-    const bool known = curl &&
-    get_info<CURLINFO_REDIRECT_COUNT> (curl, &followed) == CURLE_OK && followed >= 0;
-    std::string text = "Too many redirects: the server redirected more than ";
-    text += known ? std::to_string (followed) + " times" : "the allowed number of times";
-    return text + " (see Maximum redirects). " + curl_text;
+    long followed = -1;
+    if (!curl || get_info<CURLINFO_REDIRECT_COUNT> (curl, &followed) != CURLE_OK ||
+    followed < 0) {
+        return vayu::http::too_many_redirects_message (std::nullopt, curl_text);
+    }
+    return vayu::http::too_many_redirects_message (followed, curl_text);
 }
 
 /// The `Content-Encoding` value of the last response libcurl received, or
