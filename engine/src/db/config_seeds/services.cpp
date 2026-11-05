@@ -80,8 +80,8 @@ void seed_services (ConfigSeeder& seed, int64_t now) {
     "How long a stream may deliver nothing before the engine ends it. This is "
     "the one deadline a stream gets - a whole-transfer timeout would kill a "
     "healthy stream mid-flight - so it must be longer than the quietest gap "
-    "the endpoint you are watching leaves between events. Enforced at whole-"
-    "second resolution.",
+    "the endpoint you are watching leaves between events. A quiet stream ends "
+    "within a couple of seconds of this setting.",
     "services", std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS),
     std::to_string (vayu::core::constants::sse::MIN_IDLE_TIMEOUT_MS),
     std::to_string (vayu::core::constants::sse::IDLE_TIMEOUT_MS_CEILING), std::nullopt, now }))));

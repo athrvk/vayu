@@ -898,9 +898,10 @@ constexpr int64_t STREAM_EVENTS_CEILING = 10000000;
 constexpr int64_t LOAD_STREAM_TIMEOUT_GRACE_MS = 5000;
 
 /// How long a stream may deliver nothing before it is ended as idle, seeding
-/// `sseIdleTimeoutMs`. Enforced through `CURLOPT_LOW_SPEED_TIME`, whose
-/// resolution is whole seconds, so a value is rounded up to the next second and
-/// the floor is one second.
+/// `sseIdleTimeoutMs`. The progress callback judges it, and libcurl runs that
+/// about once a second while a stream is quiet, so the floor is one second: a
+/// smaller window would not end a stream any sooner, and one ends within a
+/// couple of seconds of its setting.
 constexpr int64_t IDLE_TIMEOUT_MS         = 60000;
 constexpr int64_t MIN_IDLE_TIMEOUT_MS     = 1000;
 constexpr int64_t IDLE_TIMEOUT_MS_CEILING = 3600000;

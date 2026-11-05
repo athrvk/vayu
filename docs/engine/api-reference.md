@@ -7779,11 +7779,11 @@ timeout happened to fire":
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
 | `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
 | `maxStreamDurationMs` | The duration cap elapsed |
-| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made |
+| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` on a made connection; a header line counts as arriving, and each redirect hop's own connect is bounded by the connect deadline below, not counted as silence. The stream ends within a couple of seconds of the setting (the engine checks about once a second) |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
 would kill a healthy one mid-flight. Two deadlines apply instead: connecting
-(TCP and the TLS handshake) is bounded by the smaller of `timeout` and 30
+(TCP and the TLS handshake, on every redirect hop) is bounded by the smaller of `timeout` and 30
 seconds (issue #2835), and once connected the idle one bounds silence; the two
 caps above are what bound a stream that talks forever. A connect that runs out
 ends the stream as `error` with `errorCode` `TIMEOUT`, as a refused connection

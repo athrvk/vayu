@@ -119,13 +119,18 @@ describe("the Settings tab's hierarchy", () => {
 		expect(screen.getAllByText("Protocol")).toHaveLength(1);
 	});
 
-	it("states the scope once, and only where it is not the rule", () => {
+	it("states the scope once, and the Event stream row says a load run streams too", () => {
 		render(<SettingsPanel />);
 
-		// It was on all three sections, in two variants. The exception - a load
-		// test never streams - still says so, on the row it is about.
+		// It was on all three sections, in two variants. The one row with
+		// something to add - what a load run does with a stream - says it itself.
 		expect(screen.getAllByText(/every Send and every load test/)).toHaveLength(1);
-		expect(screen.getByText(/a load test always buffers/)).toBeTruthy();
+		expect(
+			screen.getByText(
+				/Applies to Send and to load tests; a load run's stream ends at the caps set in its dialog\./
+			)
+		).toBeTruthy();
+		expect(screen.queryByText(/always buffers/)).toBeNull();
 	});
 
 	it("builds its rows on the shared primitives instead of rolling them", () => {

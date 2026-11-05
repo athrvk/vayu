@@ -20,6 +20,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace vayu::http {
@@ -182,9 +183,13 @@ parse_inbox_response_update (const nlohmann::json& json, const InboxCannedRespon
  * only ever emits non-negative integer ids, so anything else is a caller's bug,
  * and resuming from the start would replay every retained capture as though it
  * had just arrived.
+ *
+ * @p id_noun names what the id identifies in that error ("capture" for the
+ * inbox, "event" for a run's event relay), so a caller reads its own vocabulary.
  */
-std::expected<int64_t, InboxParseError>
-parse_live_resume_point (const std::string& header_value, const std::string& param_value);
+std::expected<int64_t, InboxParseError> parse_live_resume_point (const std::string& header_value,
+const std::string& param_value,
+std::string_view id_noun);
 
 /** The wire shape of an inbox, shared by start, list and update. */
 nlohmann::json inbox_info_json (const InboxInfo& info);

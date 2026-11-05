@@ -180,7 +180,7 @@ void handle_run_events (RouteContext& ctx, const httplib::Request& req, httplib:
     }
 
     const auto resume_point = parse_live_resume_point (
-    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
+    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"), "event");
     if (!resume_point) {
         const auto& refusal = resume_point.error ();
         send_error (res, refusal.http_status, refusal.message, refusal.code);
