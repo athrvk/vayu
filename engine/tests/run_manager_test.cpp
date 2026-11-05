@@ -1357,6 +1357,63 @@ TEST (LoadDrain, AStreamingRunsNaturalEndWaitsForTheStreamsCap) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #3235: a collection run's streams are its steps', so its natural end waits
+// for the longest step's cap rather than for the run's 200 ms timeout. One
+// virtual user opens `/sse-ticks` (6 s) at the start of a 1 s run; the step's
+// 4 s cap ends it as a success, where a drain sized by the timeout gives up
+// at about 3.2 s and records it cancelled. Asserted on the recorded outcome.
+// Mutation check: size the drain by `context->stream_bounds` alone again in
+// `execute_load_test` and every assertion below fails.
+TEST (LoadDrain, ACollectionRunsNaturalEndWaitsForItsStreamingStepsCap) {
+    const std::string db_path = "test_load_drain_scenario_stream.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        auto execution            = std::make_shared<ScenarioExecution> ();
+        execution->request.source = "collection";
+        execution->request.collection_id = "col_drain_stream";
+        ScenarioStep step;
+        step.request_id            = "req_stream";
+        step.name                  = "events";
+        step.request.method        = vayu::HttpMethod::GET;
+        step.request.url           = server.sse_ticks_url ();
+        step.request.timeout_ms    = 200;
+        step.request.stream_bounds = vayu::StreamBounds{ 4000, 100000 };
+        step.stored_url            = step.request.url;
+        execution->plan.steps.push_back (std::move (step));
+
+        const nlohmann::json config{ { "mode", "constant_concurrency" },
+            { "concurrency", 1 }, { "duration", "1s" }, { "timeout", 200 },
+            { "scenario",
+            { { "source", "collection" }, { "collectionId", "col_drain_stream" } } } };
+        const std::string run_id = "run_load_drain_scenario_stream";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db, execution));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& summary = report.at ("summary");
+        EXPECT_EQ (summary.at ("successfulRequests").get<size_t> (), 1u)
+        << report.dump ();
+        EXPECT_EQ (summary.at ("failedRequests").get<size_t> (), 0u) << report.dump ();
+        EXPECT_FALSE (report.at ("errors").at ("types").contains ("cancelled"))
+        << report.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #2385: a stored row is its whole second, not the last 100 ms window of it,
 // and the gate frame of the same tick carries the same figures as `second*`.
 // At 20 rps a second holds about 20 completions, so its p99 is its slowest and

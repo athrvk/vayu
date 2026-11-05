@@ -376,7 +376,8 @@ Manages the lifecycle of load test runs:
   `timeout` + 2s. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
   stream's duration cap (`maxStreamDurationMs`) plus the 5s backstop grace plus 2s
   (`natural_end_drain_ms`, issue #2834), so the drain never cuts a healthy stream short of its
-  cap. A request the drain deadline cancels is recorded as an error; one a user stop
+  cap. A collection run is sized by its longest streaming step's cap the same way
+  (`longest_stream_bounds`, issue #3235). A request the drain deadline cancels is recorded as an error; one a user stop
   cancels is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
   its error count, so `requests_sent` is always the total plus the cancelled count.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
@@ -1271,7 +1272,8 @@ throughput: `maxHealthy*` is the last level tried, which overshoots it.
 ### Bounded streams under load
 
 A load run may consume `text/event-stream` responses (`POST /runs` with
-`"stream": true`, issue #576), and the design principle is one line:
+`"stream": true`, issue #576; a collection load run, for each step whose stored
+request has `stream` set, issue #3235), and the design principle is one line:
 **under load, every SSE stream is bounded by construction.**
 
 That follows from the refill loop below rather than from taste. The loop is
@@ -1281,7 +1283,9 @@ it leaks its concurrency slot for the rest of the run, and a run of *N* endless
 streams stops sending anything at all once *N* reaches the target. So a
 streaming request carries `Request::stream_bounds`, and both caps are always
 set - the payload's, or the `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
-settings - with no zero-means-unbounded spelling for either.
+settings - with no zero-means-unbounded spelling for either. A collection run's
+plan gives the bounds to each streaming step, reading the stored row because
+composition drops the flag, so both executors receive the step already bounded.
 
 The two caps are enforced in the two places that can see them:
 

@@ -727,7 +727,14 @@ logged as a warning: it means a client skipped composition.
   `Request::stream_bounds`, the event loop ends it counting with
   `SseFrameCounter` (which agrees with `SseParser` on what an event is), and
   both caps are always set because the load loop refills concurrency per
-  completion and an unending transfer would leak its slot. Reaching a cap is a
+  completion and an unending transfer would leak its slot. A collection run
+  streams the steps whose stored request has `stream` set (#3235): the plan
+  reads the row (composition drops the flag) and gives each one
+  `Request::stream_bounds` from the run's caps over the `sse*` settings
+  (`vayu::http::resolve_stream_bounds`, the one resolution both run shapes
+  use); its caps stand without `stream` (`read_collection_run_stream_caps`),
+  a top-level `stream` there is a `400`, and a load run's natural end drains
+  for the longest step's cap (`longest_stream_bounds`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
   The report gains a `stream` section, absent for runs that did not stream. A
   load stream's events are parsed back, never stored twice (#657): the sample

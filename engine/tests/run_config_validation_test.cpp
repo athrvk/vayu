@@ -557,6 +557,50 @@ TEST (RunConfigValidation, CapsWithoutStreamAreRejected) {
     expect_rejected (config, "maxStreamEvents");
 }
 
+// A collection run streams the steps whose stored request streams (#3235), so
+// its caps stand alone and bound only those steps.
+namespace {
+nlohmann::json collection_run_config () {
+    auto config = valid_config ();
+    config["scenario"] = { { "source", "collection" }, { "collectionId", "col" } };
+    return config;
+}
+} // namespace
+
+TEST (RunConfigValidation, CapsWithoutStreamAreAcceptedOnACollectionRun) {
+    auto config                   = collection_run_config ();
+    config["maxStreamDurationMs"] = 30000;
+    config["maxStreamEvents"]     = 200;
+    EXPECT_FALSE (validate_run_config (config).has_value ());
+}
+
+TEST (RunConfigValidation, ACollectionRunsCapOutOfRangeIsRejected) {
+    auto config               = collection_run_config ();
+    config["maxStreamEvents"] = 0;
+    expect_rejected (config, "maxStreamEvents");
+
+    auto slow                   = collection_run_config ();
+    slow["maxStreamDurationMs"] = 10; // below MIN_STREAM_DURATION_MS
+    expect_rejected (slow, "maxStreamDurationMs");
+
+    auto text               = collection_run_config ();
+    text["maxStreamEvents"] = "5";
+    expect_rejected (text, "maxStreamEvents");
+}
+
+// Accepted and ignored before #3235: neither value can change which steps
+// stream, so a caller sending one is refused rather than misled.
+TEST (RunConfigValidation, StreamIsRefusedOnACollectionRun) {
+    for (const bool value : { true, false }) {
+        auto config      = collection_run_config ();
+        config["stream"] = value;
+        expect_rejected (config, "stream");
+    }
+    auto absent      = collection_run_config ();
+    absent["stream"] = nullptr;
+    EXPECT_FALSE (validate_run_config (absent).has_value ());
+}
+
 TEST (RunConfigValidation, ANullStreamIsAcceptedAsAbsent) {
     auto config      = valid_config ();
     config["stream"] = nullptr;

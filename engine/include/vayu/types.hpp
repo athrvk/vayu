@@ -484,8 +484,10 @@ constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
  * @brief The caps that end a streaming transfer under load (issue #576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
- * load event loop, and absent everywhere else - including on the design path,
- * whose stream is managed by `SseStreamManager` and ends by rules of its own.
+ * load event loop, or a collection run's step whose stored request streams
+ * (#3235; the plan sets it for either executor). Absent everywhere else -
+ * including on `POST /execute`'s stream, which `SseStreamManager` manages and
+ * ends by rules of its own.
  *
  * Both caps are always set, never zero-for-unbounded: the load loop is
  * completion-driven (`in_flight() = sent - completed`, refill per completion),
@@ -666,7 +668,7 @@ struct Request {
     /**
      * @brief Consume this transfer as a bounded `text/event-stream` (#576).
      *
-     * Absent for every ordinary transfer, and for the design path's stream -
+     * Absent for every ordinary transfer, and for `POST /execute`'s stream -
      * see `StreamBounds`. Set, it changes three things about the transfer and
      * nothing else: events are counted as they arrive, either cap ends it as a
      * **success**, and the whole-transfer timeout becomes a backstop around the

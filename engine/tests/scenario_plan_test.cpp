@@ -52,6 +52,7 @@
 #include "vayu/http/request_composer.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/encoding.hpp"
 
 using nlohmann::json;
@@ -164,6 +165,22 @@ class ScenarioPlanTest : public ::testing::Test {
         ASSERT_HAS_VALUE (row) << id;
         row->elements = elements.dump ();
         db_->create_collection (*row); // a replace, keyed on the id
+    }
+
+    /// Store request @p id with `stream` set, as the request editor saves it.
+    void mark_streaming (const std::string& id) {
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->stream = true;
+        db_->save_request (*row);
+    }
+
+    /// Write a config value through the catalogue, as POST /config does.
+    void set_config (const char* key, const std::string& value) {
+        auto entry = db_->get_config_entry (key);
+        ASSERT_HAS_VALUE (entry) << key;
+        entry->value = value;
+        db_->save_config_entry (*entry);
     }
 
     void seed_environment (const std::string& id, const std::string& variables) {
@@ -599,6 +616,77 @@ TEST_F (ScenarioPlanTest, StepsResolveAgainstTheRunsEnvironment) {
     const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
     ASSERT_TRUE (resolved.ok) << resolved.error;
     EXPECT_EQ (resolved.plan.steps[0].request.url, "https://api.example.test/ping");
+}
+
+// --- A stored stream runs as one (#3235) ---------------------------------------
+
+// Composition drops the row's `stream`, so the plan reads it off the row.
+// Mutation check: drop the `row.stream` copy in `resolve_step` and the
+// streaming step's assertions fail.
+TEST_F (ScenarioPlanTest, AStoredStreamingStepCarriesTheRunsStreamBounds) {
+    seed_collection ("col", "");
+    seed_request ("sse", "col", 0, "https://example.test/events");
+    seed_request ("plain", "col", 1, "https://example.test/ping");
+    mark_streaming ("sse");
+
+    auto opts                          = options ();
+    opts.stream_bounds.max_duration_ms = 2000;
+    opts.stream_bounds.max_events      = 7;
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    ASSERT_EQ (resolved.plan.steps.size (), 2u);
+
+    const auto& streaming = resolved.plan.steps[0].request.stream_bounds;
+    ASSERT_HAS_VALUE (streaming);
+    EXPECT_EQ (streaming->max_duration_ms, 2000);
+    EXPECT_EQ (streaming->max_events, 7);
+    EXPECT_FALSE (resolved.plan.steps[1].request.stream_bounds.has_value ())
+    << "a step whose stored request does not stream is sent as an ordinary one";
+
+    const auto longest = vayu::core::longest_stream_bounds (resolved.plan);
+    ASSERT_HAS_VALUE (longest);
+    EXPECT_EQ (longest->max_duration_ms, 2000);
+}
+
+// The route's resolution, which `POST /runs` hands the plan: the run's own
+// caps over the `sse*` settings, each cap on its own.
+TEST_F (ScenarioPlanTest, AStreamingStepFallsBackToTheStreamSettingsCapByCap) {
+    set_config ("sseMaxStreamDurationMs", "45000");
+    set_config ("sseMaxStreamEvents", "12");
+    seed_collection ("col", "");
+    seed_request ("sse", "col", 0, "https://example.test/events");
+    mark_streaming ("sse");
+
+    const auto defaults =
+    vayu::http::default_stream_bounds (vayu::http::read_sse_limits (*db_));
+    const auto resolve_with = [&] (const json& run_config) {
+        auto opts = options ();
+        opts.stream_bounds = vayu::http::resolve_stream_bounds (run_config, defaults);
+        return vayu::core::resolve_scenario (*db_, block ("col"), opts);
+    };
+
+    const auto from_settings = resolve_with (json::object ());
+    ASSERT_TRUE (from_settings.ok) << from_settings.error;
+    const auto& settled = from_settings.plan.steps.at (0).request.stream_bounds;
+    ASSERT_HAS_VALUE (settled);
+    EXPECT_EQ (settled->max_duration_ms, 45000);
+    EXPECT_EQ (settled->max_events, 12);
+
+    const auto mixed = resolve_with (
+    json{ { "maxStreamEvents", 3 }, { "maxStreamDurationMs", nullptr } });
+    ASSERT_TRUE (mixed.ok) << mixed.error;
+    const auto& capped = mixed.plan.steps.at (0).request.stream_bounds;
+    ASSERT_HAS_VALUE (capped);
+    EXPECT_EQ (capped->max_duration_ms, 45000) << "a null cap is an absent one";
+    EXPECT_EQ (capped->max_events, 3);
+}
+
+TEST_F (ScenarioPlanTest, APlanWithNoStreamingStepHasNoStreamBounds) {
+    seed_collection ("col", "");
+    seed_request ("plain", "col");
+    const auto resolved = vayu::core::resolve_scenario (*db_, block ("col"), options ());
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    EXPECT_FALSE (vayu::core::longest_stream_bounds (resolved.plan).has_value ());
 }
 
 // --- The snapshot manifest ----------------------------------------------------

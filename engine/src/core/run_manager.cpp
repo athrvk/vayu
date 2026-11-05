@@ -895,7 +895,8 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
 
     // The caps a streaming run's transfers are bounded by. `stream` has already
     // been validated by `read_stream_flag` in the route, so a value here is a
-    // boolean.
+    // boolean. A collection run never carries it (the route refuses it there):
+    // each streaming step took its caps from the plan (#3235).
     if (config.value ("stream", false)) {
         stream_bounds =
         vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
@@ -2603,8 +2604,12 @@ RunManager& manager) {
         if (context->should_stop) {
             context->event_loop->stop (false);
         } else {
-            const int64_t drain_ms =
-            natural_end_drain_ms (context->stream_bounds, timeout_ms);
+            // A collection run's streams are its steps' (#3235), so the
+            // longest of them sizes the wait.
+            const int64_t drain_ms = natural_end_drain_ms (context->scenario ?
+            longest_stream_bounds (context->scenario->plan) :
+            context->stream_bounds,
+            timeout_ms);
             context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
         }
 

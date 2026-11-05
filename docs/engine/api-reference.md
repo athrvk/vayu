@@ -8748,9 +8748,9 @@ Start a load test run (Vayu Mode).
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
   "httpVersion": "auto",     // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
-  "stream": false,           // Optional - consume each response as text/event-stream; see below
-  "maxStreamDurationMs": 600000,  // Optional, streaming only - see below
-  "maxStreamEvents": 100000,      // Optional, streaming only - see below
+  "stream": false,           // Optional, single-request only - consume each response as text/event-stream; see below
+  "maxStreamDurationMs": 600000,  // Optional, streaming only (a collection run's streaming steps) - see below
+  "maxStreamEvents": 100000,      // Optional, streaming only (a collection run's streaming steps) - see below
   "stream_metrics": true     // Optional - feed the histograms behind the report's `stream` section
 }
 ```
@@ -8881,14 +8881,29 @@ Events are counted on the write path by a frame counter that agrees with the
 design path's parser about what an event is: a frame carrying no `data` field
 is not one, so comment-only keep-alives do not inflate the tally.
 
-`stream` is refused beside `transient` (as on a send) and each cap is refused
-without `stream` - a cap on a non-streaming run reads as a bound the caller
-expects to apply, and ignoring it is how an unbounded run gets mistaken for a
-capped one.
+On a single-request run, `stream` is refused beside `transient` (as on a send)
+and each cap is refused without `stream` - a cap on a non-streaming run reads
+as a bound the caller expects to apply, and ignoring it is how an unbounded run
+gets mistaken for a capped one.
 
-Streaming is **not** supported on a scenario run: `scenario` composes its steps
-at plan time and each step is its own request, so there is no single stream for
-the caps to bound.
+**A collection run (`scenario`) streams the steps whose stored request has
+`stream` set** (#3235), and only those. The plan reads the flag off each stored
+request, so the run declares nothing: `maxStreamDurationMs` and
+`maxStreamEvents` are accepted *without* `stream` here, range-checked as above,
+and bound every streaming step, each falling back to its `sse*` setting on its
+own. A step that does not stream ignores them. A top-level `stream` is a `400`
+(`invalid_run_config`) on a collection run, `true` or `false`: it cannot make a
+stored request stream or stop one streaming, so accepting it would let a caller
+believe it did either. A collection **load** run sends a streaming step through
+the same event loop as a streaming single-request run, so the table above
+holds per step: a cap or the server's close ends it as a success, its events
+land in the report's `stream` section, its stored exchange keeps its event
+count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
+connect phase - the whole-transfer timeout is the duration cap plus the 5s
+backstop. A load run's natural end waits for the longest streaming step's cap
+plus that backstop before cancelling what is still in flight. A sequential
+(design-mode) collection run carries the same caps on the step but does not
+send it as a stream yet.
 
 #### The `data` rows (a data-driven load run)
 
@@ -10503,9 +10518,9 @@ default, and whose message names the offending field and why the bound exists:
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
 | `iterations` | `1`-`2147483647` | An `iterations` run stops on its request count alone, read as a `size_t`, so `-1` was ~1.8e19 requests and a run that never ended until stopped. The ceiling is the one `scenario.iterations` has. |
 | `rps` / `targetRps` | `0`-`1000000`, fractions allowed | The open-loop arrival rate per second; `0` asks for none. The ceiling is the highest RPS cap the app and MCP settings can be raised to. `constant_rps` needs one of the two positive, and every other mode refuses a positive one - see below. |
-| `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
-| `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
-| `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
+| `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
+| `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
+| `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
 | `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms. `false` leaves the report's `stream` section out entirely rather than zeroing it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |

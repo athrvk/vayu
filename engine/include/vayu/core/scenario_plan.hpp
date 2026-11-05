@@ -54,6 +54,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/elements.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
@@ -184,6 +185,15 @@ compute_element_spans (const ScenarioPlan& plan);
  * step's script *text*, which is `find_step_post_scripts` in `run_manager.cpp`.
  */
 [[nodiscard]] bool step_has_script (const ScenarioStep& step, std::string_view kind);
+
+/**
+ * The bounds of @p plan's longest-running streaming step (#3235), or none
+ * when no step streams: what a load run's natural end sizes its drain by
+ * (`natural_end_drain_ms`), so a healthy stream is not cancelled before its
+ * cap.
+ */
+[[nodiscard]] std::optional<vayu::StreamBounds> longest_stream_bounds (
+const ScenarioPlan& plan);
 
 /**
  * A load run's `elements.scripts` override (issue #1495): "asMarked" leaves
@@ -410,6 +420,13 @@ struct ScenarioResolveOptions {
     /// Ends an oauth2 token request a step's auth makes while resolving
     /// (`build_request`): `POST /runs` passes its `server_stopping` (#2683).
     const std::atomic<bool>* cancel = nullptr;
+    /// The caps every step whose stored request streams is bounded by
+    /// (#3235), as its `Request::stream_bounds`: the run's own
+    /// `maxStreamDurationMs` / `maxStreamEvents` over the `sse*` settings,
+    /// resolved by the route (`vayu::http::resolve_stream_bounds`). A step
+    /// that does not stream carries none.
+    vayu::StreamBounds stream_bounds{ constants::sse::MAX_STREAM_DURATION_MS,
+        constants::sse::MAX_STREAM_EVENTS };
 };
 
 /**
