@@ -22,9 +22,11 @@
 #include <httplib.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <utility>
 
 namespace vayu::tests {
@@ -104,7 +106,53 @@ class CountingTaskQueue final : public httplib::TaskQueue {
     std::shared_ptr<std::atomic<int>> live_;
 };
 
+/**
+ * @brief A pooled task queue whose every connection waits before it is served.
+ *
+ * A connection is one task from its accept (the TLS handshake included) to its
+ * close, so the wait puts the delay in front of the handshake: the client's
+ * hello sits unanswered in the socket buffer, which is a connect phase that
+ * takes a while and then succeeds.
+ */
+class DelayedTaskQueue final : public httplib::TaskQueue {
+    public:
+    DelayedTaskQueue (std::size_t threads, std::chrono::milliseconds delay)
+    : pool_ (threads), delay_ (delay) {
+    }
+    ~DelayedTaskQueue () override                         = default;
+    DelayedTaskQueue (const DelayedTaskQueue&)            = delete;
+    DelayedTaskQueue& operator= (const DelayedTaskQueue&) = delete;
+    DelayedTaskQueue (DelayedTaskQueue&&)                 = delete;
+    DelayedTaskQueue& operator= (DelayedTaskQueue&&)      = delete;
+
+    bool enqueue (std::function<void ()> fn) override {
+        return pool_.enqueue ([delay = delay_, task = std::move (fn)] () {
+            std::this_thread::sleep_for (delay);
+            task ();
+        });
+    }
+
+    void shutdown () override {
+        pool_.shutdown ();
+    }
+
+    private:
+    httplib::ThreadPool pool_;
+    std::chrono::milliseconds delay_;
+};
+
 } // namespace detail
+
+/// `pooled_task_queue`, with every connection held @p delay before it is served.
+inline std::function<httplib::TaskQueue*()>
+delayed_task_queue (std::size_t threads, std::chrono::milliseconds delay) {
+    return [threads, delay] () -> httplib::TaskQueue* {
+        // httplib owns and deletes what this factory returns; see the file
+        // comment above.
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
+        return new detail::DelayedTaskQueue (threads, delay);
+    };
+}
 
 /**
  * @brief `pooled_task_queue`, with @p live tracking the connections held open.

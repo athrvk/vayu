@@ -293,8 +293,11 @@ struct TransferState {
     SseStreamContext* context       = nullptr;
     SseParser* parser               = nullptr;
     vayu::Response* response        = nullptr;
-    /// Counts the requests libcurl has written on a made connection, which is
-    /// how the progress callback knows the connect phase is over.
+    /// The handle the callbacks run for, read for `CURLINFO_REDIRECT_COUNT`.
+    CURL* curl = nullptr;
+    /// Counts the requests libcurl has written on a made connection, which,
+    /// against the redirects followed so far, is how the progress callback
+    /// knows the current hop's connect phase is over.
     const detail::ConnectedPeerCheck* peer_check = nullptr;
     /// Set the moment the initial response's header block is complete, so the
     /// `open` frame is published once even across a redirect chain.
@@ -309,10 +312,15 @@ struct TransferState {
     int64_t max_duration_ms = 0;
     std::chrono::steady_clock::time_point started_at;
     /// When the connection last showed life: a body byte or a header line.
-    /// Empty until the connection is made and the progress callback first
-    /// sees it, so the connect and TLS phases, which have their own bound,
-    /// never count as silence.
+    /// Empty until the progress callback first sees a hop connected, so the
+    /// connect and TLS phases, which have their own bound, never count as
+    /// silence.
     std::optional<std::chrono::steady_clock::time_point> last_byte_at;
+    /// The hop (redirects followed so far) that stamped `last_byte_at`. A stamp
+    /// from an earlier hop says nothing about the current connection: the
+    /// redirect response's last header line predates the next hop's DNS, TCP and
+    /// TLS, and libcurl runs no progress callback while a hop connects.
+    long last_byte_hop      = 0;
     int64_t idle_timeout_ms = 0;
     /// Body bytes the current hop delivered, kept or not. Reset per hop, so it
     /// ends as the final response's count.
@@ -362,8 +370,16 @@ void begin_response_hop (TransferState& state) {
     state.keeps_body.reset ();
 }
 
+/// The hop in flight: how many redirects libcurl has followed.
+long current_hop (const TransferState& state) {
+    long redirects = 0;
+    get_info<CURLINFO_REDIRECT_COUNT> (state.curl, &redirects);
+    return redirects;
+}
+
 void note_activity (TransferState& state) {
-    state.last_byte_at = std::chrono::steady_clock::now ();
+    state.last_byte_at  = std::chrono::steady_clock::now ();
+    state.last_byte_hop = current_hop (state);
 }
 
 size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
@@ -451,18 +467,23 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
     return total_size;
 }
 
-/// Whether the connection has been silent for the idle window. The clock is
-/// armed by the first progress call after the connection is made, unless a
-/// byte armed it already. libcurl calls the progress callback about once a
-/// second while idle, so a quiet stream ends within about a second of its
-/// setting, not at the millisecond.
+/// Whether the connection has been silent for the idle window. The clock waits
+/// while the current hop is connecting - libcurl has written no more requests
+/// than it has followed redirects - and is armed by the first progress call
+/// that finds the hop connected, unless a byte of this hop armed it already.
+/// libcurl calls the progress callback about once a second while idle, and a
+/// connection that completes between two calls arms the clock up to a second
+/// late, so a quiet stream ends within a couple of seconds of its setting, not
+/// at the millisecond.
 bool idle_window_elapsed (TransferState& state) {
     const auto now = std::chrono::steady_clock::now ();
-    if (!state.last_byte_at) {
-        if (state.peer_check->requests_started == 0) {
-            return false;
-        }
-        state.last_byte_at = now;
+    const long hop = current_hop (state);
+    if (state.peer_check->requests_started <= hop) {
+        return false;
+    }
+    if (!state.last_byte_at || state.last_byte_hop != hop) {
+        state.last_byte_at  = now;
+        state.last_byte_hop = hop;
     }
     const auto silent_for =
     std::chrono::duration_cast<std::chrono::milliseconds> (now - *state.last_byte_at);
@@ -516,11 +537,12 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     CurlErrorBuffer errors;
     SseParser parser (request.limits.max_event_bytes);
     // The transport policy's connect-time state; the idle rule reads its count
-    // of requests written to learn the connection is made.
+    // of requests written to learn each hop's connection is made.
     detail::ConnectedPeerCheck peer_check;
 
     TransferState state;
     state.request         = &request;
+    state.curl            = curl;
     state.context         = &context;
     state.parser          = &parser;
     state.response        = &response;
@@ -562,9 +584,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // ends a stream that is talking forever, by a rule that can say its own
     // name. Not `CURLOPT_LOW_SPEED_LIMIT`/`_TIME`: libcurl judges those against
     // an averaged speed, which in some releases lets a quiet stream outlive its
-    // setting by about six seconds (#3241). The idle window only runs once a
-    // connection carries the request, so the connect phase (TCP and TLS) gets
-    // a bound of its own (#2835), and its expiry is an error, never an idle end.
+    // setting by about six seconds (#3241). The idle window only runs while a
+    // connection carries the request, so the connect phase (TCP and TLS) of
+    // every hop gets a bound of its own (#2835), and its expiry is an error,
+    // never an idle end.
     set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
     static_cast<long> (constants::server::connect_timeout_ms (request.request.timeout_ms)));
 
