@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Clock, FileText, History, ShieldCheck } from "lucide-react";
+import { Clock, FileText, History, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
@@ -33,6 +33,7 @@ import {
 	isReportedMs,
 	responseSizeTip,
 } from "./utils";
+import { HttpVersionDowngradeNote } from "./HttpVersionDowngradeNote";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -240,28 +241,11 @@ export function ResponseStatusBar({
 
 			{/*
 			 * Protocol downgrade. Shown only when it happened - a response that
-			 * negotiated what it asked for says nothing here, because a chip
-			 * present on every response is a chip nobody reads.
-			 *
-			 * Text, not a `Badge`: it paints no background, and the
-			 * variant="chip" rule in badge-hover.test.tsx exists precisely for
-			 * the ones that do. It sits among status/time/size rather than at
-			 * the far end with the age, because like them it describes the
-			 * exchange itself.
+			 * negotiated what it asked for says nothing here. It sits among
+			 * status/time/size rather than at the far end with the age, because
+			 * like them it describes the exchange itself.
 			 */}
-			{httpVersionDowngraded && (
-				<div
-					className="flex items-center gap-1.5 text-xs text-status-warning-text"
-					title={
-						`HTTP/2 was requested, but the connection negotiated ` +
-						`${httpVersion || "an older protocol"}.\n` +
-						`Timings and throughput below describe that connection, not HTTP/2.`
-					}
-				>
-					<AlertTriangle className="size-icon-sm" />
-					<span>{httpVersion || "HTTP/1.1"}, not HTTP/2</span>
-				</div>
-			)}
+			{httpVersionDowngraded && <HttpVersionDowngradeNote httpVersion={httpVersion} />}
 
 			{/*
 			 * The client certificate this exchange presented (issue #707).

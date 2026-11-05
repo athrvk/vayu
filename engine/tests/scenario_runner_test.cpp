@@ -2307,6 +2307,46 @@ TEST_F (ScenarioRunnerTest, ARefusedConnectionIsAStatusZeroRequestInTheSummary) 
     << summary.dump ();
 }
 
+// #3262: a collection run stores how many of its requests asked for HTTP/2 and
+// got something lower, in the key the report reads for a load run. The mock is
+// cleartext, where `http2` is never offered (CURL_HTTP_VERSION_2TLS), so the
+// step asking for it is a downgrade without a TLS fixture; the `auto` step
+// beside it is not, and the count is requests (2 iterations), not steps.
+// Mutation check: drop the `++summary.http_version_downgraded` in
+// `store_step_record` and the count reads 0.
+TEST_F (ScenarioRunnerTest, ADowngradedStepIsCountedInTheSummaryPerRequest) {
+    seed_collection ("col_1");
+    seed_request ("req_h2", 0, "/ok");
+    seed_request ("req_auto", 1, "/ok");
+    auto h2 = db_->get_request ("req_h2");
+    ASSERT_HAS_VALUE (h2);
+    h2->http_version = "http2";
+    db_->save_request (*h2);
+
+    const auto run_id = start (/*iterations=*/2);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    EXPECT_EQ (summary["total_requests"].get<size_t> (), 4u) << summary.dump ();
+    ASSERT_TRUE (summary.contains ("http_version_downgraded")) << summary.dump ();
+    EXPECT_EQ (summary["http_version_downgraded"].get<size_t> (), 2u) << summary.dump ();
+}
+
+// The other side: a run that asked for nothing special stores a counted 0, so
+// a reader can tell it from a summary written before #3262.
+// Mutation check: write the key only when positive and `contains` fails.
+TEST_F (ScenarioRunnerTest, ARunWithoutADowngradeStoresACountedZero) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of (run_id);
+    ASSERT_TRUE (summary.contains ("http_version_downgraded")) << summary.dump ();
+    EXPECT_EQ (summary["http_version_downgraded"].get<size_t> (), 0u) << summary.dump ();
+}
+
 TEST_F (ScenarioRunnerTest, SkipRequestInATestScriptFailsTheStepRatherThanPretending) {
     seed_collection ("col_1");
     seed_request ("req_a", 0, "/ok", "", R"(pm.execution.skipRequest();)");
@@ -2631,10 +2671,12 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     inputs.stop_on_error        = true;
     inputs.duration_s           = 2.0;
     // Nine of the eleven steps sent; the other two are counted as steps only.
-    inputs.status_codes = { { 200, 6 }, { 500, 2 }, { 0, 1 } };
+    inputs.status_codes            = { { 200, 6 }, { 500, 2 }, { 0, 1 } };
+    inputs.http_version_downgraded = 3;
 
     auto summary = vayu::core::build_scenario_summary_payload (inputs);
     EXPECT_EQ (summary["total_requests"].get<size_t> (), 9u);
+    EXPECT_EQ (summary["http_version_downgraded"].get<size_t> (), 3u);
     EXPECT_EQ (summary["status_codes"],
     (nlohmann::json{ { "0", 1 }, { "200", 6 }, { "500", 2 } }))
     << summary.dump ();

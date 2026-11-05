@@ -1886,11 +1886,14 @@ carries it as-is rather than comparing the negotiated protocol against the
 tab's current setting: a restored or replayed response sits beside request
 state that may have changed since, and the answer belongs to the exchange.
 `ResponseStatusBar` draws it as a warning beside the status chip, and only when
-it is true. Load runs carry the whole-run count as
-`report.summary.httpVersionDowngraded`, which `LoadTestDetail` shows next to
-the requested protocol - without it a run measured entirely over HTTP/1.1 still
+it is true. A collection run's step card, whose viewer has no status bar, draws
+the same line from the step's trace. Load runs and collection runs both carry
+the whole-run count of requests that fell back as
+`report.summary.httpVersionDowngraded`: `LoadTestDetail` shows it next to the
+requested protocol - without it a run measured entirely over HTTP/1.1 still
 read "HTTP/2" there
-([#215](https://github.com/athrvk/vayu/issues/215)).
+([#215](https://github.com/athrvk/vayu/issues/215)) - and `ScenarioRunView`
+shows it in the run's header ([#3262](https://github.com/athrvk/vayu/issues/3262)).
 
 Load runs also carry `report.summary.connectionReplays`, the count of requests
 libcurl re-sent on a new connection after the server dropped or refused a

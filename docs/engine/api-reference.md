@@ -8556,8 +8556,8 @@ latency and a body look identical whether or not the protocol you asked for was
 granted. Windows shipped from v0.11.0 to v0.14.0 with HTTP/2 unreachable and
 every request silently on HTTP/1.1 ([#215](https://github.com/athrvk/vayu/issues/215));
 nothing in the API said so. The same field is stored on a design run's
-`trace_data.response`, and load runs carry the whole-run count as
-`summary.httpVersionDowngraded` in
+`trace_data.response`, and load runs and collection runs carry the
+whole-run count as `summary.httpVersionDowngraded` in
 [`GET /runs/:runId/report`](#get-runsrunidreport).
 
 **One timing convention.** The eight phase keys above (`totalMs` through
@@ -9894,6 +9894,16 @@ ignored - a `setNextRequest`, `skipRequest` or `setNextRequest(null)` from a
 script that then threw is an instruction from code that did not finish, so the
 iteration walks to the next plan position (see
 [scripting.md](scripting.md#flow-control-pmexecution)).
+
+**The run's summary also carries the HTTP/2 fallback count** (#3262). Every sent
+step's trace has `httpVersionDowngraded` (see [`POST /execute`](#post-execute)),
+and the runner adds those up into the stored summary's `http_version_downgraded`,
+the key a load run writes, so the report's `summary.httpVersionDowngraded` is the
+same figure in both run kinds. It counts requests, not steps: a step the plan
+skipped sent nothing and is never in it, and a request that asked for `http2`
+and got `HTTP/1.1` is one for every iteration it ran in. It is written as `0` for
+a run that counted and saw none, so only a summary stored before #3262 lacks the
+key.
 
 **`stopOnError`** is a top-level boolean on `POST /runs`, default `false`,
 type-checked before the run row is created (`null` reads as the default, and a
@@ -12771,7 +12781,10 @@ figure then holds.
 
 `summary.httpVersionDowngraded` is the count of this run's transfers that asked
 for HTTP/2 and negotiated something older - see
-[`httpVersionDowngraded` on a response](#post-execute). It is the only figure in
+[`httpVersionDowngraded` on a response](#post-execute). A collection run counts
+its sent requests the same way (#3262, [Scenario runs](#scenario-runs)); a
+collection run stored by an engine older than that fix reads `0` here although
+its steps' traces may say otherwise. It is the only figure in
 `summary` that describes the report's *validity* rather than its performance:
 non-zero means the latency and throughput beside it were measured over a
 protocol other than the one `metadata.configuration.httpVersion` names.
