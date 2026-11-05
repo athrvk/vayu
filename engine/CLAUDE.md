@@ -733,9 +733,13 @@ logged as a warning: it means a client skipped composition.
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its
   worker, because `daemon.cpp` runs `curl_global_cleanup` between that call and
   `~Server`. A fixture holding a manager beside a `Database` it resets owes the
-  same order (keep the manager in a `unique_ptr` reset first). Waiting on
-  `context->closed()` is not draining: it flips before the completion callback
-  writes the run row.
+  same order (keep the manager in a `unique_ptr` reset first). The worker
+  closes the context only after the completion callback has written the run
+  row, on every path including a throw (#3239): `consume_sse_stream` records
+  the end reason and leaves the close to its owner, so the relay's `event:
+  complete` means `GET /runs/:id/report` already holds the result. Waiting on
+  `context->closed()` is still not draining: the worker is on its stack when
+  it flips, and only joining it is.
 - **A transfer a management-API handler makes carries
   `RouteContext::server_stopping`** (#2683) as `ClientConfig::cancel`, through
   `ExchangeInputs::cancel`, `acquire_token`'s `cancel` or the route core's own

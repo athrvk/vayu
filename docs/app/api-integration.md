@@ -1589,7 +1589,9 @@ Send does not - and only the last two steps differ:
    Events tab renders them live.
 6. **Swap to stored truth**: on the relay's `complete` frame the provider
    fetches `GET /runs/:id/report` and `restore-response.ts` maps the trace's
-   `events` node onto the response, which is the record from then on.
+   `events` node onto the response, which is the record from then on. One
+   fetch is enough: the engine sends `complete` only after the post-request
+   script has run and the run row and trace are stored (#3239).
 
 **A different `EventSource` from the `SSEClient` singleton below.** That client
 belongs to load and scenario runs, is a single connection whose lifetime is the

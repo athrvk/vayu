@@ -173,9 +173,12 @@ class SseStreamContext {
         return published_count_.load (std::memory_order_acquire);
     }
 
-    /// True once the producer has published its final frame. The relay ends
-    /// only when this is set **and** it has drained the ring - never on the
-    /// worker's liveness, which flips before the last frame lands.
+    /// True once the stream is over **and** its run row and trace are stored
+    /// (#3239): the manager's worker closes after `on_complete` returns, so the
+    /// relay's `event: complete` is a promise that `GET /runs/:id/report`
+    /// already reads the result. The relay ends only when this is set **and**
+    /// it has drained the ring. Not a drain: the worker thread is still
+    /// unwinding, and only joining it (`SseStreamManager::shutdown`) is.
     [[nodiscard]] bool closed () const {
         return closed_.load (std::memory_order_acquire);
     }
@@ -183,10 +186,16 @@ class SseStreamContext {
     /// Set by `POST /runs/:id/stop`; read by the transfer's progress callback.
     std::atomic<bool> should_stop{ false };
 
-    /// Publish the terminal state. Idempotent - the first reason wins, so a
-    /// cap that fired while the server was closing is not overwritten by the
-    /// close that followed it.
+    /// Record why the stream ended, without closing it, so the completion
+    /// callback can read `end_reason()` while `closed()` is still false. The
+    /// first reason wins, so a cap that fired while the server was closing is
+    /// not overwritten by the close that followed it.
+    void record_end (SseEndReason reason);
+    /// Publish the terminal state: `record_end (reason)`, then `closed()`.
+    /// Idempotent, and an end already recorded wins over @p reason, which is
+    /// therefore the fallback for a stream that never recorded one.
     void close (SseEndReason reason);
+    /// The recorded end; `Completed` until one is recorded.
     [[nodiscard]] SseEndReason end_reason () const;
     /// 0 while running; stamped at `close()`.
     [[nodiscard]] int64_t completed_at_ms () const {
@@ -224,7 +233,8 @@ class SseStreamContext {
     std::atomic<bool> closed_{ false };
     std::atomic<int64_t> completed_at_ms_{ 0 };
     std::atomic<int64_t> total_events_{ 0 };
-    SseEndReason end_reason_ = SseEndReason::Completed;
+    /// Guarded by `mutex_`; empty until `record_end` or `close`.
+    std::optional<SseEndReason> end_reason_;
     /// Guarded by `mutex_`; capped at `limits.max_stored_events`.
     std::vector<nlohmann::json> stored_;
 
@@ -324,7 +334,9 @@ struct SseStreamRequest {
     DefaultHeaderPolicy default_headers;
     /**
      * Called on the worker thread once the stream has terminated, with the
-     * request as sent and the response the exchange produced.
+     * request as sent and the response the exchange produced. The context's
+     * `end_reason()` is final here and `closed()` is still false: the worker
+     * closes only after this returns or throws (#3239).
      *
      * Persistence is deliberately the caller's: the route decides what a run
      * records (a transient execution records nothing at all), and a second copy
@@ -418,6 +430,11 @@ class SseStreamManager {
  * Consume one `text/event-stream` response into @p context. Blocks until the
  * stream terminates; this is the body of the worker thread, exposed so a test
  * can drive it on its own thread against an in-process fixture.
+ *
+ * Records the end reason (`SseStreamContext::record_end`) and does **not**
+ * close @p context: closing is its owner's, after whatever the result has to
+ * be stored by (the manager's worker runs `on_complete` first). A caller that
+ * relays the context must close it, or the relay never ends.
  *
  * @return The response the exchange produced: the final hop's status line,
  *         headers and timings, with the error fields set when the transfer

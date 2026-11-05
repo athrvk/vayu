@@ -11394,6 +11394,9 @@ Relay a streaming run's events via Server-Sent Events (issue #573). Started by
 
 The endpoint replays the run's retained events, then tails until the stream
 terminates, and closes with a `complete` event naming the termination reason.
+`complete` is sent only once the post-request script has run and the run row
+and trace are stored (#3239), so a `GET /runs/:runId/report` made on it already
+reads the result and a terminal status.
 Like the live-metrics topic, the ring is retained for `liveRetentionMs` after
 the stream ends, so a client that connects late - even after a short stream has
 already finished - still receives the whole series.
