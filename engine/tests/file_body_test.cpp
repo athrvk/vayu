@@ -701,8 +701,8 @@ class RedirectingServer {
 
 // The second leg of a 307 - like Digest's or NTLM's second leg - resends the
 // body, which a streamed upload can only do by seeking back to its start.
-// Mutation check: drop `CURLOPT_SEEKFUNCTION` from `apply_method_and_body` and
-// the follow fails with libcurl's rewind error.
+// Mutation check: drop `rewind_body_source` from `apply_hop_method` and the
+// second hop sends an empty or short body.
 TEST_F (BinaryBodyWireTest, AStreamedBodyIsRewoundForARedirect) {
     RedirectingServer redirecting;
     const std::string payload = binary_payload (LARGE);
