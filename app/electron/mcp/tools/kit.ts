@@ -453,6 +453,28 @@ export function requireStr(args: Record<string, unknown>, key: string): string {
 	return v;
 }
 
+/** The engine's blank test for a collection or environment name (`reject_blank_name`). */
+const BLANK_NAME = /^[ \t\r\n]*$/;
+
+/**
+ * A collection or environment `name` the caller stated: a string with some
+ * content, or absent. A blank one is refused here, before the engine sees it,
+ * so the caller learns it is an input mistake (#3253). The stored name is not
+ * trimmed, so the value is returned as written.
+ */
+export function optionalName(args: Record<string, unknown>): string | undefined {
+	const name = str(args, "name");
+	if (name !== undefined && BLANK_NAME.test(name)) {
+		throw new ToolArgError('"name" must not be empty or whitespace-only.');
+	}
+	return name;
+}
+
+/** `optionalName` for a create, where the name is not optional. */
+export function requireName(args: Record<string, unknown>): string {
+	return optionalName(args) ?? requireStr(args, "name");
+}
+
 /**
  * An optional array-of-strings argument. A non-array, or an array carrying
  * anything but strings, is the caller's mistake rather than an empty selection:

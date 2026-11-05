@@ -64,6 +64,7 @@ export * from "./ElementTally";
 export * from "./ReplayConsole";
 export * from "./element-origin";
 export * from "./ExtractorMisses";
+export * from "./UnresolvedTokens";
 export * from "./RequestElementsSummary";
 
 // "982 of 1,000 assertions passed" - a load run's test outcome, live and stored

@@ -24,8 +24,9 @@
  * what is left here is the choice, the summary and the download.
  *
  * Delivery is the repo's one file-to-disk path, `downloadTextFile`, the same
- * one `ResponseActions` uses. No IPC, no save dialog - there is no such
- * bridge, and the export does not need one.
+ * one `ResponseActions` uses. It answers what became of the file (#3246), so
+ * the dialog closes once the file is written, stays open on a cancelled save
+ * dialog, and says why a write failed.
  *
  * **A bound collection also asks how much to write.** Its document is usually
  * somebody's contract, so the default, "Values only", writes examples and
@@ -84,6 +85,7 @@ export interface ExportSpecDialogProps {
 export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpecDialogProps) {
 	const [format, setFormat] = useState<ExportFormat>("json");
 	const [mode, setMode] = useState<ExportMode>("contract");
+	const [saveError, setSaveError] = useState<string | null>(null);
 	// The binding decides the direction, so it decides whether there is a
 	// contract to keep - the engine reads the same fact off the same row.
 	const bound = Boolean(collection.openapi?.specId);
@@ -101,14 +103,16 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 	 */
 	const firstRead = exported.isPending;
 	const reassembling = exported.isFetching && !firstRead;
-	const handleDownload = () => {
+	const handleDownload = async () => {
 		if (!result) return;
-		downloadTextFile(
+		setSaveError(null);
+		const saved = await downloadTextFile(
 			result.text,
 			result.fileName,
 			format === "yaml" ? "application/yaml" : "application/json"
 		);
-		onOpenChange(false);
+		if (saved.outcome === "saved") onOpenChange(false);
+		if (saved.outcome === "failed") setSaveError(saved.message);
 	};
 
 	return (
@@ -188,6 +192,12 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 					)}
 
 					{result && <ExportSummary notes={result.notes} />}
+
+					{saveError && (
+						<Callout severity="blocking" title="Couldn't save the file">
+							{saveError}
+						</Callout>
+					)}
 				</DialogBody>
 
 				<DialogFooter>
@@ -206,7 +216,10 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 						<Copy className="size-icon" />
 						Copy
 					</Button>
-					<Button disabled={!result || reassembling} onClick={handleDownload}>
+					<Button
+						disabled={!result || reassembling}
+						onClick={() => void handleDownload()}
+					>
 						<Download className="size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>

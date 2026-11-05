@@ -368,6 +368,19 @@ TEST_F (ImportApplyRouteTest, RejectsANullNameThatHasNoDefault) {
     EXPECT_EQ (stored_rows (), 0u);
 }
 
+// `POST /collections` and `POST /environments` refuse a blank name (#3253), but
+// an importer can write one and the bulk path has always stored it: the rule
+// lives in the route cores, not the shared appliers, so an import that worked
+// keeps working.
+TEST_F (ImportApplyRouteTest, ABlankNameIsStillImported) {
+    json body{ { "collections", json::array ({ collection_item ("c1", "  ") }) },
+        { "environments", json::array ({ json{ { "tempId", "e1" }, { "name", "" } } }) } };
+
+    auto [status, response] = import_apply_response (*db_, body);
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (stored_rows (), 2u);
+}
+
 TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
     // A non-string `name` makes the shared applier throw a json type_error; the
     // core must turn that into a per-item 400 rather than letting it escape as a

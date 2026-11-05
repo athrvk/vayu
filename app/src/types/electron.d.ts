@@ -230,6 +230,14 @@ export type AllowFolderReply =
 /** What `removeAllowedFolder` resolves to. Mirrors `RemoveFolderReply` in `electron/file-ipc.ts`. */
 export type RemoveFolderReply = { outcome: "done"; value: null } | EngineWriteFailure;
 
+/**
+ * What `saveFile` resolves to: written to `path`, the dialog cancelled, or the
+ * write failed after a path was chosen. Mirrors `SaveFileReply` in
+ * `electron/save-file-ipc.ts`.
+ */
+export type SaveFileReply =
+	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
+
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
 
@@ -419,6 +427,15 @@ interface ElectronAPI {
 	 * Absent outside Electron.
 	 */
 	statFile: (path: string) => Promise<{ size: number; mtimeMs: number } | null>;
+
+	/**
+	 * Open the system save dialog on `suggestedName` (main keeps its last path
+	 * segment, in the Downloads folder) and write `contents` there, text as
+	 * UTF-8 (#3246). Rejects before any dialog when main refuses the call.
+	 * Renderer callers go through `lib/download-text-file.ts`. Absent outside
+	 * Electron.
+	 */
+	saveFile: (contents: string | Uint8Array, suggestedName: string) => Promise<SaveFileReply>;
 
 	/**
 	 * Re-read a collection's declared data file by path (issue #599). Rejects

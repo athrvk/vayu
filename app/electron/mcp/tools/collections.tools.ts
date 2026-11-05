@@ -23,6 +23,8 @@ import {
 	engineErrorResult,
 	errorResult,
 	mergeAndWrite,
+	optionalName,
+	requireName,
 	requireStr,
 	str,
 	ToolArgError,
@@ -82,7 +84,7 @@ export const COLLECTION_TOOLS: McpTool[] = [
 		handler: async (args, ctx, signal) => {
 			const refused = writesDisabled(ctx);
 			if (refused) return refused;
-			const payload: Record<string, unknown> = { name: requireStr(args, "name") };
+			const payload: Record<string, unknown> = { name: requireName(args) };
 			const parentId = str(args, "parentId");
 			if (parentId !== undefined) payload.parentId = parentId;
 			const description = str(args, "description");
@@ -163,10 +165,10 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			// The engine merge-patches, so a body naming nothing would be a write
 			// that changes nothing while reporting success. Say so instead.
 			const payload: Record<string, unknown> = {};
-			for (const field of ["name", "description"] as const) {
-				const value = str(args, field);
-				if (value !== undefined) payload[field] = value;
-			}
+			const name = optionalName(args);
+			if (name !== undefined) payload.name = name;
+			const description = str(args, "description");
+			if (description !== undefined) payload.description = description;
 			const scriptEdits = readScriptEdits(args);
 			const auth = readAuthArg(args);
 			if (auth) payload.auth = auth;

@@ -47,6 +47,7 @@ import {
 	ReplayConsole,
 	ScenarioFacts,
 	StepLabelCell,
+	UnresolvedTokens,
 	deferredResponsesOf,
 	elementRowKey,
 	hasReplayConsole,
@@ -130,6 +131,30 @@ function StepReplayConsoleRow({ step }: { step: RunScenarioStepStat }) {
 		<TableRow className="bg-muted/20">
 			<TableCell colSpan={8} className="py-1.5 pl-9">
 				<ReplayConsole source={tests} sampled={tests.sampled} className="text-xs" />
+			</TableCell>
+		</TableRow>
+	);
+}
+
+/**
+ * What a step's extractor misses (issue #3053) left behind, as one row after
+ * its element rows: each miss is also filed under an extractor row's `missing`
+ * (or its `skipped`, for an optional `extract.json` over a body it could not
+ * read), and a miss a `default` answered is neither. They are summed here
+ * because each also left a later step sending that name unresolved, which the
+ * second notice counts in sends (issue #3269). One row when either is present,
+ * none when neither: the engine omits the first at 0, and the second is 0 on a
+ * step that sent every name resolved.
+ */
+function StepUnresolvedRow({ step }: { step: RunScenarioStepStat }) {
+	if (!step.extractorMisses && !step.unresolvedTokens) return null;
+	return (
+		<TableRow className="bg-muted/20">
+			<TableCell colSpan={8} className="py-1.5 pl-9">
+				<span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+					<ExtractorMisses count={step.extractorMisses} />
+					<UnresolvedTokens count={step.unresolvedTokens} unit="sends" />
+				</span>
 			</TableCell>
 		</TableRow>
 	);
@@ -250,17 +275,7 @@ export default function ScenarioStepsTab({
 									</TableRow>
 								))}
 								<StepReplayConsoleRow step={step} />
-								{/* The step's extractor misses (issue #3053), after its element
-								    rows: each is one of an extractor row's `missing`, summed here
-								    because each also left a later step sending that name
-								    unresolved. */}
-								{!!step.extractorMisses && (
-									<TableRow className="bg-muted/20">
-										<TableCell colSpan={8} className="py-1.5 pl-9">
-											<ExtractorMisses count={step.extractorMisses} />
-										</TableCell>
-									</TableRow>
-								)}
+								<StepUnresolvedRow step={step} />
 							</Fragment>
 						))}
 					</TableBody>

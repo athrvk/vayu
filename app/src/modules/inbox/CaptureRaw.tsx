@@ -11,7 +11,8 @@
  * The engine spells a body that is not valid UTF-8 as base64 (#3109). Printing
  * that string would show a protobuf or a gzip as a wall of letters that look
  * like a payload and are not, so the Raw view says what the body is and its
- * size, and Download and Copy hand over the exact bytes the engine stored.
+ * size, and Download and Copy hand over the exact bytes the engine stored. A
+ * save that fails is a toast; a cancelled save dialog is not (#3246).
  */
 
 import { useMemo } from "react";
@@ -19,11 +20,12 @@ import { Copy, Download } from "lucide-react";
 import { Button } from "@/components/ui";
 import { buildRawRequest } from "@/components/shared/response-viewer/utils";
 import { useCopy } from "@/hooks/useCopy";
-import { downloadBlob } from "@/lib/download-text-file";
+import { downloadBlob, saveFailedMessage } from "@/lib/download-text-file";
 import {
 	contentTypeOf,
 	extensionForContentType,
 } from "@/modules/request-builder/utils/response-bytes";
+import { useToastStore } from "@/stores";
 import type { InboxCapture } from "@/types";
 import { binaryBodyPlaceholder, captureBinaryBytes } from "./utils";
 
@@ -36,6 +38,7 @@ const ACTION_CLASS = "h-control-sm gap-1.5 px-2 text-xs";
 
 export function CaptureRaw({ capture, url }: CaptureRawProps) {
 	const { copy } = useCopy();
+	const showToast = useToastStore((s) => s.showToast);
 	const isBinary = capture.bodyEncoding === "base64";
 	const bytes = useMemo(() => captureBinaryBytes(capture), [capture]);
 
@@ -45,13 +48,14 @@ export function CaptureRaw({ capture, url }: CaptureRawProps) {
 		? `${buildRawRequest(capture.method, url, capture.headers)}${binaryBodyPlaceholder(capture, bytes?.length)}`
 		: buildRawRequest(capture.method, url, capture.headers, capture.body);
 
-	const download = () => {
+	const download = async () => {
 		if (!bytes) return;
 		const type = contentTypeOf(capture.headers) || "application/octet-stream";
-		downloadBlob(
-			new Blob([bytes], { type }),
-			`capture-${capture.id}.${extensionForContentType(type)}`
-		);
+		const fileName = `capture-${capture.id}.${extensionForContentType(type)}`;
+		const saved = await downloadBlob(new Blob([bytes], { type }), fileName);
+		if (saved.outcome === "failed") {
+			showToast(saveFailedMessage(fileName, saved.message), "error");
+		}
 	};
 
 	return (
@@ -65,7 +69,7 @@ export function CaptureRaw({ capture, url }: CaptureRawProps) {
 								variant="ghost"
 								size="sm"
 								className={ACTION_CLASS}
-								onClick={download}
+								onClick={() => void download()}
 							>
 								<Download className="size-icon-sm" aria-hidden="true" />
 								Download body

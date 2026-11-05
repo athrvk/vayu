@@ -114,6 +114,7 @@ import {
 } from "./app-log.js";
 import { registerLogIpc } from "./log-ipc.js";
 import { registerFileIpc } from "./file-ipc.js";
+import { registerSaveFileIpc } from "./save-file-ipc.js";
 import { createFileRoots } from "./file-roots.js";
 import { createFileTrustClient } from "./file-trust-client.js";
 import { createFileGrants, registerFilePickedIpc } from "./file-grants.js";
@@ -1726,6 +1727,19 @@ function setupIpcHandlers() {
 		isAppFrame,
 		isGranted: (p) => fileGrants.isGranted(p),
 		roots: fileRoots,
+	});
+
+	// The save dialog behind every export and Download, which answers whether
+	// the file was written (#3246). The renderer suggests a name, never a folder;
+	// see save-file-ipc.ts.
+	registerSaveFileIpc(ipcMain, {
+		showSaveDialog: (options) => {
+			const win = liveWindow();
+			return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+		},
+		defaultDirectory: () => app.getPath("downloads"),
+		isAppFrame,
+		log: (msg) => appLogger().warn("ipc", msg),
 	});
 
 	// The preload's report of a file the user picked or dropped, recorded with

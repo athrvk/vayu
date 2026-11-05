@@ -538,6 +538,10 @@ logged as a warning: it means a client skipped composition.
   blank or differs from `trim_variable_name`, the trim `{{ name }}` is looked up
   by, since such a key could never be referenced; the importers trim names
   instead (`to_var_record`), so one padded row cannot fail an atomic import.
+  A collection's or environment's blank `name` is refused by
+  `reject_blank_name` (`routes.hpp`, #3253), which the four create/update
+  cores call and the appliers do not, because an importer can write a blank
+  name that `POST /import/apply` and `POST /specs/sync` store today.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`
@@ -1317,8 +1321,13 @@ regardless, a late credential included (`resolve_load_residuals`, the one
 copy both load paths call). Since #1594, the single-request load path
 (`load_strategy.cpp`) runs the same pass too, against a per-submission
 `ScopeOverlay` rather than a per-VU one - see the element-pipeline bullet
-above - but only when the run declares `requestElements`; a bare URL run
-with no step-level elements at all skips it exactly as before.
+above - but only when the run declares `requestElements`. A run without them
+that names an `environmentId` or `requestId` instead resolves its shared
+template once, in `build_load_request` before the split (#3253,
+`resolve_load_template_tokens`: `DynamicResolution::Defer` plus the run's bound
+columns, so every token the bind owns survives, and `PathSettle::Answered`); a
+template holding no `{{` reads no scope, so the #992 fast path pays nothing. It
+runs before `script.setup`, so a setup write never reaches such a run's request.
 
 **The renderer's resolver is preview-only.** `useVariableResolver` /
 `app/src/lib/variable-resolution.ts` back tab titles, previews, unresolved-token

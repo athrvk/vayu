@@ -45,7 +45,10 @@ vi.mock("@/queries", () => ({
 	useBaselineRunQuery: () => ({ data: queries.baseline }),
 }));
 vi.mock("@/services/api", () => ({ apiService: { exportRunReport: vi.fn() } }));
-vi.mock("@/lib/download-text-file", () => ({ downloadTextFile: vi.fn() }));
+vi.mock("@/lib/download-text-file", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/lib/download-text-file")>()),
+	downloadTextFile: vi.fn(),
+}));
 
 function loadRun(id: string): Run {
 	return {
@@ -96,7 +99,7 @@ beforeEach(() => {
 	queries.run = loadRun("run_1");
 	queries.baseline = null;
 	exportRunReport.mockReset().mockResolvedValue(envelope());
-	download.mockReset();
+	download.mockReset().mockResolvedValue({ outcome: "saved" });
 	writeText.mockReset().mockResolvedValue(undefined);
 	Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 	useToastStore.setState({ toasts: [] });
@@ -283,6 +286,29 @@ describe("saving", () => {
 				"Exported Orders 2026-10-17 0841.run.json - 2 URL credentials left out",
 			])
 		);
+	});
+
+	it("says nothing when the user cancels the save dialog", async () => {
+		let answerDialog!: (outcome: { outcome: "cancelled" }) => void;
+		download.mockReturnValue(new Promise((resolve) => (answerDialog = resolve)));
+		renderMenu();
+		fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: "Save as JSON" }));
+
+		await waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+		await act(async () => answerDialog({ outcome: "cancelled" }));
+
+		expect(toasts()).toEqual([]);
+	});
+
+	it("says the file was not saved, and why, when the write fails", async () => {
+		download.mockResolvedValue({ outcome: "failed", message: "EACCES: permission denied" });
+		renderMenu();
+		fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: "Save as JSON" }));
+
+		await waitFor(() => expect(toasts()).toHaveLength(1));
+		expect(toasts().map((t) => [t.message, t.variant])).toEqual([
+			["Couldn't save Orders 2026-10-17 0841.run.json - EACCES: permission denied", "error"],
+		]);
 	});
 
 	it("says why in the engine's words, and downloads nothing, when the export fails", async () => {

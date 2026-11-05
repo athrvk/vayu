@@ -1047,6 +1047,40 @@ describe("data-write tools", () => {
 		expect(client.updateCollection).not.toHaveBeenCalled();
 	});
 
+	// A blank name is an input mistake caught before the engine is asked (#3253).
+	test.each(["", "  ", "\t\r\n "])(
+		"create_collection and update_collection refuse the blank name %j without calling the engine",
+		async (blank) => {
+			const client = fakeClient();
+			const ctx = ctxWith(client, { allowWrites: true });
+			const created = await dispatchTool("create_collection", { name: blank }, ctx);
+			const renamed = await dispatchTool(
+				"update_collection",
+				{ collectionId: "col_1", name: blank },
+				ctx
+			);
+			for (const res of [created, renamed]) {
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+			}
+			expect(firstText(renamed)).toContain("whitespace-only");
+			expect(client.createCollection).not.toHaveBeenCalled();
+			expect(client.getCollection).not.toHaveBeenCalled();
+			expect(client.updateCollection).not.toHaveBeenCalled();
+		}
+	);
+
+	test("create_collection and update_collection keep a name's surrounding spaces as written", async () => {
+		const client = fakeClient();
+		const ctx = ctxWith(client, { allowWrites: true });
+		await dispatchTool("create_collection", { name: " API " }, ctx);
+		await dispatchTool("update_collection", { collectionId: "col_1", name: " Renamed " }, ctx);
+		const created = (client.createCollection as ReturnType<typeof vi.fn>).mock.calls[0][0];
+		const [, patch] = (client.updateCollection as ReturnType<typeof vi.fn>).mock.calls[0];
+		expect(created).toEqual({ name: " API " });
+		expect(patch).toEqual({ name: " Renamed " });
+	});
+
 	test("update_request patches only the named field, leaving the rest stored", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
@@ -1418,6 +1452,43 @@ describe("environments, globals and the cookie jar", () => {
 			name: "Development",
 			variables: { baseUrl: { value: "x", enabled: true } },
 		});
+	});
+
+	test.each(["", "  ", "\t\r\n "])(
+		"create_environment and update_environment refuse the blank name %j without calling the engine",
+		async (blank) => {
+			const client = fakeClient();
+			const created = await dispatchTool(
+				"create_environment",
+				{ name: blank },
+				ctxWith(client, WRITES)
+			);
+			const renamed = await dispatchTool(
+				"update_environment",
+				{ environmentId: "env_1", name: blank },
+				ctxWith(client, WRITES)
+			);
+			for (const res of [created, renamed]) {
+				expect(res.isError).toBe(true);
+				expect(res.structuredContent).toMatchObject({ error: { class: "input" } });
+			}
+			expect(firstText(renamed)).toContain("whitespace-only");
+			expect(client.createEnvironment).not.toHaveBeenCalled();
+			expect(client.getEnvironment).not.toHaveBeenCalled();
+			expect(client.updateEnvironment).not.toHaveBeenCalled();
+		}
+	);
+
+	test("create_environment and update_environment keep a name's surrounding spaces as written", async () => {
+		const client = fakeClient();
+		await dispatchTool("create_environment", { name: " Staging " }, ctxWith(client, WRITES));
+		await dispatchTool(
+			"update_environment",
+			{ environmentId: "env_1", name: " Renamed " },
+			ctxWith(client, WRITES)
+		);
+		expect(lastCall(client.createEnvironment)[0]).toMatchObject({ name: " Staging " });
+		expect(lastCall(client.updateEnvironment)[1]).toMatchObject({ name: " Renamed " });
 	});
 
 	test("create_environment stores variables as entries and lets the engine assign the id", async () => {

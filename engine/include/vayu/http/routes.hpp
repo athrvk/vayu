@@ -1043,6 +1043,32 @@ bool is_create) {
 }
 
 /**
+ * A `name` the body states that is empty or only spaces, tabs, CR and LF is a
+ * 400 (#3253): a collection or environment with such a name is an unlabelled
+ * row nobody can find in a tree or a switcher. Absent passes (a PUT keeps the
+ * stored name, and a create's absence is `apply_required_string_field`'s 400),
+ * as does a non-string, which that applier refuses.
+ *
+ * Its own check rather than a branch of `apply_required_string_field`, whose
+ * other callers (a request's `url`, an example's `name`) may be blank, and
+ * called by the create and update cores rather than from
+ * `apply_collection_fields` / `apply_environment_fields`: `POST /import/apply`
+ * and `POST /specs/sync` reach those with names an importer wrote, and one that
+ * is blank succeeds today. Stored names are never trimmed - a name with
+ * content keeps its surrounding spaces.
+ */
+inline RouteResult reject_blank_name (const nlohmann::json& json) {
+    if (!json.contains ("name") || !json["name"].is_string ()) {
+        return {};
+    }
+    const auto& name = json["name"].get_ref<const std::string&> ();
+    if (name.find_first_not_of (" \t\r\n") != std::string::npos) {
+        return {};
+    }
+    return route_error (400, "Invalid 'name': is empty or whitespace-only");
+}
+
+/**
  * `id` is engine-owned (issue #97): every id in the database comes from
  * `generate_id`, so a create that carries one is a 400 rather than a silently
  * honoured - or silently ignored - field. `POST /import/apply` already rejects

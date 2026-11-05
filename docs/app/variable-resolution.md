@@ -471,8 +471,12 @@ variable of the same name.
 
 ### 3. Active environment
 
-The environment selected in the variables store (top of the sidebar). Environment
-variables override everything else. This is the intended override point for
+The environment marked active, held in the session store as `activeEnvironmentId`
+(`app/src/stores/session-store.ts`). It mirrors the engine's `isActive` flag:
+`useActiveEnvironmentRestore` adopts the engine's answer on start, and
+`useSetActiveEnvironmentMutation` writes a switch through to it. The person switches it
+from the `EnvSwitcher` in the title bar (`app/src/components/layout/TitleBar.tsx`).
+Environment variables override everything else. This is the intended override point for
 per-environment values like base URLs and API keys.
 
 ---
