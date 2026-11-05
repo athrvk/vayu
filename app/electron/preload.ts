@@ -17,7 +17,7 @@ const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
  * `ipcRenderer.invoke` wraps a handler's rejection in its own sentence -
  * `Error invoking remote method '<channel>': Error: <message>` - which is
  * Electron's doing, not this preload's. `readDataFile`, `hashDataFile` (for a
- * refused request) and `readSpecFile` throw already-clean, user-facing
+ * refused request), `readSpecFile` and `saveFile` throw already-clean, user-facing
  * messages on the main-process side (`data-file.ts`, `spec-file.ts` - a
  * missing file, an over-cap document, a refused extension), so callers on the
  * renderer side (`read-declared.ts`, `ImportModal.tsx`) can show them as-is.
@@ -448,6 +448,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// missing file, or anything that is not a regular file. See file-ipc.ts.
 	statFile: (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
 		ipcRenderer.invoke("file:stat", path),
+
+	// Write an export to the path the user picks in the system save dialog, and
+	// say whether it was written (#3246). The renderer suggests a file name and
+	// main keeps only its last segment; the dialog opens in Downloads. Rejects,
+	// before any dialog, when the sender is not the app window or the arguments
+	// are not text-or-bytes and a name. The shape mirrors `SaveFileReply` in
+	// electron/save-file-ipc.ts, inlined because this file is a CommonJS script
+	// and must not grow imports.
+	saveFile: (
+		contents: string | Uint8Array,
+		suggestedName: string
+	): Promise<
+		| { outcome: "saved"; path: string }
+		| { outcome: "cancelled" }
+		| { outcome: "failed"; message: string }
+	> =>
+		ipcRenderer.invoke("file:save", contents, suggestedName).catch((e: unknown) => {
+			throw unwrapIpcError(e);
+		}),
 
 	// Re-read a collection's declared data file by path (issue #599) - a channel
 	// on which the renderer names a path, because the Run dialog has to re-open a
