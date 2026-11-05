@@ -561,18 +561,29 @@ TEST (SseConsumer, EndsOnTheDurationCapAndNamesIt) {
     EXPECT_LT (elapsed, std::chrono::seconds (10));
 }
 
-// The no-events-for-N-seconds case. Without the low-speed options this transfer
-// has no deadline at all and holds its worker until the process ends.
+// The no-events-for-N-seconds case. The stream has no whole-transfer deadline,
+// so without the idle rule it holds its worker until the process ends.
+//
+// The window is 1000 ms and the rule is judged from libcurl's progress
+// callback, about once a second while quiet: a healthy engine ends the stream
+// at about 1.0 to 1.5 s. The bound is the setting plus three seconds, because
+// the upper side is the one a slow runner can push. The broken readings it
+// separates from: #3241 measured about 7 s when `CURLOPT_LOW_SPEED_TIME`
+// judged the silence (libcurl averaged the speed over about five seconds;
+// libcurl 8.23 does not reproduce that), and a rule that never fires ends at
+// the 30 s duration cap. Mutation checks: add 4 s to the rule's threshold and
+// the upper bound fails; end at the first progress call and the lower fails.
 TEST (SseConsumer, EndsOnTheIdleTimeoutAndNamesIt) {
     StreamServer server;
-    SseStreamContext context ("run_test", brisk_limits ());
+    const auto limits = brisk_limits ();
+    SseStreamContext context ("run_test", limits);
     const auto started = std::chrono::steady_clock::now ();
-    vayu::http::consume_sse_stream (
-    spec_for (server.url ("/silent"), brisk_limits ()), context);
+    vayu::http::consume_sse_stream (spec_for (server.url ("/silent"), limits), context);
     const auto elapsed = std::chrono::steady_clock::now () - started;
 
     EXPECT_EQ (context.end_reason (), SseEndReason::Idle);
-    EXPECT_LT (elapsed, std::chrono::seconds (20));
+    EXPECT_GE (elapsed, std::chrono::milliseconds (limits.idle_timeout_ms));
+    EXPECT_LE (elapsed, std::chrono::milliseconds (limits.idle_timeout_ms + 3000));
     EXPECT_EQ (context.total_events (), 0);
 }
 

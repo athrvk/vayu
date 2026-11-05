@@ -36,7 +36,7 @@ struct UrlAuthority {
  *
  * The single-request client builds one per send, and the event loop keeps one
  * on every `TransferData`; the SSE consumer keeps one for the count, which
- * tells its connect timeout from its idle one (#2835). Only a
+ * tells its idle rule the connection is made (#2835, #3241). Only a
  * `/import/fetch` reference sets `local_peers` (#2364).
  */
 struct ConnectedPeerCheck {

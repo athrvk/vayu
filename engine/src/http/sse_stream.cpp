@@ -293,6 +293,9 @@ struct TransferState {
     SseStreamContext* context       = nullptr;
     SseParser* parser               = nullptr;
     vayu::Response* response        = nullptr;
+    /// Counts the requests libcurl has written on a made connection, which is
+    /// how the progress callback knows the connect phase is over.
+    const detail::ConnectedPeerCheck* peer_check = nullptr;
     /// Set the moment the initial response's header block is complete, so the
     /// `open` frame is published once even across a redirect chain.
     bool announced = false;
@@ -305,6 +308,12 @@ struct TransferState {
     int64_t max_events      = 0;
     int64_t max_duration_ms = 0;
     std::chrono::steady_clock::time_point started_at;
+    /// When the connection last showed life: a body byte or a header line.
+    /// Empty until the connection is made and the progress callback first
+    /// sees it, so the connect and TLS phases, which have their own bound,
+    /// never count as silence.
+    std::optional<std::chrono::steady_clock::time_point> last_byte_at;
+    int64_t idle_timeout_ms = 0;
     /// Body bytes the current hop delivered, kept or not. Reset per hop, so it
     /// ends as the final response's count.
     std::size_t delivered_bytes = 0;
@@ -353,9 +362,14 @@ void begin_response_hop (TransferState& state) {
     state.keeps_body.reset ();
 }
 
+void note_activity (TransferState& state) {
+    state.last_byte_at = std::chrono::steady_clock::now ();
+}
+
 size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* state             = static_cast<TransferState*> (userdata);
     const size_t total_size = size * nmemb;
+    note_activity (*state);
     const std::string_view bytes (ptr, total_size);
 
     // The header block is complete by the time the first body byte arrives, so
@@ -393,6 +407,7 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
 size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
     auto* state             = static_cast<TransferState*> (userdata);
     const size_t total_size = size * nitems;
+    note_activity (*state);
     std::string line (buffer, total_size);
     while (!line.empty () && (line.back () == '\r' || line.back () == '\n')) {
         line.pop_back ();
@@ -436,6 +451,24 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
     return total_size;
 }
 
+/// Whether the connection has been silent for the idle window. The clock is
+/// armed by the first progress call after the connection is made, unless a
+/// byte armed it already. libcurl calls the progress callback about once a
+/// second while idle, so a quiet stream ends within about a second of its
+/// setting, not at the millisecond.
+bool idle_window_elapsed (TransferState& state) {
+    const auto now = std::chrono::steady_clock::now ();
+    if (!state.last_byte_at) {
+        if (state.peer_check->requests_started == 0) {
+            return false;
+        }
+        state.last_byte_at = now;
+    }
+    const auto silent_for =
+    std::chrono::duration_cast<std::chrono::milliseconds> (now - *state.last_byte_at);
+    return silent_for.count () >= state.idle_timeout_ms;
+}
+
 int stream_progress_callback (void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     auto* state = static_cast<TransferState*> (userdata);
     if (state->context->should_stop.load (std::memory_order_acquire)) {
@@ -449,26 +482,11 @@ int stream_progress_callback (void* userdata, curl_off_t, curl_off_t, curl_off_t
         state->abort_reason = SseEndReason::MaxDuration;
         return 1;
     }
+    if (idle_window_elapsed (*state)) {
+        state->abort_reason = SseEndReason::Idle;
+        return 1;
+    }
     return 0;
-}
-
-/// Whether the last hop got a connection to write its request on. The
-/// pre-request callback counts each request once its connection, TLS included,
-/// is up, and every hop before the last wrote one. Not PRETRANSFER: libcurl
-/// 8.23 stamps it on a transfer that never connected too.
-bool last_hop_connected (CURL* curl, const detail::ConnectedPeerCheck& peer_check) {
-    long redirects = 0;
-    get_info<CURLINFO_REDIRECT_COUNT> (curl, &redirects);
-    return peer_check.requests_started > redirects;
-}
-
-/// The idle timeout as `CURLOPT_LOW_SPEED_TIME` takes it: whole seconds,
-/// rounded **up** so a sub-second setting is never silently rounded to "no
-/// timeout at all". The config floor is a second, so this only rounds a
-/// hand-edited row.
-long idle_timeout_seconds (int64_t idle_timeout_ms) {
-    const int64_t seconds = (idle_timeout_ms + 999) / 1000;
-    return static_cast<long> (std::max<int64_t> (1, seconds));
 }
 
 } // namespace
@@ -497,12 +515,17 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     CurlErrorBuffer errors;
     SseParser parser (request.limits.max_event_bytes);
+    // The transport policy's connect-time state; the idle rule reads its count
+    // of requests written to learn the connection is made.
+    detail::ConnectedPeerCheck peer_check;
 
     TransferState state;
-    state.request  = &request;
-    state.context  = &context;
-    state.parser   = &parser;
-    state.response = &response;
+    state.request         = &request;
+    state.context         = &context;
+    state.parser          = &parser;
+    state.response        = &response;
+    state.peer_check      = &peer_check;
+    state.idle_timeout_ms = request.limits.idle_timeout_ms;
     state.max_events = request.max_events.value_or (request.limits.max_stream_events);
     state.max_duration_ms =
     request.max_duration_ms.value_or (request.limits.max_stream_duration_ms);
@@ -534,15 +557,14 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // **No `CURLOPT_TIMEOUT_MS`.** A whole-transfer deadline is exactly what
     // made a stream unusable before this path existed: it kills a healthy
     // stream at an arbitrary moment and reports it as a timeout. What a stream
-    // needs bounded is silence, so the deadline is an *idle* one -
-    // `CURLOPT_LOW_SPEED_LIMIT`/`_TIME`, the first use of the pair in this
-    // codebase - and the duration cap above ends a stream that is talking
-    // forever, by a rule that can say its own name. The idle window only runs
-    // once a connection carries the request, so the connect phase (TCP and
-    // TLS) gets a bound of its own (#2835).
-    set_opt<CURLOPT_LOW_SPEED_LIMIT> (curl, 1L);
-    set_opt<CURLOPT_LOW_SPEED_TIME> (
-    curl, idle_timeout_seconds (request.limits.idle_timeout_ms));
+    // needs bounded is silence, so the deadline is an *idle* one, kept by the
+    // progress callback (`idle_window_elapsed`), and the duration cap above
+    // ends a stream that is talking forever, by a rule that can say its own
+    // name. Not `CURLOPT_LOW_SPEED_LIMIT`/`_TIME`: libcurl judges those against
+    // an averaged speed, which in some releases lets a quiet stream outlive its
+    // setting by about six seconds (#3241). The idle window only runs once a
+    // connection carries the request, so the connect phase (TCP and TLS) gets
+    // a bound of its own (#2835), and its expiry is an error, never an idle end.
     set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
     static_cast<long> (constants::server::connect_timeout_ms (request.request.timeout_ms)));
 
@@ -553,8 +575,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // Until #705 this path set no proxy option at all, so a configured proxy
     // covered every send and every load run and silently skipped streams. The
     // shared applier is what makes that unrepeatable. The peer check carries no
-    // rule; its count is what tells a connect timeout from an idle one.
-    detail::ConnectedPeerCheck peer_check;
+    // rule; its count is what tells the idle rule the connection is made.
     if (const ClientCertRule* certificate = detail::apply_transport_policy (
         curl, request.transport, request.request.verify_ssl, url, &peer_check)) {
         response.client_certificate = client_cert_label (*certificate);
@@ -620,13 +641,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         // An abort with no reason is the transport's pre-request refusal
         // (#2355), an error like any other.
         reason = *state.abort_reason;
-    } else if (result == CURLE_OPERATION_TIMEDOUT && last_hop_connected (curl, peer_check)) {
-        // Two timeouts are set, the connect bound and the low-speed one, and
-        // only the low-speed one runs on a made connection: this is silence.
-        // A timeout before the connection was made is the connect bound, and
-        // falls through to the error a refused connect gets.
-        reason = SseEndReason::Idle;
     } else if (result != CURLE_OK) {
+        // `CURLE_OPERATION_TIMEDOUT` lands here too: the connect bound is the
+        // only timeout set, and its expiry is an error like a refused connect.
         reason = SseEndReason::Error;
         const Error error =
         detail::curl_to_error (curl, result, errors, &request.request);

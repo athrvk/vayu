@@ -7767,7 +7767,7 @@ timeout happened to fire":
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
 | `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
 | `maxStreamDurationMs` | The duration cap elapsed |
-| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made |
+| `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` after the connection was made; a header line counts as arriving. The stream ends within about a second of the setting (the engine checks about once a second) |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
 would kill a healthy one mid-flight. Two deadlines apply instead: connecting
