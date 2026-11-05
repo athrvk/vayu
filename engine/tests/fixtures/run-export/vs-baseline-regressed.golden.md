@@ -57,7 +57,7 @@
 | Throughput (whole run, drain included)    | 499 req/s | 410 req/s | -89 req/s (-17.8%) | regressed    |
 | Response rate (whole run, drain included) | -         | 410 req/s | -                  | not compared |
 | Error rate                                | 0.0%      | 2.5%      | +2.5%              | regressed    |
-| Total requests                            | 29,944    | 24,600    | -5,344 (-17.8%)    | unchanged    |
+| Total requests                            | 29,944    | 24,600    | -5,344 (-17.8%)    | -            |
 
 The two runs were not set up the same way, so these changes may not be like for like:
 

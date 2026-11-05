@@ -520,15 +520,47 @@ TEST (RunExportMarkdownTest, TheComparisonIsOmittedWithoutOneAndReadsDirectionWi
         return at == std::string::npos ? std::string () :
                                          text.substr (at, text.find ('\n', at) - at);
     };
-    // A longer latency regressed, a shorter peak improved, a neutral count did not move.
+    // A longer latency regressed, a shorter peak improved, a neutral count moved
+    // without being better or worse.
     EXPECT_NE (row ("P50 latency").find ("regressed"), std::string::npos) << text;
     EXPECT_NE (row ("Max latency").find ("improved"), std::string::npos) << text;
-    EXPECT_NE (row ("Total requests").find ("unchanged"), std::string::npos) << text;
+    EXPECT_EQ (row ("Total requests").find ("unchanged"), std::string::npos) << text;
     // A figure one run never recorded is not a claim that nothing moved.
     EXPECT_NE (row ("Response rate").find ("not compared"), std::string::npos) << text;
     EXPECT_NE (
     text.find ("- Virtual users: 50 in the base run, 80 in this one"), std::string::npos)
     << text;
+}
+
+TEST (RunExportMarkdownTest, ANeutralMetricThatMovedIsNotCalledUnchanged) {
+    const auto total_requests_row = [] (const ordered_json& document) {
+        const std::string text = render_run_export_markdown (document);
+        const auto at          = text.find ("| Total requests");
+        return at == std::string::npos ? std::string () :
+                                         text.substr (at, text.find ('\n', at) - at);
+    };
+
+    ordered_json document = read_document ("vs-baseline-regressed");
+    ordered_json& deltas  = document["comparison"]["deltas"];
+    ASSERT_FALSE (deltas.empty ());
+    ordered_json& total = deltas.back ();
+    ASSERT_EQ (total["metric"], "summary.totalRequests");
+
+    // The change is -5,344 and the Result cell says neither better nor worse.
+    const std::string moved = total_requests_row (document);
+    EXPECT_NE (moved.find ("-5,344"), std::string::npos) << moved;
+    EXPECT_EQ (moved.find ("unchanged"), std::string::npos) << moved;
+    // The table pads each column, so read the last cell without its padding.
+    const std::string_view cells =
+    std::string_view (moved).substr (0, moved.rfind ('|'));
+    EXPECT_TRUE (cells.substr (0, cells.find_last_not_of (' ') + 1).ends_with ("| -"))
+    << moved;
+
+    // Only a change of exactly zero is unchanged.
+    total["target"]        = total["base"];
+    total["delta"]         = 0;
+    const std::string held = total_requests_row (document);
+    EXPECT_NE (held.find ("unchanged"), std::string::npos) << held;
 }
 
 TEST (RunExportMarkdownTest, AnExpectContinueDifferenceReadsWithItsLabel) {
@@ -1369,6 +1401,37 @@ TEST (RunExportMarkdownTest, AWarningNameThatIsNotAStringReadsAsADashNotAnError)
     { "names", ordered_json::array ({ "a", 7, nullptr, "b" }) } } });
     const std::string text = render_run_export_markdown (document);
     EXPECT_NE (text.find ("- slow: a, -, -, b\n"), std::string::npos) << text;
+}
+
+TEST (RunExportMarkdownTest, AWarningWhoseMessageAlreadyEndsWithItsNamesListsThemOnce) {
+    // The engine's own text for an unresolved-variable warning
+    // (`build_run_warnings`) carries the names already.
+    ordered_json document = read_document ("healthy-passed");
+    document["report"]["warnings"] =
+    ordered_json::array ({ { { "code", "unresolved_tokens" },
+    { "message", "12 requests sent with unresolved variables: token, userId" },
+    { "count", 12 }, { "names", ordered_json::array ({ "token", "userId" }) } } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("- 12 requests sent with unresolved variables: "
+                          "token, userId (unresolved_tokens)\n"),
+    std::string::npos)
+    << text;
+    const auto first = text.find ("userId");
+    EXPECT_EQ (text.find ("userId", first + 1), std::string::npos) << text;
+}
+
+TEST (RunExportMarkdownTest, AWarningNameCitedInPassingStillGetsItsList) {
+    ordered_json document = read_document ("healthy-passed");
+    // The exact tail is what counts: `token` occurring in the message is not it,
+    // and neither is a tail naming fewer names than the warning carries.
+    document["report"]["warnings"] = ordered_json::array (
+    { { { "message", "token was never set" }, { "names", ordered_json::array ({ "token" }) } },
+    { { "message", "unresolved: a, b" }, { "names", ordered_json::array ({ "a", "b", "c" }) } },
+    { { "message", "unresolved: a, 7" }, { "names", ordered_json::array ({ "a", 7 }) } } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("- token was never set: token\n"), std::string::npos) << text;
+    EXPECT_NE (text.find ("- unresolved: a, b: a, b, c\n"), std::string::npos) << text;
+    EXPECT_NE (text.find ("- unresolved: a, 7: a, -\n"), std::string::npos) << text;
 }
 
 // --- numbers -------------------------------------------------------------------------------------------
