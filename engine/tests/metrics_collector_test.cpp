@@ -18,6 +18,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/utils/metrics_helper.hpp"
 
@@ -2148,21 +2149,61 @@ TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
     // what lets a reader tell "the run measured its own bounds" from "the
     // target closed the connections".
     EXPECT_EQ (totals->capped, 2u);
+    // Counts this small are exact, so the offset the histogram stores them at
+    // (#3240) must not show: record without it and every figure reads one low.
     EXPECT_EQ (totals->events.count, 3u);
-    EXPECT_GE (totals->events.max, 30.0);
+    EXPECT_DOUBLE_EQ (totals->events.min, 10.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 20.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 30.0);
 }
 
-// A stream that delivered nothing is still a completion. Counting it only in
-// the histogram would lose it, since hdr cannot hold a value below 1 - which is
-// exactly the population ("every connection closed before the first event") a
-// report most needs to show.
-TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
+// A stream that delivered nothing is still a completion, and a 0 in the
+// distribution (#3240) - the population ("every connection closed before the
+// first event") a report most needs to show. Mutation check: record
+// `max (1, events)` with no offset and min, p50 and max read 1.
+TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsZeroEvents) {
+    collector->record_stream_completion (0, false, std::nullopt);
     collector->record_stream_completion (0, false, std::nullopt);
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
-    EXPECT_EQ (totals->completions, 1u);
+    EXPECT_EQ (totals->completions, 2u);
     EXPECT_EQ (totals->total_events, 0u);
+    EXPECT_EQ (totals->events.count, 2u);
+    EXPECT_DOUBLE_EQ (totals->events.min, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p99, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 0.0);
+}
+
+// Silent streams beside ones that delivered: the zeros stay zeros and the
+// real counts keep their values.
+TEST_F (MetricsCollectorTest, StreamTotalsKeepEmptyAndDeliveringStreamsApart) {
+    for (int i = 0; i < 3; ++i) {
+        collector->record_stream_completion (0, false, std::nullopt);
+    }
+    collector->record_stream_completion (40, true, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->events.count, 4u);
+    EXPECT_DOUBLE_EQ (totals->events.min, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 40.0);
+}
+
+// The largest event cap a run may set, stored one above itself, still fits the
+// histogram: a dropped record would leave `count` short of the completions.
+TEST_F (MetricsCollectorTest, StreamTotalsHoldAStreamAtTheLargestEventCap) {
+    const auto ceiling = vayu::core::constants::sse::STREAM_EVENTS_CEILING;
+    collector->record_stream_completion (static_cast<size_t> (ceiling), true, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->events.count, 1u);
+    // Three significant figures: within 0.1% of the count recorded.
+    EXPECT_NEAR (totals->events.max, static_cast<double> (ceiling),
+    static_cast<double> (ceiling) / 1000.0);
 }
 
 // Time to first event (#3234) is the distribution over the completions that

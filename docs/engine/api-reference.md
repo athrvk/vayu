@@ -12701,6 +12701,10 @@ streams of 40 events each have a p50 of 40, not of 19200. `eventsPerSecond` is
 the whole-run rate, derived from the same `testDuration` the report's `rps`
 uses so the two are comparable. Both are reported because one long stream and
 250 short ones can share a rate while being entirely different runs.
+A stream that delivered nothing is a 0 in `events` like any other count
+(#3240), so a run whose target closed every connection before the first
+event reads `min`, `max` and every percentile as 0 beside `totalEvents: 0`.
+The figures are exact up to 2,046 events per stream and within 0.1% above.
 
 `capped` counts the completions a cap ended rather than the server. In the
 example above every stream hit the event cap - the `events` percentiles all

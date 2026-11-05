@@ -57,21 +57,38 @@ double us_to_ms (int64_t us) {
     return static_cast<double> (us) / 1000.0;
 }
 
-/// @p histogram's percentiles in milliseconds; all zeros when it is empty.
-MetricsCollector::Percentiles percentiles_of (const struct hdr_histogram* histogram) {
+/// HdrHistogram's floor is 1, so a stream's event count is recorded one above
+/// itself and read back one below (#3240): a stream that delivered nothing is
+/// then a 0 in every figure rather than a 1. Counts under 2047 stay exact at
+/// three significant figures.
+constexpr int64_t STREAM_EVENTS_OFFSET = 1;
+
+int64_t stream_events_recorded (size_t events) {
+    return static_cast<int64_t> (events) + STREAM_EVENTS_OFFSET;
+}
+
+double stream_events_read (int64_t recorded) {
+    return static_cast<double> (recorded - STREAM_EVENTS_OFFSET);
+}
+
+/// @p histogram's percentiles, each recorded value passed through
+/// @p to_value (milliseconds unless told otherwise); all zeros when it is
+/// empty.
+MetricsCollector::Percentiles percentiles_of (const struct hdr_histogram* histogram,
+double (*to_value) (int64_t) = us_to_ms) {
     MetricsCollector::Percentiles result;
     if (histogram == nullptr || histogram->total_count == 0) {
         return result;
     }
     result.count = static_cast<size_t> (histogram->total_count);
-    result.min   = us_to_ms (hdr_min (histogram));
-    result.max   = us_to_ms (hdr_max (histogram));
-    result.p50   = us_to_ms (hdr_value_at_percentile (histogram, 50.0));
-    result.p75   = us_to_ms (hdr_value_at_percentile (histogram, 75.0));
-    result.p90   = us_to_ms (hdr_value_at_percentile (histogram, 90.0));
-    result.p95   = us_to_ms (hdr_value_at_percentile (histogram, 95.0));
-    result.p99   = us_to_ms (hdr_value_at_percentile (histogram, 99.0));
-    result.p999  = us_to_ms (hdr_value_at_percentile (histogram, 99.9));
+    result.min   = to_value (hdr_min (histogram));
+    result.max   = to_value (hdr_max (histogram));
+    result.p50   = to_value (hdr_value_at_percentile (histogram, 50.0));
+    result.p75   = to_value (hdr_value_at_percentile (histogram, 75.0));
+    result.p90   = to_value (hdr_value_at_percentile (histogram, 90.0));
+    result.p95   = to_value (hdr_value_at_percentile (histogram, 95.0));
+    result.p99   = to_value (hdr_value_at_percentile (histogram, 99.0));
+    result.p999  = to_value (hdr_value_at_percentile (histogram, 99.9));
     return result;
 }
 
@@ -1209,14 +1226,7 @@ std::optional<double> first_event_ms) {
         stream_capped_.fetch_add (1, std::memory_order_relaxed);
     }
     if (stream_events_histogram_ != nullptr) {
-        // A stream that delivered nothing records its 0 - `hdr` cannot hold one
-        // below its floor of 1, so it is clamped, and the completion is still
-        // counted above. That is why `completions` is a counter rather than
-        // read off the histogram: the two would disagree by exactly the number
-        // of empty streams, which is the population a report most needs to
-        // show.
-        hdr_record_value_atomic (stream_events_histogram_,
-        static_cast<int64_t> (std::max<size_t> (1, events)));
+        hdr_record_value_atomic (stream_events_histogram_, stream_events_recorded (events));
     }
     if (first_event_ms && stream_first_event_histogram_ != nullptr) {
         hdr_record_value_atomic (stream_first_event_histogram_,
@@ -1247,19 +1257,7 @@ std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals ()
     totals.completions  = completions;
     totals.total_events = stream_events_total_.load (std::memory_order_relaxed);
     totals.capped       = stream_capped_.load (std::memory_order_relaxed);
-
-    if (stream_events_histogram_ != nullptr && stream_events_histogram_->total_count > 0) {
-        auto* h             = stream_events_histogram_;
-        totals.events.count = static_cast<size_t> (h->total_count);
-        totals.events.min   = static_cast<double> (hdr_min (h));
-        totals.events.max   = static_cast<double> (hdr_max (h));
-        totals.events.p50 = static_cast<double> (hdr_value_at_percentile (h, 50.0));
-        totals.events.p75 = static_cast<double> (hdr_value_at_percentile (h, 75.0));
-        totals.events.p90 = static_cast<double> (hdr_value_at_percentile (h, 90.0));
-        totals.events.p95 = static_cast<double> (hdr_value_at_percentile (h, 95.0));
-        totals.events.p99 = static_cast<double> (hdr_value_at_percentile (h, 99.0));
-        totals.events.p999 = static_cast<double> (hdr_value_at_percentile (h, 99.9));
-    }
+    totals.events = percentiles_of (stream_events_histogram_, stream_events_read);
     totals.time_to_first_event = percentiles_of (stream_first_event_histogram_);
     return totals;
 }
