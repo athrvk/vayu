@@ -7650,6 +7650,41 @@ describe("dispatchTool", () => {
 		).toThrow();
 	});
 
+	test("start_load_run holds the stream budgets to the engine's bounds (#3234)", () => {
+		// The catchall for `custom.*` keys takes any number, so a stream key the
+		// schema did not name would pass at 0 or below and meet the engine's 400
+		// with no field named.
+		const stream = (thresholds: Record<string, number>) =>
+			parseArgs("start_load_run", { url: "https://api.example.com", thresholds });
+		expect(stream({ streamTimeToFirstEventP95Ms: 800 }).thresholds).toEqual({
+			streamTimeToFirstEventP95Ms: 800,
+		});
+		expect(stream({ streamEventsPerSecondMin: 200 }).thresholds).toEqual({
+			streamEventsPerSecondMin: 200,
+		});
+		const refused: Record<string, number>[] = [
+			{ streamTimeToFirstEventP95Ms: 0 },
+			{ streamTimeToFirstEventP95Ms: 86_400_001 },
+			{ streamEventsPerSecondMin: 0 },
+			{ streamEventsPerSecondMin: -1 },
+			{ streamEventsPerSecondMin: 1_000_000_001 },
+		];
+		for (const bad of refused) {
+			expect(() => stream(bad), JSON.stringify(bad)).toThrow();
+		}
+	});
+
+	test("start_load_run says the stream budgets need a streaming run (#3234)", () => {
+		const shape = TOOLS.find((t) => t.name === "start_load_run")!.inputSchema as Record<
+			string,
+			z.ZodType
+		>;
+		const description = shape.thresholds.description ?? "";
+		expect(description).toContain("streamTimeToFirstEventP95Ms");
+		expect(description).toContain("streamEventsPerSecondMin");
+		expect(description).toContain("not evaluated and count as failed");
+	});
+
 	test("start_load_run still accepts the agent argument name `tests` as the same script", async () => {
 		const client = fakeClient();
 		const res = await dispatchTool(
