@@ -27,6 +27,8 @@
  * exact bytes under the response's own Content-Type; its text, when it has
  * one, is a decoding and is what Copy takes. One with no text has nothing to
  * copy, so Copy says so instead of copying base64.
+ *
+ * A save that fails is a toast; a cancelled save dialog is not (#3246).
  */
 
 import { Copy, Check, Download } from "lucide-react";
@@ -40,8 +42,9 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
-import { downloadBlob, downloadTextFile } from "@/lib/download-text-file";
+import { downloadBlob, downloadTextFile, saveFailedMessage } from "@/lib/download-text-file";
 import { cn } from "@/lib/utils";
+import { useToastStore } from "@/stores";
 import {
 	extensionForContentType,
 	type ResponseBytes,
@@ -73,18 +76,22 @@ export function ResponseActions({
 	className,
 }: ResponseActionsProps) {
 	const { copy, copied } = useCopy({ feedback: "icon" });
+	const showToast = useToastStore((s) => s.showToast);
 	const noText = rawBytes !== undefined && !rawBytes.isText;
 
-	const handleDownload = () => {
+	const handleDownload = async () => {
 		// Stamped at click time, not render time.
 		const stamp = `response-${Date.now()}`;
-		if (rawBytes) {
-			const type = contentType || "application/octet-stream";
-			const blob = new Blob([rawBytes.data], { type });
-			downloadBlob(blob, `${stamp}.${extensionForContentType(type)}`);
-			return;
+		const type = contentType || "application/octet-stream";
+		const fileName = rawBytes
+			? `${stamp}.${extensionForContentType(type)}`
+			: `${stamp}.${textExtension(contentType)}`;
+		const saved = rawBytes
+			? await downloadBlob(new Blob([rawBytes.data], { type }), fileName)
+			: await downloadTextFile(content, fileName, "text/plain");
+		if (saved.outcome === "failed") {
+			showToast(saveFailedMessage(fileName, saved.message), "error");
 		}
-		downloadTextFile(content, `${stamp}.${textExtension(contentType)}`, "text/plain");
 	};
 
 	const copyButton = (
@@ -123,7 +130,7 @@ export function ResponseActions({
 					<Button
 						size="icon"
 						variant="ghost"
-						onClick={handleDownload}
+						onClick={() => void handleDownload()}
 						aria-label="Download response"
 					>
 						<Download className="size-icon-sm" data-icon-motion={ICON_MOTION.drop} />

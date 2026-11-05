@@ -17,7 +17,9 @@
  * the export could not carry, and that a document the engine refused stops the
  * export instead of silently downgrading it to a skeleton. Those are what this
  * file locks, plus the one thing that is still the renderer's decision - that
- * each format is asked for once, so toggling back is free.
+ * each format is asked for once, so toggling back is free - and that the dialog
+ * closes only once the file is written (#3246; mutation check: close whatever
+ * the save answered and the cancelled and failed save cases red).
  *
  * The assembly itself is no longer here to test: the subtree walk, its boundary
  * at a nested binding (#721) and every rule about what is written are
@@ -25,7 +27,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { withQueryClient } from "@/test/query-wrapper";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
@@ -36,6 +38,14 @@ const exportSpec = vi.hoisted(() =>
 );
 
 vi.mock("@/services/api", () => ({ apiService: { exportSpec } }));
+
+// The real downloader, spied so a case can answer for the save dialog (#3246).
+vi.mock("@/lib/download-text-file", async (importOriginal) => {
+	const real = await importOriginal<typeof import("@/lib/download-text-file")>();
+	return { ...real, downloadTextFile: vi.fn(real.downloadTextFile) };
+});
+const { downloadTextFile } = await import("@/lib/download-text-file");
+const saveAnswer = vi.mocked(downloadTextFile);
 
 const { default: ExportSpecDialog } = await import("./ExportSpecDialog");
 
@@ -118,12 +128,13 @@ function captureDownload() {
 	};
 }
 
-function open(overrides: Partial<Collection> = {}) {
+function open(overrides: Partial<Collection> = {}, onOpenChange = vi.fn()) {
 	render(
 		withQueryClient(
-			<ExportSpecDialog collection={collection(overrides)} onOpenChange={vi.fn()} />
+			<ExportSpecDialog collection={collection(overrides)} onOpenChange={onOpenChange} />
 		)
 	);
+	return onOpenChange;
 }
 
 /** A collection bound to a stored document - the one kind asked how much to write. */
@@ -150,6 +161,7 @@ function deferred() {
 
 beforeEach(() => {
 	vi.restoreAllMocks();
+	saveAnswer.mockClear();
 	exportSpec.mockReset();
 	exportSpec.mockResolvedValue(answer());
 });
@@ -295,6 +307,45 @@ describe("ExportSpecDialog", () => {
 		expect(asYaml.fileName).toBe("petstore.openapi.yaml");
 		expect(asYaml.type).toBe("application/yaml");
 		expect(asYaml.text.startsWith("openapi: 3.0.3")).toBe(true);
+	});
+
+	it("closes once the file is written", async () => {
+		captureDownload();
+		const onOpenChange = open();
+		await screen.findByText(/values updated/);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+	});
+
+	it("stays open, and says nothing, when the save dialog is cancelled", async () => {
+		let answerDialog!: (outcome: { outcome: "cancelled" }) => void;
+		saveAnswer.mockReturnValueOnce(new Promise((resolve) => (answerDialog = resolve)));
+		const onOpenChange = open();
+		await screen.findByText(/values updated/);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+		await waitFor(() => expect(saveAnswer).toHaveBeenCalledTimes(1));
+		await act(async () => answerDialog({ outcome: "cancelled" }));
+
+		expect(onOpenChange).not.toHaveBeenCalled();
+		expect(screen.queryByText("Couldn't save the file")).toBeNull();
+	});
+
+	it("stays open and says why when the write fails", async () => {
+		saveAnswer.mockResolvedValueOnce({
+			outcome: "failed",
+			message: "EACCES: permission denied",
+		});
+		const onOpenChange = open();
+		await screen.findByText(/values updated/);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+		expect(await screen.findByText("Couldn't save the file")).toBeTruthy();
+		expect(screen.getByText(/EACCES: permission denied/)).toBeTruthy();
+		expect(onOpenChange).not.toHaveBeenCalled();
 	});
 
 	it("calls a free-form collection's export a starting point, not a contract", async () => {

@@ -15,10 +15,14 @@
  * user is told before the file lands: how much went out, how many secrets were
  * left empty, every kind of thing Postman had no place for - and that the
  * credentials switch asks the engine again rather than editing text here.
+ * The dialog closes only once the file is written (#3246).
+ *
+ * Mutation check: close whatever the save answered and the cancelled and
+ * failed save cases red.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 import { withQueryClient } from "@/test/query-wrapper";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
@@ -34,6 +38,14 @@ const exportPostman = vi.hoisted(() =>
 );
 
 vi.mock("@/services/api", () => ({ apiService: { exportPostman } }));
+
+// The real downloader, spied so a case can answer for the save dialog (#3246).
+vi.mock("@/lib/download-text-file", async (importOriginal) => {
+	const real = await importOriginal<typeof import("@/lib/download-text-file")>();
+	return { ...real, downloadTextFile: vi.fn(real.downloadTextFile) };
+});
+const { downloadTextFile } = await import("@/lib/download-text-file");
+const saveAnswer = vi.mocked(downloadTextFile);
 
 const { default: ExportPostmanDialog } = await import("./ExportPostmanDialog");
 
@@ -132,6 +144,7 @@ function summaryLines() {
 
 beforeEach(() => {
 	vi.restoreAllMocks();
+	saveAnswer.mockClear();
 	exportPostman.mockReset();
 	exportPostman.mockResolvedValue(answer());
 });
@@ -249,7 +262,36 @@ describe("ExportPostmanDialog", () => {
 			type: "application/json",
 			text: '{\n  "info": { "name": "Petstore" }\n}\n',
 		});
-		expect(onOpenChange).toHaveBeenCalledWith(false);
+		await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+	});
+
+	it("stays open, and says nothing, when the save dialog is cancelled", async () => {
+		let answerDialog!: (outcome: { outcome: "cancelled" }) => void;
+		saveAnswer.mockReturnValueOnce(new Promise((resolve) => (answerDialog = resolve)));
+		const onOpenChange = open();
+		await screen.findByText("Postman Collection");
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+		await waitFor(() => expect(saveAnswer).toHaveBeenCalledTimes(1));
+		await act(async () => answerDialog({ outcome: "cancelled" }));
+
+		expect(onOpenChange).not.toHaveBeenCalled();
+		expect(screen.queryByText("Couldn't save the file")).toBeNull();
+	});
+
+	it("stays open and says why when the write fails", async () => {
+		saveAnswer.mockResolvedValueOnce({
+			outcome: "failed",
+			message: "EACCES: permission denied",
+		});
+		const onOpenChange = open();
+		await screen.findByText("Postman Collection");
+
+		fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+		expect(await screen.findByText("Couldn't save the file")).toBeTruthy();
+		expect(screen.getByText(/EACCES: permission denied/)).toBeTruthy();
+		expect(onOpenChange).not.toHaveBeenCalled();
 	});
 
 	it("copies the engine's text", async () => {

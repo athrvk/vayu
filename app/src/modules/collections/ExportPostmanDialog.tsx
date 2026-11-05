@@ -11,8 +11,10 @@
  * `ExportSpecDialog`'s sibling, and built the same way on purpose: the engine
  * assembles the document (`POST /export/postman`), the dialog states what it
  * is about to write and what it could not carry, and delivery is the repo's
- * one file-to-disk path (`downloadTextFile`). Mounted only while open, so the mount is the reset and the credentials choice starts off on
- * every opening.
+ * one file-to-disk path (`downloadTextFile`): the dialog closes once the file
+ * is written, stays open on a cancelled save dialog, and says why a write
+ * failed (#3246). Mounted only while open, so the mount is the reset and the
+ * credentials choice starts off on every opening.
  *
  * **The one choice is whether credentials travel.** A Postman export is
  * usually headed for somebody else, so the default writes credentials empty
@@ -73,6 +75,7 @@ export default function ExportPostmanDialog({
 	onOpenChange,
 }: ExportPostmanDialogProps) {
 	const [includeSecrets, setIncludeSecrets] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
 	const exported = usePostmanExportQuery(collection.id, includeSecrets);
 	const { copy } = useCopy();
 
@@ -80,10 +83,12 @@ export default function ExportPostmanDialog({
 	const firstRead = exported.isPending;
 	const reassembling = exported.isFetching && !firstRead;
 
-	const handleDownload = () => {
+	const handleDownload = async () => {
 		if (!result) return;
-		downloadTextFile(result.text, result.fileName, "application/json");
-		onOpenChange(false);
+		setSaveError(null);
+		const saved = await downloadTextFile(result.text, result.fileName, "application/json");
+		if (saved.outcome === "saved") onOpenChange(false);
+		if (saved.outcome === "failed") setSaveError(saved.message);
 	};
 
 	return (
@@ -143,6 +148,12 @@ export default function ExportPostmanDialog({
 					{result && (
 						<ExportSummary notes={result.notes} includeSecrets={includeSecrets} />
 					)}
+
+					{saveError && (
+						<Callout severity="blocking" title="Couldn't save the file">
+							{saveError}
+						</Callout>
+					)}
 				</DialogBody>
 
 				<DialogFooter>
@@ -161,7 +172,10 @@ export default function ExportPostmanDialog({
 						<Copy className="size-icon" />
 						Copy
 					</Button>
-					<Button disabled={!result || reassembling} onClick={handleDownload}>
+					<Button
+						disabled={!result || reassembling}
+						onClick={() => void handleDownload()}
+					>
 						<Download className="size-icon" data-icon-motion={ICON_MOTION.drop} />
 						Download
 					</Button>

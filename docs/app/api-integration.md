@@ -594,8 +594,8 @@ variable's row and name and writes its value `""`, counted in
 plus `notCarried`, whose one kind is `variable_types`: `json`-typed variables,
 which Postman has no type for, written as `default`. The renderer's only caller
 is the environment row's **Export as Postman Environment** item, which sends the
-id alone, downloads `text` as `fileName` and puts `secretsOmitted` and the
-`variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).
+id alone, saves `text` as `fileName` and, once the file is written, puts
+`secretsOmitted` and the `variable_types` count in the toast (`modules/variables/sidebar/postman-environment-export.ts`).
 
 `exportRunReport` is the same kind of read for a finished load run (issue
 #2127). `RunReportExportRequest` is `{runId, format?, series?, baseRunId?}`:

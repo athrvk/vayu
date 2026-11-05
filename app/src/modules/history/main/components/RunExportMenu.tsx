@@ -13,8 +13,10 @@
  * load run - the engine refuses any other (`read_exportable_run`).
  *
  * The engine writes the document, names the file and picks its type; this menu
- * asks, then hands the answer to `downloadTextFile` untouched. A failed export
- * downloads nothing and says why, in the engine's words.
+ * asks, then hands the answer to `downloadTextFile` untouched, and says
+ * "Exported" only once the file is written (#3246): a cancelled save dialog is
+ * silent, a failed write says why. A failed export downloads nothing and says
+ * why, in the engine's words.
  *
  * The items are `runExportActions`, the list the palette's export commands are
  * generated from, and the palette reaches them through this menu's own handler
@@ -35,7 +37,7 @@ import {
 } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
 import { useRegisterExportRunSurface } from "@/lib/commands";
-import { downloadTextFile } from "@/lib/download-text-file";
+import { downloadTextFile, saveFailedMessage } from "@/lib/download-text-file";
 import { formatNumber } from "@/lib/format-number";
 import { runExportActions, type RunExportAction } from "@/lib/run-export-formats";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -94,8 +96,12 @@ export default function RunExportMenu({ runId, requestUrl, requestMethod }: RunE
 			await copy(result.text, `${action.format.name} report`);
 			return;
 		}
-		downloadTextFile(result.text, result.fileName, result.mimeType);
-		showToast(savedMessage(result), "success");
+		const saved = await downloadTextFile(result.text, result.fileName, result.mimeType);
+		if (saved.outcome === "failed") {
+			showToast(saveFailedMessage(result.fileName, saved.message), "error");
+			return;
+		}
+		if (saved.outcome === "saved") showToast(savedMessage(result), "success");
 	};
 
 	// Withdrawn while one export is in flight, as the items are disabled: a

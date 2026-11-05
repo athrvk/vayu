@@ -11,13 +11,17 @@
 /**
  * "Export as Postman Environment" on an environment row (#2253): one engine
  * call, the file it answers with downloaded, and a toast that says what the
- * file left out.
+ * file left out - only once the file is written (#3246).
+ *
+ * Mutation check: toast "Exported" whatever the save answered and the
+ * cancelled-save case reds.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
+import { downloadTextFile } from "@/lib/download-text-file";
 import VariablesCategoryTree from "./VariablesCategoryTree";
 import type { Environment, PostmanEnvironmentExportResponse } from "@/types";
 
@@ -57,6 +61,13 @@ vi.mock("@/modules/variables/variables-store", () => ({
 	) => select({ selectedCategory: null, setSelectedCategory: vi.fn() }),
 }));
 
+// The real downloader, spied so a case can answer for the save dialog.
+vi.mock("@/lib/download-text-file", async (importOriginal) => {
+	const real = await importOriginal<typeof import("@/lib/download-text-file")>();
+	return { ...real, downloadTextFile: vi.fn(real.downloadTextFile) };
+});
+const saveAnswer = vi.mocked(downloadTextFile);
+
 const { exportPostmanEnvironment } = vi.hoisted(() => ({ exportPostmanEnvironment: vi.fn() }));
 vi.mock("@/services/api", () => ({ apiService: { exportPostmanEnvironment } }));
 
@@ -77,6 +88,7 @@ function answer(
 beforeEach(() => {
 	exportPostmanEnvironment.mockReset().mockResolvedValue(answer());
 	showToast.mockReset();
+	saveAnswer.mockClear();
 	createObjectURL.mockClear();
 	revokeObjectURL.mockClear();
 	anchorClick.mockReset().mockImplementation(() => {});
@@ -167,6 +179,31 @@ describe("Export as Postman Environment on an environment row", () => {
 				"success"
 			)
 		);
+	});
+
+	it("says nothing when the user cancels the save dialog", async () => {
+		let answerDialog!: (outcome: { outcome: "cancelled" }) => void;
+		saveAnswer.mockReturnValueOnce(new Promise((resolve) => (answerDialog = resolve)));
+
+		await clickExport();
+		await waitFor(() => expect(saveAnswer).toHaveBeenCalledTimes(1));
+		await act(async () => answerDialog({ outcome: "cancelled" }));
+
+		expect(showToast).not.toHaveBeenCalled();
+	});
+
+	it("says the file was not saved, and why, when the write fails", async () => {
+		saveAnswer.mockResolvedValueOnce({ outcome: "failed", message: "Disk full" });
+
+		await clickExport();
+
+		await waitFor(() =>
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't save Staging.postman_environment.json - Disk full",
+				"error"
+			)
+		);
+		expect(showToast).not.toHaveBeenCalledWith(expect.anything(), "success");
 	});
 
 	it("reports a failed export as an error and downloads nothing", async () => {

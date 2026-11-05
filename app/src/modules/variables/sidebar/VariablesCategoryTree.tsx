@@ -81,7 +81,7 @@ import { useInlineRename } from "@/hooks/useInlineRename";
 import { useCopy } from "@/hooks/useCopy";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { environmentReference } from "@/lib/agent-reference";
-import { downloadTextFile } from "@/lib/download-text-file";
+import { downloadTextFile, saveFailedMessage } from "@/lib/download-text-file";
 import {
 	Badge,
 	Button,
@@ -304,7 +304,8 @@ export default function VariablesCategoryTree() {
 	 * Secret values are written blank (`includeSecrets` left to the engine's
 	 * default): a file leaving the machine should not carry them by one click on
 	 * a menu item. One export at a time, since a second click would download the
-	 * file twice.
+	 * file twice. "Exported" only once the file is written (#3246): a cancelled
+	 * save dialog is silent.
 	 */
 	const exportingRef = useRef(false);
 	const exportEnvironment = async (env: Environment) => {
@@ -314,8 +315,12 @@ export default function VariablesCategoryTree() {
 			const { text, fileName, notes } = await apiService.exportPostmanEnvironment({
 				environmentId: env.id,
 			});
-			downloadTextFile(text, fileName, "application/json");
-			showToast(postmanEnvironmentExportMessage(fileName, notes), "success");
+			const saved = await downloadTextFile(text, fileName, "application/json");
+			if (saved.outcome === "failed") {
+				showToast(saveFailedMessage(fileName, saved.message), "error");
+			} else if (saved.outcome === "saved") {
+				showToast(postmanEnvironmentExportMessage(fileName, notes), "success");
+			}
 		} catch (error) {
 			reportFailure(error, "Couldn't export the environment");
 		} finally {

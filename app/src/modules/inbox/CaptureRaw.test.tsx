@@ -13,15 +13,27 @@
  *
  * Printing the base64 would put a wall of letters in the Raw view that reads as
  * a payload and is not one. The view names the size instead, Download writes
- * the exact stored bytes, and Copy takes the base64 spelling.
+ * the exact stored bytes, and Copy takes the base64 spelling. A failed save is
+ * a toast and a cancelled one is silent (#3246; mutation check: drop the
+ * `failed` test before the toast and the cancelled case reds).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { downloadBlob } from "@/lib/download-text-file";
 import { useToastStore } from "@/stores";
 import type { InboxCapture } from "@/types";
 import { CaptureRaw } from "./CaptureRaw";
 import { binaryBodyPlaceholder, captureBinaryBytes } from "./utils";
+
+// The real downloader, spied so a case can answer for the save dialog (#3246).
+vi.mock("@/lib/download-text-file", async (importOriginal) => {
+	const real = await importOriginal<typeof import("@/lib/download-text-file")>();
+	return {
+		...real,
+		downloadBlob: vi.fn(real.downloadBlob),
+	};
+});
 
 const PNG_HEAD = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PNG_BASE64 = btoa(String.fromCharCode(...PNG_HEAD));
@@ -50,6 +62,7 @@ let blobs: Blob[];
 let downloads: string[];
 
 beforeEach(() => {
+	vi.mocked(downloadBlob).mockClear();
 	writeText.mockReset();
 	writeText.mockResolvedValue(undefined);
 	Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -108,6 +121,32 @@ describe("a base64 capture body", () => {
 		expect(blobs[0].type).toBe("image/png");
 		expect(new Uint8Array(await blobs[0].arrayBuffer())).toEqual(PNG_HEAD);
 		expect(downloads).toEqual(["capture-12.png"]);
+	});
+
+	it("says nothing when the user cancels the save dialog", async () => {
+		let answerDialog!: (outcome: { outcome: "cancelled" }) => void;
+		vi.mocked(downloadBlob).mockReturnValueOnce(
+			new Promise((resolve) => (answerDialog = resolve))
+		);
+		render(<CaptureRaw capture={capture()} url={URL_} />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download body" }));
+		await act(async () => answerDialog({ outcome: "cancelled" }));
+
+		expect(useToastStore.getState().toasts).toEqual([]);
+	});
+
+	it("names the file and the reason when the save fails", async () => {
+		vi.mocked(downloadBlob).mockResolvedValueOnce({ outcome: "failed", message: "Disk full" });
+		render(<CaptureRaw capture={capture()} url={URL_} />);
+
+		fireEvent.click(screen.getByRole("button", { name: "Download body" }));
+
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+		expect(useToastStore.getState().toasts[0]).toMatchObject({
+			message: "Couldn't save capture-12.png - Disk full",
+			variant: "error",
+		});
 	});
 
 	it("falls back to an octet-stream .bin download when no type was sent", () => {
