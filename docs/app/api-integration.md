@@ -2320,14 +2320,16 @@ derived from the steps it actually sent.
 **Stream budgets** (issue #3234): `streamTimeToFirstEventP95Ms` (a ceiling on
 `stream.timeToFirstEvent.p95`, ms) and `streamEventsPerSecondMin` (a floor on
 `stream.eventsPerSecond`) judge the report's `stream` section, which only a
-streaming load run has. On any other run the engine reports them not evaluated,
+streaming request's load run and a collection run with a streaming step
+(#3235, design or load) have. On any other run the engine reports them not evaluated,
 and that counts as failed, so the dialog treats them as a property of the
 request: `BUDGET_FIELDS` marks them `streamOnly`, and `budgetFieldsFor(streaming)`
 is the one list the load dialog's fields, validation, closed-card summary and
 payload read. A request that does not stream is offered neither, validates and
 sends neither (a value the global memo holds for them stays in the memo for the
-next streaming request, and is not named as carried over), and
-`RunCollectionDialog` never offers them. A streaming request's latency budgets
+next streaming request, and is not named as carried over).
+`RunCollectionDialog` reads the same list with `anyStreams`, whether a request
+the run sends streams, so it offers, checks and sends them only then. A streaming request's latency budgets
 read on each stream's full duration, from sending the request to the stream
 closing, and the section says so under the p99 field.
 

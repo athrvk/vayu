@@ -1067,7 +1067,7 @@ describe("pass/fail budgets", () => {
 		expect(mutate.mock.calls[0][0]).not.toHaveProperty("thresholds");
 	});
 
-	it("never offers a stream budget: a collection run has no stream section to judge (#3234)", () => {
+	it("offers no stream budget when no step streams: there is no stream section to judge (#3234)", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
 		expect(screen.getByLabelText(/error rate/i)).toBeInTheDocument();
@@ -2053,11 +2053,74 @@ describe("the stream caps of a collection with a streaming request (#3235)", () 
 		expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
 	});
 
-	it("still offers no stream budget: the report judges a stream section for a single request only (#3234)", () => {
+	/*
+	 * The engine judges a collection run's stream section (#3234, #3235), so a
+	 * streaming step brings the stream budgets, and the note on what a latency
+	 * budget measures for one. Mutation check: render `budgetFieldsFor(false)`
+	 * again and the offer cases red; build the thresholds without `anyStreams`
+	 * and the payload ones do.
+	 */
+	const openBudgets = () =>
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
+	const budgetField = (name: RegExp) => screen.queryByRole("spinbutton", { name });
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("offers the stream budgets on $label when a step streams", ({ load }) => {
 		seedStreaming();
 		open();
-		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
-		expect(screen.queryByLabelText(/time to first event/i)).not.toBeInTheDocument();
-		expect(screen.queryByLabelText(/events per second/i)).not.toBeInTheDocument();
+		if (load) enableLoadTest();
+		openBudgets();
+
+		expect(budgetField(/time to first event/i)).toBeInTheDocument();
+		expect(budgetField(/events per second/i)).toBeInTheDocument();
+		expect(screen.getByText(STREAM_LATENCY_NOTE)).toBeInTheDocument();
+	});
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("sends a typed stream budget under the engine's key on $label", ({ load }) => {
+		seedStreaming();
+		open();
+		if (load) enableLoadTest();
+		openBudgets();
+		fireEvent.change(budgetField(/time to first event/i)!, { target: { value: "300" } });
+		fireEvent.change(budgetField(/events per second/i)!, { target: { value: "2" } });
+		run();
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({
+			streamTimeToFirstEventP95Ms: 300,
+			streamEventsPerSecondMin: 2,
+		});
+	});
+
+	// The typed value outlives the field: turning Include nested collections off
+	// removes the only streaming step, and a stream budget sent then would be
+	// reported not evaluated, and so missed. Mutation check: build the
+	// thresholds, the error or the summary with `true` for `anyStreams` and the
+	// matching assertion reds.
+	it("neither sends, counts nor checks a stream budget typed while a streaming step was in scope once none is", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		openBudgets();
+		fireEvent.change(budgetField(/events per second/i)!, { target: { value: "-1" } });
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
+		fireEvent.change(budgetField(/time to first event/i)!, { target: { value: "300" } });
+		fireEvent.change(budgetField(/error rate/i)!, { target: { value: "1" } });
+
+		fireEvent.click(nested);
+		expect(budgetField(/time to first event/i)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /pass\/fail budgets/i })).toHaveTextContent(
+			"1 budget active - Error rate at most 1%"
+		);
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+		run();
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({ maxErrorRatePct: 1 });
 	});
 });

@@ -79,7 +79,7 @@
  * that memo describes one request, and a sequence multiplies its load.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -116,6 +116,8 @@ import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
 import {
 	BUDGETS_EXPLAINER,
+	STREAM_LATENCY_NOTE,
+	STREAM_LATENCY_NOTE_AFTER,
 	budgetFieldsFor,
 	summariseBudgets,
 	type BudgetDraft,
@@ -440,7 +442,10 @@ export default function RunCollectionDialog({
 	const profileError = scenarioProfileError(profile, limits);
 	const streamCapsError = anyStreams ? scenarioStreamCapError(profile, limits) : null;
 
-	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
+	// The stream budgets are judged on the report's `stream` section, which only
+	// a run with a streaming step has; read off `anyStreams` like the caps, so a
+	// value typed while one was in scope is neither checked nor sent once none is.
+	const budgetsError = budgetError(budgets, anyStreams) ?? customBudgetsError(customBudgets);
 
 	const settingsValid = loadTest
 		? !profileError && !streamCapsError && !dataFileError && !budgetsError
@@ -503,7 +508,7 @@ export default function RunCollectionDialog({
 
 	const handleRun = () => {
 		if (!canRun) return;
-		const thresholds = buildThresholds(budgets, failRun, customBudgets);
+		const thresholds = buildThresholds(budgets, failRun, customBudgets, anyStreams);
 		// Top-level, matching where the engine reads it
 		// (`validate_elements_run_override` looks at the run payload directly,
 		// not inside `scenario`) - and, unlike `mode`/`concurrency`/`duration`
@@ -796,28 +801,33 @@ export default function RunCollectionDialog({
 						open={budgetsOpen}
 						onOpenChange={setBudgetsOpen}
 						title="Pass/fail budgets"
-						summary={summariseBudgets(budgets, customBudgets)}
+						summary={summariseBudgets(budgets, customBudgets, anyStreams)}
 					>
 						<p className="text-label leading-relaxed text-muted-foreground">
 							{BUDGETS_EXPLAINER}
 						</p>
-						{/* A collection run never streams, so it has no stream section to judge. */}
-						{budgetFieldsFor(false).map((field) => (
-							<NumberField
-								key={field.key}
-								id={`run-collection-${field.id}`}
-								label={field.label}
-								unit={field.unit}
-								optional
-								value={budgets[field.key]}
-								onChange={(raw) =>
-									setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-								}
-								min={field.min}
-								max={field.max}
-								placeholder="No budget"
-								hint={field.hint}
-							/>
+						{budgetFieldsFor(anyStreams).map((field) => (
+							<Fragment key={field.key}>
+								<NumberField
+									id={`run-collection-${field.id}`}
+									label={field.label}
+									unit={field.unit}
+									optional
+									value={budgets[field.key]}
+									onChange={(raw) =>
+										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
+									}
+									min={field.min}
+									max={field.max}
+									placeholder="No budget"
+									hint={field.hint}
+								/>
+								{anyStreams && field.key === STREAM_LATENCY_NOTE_AFTER && (
+									<p className="text-label leading-relaxed text-muted-foreground">
+										{STREAM_LATENCY_NOTE}
+									</p>
+								)}
+							</Fragment>
 						))}
 
 						{/*
