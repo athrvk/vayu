@@ -100,6 +100,12 @@ class MockUpstream {
         svr.Get ("/events", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("data: one\n\ndata: two\n\n", "text/event-stream");
         });
+        // An origin that itself answers 407, which is not a proxy's to claim.
+        svr.Get ("/origin-407", [] (const httplib::Request&, httplib::Response& res) {
+            res.status = 407;
+            res.set_header ("Proxy-Authenticate", "Basic realm=\"origin\"");
+            res.set_content ("origin says no", "text/plain");
+        });
         svr.Post ("/token", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content (R"({"access_token":"AT-PROXIED","token_type":"Bearer","expires_in":3600})",
             "application/json");
@@ -1284,6 +1290,112 @@ TEST (TransportPolicyErrors, RefusedConnectIsProxyError) {
     EXPECT_EQ (response.error_code, ErrorCode::ProxyError)
     << "got " << to_string (response.error_code) << ": " << response.error_message;
     EXPECT_EQ (proxy.count (), 1u);
+}
+
+/// A policy through a proxy nothing listens on.
+TransportPolicy manual_through_closed_proxy () {
+    TransportPolicy policy;
+    policy.proxy_mode = ProxyMode::Manual;
+    policy.proxy_url  = vayu::tests::closed_loopback_origin ();
+    return policy;
+}
+
+void expect_proxy_error (const Response& response) {
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, ErrorCode::ProxyError)
+    << "got " << to_string (response.error_code) << ": " << response.error_message;
+}
+
+// A refused connect is the proxy's, not the target's, because the target was
+// never dialled (#3257). Mutation check: map `CURLE_COULDNT_CONNECT` to
+// `ConnectionFailed` unconditionally and both cases report CONNECTION_FAILED.
+TEST (TransportPolicyErrors, AProxyThatRefusesTheConnectionIsProxyErrorForAnHttpTarget) {
+    MockUpstream upstream;
+
+    ClientConfig config;
+    config.transport = manual_through_closed_proxy ();
+    Client client (config);
+
+    const auto result = client.send (get_request (upstream.url ("/hello")));
+    ASSERT_TRUE (result.is_ok ());
+    expect_proxy_error (result.value ());
+}
+
+TEST (TransportPolicyErrors, AProxyThatRefusesTheConnectionIsProxyErrorForAnHttpsTarget) {
+    ClientConfig config;
+    config.transport = manual_through_closed_proxy ();
+    Client client (config);
+
+    const auto result =
+    client.send (get_request ("https://vayu-target.invalid/secure"));
+    ASSERT_TRUE (result.is_ok ());
+    expect_proxy_error (result.value ());
+}
+
+TEST (TransportPolicyErrors, AnEnvironmentProxyThatRefusesTheConnectionIsProxyError) {
+    // No `configured_proxy` to ask in this mode: the answer has to come from
+    // libcurl, which is what picked the proxy.
+    MockUpstream upstream;
+    ScopedEnv proxy_env ("http_proxy", vayu::tests::closed_loopback_origin ());
+    ScopedNoProxy bypass_env ("");
+
+    Client client{ ClientConfig{} };
+    const auto result = client.send (get_request (upstream.url ("/hello")));
+    ASSERT_TRUE (result.is_ok ());
+    expect_proxy_error (result.value ());
+}
+
+TEST (TransportPolicyErrors, ARefusedConnectionWithNoProxyStaysTheTargets) {
+    // The other branch of the same mapping: nothing listens on the target.
+    ClientConfig config;
+    config.transport.proxy_mode = ProxyMode::Off;
+    Client client (config);
+
+    const auto result =
+    client.send (get_request (vayu::tests::closed_loopback_origin () + "/hello"));
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().error_code, ErrorCode::ConnectionFailed);
+}
+
+// A forwarding proxy answers an unauthenticated `http://` request with a plain
+// 407 response, which libcurl completes as CURLE_OK. Mutation check: drop the
+// `proxy_authentication_refusal` call in `Client::send` and the first test sees
+// status 407 with no error.
+TEST (TransportPolicyErrors, AForwardingProxysAuthenticationChallengeIsProxyError) {
+    MockUpstream upstream;
+    MockProxy proxy;
+    proxy.refuse_every_request ();
+
+    ClientConfig config;
+    config.transport = manual_through (proxy);
+    Client client (config);
+
+    const auto result = client.send (get_request (upstream.url ("/hello")));
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    expect_proxy_error (response);
+    EXPECT_NE (response.error_message.find ("407"), std::string::npos)
+    << response.error_message;
+    EXPECT_TRUE (response.body.empty ())
+    << "the proxy's page is not the target's body";
+    EXPECT_EQ (proxy.count (), 1u)
+    << "the challenge has to have come from the proxy";
+}
+
+TEST (TransportPolicyErrors, AnOriginsOwn407WithNoProxyStaysAResponse) {
+    MockUpstream upstream;
+
+    ClientConfig config;
+    config.transport.proxy_mode = ProxyMode::Off;
+    Client client (config);
+
+    const auto result =
+    client.send (get_request (upstream.url ("/origin-407")));
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_FALSE (response.has_error ()) << response.error_message;
+    EXPECT_EQ (response.status_code, 407);
+    EXPECT_EQ (response.body, "origin says no");
 }
 
 TEST (TransportPolicyErrors, ProxyErrorHasItsOwnWireName) {

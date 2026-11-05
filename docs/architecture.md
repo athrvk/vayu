@@ -568,8 +568,10 @@ Engine (libcurl) ──▶ [proxy, when configured] ──▶ Target API
 
 `proxyBypass` (curl's `NOPROXY` semantics) exempts hosts from the proxy in
 any proxying mode. A failure of the hop itself - an unresolvable proxy host,
-a refused CONNECT - is reported as its own `PROXY_ERROR`, never as the target's
-`CONNECTION_FAILED`. Cookies are unaffected: libcurl matches them on the origin
+a proxy that is down, a refused CONNECT, a forwarding proxy's 407 on an
+`http://` request - is reported as its own `PROXY_ERROR`, never as the target's
+`CONNECTION_FAILED` or as the server's own answer (a load run still counts that
+407 as a status). Cookies are unaffected: libcurl matches them on the origin
 host, never on the proxy.
 
 The same policy carries **who the engine trusts**. `customCaCertificates` holds

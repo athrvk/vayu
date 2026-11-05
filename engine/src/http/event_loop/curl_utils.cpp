@@ -793,7 +793,8 @@ namespace {
 /// cannot say: curl reports a 4xx answered to a CONNECT as `CURLE_RECV_ERROR`,
 /// the same code an upstream that hung up mid-body produces. The connect code
 /// is the only place the distinction survives, and it is 0 on every transfer
-/// that never issued a CONNECT.
+/// that never issued a CONNECT. Only the refusal of a tunnel: a proxy that is
+/// not listening never answers a CONNECT, and is `proxy_was_used` below.
 bool proxy_refused_tunnel (CURL* curl) {
     if (!curl) {
         return false;
@@ -803,6 +804,22 @@ bool proxy_refused_tunnel (CURL* curl) {
         return false;
     }
     return connect_code >= 400;
+}
+
+/// Whether libcurl routed this transfer through a proxy, whichever way the
+/// proxy was chosen: `CURLINFO_USED_PROXY` is libcurl's own answer, so it
+/// covers the environment mode (where `configured_proxy` has nothing to say,
+/// the variables being libcurl's to read) and a `no_proxy` bypass alike. Null
+/// handle and an unreadable value both read as no proxy.
+bool proxy_was_used (CURL* curl) {
+    if (!curl) {
+        return false;
+    }
+    long used = 0;
+    if (get_info<CURLINFO_USED_PROXY> (curl, &used) != CURLE_OK) {
+        return false;
+    }
+    return used != 0;
 }
 
 namespace {
@@ -1306,7 +1323,8 @@ const ConnectedPeerCheck* peer_check) {
     // came out, and curl spreads that one event across at least two of them
     // (`CURLE_COULDNT_CONNECT` for the refusal, `CURLE_RECV_ERROR` when the
     // tunnel dies after). Deciding from the connect code first means the
-    // mapping does not have to enumerate them.
+    // mapping does not have to enumerate them. A proxy nothing answers is the
+    // other proxy failure, and reads off `CURLE_COULDNT_CONNECT` below.
     if (code != CURLE_OK && proxy_refused_tunnel (curl)) {
         error.code = ErrorCode::ProxyError;
         return error;
@@ -1330,7 +1348,12 @@ const ConnectedPeerCheck* peer_check) {
     case CURLE_COULDNT_RESOLVE_PROXY:
     case CURLE_PROXY: error.code = ErrorCode::ProxyError; break;
     case CURLE_COULDNT_RESOLVE_HOST: error.code = ErrorCode::DnsError; break;
-    case CURLE_COULDNT_CONNECT: error.code = ErrorCode::ConnectionFailed; break;
+    // The code does not say whose connection was refused: with a proxy in
+    // the path, the socket curl could not open is the proxy's, and the
+    // target was never dialled (#3257).
+    case CURLE_COULDNT_CONNECT:
+        error.code = proxy_was_used (curl) ? ErrorCode::ProxyError : ErrorCode::ConnectionFailed;
+        break;
     // The target was reached and then failed the exchange: an empty reply, a
     // reset mid-transfer, a reply that is not HTTP. The target's or the
     // network's doing, never this engine's, so not `InternalError`. The TLS
@@ -1381,6 +1404,22 @@ const ConnectedPeerCheck* peer_check) {
     }
 
     return error;
+}
+
+std::optional<Error> proxy_authentication_refusal (CURL* curl, long status) {
+    if (status != 407 || !proxy_was_used (curl)) {
+        return std::nullopt;
+    }
+    // A CONNECT that was answered 2xx means the 407 came through the tunnel,
+    // from the origin; the connect code is 0 on a forwarded plain request.
+    long connect_code = 0;
+    if (get_info<CURLINFO_HTTP_CONNECTCODE> (curl, &connect_code) != CURLE_OK ||
+    connect_code != 0) {
+        return std::nullopt;
+    }
+    return Error{ ErrorCode::ProxyError,
+        "The proxy answered 407 Proxy Authentication Required: check the "
+        "proxy's credentials" };
 }
 
 namespace {

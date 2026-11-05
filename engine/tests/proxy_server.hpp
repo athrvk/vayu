@@ -20,7 +20,10 @@
  * It is not a general-purpose proxy and should not grow into one. It speaks
  * enough of the protocol for these tests and no more: no CONNECT tunnelling
  * (the tunnel case here is a *refusal*, which needs no upstream at all), no
- * keep-alive reuse across targets, no authentication challenge.
+ * keep-alive reuse across targets, and no authentication handshake. The only
+ * challenge it can issue is a flat one: a CONNECT is always answered 407, and
+ * `refuse_every_request` extends the same 407 to a plain forwarded request, the
+ * answer a proxy gives an unauthenticated `http://` request (#3257).
  *
  * `MockTlsProxy` is the same forwarder behind a TLS listener, for an `https://`
  * proxy URL (#2469). It still forwards absolute-form requests to a plain-HTTP
@@ -56,10 +59,11 @@ class ProxyForwarder {
         // routing. Refusing it with a 407 is exactly the shape that used to
         // surface as `INTERNAL_ERROR`: curl reports the refusal as
         // `CURLE_RECV_ERROR` and only `CURLINFO_HTTP_CONNECTCODE` remembers
-        // that a proxy said no.
+        // that a proxy said no. With `refuse_every_request` set, every other
+        // method is refused the same way before it is forwarded.
         server.set_pre_routing_handler (
         [this] (const httplib::Request& req, httplib::Response& res) {
-            if (req.method != "CONNECT") {
+            if (req.method != "CONNECT" && !refusing ()) {
                 return httplib::Server::HandlerResponse::Unhandled;
             }
             record (req.target);
@@ -102,7 +106,20 @@ class ProxyForwarder {
         fixed_origin = std::move (origin);
     }
 
+    /// Answer every request, not only a CONNECT, with `407 Proxy
+    /// Authentication Required` and `Proxy-Authenticate`: a forwarding proxy
+    /// that wants credentials the client did not send.
+    void refuse_every_request () {
+        std::lock_guard<std::mutex> lock (mutex);
+        refuse_all = true;
+    }
+
     private:
+    bool refusing () const {
+        std::lock_guard<std::mutex> lock (mutex);
+        return refuse_all;
+    }
+
     void record (const std::string& target) {
         std::lock_guard<std::mutex> lock (mutex);
         targets.push_back (target);
@@ -197,6 +214,7 @@ class ProxyForwarder {
     mutable std::mutex mutex;
     std::vector<std::string> targets;
     std::string fixed_origin;
+    bool refuse_all = false;
 };
 
 class MockProxy {
@@ -243,12 +261,30 @@ class MockProxy {
         forwarder.forward_every_target_to (std::move (origin));
     }
 
+    /// See `ProxyForwarder::refuse_every_request`.
+    void refuse_every_request () {
+        forwarder.refuse_every_request ();
+    }
+
     private:
     ProxyForwarder forwarder;
     httplib::Server svr;
     std::thread thread;
     int port = 0;
 };
+
+/// An `http://127.0.0.1:port` origin nothing listens on: a port a listener held
+/// a moment ago and released, so a connect to it is refused. As a proxy URL it
+/// is a proxy that is down; as a target, a server that is.
+inline std::string closed_loopback_origin () {
+    httplib::Server probe;
+    const int port = probe.bind_to_any_port ("127.0.0.1");
+    std::thread runner ([&probe] () { probe.listen_after_bind (); });
+    probe.wait_until_ready ();
+    probe.stop ();
+    runner.join ();
+    return "http://127.0.0.1:" + std::to_string (port);
+}
 
 /**
  * @brief A forwarding proxy that speaks TLS to its client, its certificate

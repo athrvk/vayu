@@ -1187,13 +1187,39 @@ rejected under any mode; a *valid* URL stored while the mode is `off` is kept
 untouched, which is how a proxy is switched off temporarily without losing it.
 
 A failure of the proxy hop is reported as its own error code, `PROXY_ERROR`,
-rather than as the target's: an unresolvable proxy hostname (previously
-`CONNECTION_FAILED`, which sent people debugging an endpoint that was never
-reached), a SOCKS handshake failure, and a `4xx` answered to a `CONNECT` -
-including the `407` a proxy demanding authentication returns, which curl
-reports as a generic receive error and which previously surfaced as
-`INTERNAL_ERROR`. The code is **appended** to the error enumeration, so the
-numeric values stored in existing traces are unchanged.
+rather than as the target's:
+
+- an unresolvable proxy hostname (previously `CONNECTION_FAILED`, which sent
+  people debugging an endpoint that was never reached);
+- a proxy that is down, so connecting to *it* is refused (#3257). The refused
+  socket is the proxy's whatever the target is, and the target was never
+  dialled. This holds in every mode, `environment` included, because the
+  decision reads libcurl's own record that a proxy was in the path
+  (`CURLINFO_USED_PROXY`) and not the configured URL; the same refusal with no
+  proxy in the path stays the target's `CONNECTION_FAILED`;
+- a SOCKS handshake failure;
+- a `4xx` answered to a `CONNECT`, which an `https://` target makes the proxy
+  see - including the `407` a proxy demanding authentication returns, which
+  curl reports as a generic receive error and which previously surfaced as
+  `INTERNAL_ERROR`;
+- a forwarding proxy's `407` on a plain `http://` request (#3257), which needs
+  no `CONNECT` and so comes back as an ordinary response that read as the
+  server's own answer. `POST /execute` (and the other single-request sends:
+  the connection test, `pm.sendRequest`, the OAuth token fetch, the import
+  fetch) reports it as `PROXY_ERROR` with status `0` and the message "The proxy
+  answered 407 Proxy Authentication Required: check the proxy's credentials".
+  A `407` is the proxy's only when a proxy carried the transfer and no tunnel
+  stands between the engine and the server: a `407` a server sends directly,
+  or through an established `CONNECT` tunnel, stays a response with its status.
+
+**A load run keeps counting a proxy's `407` as a status**, as it does any
+other status the proxy returns on a forwarded `http://` request: the load path
+does not reinterpret completed transfers, so the run's status distribution
+shows the `407`s and its error counts do not. A proxy that is down is
+`PROXY_ERROR` there too, since that mapping reads the failed transfer.
+
+The code is **appended** to the error enumeration, so the numeric values stored
+in existing traces are unchanged.
 
 Two more failures of the *target's answer* have their own codes
 (issue #2462): `TOO_MANY_REDIRECTS`, when the server redirected past the
@@ -5899,12 +5925,12 @@ never named and report its proxy and certificate as this one's) and a fixed
 
 | Field | Meaning |
 |-------|---------|
-| `outcome` | `ok`, `proxy_failed`, `tls_failed`, `timed_out` or `failed`. Deliberately coarser than `ErrorCode`: these are the answers that lead a reader to a different setting. |
+| `outcome` | `ok`, `proxy_failed`, `tls_failed`, `timed_out` or `failed`. Deliberately coarser than `ErrorCode`: these are the answers that lead a reader to a different setting. `proxy_failed` covers every `PROXY_ERROR`: an unresolvable or down proxy, a refused `CONNECT`, and a forwarding proxy's `407` on an `http://` target. |
 | `proxy.mode` | The `proxyMode` in force. Always present. |
 | `proxy.url` | The proxy that was used, **absent when the engine does not know it** - every `environment`-mode test, since libcurl reads those variables itself. Absent means "not the engine's to say", never "no proxy". |
 | `clientCertificate` | The registry entry that answered for this host, `""` when none did. Always present, like `POST /execute`'s. |
 | `status` | The status line. Present only on `ok`. |
-| `errorCode` / `detail` | The engine's `ErrorCode` spelling and libcurl's own message. Absent on `ok`. |
+| `errorCode` / `detail` | The engine's `ErrorCode` spelling and the message: libcurl's own, or for a forwarding proxy's `407` on an `http://` target (#3257) the engine's sentence naming the proxy. Absent on `ok`. |
 
 **A failed connection is a `200`.** The test succeeded in answering; only a
 malformed body or a URL that is not `http`/`https` is a `400`.

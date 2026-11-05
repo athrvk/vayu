@@ -209,6 +209,50 @@ TEST (ConnectionTest, ReportsAnUnresolvableProxyAsAProxyFailure) {
     EXPECT_EQ (body["errorCode"].get<std::string> (), "PROXY_ERROR");
 }
 
+TEST (ConnectionTest, ReportsAForwardingProxysChallengeAsAProxyFailure) {
+    // An http:// target needs no CONNECT, so a proxy that wants credentials
+    // answers the probe itself with a plain 407, which is `ok` with status 407
+    // unless the client attributes it to the proxy (#3257). Mutation check:
+    // drop `proxy_authentication_refusal` from `Client::send` and this reads
+    // `ok`.
+    MockProxy proxy;
+    proxy.refuse_every_request ();
+    TransportPolicy policy;
+    policy.proxy_mode = ProxyMode::Manual;
+    policy.proxy_url  = proxy.url ();
+
+    auto [status, body] =
+    connection_test (test_body ("http://example.invalid/x"), policy);
+
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body["outcome"].get<std::string> (), "proxy_failed");
+    EXPECT_EQ (body["errorCode"].get<std::string> (), "PROXY_ERROR");
+    EXPECT_NE (body["detail"].get<std::string> ().find ("407"), std::string::npos)
+    << body["detail"].get<std::string> ();
+    EXPECT_FALSE (body.contains ("status"));
+    EXPECT_GE (proxy.count (), 1u)
+    << "the challenge has to have come from the proxy";
+}
+
+TEST (ConnectionTest, ReportsAProxyThatIsDownAsAProxyFailure) {
+    // Nothing listens on the proxy's port. The refused socket is the proxy's,
+    // and the target (reachable or not) was never dialled; reported as the
+    // target's `failed` it sent users to a server that was fine (#3257).
+    // Mutation check: map `CURLE_COULDNT_CONNECT` to `ConnectionFailed`
+    // unconditionally and both targets read `failed`.
+    TransportPolicy policy;
+    policy.proxy_mode = ProxyMode::Manual;
+    policy.proxy_url  = vayu::tests::closed_loopback_origin ();
+
+    for (const char* target : { "http://example.invalid/x", "https://example.invalid/x" }) {
+        auto [status, body] = connection_test (test_body (target), policy);
+
+        EXPECT_EQ (status, 200) << target;
+        EXPECT_EQ (body["outcome"].get<std::string> (), "proxy_failed") << target;
+        EXPECT_EQ (body["errorCode"].get<std::string> (), "PROXY_ERROR") << target;
+    }
+}
+
 TEST (ConnectionTest, CarriesTheClientCertificateKeyOnEveryAnswer) {
     // Sent always, "" included, the same way POST /execute sends it: a caller
     // can then tell "no certificate was used" from "this engine cannot say".

@@ -627,6 +627,34 @@ TEST (CurlToError, ATargetsVerificationFailureDoesNotBlameTheProxy) {
     curl_easy_cleanup (curl);
 }
 
+// A refused connect is the target's unless a proxy was in the path (#3257). A
+// fresh handle reads `CURLINFO_USED_PROXY` as 0, so it and a null handle are
+// the no-proxy half; the proxy half needs a transfer and lives in
+// transport_policy_test.cpp (`TransportPolicyErrors`). Mutation-check: map
+// CURLE_COULDNT_CONNECT to ProxyError unconditionally and this fails.
+TEST (CurlToError, ARefusedConnectWithNoProxyBehindItIsTheTargets) {
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    const vayu::http::CurlErrorBuffer errors;
+    for (CURL* handle : { static_cast<CURL*> (nullptr), curl }) {
+        EXPECT_EQ (curl_to_error (handle, CURLE_COULDNT_CONNECT, errors).code,
+        vayu::ErrorCode::ConnectionFailed);
+    }
+    curl_easy_cleanup (curl);
+}
+
+// A 407 is the proxy's only when a proxy carried the transfer; without one
+// there is nobody else's to blame, and a null handle cannot say.
+TEST (ProxyAuthenticationRefusal, NeedsAProxyInThePath) {
+    CURL* curl = curl_easy_init ();
+    ASSERT_NE (curl, nullptr);
+    for (CURL* handle : { static_cast<CURL*> (nullptr), curl }) {
+        EXPECT_FALSE (vayu::http::detail::proxy_authentication_refusal (handle, 407))
+        << "a direct 407 is the origin's";
+    }
+    curl_easy_cleanup (curl);
+}
+
 // ============================================================================
 // curl_transfer_attempted - which failures reached the network (#2412)
 // ============================================================================
