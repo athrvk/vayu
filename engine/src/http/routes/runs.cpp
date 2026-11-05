@@ -2600,7 +2600,8 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             // Waited on rather than answered immediately, so the caller is
             // told what actually happened - the same budget the load path
             // gives a graceful stop. A transfer notices within one progress
-            // callback, so this all but always settles at once.
+            // callback; `closed()` then waits for the post-request script
+            // and the row write too (#3239), so a slow script can outlast it.
             auto stream = ctx.sse_manager.get (run_id);
             const auto deadline =
             std::chrono::steady_clock::now () + std::chrono::seconds (5);

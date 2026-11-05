@@ -148,13 +148,22 @@ SseStreamContext::EventBatch SseStreamContext::events_since (std::size_t from) c
     return { { begin_it, ring_.end () }, end };
 }
 
+void SseStreamContext::record_end (SseEndReason reason) {
+    std::lock_guard<std::mutex> lock (mutex_);
+    if (!end_reason_) {
+        end_reason_ = reason;
+    }
+}
+
 void SseStreamContext::close (SseEndReason reason) {
     {
         std::lock_guard<std::mutex> lock (mutex_);
         if (closed_.load (std::memory_order_acquire)) {
             return;
         }
-        end_reason_ = reason;
+        if (!end_reason_) {
+            end_reason_ = reason;
+        }
     }
     completed_at_ms_.store (now_ms (), std::memory_order_release);
     // Released last, so a relay that observes `closed` also observes the reason
@@ -164,7 +173,7 @@ void SseStreamContext::close (SseEndReason reason) {
 
 SseEndReason SseStreamContext::end_reason () const {
     std::lock_guard<std::mutex> lock (mutex_);
-    return end_reason_;
+    return end_reason_.value_or (SseEndReason::Completed);
 }
 
 std::vector<nlohmann::json> SseStreamContext::stored_events () const {
@@ -473,7 +482,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     if (auto invalid = detail::validate_transferable (request.request)) {
         vayu::Response refused  = detail::error_response (*invalid);
         refused.request_headers = request.request.headers;
-        context.close (SseEndReason::Error);
+        context.record_end (SseEndReason::Error);
         return refused;
     }
 
@@ -482,7 +491,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         vayu::Response failed = detail::error_response (
         vayu::Error{ vayu::ErrorCode::InternalError, "Failed to initialize curl" });
         failed.request_headers = request.request.headers;
-        context.close (SseEndReason::Error);
+        context.record_end (SseEndReason::Error);
         return failed;
     }
 
@@ -635,7 +644,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     }
 
     curl_easy_cleanup (curl);
-    context.close (reason);
+    context.record_end (reason);
     return response;
 }
 
@@ -661,6 +670,45 @@ void log_unrecoverable (std::string_view what, std::string_view detail) noexcept
         // @deliberate the logger failed while reporting a failure in a frame
         // that terminates if anything escapes it. There is nowhere left to
         // report to, and dropping the message is this handler's whole job.
+    }
+}
+
+/// Run the transfer, then hand its result to `on_complete`. A failure in
+/// either is logged rather than thrown: the run must still reach a terminal
+/// state, and the worker has no handler above it to do that.
+void consume_and_record (const SseStreamRequest& spec, SseStreamContext& context) {
+    vayu::Response response;
+    try {
+        response = consume_sse_stream (spec, context);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error (
+        "http", "SSE stream failed: " + context.run_id + ": " + e.what ());
+        response.status_code   = 0;
+        response.status_text   = vayu::http::status_text (0);
+        response.error_code    = vayu::ErrorCode::InternalError;
+        response.error_message = e.what ();
+        context.record_end (SseEndReason::Error);
+    }
+    if (!spec.on_complete) {
+        return;
+    }
+    try {
+        spec.on_complete (spec.request, response, context);
+    } catch (const std::exception& e) {
+        vayu::utils::log_error ("http",
+        "Failed to record SSE stream result: " + context.run_id + ": " + e.what ());
+    }
+}
+
+/// Close @p context on every path the worker takes, after the result is stored
+/// or has failed to be: an open context strands its relay and holds
+/// `POST /runs/:id/stop` for its whole budget. `Error` is only the fallback for
+/// a stream that never recorded its end.
+void close_after_recording (SseStreamContext& context) noexcept {
+    try {
+        context.close (SseEndReason::Error);
+    } catch (...) {
+        log_unrecoverable ("SSE stream close failed", context.run_id);
     }
 }
 
@@ -733,38 +781,19 @@ std::shared_ptr<SseStreamContext> SseStreamManager::start (SseStreamRequest requ
     stream.worker = std::thread ([context, spec = std::move (request)] () mutable {
         // The outermost frame this thread has: `std::thread` calls
         // `std::terminate` if its entry function throws. The inner handlers
-        // below recover the *stream*, and each of them allocates while doing
-        // so, so a second failure raised inside one of them would escape by
-        // exactly the route they exist to close. This stays whether or not the
-        // linter asks for it.
+        // recover the *stream*, and each of them allocates while doing so, so
+        // a second failure raised inside one of them would escape by exactly
+        // the route they exist to close. This stays whether or not the linter
+        // asks for it.
         try {
-            vayu::Response response;
-            try {
-                response = consume_sse_stream (spec, *context);
-            } catch (const std::exception& e) {
-                // A worker thread has no handler above it, and a stream that
-                // threw must still reach a terminal state or its run is
-                // stranded running forever.
-                vayu::utils::log_error ("http",
-                "SSE stream failed: " + context->run_id + ": " + e.what ());
-                response.status_code   = 0;
-                response.status_text   = vayu::http::status_text (0);
-                response.error_code    = vayu::ErrorCode::InternalError;
-                response.error_message = e.what ();
-                context->close (SseEndReason::Error);
-            }
-            if (spec.on_complete) {
-                try {
-                    spec.on_complete (spec.request, response, *context);
-                } catch (const std::exception& e) {
-                    vayu::utils::log_error ("http",
-                    "Failed to record SSE stream result: " + context->run_id +
-                    ": " + e.what ());
-                }
-            }
+            consume_and_record (spec, *context);
         } catch (...) {
             log_unrecoverable ("SSE stream worker failed unrecoverably", context->run_id);
         }
+        // After the run row is written, so `event: complete` means the report
+        // already holds the result (#3239), and outside the `try`, so a failure
+        // above still ends the relay.
+        close_after_recording (*context);
     });
     return context;
 }

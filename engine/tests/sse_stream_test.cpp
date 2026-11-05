@@ -28,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -500,7 +501,8 @@ TEST (SseConsumer, RelaysAScriptedStreamAndEndsOnServerClose) {
 
     EXPECT_EQ (response.status_code, 200);
     EXPECT_FALSE (response.has_error ());
-    EXPECT_TRUE (context.closed ());
+    // Recorded, not closed: closing is the owner's, once the result is stored.
+    EXPECT_FALSE (context.closed ());
     EXPECT_EQ (context.end_reason (), SseEndReason::Completed);
     EXPECT_EQ (context.total_events (), 3);
 
@@ -604,7 +606,7 @@ TEST (SseConsumer, AnUnreachableHostIsAFailedRunNotAThrow) {
     // Failed, but a transfer ran: its timing is a measurement (#2384).
     EXPECT_TRUE (response.transfer_attempted);
     EXPECT_EQ (context.end_reason (), SseEndReason::Error);
-    EXPECT_TRUE (context.closed ());
+    EXPECT_FALSE (context.closed ());
 }
 
 // A handshake that never finishes is the connect bound, min(timeout, 30s), and
@@ -785,6 +787,23 @@ TEST (SseRing, TheFirstEndReasonWins) {
     << "a close that followed a cap rewrote why the stream ended";
 }
 
+// A recorded end is readable before the close and survives it: the completion
+// callback reads it while the context is still open (#3239).
+TEST (SseRing, ARecordedEndIsReadBeforeTheCloseAndWinsOverIt) {
+    SseStreamContext context ("run_test", vayu::http::SseLimits{});
+    context.record_end (SseEndReason::Idle);
+    context.record_end (SseEndReason::Completed);
+    EXPECT_EQ (context.end_reason (), SseEndReason::Idle);
+    EXPECT_FALSE (context.closed ());
+    EXPECT_EQ (context.completed_at_ms (), 0);
+
+    context.close (SseEndReason::Error);
+    EXPECT_TRUE (context.closed ());
+    EXPECT_NE (context.completed_at_ms (), 0);
+    EXPECT_EQ (context.end_reason (), SseEndReason::Idle)
+    << "the close's fallback replaced the end the stream recorded";
+}
+
 TEST (SseRing, DisclosesATruncatedEventInBand) {
     SseStreamContext context ("run_test", vayu::http::SseLimits{});
     vayu::http::SseEvent event;
@@ -915,12 +934,11 @@ TEST (SseStreamManagerTest, TearsDownWithAStreamStillRunning) {
 }
 
 // The ordering contract every owner runs on (#646): `shutdown()` does not
-// return until each worker has finished - callback included. `closed()` flips
-// at the end of the transfer, with the completion callback still to run, so a
-// drain that waited on the context rather than joining the thread would return
-// while the worker was still inside `on_complete`, writing through a `Database`
-// its owner is about to destroy. That is the intermittent segfault this test
-// exists to keep fixed.
+// return until each worker has finished - callback included. Joining is the
+// drain; `closed()` is not, since the worker is still on its stack when it
+// flips. A drain that returned early would leave the worker writing through a
+// `Database` its owner is about to destroy, the intermittent segfault this
+// test exists to keep fixed.
 TEST (SseStreamManagerTest, ShutdownJoinsEveryWorkerAndIsTerminalAndIdempotent) {
     StreamServer server;
     SseStreamManager manager;
@@ -968,6 +986,79 @@ TEST (SseStreamManagerTest, SweepsOnlyFinishedStreamsPastTheirRetention) {
     EXPECT_EQ (manager.get ("run_test"), nullptr);
 }
 
+// The context closes only once `on_complete` has returned, so a relay cannot
+// write `event: complete` before the run row exists, and the callback already
+// reads the true end reason (#3239). Stopped rather than a server close,
+// because `Completed` is also what an unrecorded end reads as. Mutation check:
+// close the context in `consume_sse_stream` again and `closed()` is true while
+// the callback is held.
+TEST (SseStreamManagerTest, ClosesOnlyAfterTheCompletionCallbackReturns) {
+    StreamServer server;
+    SseStreamManager manager;
+    std::atomic<bool> entered{ false };
+    std::atomic<bool> release{ false };
+    std::atomic<bool> closed_inside{ true };
+    std::atomic<SseEndReason> reason_inside{ SseEndReason::Completed };
+
+    auto spec        = spec_for (server.url ("/endless"), brisk_limits ());
+    spec.on_complete = [&] (const vayu::Request&, const vayu::Response&,
+                       const SseStreamContext& context) {
+        closed_inside.store (context.closed ());
+        reason_inside.store (context.end_reason ());
+        entered.store (true);
+        // Bounded, so a failed assertion below cannot leave the manager's
+        // destructor joining a worker that waits forever.
+        (void)vayu::tests::wait_until ([&] () { return release.load (); });
+    };
+    auto context = manager.start (std::move (spec));
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return context->total_events () >= 1; }));
+    ASSERT_TRUE (manager.request_stop ("run_test"));
+
+    ASSERT_TRUE (vayu::tests::wait_until ([&] () { return entered.load (); }));
+    EXPECT_FALSE (context->closed ())
+    << "the context closed while the completion callback was still running";
+    EXPECT_EQ (context->completed_at_ms (), 0);
+    EXPECT_FALSE (closed_inside.load ());
+    EXPECT_EQ (reason_inside.load (), SseEndReason::Stopped);
+
+    release.store (true);
+    ASSERT_TRUE (vayu::tests::wait_until ([&] () { return context->closed (); }));
+    EXPECT_EQ (context->end_reason (), SseEndReason::Stopped);
+}
+
+// A completion callback that throws must not leave the context open: the relay
+// would never end and `POST /runs/:id/stop` would wait out its budget. One
+// `std::exception` and one that is not, since they unwind through different
+// handlers. Mutation check: move the close into the worker's `try` and the
+// non-standard throw never closes.
+TEST (SseStreamManagerTest, AThrowingCompletionCallbackStillCloses) {
+    StreamServer server ({ "data: a\n\n" });
+    SseStreamManager manager;
+
+    auto standard        = spec_for (server.url ("/scripted"), brisk_limits ());
+    standard.run_id      = "run_standard";
+    standard.on_complete = [] (const vayu::Request&, const vayu::Response&,
+                           const SseStreamContext&) {
+        throw std::runtime_error ("the row could not be written");
+    };
+    auto other        = spec_for (server.url ("/scripted"), brisk_limits ());
+    other.run_id      = "run_other";
+    other.on_complete = [] (const vayu::Request&, const vayu::Response&,
+                        const SseStreamContext&) { throw 42; };
+
+    for (auto* spec : { &standard, &other }) {
+        const std::string run_id = spec->run_id;
+        auto context             = manager.start (std::move (*spec));
+        ASSERT_NE (context, nullptr) << run_id;
+        EXPECT_TRUE (
+        vayu::tests::wait_until ([&] () { return context->closed (); }))
+        << run_id << " never closed after its callback threw";
+        EXPECT_EQ (context->end_reason (), SseEndReason::Completed) << run_id;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The relay
 // ---------------------------------------------------------------------------
@@ -999,10 +1090,9 @@ class RelayTest : public ::testing::Test {
         if (thread_.joinable ()) {
             thread_.join ();
         }
-        // Before `db_`, always (#646). A stream worker outlives the test body -
-        // `closed()` flips at the end of the transfer, with the completion
-        // callback still to run - and it writes through `*db_`, so resetting
-        // the database first is a use-after-free that only shows up as an
+        // Before `db_`, always (#646). A stream worker can outlive the test
+        // body - only joining it proves it has left `*db_` - so resetting the
+        // database first is a use-after-free that only shows up as an
         // intermittent segfault under load. Same order as InboxListenerTest,
         // and the order `Server::stop()` holds in production.
         manager_.reset ();
@@ -2072,6 +2162,39 @@ TEST_F (StreamExecuteTest, AnAuthFailureReplyCarriesNoEngineMs) {
         EXPECT_FALSE (body["timing"].contains ("engineMs")) << body.dump (2);
     }
     EXPECT_FALSE (latest_design_trace ().contains ("engineMs"));
+}
+
+// The relay's `event: complete` is the app's one cue to read the report, so it
+// must mean the run row and trace are stored (#3239). The post-request script
+// spins so that the window between the transfer's end and the row write is
+// wide; the report is read once, unpolled, the moment the relay ends. Healthy:
+// one result, run terminal. Mutation check: close the context in
+// `consume_sse_stream` again and the relay ends while the script still spins,
+// leaving no result and the run `running`.
+TEST_F (StreamExecuteTest, TheCompleteFrameMeansTheReportIsStored) {
+    constexpr int POST_SCRIPT_MS = 500;
+    serve (2);
+    const auto run_id = start (json{ { "elements",
+    script_elements ("", "console.log ('stored');" + busy_script (POST_SCRIPT_MS)) } });
+    ASSERT_FALSE (run_id.empty ());
+
+    httplib::Client relay ("127.0.0.1", port_);
+    relay.set_read_timeout (20, 0);
+    const auto events = relay.Get ("/runs/" + run_id + "/events");
+    ASSERT_TRUE (events);
+    ASSERT_EQ (events->status, 200);
+    ASSERT_NE (events->body.find ("event: complete"), std::string::npos)
+    << events->body;
+
+    auto [status, report] = vayu::http::routes::run_report_response (*db_, run_id);
+    ASSERT_EQ (status, 200) << report.dump (2);
+    EXPECT_EQ (report["results"].size (), 1u) << report.dump (2);
+    EXPECT_EQ (report["metadata"]["status"], "completed") << report.dump (2);
+
+    const auto trace = latest_design_trace ();
+    ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
+    ASSERT_FALSE (trace["scripts"]["consoleLogs"].empty ()) << trace.dump (2);
+    EXPECT_EQ (trace["scripts"]["consoleLogs"][0]["message"], "stored");
 }
 
 // ---------------------------------------------------------------------------
