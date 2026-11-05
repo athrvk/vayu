@@ -52,7 +52,8 @@ struct ThresholdMetric {
     /// means always yes: the error rate and throughput are 0/0-safe already
     /// (see `measured_error_rate`, and a starved throughput floor already
     /// fails on its own). A latency percentile needs a real completion to
-    /// mean anything, so it is not evaluated when the run recorded none.
+    /// mean anything, so it is not evaluated when the run recorded none; a
+    /// stream budget likewise needs the run to have streamed.
     bool (*has_data) (const RunSummaryInputs&);
     /// The populations an evaluated check carries onto the report, for a
     /// metric judged from more than one; `nullptr` for every other metric.
@@ -104,9 +105,33 @@ const RunSummaryInputs& inputs) {
     return inputs.assertions;
 }
 
+/// The report's `stream.timeToFirstEvent.p95` (#3234).
+double measured_first_event_p95 (const RunSummaryInputs& inputs) {
+    const auto& stream = inputs.stream;
+    return stream ? stream->time_to_first_event.p95 : 0.0;
+}
+
+/// A run with no `stream` section measured no stream at all.
+bool stream_data_present (const RunSummaryInputs& inputs) {
+    return inputs.stream.has_value ();
+}
+
+/// A stream section can still hold no timed first event: every stream stayed
+/// silent, or its only event was a frame the close completed.
+bool first_event_data_present (const RunSummaryInputs& inputs) {
+    const auto& stream = inputs.stream;
+    return stream && stream->time_to_first_event.count > 0;
+}
+
+/// The report's `stream.eventsPerSecond`, through the same derivation.
+double measured_events_per_second (const RunSummaryInputs& inputs) {
+    const auto& stream = inputs.stream;
+    return stream ? stream->events_per_second (inputs.test_duration_s) : 0.0;
+}
+
 /// Every budget a run may declare, in the order the report lists them.
-const std::array<ThresholdMetric, 6>& metrics () {
-    static const std::array<ThresholdMetric, 6> table = { {
+const std::array<ThresholdMetric, 8>& metrics () {
+    static const std::array<ThresholdMetric, 8> table = { {
     { "latencyP50Ms", "p50 latency", Direction::AtMost, 0.0, false, MAX_LATENCY_BUDGET_MS,
     "greater than 0 and at most 86400000", "It is a latency ceiling in milliseconds.",
     [] (const RunSummaryInputs& in) { return in.latency.p50; },
@@ -127,6 +152,14 @@ const std::array<ThresholdMetric, 6>& metrics () {
     { "maxAssertionFailureRatePct", "Assertion failure rate", Direction::AtMost, 0.0,
     true, 100.0, "between 0 and 100", "It is a percentage of this run's assert.* and pm.test outcomes.",
     measured_assertion_failure_rate, assertion_data_present, assertion_populations },
+    { "streamTimeToFirstEventP95Ms", "Time to first event p95", Direction::AtMost,
+    0.0, false, MAX_LATENCY_BUDGET_MS, "greater than 0 and at most 86400000",
+    "It is a ceiling in milliseconds on a stream's wait for its first event.",
+    measured_first_event_p95, first_event_data_present, nullptr },
+    { "streamEventsPerSecondMin", "Events per second", Direction::AtLeast, 0.0,
+    false, MAX_THROUGHPUT_BUDGET_RPS, "greater than 0 and at most 1000000000",
+    "It is a floor on a streaming run's delivered events per second.",
+    measured_events_per_second, stream_data_present, nullptr },
     } };
     return table;
 }

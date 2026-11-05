@@ -8959,6 +8959,8 @@ its report has no such section at all.
     "maxErrorRatePct": 0.1,    // ceiling, percent of the run's requests; 0-100
     "minThroughputRps": 10000, // floor, completed requests per second; > 0
     "maxAssertionFailureRatePct": 0, // ceiling, percent of failed assertions, the worse population; 0-100
+    "streamTimeToFirstEventP95Ms": 800, // ceiling, ms, streaming runs; > 0 and <= 86400000
+    "streamEventsPerSecondMin": 200,    // floor, events per second, streaming runs; > 0
     "failRun": true            // a missed budget sets status "failed"; default false
   }
 }
@@ -9012,6 +9014,15 @@ percentile, when the run made no assertion at all - a run with no `assert.*`
 element and no test script is unaffected by declaring this budget - and then
 the population keys are absent too, as `actual` is.
 
+`streamTimeToFirstEventP95Ms` and `streamEventsPerSecondMin` (issue #3234)
+judge a streaming run's [`stream`](#get-runsrunidreport) section:
+`timeToFirstEvent.p95` and `eventsPerSecond`, the same figures the report
+prints. Both are unevaluated, and so count toward `failed`, on a run with no
+`stream` section (one that did not stream, or ran with `stream_metrics: false`),
+because a run that streamed nothing measured neither; a floor read as `0`
+there would fail for the wrong reason. The time-to-first-event budget is also
+unevaluated when no completion delivered a timed event.
+
 **Every run mode is judged** (issue #1564): a single-request load run, a
 scenario load run and a **collection** (sequential, design-mode) run all
 evaluate the same `thresholds` block against their own numbers and store the
@@ -9036,7 +9047,7 @@ field as `value`, spelled for a rate metric):
 { "thresholds": { "custom.ttfb2.p95": 50 } } // ceiling, always - >= 0
 ```
 
-Unlike the six fixed keys, this is a dynamic key family: the route checks the
+Unlike the fixed keys, this is a dynamic key family: the route checks the
 shape (`custom.` prefix, a non-empty name, a stat from the list above) and that
 the value is a non-negative number, not that `ttfb2` is a name this run's plan
 actually declares - a `metric.record` on a step the run never reaches, or a
@@ -9051,7 +9062,7 @@ is evaluated with `actual: 0`, which is what lets
 never goes negative: `pm.metrics.counter` throws on a negative or non-finite
 increment, and `metric.record` reports `error` for one and records nothing.
 **Every run mode is judged**, the same
-rule the six fixed keys follow (#1564): `execute_scenario_run` folds
+rule the fixed keys follow (#1564): `execute_scenario_run` folds
 `summary.custom_metrics` into the same `RunSummaryInputs` it evaluates
 thresholds against for a collection (sequential, design-mode) run, not only a
 load run.

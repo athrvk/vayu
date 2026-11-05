@@ -265,6 +265,25 @@ TEST (RunExportMarkdownTest, NamesTheMissedBudgetsWithTheirFigures) {
     << text;
 }
 
+// #3234: the stream budgets read in their own words and units, and the event
+// rate as the floor it is. Mutation check: drop either row from
+// BUDGET_METRICS (run_export_view.cpp) and its expectation fails, on the raw
+// key and, for the floor, on `<=`.
+TEST (RunExportMarkdownTest, NamesTheMissedStreamBudgetsWithTheirUnits) {
+    ordered_json document = read_document ("errors-and-budget-failed");
+    document["report"]["thresholdValidation"]["checks"] = ordered_json::array (
+    { { { "metric", "streamTimeToFirstEventP95Ms" }, { "limit", 500 },
+      { "actual", 812.0 }, { "passed", false }, { "evaluated", true } },
+    { { "metric", "streamEventsPerSecondMin" }, { "limit", 100 },
+    { "actual", 40.0 }, { "passed", false }, { "evaluated", true } } });
+    const std::string text = render_run_export_markdown (document);
+    EXPECT_NE (text.find ("time to first event p95 <= 500 ms missed (812 ms)"),
+    std::string::npos)
+    << text;
+    EXPECT_NE (text.find ("event rate >= 100 events/s missed (40 events/s)"), std::string::npos)
+    << text;
+}
+
 // --- skipped requests (#2911) -----------------------------------------------------------
 
 constexpr std::string_view SKIPPED_ROW_START = "| Skipped requests";

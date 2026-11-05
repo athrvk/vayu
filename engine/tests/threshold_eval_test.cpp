@@ -85,6 +85,8 @@ const std::unordered_map<std::string, std::string>& metric_labels () {
         { "maxErrorRatePct", "Error rate" },
         { "minThroughputRps", "Throughput" },
         { "maxAssertionFailureRatePct", "Assertion failure rate" },
+        { "streamTimeToFirstEventP95Ms", "Time to first event p95" },
+        { "streamEventsPerSecondMin", "Events per second" },
     };
     return labels;
 }
@@ -184,11 +186,12 @@ TEST (ThresholdEval, AThroughputFloorOfZeroIsRejected) {
 TEST (ThresholdEval, EveryKnownBudgetIsAcceptedTogether) {
     nlohmann::json thresholds{ { "latencyP50Ms", 20 }, { "latencyP95Ms", 40 },
         { "latencyP99Ms", 50 }, { "maxErrorRatePct", 0.1 },
-        { "minThroughputRps", 10000 }, { "maxAssertionFailureRatePct", 5 } };
+        { "minThroughputRps", 10000 }, { "maxAssertionFailureRatePct", 5 },
+        { "streamTimeToFirstEventP95Ms", 800 }, { "streamEventsPerSecondMin", 200 } };
     EXPECT_FALSE (validate_thresholds (config_with (thresholds)).has_value ());
     auto outcome = evaluate_thresholds (config_with (thresholds), measured_run ());
     ASSERT_HAS_VALUE (outcome);
-    EXPECT_EQ (outcome->checks.size (), 6u);
+    EXPECT_EQ (outcome->checks.size (), 8u);
 }
 
 // --- The verdict: each budget passes and fails off the run's own numbers ---
@@ -524,6 +527,99 @@ TEST (ThresholdEval, OnlyAnEvaluatedAssertionCheckCarriesPopulations) {
     const auto row = build_threshold_outcome_payload (*unjudged)["checks"][0];
     EXPECT_FALSE (row.contains ("assertionsExact")) << row.dump ();
     EXPECT_FALSE (row.contains ("assertionsSampled")) << row.dump ();
+}
+
+// --- Streaming budgets (issue #3234): the report's `stream` section --------
+
+/// measured_run (), streamed: 19,200 events over 60 s is 320 events/s, and 400
+/// of its 480 streams delivered a timed first event, p95 650 ms.
+RunSummaryInputs streaming_run () {
+    RunSummaryInputs inputs = measured_run ();
+    inputs.test_duration_s  = 60.0;
+    vayu::core::MetricsCollector::StreamTotals stream;
+    stream.completions               = 480;
+    stream.total_events              = 19200;
+    stream.time_to_first_event.count = 400;
+    stream.time_to_first_event.p95   = 650.0;
+    inputs.stream                    = stream;
+    return inputs;
+}
+
+TEST (ThresholdEval, AStreamBudgetOutsideItsRangeIsRejected) {
+    expect_rejected ({ { "streamTimeToFirstEventP95Ms", 0 } }, "streamTimeToFirstEventP95Ms");
+    expect_rejected ({ { "streamTimeToFirstEventP95Ms", 86400001 } },
+    "streamTimeToFirstEventP95Ms");
+    expect_rejected ({ { "streamTimeToFirstEventP95Ms", "fast" } }, "streamTimeToFirstEventP95Ms");
+    expect_rejected ({ { "streamEventsPerSecondMin", 0 } }, "streamEventsPerSecondMin");
+    expect_rejected ({ { "streamEventsPerSecondMin", 1e9 + 1 } }, "streamEventsPerSecondMin");
+    expect_rejected ({ { "streamEventsPerSecondMin", true } }, "streamEventsPerSecondMin");
+}
+
+// A ceiling on the first event's p95, at the boundary a pass. Mutation check:
+// read `time_to_first_event.p50` in `measured_first_event_p95` and the actual
+// reads 0.
+TEST (ThresholdEval, AFirstEventBudgetJudgesTheStreamsP95) {
+    auto pass = only_check (evaluate_thresholds (
+    config_with ({ { "streamTimeToFirstEventP95Ms", 650 } }), streaming_run ()));
+    EXPECT_TRUE (pass.evaluated);
+    EXPECT_DOUBLE_EQ (pass.actual, 650.0);
+    EXPECT_TRUE (pass.passed);
+    EXPECT_FALSE (only_check (
+    evaluate_thresholds (
+    config_with ({ { "streamTimeToFirstEventP95Ms", 649 } }), streaming_run ()))
+    .passed);
+}
+
+// A floor on the rate the report prints, judged the other way round from a
+// ceiling. Mutation check: measure `in.throughput` (500) instead and 321 passes.
+TEST (ThresholdEval, AnEventRateFloorJudgesTheReportedRate) {
+    auto pass = only_check (evaluate_thresholds (
+    config_with ({ { "streamEventsPerSecondMin", 320 } }), streaming_run ()));
+    EXPECT_TRUE (pass.evaluated);
+    EXPECT_DOUBLE_EQ (pass.actual, 320.0);
+    EXPECT_TRUE (pass.passed);
+    EXPECT_FALSE (only_check (
+    evaluate_thresholds (config_with ({ { "streamEventsPerSecondMin", 321 } }), streaming_run ()))
+    .passed);
+}
+
+// A run that did not stream measured neither figure, so neither budget reads
+// a 0 as a measurement: unevaluated, and so failed. Mutation check: make the
+// event rate's `has_data` nullptr and its check reads evaluated with actual 0.
+TEST (ThresholdEval, StreamBudgetsOnARunThatDidNotStreamAreUnevaluated) {
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "streamTimeToFirstEventP95Ms", 800 },
+                         { "streamEventsPerSecondMin", 1 } }),
+    measured_run ());
+    ASSERT_HAS_VALUE (outcome);
+    ASSERT_EQ (outcome->checks.size (), 2u);
+    for (const auto& check : outcome->checks) {
+        EXPECT_FALSE (check.evaluated) << check.metric;
+        EXPECT_FALSE (check.passed) << check.metric;
+    }
+    EXPECT_EQ (outcome->failed, 2u);
+    const auto payload = build_threshold_outcome_payload (*outcome);
+    EXPECT_FALSE (payload["checks"][1].contains ("actual")) << payload.dump ();
+}
+
+// Streams that all stayed silent still have an event rate (0), but no first
+// event to time. Mutation check: reduce `first_event_data_present` to
+// `stream_data_present` and the first check reads evaluated.
+TEST (ThresholdEval, AFirstEventBudgetIsUnevaluatedWhenNoStreamWasTimed) {
+    RunSummaryInputs inputs = streaming_run ();
+    vayu::core::MetricsCollector::StreamTotals silent;
+    silent.completions = 480;
+    inputs.stream      = silent;
+    auto outcome =
+    evaluate_thresholds (config_with ({ { "streamTimeToFirstEventP95Ms", 800 },
+                         { "streamEventsPerSecondMin", 1 } }),
+    inputs);
+    ASSERT_HAS_VALUE (outcome);
+    ASSERT_EQ (outcome->checks.size (), 2u);
+    EXPECT_FALSE (outcome->checks[0].evaluated);
+    EXPECT_TRUE (outcome->checks[1].evaluated);
+    EXPECT_DOUBLE_EQ (outcome->checks[1].actual, 0.0);
+    EXPECT_FALSE (outcome->checks[1].passed);
 }
 
 // --- thresholds.failRun (issue #1497): a flag, not a budget -----------------
