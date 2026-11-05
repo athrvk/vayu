@@ -50,7 +50,7 @@ import { memo, useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
-import { Callout, ExtractorMisses, SentBodyFileNote } from "@/components/shared";
+import { Callout, ExtractorMisses, SentBodyFileNote, UnresolvedTokens } from "@/components/shared";
 import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
@@ -226,6 +226,13 @@ function ScenarioStepCard({
 					 * step then sends that name unresolved.
 					 */}
 					<ExtractorMisses count={step.extractorMisses} className="shrink-0" />
+					{/* The other half of a miss (issue #3269): the names this step
+					    sent as literal `{{text}}`. Distinct names, not sends. */}
+					<UnresolvedTokens
+						count={step.unresolvedTokens}
+						unit="names"
+						className="shrink-0"
+					/>
 				</span>
 			}
 			actions={
