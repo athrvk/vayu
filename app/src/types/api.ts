@@ -925,6 +925,16 @@ export interface StartScenarioRunRequest {
 	 * runner's per-run pass count - a load run reads this one.
 	 */
 	iterations?: number;
+	/**
+	 * Run-level stream caps (#3235), in ms, for a collection run whose stored
+	 * requests include one with `stream` set. They bound each such step and are
+	 * accepted **without** `stream` here; a step that does not stream ignores
+	 * them, and omitted ones fall back to the `sse*` settings cap by cap. Never
+	 * send `stream` on a scenario run: it is a `400`, since the flag belongs to
+	 * each stored request.
+	 */
+	maxStreamDurationMs?: number;
+	maxStreamEvents?: number;
 	scenario: {
 		/**
 		 * The discriminator for a future stored scenario. `"collection"` is the

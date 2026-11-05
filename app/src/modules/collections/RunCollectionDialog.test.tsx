@@ -1905,3 +1905,159 @@ describe("the OAuth 2.0 token guard", () => {
 		});
 	});
 });
+
+describe("the stream caps of a collection with a streaming request (#3235)", () => {
+	const stored = (collectionId: string, stream: boolean) =>
+		({
+			id: `req_${collectionId}_${stream}`,
+			collectionId,
+			stream,
+			url: "https://api.test/events",
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			elements: [],
+			auth: { mode: "none" },
+		}) as unknown as Request;
+	const childCollection = {
+		id: "col_child",
+		name: "Child",
+		parentId: "col_1",
+		elements: [],
+	} as unknown as Collection;
+	const seedStreaming = (collectionId = "col_1") =>
+		requestsByCollection.set(collectionId, [
+			stored(collectionId, false),
+			stored(collectionId, true),
+		]);
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+	const capField = (name: RegExp) => screen.queryByRole("spinbutton", { name });
+	const open = () =>
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+	const run = () => fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+	// Mutation check: pass `isStreamingRequest={false}` back to ProfileFields, or
+	// gate the design-run block on `loadTest`, and the matching case reds.
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("shows both caps on $label when a step streams", ({ load }) => {
+		seedStreaming();
+		open();
+		if (load) enableLoadTest();
+
+		expect(capField(/stop each stream after/i)).toBeInTheDocument();
+		expect(capField(/or after this many events/i)).toBeInTheDocument();
+	});
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("shows neither cap on $label when no step streams", ({ load }) => {
+		requestsByCollection.set("col_1", [stored("col_1", false)]);
+		open();
+		if (load) enableLoadTest();
+
+		expect(capField(/stop each stream after/i)).not.toBeInTheDocument();
+		expect(capField(/or after this many events/i)).not.toBeInTheDocument();
+	});
+
+	it("reads Include nested collections: a streaming step in a sub-collection brings the caps", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		expect(capField(/stop each stream after/i)).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
+		expect(capField(/stop each stream after/i)).toBeInTheDocument();
+	});
+
+	// Mutation check: drop the seconds-to-ms conversion in `scenarioStreamCaps`,
+	// or send them unconditionally, and these two redden.
+	it("sends the typed caps as milliseconds beside the design run, and never `stream`", () => {
+		seedStreaming();
+		open();
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "20" } });
+		fireEvent.change(capField(/or after this many events/i)!, { target: { value: "250" } });
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({ maxStreamDurationMs: 20_000, maxStreamEvents: 250 });
+		expect(payload).not.toHaveProperty("stream");
+		expect(payload).not.toHaveProperty("mode");
+	});
+
+	it("sends the caps on a load run too, beside its profile and never `stream`", () => {
+		seedStreaming();
+		open();
+		enableLoadTest();
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "5" } });
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({ mode: "constant_concurrency", maxStreamDurationMs: 5000 });
+		expect(payload).toHaveProperty("maxStreamEvents");
+		expect(payload).not.toHaveProperty("stream");
+	});
+
+	it.each([{ load: false }, { load: true }])(
+		"sends no cap when no step streams (load test: $load)",
+		({ load }) => {
+			requestsByCollection.set("col_1", [stored("col_1", false)]);
+			open();
+			if (load) enableLoadTest();
+			run();
+
+			const payload = mutate.mock.calls[0][0];
+			expect(payload).not.toHaveProperty("maxStreamDurationMs");
+			expect(payload).not.toHaveProperty("maxStreamEvents");
+			expect(payload).not.toHaveProperty("stream");
+		}
+	);
+
+	// The typed cap outlives the field: turning Include nested collections off
+	// removes the only streaming step. Mutation check: send `scenarioStreamCaps`
+	// unconditionally and this reds.
+	it("does not send a cap typed while a streaming step was in scope once none is", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		fireEvent.change(capField(/or after this many events/i)!, { target: { value: "7" } });
+		fireEvent.click(nested);
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).not.toHaveProperty("maxStreamDurationMs");
+		expect(payload).not.toHaveProperty("maxStreamEvents");
+	});
+
+	// Mutation check: validate the caps whatever `anyStreams` says and the second
+	// half reds; drop the check and the first does.
+	it("refuses an out-of-range cap while the field is on screen, and not once it is hidden", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "0" } });
+
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
+		expect(
+			screen.getByText(/stream duration must be a number from 1 to 86,400/i)
+		).toBeVisible();
+
+		fireEvent.click(nested);
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+	});
+
+	it("still offers no stream budget: the report judges a stream section for a single request only (#3234)", () => {
+		seedStreaming();
+		open();
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
+		expect(screen.queryByLabelText(/time to first event/i)).not.toBeInTheDocument();
+		expect(screen.queryByLabelText(/events per second/i)).not.toBeInTheDocument();
+	});
+});

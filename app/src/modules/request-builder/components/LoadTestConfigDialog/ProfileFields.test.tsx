@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ProfileFields } from "./ProfileFields";
 import { SCENARIO_PROFILE_DEFAULTS } from "./scenarioProfile";
 import { LOAD_TEST_LIMITS } from "@/constants/load-test";
@@ -88,5 +88,36 @@ describe("ProfileFields' fixed-count label", () => {
 			screen.getByRole("spinbutton", { name: "Passes through the sequence" })
 		).toBeTruthy();
 		expect(screen.queryByRole("spinbutton", { name: "Requests" })).toBeNull();
+	});
+});
+
+describe("ProfileFields' stream caps", () => {
+	const renderStream = (isStreamingRequest: boolean, onChange = vi.fn()) =>
+		render(
+			<ProfileFields
+				profile={fixed}
+				onChange={onChange}
+				limits={LOAD_TEST_LIMITS}
+				isStreamingRequest={isStreamingRequest}
+			/>
+		);
+
+	it("shows both caps for a streaming request and edits them as numbers", () => {
+		const onChange = vi.fn();
+		renderStream(true, onChange);
+		fireEvent.change(screen.getByRole("spinbutton", { name: "Stop each stream after" }), {
+			target: { value: "12" },
+		});
+		fireEvent.change(screen.getByRole("spinbutton", { name: "Or after this many events" }), {
+			target: { value: "34" },
+		});
+		expect(onChange).toHaveBeenCalledWith({ streamDuration: 12 });
+		expect(onChange).toHaveBeenCalledWith({ streamMaxEvents: 34 });
+	});
+
+	it("shows neither cap for a request that does not stream", () => {
+		renderStream(false);
+		expect(screen.queryByRole("spinbutton", { name: "Stop each stream after" })).toBeNull();
+		expect(screen.queryByRole("spinbutton", { name: "Or after this many events" })).toBeNull();
 	});
 });
