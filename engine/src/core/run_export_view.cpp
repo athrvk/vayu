@@ -949,17 +949,24 @@ constexpr auto COMPARED_FORMATS = std::to_array<ComparedFormat> ({
 { "summary.totalRequests", "Total requests", format_run_count, "" },
 });
 
-/// `improved`, `regressed` or `unchanged` by the direction the delta carries
-/// (`COMPARED_METRICS`, the app's `deltaVerdict`); a metric one run lacks is
-/// `not compared`, which is not a claim that nothing moved.
+/// `improved` or `regressed` by the direction the delta carries
+/// (`COMPARED_METRICS`, the app's `deltaVerdict`); `unchanged` only for a change
+/// of exactly zero; a metric one run lacks is `not compared`, which is not a
+/// claim that nothing moved. A neutral metric that did move (the request count)
+/// is `-`: it is neither better nor worse, and `unchanged` would contradict the
+/// Change column beside it. This differs on purpose from `deltaVerdict`, which
+/// folds that case into `unchanged` for a colour, not for a sentence.
 std::string delta_word (const ordered& delta) {
     const auto change = number_at (delta, { "delta" });
     if (!change) {
         return "not compared";
     }
-    const std::string direction = text_at (delta, { "direction" });
-    if (*change == 0 || direction == NEUTRAL) {
+    if (*change == 0) {
         return "unchanged";
+    }
+    const std::string direction = text_at (delta, { "direction" });
+    if (direction == NEUTRAL) {
+        return std::string (ABSENT);
     }
     return (direction == LOWER_IS_BETTER) == (*change < 0) ? "improved" : "regressed";
 }
@@ -1757,13 +1764,30 @@ ReportText warning_names (const ordered& names) {
     return listed;
 }
 
+/// Whether @p message already ends with `: ` and every name joined by `, `, as
+/// the engine writes an unresolved-variable warning (`run_manager.cpp`,
+/// `build_run_warnings`). The raw strings are compared, before any escaping, and
+/// only the exact tail counts: a name that merely occurs inside the message does
+/// not, so a message that cites one in passing still gets the list.
+bool message_ends_with_names (const std::string& message, const ordered& names) {
+    std::string tail = ": ";
+    for (std::size_t at = 0; at < names.size (); ++at) {
+        if (!names[at].is_string ()) {
+            return false;
+        }
+        tail += (at == 0 ? "" : ", ") + names[at].get<std::string> ();
+    }
+    return message.ends_with (tail);
+}
+
 ReportText warning_line (const ordered& warning) {
-    ReportText line = user (text_at (warning, { "message" }));
+    const std::string message = text_at (warning, { "message" });
+    ReportText line           = user (message);
     if (const std::string code = text_at (warning, { "code" }); !code.empty ()) {
         line += " (" + user (code) + ")";
     }
     const ordered& names = member (warning, "names");
-    if (names.is_array () && !names.empty ()) {
+    if (names.is_array () && !names.empty () && !message_ends_with_names (message, names)) {
         line += ": " + warning_names (names);
     }
     return line;
