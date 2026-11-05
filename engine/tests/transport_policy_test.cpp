@@ -53,6 +53,7 @@
 #include "step_elements_test_helper.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
+#include "tls_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
@@ -363,20 +364,94 @@ TEST (ProxyUrlValidation, RejectsTheShapesThatAreAlwaysMistakes) {
 // (issue #706)
 // ---------------------------------------------------------------------------
 
-/// A syntactically complete certificate block. Never parsed as a certificate by
-/// anything under test - the validation here is deliberately about PEM shape,
-/// so a body that is only base64-shaped is exactly the right fixture.
-constexpr const char* SAMPLE_CERT =
+/// A certificate OpenSSL parses (#3256): a CA minted for the run, so no
+/// expiry date can turn a test red. Built once, because an RSA key costs
+/// noticeable time and none of these cases cares which key it is.
+const std::string& sample_cert () {
+    static const std::string pem =
+    vayu::tests::TestCertificateAuthority ("Sample CA").pem ();
+    return pem;
+}
+
+/// A block that is PEM-shaped, and base64, and not a certificate.
+constexpr const char* UNPARSEABLE_CERT =
 "-----BEGIN CERTIFICATE-----\n"
 "MIIBkTCB+wIJAJ2Vayu0TESTMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnZh\n"
-"eXUtY2EwHhcNMjYwMTAxMDAwMDAwWhcNMzYwMTAxMDAwMDAwWjARMQ8wDQYDVQQD\n"
 "-----END CERTIFICATE-----\n";
 
 TEST (CaPemValidation, AcceptsACertificateBlock) {
-    EXPECT_FALSE (ca_pem_rejection (SAMPLE_CERT).has_value ());
+    EXPECT_FALSE (ca_pem_rejection (sample_cert ()).has_value ());
     // Two anchors in one paste is the normal corporate shape (root plus the
     // issuing intermediate).
-    EXPECT_FALSE (ca_pem_rejection (std::string (SAMPLE_CERT) + SAMPLE_CERT).has_value ());
+    EXPECT_FALSE (ca_pem_rejection (sample_cert () + sample_cert ()).has_value ());
+}
+
+TEST (CaPemValidation, TheShallowCheckLeavesParsingToTheResolver) {
+    // A stored value with one bad block must still reach the resolver, which
+    // cuts that block out; refusing it here would drop the good ones too.
+    EXPECT_FALSE (ca_pem_rejection (sample_cert () + UNPARSEABLE_CERT).has_value ());
+}
+
+TEST (CaPemParseValidation, AcceptsRealCertificatesWhateverSitsBetweenThem) {
+    EXPECT_FALSE (ca_pem_parse_rejection (sample_cert ()).has_value ());
+    EXPECT_FALSE (ca_pem_parse_rejection ("# corporate root\n" +
+    sample_cert () + "\nsubject=CN=Issuing\n\n" + sample_cert ())
+    .has_value ());
+}
+
+TEST (CaPemParseValidation, AcceptsTheLabelsOpenSslLoadsBesideAPlainBlock) {
+    // `X509 CERTIFICATE` is the pre-RFC spelling and `TRUSTED CERTIFICATE`
+    // carries trust settings; OpenSSL loads both from a bundle file, so
+    // refusing either would narrow what libcurl takes.
+    const auto relabel = [] (std::string pem, const std::string& label) {
+        for (const std::string edge : { "BEGIN ", "END " }) {
+            const std::string plain = "-----" + edge + "CERTIFICATE-----";
+            std::string relabeled   = "-----";
+            relabeled += edge;
+            relabeled += label;
+            relabeled += "-----";
+            pem.replace (pem.find (plain), plain.size (), relabeled);
+        }
+        return pem;
+    };
+    EXPECT_FALSE (ca_pem_parse_rejection (sample_cert () + relabel (sample_cert (), "X509 CERTIFICATE"))
+    .has_value ());
+    EXPECT_FALSE (ca_pem_parse_rejection (
+    sample_cert () + relabel (sample_cert (), "TRUSTED CERTIFICATE"))
+    .has_value ());
+}
+
+TEST (CaPemParseValidation, NamesTheBlockThatDoesNotParse) {
+    const auto second =
+    ca_pem_parse_rejection (sample_cert () + UNPARSEABLE_CERT + sample_cert ());
+    ASSERT_HAS_VALUE (second);
+    EXPECT_EQ (*second, "certificate 2 of 3 does not parse");
+
+    const auto only = ca_pem_parse_rejection (UNPARSEABLE_CERT);
+    ASSERT_HAS_VALUE (only);
+    EXPECT_EQ (*only, "certificate 1 of 1 does not parse");
+
+    // Base64 that is not base64 at all.
+    const auto garbage = ca_pem_parse_rejection (sample_cert () +
+    "-----BEGIN CERTIFICATE-----\n!!not base64!!\n-----END CERTIFICATE-----\n");
+    ASSERT_HAS_VALUE (garbage);
+    EXPECT_EQ (*garbage, "certificate 2 of 2 does not parse");
+}
+
+TEST (CaPemParseValidation, ATruncatedLaterBlockIsNamed) {
+    const auto rejection = ca_pem_parse_rejection (
+    sample_cert () + "-----BEGIN CERTIFICATE-----\nMIIBkTCB+wIJ\n");
+    ASSERT_HAS_VALUE (rejection);
+    EXPECT_EQ (*rejection, "certificate 2 of 2 does not parse");
+}
+
+TEST (CaPemParseValidation, TheShallowRefusalsComeFirst) {
+    const auto key = ca_pem_parse_rejection (
+    "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----\n" + sample_cert ());
+    ASSERT_HAS_VALUE (key);
+    EXPECT_NE (key->find ("private key"), std::string::npos) << *key;
+    EXPECT_EQ (ca_pem_parse_rejection ("  ").value_or (""), "no certificate found");
+    EXPECT_TRUE (ca_pem_parse_rejection ("not a certificate").has_value ());
 }
 
 TEST (CaPemValidation, RejectsWhatIsNotAPemBundle) {
@@ -406,7 +481,7 @@ TEST_F (TransportPolicyDbTest, NoPastedCertificatesMeansNoBundle) {
 }
 
 TEST_F (TransportPolicyDbTest, PastedCertificatesAreMaterializedBesideTheDatabase) {
-    set_config ("customCaCertificates", SAMPLE_CERT);
+    set_config ("customCaCertificates", sample_cert ());
 
     const auto policy = resolve_transport_policy (*db_);
     ASSERT_FALSE (policy.ca_bundle_path.empty ());
@@ -421,7 +496,7 @@ TEST_F (TransportPolicyDbTest, PastedCertificatesAreMaterializedBesideTheDatabas
     std::filesystem::absolute (db_dir.empty () ? std::filesystem::path (".") : db_dir));
 
     const std::string bundle = read_whole_file (policy.ca_bundle_path);
-    EXPECT_NE (bundle.find (SAMPLE_CERT), std::string::npos)
+    EXPECT_NE (bundle.find (sample_cert ()), std::string::npos)
     << "the pasted certificate is not in the bundle curl is pointed at";
 
     // The additive rule of #704, asserted where it is actually enforceable:
@@ -442,20 +517,56 @@ TEST_F (TransportPolicyDbTest, AChangedPasteReachesTheNextTransfer) {
     // The bundle is cached on the content that produced it, because the policy
     // is resolved per transfer. A cache that ignored a settings change would
     // keep verifying against the old anchors until the engine restarted.
-    set_config ("customCaCertificates", SAMPLE_CERT);
+    set_config ("customCaCertificates", sample_cert ());
     const auto first = resolve_transport_policy (*db_);
     ASSERT_FALSE (first.ca_bundle_path.empty ());
 
-    const std::string second_cert = std::string (SAMPLE_CERT) +
-    "-----BEGIN CERTIFICATE-----\nQkJCQkJC\n-----END CERTIFICATE-----\n";
-    set_config ("customCaCertificates", second_cert);
+    const std::string added = vayu::tests::TestCertificateAuthority ("Added CA").pem ();
+    set_config ("customCaCertificates", sample_cert () + added);
     const auto second = resolve_transport_policy (*db_);
     ASSERT_FALSE (second.ca_bundle_path.empty ());
 
     const std::string bundle = read_whole_file (second.ca_bundle_path);
-    EXPECT_NE (bundle.find ("QkJCQkJC"), std::string::npos)
+    EXPECT_NE (bundle.find (added), std::string::npos)
     << "the second paste never reached the file";
     std::filesystem::remove (second.ca_bundle_path);
+}
+
+TEST_F (TransportPolicyDbTest, AStoredBlockThatDoesNotParseIsCutFromTheBundle) {
+    // A value stored before `POST /config` parsed its paste. OpenSSL abandons
+    // a bundle file at its first bad block, so the bad one must not reach the
+    // file - and the good block beside it, and the platform's anchors, must.
+    const std::string good = vayu::tests::TestCertificateAuthority ("Kept CA").pem ();
+    set_config ("customCaCertificates", sample_cert () + UNPARSEABLE_CERT + good);
+
+    const auto policy = resolve_transport_policy (*db_);
+    ASSERT_FALSE (policy.ca_bundle_path.empty ());
+    const std::string bundle = read_whole_file (policy.ca_bundle_path);
+    EXPECT_EQ (bundle.find (UNPARSEABLE_CERT), std::string::npos)
+    << "the unparseable block is still in the file curl loads";
+    EXPECT_NE (bundle.find (sample_cert ()), std::string::npos);
+    EXPECT_NE (bundle.find (good), std::string::npos);
+    if (const std::string anchors = system_ca_bundle_pem (); !anchors.empty ()) {
+        EXPECT_NE (bundle.find (anchors), std::string::npos)
+        << "the platform's anchors were lost with the bad block";
+    }
+    std::filesystem::remove (policy.ca_bundle_path);
+}
+
+TEST_F (TransportPolicyDbTest, AStoredPasteOfOnlyBadBlocksLeavesNoEmptyBundle) {
+    // With no system file to keep, cutting every block would leave a file with
+    // no certificate in it, which CAINFO would then fail every handshake on.
+    set_config ("customCaCertificates", UNPARSEABLE_CERT);
+
+    const auto policy = resolve_transport_policy (*db_);
+    if (system_ca_bundle_pem ().empty ()) {
+        EXPECT_TRUE (policy.ca_bundle_path.empty ());
+        return;
+    }
+    ASSERT_FALSE (policy.ca_bundle_path.empty ());
+    EXPECT_EQ (read_whole_file (policy.ca_bundle_path).find (UNPARSEABLE_CERT),
+    std::string::npos);
+    std::filesystem::remove (policy.ca_bundle_path);
 }
 
 TEST_F (TransportPolicyDbTest, AnUnusablePasteIsNotMaterialized) {

@@ -1004,7 +1004,10 @@ logged as a warning: it means a client skipped composition.
   `SslError`. The bundle is materialised from
   `customCaCertificates` beside the database and **extends** the platform's
   trust: on an OpenSSL build CAINFO is the whole store, so the file is the
-  system anchors plus the user's. A proxy-hop failure is
+  system anchors plus the user's. `POST /config` parses every pasted block
+  (`ca_pem_parse_rejection`, #3256) because OpenSSL abandons the file at the
+  first bad one; the resolver stays on the shallow `ca_pem_rejection` and
+  cuts a bad block out of an already-stored value instead. A proxy-hop failure is
   `ErrorCode::ProxyError`, distinct from the target's `ConnectionFailed`;
   `curl_to_error` takes the handle because only `CURLINFO_HTTP_CONNECTCODE`
   remembers a proxy's 407. The handle answers a second question (#802): an

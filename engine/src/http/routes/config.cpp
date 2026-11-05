@@ -321,9 +321,9 @@ std::string type_rejection (const vayu::db::ConfigEntry& entry, const std::strin
  * the key knows what the text has to be.
  *
  * `customCaCertificates` is rejected at the boundary rather than at handshake
- * time, because a pasted key or a truncated block would otherwise be stored,
- * materialized, and reported as an unrelated verification failure on every
- * request afterwards (issue #706).
+ * time, because a pasted key, a truncated block or a block OpenSSL cannot
+ * parse would otherwise be stored, materialized, and reported as an unrelated
+ * verification failure on every request afterwards (issues #706, #3256).
  *
  * `proxySystemUrl` the app writes from the operating system's answer (issue
  * #708), and the same rule applies to it as to a hand-typed `proxyUrl`: a shape
@@ -342,7 +342,7 @@ std::string key_rejection (const vayu::db::ConfigEntry& entry, const std::string
         }
     }
     if (entry.key == "customCaCertificates" && !value.empty ()) {
-        if (const auto rejection = vayu::http::ca_pem_rejection (value)) {
+        if (const auto rejection = vayu::http::ca_pem_parse_rejection (value)) {
             return "'" + entry.label + "' is not a usable PEM bundle: " + *rejection;
         }
     }

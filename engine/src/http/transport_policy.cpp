@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -27,6 +28,10 @@
 #include <vector>
 
 #include <curl/curl.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 
 #include "vayu/db/database.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -125,6 +130,137 @@ constexpr std::string_view CERT_BEGIN     = "-----BEGIN CERTIFICATE-----";
 constexpr std::string_view CERT_END       = "-----END CERTIFICATE-----";
 constexpr std::string_view KEY_MARKER     = "-----BEGIN PRIVATE KEY-----";
 constexpr std::string_view RSA_KEY_MARKER = "-----BEGIN RSA PRIVATE KEY-----";
+
+/// The labels OpenSSL's certificate reader loads as a certificate, so a paste
+/// holding one beside a plain block is read the way libcurl would read it. The
+/// plain label alone is what makes a paste *look* like a bundle
+/// (`ca_pem_rejection`); the other two only ever appear beside it.
+struct CertificateLabel {
+    std::string_view begin;
+    std::string_view end;
+};
+constexpr std::array<CertificateLabel, 3> CERTIFICATE_LABELS = { {
+{ CERT_BEGIN, CERT_END },
+{ "-----BEGIN X509 CERTIFICATE-----", "-----END X509 CERTIFICATE-----" },
+{ "-----BEGIN TRUSTED CERTIFICATE-----", "-----END TRUSTED CERTIFICATE-----" },
+} };
+
+/// One certificate block's extent in a paste: `[begin, end)`, END line included.
+struct BlockRange {
+    std::size_t begin = 0;
+    std::size_t end   = 0;
+};
+
+/// Where the first certificate block at or after @p from opens, with the label
+/// it carries.
+struct BlockStart {
+    std::size_t begin             = 0;
+    const CertificateLabel* label = nullptr;
+};
+
+std::optional<BlockStart> next_block_start (std::string_view pem, std::size_t from) {
+    std::optional<BlockStart> first;
+    for (const auto& label : CERTIFICATE_LABELS) {
+        const auto at = pem.find (label.begin, from);
+        if (at != std::string_view::npos && (!first || at < first->begin)) {
+            first = BlockStart{ at, &label };
+        }
+    }
+    return first;
+}
+
+/// Every certificate block of @p pem in order, text between them ignored. A
+/// block with no END line runs to the end of the paste and so fails to parse,
+/// which is what it would do for OpenSSL.
+std::vector<BlockRange> certificate_blocks (std::string_view pem) {
+    std::vector<BlockRange> blocks;
+    std::size_t from = 0;
+    while (const auto start = next_block_start (pem, from)) {
+        const auto closing =
+        pem.find (start->label->end, start->begin + start->label->begin.size ());
+        const std::size_t end = closing == std::string_view::npos ?
+        pem.size () :
+        closing + start->label->end.size ();
+        blocks.push_back ({ start->begin, end });
+        from = end;
+    }
+    return blocks;
+}
+
+struct BioFree {
+    void operator() (BIO* bio) const noexcept {
+        BIO_free (bio);
+    }
+};
+struct X509Free {
+    void operator() (X509* certificate) const noexcept {
+        X509_free (certificate);
+    }
+};
+
+/// A callback that answers "no passphrase". OpenSSL's default one prompts on
+/// the terminal, and a certificate block carrying a `Proc-Type: 4,ENCRYPTED`
+/// header would make a route handler wait there.
+int no_passphrase (char* /*buffer*/, int /*size*/, int /*rwflag*/, void* /*user*/) {
+    return -1;
+}
+
+/// Whether OpenSSL reads @p block as a certificate: the parse libcurl's own
+/// load of the bundle file makes, where one block that fails aborts the whole
+/// file. A tolerant `_AUX` read, so the `TRUSTED CERTIFICATE` form loads too.
+bool block_parses (std::string_view block) {
+    if (!std::in_range<int> (block.size ())) {
+        return false;
+    }
+    const std::unique_ptr<BIO, BioFree> bio (
+    BIO_new_mem_buf (block.data (), static_cast<int> (block.size ())));
+    if (!bio) {
+        return false;
+    }
+    const std::unique_ptr<X509, X509Free> certificate (
+    PEM_read_bio_X509_AUX (bio.get (), nullptr, &no_passphrase, nullptr));
+    // A failed read leaves its reasons on this thread's error queue, where an
+    // unrelated TLS call on the same worker would find them.
+    ERR_clear_error ();
+    return certificate != nullptr;
+}
+
+/// 1-based "certificate N of M" for the block at @p index of @p total.
+std::string block_position (std::size_t index, std::size_t total) {
+    return "certificate " + std::to_string (index + 1) + " of " + std::to_string (total);
+}
+
+/**
+ * @p pem with every certificate block that does not parse cut out, each one
+ * logged by position.
+ *
+ * Only a value stored before `POST /config` parsed its paste reaches a block
+ * to cut. It is cut here because OpenSSL aborts loading a bundle file at the
+ * first bad block, and the platform's anchors sit in that file too: one bad
+ * paste would otherwise fail every https send, public hosts included. Text
+ * between blocks, and any block this does not recognise as a certificate, is
+ * kept as pasted.
+ */
+std::string without_unparseable_blocks (const std::string& pem) {
+    const std::vector<BlockRange> blocks = certificate_blocks (pem);
+    const std::string_view text (pem);
+    std::string kept;
+    std::size_t copied = 0;
+    for (std::size_t i = 0; i < blocks.size (); ++i) {
+        const auto [begin, end] = blocks[i];
+        if (block_parses (text.substr (begin, end - begin))) {
+            continue;
+        }
+        kept.append (text.substr (copied, begin - copied));
+        copied = end;
+        vayu::utils::log_warning ("client",
+        "Config 'customCaCertificates': " + block_position (i, blocks.size ()) +
+        " does not parse and is left out of the CA bundle; the rest stay in "
+        "use");
+    }
+    kept.append (text.substr (copied));
+    return kept;
+}
 
 /// Where a Unix build keeps its trust store, for a libcurl whose compiled-in
 /// `cainfo` names no file that exists. Probed in the order curl's own fallback
@@ -284,9 +420,19 @@ const std::filesystem::path& directory) {
             content += '\n';
         }
     }
-    content += pem;
+    content += without_unparseable_blocks (pem);
     if (!content.empty () && content.back () != '\n') {
         content += '\n';
+    }
+    // CAINFO naming a file with no certificate in it fails every handshake, so
+    // a paste whose every block was cut, on a platform with no system file to
+    // keep, is not a bundle (the native store still serves Windows).
+    if (certificate_blocks (content).empty ()) {
+        vayu::utils::log_error (
+        "client", "No certificate in 'customCaCertificates' parses; no custom CA certificates are in use");
+        cached_pem.clear ();
+        cached_path.clear ();
+        return {};
     }
 
     std::filesystem::create_directories (dir, ec);
@@ -709,6 +855,20 @@ std::optional<std::string> ca_pem_rejection (std::string_view pem) {
     }
     if (pem.find (CERT_END, begin + CERT_BEGIN.size ()) == std::string_view::npos) {
         return "a certificate block is not closed by '" + std::string (CERT_END) + "'";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> ca_pem_parse_rejection (std::string_view pem) {
+    if (auto shallow = ca_pem_rejection (pem)) {
+        return shallow;
+    }
+    const std::vector<BlockRange> blocks = certificate_blocks (pem);
+    for (std::size_t i = 0; i < blocks.size (); ++i) {
+        const auto [begin, end] = blocks[i];
+        if (!block_parses (pem.substr (begin, end - begin))) {
+            return block_position (i, blocks.size ()) + " does not parse";
+        }
     }
     return std::nullopt;
 }

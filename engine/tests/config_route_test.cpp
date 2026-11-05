@@ -7,6 +7,10 @@
  * "check the logs" string that surfaces as a bare "HTTP 400".
  */
 
+// First, before anything that includes <httplib.h> (`tls_server.hpp` does): see
+// the header.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -26,6 +30,7 @@
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "tls_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/request_exchange.hpp"
@@ -1169,14 +1174,38 @@ TEST_F (ConfigRouteTest, AConcurrentValidationNeverReadsAStaleProxyModeMidBatch)
 // shows a trust store that looks configured.
 // ---------------------------------------------------------------------------
 
+/// A certificate OpenSSL parses; the route reads every pasted block (#3256).
+std::string real_certificate (const std::string& common_name = "Vayu Test CA") {
+    return vayu::tests::TestCertificateAuthority (common_name).pem ();
+}
+
+/// PEM-shaped, base64, and not a certificate.
+constexpr const char* UNPARSEABLE_CERT =
+"-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n";
+
 TEST_F (ConfigRouteTest, PastedCertificatesAreStored) {
     const nlohmann::json body = { { "entries",
-    { { "customCaCertificates", "-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n" } } } };
+    { { "customCaCertificates", real_certificate () } } } };
     auto [status, response] =
     vayu::http::routes::apply_config_update (*db_, body.dump ());
     ASSERT_EQ (status, 200) << response.dump ();
     EXPECT_NE (db_->get_config_string ("customCaCertificates", "").find ("BEGIN CERTIFICATE"),
     std::string::npos);
+}
+
+TEST_F (ConfigRouteTest, ABlockThatDoesNotParseIs400NamingIt) {
+    // One bad block among good ones: OpenSSL abandons the whole bundle file at
+    // it, so every https send would fail with the platform's anchors gone too.
+    const nlohmann::json body = { { "entries",
+    { { "customCaCertificates",
+    real_certificate ("First CA") + UNPARSEABLE_CERT + real_certificate ("Third CA") } } } };
+    auto [status, response] =
+    vayu::http::routes::apply_config_update (*db_, body.dump ());
+    ASSERT_EQ (status, 400) << response.dump ();
+    EXPECT_NE (response.dump ().find ("certificate 2 of 3 does not parse"), std::string::npos)
+    << response.dump ();
+    EXPECT_TRUE (db_->get_config_string ("customCaCertificates", "").empty ())
+    << "a rejected update must not leave the value behind";
 }
 
 TEST_F (ConfigRouteTest, TextThatHoldsNoCertificateIs400) {
@@ -1204,7 +1233,7 @@ TEST_F (ConfigRouteTest, ClearingTheCertificatesIsAllowed) {
     // Empty is how the setting is turned off, so the PEM rule must not make it
     // impossible to undo a paste.
     const nlohmann::json set = { { "entries",
-    { { "customCaCertificates", "-----BEGIN CERTIFICATE-----\nMIIBkTCB+w==\n-----END CERTIFICATE-----\n" } } } };
+    { { "customCaCertificates", real_certificate () } } } };
     ASSERT_EQ (vayu::http::routes::apply_config_update (*db_, set.dump ()).first, 200);
 
     auto [status, response] = vayu::http::routes::apply_config_update (

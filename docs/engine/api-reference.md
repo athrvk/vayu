@@ -1281,11 +1281,14 @@ reaches the same six outbound paths the proxy settings do.
 
 | Key | Default | Values | Effect |
 |-----|---------|--------|--------|
-| `customCaCertificates` | `""` | PEM text (`text` entry) | Certificate authorities to trust **in addition** to the ones this platform already trusts. Pasted content, not a path: a path breaks when the file moves and cannot be shown back in Settings. `POST /config` refuses text that holds no `-----BEGIN CERTIFICATE-----` block, and names a pasted private key for what it is. |
+| `customCaCertificates` | `""` | PEM text (`text` entry) | Certificate authorities to trust **in addition** to the ones this platform already trusts. Pasted content, not a path: a path breaks when the file moves and cannot be shown back in Settings. `POST /config` refuses text that holds no `-----BEGIN CERTIFICATE-----` block, and names a pasted private key for what it is. It then parses every certificate block with OpenSSL and answers `400` naming the first one that does not, counted from 1 (`certificate 2 of 3 does not parse`); only the parse is asked, never validity or expiry. |
 
 The engine materializes the bundle as `ca-bundle.pem` beside its database and
 points `CURLOPT_CAINFO` at it, rewriting the file only when the setting's
-content changes. **Native trust is preserved** - the mechanism differs by TLS
+content changes. A block that does not parse in a value stored before that
+check is left out of the file and logged (a warning naming the setting and the
+block's position), because OpenSSL abandons a bundle file at its first bad block
+and the platform's anchors would go with it. **Native trust is preserved** - the mechanism differs by TLS
 backend, and each is stated rather than assumed:
 
 | Platform | Backend | What the bundle does |
