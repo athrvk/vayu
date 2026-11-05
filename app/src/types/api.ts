@@ -2492,7 +2492,10 @@ export interface PostmanEnvironmentExportNotes {
 	variablesExported: number;
 	/** Secret values written as `""`. Zero when `includeSecrets` was set. */
 	secretsOmitted: number;
-	/** One `variable_types` entry when `json`-typed variables were written as `default`. */
+	/**
+	 * One `variable_types` entry when a type was not written: a `json` type
+	 * (written as `default`) or a typed secret's type (written as `secret`).
+	 */
 	notCarried: PostmanNotCarried[];
 }
 

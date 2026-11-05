@@ -1093,6 +1093,18 @@ json stored (const std::string& blob) {
     return parsed;
 }
 
+/// A stored variables column, each row's `createdAt` dropped: the import
+/// stamps it from the clock (#3252).
+json stored_variables (const std::string& blob) {
+    json parsed = stored (blob);
+    for (auto row = parsed.begin (); row != parsed.end (); ++row) {
+        if (row->is_object ()) {
+            row->erase ("createdAt");
+        }
+    }
+    return parsed;
+}
+
 /// Everything the UI shows for @p id's subtree, ids and timestamps aside.
 json snapshot (vayu::db::Database& db, const std::string& id) {
     const auto collection = db.get_collection (id);
@@ -1101,7 +1113,7 @@ json snapshot (vayu::db::Database& db, const std::string& id) {
         return json ();
     }
     json out{ { "name", collection->name }, { "description", collection->description },
-        { "variables", stored (collection->variables) },
+        { "variables", stored_variables (collection->variables) },
         { "auth", stored (collection->auth) },
         { "elements", stored (collection->elements) } };
     json requests = json::array ();
@@ -1164,7 +1176,8 @@ TEST_F (PostmanExportRouteTest, ImportExportImportIsAFixedPoint) {
 // --- POST /export/postman-environment (#2253) --------------------------------
 
 /// The document's rows as `name -> {value, enabled, secret?, type?}`, the shape
-/// the importer stores a Postman environment's variables in.
+/// the importer stores a Postman environment's variables in, less the
+/// `createdAt` it stamps from the clock (#3252).
 json imported_variables (const std::string& text) {
     const vayu::core::ImportParse parsed = vayu::core::parse_import (text, {}, {});
     EXPECT_TRUE (parsed.ok ()) << parsed.error;
@@ -1172,7 +1185,12 @@ json imported_variables (const std::string& text) {
         ADD_FAILURE () << "not one environment: " << text;
         return json ();
     }
-    return json::parse (parsed.result.at ("environments")[0].at ("variables").dump ());
+    json variables =
+    json::parse (parsed.result.at ("environments")[0].at ("variables").dump ());
+    for (auto row = variables.begin (); row != variables.end (); ++row) {
+        row->erase ("createdAt");
+    }
+    return variables;
 }
 
 class PostmanEnvironmentExportTest : public PostmanExportRouteTest {
@@ -1311,6 +1329,29 @@ TEST_F (PostmanEnvironmentExportTest, AJsonTypedVariableIsWrittenAsDefaultAndCou
     EXPECT_EQ (rows[0]["type"], "default");
     EXPECT_EQ (rows[0]["value"], "5") << "a stored number is written as text";
     EXPECT_EQ (rows[2]["type"], "string");
+}
+
+// Postman's one `type` slot holds `secret`, so a secret's own `number` or
+// `boolean` type is lost and counted (#3252); a `json` secret loses one type,
+// counted once, and a `string` secret loses nothing. Mutation check: drop the
+// secret half of `variable_type_lost` and the count reads 1.
+TEST_F (PostmanEnvironmentExportTest, ATypedSecretIsWrittenAsSecretAndCounted) {
+    const std::string id = save_environment ("Secrets", R"({
+      "port": {"value": "8443", "enabled": true, "secret": true, "type": "number"},
+      "debug": {"value": "true", "enabled": true, "secret": true, "type": "boolean"},
+      "blob": {"value": "{}", "enabled": true, "secret": true, "type": "json"},
+      "token": {"value": "t", "enabled": true, "secret": true, "type": "string"}})");
+    const json body      = export_environment (id, true);
+
+    ASSERT_EQ (body["notes"]["notCarried"].size (), 1u) << body.dump ();
+    const json& entry = body["notes"]["notCarried"][0];
+    EXPECT_EQ (entry["code"], "variable_types");
+    EXPECT_EQ (entry["count"], 3) << "port, debug and blob, each once";
+
+    const json rows = json::parse (body["text"].get<std::string> ())["values"];
+    for (const json& row : rows) {
+        EXPECT_EQ (row["type"], "secret") << row.dump ();
+    }
 }
 
 TEST_F (PostmanEnvironmentExportTest, MalformedStoredVariablesExportAsNone) {

@@ -617,9 +617,10 @@ The names below are those functions'.
 `null`/`undefined` → `""`. Vayu stores all values as strings. 
 
 ### to_var_record
-`to_var_record(vars)` - Postman/Insomnia variable arrays (`{key, value?, enabled?, disabled?}`)
+`to_var_record(vars)` - Postman variable arrays (`{key, value?, enabled?, disabled?}`)
 → `Record<string, VariableValue>`. `disabled` takes precedence over `enabled`; default
 `enabled: true`. Values pass through `normalize_template_vars`. Rows without a `key` are skipped.
+Each row is stamped `createdAt` in array order (#3252), since the stored object keeps name order.
 
 ### map_key_values
 `map_key_values(rows)` - Postman header/query/urlencoded arrays → `KeyValueEntry[]`. Sets

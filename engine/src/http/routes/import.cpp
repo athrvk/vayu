@@ -1464,6 +1464,23 @@ import_document_response (vayu::db::Database& db, const nlohmann::json& body) {
 namespace {
 
 /**
+ * @p imported as it replaces @p stored, a global of the same name: the
+ * import stamped a fresh `createdAt`, and an existing variable is never
+ * restamped (`docs/engine/db-schema.md`, VariableValue shape), so the stored
+ * row's stamp is kept - or its absence, for a row that never had one.
+ */
+nlohmann::json keep_stored_created_at (const nlohmann::json& stored, nlohmann::json imported) {
+    if (!stored.is_object () || !imported.is_object ()) {
+        return imported;
+    }
+    imported.erase ("createdAt");
+    if (const auto created = stored.find ("createdAt"); created != stored.end ()) {
+        imported["createdAt"] = *created;
+    }
+    return imported;
+}
+
+/**
  * Merge @p imported over the stored globals and write the result. The caller
  * holds the DB mutex across the whole call.
  *
@@ -1486,7 +1503,10 @@ const std::function<void ()>& before_write) {
         }
     }
     for (auto entry = imported.begin (); entry != imported.end (); ++entry) {
-        merged[entry.key ()] = entry.value ();
+        const auto stored    = merged.find (entry.key ());
+        merged[entry.key ()] = stored == merged.end () ?
+        entry.value () :
+        keep_stored_created_at (*stored, entry.value ());
     }
     vayu::db::Globals row;
     // The singleton's id, always - a row saved without it is a row
