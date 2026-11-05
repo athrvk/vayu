@@ -1971,6 +1971,45 @@ TEST_F (RunsRouteTest, ReportReadsTheStoredSummary) {
     EXPECT_FALSE (body["testValidation"].contains ("consoleDropped"));
 }
 
+// #3234: a streaming run's report carries the time to first event beside the
+// event rate, and leaves it out when no stream delivered a timed event.
+// Mutation check: drop the `timeToFirstEvent` write in
+// `build_run_summary_payload` and the first block fails; write it whatever
+// the count and the last expectation fails.
+TEST_F (RunsRouteTest, ReportCarriesAStreamsTimeToFirstEvent) {
+    vayu::core::MetricsCollector::StreamTotals stream;
+    stream.completions               = 4;
+    stream.total_events              = 40;
+    stream.time_to_first_event.count = 3;
+    stream.time_to_first_event.p50   = 410.0;
+    stream.time_to_first_event.p95   = 650.0;
+    stream.time_to_first_event.p99   = 800.0;
+    stream.time_to_first_event.max   = 910.0;
+    auto inputs                      = summary_inputs ();
+    inputs.stream                    = stream;
+    seed ({ .id = "run_stream", .start_time = 1000 });
+    db_->update_run_summary (
+    "run_stream", vayu::core::build_run_summary_payload (inputs).dump ());
+
+    auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_stream");
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto& reported = body["stream"];
+    // 40 events over the 2s test duration.
+    EXPECT_DOUBLE_EQ (reported.value ("eventsPerSecond", -1.0), 20.0);
+    ASSERT_TRUE (reported.contains ("timeToFirstEvent")) << reported.dump ();
+    const auto& first_event = reported["timeToFirstEvent"];
+    EXPECT_DOUBLE_EQ (first_event.value ("p50", -1.0), 410.0);
+    EXPECT_DOUBLE_EQ (first_event.value ("p95", -1.0), 650.0);
+    EXPECT_DOUBLE_EQ (first_event.value ("p99", -1.0), 800.0);
+    EXPECT_DOUBLE_EQ (first_event.value ("max", -1.0), 910.0);
+    EXPECT_EQ (first_event.value ("count", 0), 3);
+
+    stream.time_to_first_event = {};
+    inputs.stream              = stream;
+    EXPECT_FALSE (vayu::core::build_run_summary_payload (inputs)["stream"].contains (
+    "timeToFirstEvent"));
+}
+
 // #3127: the deferred replay's console lines reach the report, on the run's
 // `testValidation` and on a scenario step's `tests`, each with its dropped
 // count, and a line logged more than once with its `count`. Mutation check:

@@ -179,6 +179,8 @@ constexpr auto STREAM_KEYS = std::to_array<std::string_view> (
 { "completions", "totalEvents", "capped", "eventsPerSecond" });
 constexpr auto STREAM_EVENTS_KEYS = std::to_array<std::string_view> (
 { "min", "max", "p50", "p90", "p95", "p99", "count" });
+constexpr auto STREAM_FIRST_EVENT_KEYS =
+std::to_array<std::string_view> ({ "p50", "p95", "p99", "max", "count" });
 constexpr auto SLOW_REQUESTS_KEYS = std::to_array<std::string_view> (
 { "count", "thresholdMs", "tracesStored", "percentage" });
 constexpr auto SAMPLING_KEYS =
@@ -274,6 +276,10 @@ ordered stream_section (const json& stream) {
     ordered out = pick (stream, STREAM_KEYS);
     if (const json& events = member (stream, "events"); events.is_object ()) {
         out["events"] = pick (events, STREAM_EVENTS_KEYS);
+    }
+    if (const json& first_event = member (stream, "timeToFirstEvent");
+    first_event.is_object ()) {
+        out["timeToFirstEvent"] = pick (first_event, STREAM_FIRST_EVENT_KEYS);
     }
     return out;
 }

@@ -277,8 +277,8 @@ const ResultAnnotations& annotations) {
     // transfer that actually streamed carries the count - see
     // `Response::stream_events` for why it is optional rather than a zero.
     if (response.stream_events) {
-        context->metrics_collector->record_stream_completion (
-        *response.stream_events, response.stream_capped);
+        context->metrics_collector->record_stream_completion (*response.stream_events,
+        response.stream_capped, response.stream_first_event_ms);
     }
 
     if (response.has_error ()) {

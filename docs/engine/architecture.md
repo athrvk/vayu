@@ -1285,7 +1285,13 @@ The two caps are enforced in the two places that can see them:
   without assembling one. It agrees with `SseParser` about what an event is (a
   frame carrying no `data` field is not one), so a load run and a design run
   report the same count for the same stream; `sse_frame_counter_test.cpp` drives
-  both over one table and asserts they match.
+  both over one table and asserts they match. The same callback stamps the
+  write that completes the first event (`TransferData::stream_first_event_ms`,
+  issue #3234), measured from `submitted_at` like the latency, and the
+  completion copies it to `Response::stream_first_event_ms`. It is the report's
+  `stream.timeToFirstEvent`, and it cannot be read off libcurl: the
+  start-transfer time ends at the response headers, which a gateway that
+  answers `200` and then thinks sends long before its first event.
 - **Duration** in the progress callback, which libcurl runs at least once a
   second whether or not bytes arrive - which is the only place a stream that has
   gone *quiet* can be ended. The whole-transfer timeout is moved to a grace

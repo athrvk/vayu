@@ -234,6 +234,18 @@
                 "p99": {"type": "number"},
                 "count": {"type": "number"}
               }
+            },
+            "timeToFirstEvent": {
+              "description": "Milliseconds from submission to each stream's first event; count is the completions that delivered one. Absent when none did.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p50": {"type": "number"},
+                "p95": {"type": "number"},
+                "p99": {"type": "number"},
+                "max": {"type": "number"},
+                "count": {"type": "number"}
+              }
             }
           }
         },

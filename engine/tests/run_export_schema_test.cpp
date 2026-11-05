@@ -110,7 +110,10 @@ json healthy_summary () {
         { "eventsPerSecond", 10.0 },
         { "events",
         { { "min", 10 }, { "max", 10 }, { "p50", 10 }, { "p90", 10 },
-        { "p95", 10 }, { "p99", 10 }, { "count", 10 } } } } },
+        { "p95", 10 }, { "p99", 10 }, { "count", 10 } } },
+        { "timeToFirstEvent",
+        { { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
+        { "max", 910.0 }, { "count", 9 }, { "unlisted", "dropped" } } } } },
         { "coverage",
         { { "operationsTotal", 1 }, { "operationsCovered", 1 },
         { "declaredResponsesTotal", 1 }, { "declaredResponsesHit", 1 },
@@ -336,6 +339,18 @@ TEST_F (RunExportSchemaTest, AHealthyRunWithEverySectionValidates) {
     (json{ { "kind", "collection" }, { "scope", "collection" },
     { "id", "col_1" }, { "name", "Shop" } }));
     EXPECT_FALSE (document["timeSeries"].empty ());
+}
+
+// #3234: a stream's time to first event survives the allowlist, member by
+// member. Mutation check: drop the `timeToFirstEvent` pick in
+// `stream_section` and the first expectation fails; drop the property from
+// the schema and the validation does.
+TEST_F (RunExportSchemaTest, AStreamsTimeToFirstEventIsExported) {
+    seed ("run_first_event", vayu::RunStatus::Completed, healthy_summary ());
+    json document = expect_valid (json{ { "runId", "run_first_event" } });
+    EXPECT_EQ (document["report"]["stream"].value ("timeToFirstEvent", json ()),
+    (json{ { "p50", 410.0 }, { "p95", 650.0 }, { "p99", 800.0 },
+    { "max", 910.0 }, { "count", 9 } }));
 }
 
 // #2911: a document written before the skip counters has neither key and

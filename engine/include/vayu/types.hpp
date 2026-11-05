@@ -1092,6 +1092,19 @@ struct Response {
     std::optional<std::size_t> stream_events;
 
     /**
+     * @brief Milliseconds from submission to the first event of a bounded
+     *        stream (issue #3234); absent when no event arrived, and on every
+     *        transfer that was not one.
+     *
+     * Not `timing.first_byte_ms`, which ends at the response headers: a server
+     * that answers at once and then thinks puts its whole wait after them.
+     * Measured from the same submission `timing.total_ms` is, so the two
+     * compare. An unterminated last frame counted only at the close leaves
+     * this unset, since nothing measured when it arrived.
+     */
+    std::optional<double> stream_first_event_ms;
+
+    /**
      * @brief Body bytes the final response delivered over a design stream
      *        (`consume_sse_stream`, issue #3238); absent on every other path.
      *

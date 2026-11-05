@@ -632,8 +632,10 @@ Notes:
   explicitly: **reaching either cap completes the stream successfully**, so a
   streaming run's 0% error rate is not evidence the caps were never hit -
   `get_run_report`'s `stream.capped` is what answers that. The report's `stream`
-  section also carries the per-completion event distribution and a derived
-  `eventsPerSecond`.
+  section also carries the per-completion event distribution, a derived
+  `eventsPerSecond` and `timeToFirstEvent` (issue #3234), the wait from submit
+  to each stream's first event, which `timingBreakdown.phases.firstByte` does
+  not measure: it ends at the response headers.
 - **`start_load_run`'s `monitor` block** scrapes the target's own metrics
   endpoint for the life of the run (`url`, optional `intervalMs` and `format`,
   and the `series` names to read), so an agent asked why a target slowed down

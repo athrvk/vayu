@@ -1794,8 +1794,9 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // stream indistinguishable from one that carried nothing.
     if (data->stream_bounds) {
         data->stream_counter.finish ();
-        response.stream_events = data->stream_counter.events ();
-        response.stream_capped = data->stream_cap_reached;
+        response.stream_events         = data->stream_counter.events ();
+        response.stream_capped         = data->stream_cap_reached;
+        response.stream_first_event_ms = data->stream_first_event_ms;
     }
 
     // A cap ended this stream, which is what a bounded stream under load is

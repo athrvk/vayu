@@ -19,6 +19,22 @@
 
 namespace vayu::http::detail {
 
+namespace {
+
+/// Stamp the first event's arrival on the clock latency is read from (#3234).
+/// libcurl cannot answer this: its start-transfer time ends at the response
+/// headers, which a stream sends long before its first event.
+void stamp_first_event (TransferData& data) {
+    if (data.stream_first_event_ms || data.stream_counter.events () == 0) {
+        return;
+    }
+    data.stream_first_event_ms = std::chrono::duration<double, std::milli> (
+    std::chrono::steady_clock::now () - data.submitted_at)
+                                 .count ();
+}
+
+} // namespace
+
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
     auto* transfer_data = static_cast<TransferData*> (userptr);
@@ -48,6 +64,7 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     bool stream_cap_hit = false;
     if (data->stream_bounds) {
         data->stream_counter.feed (std::string_view (ptr, total_size));
+        stamp_first_event (*data);
         stream_cap_hit = std::cmp_greater_equal (
         data->stream_counter.events (), data->stream_bounds->max_events);
     }
