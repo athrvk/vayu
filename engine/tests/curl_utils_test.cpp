@@ -481,14 +481,19 @@ TEST (CurlToError, AnUnresolvableProxyHostIsStillAProxyError) {
 }
 
 // The target was reached and failed the exchange: none of these is this
-// engine's own failure. Mutation-check: delete the case group and every one
-// of them reads INTERNAL_ERROR again.
+// engine's own failure. CURLE_PARTIAL_FILE is a chunked reply closed without
+// its final chunk (#3240). Mutation-check: delete the case group and every one
+// of them reads INTERNAL_ERROR again; delete CURLE_PARTIAL_FILE alone and only
+// it does.
 TEST (CurlToError, ATargetThatFailedTheExchangeIsNotAnInternalError) {
     const vayu::http::CurlErrorBuffer errors;
     for (const CURLcode code : { CURLE_GOT_NOTHING, CURLE_SEND_ERROR,
-         CURLE_RECV_ERROR, CURLE_WEIRD_SERVER_REPLY }) {
-        EXPECT_EQ (curl_to_error (nullptr, code, errors).code, vayu::ErrorCode::ConnectionFailed)
+         CURLE_RECV_ERROR, CURLE_PARTIAL_FILE, CURLE_WEIRD_SERVER_REPLY }) {
+        const vayu::Error error = curl_to_error (nullptr, code, errors);
+        EXPECT_EQ (error.code, vayu::ErrorCode::ConnectionFailed)
         << curl_easy_strerror (code);
+        EXPECT_EQ (error.message, curl_easy_strerror (code))
+        << "libcurl's own text must travel unchanged: " << error.message;
     }
 }
 

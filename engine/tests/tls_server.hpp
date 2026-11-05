@@ -58,6 +58,7 @@
 #include <openssl/x509v3.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <sstream>
@@ -65,6 +66,8 @@
 #include <string>
 #include <string_view>
 #include <thread>
+
+#include "task_queue.hpp"
 
 namespace vayu::tests {
 
@@ -620,7 +623,8 @@ class CrlServer {
  * `/events` is the same assertion for the SSE driver, which reads a stream
  * rather than a body and so cannot be pointed at `/hello`. `/bounce?to=<url>`
  * answers `302` to that URL, which is how a test leaves TLS for a cleartext
- * target (#2949).
+ * target (#2949). Given a handshake delay it holds every connection that long
+ * before answering the hello, which is a connect that is slow and succeeds.
  */
 class TlsServer {
     public:
@@ -640,6 +644,12 @@ class TlsServer {
      */
     TlsServer (const TestCertificateAuthority& ca, const TestCertificateAuthority& client_ca)
     : TlsServer (ca, &client_ca) {
+    }
+
+    /// A listener that sits @p handshake_delay on each connection before it
+    /// answers the hello: a connect that is slow and then succeeds.
+    TlsServer (const TestCertificateAuthority& ca, std::chrono::milliseconds handshake_delay)
+    : TlsServer (ca, nullptr, handshake_delay) {
     }
 
     ~TlsServer () {
@@ -682,7 +692,9 @@ class TlsServer {
      * the client for nothing, and names the authority whose signature it will
      * accept otherwise.
      */
-    TlsServer (const TestCertificateAuthority& ca, const TestCertificateAuthority* client_ca)
+    TlsServer (const TestCertificateAuthority& ca,
+    const TestCertificateAuthority* client_ca,
+    std::chrono::milliseconds handshake_delay = std::chrono::milliseconds::zero ())
     : crl_ (ca),
       identity_ (ca.issue ("127.0.0.1", "IP:127.0.0.1,DNS:localhost", crl_.url ())),
       cert_pem_ (identity_.pem ()), key_pem_ (identity_.key_pem ()),
@@ -700,6 +712,9 @@ class TlsServer {
         svr_.Get ("/bounce", [] (const httplib::Request& req, httplib::Response& res) {
             res.set_redirect (req.get_param_value ("to"), 302);
         });
+        if (handshake_delay > std::chrono::milliseconds::zero ()) {
+            svr_.new_task_queue = delayed_task_queue (4, handshake_delay);
+        }
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
         svr_.wait_until_ready ();

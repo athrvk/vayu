@@ -34,6 +34,19 @@ export function pluralize(
 	return pluralRules.select(count) === "one" ? singular : plural;
 }
 
+/**
+ * A count (events, streams) in the reader's locale, `-` for a non-finite value.
+ * Counts, not milliseconds: `fmt` elsewhere in the dashboard means latency, and
+ * the chart formatter `fmtCount` rounds a series value without grouping.
+ */
+export function formatCount(value: number, decimals = 0): string {
+	if (!Number.isFinite(value)) return "-";
+	return value.toLocaleString(undefined, {
+		minimumFractionDigits: decimals,
+		maximumFractionDigits: decimals,
+	});
+}
+
 export interface FormatDurationOptions {
 	/**
 	 * Round each component to the nearest unit instead of truncating. A

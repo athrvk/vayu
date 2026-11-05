@@ -845,7 +845,10 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     }
 }
 
-RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_errors, EngineDefaults engine_defaults)
+RunContext::RunContext (const std::string& id,
+nlohmann::json cfg,
+size_t max_errors,
+const EngineDefaults& engine_defaults)
 : run_id (id),
   config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()) {
     // Initialize MetricsCollector with configuration from test config
@@ -901,6 +904,7 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
         stream_bounds =
         vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
     }
+    mc_config.streams = stream_bounds.has_value ();
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
@@ -981,6 +985,11 @@ RunContext::RunContext (const std::string& id, nlohmann::json cfg, size_t max_er
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
+    // Every transfer carries the run's live event tally on its bounds, so the
+    // write callback can count into it without knowing about the collector.
+    if (stream_bounds) {
+        stream_bounds->live_events = metrics_collector->live_stream_event_counter ();
+    }
 }
 
 /**
@@ -2974,6 +2983,33 @@ cumulative_counters (const MetricsCollector& mc, int64_t steady_ms, size_t compl
     return counters;
 }
 
+/**
+ * Push this tick's counters into @p window and put its reading on @p stats.
+ * The completed and event counts are the frame's own (`totalRequests`,
+ * `streamEvents`), so each rate is one reading with its total, and the
+ * live-only `eventsPerSecond` (#3236) is on exactly the frames that carry
+ * `streamEvents`.
+ */
+WindowReading put_trailing_window (TrailingWindow& window,
+const MetricsCollector& mc,
+nlohmann::json& stats,
+int64_t steady_ms,
+size_t sent) {
+    CumulativeCounters counters = cumulative_counters (
+    mc, steady_ms, stats.at ("totalRequests").get<size_t> (), sent);
+    const auto stream_events = stats.find ("streamEvents");
+    const bool streams       = stream_events != stats.end ();
+    if (streams) {
+        counters.stream_events = stream_events->get<size_t> ();
+    }
+    const WindowReading reading = window.push (counters);
+    put_window_reading (stats, reading);
+    if (streams) {
+        stats["eventsPerSecond"] = reading.events_per_s;
+    }
+    return reading;
+}
+
 /// What a gate tick hands the stored row: the second's merged percentiles, the
 /// trailing window and the closed seconds' status classes its own frame
 /// carries.
@@ -3198,10 +3234,9 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
         auto stats = mc.get_current_stats (active_count, elapsed_seconds,
         requests_sent, requests_expected, &statuses, &window);
 
-        size_t current_total      = stats["totalRequests"].get<size_t> ();
-        const WindowReading rates = rate_window.push (
-        cumulative_counters (mc, now_steady_ms, current_total, requests_sent));
-        put_window_reading (stats, rates);
+        size_t current_total = stats["totalRequests"].get<size_t> ();
+        const WindowReading rates =
+        put_trailing_window (rate_window, mc, stats, now_steady_ms, requests_sent);
 
         std::optional<GateReadings> gate;
         if (closes_second) {

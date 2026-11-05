@@ -10,7 +10,7 @@ ways; until then the live view stays, with the report fetch's Retry.
 ## Structure
 
 - `index.tsx` - Main LoadTestDashboard component (entry point)
-- `components/` - Sub-components (DashboardHeader, MetricsView, etc.). The header takes the
+- `components/` - Sub-components (DashboardHeader, MetricsView, LiveSequencePanel, LiveStreamPanel, etc.). The header takes the
   finished run's verdict (`outcome`, from `components/shared/run-outcome.ts`) as a string so a
   `completed` pill does not wear the success tick for a run that missed a budget; it is a string
   because the header is memo'd on `Object.is`. The verdict's banner is the report's own
@@ -155,6 +155,23 @@ consumes it.
   figures as pooled (`pooledLatency: {}` on the derived bundle; the steps
   carry no p99 live, so only History can name the slowest step). A run whose
   frames carry no block renders exactly as before.
+- **A streaming run's stream card is gated on its frames, and an absent figure
+  is not 0** (#3236). The engine sends `streamEvents` (cumulative), `streamsOpen`
+  and `eventsPerSecond` on every frame of a streaming run with stream metrics on,
+  and `streamTimeToFirstEvent` on gate frames once a stream with a timed first
+  event has completed. `mapSseMetrics` passes all four through as sent
+  (`stream_events`, `streams_open`, `events_per_second`,
+  `stream_time_to_first_event`), so a real `0` is a reading and an absent key is
+  "not measured"; a `|| 0` there would draw "0 events/sec" on every ordinary
+  load run. `MetricsView` shows `LiveStreamPanel` (Row 1.6) when the newest frame
+  carries `stream_events` (`utils/liveStream.ts`) - not a run-config field, and
+  not the store's `isStreaming`, which only means the SSE connection is
+  attached. The cumulative tiles read that frame (the history buffer is trimmed
+  by the live window); the first-event tile reads the latest frame carrying
+  `stream_time_to_first_event`, as the sequence panel does, and is omitted until
+  one exists. It counts finished streams only and is not the First byte phase.
+  The events/sec chart plots `events_per_second` (`pickEventsPerSecond`), the
+  trailing-window rate, with a gap for a frame that holds none.
 - **Row 3 reads the latest gate frame from `historicalMetrics`, never the newest
   tick** (#2782). The two cards used to be placeholders until the report
   arrived (#2261); they now draw the run-so-far data. The run-so-far latency

@@ -830,9 +830,10 @@ constexpr bool DEFAULT_PHASE_HISTOGRAMS = true;
 constexpr bool DEFAULT_STREAM_METRICS = true;
 
 /// Ceiling on the event histogram's value range - events delivered by one
-/// stream. Above `sse::STREAM_EVENTS_CEILING`, which is what a per-request cap
-/// can be set to, so the histogram can hold any completion the caps allow.
-constexpr int64_t HISTOGRAM_MAX_EVENTS = 10000000;
+/// stream, recorded one above itself because hdr's floor is 1 (#3240). Held
+/// above `sse::STREAM_EVENTS_CEILING`, the most a per-request cap can be set
+/// to, by the `static_assert` beside it.
+constexpr int64_t HISTOGRAM_MAX_EVENTS = 10000001;
 
 /// Ceiling on distinct `metric.record` / `pm.metrics` names one run may
 /// declare (issue #1500). Each name backs its own HdrHistogram (trend) or
@@ -887,6 +888,9 @@ constexpr int64_t STREAM_DURATION_MS_CEILING = 86400000;
 constexpr int64_t MAX_STREAM_EVENTS     = 100000;
 constexpr int64_t MIN_STREAM_EVENTS     = 1;
 constexpr int64_t STREAM_EVENTS_CEILING = 10000000;
+static_assert (metrics_collector::HISTOGRAM_MAX_EVENTS >= STREAM_EVENTS_CEILING + 1,
+"a stream stopped at the largest event cap, recorded one above its count, "
+"must fit the event histogram");
 
 /// Grace between a load stream's duration cap and the whole-transfer timeout
 /// that backstops it (issue #576). The cap is enforced from the progress
@@ -898,9 +902,10 @@ constexpr int64_t STREAM_EVENTS_CEILING = 10000000;
 constexpr int64_t LOAD_STREAM_TIMEOUT_GRACE_MS = 5000;
 
 /// How long a stream may deliver nothing before it is ended as idle, seeding
-/// `sseIdleTimeoutMs`. Enforced through `CURLOPT_LOW_SPEED_TIME`, whose
-/// resolution is whole seconds, so a value is rounded up to the next second and
-/// the floor is one second.
+/// `sseIdleTimeoutMs`. The progress callback judges it, and libcurl runs that
+/// about once a second while a stream is quiet, so the floor is one second: a
+/// smaller window would not end a stream any sooner, and one ends within a
+/// couple of seconds of its setting.
 constexpr int64_t IDLE_TIMEOUT_MS         = 60000;
 constexpr int64_t MIN_IDLE_TIMEOUT_MS     = 1000;
 constexpr int64_t IDLE_TIMEOUT_MS_CEILING = 3600000;

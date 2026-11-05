@@ -1320,6 +1320,29 @@ and it is what keeps `handle_result`-exactly-once and the refill loop untouched.
 buffer, not an ending, and the event cap bounds how many events arrive rather
 than how large one is.
 
+**The live frames count events as they arrive** (issue #3236), because a run of
+two-minute streams completes nothing for two minutes and every
+completion-driven figure on the dashboard reads zero until then. The write
+callback adds what each chunk completed to a run-wide atomic, and the
+completion adds the unterminated last frame `SseFrameCounter::finish` counts
+(`StreamTally::feed` / `report`, the only two places the counter is fed). The
+http layer knows nothing of the collector: the atomic is owned by the run's
+`MetricsCollector`, allocated only for a `POST /runs` run with `stream` and
+`stream_metrics` on, and reaches every transfer as `StreamBounds::live_events`,
+so a non-streaming transfer never sees it and a streaming one pays a null check
+and one relaxed `fetch_add` per chunk that completed an event. A collection
+run's streaming steps carry no tally, so its live frames have no stream keys;
+its report's `stream` section is unaffected. The tally is kept apart from the
+completion counters behind the report's `stream` section, which
+`record_stream_completion` feeds, so nothing is counted twice; once the run
+settles the two agree, except that a stream a Stop cancelled delivered events
+the live total counts and the report does not. `get_current_stats` reads it as
+`streamEvents`, with `streamsOpen` as the active transfer count; the trailing
+window turns it into `eventsPerSecond` beside `currentRps`; and a gate frame
+adds `streamTimeToFirstEvent` from the completed streams' histogram, read
+through a snapshot as `cumulativePhases` is. All four are live only, never
+stored.
+
 `POST /execute` is deliberately not affected. With `stream` it is still
 `SseStreamManager`'s one-thread-per-stream model with no whole-transfer
 deadline; only the flag's spelling is shared, through `read_stream_flag`. A

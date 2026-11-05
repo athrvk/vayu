@@ -37,6 +37,34 @@ describe("mapSseMetrics", () => {
 		expect(m.status_codes).toBeUndefined();
 	});
 
+	it("passes a streaming run's keys through as sent, a real 0 included (issue #3236)", () => {
+		const m = mapSseMetrics({
+			timestamp: 1,
+			streamEvents: 0,
+			streamsOpen: 3,
+			eventsPerSecond: 0,
+			streamTimeToFirstEvent: { p50: 12, p95: 40, p99: 55, max: 60, count: 4 },
+		});
+		expect(m.stream_events).toBe(0);
+		expect(m.streams_open).toBe(3);
+		expect(m.events_per_second).toBe(0);
+		expect(m.stream_time_to_first_event).toEqual({
+			p50: 12,
+			p95: 40,
+			p99: 55,
+			max: 60,
+			count: 4,
+		});
+	});
+
+	it("leaves the stream keys absent for a run that does not stream, never 0 (issue #3236)", () => {
+		const m = mapSseMetrics({ timestamp: 1, totalRequests: 5, currentRps: 5 });
+		expect(m.stream_events).toBeUndefined();
+		expect(m.streams_open).toBeUndefined();
+		expect(m.events_per_second).toBeUndefined();
+		expect(m.stream_time_to_first_event).toBeUndefined();
+	});
+
 	it("marks a frame as live and leaves the second and cumulative percentiles absent (issue #2385)", () => {
 		const m = mapSseMetrics({ timestamp: 1, latencyP99Ms: 12 });
 		expect(m.live).toBe(true);

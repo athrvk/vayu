@@ -15,14 +15,20 @@
  * loop's `TransferData` and the single-request `Client` (a collection run's
  * sequential steps, #3235). It is the one place that decides when a cap is
  * reached and what the ended stream reports, so the two drivers cannot come
- * to disagree about either.
+ * to disagree about either. It also feeds the run's live event tally
+ * (`StreamBounds::live_events`, #3236) as the events arrive, so a live tick
+ * sees a stream's events while it is still open and the settled live total
+ * equals the report's.
  *
  * Not thread-safe: one tally belongs to one transfer, which libcurl drives
- * from one thread.
+ * from one thread. The live tally it feeds is shared, and atomic.
  */
 
+#include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -40,9 +46,10 @@ class StreamTally {
     /// the transfer's latency is measured from. A tally never started is
     /// inactive, and its owner calls nothing but `report` on it.
     void start (const StreamBounds& bounds, Clock::time_point started_at) {
-        active_     = true;
-        max_events_ = bounds.max_events;
-        started_at_ = started_at;
+        active_      = true;
+        max_events_  = bounds.max_events;
+        live_events_ = bounds.live_events;
+        started_at_  = started_at;
         deadline_ = started_at + std::chrono::milliseconds (bounds.max_duration_ms);
     }
 
@@ -54,10 +61,13 @@ class StreamTally {
      * Count @p chunk; true once the event cap is reached. The whole chunk is
      * counted before the cap is tested: those events are on the wire either
      * way, and a tally that stopped mid-chunk would under-report the stream
-     * it exists to measure.
+     * it exists to measure. The events it completes reach the live tally
+     * here rather than at completion, so a tick sees an open stream's events.
      */
     bool feed (std::string_view chunk) {
+        const std::size_t before = counter_.events ();
         counter_.feed (chunk);
+        publish_since (before);
         // Stamped on the clock latency is read from (#3234). libcurl cannot
         // answer this: its start-transfer time ends at the response headers,
         // which a stream sends long before its first event.
@@ -90,22 +100,38 @@ class StreamTally {
      * mid-way still delivered the events it delivered. Counts an unterminated
      * last frame the close completed, which leaves the first-event time unset
      * when it was the only one: no write delivered it at a time to measure.
-     * An inactive tally reports nothing, so an ordinary transfer's
-     * `stream_events` stays absent rather than zero.
+     * That frame reaches the live tally too. An inactive tally reports
+     * nothing, so an ordinary transfer's `stream_events` stays absent rather
+     * than zero. Called once per transfer.
      */
     void report (Response& response) {
         if (!active_) {
             return;
         }
+        const std::size_t before = counter_.events ();
         counter_.finish ();
+        publish_since (before);
         response.stream_events         = counter_.events ();
         response.stream_capped         = cap_reached_;
         response.stream_first_event_ms = first_event_ms_;
     }
 
     private:
+    /// Add what the counter counted since it read @p before to the run's live
+    /// tally. Relaxed: the tick only needs each event counted once, not
+    /// ordered against anything else the transfer wrote.
+    void publish_since (std::size_t before) const {
+        const std::size_t after = counter_.events ();
+        if (after == before || live_events_ == nullptr) {
+            return;
+        }
+        live_events_->fetch_add (after - before, std::memory_order_relaxed);
+    }
+
     bool active_        = false;
     int64_t max_events_ = 0;
+    /// Null unless the run reports stream metrics live.
+    std::shared_ptr<std::atomic<std::size_t>> live_events_;
     Clock::time_point started_at_;
     Clock::time_point deadline_;
     SseFrameCounter counter_;

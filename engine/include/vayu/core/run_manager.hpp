@@ -643,7 +643,8 @@ struct RunContext {
      * every `Request` the executors submit. Resolved here rather than per
      * submission because it is the same two numbers for every transfer of the
      * run, and per-submission it would be two string-keyed JSON lookups on the
-     * strategy thread's hot path.
+     * strategy thread's hot path. Also carries the collector's live event
+     * tally (`StreamBounds::live_events`, issue #3236) to every transfer.
      */
     std::optional<vayu::StreamBounds> stream_bounds;
 
@@ -1144,7 +1145,7 @@ struct RunContext {
     RunContext (const std::string& id,
     nlohmann::json cfg,
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS,
-    EngineDefaults engine_defaults = {});
+    const EngineDefaults& engine_defaults = {});
     ~RunContext ();
     RunContext (const RunContext&)            = delete;
     RunContext& operator= (const RunContext&) = delete;

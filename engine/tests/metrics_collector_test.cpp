@@ -18,6 +18,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/utils/metrics_helper.hpp"
 
@@ -2148,21 +2149,61 @@ TEST_F (MetricsCollectorTest, StreamTotalsSumEventsAndCountCappedSeparately) {
     // what lets a reader tell "the run measured its own bounds" from "the
     // target closed the connections".
     EXPECT_EQ (totals->capped, 2u);
+    // Counts this small are exact, so the offset the histogram stores them at
+    // (#3240) must not show: record without it and every figure reads one low.
     EXPECT_EQ (totals->events.count, 3u);
-    EXPECT_GE (totals->events.max, 30.0);
+    EXPECT_DOUBLE_EQ (totals->events.min, 10.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 20.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 30.0);
 }
 
-// A stream that delivered nothing is still a completion. Counting it only in
-// the histogram would lose it, since hdr cannot hold a value below 1 - which is
-// exactly the population ("every connection closed before the first event") a
-// report most needs to show.
-TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsACompletion) {
+// A stream that delivered nothing is still a completion, and a 0 in the
+// distribution (#3240) - the population ("every connection closed before the
+// first event") a report most needs to show. Mutation check: record
+// `max (1, events)` with no offset and min, p50 and max read 1.
+TEST_F (MetricsCollectorTest, StreamTotalsCountAnEmptyStreamAsZeroEvents) {
+    collector->record_stream_completion (0, false, std::nullopt);
     collector->record_stream_completion (0, false, std::nullopt);
 
     auto totals = collector->stream_totals ();
     ASSERT_HAS_VALUE (totals);
-    EXPECT_EQ (totals->completions, 1u);
+    EXPECT_EQ (totals->completions, 2u);
     EXPECT_EQ (totals->total_events, 0u);
+    EXPECT_EQ (totals->events.count, 2u);
+    EXPECT_DOUBLE_EQ (totals->events.min, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p99, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 0.0);
+}
+
+// Silent streams beside ones that delivered: the zeros stay zeros and the
+// real counts keep their values.
+TEST_F (MetricsCollectorTest, StreamTotalsKeepEmptyAndDeliveringStreamsApart) {
+    for (int i = 0; i < 3; ++i) {
+        collector->record_stream_completion (0, false, std::nullopt);
+    }
+    collector->record_stream_completion (40, true, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->events.count, 4u);
+    EXPECT_DOUBLE_EQ (totals->events.min, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.p50, 0.0);
+    EXPECT_DOUBLE_EQ (totals->events.max, 40.0);
+}
+
+// The largest event cap a run may set, stored one above itself, still fits the
+// histogram: a dropped record would leave `count` short of the completions.
+TEST_F (MetricsCollectorTest, StreamTotalsHoldAStreamAtTheLargestEventCap) {
+    const auto ceiling = vayu::core::constants::sse::STREAM_EVENTS_CEILING;
+    collector->record_stream_completion (static_cast<size_t> (ceiling), true, std::nullopt);
+
+    auto totals = collector->stream_totals ();
+    ASSERT_HAS_VALUE (totals);
+    EXPECT_EQ (totals->events.count, 1u);
+    // Three significant figures: within 0.1% of the count recorded.
+    EXPECT_NEAR (totals->events.max, static_cast<double> (ceiling),
+    static_cast<double> (ceiling) / 1000.0);
 }
 
 // Time to first event (#3234) is the distribution over the completions that
@@ -2204,4 +2245,97 @@ TEST_F (MetricsCollectorTest, StreamMetricsOffRecordsNothing) {
     // Off means the report has no section at all, not a section of zeros - so
     // the counters behind it must not tick either.
     EXPECT_FALSE (off.stream_totals ().has_value ());
+}
+
+// ============================================================================
+// The live stream keys (issue #3236)
+// ============================================================================
+
+namespace {
+
+/// Every live stream key a frame can carry, the gate frame's included.
+constexpr auto LIVE_STREAM_KEYS = std::to_array<const char*> (
+{ "streamEvents", "streamsOpen", "eventsPerSecond", "streamTimeToFirstEvent" });
+
+MetricsCollectorConfig streaming_config (bool stream_metrics) {
+    MetricsCollectorConfig config;
+    config.streams        = true;
+    config.stream_metrics = stream_metrics;
+    return config;
+}
+
+/// Names of the live stream keys @p frame carries, for a readable failure.
+std::string live_stream_keys_in (const nlohmann::json& frame) {
+    std::string present;
+    for (const auto* key : LIVE_STREAM_KEYS) {
+        if (frame.contains (key)) {
+            present += std::string (present.empty () ? "" : ", ") + key;
+        }
+    }
+    return present;
+}
+
+} // namespace
+
+// The tally the write callback counts into is what the tick reads, and every
+// transfer of a streaming run is a stream, so the active count is the open
+// streams. Mutation check: read `stream_events_total_` (completions only) into
+// `streamEvents` and the first assertion reads 0.
+TEST_F (MetricsCollectorTest, AStreamingRunsTickCarriesTheLiveTallyAndItsOpenStreams) {
+    MetricsCollector streaming ("stream_live", streaming_config (true));
+    const auto tally = streaming.live_stream_event_counter ();
+    ASSERT_NE (tally, nullptr)
+    << "a streaming run with stream_metrics has a tally";
+    tally->fetch_add (7);
+
+    const auto stats = streaming.get_current_stats (3, 1.0, 3);
+
+    EXPECT_EQ (stats.at ("streamEvents").get<size_t> (), 7u) << stats.dump ();
+    EXPECT_EQ (stats.at ("streamsOpen").get<size_t> (), 3u) << stats.dump ();
+    EXPECT_EQ (stats.at ("totalRequests").get<size_t> (), 0u)
+    << "nothing completed, and the events are on the frame anyway";
+}
+
+// Absent, not zero, on both runs that are not a reporting stream: one that does
+// not stream (the default `stream_metrics: true` included) and a stream with
+// `stream_metrics: false`. Neither has a tally for a transfer to count into.
+TEST_F (MetricsCollectorTest, ATickCarriesNoStreamKeysUnlessTheRunStreamsWithStreamMetrics) {
+    MetricsCollector plain ("plain", MetricsCollectorConfig{});
+    MetricsCollector metrics_off ("stream_off_live", streaming_config (false));
+
+    for (auto* run : { &plain, &metrics_off }) {
+        run->record_stream_completion (4, false, 25.0);
+        EXPECT_EQ (run->live_stream_event_counter (), nullptr);
+        EXPECT_FALSE (run->live_stream_events ().has_value ());
+        auto stats = run->get_current_stats (1, 1.0, 1);
+        run->put_gate_distributions (stats);
+        EXPECT_EQ (live_stream_keys_in (stats), "") << stats.dump ();
+    }
+}
+
+// The live time to first event covers the streams completed so far, so it is
+// absent until one completes with a timed event and then reads that one.
+// Mutation check: drop the snapshot read from `put_gate_distributions` and
+// the second half fails; emit the key on a zero count and the first does.
+TEST_F (MetricsCollectorTest, TheGateFrameCarriesTimeToFirstEventOnceAStreamCompleted) {
+    MetricsCollector streaming ("stream_first_live", streaming_config (true));
+
+    nlohmann::json before;
+    streaming.put_gate_distributions (before);
+    streaming.record_stream_completion (0, false, std::nullopt);
+    streaming.put_gate_distributions (before);
+    EXPECT_FALSE (before.contains ("streamTimeToFirstEvent")) << before.dump ();
+
+    streaming.record_stream_completion (3, false, 120.0);
+    nlohmann::json after;
+    streaming.put_gate_distributions (after);
+    ASSERT_TRUE (after.contains ("streamTimeToFirstEvent")) << after.dump ();
+    const auto& first_event = after.at ("streamTimeToFirstEvent");
+    // hdr keeps three significant figures of the microseconds recorded.
+    EXPECT_NEAR (first_event.at ("p50").get<double> (), 120.0, 0.5);
+    EXPECT_NEAR (first_event.at ("max").get<double> (), 120.0, 0.5);
+    EXPECT_EQ (first_event.at ("count").get<size_t> (), 1u);
+    for (const auto* key : { "p95", "p99" }) {
+        EXPECT_TRUE (first_event.contains (key)) << key;
+    }
 }

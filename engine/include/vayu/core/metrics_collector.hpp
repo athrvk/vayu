@@ -270,6 +270,12 @@ struct MetricsCollectorConfig {
     /// a zeroed distribution. Only a run whose request streams ever feeds it -
     /// an ordinary run pays a null check per completion and nothing else.
     bool stream_metrics = constants::metrics_collector::DEFAULT_STREAM_METRICS;
+
+    /// Whether this run's transfers are load streams (`Request::stream_bounds`
+    /// set, issue #576). With `stream_metrics` on, it allocates the live event
+    /// tally the live frames' stream keys are read from (issue #3236); either
+    /// off leaves those keys absent rather than zero.
+    bool streams = false;
 };
 
 /**
@@ -1009,6 +1015,11 @@ class MetricsCollector {
      * count are one reading, while two phases' counts can differ by the
      * completions that landed between their snapshots. The reading after the
      * drain is exact and equals the report's.
+     *
+     * `streamTimeToFirstEvent` is `{p50, p95, p99, max, count}` in
+     * milliseconds over the streams *completed* so far (issue #3236), read
+     * through its own snapshot the same way; absent until one completed with
+     * a timed event, and on every run without the live event tally.
      */
     void put_gate_distributions (nlohmann::json& frame);
 
@@ -1068,6 +1079,22 @@ class MetricsCollector {
      * distribution.
      */
     void record_stream_completion (size_t events, bool capped, std::optional<double> first_event_ms);
+
+    /**
+     * @brief The run's tally of stream events as they arrive (issue #3236),
+     *        for the run to put on `StreamBounds::live_events`.
+     *
+     * Null unless the config sets both `streams` and `stream_metrics`. Fed by
+     * the event loop's write callback, never by `record_stream_completion`, so
+     * the two totals are separate counts of the same events: once the run has
+     * settled this one equals `StreamTotals::total_events`, plus the events of
+     * any stream a Stop cancelled, which the report does not count.
+     */
+    [[nodiscard]] std::shared_ptr<std::atomic<size_t>> live_stream_event_counter () const;
+
+    /// The tally above, read once; nullopt when the run has none, which is
+    /// what keeps the live frames' stream keys absent rather than zero.
+    [[nodiscard]] std::optional<size_t> live_stream_events () const;
 
     /**
      * @brief Sample the rolling (windowed) latency percentiles for the interval
@@ -1298,9 +1325,13 @@ class MetricsCollector {
      *         `cumulativeP95Ms` / `cumulativeP99Ms` are every window sampled so
      *         far (null before any completion was sampled), read from the
      *         reader-owned run-so-far histogram, so call this on the thread that
-     *         samples the windows. The gate-only keys (`second*`,
-     *         `cumulativeLatency`, `cumulativePhases`) are not built here; the
-     *         metrics thread adds them on the tick that closes a second.
+     *         samples the windows. A streaming run with `stream_metrics` on
+     *         also carries `streamEvents` (the live tally) and `streamsOpen`
+     *         (@p current_active: every transfer of such a run is a stream);
+     *         every other run has neither key. The gate-only keys
+     *         (`second*`, `cumulativeLatency`, `cumulativePhases`,
+     *         `streamTimeToFirstEvent`) are not built here; the metrics thread
+     *         adds them on the tick that closes a second.
      */
     [[nodiscard]] nlohmann::json get_current_stats (size_t current_active,
     double elapsed_seconds,
@@ -1405,6 +1436,11 @@ class MetricsCollector {
     // Time to first event (issue #3234): a duration, so microseconds on the
     // latency histograms' scale. Null on the same rule as the one above.
     struct hdr_histogram* stream_first_event_histogram_ = nullptr;
+    // The gate frame's live read of the histogram above, on the rule
+    // `phase_snapshot_` states. Allocated only beside the live tally.
+    OwnedHistogram stream_first_event_snapshot_;
+    // live_stream_event_counter(); shared with every transfer of the run.
+    std::shared_ptr<std::atomic<size_t>> live_stream_events_;
     std::atomic<size_t> stream_completions_{ 0 };
     std::atomic<size_t> stream_events_total_{ 0 };
     std::atomic<size_t> stream_capped_{ 0 };
@@ -1597,6 +1633,11 @@ class MetricsCollector {
 
     // Helper for atomic double addition
     void atomic_add_double (std::atomic<double>& target, double value);
+
+    // The live event tally and the first-event snapshot (issue #3236), for a
+    // streaming run with `stream_metrics` on. A failed snapshot costs the live
+    // first-event key and nothing else.
+    void allocate_live_stream_metrics ();
 
     // Increment the count for a status code, and its class in the second it
     // completed in. Lock-free for codes in [0, STATUS_CODE_SLOTS); falls back

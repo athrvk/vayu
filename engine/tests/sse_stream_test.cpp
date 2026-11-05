@@ -41,6 +41,7 @@
 #include "silent_listener.hpp"
 #include "temp_database.hpp"
 #include "timed_out_after.hpp"
+#include "tls_server.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/http/run_summary_cache.hpp"
@@ -182,7 +183,7 @@ class StreamServer {
 
         svr_.Get ("/hop", [this] (const httplib::Request&, httplib::Response& res) {
             res.status = 302;
-            res.set_header ("Location", url ("/canned"));
+            res.set_header ("Location", hop_location ());
             res.set_content (R"({"hop":"first"})", "application/json");
         });
 
@@ -267,6 +268,12 @@ class StreamServer {
         canned_ = Canned{ status, std::move (content_type), std::move (chunks) };
     }
 
+    /// Where `/hop` redirects from now on, instead of `/canned`.
+    void hop_to (std::string location) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        hop_location_ = std::move (location);
+    }
+
     private:
     struct Canned {
         int status = 200;
@@ -277,6 +284,11 @@ class StreamServer {
     Canned canned_reply () const {
         std::lock_guard<std::mutex> lock (received_mutex_);
         return canned_;
+    }
+
+    std::string hop_location () const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        return hop_location_.empty () ? url ("/canned") : hop_location_;
     }
 
     std::string set_cookie_value () const {
@@ -302,6 +314,7 @@ class StreamServer {
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
     std::string set_cookie_;
+    std::string hop_location_;
     Canned canned_;
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
@@ -561,18 +574,30 @@ TEST (SseConsumer, EndsOnTheDurationCapAndNamesIt) {
     EXPECT_LT (elapsed, std::chrono::seconds (10));
 }
 
-// The no-events-for-N-seconds case. Without the low-speed options this transfer
-// has no deadline at all and holds its worker until the process ends.
+// The no-events-for-N-seconds case. The stream has no whole-transfer deadline,
+// so without the idle rule it holds its worker until the process ends.
+//
+// The window is 1000 ms and the rule is judged from libcurl's progress
+// callback, about once a second while quiet: a healthy engine ends the stream
+// at about 1.0 to 2.0 s (the clock arms at the first call after the connection
+// is made, and the next call after the window ends it). The bound is the
+// setting plus three seconds, because the upper side is the one a slow runner
+// can push. The broken readings it separates from: #3241 measured about 7 s
+// when `CURLOPT_LOW_SPEED_TIME` judged the silence (libcurl averaged the speed
+// over about five seconds; libcurl 8.23 does not reproduce that), and a rule
+// that never fires ends at the 30 s duration cap. Mutation checks: add 4 s to the rule's threshold and
+// the upper bound fails; end at the first progress call and the lower fails.
 TEST (SseConsumer, EndsOnTheIdleTimeoutAndNamesIt) {
     StreamServer server;
-    SseStreamContext context ("run_test", brisk_limits ());
+    const auto limits = brisk_limits ();
+    SseStreamContext context ("run_test", limits);
     const auto started = std::chrono::steady_clock::now ();
-    vayu::http::consume_sse_stream (
-    spec_for (server.url ("/silent"), brisk_limits ()), context);
+    vayu::http::consume_sse_stream (spec_for (server.url ("/silent"), limits), context);
     const auto elapsed = std::chrono::steady_clock::now () - started;
 
     EXPECT_EQ (context.end_reason (), SseEndReason::Idle);
-    EXPECT_LT (elapsed, std::chrono::seconds (20));
+    EXPECT_GE (elapsed, std::chrono::milliseconds (limits.idle_timeout_ms));
+    EXPECT_LE (elapsed, std::chrono::milliseconds (limits.idle_timeout_ms + 3000));
     EXPECT_EQ (context.total_events (), 0);
 }
 
@@ -641,6 +666,56 @@ TEST (SseConsumer, SilenceAfterTheConnectionIsMadeStaysIdle) {
 
     EXPECT_EQ (context.end_reason (), SseEndReason::Idle) << response.error_message;
     EXPECT_EQ (response.error_code, vayu::ErrorCode::None) << response.error_message;
+}
+
+// A redirect response's header lines stamp the idle clock, and the next hop's
+// DNS, TCP and TLS then run in silence that is the connect bound's to judge,
+// not the idle window's (#3241). libcurl runs no progress callback while a hop
+// connects, so a slow connect cannot be seen to go wrong from inside it; the
+// stale stamp is found by the first call after the hop is made.
+//
+// The hop's handshake waits 1500 ms against the 1000 ms floor and then
+// succeeds. Broken, the first progress call after the connect reads a stamp
+// 1.5 s old and ends the stream Idle; fixed, that call arms the clock and the
+// two-event stream completes. The delay is a lower bound on the stale stamp, so
+// a slow runner only makes the broken reading likelier, and the fixed one
+// holds as long as the answer comes inside the 1000 ms window on loopback.
+// Mutation check: end the idle rule's hop check at `requests_started == 0`
+// (the pre-fix connected test) with `last_byte_hop` ignored and this reads Idle.
+TEST (SseConsumer, ASlowRedirectHopIsNotIdleWhileItConnects) {
+    const vayu::tests::TestCertificateAuthority ca;
+    const vayu::tests::TlsServer target (ca, std::chrono::milliseconds (1500));
+    StreamServer server;
+    server.hop_to (target.url ("/events"));
+    auto spec               = spec_for (server.url ("/hop"), brisk_limits ());
+    spec.request.verify_ssl = false;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Completed) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (context.total_events (), 2);
+}
+
+// The same redirect to a hop whose handshake never finishes is the connect
+// bound's timeout error, never Idle. The libcurl the engine builds against
+// runs no progress callback during that wait, so this holds the classification
+// end to end rather than the clock: it passes with or without the hop check,
+// and the slow-hop test above is the one that fails without it. The bound is
+// 10 s against the 1000 ms floor, and the healthy reading is Error at the
+// bound.
+TEST (SseConsumer, ARedirectHopThatNeverConnectsIsATimeoutErrorNotIdle) {
+    vayu::tests::SilentListener listener;
+    ASSERT_NE (listener.port (), 0);
+    StreamServer server;
+    server.hop_to (listener.url ("https"));
+    auto spec               = spec_for (server.url ("/hop"), brisk_limits ());
+    spec.request.timeout_ms = 10000;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout) << response.error_message;
 }
 
 TEST (SseConsumer, RecordsTheInitialResponseHeaders) {
@@ -1225,6 +1300,9 @@ TEST_F (RelayTest, AGarbledResumePointIs400RatherThanASilentReplay) {
     ASSERT_TRUE (response);
     EXPECT_EQ (response->status, 400);
     EXPECT_NE (response->body.find ("invalid_last_event_id"), std::string::npos);
+    // A run's frames are events, not the inbox's captures.
+    EXPECT_EQ (json::parse (response->body).at ("error").at ("message"),
+    "lastEventId must be a non-negative event id");
 }
 
 // Each stream parks a cpp-httplib pool thread for its whole life, so a second

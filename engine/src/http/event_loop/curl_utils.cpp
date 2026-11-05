@@ -1347,13 +1347,17 @@ const ConnectedPeerCheck* peer_check) {
         error.code = proxy_was_used (curl) ? ErrorCode::ProxyError : ErrorCode::ConnectionFailed;
         break;
     // The target was reached and then failed the exchange: an empty reply, a
-    // reset mid-transfer, a reply that is not HTTP. The target's or the
-    // network's doing, never this engine's, so not `InternalError`. The TLS
-    // shape still wins here: a client-certificate refusal under TLS 1.3 arrives
-    // as `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802).
+    // reset mid-transfer, a chunked reply closed without its final chunk
+    // (`CURLE_PARTIAL_FILE`, "transfer closed with outstanding read data
+    // remaining"), a reply that is not HTTP. The target's or the network's
+    // doing, never this engine's, so not `InternalError`. The TLS shape still
+    // wins here: a client-certificate refusal under TLS 1.3 arrives as
+    // `CURLE_RECV_ERROR` (see `tls_connection_never_answered`, issue #802). A
+    // partial reply has a response line, so that shape never claims it.
     case CURLE_GOT_NOTHING:
     case CURLE_SEND_ERROR:
     case CURLE_RECV_ERROR:
+    case CURLE_PARTIAL_FILE:
     case CURLE_WEIRD_SERVER_REPLY:
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::ConnectionFailed;

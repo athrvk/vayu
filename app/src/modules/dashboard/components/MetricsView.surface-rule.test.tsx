@@ -18,8 +18,10 @@
  * `border-rule` alone proves nothing: under no declared surface it falls back
  * to the invisible default. So this renders a ramp-up run that reaches every
  * divider the live view can draw (ramp footer, HDR footer, timing footer) and
- * asserts the declarations. The phase-percentile and stream-event dividers are
- * the finished report's, guarded by `PerformanceTab.surface-rule.test.tsx`.
+ * asserts the declarations. Its frames carry the stream keys, so the live
+ * stream card (#3236) is among the surfaces checked. The phase-percentile and
+ * stream-event dividers are the finished report's, guarded by
+ * `PerformanceTab.surface-rule.test.tsx`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -56,6 +58,9 @@ function tick(i: number): LoadTestMetrics {
 		bytes_sent: i * 1000,
 		bytes_received: i * 5000,
 		status_codes: { "200": i * 90, "500": i * 3 },
+		stream_events: i * 400,
+		events_per_second: 400,
+		streams_open: 8,
 	};
 }
 
@@ -70,6 +75,9 @@ const props: MetricsViewProps = {
 		avg_latency_ms: 27,
 		bytes_sent: 5000,
 		bytes_received: 25000,
+		stream_events: 2000,
+		events_per_second: 400,
+		streams_open: 8,
 	} as DisplayMetrics,
 	// The last tick is a gate frame, so Row 3 draws its footers (HDR and timing).
 	historicalMetrics: Array.from({ length: 6 }, (_, i) =>
@@ -92,6 +100,10 @@ function renderView() {
 }
 
 describe("MetricsView declares the surface its dividers read", () => {
+	it("reaches the live stream card, so the checks below cover it", () => {
+		expect(renderView().textContent).toContain("Stream events");
+	});
+
 	it("every border-rule sits under a declared surface", () => {
 		const rules = Array.from(renderView().querySelectorAll(".border-rule"));
 
@@ -109,7 +121,7 @@ describe("MetricsView declares the surface its dividers read", () => {
 	it("every bg-card block declares surface-card and keeps border-border to its own edge", () => {
 		const cards = Array.from(renderView().querySelectorAll(".bg-card"));
 
-		expect(cards.length).toBeGreaterThanOrEqual(13);
+		expect(cards.length).toBeGreaterThanOrEqual(14);
 		for (const card of cards) {
 			expect(
 				has(card, "surface-card"),

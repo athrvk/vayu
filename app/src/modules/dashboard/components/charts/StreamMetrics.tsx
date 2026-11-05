@@ -8,8 +8,9 @@
 import type { RunReport } from "@/types";
 import { InfoChip } from "../shared";
 import { TOOLTIPS } from "../tooltips";
-import { pluralize } from "../../utils/format";
+import { formatCount, pluralize } from "../../utils/format";
 import { DurationValue } from "./PhasePercentiles";
+import { StreamStat } from "./StreamStat";
 
 /**
  * What a streaming load run's transfers delivered - from `report.stream`
@@ -48,11 +49,11 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 			<div className="grid grid-cols-3 gap-2.5">
 				<StreamStat
 					label="events/sec"
-					value={fmtCount(stream.eventsPerSecond, 1)}
+					value={formatCount(stream.eventsPerSecond, 1)}
 					emphasis
 				/>
-				<StreamStat label="events" value={fmtCount(stream.totalEvents)} />
-				<StreamStat label="streams" value={fmtCount(stream.completions)} />
+				<StreamStat label="events" value={formatCount(stream.totalEvents)} />
+				<StreamStat label="streams" value={formatCount(stream.completions)} />
 			</div>
 
 			<div className="grid grid-cols-[68px_repeat(4,1fr)] gap-2.5 pt-2.5 border-t border-dashed border-rule text-label text-muted-foreground">
@@ -92,7 +93,7 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 				</p>
 			) : stream.capped > 0 ? (
 				<p className="text-label text-muted-foreground">
-					{fmtCount(stream.capped)} of {fmtCount(stream.completions)}{" "}
+					{formatCount(stream.capped)} of {formatCount(stream.completions)}{" "}
 					{pluralize(stream.completions, "stream")}{" "}
 					{pluralize(stream.capped, "was", "were")} ended by a cap
 					{stream.capped < stream.completions
@@ -108,45 +109,11 @@ export function StreamMetrics({ report }: { report: RunReport | null }) {
 	);
 }
 
-/** Counts, not milliseconds - `fmt` elsewhere in the dashboard means latency. */
-function fmtCount(value: number, decimals = 0): string {
-	if (!Number.isFinite(value)) return "-";
-	return value.toLocaleString(undefined, {
-		minimumFractionDigits: decimals,
-		maximumFractionDigits: decimals,
-	});
-}
-
-function StreamStat({
-	label,
-	value,
-	emphasis,
-}: {
-	label: string;
-	value: string;
-	emphasis?: boolean;
-}) {
-	return (
-		<div>
-			<div
-				className={
-					emphasis
-						? "text-sm font-semibold text-foreground font-mono tabular-nums"
-						: "text-sm text-foreground font-mono tabular-nums"
-				}
-			>
-				{value}
-			</div>
-			<div className="text-micro text-muted-foreground">{label}</div>
-		</div>
-	);
-}
-
 function EventValue({ value, emphasis }: { value: number; emphasis?: boolean }) {
 	return (
 		<span className="text-right font-mono tabular-nums text-label">
 			<span className={emphasis ? "text-foreground font-medium" : "text-foreground"}>
-				{fmtCount(value)}
+				{formatCount(value)}
 			</span>
 		</span>
 	);

@@ -408,8 +408,8 @@ export default function SettingsPanel() {
 						<code>
 							{ACCEPT_HEADER}: {SSE_ACCEPT}
 						</code>{" "}
-						unless this request already declares one. Applies to Send; a load test
-						always buffers.
+						unless this request already declares one. Applies to Send and to load tests;
+						a load run&apos;s stream ends at the caps set in its dialog.
 					</>
 				}
 			/>

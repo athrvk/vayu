@@ -8,11 +8,11 @@
 /**
  * @file core/run_export_markdown.cpp
  * @brief The run-report document as Markdown (#2131): a verdict, the run, the
- *        headline numbers, latency against budgets, a capacity search's
- *        result, the contract's coverage and schema checks, a scenario's
- *        sequence and transactions, errors, the comparison and the warnings, in
- *        that order. What each section says is `run_export_view.cpp`; this file
- *        is Markdown's syntax and escaping.
+ *        headline numbers, latency against budgets, a streaming run's events
+ *        (#3240), a capacity search's result, the contract's coverage and schema
+ *        checks, a scenario's sequence and transactions, errors, the comparison
+ *        and the warnings, in that order. What each section says is
+ *        `run_export_view.cpp`; this file is Markdown's syntax and escaping.
  */
 
 #include "vayu/core/run_export_markdown.hpp"
@@ -290,6 +290,16 @@ std::string latency_block (const ReportView& view) {
     render_table (view.latency);
 }
 
+/// Empty when the run did not stream.
+std::string stream_block (const ReportView& view) {
+    if (!view.stream) {
+        return {};
+    }
+    const ReportStream& stream = *view.stream;
+    return "## Stream\n\n" + markdown_text (stream.note) + "\n\n" +
+    render_table (stream.totals) + '\n' + render_table (stream.distribution);
+}
+
 /// Empty when the run was not a capacity search.
 std::string capacity_block (const ReportView& view) {
     if (!view.capacity) {
@@ -399,9 +409,10 @@ std::string footer_block (const ReportView& view) {
 std::string render_run_export_markdown (const nlohmann::ordered_json& document) {
     const ReportView view = build_run_report_view (document);
     std::string out;
-    for (const auto section : { title_block, verdict_block, run_block, results_block,
-         latency_block, capacity_block, contract_block, sequence_block, transactions_block,
-         errors_block, comparison_block, warnings_block, footer_block }) {
+    for (const auto section : { title_block, verdict_block, run_block,
+         results_block, latency_block, stream_block, capacity_block,
+         contract_block, sequence_block, transactions_block, errors_block,
+         comparison_block, warnings_block, footer_block }) {
         if (const std::string block = section (view); !block.empty ()) {
             add_block (out, block);
         }

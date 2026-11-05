@@ -535,8 +535,9 @@ nlohmann::json inbox_info_json (const InboxInfo& info) {
     return out;
 }
 
-std::expected<int64_t, InboxParseError>
-parse_live_resume_point (const std::string& header_value, const std::string& param_value) {
+std::expected<int64_t, InboxParseError> parse_live_resume_point (const std::string& header_value,
+const std::string& param_value,
+std::string_view id_noun) {
     // The header is the browser's own reconnect and therefore the more recent
     // of the two; an empty one is absent, not a resume point of "".
     const std::string& value = header_value.empty () ? param_value : header_value;
@@ -548,8 +549,9 @@ parse_live_resume_point (const std::string& header_value, const std::string& par
     const std::optional<int64_t> parsed_id = vayu::utils::parse_number<int64_t> (value);
     if (!parsed_id.has_value () || *parsed_id < 0) {
         return std::unexpected (InboxParseError{ .http_status = 400,
-        .code = "invalid_last_event_id",
-        .message = std::string (source) + " must be a non-negative capture id" });
+        .code    = "invalid_last_event_id",
+        .message = std::string (source) + " must be a non-negative " +
+        std::string (id_noun) + " id" });
     }
     return *parsed_id;
 }
@@ -1362,7 +1364,7 @@ void handle_inbox_live (RouteContext& ctx, const httplib::Request& req, httplib:
     const auto limits = ctx.inbox_manager.limits (inbox_id).value_or (InboxLimits{});
 
     const auto resume_point = parse_live_resume_point (
-    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"));
+    req.get_header_value ("Last-Event-ID"), req.get_param_value ("lastEventId"), "capture");
     if (!resume_point) {
         const auto& refusal = resume_point.error ();
         send_error (res, refusal.http_status, refusal.message, refusal.code);

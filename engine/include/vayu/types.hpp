@@ -13,6 +13,7 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -502,6 +503,13 @@ struct StreamBounds {
     int64_t max_duration_ms = 0;
     /// Ceiling on events delivered, counted by `SseFrameCounter`.
     int64_t max_events = 0;
+    /// The run's tally of events as they arrive (issue #3236), shared by every
+    /// transfer of the run and read by the live tick. Owned by the run's
+    /// `MetricsCollector`; null when the run reports no stream metrics, which
+    /// leaves the write path one null check. The initializer is what lets a
+    /// caller spell the two caps alone (`StreamBounds{ ms, events }`) under
+    /// `-Wmissing-field-initializers`.
+    std::shared_ptr<std::atomic<std::size_t>> live_events = nullptr;
 };
 
 /**
