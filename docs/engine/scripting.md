@@ -2396,6 +2396,10 @@ would read and act on.
 The jar is libcurl's own cookie engine underneath: matching, expiry and
 replacement are its rules, not a second implementation of RFC 6265.
 
+`SameSite` is ignored, on purpose: a script is not a browsing context, so there
+is no cross-site request to restrict. A jar cookie is sent whatever its `SameSite`
+value.
+
 ### Writing to the jar (`pm.cookies.jar()`)
 
 ```javascript
