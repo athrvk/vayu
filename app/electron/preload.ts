@@ -460,9 +460,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		contents: string | Uint8Array,
 		suggestedName: string
 	): Promise<
-		| { outcome: "saved"; path: string }
-		| { outcome: "cancelled" }
-		| { outcome: "failed"; message: string }
+		{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string }
 	> =>
 		ipcRenderer.invoke("file:save", contents, suggestedName).catch((e: unknown) => {
 			throw unwrapIpcError(e);

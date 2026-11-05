@@ -44,9 +44,7 @@ export const SAVE_FILE_MAX_BYTES = 1024 * 1024 * 1024;
  * which can import from here.
  */
 export type SaveFileReply =
-	| { outcome: "saved"; path: string }
-	| { outcome: "cancelled" }
-	| { outcome: "failed"; message: string };
+	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
 
 /** The subset of `dialog.showSaveDialog`'s options this channel sets. */
 export interface SaveDialogOptions {
@@ -127,7 +125,7 @@ export async function saveFile(
 		deps.log(`Couldn't write a saved file: ${message}`);
 		return { outcome: "failed", message };
 	}
-	return { outcome: "saved", path: chosen.filePath };
+	return { outcome: "saved" };
 }
 
 export function registerSaveFileIpc(ipc: IpcLike, deps: SaveFileIpcDeps): void {

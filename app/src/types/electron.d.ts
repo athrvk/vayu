@@ -236,9 +236,7 @@ export type RemoveFolderReply = { outcome: "done"; value: null } | EngineWriteFa
  * `electron/save-file-ipc.ts`.
  */
 export type SaveFileReply =
-	| { outcome: "saved"; path: string }
-	| { outcome: "cancelled" }
-	| { outcome: "failed"; message: string };
+	{ outcome: "saved" } | { outcome: "cancelled" } | { outcome: "failed"; message: string };
 
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };

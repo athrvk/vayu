@@ -47,12 +47,11 @@ function depsWith(overrides: Partial<SaveFileIpcDeps> = {}) {
 }
 
 describe("saveFile", () => {
-	it("writes the text where the user chose, and says where", async () => {
+	it("writes the text where the user chose", async () => {
 		const deps = depsWith();
 
 		await expect(saveFile('{"a":1}', "report.json", deps)).resolves.toEqual({
 			outcome: "saved",
-			path: "/home/ada/out/report.json",
 		});
 
 		expect(deps.showSaveDialog).toHaveBeenCalledWith({
@@ -207,7 +206,7 @@ describe("the wiring", () => {
 			"saveFile: (contents: string | Uint8Array, suggestedName: string) => Promise<SaveFileReply>;"
 		);
 		for (const source of [preload, declarations]) {
-			expect(source).toContain('{ outcome: "saved"; path: string }');
+			expect(source).toContain('{ outcome: "saved" }');
 			expect(source).toContain('{ outcome: "cancelled" }');
 			expect(source).toContain('{ outcome: "failed"; message: string }');
 		}
