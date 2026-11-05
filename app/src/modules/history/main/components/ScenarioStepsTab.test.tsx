@@ -564,6 +564,68 @@ describe("the per-step extractor misses", () => {
 });
 
 /**
+ * A step's unresolved variables (`scenario.steps[i].unresolvedTokens`, issue
+ * #3269): the executions that sent one, in the same row as the extractor misses
+ * so a step shows one row of warnings, not two. The engine always sends the
+ * field on a load run, so 0 is a real "none".
+ * Mutation check: drop `<UnresolvedTokens>` from `ScenarioStepsTab.tsx` and the
+ * first three cases fail; render it whatever the count and the last two do;
+ * split it into a row of its own and the shared-row case does.
+ */
+describe("the per-step unresolved variables", () => {
+	it("counts the sends that carried one", () => {
+		render(
+			<ScenarioStepsTab steps={[{ ...STEPS[0], unresolvedTokens: 1234 }]} virtualUsers={8} />
+		);
+
+		const rows = screen.getAllByRole("row").slice(1); // drop the header row
+		expect(rows).toHaveLength(2);
+		expect(within(rows[1]).getByText("1,234 sends with unresolved variables")).toBeTruthy();
+	});
+
+	it("says one send in the singular", () => {
+		render(
+			<ScenarioStepsTab steps={[{ ...STEPS[0], unresolvedTokens: 1 }]} virtualUsers={8} />
+		);
+
+		expect(screen.getByText("1 send with unresolved variables")).toBeTruthy();
+	});
+
+	it("shares the extractor misses' row rather than stacking a second one", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[{ ...STEPS[0], extractorMisses: 3, unresolvedTokens: 7 }, STEPS[1]]}
+				virtualUsers={8}
+			/>
+		);
+
+		const rows = screen.getAllByRole("row").slice(1);
+		expect(rows).toHaveLength(3);
+		expect(within(rows[1]).getByText("3 extractor misses")).toBeTruthy();
+		expect(within(rows[1]).getByText("7 sends with unresolved variables")).toBeTruthy();
+	});
+
+	it("adds no row for a step that sent every name resolved", () => {
+		render(
+			<ScenarioStepsTab
+				steps={[{ ...STEPS[0], unresolvedTokens: 0 }, STEPS[1]]}
+				virtualUsers={8}
+			/>
+		);
+
+		expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+		expect(screen.queryByText(/unresolved variables/)).toBeNull();
+	});
+
+	it("adds no row for a report from before the field", () => {
+		render(<ScenarioStepsTab steps={STEPS} virtualUsers={8} />);
+
+		expect(screen.getAllByRole("row").slice(1)).toHaveLength(2);
+		expect(screen.queryByText(/unresolved variables/)).toBeNull();
+	});
+});
+
+/**
  * Issue #3127: the step's inline script row lists what the script said, and its
  * deferred row names the step's own sampled-response count. Mutation check:
  * drop `replaySamples` from the `ElementTally` call and the sized cases fail.
