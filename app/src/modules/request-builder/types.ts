@@ -36,6 +36,7 @@ import type {
 	DataContractScope,
 	ElementDef,
 	ElementOutcome,
+	ExchangeWarning,
 	HttpMethod,
 	HttpVersion,
 	KeyValueItem,
@@ -388,6 +389,17 @@ export interface ResponseState {
 	 * `app/src/types/domain.ts`.
 	 */
 	authNotice?: string;
+	/**
+	 * What the engine did to this exchange that the response does not show - a
+	 * jar cookie left off the `Cookie` line, a `Set-Cookie` libcurl discarded
+	 * (issue #3307). Absent when there is none: both funnels read an empty list
+	 * and a missing key as the same thing. Set by `responseFromExecuteResult`
+	 * from the `/execute` body and `responseFromRunResult` from
+	 * `trace.warnings`, and drawn by `ExchangeWarnings`, in `ResponseViewer`
+	 * above the tabs and on a collection run's step card. See
+	 * `HttpResponse.warnings` in `app/src/types/domain.ts`.
+	 */
+	warnings?: ExchangeWarning[];
 	/**
 	 * The client-certificate registry entry this exchange presented, as `host`
 	 * or `host:port` (issue #707); absent when none matched.

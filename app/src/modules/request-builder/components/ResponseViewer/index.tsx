@@ -50,7 +50,7 @@ import {
 	ResponseEvents,
 	formatSize,
 } from "@/components/shared/response-viewer";
-import { Callout, EmptyState } from "@/components/shared";
+import { Callout, EmptyState, ExchangeWarnings } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
 import ResponseTimingTab from "./ResponseTimingTab";
 import ConsoleOutput from "./ConsoleOutput";
@@ -543,6 +543,17 @@ export default function ResponseViewer() {
 					</Callout>
 				</div>
 			)}
+
+			{/*
+			 * What the engine did to the exchange that the response does not show
+			 * (issue #3307), e.g. a jar cookie left off the `Cookie` line. A band
+			 * for the same reason the notice above is: the sentence explains the
+			 * outcome, so it shows on every tab and on a `status: 0` failure.
+			 */}
+			<ExchangeWarnings
+				warnings={shown.warnings}
+				className={cn("px-4 pt-3 shrink-0", staleClass)}
+			/>
 
 			{/* Response Tabs */}
 			<Tabs

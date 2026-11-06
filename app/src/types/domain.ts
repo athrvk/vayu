@@ -1516,6 +1516,18 @@ export interface RunResultScripts {
 }
 
 /**
+ * One thing the engine did to a design send that its response does not show
+ * (issue #3307). `code` is the stable identifier (`cookie_not_sent`,
+ * `cookie_limit_reached`, `cookie_dropped_oversized`, `cookie_dropped_too_many`
+ * today; more arrive as the engine produces them), `message` the sentence to
+ * show, which names a cookie by name and never by value.
+ */
+export interface ExchangeWarning {
+	code: string;
+	message: string;
+}
+
+/**
  * One HTTP exchange's trace, as the engine stores it. A design-mode trace
  * (`POST /request` -> `store_result`, execution.cpp) nests the request and
  * response; a load-test trace flattens timing and status onto the object
@@ -1748,6 +1760,14 @@ export interface RunResultTrace {
 	 * before the registry existed means, and the two are the same fact.
 	 */
 	clientCertificate?: string;
+	/**
+	 * What the engine did to this exchange that its response does not show -
+	 * {@link HttpResponse.warnings} stored verbatim (issue #3307). Top level for
+	 * the reason `clientCertificate` is: a send that failed has no `response`
+	 * node and can still have warned. Written **only when non-empty**, so absent
+	 * is "none", which is also what a row stored before the field means.
+	 */
+	warnings?: ExchangeWarning[];
 	/*
 	 * Step identity, stamped onto a scenario run's per-step trace by
 	 * `stamp_step_identity` (engine/src/core/scenario_runner.cpp) and read by
@@ -2500,6 +2520,15 @@ export interface HttpResponse {
 	 */
 	authNotice?: string;
 	/**
+	 * What the engine did to this exchange that the response does not show
+	 * (issue #3307): a jar cookie left off the `Cookie` line, or a `Set-Cookie`
+	 * libcurl discarded unread. Never fails the send. **Always present** on a live
+	 * `/execute` body, `[]` when there is nothing to say, so an absent key is an
+	 * engine too old to warn. A streaming send is answered before the exchange
+	 * runs and carries none.
+	 */
+	warnings?: ExchangeWarning[];
+	/**
 	 * Which client-certificate registry entry this exchange presented, as
 	 * `host` or `host:port`; `""` when none matched (issue #707). Always
 	 * present on a live body, like `httpVersion` above and for the same reason:
@@ -3074,7 +3103,8 @@ export interface RunReport {
 	 * unresolved `{{token}}` because load mode runs no residual pass, a step
 	 * whose pre-request script that mode never executes, a per-host connection
 	 * limit raised above its setting (#2394), or requests libcurl re-sent on a
-	 * new connection (#2799). Never refuses the run - a literal `{{` can be
+	 * new connection (#2799), or `Set-Cookie` headers the cookie engine dropped
+	 * (`cookies_dropped`, #3307). Never refuses the run - a literal `{{` can be
 	 * deliberate in a body - only names it, so a green run and one that quietly
 	 * sent every request unauthenticated do not read the same. Absent, not
 	 * empty, for a run with nothing to report.
@@ -3082,6 +3112,11 @@ export interface RunReport {
 	warnings?: Array<{
 		code: string;
 		message: string;
+		/**
+		 * `unresolved_tokens`: requests affected. `connection_replayed`: requests
+		 * re-sent. `cookies_dropped`: `Set-Cookie` headers dropped across the run;
+		 * the message states it, a count and never a name.
+		 */
 		count?: number;
 		names?: string[];
 		steps?: number;

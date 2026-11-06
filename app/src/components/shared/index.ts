@@ -77,6 +77,9 @@ export * from "./CapturedDataWarning";
 // "This run sent requests with an unresolved variable" - a load run's report
 export * from "./RunWarnings";
 
+// "A cookie did not fit the Cookie header" - what a design send did that its response hides
+export * from "./ExchangeWarnings";
+
 // The same disclosure for a collection run's stored step exchanges
 export * from "./StoredExchangeWarning";
 
