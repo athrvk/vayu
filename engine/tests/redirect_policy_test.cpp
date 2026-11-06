@@ -154,9 +154,6 @@ TEST (RedirectLimit, TheErrorNamesTheLimitAsLibcurlsDid) {
     EXPECT_EQ (error.message,
     "Too many redirects: the server redirected more than 2 times (see Maximum "
     "redirects). Maximum (2) redirects followed");
-    EXPECT_EQ (too_many_redirects_message (std::nullopt, "detail"),
-    "Too many redirects: the server redirected more than the allowed number of "
-    "times (see Maximum redirects). detail");
 }
 
 // ---------------------------------------------------------------------------

@@ -537,8 +537,9 @@ TEST_F (HttpClientTest, RawRequestOfAGetWithABodyRedirectedByA302EndsAtTheHeader
 }
 
 // A redirect loop is the server's answer, not a connection that failed
-// (issue #2462). Mutation-check: put CURLE_TOO_MANY_REDIRECTS back under the
-// connection-failed group and the code reads CONNECTION_FAILED.
+// (issue #2462). Mutation-check: change `too_many_redirects_error`'s code to
+// ConnectionFailed and the code reads CONNECTION_FAILED; change the number its
+// text names and the message check fails.
 TEST_F (HttpClientTest, ARedirectLoopIsTooManyRedirectsAndNamesTheLimit) {
     for (const int limit : { 0, 2 }) {
         Request request;
@@ -559,8 +560,9 @@ TEST_F (HttpClientTest, ARedirectLoopIsTooManyRedirectsAndNamesTheLimit) {
                                             "redirected more than " +
         std::to_string (limit) + " times"))
         << limit << ": " << response.error_message;
-        // libcurl's own text follows the plain statement.
-        EXPECT_NE (response.error_message.find ("redirect"), std::string::npos);
+        EXPECT_TRUE (response.error_message.ends_with (
+        "Maximum (" + std::to_string (limit) + ") redirects followed"))
+        << limit << ": " << response.error_message;
     }
 }
 

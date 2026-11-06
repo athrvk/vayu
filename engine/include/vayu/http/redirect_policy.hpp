@@ -125,15 +125,6 @@ struct RedirectedRequest {
  */
 [[nodiscard]] Error too_many_redirects_error (int max_redirects);
 
-/**
- * @brief The sentence that opens a redirect-limit failure, then @p detail.
- *
- * @p limit is the number of redirects followed when the limit was reached; the
- * sentence names no number when it is unknown rather than guess one.
- */
-[[nodiscard]] std::string
-too_many_redirects_message (std::optional<long> limit, std::string_view detail);
-
 // ---------------------------------------------------------------------------
 // The request a chain sends next
 // ---------------------------------------------------------------------------

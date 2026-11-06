@@ -153,8 +153,9 @@ class ExecuteTransportFailureTest : public ::testing::Test {
     std::unique_ptr<vayu::http::routes::RouteContext> ctx_;
 };
 
-// Mutation-check: map CURLE_TOO_MANY_REDIRECTS back to ConnectionFailed and
-// errorCode reads CONNECTION_FAILED.
+// Mutation-check: change `too_many_redirects_error`'s code to ConnectionFailed
+// and errorCode reads CONNECTION_FAILED; change the number its text names and
+// the message check fails.
 TEST_F (ExecuteTransportFailureTest, ARedirectLoopAnswersTooManyRedirects) {
     const FailingServer server;
     const json answer = execute ({ { "method", "GET" }, { "url", server.url ("/loop") },

@@ -1225,24 +1225,6 @@ bool tls_connection_never_answered (CURL* curl) {
     return response_code == 0;
 }
 
-/**
- * The sentence that opens a redirect-limit failure of a transfer libcurl
- * followed itself, ahead of libcurl's own text.
- *
- * The limit is read off the handle (`CURLINFO_REDIRECT_COUNT`) rather than the
- * request, which this function never sees: libcurl raises
- * `CURLE_TOO_MANY_REDIRECTS` exactly when the hops followed reach
- * `CURLOPT_MAXREDIRS`, so the count at failure is the limit.
- */
-std::string too_many_redirects_message (CURL* curl, const std::string& curl_text) {
-    long followed = -1;
-    if (!curl || get_info<CURLINFO_REDIRECT_COUNT> (curl, &followed) != CURLE_OK ||
-    followed < 0) {
-        return vayu::http::too_many_redirects_message (std::nullopt, curl_text);
-    }
-    return vayu::http::too_many_redirects_message (followed, curl_text);
-}
-
 /// The `Content-Encoding` value of the last response libcurl received, or
 /// empty. Only the last request's headers: a redirect hop's are not the body
 /// that failed to decode.
@@ -1443,14 +1425,9 @@ const ConnectedPeerCheck* peer_check) {
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::ConnectionFailed;
         break;
-    // The two below are the target's answer being unusable, not a connection
-    // that failed: every hop was answered. Their own codes, because reading
-    // "couldn't connect" sent users to the network for a redirect loop or a
+    // The target's answer being unusable, not a connection that failed: its own
+    // code, because reading "couldn't connect" sent users to the network for a
     // mislabelled body (issue #2462).
-    case CURLE_TOO_MANY_REDIRECTS:
-        error.code    = ErrorCode::TooManyRedirects;
-        error.message = too_many_redirects_message (curl, error.message);
-        break;
     case CURLE_BAD_CONTENT_ENCODING:
         error.code    = ErrorCode::BadContentEncoding;
         error.message = bad_content_encoding_message (curl, error.message);
@@ -1547,7 +1524,6 @@ bool verify_ssl,
 const std::string& url,
 ConnectedPeerCheck* peer_check) {
     set_opt<CURLOPT_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
-    set_opt<CURLOPT_REDIR_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
     // The same switch for an https:// proxy's own handshake (#2469): libcurl

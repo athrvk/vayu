@@ -55,11 +55,12 @@ class DnsCache;
  *             May be null where no handle is available; the mapping then
  *             falls back to the code alone.
  *
- * A redirect loop and an undecodable body get their own codes
- * (`TooManyRedirects`, `BadContentEncoding`, issue #2462) and a message that
- * opens with a plain statement of the cause, then libcurl's text. The redirect
- * limit and the `Content-Encoding` are read off @p curl, so without a handle
- * the sentence names neither.
+ * An undecodable body gets its own code (`BadContentEncoding`, issue #2462)
+ * and a message that opens with a plain statement of the cause, then libcurl's
+ * text. The `Content-Encoding` is read off @p curl, so without a handle the
+ * sentence names none. A redirect loop is not a libcurl code: no handle
+ * follows redirects, so `CURLE_TOO_MANY_REDIRECTS` is never raised, and the
+ * `TooManyRedirects` a chain ends with comes from `too_many_redirects_error`.
  *
  * `CURLE_UNSUPPORTED_PROTOCOL` is `InvalidUrl` (a scheme the handle refused,
  * libcurl's text unchanged) unless @p curl reached a peer and stopped at an

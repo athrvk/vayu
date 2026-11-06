@@ -214,17 +214,10 @@ bool redirect_limit_reached (int followed, int max_redirects) {
 }
 
 Error too_many_redirects_error (int max_redirects) {
+    const std::string limit = std::to_string (max_redirects);
     return Error{ ErrorCode::TooManyRedirects,
-        too_many_redirects_message (max_redirects,
-        "Maximum (" + std::to_string (max_redirects) + ") redirects followed") };
-}
-
-std::string too_many_redirects_message (std::optional<long> limit, std::string_view detail) {
-    std::string text = "Too many redirects: the server redirected more than ";
-    text += limit ? std::to_string (*limit) + " times" : "the allowed number of times";
-    text += " (see Maximum redirects). ";
-    text += detail;
-    return text;
+        "Too many redirects: the server redirected more than " + limit +
+        " times (see Maximum redirects). Maximum (" + limit + ") redirects followed" };
 }
 
 RedirectChain::RedirectChain (const Request& request,
