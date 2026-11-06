@@ -16,6 +16,9 @@
 #include <memory>
 
 #include "vayu/http/curl_options.hpp"
+#include "vayu/http/event_loop/curl_utils.hpp"
+#include "vayu/http/form_body.hpp"
+#include "vayu/http/header_names.hpp"
 #include "vayu/http/url_parts.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
@@ -117,6 +120,27 @@ bool contains (const std::vector<std::string>& lines, const std::string& line) {
     return std::ranges::find (lines, line) != lines.end ();
 }
 
+/// The name of one header-list line: what precedes `:`, or `;` in libcurl's
+/// spelling of a blank header, without blanks.
+std::string_view header_line_name (std::string_view line) {
+    return trim_optional_whitespace (line.substr (0, line.find_first_of (":;")));
+}
+
+/// @p first without the lines a hop to another origin, or a rewritten hop,
+/// does not send; the caller owns the copy. Null when no line is left.
+curl_slist* filtered_header_list (const curl_slist* first, bool other_origin, bool rewritten) {
+    curl_slist* list = nullptr;
+    for (const curl_slist* item = first; item != nullptr; item = item->next) {
+        const std::string_view name = header_line_name (item->data);
+        if ((other_origin && is_origin_bound_header (name)) ||
+        (rewritten && is_body_header (name))) {
+            continue;
+        }
+        list = curl_slist_append (list, item->data);
+    }
+    return list;
+}
+
 } // namespace
 
 bool is_redirect_status (int status) {
@@ -201,6 +225,67 @@ std::string too_many_redirects_message (std::optional<long> limit, std::string_v
     text += " (see Maximum redirects). ";
     text += detail;
     return text;
+}
+
+RedirectChain::RedirectChain (const Request& request,
+curl_slist* first_headers,
+detail::BodySource& body)
+: request_ (&request), body_ (&body),
+  hop_{ wire_url (request), request.method, has_wire_body (request) },
+  first_headers_ (first_headers) {
+}
+
+void RedirectChain::SlistDeleter::operator() (curl_slist* list) const {
+    curl_slist_free_all (list);
+}
+
+std::optional<NextHop>
+RedirectChain::redirect_target (const std::vector<HeaderLine>& lines, int status) const {
+    if (!request_->follow_redirects || !is_redirect_status (status)) {
+        return std::nullopt;
+    }
+    const auto location = location_of (lines);
+    if (!location) {
+        return std::nullopt;
+    }
+    if (redirect_limit_reached (hop_.followed, request_->max_redirects)) {
+        return NextHop (std::unexpect, too_many_redirects_error (request_->max_redirects));
+    }
+    return resolve_redirect_target (hop_.url, *location);
+}
+
+void RedirectChain::advance (CURL* curl, int status, std::string next_url) {
+    apply_method (curl, status);
+    hop_.url = std::move (next_url);
+    ++hop_.followed;
+    set_opt<CURLOPT_URL> (curl, hop_.url.c_str ());
+    apply_headers (curl, same_origin (wire_url (*request_), hop_.url));
+}
+
+void RedirectChain::apply_method (CURL* curl, int status) {
+    const RedirectedRequest next = redirected_request (status, hop_.method);
+    if (next.method != hop_.method || (hop_.carries_body && !next.keeps_body)) {
+        detail::apply_bodyless_method (curl, next.method, *body_);
+        hop_.method       = next.method;
+        hop_.carries_body = false;
+        hop_.rewritten    = true;
+        return;
+    }
+    if (hop_.carries_body) {
+        detail::rewind_body_source (*body_);
+    }
+}
+
+void RedirectChain::apply_headers (CURL* curl, bool first_origin) {
+    const bool filtered = !first_origin || hop_.rewritten;
+    SlistPtr next       = filtered ?
+    SlistPtr (filtered_header_list (first_headers_.get (), !first_origin, hop_.rewritten)) :
+    nullptr;
+    set_opt<CURLOPT_HTTPHEADER> (curl, filtered ? next.get () : first_headers_.get ());
+    hop_headers_ = std::move (next);
+    // libcurl copies a string option, so the value need not outlive the call.
+    const std::string cookies = first_origin ? detail::typed_cookie_value (*request_) : "";
+    set_opt<CURLOPT_COOKIE> (curl, cookies.empty () ? nullptr : cookies.c_str ());
 }
 
 std::optional<std::string> cookie_identity (std::string_view netscape_line) {
