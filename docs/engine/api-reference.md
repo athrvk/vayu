@@ -7817,7 +7817,9 @@ events arrive on. Nothing about a non-streaming send changes.
 The worker parses SSE frames into a bounded in-memory ring that
 [`GET /runs/:runId/events`](#get-runsrunidevents) relays, and writes a bounded
 `events` node into the run's stored trace when the stream ends, so History
-restores the timeline.
+restores the timeline. The cookie `warnings` a buffered send answers with
+(issue #3315) are written to the same stored trace, at its top level; the
+`202` carries none.
 
 What the reply's bytes become depends on the final response's `Content-Type`
 (issue #3238), read per redirect hop, compared without case and without its
@@ -8519,10 +8521,10 @@ here as the engine starts producing them:
 `cookie_not_sent` and `cookie_limit_reached` are read off libcurl's own notices
 at any log verbosity, once per cookie however many hops of a redirect chain
 report them. The two `cookie_dropped_*` codes are counted from the response's
-header lines instead, only on a send that has a cookie jar, and are not reported
-on the streaming path (`stream: true`). Under load the same two checks feed the
-run's `cookies_dropped` warning instead (see
-[GET /runs/:runId/report](#get-runsrunidreport)).
+header lines instead, only on a send that has a cookie jar. A streaming send
+(`stream: true`) reports all four by the same rules, on its stored trace alone.
+Under load the same two checks feed the run's `cookies_dropped` warning instead
+(see [GET /runs/:runId/report](#get-runsrunidreport)).
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
@@ -11718,7 +11720,9 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
   `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
 - `complete`'s `reason` is one of `completed`, `stopped`, `maxStreamEvents`,
   `maxStreamDurationMs`, `idleTimeout`, `error`; see
-  [POST /execute](#post-execute).
+  [POST /execute](#post-execute). No frame carries the exchange's `warnings`
+  (issue #3315): they are on the stored trace, which the report already holds
+  when `complete` arrives.
 
 **`sourceId` is not the resume point.** `id:` on the wire is this relay's own
 frame offset, which is what `?lastEventId=` / `Last-Event-ID` takes; `sourceId`

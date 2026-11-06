@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstddef>
 #include <future>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -47,6 +48,8 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "vayu/utils/logger.hpp"
+#include "verbosity_restorer.hpp"
 #include "wait_until.hpp"
 
 namespace {
@@ -111,7 +114,7 @@ class StreamServer {
 
         svr_.Get ("/scripted", [this] (const httplib::Request& req, httplib::Response& res) {
             note_request (req);
-            if (const std::string cookie = set_cookie_value (); !cookie.empty ()) {
+            for (const auto& cookie : set_cookie_values ()) {
                 res.set_header ("Set-Cookie", cookie);
             }
             res.set_chunked_content_provider (
@@ -193,6 +196,9 @@ class StreamServer {
             const Canned body = hop_reply ();
             res.status        = 302;
             res.set_header ("Location", hop_location ());
+            for (const auto& cookie : hop_cookie_values ()) {
+                res.set_header ("Set-Cookie", cookie);
+            }
             res.set_content (body.chunks.front (), body.content_type);
         });
 
@@ -267,8 +273,15 @@ class StreamServer {
 
     /// A `Set-Cookie` every `/scripted` answer carries from now on; "" for none.
     void set_cookie (std::string value) {
+        set_cookies (value.empty () ? std::vector<std::string>{} :
+                                      std::vector<std::string>{ std::move (value) });
+    }
+
+    /// The `Set-Cookie` lines every `/scripted` answer carries from now on, one
+    /// header each, in order.
+    void set_cookies (std::vector<std::string> values) {
         std::lock_guard<std::mutex> lock (received_mutex_);
-        set_cookie_ = std::move (value);
+        set_cookies_ = std::move (values);
     }
 
     /// What `/canned` answers from now on: @p chunks, one write each.
@@ -287,6 +300,12 @@ class StreamServer {
     void hop_body (std::string content_type, std::string body) {
         std::lock_guard<std::mutex> lock (received_mutex_);
         hop_reply_ = Canned{ 302, std::move (content_type), { std::move (body) } };
+    }
+
+    /// The `Set-Cookie` lines `/hop`'s redirect carries from now on.
+    void hop_cookies (std::vector<std::string> values) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        hop_cookies_ = std::move (values);
     }
 
     /// Make `/hop` wait @p ms before it answers. Set before the request.
@@ -321,9 +340,14 @@ class StreamServer {
         return hop_reply_;
     }
 
-    std::string set_cookie_value () const {
+    std::vector<std::string> set_cookie_values () const {
         std::lock_guard<std::mutex> lock (received_mutex_);
-        return set_cookie_;
+        return set_cookies_;
+    }
+
+    std::vector<std::string> hop_cookie_values () const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        return hop_cookies_;
     }
 
     void note_request (const httplib::Request& req) {
@@ -343,7 +367,8 @@ class StreamServer {
     std::atomic<int> pace_ms_{ 0 };
     mutable std::mutex received_mutex_;
     std::map<std::string, std::string, std::less<>> received_headers_;
-    std::string set_cookie_;
+    std::vector<std::string> set_cookies_;
+    std::vector<std::string> hop_cookies_;
     std::string hop_location_;
     Canned hop_reply_{ 302, "application/json", { R"({"hop":"first"})" } };
     Canned canned_;
@@ -1949,6 +1974,225 @@ TEST_F (StreamExecuteTest, ARefusedStreamWithTheJarOffPersistsNoPreRequestWrite)
     EXPECT_EQ (response->status, 503) << response->body;
     EXPECT_TRUE (cookie_jar_.lines_for ("").empty ())
     << "a refused stream persisted its pre-request cookie write";
+}
+
+// ---------------------------------------------------------------------------
+// Cookie warnings on a stream (issue #3315)
+//
+// A stream reports the four cookie warnings a buffered send does
+// (`cookie_jar_test.cpp` holds their wording) on its stored trace: the route
+// answered `202` before the transfer, and no relay frame carries them. The
+// route hands the stream the fixture's jar under scope "" (no environment).
+// ---------------------------------------------------------------------------
+
+/// @p count jar cookies for the loopback origin, named `<stem>0`, `<stem>1`,
+/// ..., each @p value_bytes of `v`.
+std::vector<std::string>
+loopback_jar_lines (const std::string& stem, int count, size_t value_bytes) {
+    std::vector<std::string> lines;
+    lines.reserve (static_cast<size_t> (count));
+    for (int i = 0; i < count; ++i) {
+        lines.push_back ("127.0.0.1\tFALSE\t/\tFALSE\t4102444800\t" + stem +
+        std::to_string (i) + "\t" + std::string (value_bytes, 'v'));
+    }
+    return lines;
+}
+
+/// `Set-Cookie` values `<stem>0=secret-0`, `<stem>1=secret-1`, ...
+std::vector<std::string> numbered_set_cookies (int count, const std::string& stem = "c") {
+    std::vector<std::string> values;
+    values.reserve (static_cast<size_t> (count));
+    for (int i = 0; i < count; ++i) {
+        values.push_back (
+        stem + std::to_string (i) + "=secret-" + std::to_string (i) + "; Path=/");
+    }
+    return values;
+}
+
+/// The stored trace's top-level warnings that carry @p code.
+std::vector<json> trace_warnings (const json& trace, const std::string& code) {
+    std::vector<json> found;
+    std::ranges::copy_if (trace.value ("warnings", json::array ()),
+    std::back_inserter (found),
+    [&] (const json& warning) { return warning.value ("code", "") == code; });
+    return found;
+}
+
+/// No warning on @p trace quotes a cookie value the fixtures use.
+void expect_no_cookie_value (const json& trace) {
+    const std::string warnings = trace.value ("warnings", json::array ()).dump ();
+    EXPECT_EQ (warnings.find ("vvvv"), std::string::npos) << warnings;
+    EXPECT_EQ (warnings.find ("secret-"), std::string::npos) << warnings;
+}
+
+/// The `sentHeaders` record of @p trace, or an empty object.
+json sent_headers (const json& trace) {
+    return trace.value ("request", json::object ()).value ("sentHeaders", json::object ());
+}
+
+/// A payload whose request types a `Cookie` row.
+json typed_cookie_row () {
+    return json{ { "headers", { { "Cookie", "typed=2" } } } };
+}
+
+// Three ~3000-byte jar cookies pass libcurl's 8190-byte Cookie line at the
+// third, which takes the typed row with it: the trace names the cookie, and
+// `sentHeaders` stops claiming the typed row went out. At both ends of the
+// console verbosity, because the warning is the trace's, not the log's.
+// Mutation-check: drop `CURLOPT_DEBUGFUNCTION` in `consume_sse_stream` and no
+// warning arrives; return early from `stream_debug_callback` below verbosity
+// 2 and the verbosity-0 pass finds none; drop `apply_cookie_notices`' erase
+// and the typed row stays in `sentHeaders`.
+TEST_F (StreamExecuteTest, AStreamNamesAJarCookieWithheldForTheHeaderLimit) {
+    const vayu::tests::VerbosityRestorer restore;
+    serve (1);
+    cookie_jar_.store ("", loopback_jar_lines ("big", 3, 3000));
+    for (const int verbosity : { 0, 2 }) {
+        vayu::utils::Logger::instance ().set_verbosity (verbosity);
+        const auto run_id = start (typed_cookie_row ());
+        ASSERT_FALSE (run_id.empty ());
+        const auto trace = trace_for (run_id);
+
+        const auto found = trace_warnings (trace, "cookie_not_sent");
+        ASSERT_EQ (found.size (), 1U)
+        << "verbosity " << verbosity << ": " << trace.dump (2);
+        EXPECT_NE (found.front ().value ("message", "").find ("Cookie big"), std::string::npos)
+        << found.front ().dump ();
+        EXPECT_TRUE (trace_warnings (trace, "cookie_limit_reached").empty ());
+        expect_no_cookie_value (trace);
+        EXPECT_EQ (origin_->received_header ("Cookie").find ("typed"), std::string::npos)
+        << "the typed row reached the server, so the record is not what is "
+           "wrong";
+        EXPECT_FALSE (sent_headers (trace).contains ("Cookie"))
+        << "sentHeaders still claims a Cookie row the wire never carried";
+    }
+}
+
+// Past 150 jar cookies libcurl sends 150 and says so; the typed row still goes
+// out and stays in the record. Mutation-check: drop `CURLOPT_DEBUGFUNCTION` in
+// `consume_sse_stream` and no warning arrives; return early from
+// `stream_debug_callback` below verbosity 2 and the verbosity-0 pass finds
+// none.
+TEST_F (StreamExecuteTest, AStreamReportsTheJarCookieCountCap) {
+    const vayu::tests::VerbosityRestorer restore;
+    serve (1);
+    cookie_jar_.store ("", loopback_jar_lines ("c", 151, 1));
+    for (const int verbosity : { 0, 2 }) {
+        vayu::utils::Logger::instance ().set_verbosity (verbosity);
+        const auto run_id = start (typed_cookie_row ());
+        ASSERT_FALSE (run_id.empty ());
+        const auto trace = trace_for (run_id);
+
+        ASSERT_EQ (trace_warnings (trace, "cookie_limit_reached").size (), 1U)
+        << "verbosity " << verbosity << ": " << trace.dump (2);
+        EXPECT_TRUE (trace_warnings (trace, "cookie_not_sent").empty ());
+        EXPECT_NE (origin_->received_header ("Cookie").find ("typed=2"), std::string::npos);
+        EXPECT_EQ (sent_headers (trace).value ("Cookie", ""), "typed=2");
+    }
+}
+
+// libcurl keeps the first 50 cookies of a response and ignores the rest
+// without a word. Mutation-check: drop `watch_set_cookie` in
+// `stream_header_callback` and no warning arrives.
+TEST_F (StreamExecuteTest, AStreamReportsTheFiftyFirstSetCookieAsIgnored) {
+    serve (1);
+    origin_->set_cookies (numbered_set_cookies (51));
+    const auto run_id = start (json::object ());
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+
+    const auto found = trace_warnings (trace, "cookie_dropped_too_many");
+    ASSERT_EQ (found.size (), 1U) << trace.dump (2);
+    EXPECT_NE (found.front ().value ("message", "").find ("1 Set-Cookie header after that was ignored"),
+    std::string::npos)
+    << found.front ().dump ();
+    expect_no_cookie_value (trace);
+}
+
+// A `Set-Cookie` line over 5000 bytes is discarded unread; the trace names the
+// cookie, never its value. Mutation-check: drop `watch_set_cookie` in
+// `stream_header_callback` and no warning arrives.
+TEST_F (StreamExecuteTest, AStreamNamesAnOversizedSetCookie) {
+    serve (1);
+    origin_->set_cookies ({ "huge=" + std::string (5000, 'v') + "; Path=/" });
+    const auto run_id = start (json::object ());
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+
+    const auto found = trace_warnings (trace, "cookie_dropped_oversized");
+    ASSERT_EQ (found.size (), 1U) << trace.dump (2);
+    EXPECT_NE (found.front ().value ("message", "").find (": huge."), std::string::npos)
+    << found.front ().dump ();
+    expect_no_cookie_value (trace);
+}
+
+// libcurl's per-response count restarts at every response, so 30 cookies on
+// a followed redirect and 30 on the stream behind it are no overflow.
+// Mutation-check: drop `start_response` in `stream_header_callback` and 10
+// are reported ignored.
+TEST_F (StreamExecuteTest, AStreamsSetCookieCountRestartsAtEachHop) {
+    serve (1);
+    origin_->hop_to (origin_->url ("/scripted"));
+    origin_->hop_cookies (numbered_set_cookies (30, "h"));
+    origin_->set_cookies (numbered_set_cookies (30));
+    const auto run_id = start (json::object (), "/hop");
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+
+    ASSERT_EQ (origin_->hops_received (), 1) << "the stream was not redirected";
+    EXPECT_FALSE (trace.contains ("warnings")) << trace["warnings"].dump (2);
+}
+
+// Both hops of a redirect attach the same jar cookies and libcurl reports each
+// time; the trace names the cookie once. Mutation-check: drop the
+// de-duplication in `note_cookie_notice` and the count is 2.
+TEST_F (StreamExecuteTest, ARedirectedStreamNamesAWithheldCookieOnce) {
+    serve (1);
+    cookie_jar_.store ("", loopback_jar_lines ("big", 3, 3000));
+    origin_->hop_to (origin_->url ("/scripted"));
+    const auto run_id = start (json::object (), "/hop");
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+
+    ASSERT_EQ (origin_->hops_received (), 1) << "the stream was not redirected";
+    EXPECT_EQ (trace_warnings (trace, "cookie_not_sent").size (), 1U) << trace.dump (2);
+}
+
+// The other branch of all four: a stream under every limit stores no
+// `warnings` key, and its typed row stays in the record.
+TEST_F (StreamExecuteTest, AStreamUnderEveryCookieLimitStoresNoWarnings) {
+    serve (1);
+    cookie_jar_.store ("", loopback_jar_lines ("small", 3, 10));
+    origin_->set_cookies (numbered_set_cookies (50));
+    const auto run_id = start (typed_cookie_row ());
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+
+    EXPECT_FALSE (trace.contains ("warnings")) << trace["warnings"].dump (2);
+    EXPECT_EQ (sent_headers (trace).value ("Cookie", ""), "typed=2");
+}
+
+// `disableCookies` keeps libcurl's cookie engine off, so nothing is withheld or
+// dropped and nothing is reported; the same jar and origin warn with the jar
+// on. Mutation-check: point `state.incoming_cookies` at the watch whether or
+// not the stream has a jar and the jar-off run reports the 51st.
+TEST_F (StreamExecuteTest, AStreamWithTheJarOffReportsNoCookieWarning) {
+    serve (1);
+    cookie_jar_.store ("", loopback_jar_lines ("big", 3, 3000));
+    origin_->set_cookies (numbered_set_cookies (51));
+
+    const auto run_id = start (json{ { "disableCookies", true } });
+    ASSERT_FALSE (run_id.empty ());
+    const auto trace = trace_for (run_id);
+    EXPECT_FALSE (trace.contains ("warnings")) << trace["warnings"].dump (2);
+
+    const auto control = start (json::object ());
+    ASSERT_FALSE (control.empty ());
+    const auto jar_on = trace_for (control);
+    EXPECT_EQ (trace_warnings (jar_on, "cookie_not_sent").size (), 1U)
+    << jar_on.dump (2);
+    EXPECT_EQ (trace_warnings (jar_on, "cookie_dropped_too_many").size (), 1U)
+    << jar_on.dump (2);
 }
 
 // ---------------------------------------------------------------------------

@@ -52,6 +52,7 @@
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "verbosity_restorer.hpp"
 #include "wait_until.hpp"
 
 #include <nlohmann/json.hpp>
@@ -789,25 +790,6 @@ warnings_with_code (const vayu::Response& response, const std::string& code) {
     return found;
 }
 
-/// Puts the console verbosity back, so a test that raises it cannot leak the
-/// level into the next one.
-class VerbosityRestorer {
-    public:
-    VerbosityRestorer ()
-    : saved_ (vayu::utils::Logger::instance ().get_verbosity ()) {
-    }
-    ~VerbosityRestorer () {
-        vayu::utils::Logger::instance ().set_verbosity (saved_);
-    }
-    VerbosityRestorer (const VerbosityRestorer&)            = delete;
-    VerbosityRestorer& operator= (const VerbosityRestorer&) = delete;
-    VerbosityRestorer (VerbosityRestorer&&)                 = delete;
-    VerbosityRestorer& operator= (VerbosityRestorer&&)      = delete;
-
-    private:
-    int saved_;
-};
-
 } // namespace
 
 // Three ~3000-byte jar cookies pass libcurl's 8190-byte Cookie line at the
@@ -819,7 +801,7 @@ class VerbosityRestorer {
 // pass finds none; drop `apply_cookie_notices`' erase and the typed row stays
 // in the record.
 TEST (CookieJarWarnings, ACookiePastTheHeaderLimitIsNamedAndTakesTheTypedRowWithIt) {
-    VerbosityRestorer restore;
+    const vayu::tests::VerbosityRestorer restore;
     for (const int verbosity : { 0, 2 }) {
         vayu::utils::Logger::instance ().set_verbosity (verbosity);
         CookieServer server;
