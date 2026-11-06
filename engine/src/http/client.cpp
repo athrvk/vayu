@@ -309,8 +309,9 @@ void apply_incoming_cookies (const IncomingCookieWatch& watch, Response& respons
     }
     if (watch.ignored > 0) {
         response.warnings.push_back ({ std::string (CODE_COOKIE_DROPPED_TOO_MANY),
-        "libcurl keeps at most " + std::to_string (SET_COOKIES_PER_RESPONSE_LIMIT) + " cookies from one response; " +
-        count_of_headers (watch.ignored) + " after that were ignored." });
+        "libcurl keeps at most " + std::to_string (SET_COOKIES_PER_RESPONSE_LIMIT) +
+        " cookies from one response; " + count_of_headers (watch.ignored) +
+        (watch.ignored == 1 ? " after that was ignored." : " after that were ignored.") });
     }
 }
 

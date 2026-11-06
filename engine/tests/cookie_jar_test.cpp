@@ -1017,7 +1017,9 @@ TEST (CookieJarIncoming, TheFiftyFirstSetCookieHeaderIsReportedAsIgnored) {
     const auto found = warnings_with_code (response, TOO_MANY);
     ASSERT_EQ (found.size (), 1U)
     << "libcurl's per-response cookie cap moved (client.cpp)";
-    EXPECT_NE (found.front ().message.find ("1 Set-Cookie header after"), std::string::npos)
+    EXPECT_NE (
+    found.front ().message.find ("1 Set-Cookie header after that was ignored"),
+    std::string::npos)
     << found.front ().message;
     EXPECT_NE (found.front ().message.find ("50"), std::string::npos)
     << found.front ().message;
