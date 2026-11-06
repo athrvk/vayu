@@ -5604,15 +5604,16 @@ of those intermediate hops are reported on the answer's `redirects` member,
 whether or not a later hop carried them.
 
 libcurl caps what it attaches: 150 jar cookies, and a `Cookie` line of 8190
-bytes. A send that hits either still succeeds and says so in the answer's
-`warnings` (`cookie_limit_reached`, `cookie_not_sent`; see
-[POST /execute](#post-execute)). The 8190-byte cap also drops the request's
+bytes. A send that hits either still succeeds and says so in its `warnings`
+(`cookie_limit_reached`, `cookie_not_sent`; see [POST /execute](#post-execute)):
+the answer's, or for a streaming send, whose `202` carries none, the stored
+trace's. The 8190-byte cap also drops the request's
 typed `Cookie` rows, which share the line; the 150 cap does not.
 
 libcurl also silently discards what a response sets past three limits: a
 `Set-Cookie` line over 5000 bytes, a cookie whose name and value together pass
-4096 bytes, and every cookie after the first 50 of one response. The answer says
-so under `warnings` (`cookie_dropped_oversized`, `cookie_dropped_too_many`),
+4096 bytes, and every cookie after the first 50 of one response. The answer (a
+stream's stored trace) says so under `warnings` (`cookie_dropped_oversized`, `cookie_dropped_too_many`),
 naming a dropped cookie and never its value. A request sent with
 `disableCookies` has no jar and so no warning: libcurl's cookie engine is off
 and drops nothing.

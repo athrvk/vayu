@@ -1936,8 +1936,10 @@ the send, and the message names a cookie by name, never by value. The live body
 **always** carries the array, `[]` when empty; the stored trace holds it at the
 top level of `trace` (beside `clientCertificate`, not under `response`) and only
 when non-empty, so a failed exchange with no `response` node still has it. A
-streaming send's `202` carries none, since it is answered before the exchange
-runs. Both funnels read it through `receivedWarnings` (`lib/exchange-warnings.ts`),
+streaming send's `202` carries none and no relay frame does either; its stored
+trace does, and the end-of-stream fetch of the run report (`responseFromRunResult`,
+the same swap that restores `events`) is what puts them on `ResponseState`, so the
+pane draws them when the stream ends and not before. Both funnels read it through `receivedWarnings` (`lib/exchange-warnings.ts`),
 which maps an empty list, an absent key and entries that are not a string `code`
 and `message` to `undefined`, so `ResponseState.warnings` is a non-empty list or
 absent and `warnings-funnels.test.ts` holds the two together.
