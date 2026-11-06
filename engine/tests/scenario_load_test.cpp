@@ -123,6 +123,23 @@ class ScenarioMockServer {
             res.set_content ("{}", "application/json");
         });
 
+        // Cookies libcurl's engine drops (#3307): two past the 50 one
+        // response may set, and one too long to store.
+        svr.Get ("/many-cookies",
+        [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/many-cookies");
+            for (int i = 0; i < 52; ++i) {
+                res.set_header ("Set-Cookie",
+                "c" + std::to_string (i) + "=secret-" + std::to_string (i));
+            }
+            res.set_content ("{}", "application/json");
+        });
+        svr.Get ("/huge-cookie", [this] (const httplib::Request& req, httplib::Response& res) {
+            record (req, "/huge-cookie");
+            res.set_header ("Set-Cookie", "huge=" + std::string (5000, 'v'));
+            res.set_content ("{}", "application/json");
+        });
+
         // A response that arrived and is still an error (#2134): unlike the
         // refused port the transport-error tests use, it has a status.
         svr.Get ("/fail500", [this] (const httplib::Request& req, httplib::Response& res) {
@@ -727,6 +744,131 @@ TEST_F (ScenarioLoadTest, AStepWithTheJarOffStoresNoSetCookie) {
     ASSERT_EQ (echoes.size (), 1u);
     EXPECT_EQ (echoes[0].cookie, "sid=1")
     << "the jar-off step's Set-Cookie (sid=2) replaced the VU's session";
+}
+
+// ============================================================================
+// Cookies libcurl's engine drops under load (issue #3307)
+// ============================================================================
+
+namespace {
+
+/// Every `cookies_dropped` entry of @p warnings.
+std::vector<json> cookies_dropped_entries (const json& warnings) {
+    std::vector<json> found;
+    for (const auto& warning : warnings) {
+        if (warning.value ("code", "") == "cookies_dropped") {
+            found.push_back (warning);
+        }
+    }
+    return found;
+}
+
+json two_iterations_one_vu () {
+    return { { "mode", "iterations" }, { "iterations", 2 }, { "concurrency", 1 } };
+}
+
+} // namespace
+
+// The warning without a run: the collector's count and a message, never a
+// name, and nothing at 0. Mutation-check: drop the `cookies_dropped` branch of
+// `build_run_warnings` and the second half finds no entry.
+TEST (CookiesDroppedWarning, CarriesTheCountOnlyWhenACookieWasDropped) {
+    const auto quiet =
+    std::make_shared<vayu::core::RunContext> ("run-cookies-quiet", json::object ());
+    EXPECT_TRUE (
+    cookies_dropped_entries (vayu::core::build_run_warnings (quiet)).empty ());
+
+    const auto dropped = std::make_shared<vayu::core::RunContext> (
+    "run-cookies-dropped", json::object ());
+    dropped->metrics_collector->record_set_cookie_headers_dropped (2);
+    dropped->metrics_collector->record_set_cookie_headers_dropped (1);
+    const auto found = cookies_dropped_entries (vayu::core::build_run_warnings (dropped));
+    ASSERT_EQ (found.size (), 1u);
+    EXPECT_EQ (found[0]["count"], 3);
+    EXPECT_FALSE (found[0].contains ("names"));
+    const auto message = found[0]["message"].get<std::string> ();
+    EXPECT_NE (
+    message.find ("3 Set-Cookie headers were dropped across the run"), std::string::npos)
+    << message;
+}
+
+// One VU, two iterations of a step whose response sets 52 cookies and one
+// whose cookie is too long to store: 2 + 1 dropped per iteration, counted in
+// one warning of the stored report, which names no cookie. Mutation-checks:
+// drop the `set_cookie_headers_dropped` tally in `handle_result`
+// (load_strategy.cpp), or the `fetch_add` in
+// `record_set_cookie_headers_dropped`, and the warning is absent.
+TEST_F (ScenarioLoadTest, CookiesLibcurlDroppedAreCountedInOneRunWarning) {
+    ScenarioMockServer server;
+    const auto execution =
+    plan_over ({ server.url ("/many-cookies"), server.url ("/huge-cookie") });
+
+    const json report = run_to_report (two_iterations_one_vu (), execution);
+
+    ASSERT_EQ (server.hits_for ("/huge-cookie").size (), 2u);
+    const auto found =
+    cookies_dropped_entries (report.value ("warnings", json::array ()));
+    ASSERT_EQ (found.size (), 1u) << report.dump ();
+    EXPECT_EQ (found[0]["count"], 6);
+    const auto message = found[0]["message"].get<std::string> ();
+    EXPECT_EQ (message.find ("secret-"), std::string::npos) << message;
+    EXPECT_EQ (message.find ("huge"), std::string::npos) << message;
+}
+
+// The other sides: a run whose cookies all fit, and the same dropping
+// responses on steps with the jar off, where libcurl's engine is off and drops
+// nothing. Mutation-check: count in `header_callback` whatever
+// `track_cookies` says and the jar-off run reads 6.
+TEST_F (ScenarioLoadTest, ARunWhoseCookiesFitOrThatKeepsNoJarWarnsOfNoDroppedCookie) {
+    ScenarioMockServer server;
+    run (two_iterations_one_vu (),
+    plan_over ({ server.url ("/login"), server.url ("/echo") }));
+    EXPECT_TRUE (
+    cookies_dropped_entries (vayu::core::build_run_warnings (context_)).empty ());
+
+    auto jar_off =
+    plan_over ({ server.url ("/many-cookies"), server.url ("/huge-cookie") });
+    for (auto& step : jar_off.plan.steps) {
+        step.request.disable_cookies = true;
+    }
+    run (two_iterations_one_vu (), jar_off);
+    ASSERT_EQ (server.hits_for ("/huge-cookie").size (), 2u);
+    EXPECT_EQ (context_->metrics_collector->set_cookie_headers_dropped (), 0u);
+    EXPECT_TRUE (
+    cookies_dropped_entries (vayu::core::build_run_warnings (context_)).empty ());
+}
+
+// A single-request load run never gives its transfers a cookie engine, so the
+// same responses drop nothing there either. Mutation-check: the same as above;
+// this reads 4.
+TEST_F (ScenarioLoadTest, ASingleRequestLoadRunKeepsNoJarSoWarnsOfNoDroppedCookie) {
+    ScenarioMockServer server;
+    json config              = two_iterations_one_vu ();
+    config["url"]            = server.url ("/many-cookies");
+    config["method"]         = "GET";
+    const std::string run_id = "run_single_cookies";
+    vayu::db::Run run;
+    run.id              = run_id;
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Pending;
+    run.config_snapshot = config.dump ();
+    run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    db_->create_run (run);
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db_));
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return manager.get_run (run_id) == nullptr; }))
+    << "the run never finished";
+    manager.shutdown ();
+
+    ASSERT_EQ (server.hits_for ("/many-cookies").size (), 2u);
+    const json report = vayu::http::routes::run_report_response (*db_, run_id).second;
+    EXPECT_TRUE (
+    cookies_dropped_entries (report.value ("warnings", json::array ())).empty ())
+    << report.dump ();
 }
 
 // Two VUs, both held inside `/login` at the same time, must still leave with

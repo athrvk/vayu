@@ -609,7 +609,27 @@ makes a session survive from one design-mode request to the next.
   frame too, since it goes out on the same transfer. A `Cookie` the request
   types joins that line rather than going out beside it (issue #2788): its rows
   ride `CURLOPT_COOKIE`, which libcurl writes after the jar's matches on the
-  one line, so a request never carries two `Cookie` headers.
+  one line, so a request never carries two `Cookie` headers. The one exception
+  is a line libcurl cuts at 8190 bytes, which drops the typed rows with it:
+  `request_headers` records them before the transfer, so `apply_cookie_notices`
+  (`client.cpp`) removes them afterwards and the response carries a
+  `cookie_not_sent` warning, as it carries `cookie_limit_reached` past 150 jar
+  cookies. Both come from libcurl's `CURLINFO_TEXT` notices (issue #3307), read
+  before the verbosity gate because they are the response's, not the log's.
+  The incoming side has no notice to read: libcurl discards a `Set-Cookie` line
+  over 5000 bytes, a cookie whose name and value pass 4096 and every cookie
+  past the 50th of a response without a word, so `header_callback` counts the
+  lines (`IncomingCookieWatch`, `client.cpp`) when the send has a jar, and the
+  response carries `cookie_dropped_oversized` / `cookie_dropped_too_many`.
+  A `disableCookies` send has no jar, libcurl's engine is off and nothing is
+  reported. The streaming path (`sse_stream.cpp`) does not count them (#3315). The
+  rules are one copy, `SetCookieLimits` (`http/set_cookie_limits.hpp`), which
+  the event loop's `header_callback` also runs, allocation-free, on a transfer
+  that tracks cookies (a scenario load run's step): it counts what was dropped
+  on `Response::set_cookie_headers_dropped`, `handle_result` sums that in the
+  `MetricsCollector`, and the run reports one `cookies_dropped` warning with the
+  count and no name. The outgoing caps are not detected under load, because
+  reading libcurl's notices needs `CURLOPT_VERBOSE` on every transfer.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the

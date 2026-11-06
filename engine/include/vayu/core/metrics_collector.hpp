@@ -857,6 +857,23 @@ class MetricsCollector {
         return connection_replays_.load (std::memory_order_relaxed);
     }
 
+    /**
+     * @brief Count the `Set-Cookie` headers libcurl's cookie engine discarded
+     *        from one transfer's responses
+     *        (`Response::set_cookie_headers_dropped`, #3307).
+     *
+     * A virtual user that lost a session cookie this way sends its next steps
+     * without it, and nothing else in the run says why. Lock-free, called once
+     * per completed transfer that dropped any.
+     */
+    void record_set_cookie_headers_dropped (size_t headers) {
+        set_cookie_headers_dropped_.fetch_add (headers, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] size_t set_cookie_headers_dropped () const {
+        return set_cookie_headers_dropped_.load (std::memory_order_relaxed);
+    }
+
     // ========================================================================
     // Real-time stats (lock-free reads)
     // ========================================================================
@@ -1360,6 +1377,7 @@ class MetricsCollector {
     std::atomic<size_t> total_bytes_recv_{ 0 };
     std::atomic<size_t> http_version_downgraded_{ 0 };
     std::atomic<size_t> connection_replays_{ 0 };
+    std::atomic<size_t> set_cookie_headers_dropped_{ 0 };
 
     // Per-code counts, lock-free on the hot path. HTTP status codes (and the
     // synthetic code 0 used for transport errors) live in [0, STATUS_CODE_SLOTS).

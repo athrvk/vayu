@@ -36,6 +36,7 @@ import { LARGE_BODY_BYTES } from "@/components/shared/response-viewer/utils";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { noFile, withoutFileTrust } from "@/lib/file-trust";
 import { formatJson } from "@/lib/json-format";
+import { receivedWarnings } from "@/lib/exchange-warnings";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { decodeResponseBody } from "./response-bytes";
 
@@ -345,6 +346,10 @@ export function responseFromExecuteResult(result: SanityResult): ResponseState {
 		// keeps a producer's `""` from drawing an empty banner, so this funnel and
 		// the restored one agree whatever they are handed (issue #2474).
 		authNotice: result.authNotice || undefined,
+		// Always present on a live body, `[]` when empty (issue #3307); the stored
+		// trace writes the key only when non-empty, so both funnels read it through
+		// `receivedWarnings`.
+		warnings: receivedWarnings(result.warnings),
 		// `""` means no certificate matched, and the pane has nothing to show
 		// for that - mapped to `undefined` so this funnel and the restored one
 		// build the same state (see `clientCertificateFromTrace`).

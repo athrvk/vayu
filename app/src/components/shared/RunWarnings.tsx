@@ -11,9 +11,10 @@
  *
  * A request sent with a `{{token}}` composition never resolved, a step
  * whose pre-request script load mode never runs, a per-host connection limit
- * the run had to raise, or requests libcurl re-sent on a new connection all
- * still let the run finish and still count as sent - a reader who only checks
- * the error rate would see a green run. Silent when the report carries no
+ * the run had to raise, requests libcurl re-sent on a new connection, or
+ * `Set-Cookie` headers its cookie engine discarded all still let the run
+ * finish and still count as sent - a reader who only checks the error rate
+ * would see a green run. Silent when the report carries no
  * `warnings` at all, which is every run before this field existed and every
  * run that genuinely had nothing to report.
  */
@@ -31,6 +32,9 @@ const TITLES: Record<string, string> = {
 	// The run did not fail either; the target just saw more requests than the
 	// totals count (#2799).
 	connection_replayed: "Some requests were re-sent after a dropped connection",
+	// The run finished; some virtual users just went on without a cookie the
+	// server set (#3307).
+	cookies_dropped: "Some cookies the server set were dropped",
 };
 
 export interface RunWarningsProps {

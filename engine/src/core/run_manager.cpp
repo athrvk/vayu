@@ -27,6 +27,7 @@
 #include "vayu/http/request_builder.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/set_cookie_limits.hpp"
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
@@ -1883,6 +1884,27 @@ nlohmann::json connection_replayed_warning (size_t replays) {
 }
 
 /**
+ * The warning for @p headers `Set-Cookie` headers libcurl's cookie engine
+ * discarded across the run (#3307). A count and never a name: a run is shared
+ * as a report, and a name repeated per virtual user says nothing a count does
+ * not.
+ */
+nlohmann::json cookies_dropped_warning (size_t headers) {
+    const bool one = headers == 1;
+    return { { "code", "cookies_dropped" },
+        { "message",
+        std::to_string (headers) + (one ? " Set-Cookie header was" : " Set-Cookie headers were") +
+        " dropped across the run by libcurl's cookie engine (a line over " +
+        std::to_string (vayu::http::SET_COOKIE_LINE_LIMIT_BYTES) + " bytes, a name and value over " +
+        std::to_string (vayu::http::COOKIE_NAME_VALUE_LIMIT_BYTES) + " bytes, or more than " +
+        std::to_string (vayu::http::SET_COOKIES_PER_RESPONSE_LIMIT) +
+        " in one response), so the virtual users that received " +
+        (one ? "it sent their later steps without that cookie." :
+               "them sent their later steps without those cookies.") },
+        { "count", headers } };
+}
+
+/**
  * Whether @p config asks for virtual users: a `concurrency` it carries. A run
  * that sets none (every `constant_rps` run the app starts) is sized from the
  * `eventLoopMaxConcurrent` default, so its per-host raise covers no virtual
@@ -1907,8 +1929,9 @@ bool declares_concurrency (const nlohmann::json& config) {
  * connection limit the run raised above `eventLoopMaxPerHost` (#2394) to cover
  * the virtual users it asked for (#2801), so a run that opened more
  * connections than the setting says is not silent about it. And requests
- * libcurl re-sent on a new connection (#2799). Empty for a run with nothing
- * to say, which is what lets the caller omit the key entirely.
+ * libcurl re-sent on a new connection (#2799), and `Set-Cookie` headers its
+ * cookie engine discarded from a virtual user's responses (#3307). Empty for a
+ * run with nothing to say, which is what lets the caller omit the key entirely.
  */
 nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     nlohmann::json warnings = nlohmann::json::array ();
@@ -1943,6 +1966,11 @@ nlohmann::json build_run_warnings (const std::shared_ptr<RunContext>& context) {
     if (const size_t replays = context->metrics_collector->connection_replays ();
     replays > 0) {
         warnings.push_back (connection_replayed_warning (replays));
+    }
+
+    if (const size_t dropped = context->metrics_collector->set_cookie_headers_dropped ();
+    dropped > 0) {
+        warnings.push_back (cookies_dropped_warning (dropped));
     }
 
     if (context->scenario) {

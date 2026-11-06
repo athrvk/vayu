@@ -2736,7 +2736,10 @@ query parameter (`request.authQueryParam`) and the headers
 (`request.authHeaders`) auth wrote, `run_request`'s live answer names them as
 `authQueryParam` and `authHeaders` at its top level (#1845), and the masking
 reads them per record. `run_request` passes the engine's top-level `authNotice`
-(#2474, #3202) through as it came, unmasked. The
+(#2474, #3202) and `warnings` (#3307, `[{code, message}]`, `[]` when empty; a cookie
+named by name only, never a value) through as they came, unmasked, and
+`get_run_report` keeps a stored trace's top-level `warnings` beside its bounded
+`request` and `response`. The
 parameter is matched on its whole name, case-sensitively, in the URL's query
 (between the first `?` and the first `#`) and in the request line only, as the
 engine wrote it: raw, or percent-encoded as `encode_query_component` writes a

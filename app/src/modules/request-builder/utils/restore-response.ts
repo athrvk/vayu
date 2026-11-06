@@ -21,6 +21,7 @@
 import type { RunReport } from "@/types";
 import type { ResponseState, ResponseTiming } from "../types";
 import { buildRawRequest } from "@/components/shared/response-viewer";
+import { receivedWarnings } from "@/lib/exchange-warnings";
 import { receivedHeaderLines, receivedRedirects, sentHeaderLines } from "@/lib/header-lines";
 import { wireRequestHeadersField } from "@/components/shared/response-viewer/wire-headers";
 import { paneBody } from "./execute-mapping";
@@ -236,6 +237,16 @@ function clientCertificateFromTrace(trace: NonNullable<RunResultSample["trace"]>
 }
 
 /**
+ * The warnings the engine recorded for this exchange (issue #3307), or nothing.
+ * Read from the trace's top level, so the failed exchange - which has no
+ * `response` node and can still have warned - gets them too.
+ */
+function warningsFromTrace(trace: NonNullable<RunResultSample["trace"]>) {
+	const warnings = receivedWarnings(trace.warnings);
+	return warnings ? { warnings } : {};
+}
+
+/**
  * Reconstruct a `ResponseState` from the last stored design-run result.
  *
  * Returns `null` when the result carries neither a response trace nor an error
@@ -282,6 +293,7 @@ export function responseFromRunResult(
 			...elementsFromTrace(trace),
 			...validationFromTrace(trace),
 			...clientCertificateFromTrace(trace),
+			...warningsFromTrace(trace),
 		};
 	}
 
@@ -346,5 +358,6 @@ export function responseFromRunResult(
 		...elementsFromTrace(trace),
 		...validationFromTrace(trace),
 		...clientCertificateFromTrace(trace),
+		...warningsFromTrace(trace),
 	};
 }

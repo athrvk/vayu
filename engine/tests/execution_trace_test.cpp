@@ -436,6 +436,37 @@ TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
     EXPECT_EQ (vayu::json::serialize (make_response ())["clientCertificate"], "");
 }
 
+// The engine's warnings (issue #3307) are top level, like the certificate, so
+// a failed exchange (no `response` node) still says what the engine did.
+TEST (ExecutionTrace, StoresWarningsInOrderOnAFailedExchangeToo) {
+    auto response          = make_response ();
+    response.status_code   = 0;
+    response.error_code    = vayu::ErrorCode::Timeout;
+    response.error_message = "timed out";
+    response.warnings      = { { "first_code", "first message" },
+        { "second_code", "second message" } };
+
+    auto trace = build_result_trace (make_request (), response);
+
+    EXPECT_FALSE (trace.contains ("response"));
+    ASSERT_TRUE (trace.contains ("warnings")) << trace.dump ();
+    EXPECT_EQ (trace["warnings"],
+    (nlohmann::json::array ({ { { "code", "first_code" }, { "message", "first message" } },
+    { { "code", "second_code" }, { "message", "second message" } } })));
+}
+
+// Omitted rather than stored empty, unlike the always-present live array: a row
+// written before the field and a clean exchange are the same fact.
+TEST (ExecutionTrace, OmitsWarningsWhenThereAreNone) {
+    auto trace = build_result_trace (make_request (), make_response ());
+
+    EXPECT_FALSE (trace.contains ("warnings"));
+    const auto live = vayu::json::serialize (make_response ());
+    ASSERT_TRUE (live.contains ("warnings"));
+    EXPECT_TRUE (live["warnings"].is_array ());
+    EXPECT_TRUE (live["warnings"].empty ());
+}
+
 // ============================================================================
 // Stored equals live, field by field
 //
@@ -457,6 +488,13 @@ vayu::Response make_response_with_client_certificate () {
     return response;
 }
 
+vayu::Response make_response_with_warnings () {
+    auto response     = make_response ();
+    response.warnings = { { "first_code", "first message" },
+        { "second_code", "second message" } };
+    return response;
+}
+
 struct StoredEqualsLiveCase {
     const char* name;
     vayu::Request (*request_of) ();
@@ -474,6 +512,7 @@ constexpr auto STORED_EQUALS_LIVE_CASES = std::to_array<StoredEqualsLiveCase> ({
 { "RawRequest", make_request, make_response_with_wire_request, "/request/rawRequest", "/rawRequest" },
 { "ClientCertificate", make_request, make_response_with_client_certificate,
 "/clientCertificate", "/clientCertificate" },
+{ "Warnings", make_request, make_response_with_warnings, "/warnings", "/warnings" },
 });
 
 class ExecutionTraceStoredEqualsLive

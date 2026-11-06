@@ -287,7 +287,7 @@
                 "type": "string"
               },
               "count": {
-                "description": "unresolved_tokens: requests sent with an unresolved variable. connection_replayed: requests re-sent on a new connection, equal to summary.connectionReplays.",
+                "description": "unresolved_tokens: requests sent with an unresolved variable. connection_replayed: requests re-sent on a new connection, equal to summary.connectionReplays. cookies_dropped: Set-Cookie headers libcurl's cookie engine discarded across the run.",
                 "type": "number"
               },
               "names": {"$ref": "#/definitions/names"},

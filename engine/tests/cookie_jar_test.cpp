@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <future>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <thread>
@@ -43,10 +45,14 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/curl_options.hpp"
+#include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/list_page.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
+#include "vayu/utils/json.hpp"
+#include "vayu/utils/logger.hpp"
+#include "wait_until.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -88,6 +94,15 @@ const std::string& value) {
 constexpr int64_t FAR_FUTURE = 4102444800; // 2100-01-01
 constexpr int64_t NOW        = 1700000000; // 2023-11-14
 
+/// @p count cookies named `c0`, `c1`, ... on @p res, each with a value that no
+/// warning may repeat.
+void set_numbered_cookies (httplib::Response& res, int count) {
+    for (int i = 0; i < count; ++i) {
+        res.set_header ("Set-Cookie",
+        "c" + std::to_string (i) + "=secret-" + std::to_string (i) + "; Path=/");
+    }
+}
+
 class CookieServer {
     public:
     CookieServer () {
@@ -119,6 +134,52 @@ class CookieServer {
         // A redirect to `to` that sets nothing.
         svr.Get ("/go", [] (const httplib::Request& req, httplib::Response& res) {
             res.set_redirect (req.get_param_value ("to"), 302);
+        });
+        // `count` cookies in one response (#3307); libcurl keeps the first 50.
+        // `bare` lines that name no cookie go first.
+        svr.Get (R"(/set-many/(\d+))",
+        [] (const httplib::Request& req, httplib::Response& res) {
+            const int bare =
+            req.has_param ("bare") ? std::stoi (req.get_param_value ("bare")) : 0;
+            for (int i = 0; i < bare; ++i) {
+                res.set_header ("Set-Cookie", "bare" + std::to_string (i));
+            }
+            set_numbered_cookies (res, std::stoi (req.matches[1].str ()));
+            res.set_content ("{}", "application/json");
+        });
+        // The same, on a hop that redirects to `to`.
+        svr.Get (R"(/set-many-and-go/(\d+))",
+        [] (const httplib::Request& req, httplib::Response& res) {
+            set_numbered_cookies (res, std::stoi (req.matches[1].str ()));
+            res.set_redirect (req.get_param_value ("to"), 302);
+        });
+        // A cookie sized to the byte: `name`, `value_len` bytes of value, and
+        // `pad_len` bytes of a trailing attribute that lengthens the line
+        // without touching the name and value. `repeat` sends that many, the
+        // names numbered, and `field` names the header (default `Set-Cookie`).
+        svr.Get ("/sized-cookie", [] (const httplib::Request& req, httplib::Response& res) {
+            const size_t repeat = req.has_param ("repeat") ?
+            std::stoul (req.get_param_value ("repeat")) :
+            1;
+            const size_t pad    = std::stoul (req.get_param_value ("pad_len"));
+            for (size_t i = 0; i < repeat; ++i) {
+                std::string line = req.get_param_value ("name") +
+                (repeat > 1 ? std::to_string (i) : "") + "=" +
+                std::string (std::stoul (req.get_param_value ("value_len")), 'v');
+                if (pad > 0) {
+                    line += "; x=" + std::string (pad, 'p');
+                }
+                res.set_header (
+                req.has_param ("field") ? req.get_param_value ("field") : "Set-Cookie", line);
+            }
+            res.set_content ("{}", "application/json");
+        });
+        // A line of `length` bytes that names no cookie (no `=`).
+        svr.Get (R"(/bare-cookie/(\d+))",
+        [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_header (
+            "Set-Cookie", std::string (std::stoul (req.matches[1].str ()), 'x'));
+            res.set_content ("{}", "application/json");
         });
         // Expires the cookie the way a logout does.
         svr.Get ("/logout", [] (const httplib::Request&, httplib::Response& res) {
@@ -669,6 +730,592 @@ TEST (CookieJarTransfer, TheRawRequestViewShowsTheCookieThatWasSent) {
     EXPECT_EQ (none.raw_request.find ("Cookie:"), std::string::npos)
     << "a cookie appeared in a scope that sent none:\n"
     << none.raw_request;
+}
+
+// ============================================================================
+// What libcurl withholds or caps (issue #3307)
+// ============================================================================
+
+namespace {
+
+/// @p count jar cookies for 127.0.0.1, each @p value_bytes of value, named
+/// `<prefix>0`, `<prefix>1`, ... - a cookie is held to 4096 bytes of name plus
+/// value, so a line past libcurl's header limit takes several.
+void store_loopback_cookies (CookieJar& jar,
+const std::string& scope,
+const std::string& prefix,
+int count,
+size_t value_bytes) {
+    std::vector<std::string> lines;
+    lines.reserve (static_cast<size_t> (count));
+    for (int i = 0; i < count; ++i) {
+        lines.push_back (netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+        std::to_string (FAR_FUTURE), prefix + std::to_string (i),
+        std::string (value_bytes, 'v')));
+    }
+    jar.store (scope, std::move (lines));
+}
+
+/// Three loopback jar cookies of exactly the @p names, each @p value_bytes of
+/// value.
+void store_named_loopback_cookies (CookieJar& jar,
+const std::string& scope,
+const std::vector<std::string>& names,
+size_t value_bytes) {
+    std::vector<std::string> lines;
+    lines.reserve (names.size ());
+    for (const auto& name : names) {
+        lines.push_back (netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+        std::to_string (FAR_FUTURE), name, std::string (value_bytes, 'v')));
+    }
+    jar.store (scope, std::move (lines));
+}
+
+vayu::Response send_with_typed_cookie (CookieJar& jar, const std::string& url) {
+    ClientConfig config;
+    config.cookie_jar   = &jar;
+    config.cookie_scope = "env_a";
+    Client client (config);
+    vayu::Request request = get_request (url);
+    request.headers.add ("Cookie", "typed=2");
+    return client.send (request).value ();
+}
+
+std::vector<vayu::ResponseWarning>
+warnings_with_code (const vayu::Response& response, const std::string& code) {
+    std::vector<vayu::ResponseWarning> found;
+    std::ranges::copy_if (response.warnings, std::back_inserter (found),
+    [&] (const vayu::ResponseWarning& warning) { return warning.code == code; });
+    return found;
+}
+
+/// Puts the console verbosity back, so a test that raises it cannot leak the
+/// level into the next one.
+class VerbosityRestorer {
+    public:
+    VerbosityRestorer ()
+    : saved_ (vayu::utils::Logger::instance ().get_verbosity ()) {
+    }
+    ~VerbosityRestorer () {
+        vayu::utils::Logger::instance ().set_verbosity (saved_);
+    }
+    VerbosityRestorer (const VerbosityRestorer&)            = delete;
+    VerbosityRestorer& operator= (const VerbosityRestorer&) = delete;
+    VerbosityRestorer (VerbosityRestorer&&)                 = delete;
+    VerbosityRestorer& operator= (VerbosityRestorer&&)      = delete;
+
+    private:
+    int saved_;
+};
+
+} // namespace
+
+// Three ~3000-byte jar cookies pass libcurl's 8190-byte Cookie line at the
+// third, and it drops the typed `Cookie` row along with it. The response says
+// which cookie, and `request_headers` stops claiming the typed row went out.
+// Run at both ends of the console verbosity: the warning is the response's, not
+// the log's. Mutation-check: drop the CURLINFO_TEXT branch of `debug_callback`
+// and no warning arrives; move it below the verbosity gate and the verbosity-0
+// pass finds none; drop `apply_cookie_notices`' erase and the typed row stays
+// in the record.
+TEST (CookieJarWarnings, ACookiePastTheHeaderLimitIsNamedAndTakesTheTypedRowWithIt) {
+    VerbosityRestorer restore;
+    for (const int verbosity : { 0, 2 }) {
+        vayu::utils::Logger::instance ().set_verbosity (verbosity);
+        CookieServer server;
+        CookieJar jar;
+        store_loopback_cookies (jar, "env_a", "big", 3, 3000);
+
+        const vayu::Response response =
+        send_with_typed_cookie (jar, server.url ("/echo"));
+
+        ASSERT_EQ (response.status_code, 200) << "verbosity " << verbosity;
+        const auto found = warnings_with_code (response, "cookie_not_sent");
+        ASSERT_EQ (found.size (), 1U)
+        << "verbosity "
+        << verbosity << ": no warning, or libcurl reworded its header-size notice (client.cpp)";
+        EXPECT_NE (found.front ().message.find ("Cookie big"), std::string::npos)
+        << found.front ().message;
+        EXPECT_NE (found.front ().message.find ("8190"), std::string::npos)
+        << found.front ().message;
+        for (const auto& warning : response.warnings) {
+            EXPECT_EQ (warning.message.find ("vvvv"), std::string::npos)
+            << "a cookie value reached a warning: " << warning.message;
+        }
+        EXPECT_TRUE (warnings_with_code (response, "cookie_limit_reached").empty ());
+
+        EXPECT_EQ (response.body.find ("typed"), std::string::npos)
+        << "the typed row reached the server, so the record is not what is "
+           "wrong";
+        EXPECT_FALSE (response.request_headers.contains ("Cookie"))
+        << "request_headers still claims a Cookie row the wire never carried";
+        EXPECT_EQ (response.raw_request.find ("typed=2"), std::string::npos);
+    }
+}
+
+// Past 150 jar cookies libcurl sends 150 and says so; the typed row is not
+// withheld in that case and stays in the record. Mutation-check: prune on
+// every warning and the typed row leaves `request_headers`.
+TEST (CookieJarWarnings, TheCookieCountCapIsReportedAndLeavesTheTypedRowSent) {
+    CookieServer server;
+    CookieJar jar;
+    store_loopback_cookies (jar, "env_a", "c", 151, 1);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, "cookie_limit_reached");
+    ASSERT_EQ (found.size (), 1U)
+    << "no warning, or libcurl reworded its cookie-count notice (client.cpp)";
+    EXPECT_NE (found.front ().message.find ("150"), std::string::npos)
+    << found.front ().message;
+    EXPECT_TRUE (warnings_with_code (response, "cookie_not_sent").empty ());
+    EXPECT_NE (response.body.find ("typed=2"), std::string::npos) << response.body;
+    EXPECT_EQ (response.request_headers.at ("Cookie"), "typed=2");
+}
+
+// The other branch of both: a send under the header limit and the count cap
+// warns of nothing and keeps its typed row.
+TEST (CookieJarWarnings, ASendUnderBothCapsWarnsOfNothing) {
+    CookieServer server;
+    CookieJar jar;
+    store_loopback_cookies (jar, "env_a", "small", 3, 10);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.warnings.empty ());
+    EXPECT_NE (response.body.find ("typed=2"), std::string::npos) << response.body;
+    EXPECT_EQ (response.request_headers.at ("Cookie"), "typed=2");
+}
+
+// Every hop of a chain attaches the same jar cookies and libcurl reports each
+// time; the response names the cookie once. Mutation-check: drop the
+// de-duplication in `note_cookie_notice` and the count is 2.
+TEST (CookieJarWarnings, ARedirectedSendNamesTheWithheldCookieOnce) {
+    CookieServer server;
+    CookieJar jar;
+    store_loopback_cookies (jar, "env_a", "big", 3, 3000);
+
+    const vayu::Response response =
+    send_with_typed_cookie (jar, server.url ("/go?to=" + server.url ("/echo")));
+
+    ASSERT_EQ (response.status_code, 200) << response.error_message;
+    ASSERT_EQ (response.redirect_hops.size (), 1U);
+    EXPECT_EQ (warnings_with_code (response, "cookie_not_sent").size (), 1U);
+}
+
+// A jar cookie name is wire bytes. One past 0x7F that is not UTF-8 would make
+// the live body's `dump ()` throw if the warning quoted it, so the warning
+// leaves the name out and still reads as a sentence. Mutation-check: put the
+// notice's name into the message unchecked and the `dump ()` throws.
+TEST (CookieJarWarnings, AWithheldCookieWhoseNameIsNotTextIsLeftUnnamed) {
+    CookieServer server;
+    CookieJar jar;
+    store_named_loopback_cookies (
+    jar, "env_a", { "\xFF\xFE_a", "\xFF\xFE_b", "\xFF\xFE_c" }, 3000);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, "cookie_not_sent");
+    ASSERT_EQ (found.size (), 1U);
+    EXPECT_TRUE (found.front ().message.starts_with ("A cookie was not sent:"))
+    << found.front ().message;
+    EXPECT_TRUE (std::ranges::all_of (found.front ().message,
+    [] (const char byte) { return static_cast<unsigned char> (byte) < 0x80; }))
+    << "a byte that is not text reached the message";
+    EXPECT_NO_THROW ((void)vayu::json::serialize_warnings (response.warnings).dump ());
+    EXPECT_FALSE (response.request_headers.contains ("Cookie"));
+}
+
+// libcurl formats the notice into 2048 bytes and ends a longer one in "...",
+// so a name this long loses the notice's own suffix. The warning is still
+// raised (and with it the typed row dropped from the record), naming the
+// first 64 bytes. Mutation-check: require the suffix again and no warning
+// arrives, so the typed row stays in `request_headers`.
+TEST (CookieJarWarnings, AWithheldCookieWithAVeryLongNameIsStillReportedAndCutShort) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string stem (2100, 'n');
+    store_named_loopback_cookies (
+    jar, "env_a", { stem + "0", stem + "1", stem + "2" }, 1000);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, "cookie_not_sent");
+    ASSERT_EQ (found.size (), 1U)
+    << "no warning for a notice libcurl cut short (client.cpp)";
+    EXPECT_NE (found.front ().message.find ("Cookie " + std::string (64, 'n') + "... was not sent"),
+    std::string::npos)
+    << found.front ().message;
+    EXPECT_EQ (found.front ().message.find (std::string (65, 'n')), std::string::npos);
+    EXPECT_FALSE (response.request_headers.contains ("Cookie"))
+    << "request_headers still claims a Cookie row the wire never carried";
+    EXPECT_EQ (response.body.find ("typed"), std::string::npos);
+}
+
+// ============================================================================
+// What libcurl drops from a response (issue #3307)
+// ============================================================================
+
+namespace {
+
+constexpr const char* TOO_MANY  = "cookie_dropped_too_many";
+constexpr const char* OVERSIZED = "cookie_dropped_oversized";
+
+/// Bytes libcurl counts for the length limit beyond the cookie text: the space
+/// after `Set-Cookie:` and the line's CRLF.
+constexpr size_t LINE_FRAMING_BYTES = 3;
+constexpr size_t LINE_LIMIT_BYTES   = 5000;
+constexpr size_t NAME_VALUE_LIMIT   = 4096;
+
+std::string sized_cookie_url (const CookieServer& server,
+const std::string& name,
+size_t value_len,
+size_t pad_len) {
+    return server.url ("/sized-cookie?name=" + name +
+    "&value_len=" + std::to_string (value_len) + "&pad_len=" + std::to_string (pad_len));
+}
+
+/// The `pad_len` that makes libcurl measure a `<name>=<value_len bytes>; x=<pad>`
+/// line at @p measured bytes.
+size_t pad_for_measured_line (const std::string& name, size_t value_len, size_t measured) {
+    const size_t unpadded = name.size () + 1 + value_len + std::string ("; x=").size ();
+    return measured - LINE_FRAMING_BYTES - unpadded;
+}
+
+/// What the server receives back from the jar: the cookies libcurl kept.
+std::string kept_cookies (CookieJar& jar, const CookieServer& server) {
+    return send_in_scope (jar, "env_a", server.url ("/echo"));
+}
+
+void expect_no_value_in_warnings (const vayu::Response& response) {
+    for (const auto& warning : response.warnings) {
+        EXPECT_EQ (warning.message.find ("vvvv"), std::string::npos) << warning.message;
+        EXPECT_EQ (warning.message.find ("pppp"), std::string::npos) << warning.message;
+        EXPECT_EQ (warning.message.find ("secret-"), std::string::npos)
+        << warning.message;
+    }
+}
+
+} // namespace
+
+// libcurl adds the first 50 cookies of a response and ignores the rest without
+// a word. Mutation-check: raise `SET_COOKIES_PER_RESPONSE_LIMIT` to 51 and the
+// 51st finds no warning; drop `apply_incoming_cookies`' too-many branch and the
+// same.
+TEST (CookieJarIncoming, TheFiftyFirstSetCookieHeaderIsReportedAsIgnored) {
+    CookieServer server;
+    CookieJar jar;
+
+    const vayu::Response response =
+    response_in_scope (jar, "env_a", server.url ("/set-many/51"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, TOO_MANY);
+    ASSERT_EQ (found.size (), 1U)
+    << "libcurl's per-response cookie cap moved (client.cpp)";
+    EXPECT_NE (
+    found.front ().message.find ("1 Set-Cookie header after that was ignored"),
+    std::string::npos)
+    << found.front ().message;
+    EXPECT_NE (found.front ().message.find ("50"), std::string::npos)
+    << found.front ().message;
+    expect_no_value_in_warnings (response);
+
+    const std::string kept = kept_cookies (jar, server);
+    EXPECT_NE (kept.find ("c49="), std::string::npos) << kept;
+    EXPECT_EQ (kept.find ("c50="), std::string::npos)
+    << "libcurl stored the 51st, so the warning is wrong:\n"
+    << kept;
+}
+
+TEST (CookieJarIncoming, FiftySetCookieHeadersWarnOfNothing) {
+    CookieServer server;
+    CookieJar jar;
+
+    const vayu::Response response =
+    response_in_scope (jar, "env_a", server.url ("/set-many/50"));
+
+    ASSERT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.warnings.empty ());
+    EXPECT_NE (kept_cookies (jar, server).find ("c49="), std::string::npos);
+}
+
+// A line that names no cookie is not stored, so libcurl does not count it
+// against the 50: three of them before 50 cookies keep all 50. Mutation-check:
+// drop the `NotACookie` return in `SetCookieLimits::note` and three are
+// reported ignored here and under load.
+TEST (CookieJarIncoming, ALineThatNamesNoCookieIsNotCountedAgainstTheCap) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string url = server.url ("/set-many/50?bare=3");
+
+    const vayu::Response response = response_in_scope (jar, "env_a", url);
+
+    ASSERT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.warnings.empty ());
+    EXPECT_NE (kept_cookies (jar, server).find ("c49="), std::string::npos)
+    << "libcurl counted a line that names no cookie, so the rule is wrong";
+}
+
+TEST (CookieJarIncoming, TheWarningCountsEveryHeaderPastTheCap) {
+    CookieServer server;
+    CookieJar jar;
+
+    const vayu::Response response =
+    response_in_scope (jar, "env_a", server.url ("/set-many/60"));
+
+    const auto found = warnings_with_code (response, TOO_MANY);
+    ASSERT_EQ (found.size (), 1U);
+    EXPECT_NE (found.front ().message.find ("10 Set-Cookie headers after"), std::string::npos)
+    << found.front ().message;
+}
+
+// The count is per response: 30 cookies on each of two hops is 30 twice, not
+// 60. A hop with its own 51 is its own overflow, and the response reports the
+// ignored headers of both in one warning. Mutation-check: drop
+// `start_response` from `header_callback` and the 30 + 30 chain warns.
+TEST (CookieJarIncoming, TheCapIsPerResponseAndCountsEveryHopOfAChain) {
+    CookieServer server;
+    CookieJar jar;
+
+    const vayu::Response under = response_in_scope (jar, "env_a",
+    server.url ("/set-many-and-go/30?to=" + server.url ("/set-many/30")));
+    ASSERT_EQ (under.status_code, 200) << under.error_message;
+    ASSERT_EQ (under.redirect_hops.size (), 1U);
+    EXPECT_TRUE (under.warnings.empty ()) << "the count carried over a hop";
+
+    const vayu::Response over = response_in_scope (jar, "env_a",
+    server.url ("/set-many-and-go/51?to=" + server.url ("/set-many/52")));
+    ASSERT_EQ (over.redirect_hops.size (), 1U);
+    const auto found = warnings_with_code (over, TOO_MANY);
+    ASSERT_EQ (found.size (), 1U);
+    EXPECT_NE (found.front ().message.find ("3 Set-Cookie headers after"), std::string::npos)
+    << found.front ().message;
+}
+
+// libcurl discards a line it measures past 5000 bytes unread. The measure runs
+// from the byte after `Set-Cookie:` to the end of the CRLF. Mutation-check:
+// compare with `>=` and the 5000-byte line warns; drop the line test and the
+// 5001-byte one finds nothing.
+TEST (CookieJarIncoming, ALineOverFiveThousandBytesIsDroppedAndNamed) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string name = "linecookie";
+    for (const size_t measured : { LINE_LIMIT_BYTES, LINE_LIMIT_BYTES + 1 }) {
+        const bool dropped = measured > LINE_LIMIT_BYTES;
+        const size_t pad   = pad_for_measured_line (name, 10, measured);
+        const auto response =
+        response_in_scope (jar, "env_a", sized_cookie_url (server, name, 10, pad));
+
+        ASSERT_EQ (response.status_code, 200);
+        const auto found = warnings_with_code (response, OVERSIZED);
+        ASSERT_EQ (found.size (), dropped ? 1U : 0U)
+        << measured << " bytes: libcurl's line limit moved, or the measure did (client.cpp)";
+        if (dropped) {
+            EXPECT_NE (found.front ().message.find (": linecookie."), std::string::npos)
+            << found.front ().message;
+        }
+        EXPECT_EQ (kept_cookies (jar, server).find ("linecookie=") != std::string::npos, !dropped)
+        << measured << " bytes";
+        expect_no_value_in_warnings (response);
+        (void)jar.clear ("env_a");
+    }
+}
+
+// Name plus value past 4096 bytes is dropped though the line is far under the
+// line limit. Mutation-check: compare with `>=` and the 4096-byte cookie warns;
+// drop the name-and-value test and the 4097-byte one finds nothing.
+TEST (CookieJarIncoming, ANameAndValueOverFourThousandNinetySixBytesIsDroppedAndNamed) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string name = "nv";
+    for (const size_t total : { NAME_VALUE_LIMIT, NAME_VALUE_LIMIT + 1 }) {
+        const bool dropped  = total > NAME_VALUE_LIMIT;
+        const auto response = response_in_scope (
+        jar, "env_a", sized_cookie_url (server, name, total - name.size (), 0));
+
+        ASSERT_EQ (response.status_code, 200);
+        const auto found = warnings_with_code (response, OVERSIZED);
+        ASSERT_EQ (found.size (), dropped ? 1U : 0U)
+        << total << " bytes: libcurl's name and value limit moved (client.cpp)";
+        if (dropped) {
+            EXPECT_NE (found.front ().message.find (": nv."), std::string::npos)
+            << found.front ().message;
+        }
+        EXPECT_EQ (kept_cookies (jar, server).find ("nv=") != std::string::npos, !dropped)
+        << total << " bytes";
+        expect_no_value_in_warnings (response);
+        (void)jar.clear ("env_a");
+    }
+}
+
+// The header name is matched whole and without regard to case: libcurl reads
+// `set-cookie:` as `Set-Cookie:` and `X-Set-Cookie:` as nothing.
+// Mutation-check: match with `contains` or drop `ascii_lower_equal` for `==`.
+TEST (CookieJarIncoming, OnlyASetCookieHeaderInAnyCaseIsCounted) {
+    CookieServer server;
+    CookieJar jar;
+    const auto warns = [&] (const std::string& field) {
+        return !warnings_with_code (
+        response_in_scope (jar, "env_a",
+        sized_cookie_url (server, "nv", NAME_VALUE_LIMIT, 0) + "&field=" + field),
+        OVERSIZED)
+                .empty ();
+    };
+
+    EXPECT_TRUE (warns ("set-cookie"));
+    EXPECT_TRUE (warns ("SET-COOKIE"));
+    EXPECT_FALSE (warns ("X-Set-Cookie"));
+    EXPECT_FALSE (warns ("Set-Cookie2"));
+}
+
+// The name is wire bytes: one past 64 is cut (at a character boundary), one
+// that is not text is left out, and a line that names no cookie is counted
+// without a name. Only five are named. Mutation-check: drop the truncation and
+// the 100-byte name appears whole; drop the UTF-8 test and the serialized
+// warning throws.
+TEST (CookieJarIncoming, ADroppedCookiesNameIsBoundedAndNeverBytesThatAreNotText) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string long_name (100, 'n');
+
+    const auto response = response_in_scope (
+    jar, "env_a", sized_cookie_url (server, long_name, NAME_VALUE_LIMIT, 0));
+    const auto found = warnings_with_code (response, OVERSIZED);
+    ASSERT_EQ (found.size (), 1U);
+    EXPECT_NE (found.front ().message.find (std::string (64, 'n') + "..."), std::string::npos)
+    << found.front ().message;
+    EXPECT_EQ (found.front ().message.find (std::string (65, 'n')), std::string::npos);
+
+    // %FF is not UTF-8; httplib hands the byte through decoded.
+    const auto binary = response_in_scope (
+    jar, "env_a", sized_cookie_url (server, "%FF%FE", NAME_VALUE_LIMIT, 0));
+    const auto binary_found = warnings_with_code (binary, OVERSIZED);
+    ASSERT_EQ (binary_found.size (), 1U);
+    EXPECT_NE (binary_found.front ().message.find ("and 1 more"), std::string::npos)
+    << binary_found.front ().message;
+    EXPECT_NO_THROW ((void)vayu::json::serialize_warnings (binary.warnings).dump ());
+
+    const auto many       = response_in_scope (jar, "env_a",
+    sized_cookie_url (server, "m", NAME_VALUE_LIMIT, 0) + "&repeat=7");
+    const auto many_found = warnings_with_code (many, OVERSIZED);
+    ASSERT_EQ (many_found.size (), 1U);
+    EXPECT_NE (many_found.front ().message.find ("7 Set-Cookie headers it"), std::string::npos)
+    << many_found.front ().message;
+    EXPECT_NE (
+    many_found.front ().message.find (": m0, m1, m2, m3, m4, and 2 more."), std::string::npos)
+    << many_found.front ().message;
+
+    const auto bare = response_in_scope (jar, "env_a", server.url ("/bare-cookie/5001"));
+    const auto bare_found = warnings_with_code (bare, OVERSIZED);
+    ASSERT_EQ (bare_found.size (), 1U);
+    EXPECT_NE (bare_found.front ().message.find ("1 Set-Cookie header it"), std::string::npos)
+    << bare_found.front ().message;
+    EXPECT_NE (bare_found.front ().message.find ("and 1 more"), std::string::npos);
+    EXPECT_EQ (bare_found.front ().message.find ("xxxx"), std::string::npos);
+}
+
+// libcurl's engine is off for a send with no jar - what `disableCookies` hands
+// the client - so it drops nothing and the response must not claim it did.
+// Mutation-check: install the watch whatever the jar and the no-jar pass warns.
+TEST (CookieJarIncoming, ASendWithNoJarWarnsOfNoDroppedCookies) {
+    CookieServer server;
+    const std::vector<std::string> urls{ server.url ("/set-many/51"),
+        sized_cookie_url (server, "nv", NAME_VALUE_LIMIT, 0),
+        server.url ("/bare-cookie/5001") };
+    for (const auto& url : urls) {
+        CookieJar jar;
+        EXPECT_EQ (response_in_scope (jar, "env_a", url).warnings.size (), 1U)
+        << "with a jar the drop is reported: " << url;
+
+        Client without_jar{ ClientConfig{} };
+        const auto response = without_jar.send (get_request (url)).value ();
+        ASSERT_EQ (response.status_code, 200);
+        EXPECT_TRUE (response.warnings.empty ()) << "no jar, no cookie engine: " << url;
+    }
+}
+
+// ============================================================================
+// The same limits on the load path's transfers (issue #3307)
+// ============================================================================
+
+namespace {
+
+/// What the event loop counted as dropped on one transfer of @p url, given the
+/// per-transfer cookie engine a scenario virtual user's step gets when
+/// @p tracks_cookies. The load path counts and never names.
+size_t dropped_under_load (const std::string& url, bool tracks_cookies) {
+    vayu::http::EventLoopConfig config;
+    config.num_workers = 1;
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+    auto request          = get_request (url);
+    request.track_cookies = tracks_cookies;
+    auto pending          = loop.submit_async (request);
+    if (pending.future.wait_for (vayu::tests::WAIT_DEADLINE) != std::future_status::ready) {
+        ADD_FAILURE () << "no completion for " << url;
+        return 0;
+    }
+    const auto result = pending.future.get ();
+    loop.stop ();
+    if (!result.is_ok () || result.value ().status_code != 200) {
+        ADD_FAILURE () << "the transfer of " << url << " did not answer 200";
+        return 0;
+    }
+    EXPECT_TRUE (result.value ().warnings.empty ())
+    << "the load path names nothing";
+    return result.value ().set_cookie_headers_dropped;
+}
+
+} // namespace
+
+// Each limit at its boundary, through the event loop's own header callback: the
+// rule is shared with the design send, the callback and its status-line reset
+// are not. Mutation-check: drop the `count_dropped_set_cookie` call in
+// `curl_callbacks.cpp` and every count reads 0; drop
+// `set_cookie_limits.start_response ()` there and the 30 + 30 chain counts 10.
+TEST (CookieJarIncomingUnderLoad, ATransferThatTracksCookiesCountsEveryHeaderLibcurlDrops) {
+    CookieServer server;
+    const auto tracked = [] (const std::string& url) {
+        return dropped_under_load (url, true);
+    };
+    const std::string name = "linecookie";
+    const auto line_of     = [&] (size_t measured) {
+        return sized_cookie_url (
+        server, name, 10, pad_for_measured_line (name, 10, measured));
+    };
+    // A cookie `nv` whose name and value are `total` bytes.
+    const auto pair_of = [&] (size_t total) {
+        return sized_cookie_url (server, "nv", total - 2, 0);
+    };
+
+    EXPECT_EQ (tracked (server.url ("/set-many/50")), 0U);
+    EXPECT_EQ (tracked (server.url ("/set-many/53")), 3U);
+    EXPECT_EQ (tracked (server.url ("/set-many/50?bare=3")), 0U);
+    EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES)), 0U);
+    EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES + 1)), 1U);
+    EXPECT_EQ (tracked (pair_of (NAME_VALUE_LIMIT)), 0U);
+    EXPECT_EQ (tracked (pair_of (NAME_VALUE_LIMIT + 1)), 1U);
+    EXPECT_EQ (
+    tracked (server.url ("/set-many-and-go/30?to=" + server.url ("/set-many/30"))), 0U)
+    << "the per-response count carried over a hop";
+    EXPECT_EQ (
+    tracked (server.url ("/set-many-and-go/51?to=" + server.url ("/set-many/52"))), 3U)
+    << "a chain sums what each of its hops dropped";
+}
+
+// Off by default and for every single-request load run: libcurl's engine is
+// off, drops nothing, and nothing is counted. Mutation-check: drop the
+// `track_cookies` test in `header_callback` and these read 10 and 1.
+TEST (CookieJarIncomingUnderLoad, ATransferWithoutCookiesCountsNothing) {
+    CookieServer server;
+    EXPECT_EQ (dropped_under_load (server.url ("/set-many/60"), false), 0U);
+    EXPECT_EQ (
+    dropped_under_load (sized_cookie_url (server, "nv", NAME_VALUE_LIMIT, 0), false), 0U);
 }
 
 // ============================================================================

@@ -2077,7 +2077,10 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   request carries still goes out, and a pre-request script's
   `pm.cookies.jar()` write is still persisted. With the jar on, a typed
   `Cookie` and the jar's matches go out as one `Cookie` line, the jar's
-  first, never as two (issue #2788).
+  first, never as two (issue #2788). The one case it does not go out is a jar
+  line that reaches libcurl's 8190-byte limit: libcurl drops the typed rows with
+  the jar cookie it leaves off, and the answer says so under `warnings`
+  (`cookie_not_sent`, issue #3307).
 - `disabledSystemHeaders` names headers the engine does not add on its own. It
   is stored lowercased and deduplicated in first-appearance order, and
   unioned on every send with the per-send `disabledDefaultHeaders` (see
@@ -5600,6 +5603,26 @@ for what a redirect that changes origin does to cookies. The `Set-Cookie` lines
 of those intermediate hops are reported on the answer's `redirects` member,
 whether or not a later hop carried them.
 
+libcurl caps what it attaches: 150 jar cookies, and a `Cookie` line of 8190
+bytes. A send that hits either still succeeds and says so in the answer's
+`warnings` (`cookie_limit_reached`, `cookie_not_sent`; see
+[POST /execute](#post-execute)). The 8190-byte cap also drops the request's
+typed `Cookie` rows, which share the line; the 150 cap does not.
+
+libcurl also silently discards what a response sets past three limits: a
+`Set-Cookie` line over 5000 bytes, a cookie whose name and value together pass
+4096 bytes, and every cookie after the first 50 of one response. The answer says
+so under `warnings` (`cookie_dropped_oversized`, `cookie_dropped_too_many`),
+naming a dropped cookie and never its value. A request sent with
+`disableCookies` has no jar and so no warning: libcurl's cookie engine is off
+and drops nothing.
+
+Under load the same three limits apply to a scenario load run's
+per-virtual-user cookies, and what they drop is counted across the run in one
+`cookies_dropped` [run warning](#get-runsrunidreport) that names no cookie. A
+single-request load run keeps no cookies, so it drops none. The two outgoing
+caps above are not detected under load.
+
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
@@ -8202,6 +8225,7 @@ run-shaped way of stating the same field, not a second store.
   "bodyCapped": false,
   "httpVersion": "HTTP/1.1",
   "httpVersionDowngraded": true,
+  "warnings": [],
   "timing": {
     "totalMs": 245.5,
     "wireMs": 245.1,
@@ -8458,6 +8482,47 @@ the same hops as
 [`pm.response.redirects`](scripting.md#pmresponseredirects---the-hops-a-send-followed)
 (`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where
 the chain is not recorded.
+
+**`warnings` lists what the engine did to the exchange that the response does
+not show** (issue #3307), each as `{code, message}` in the order it was found:
+`code` is a stable snake_case identifier a client branches on, `message` the
+sentence a person reads. A warning never fails the send. It is always present on
+a design answer, an empty array when there is nothing to say, so a client can
+tell "no warnings" from an engine too old to warn. The stored
+`trace_data` carries it at the top level, beside `clientCertificate` and not
+inside `response`, because a send that failed has no `response` node and can
+still have warned; it is written only when non-empty, so a row stored before the
+field reads as having none. A load-run sample records none. Codes are listed
+here as the engine starts producing them:
+
+- `cookie_not_sent`: libcurl would not let the `Cookie` line pass 8190 bytes
+  and left out the first jar cookie that did not fit, named in the message (the
+  name only, never a value). It also drops every typed `Cookie` row with the
+  line, so `requestHeaders` carries no `Cookie` entry then. libcurl skips the
+  jar cookies after the named one without saying so.
+- `cookie_limit_reached`: more than 150 jar cookies matched the URL and libcurl
+  sent the first 150. A typed `Cookie` row is still sent in this case.
+
+- `cookie_dropped_oversized`: a response carried `Set-Cookie` headers libcurl
+  discarded unread, because the line was over 5000 bytes (counted from after
+  `Set-Cookie:` to the end of the line) or the cookie's name and value together
+  were over 4096. One warning counts them, across every hop, and names up to five
+  (name only, cut at 64 bytes; a line that names no cookie, or whose name is not
+  text, is counted but not named).
+- `cookie_dropped_too_many`: a single response set more than 50 cookies and
+  libcurl ignored the rest. The count restarts with each hop's response, so 30
+  cookies on each of two hops is not an overflow; one warning gives the total
+  ignored over the chain. It counts the `Set-Cookie` lines libcurl would have
+  stored, so a later cookie it rejects for another reason (a public suffix, a
+  `__Secure-` prefix) can make the count one too high.
+
+`cookie_not_sent` and `cookie_limit_reached` are read off libcurl's own notices
+at any log verbosity, once per cookie however many hops of a redirect chain
+report them. The two `cookie_dropped_*` codes are counted from the response's
+header lines instead, only on a send that has a cookie jar, and are not reported
+on the streaming path (`stream: true`). Under load the same two checks feed the
+run's `cookies_dropped` warning instead (see
+[GET /runs/:runId/report](#get-runsrunidreport)).
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
@@ -12469,7 +12534,10 @@ are HTTP-only, the same rule a failed assertion follows
       "count": 12, "names": ["token"] },
     { "code": "pre_request_script_skipped",
       "message": "1 step carries a pre-request script that does not run under load",
-      "steps": 1 }
+      "steps": 1 },
+    { "code": "cookies_dropped",
+      "message": "4 Set-Cookie headers were dropped across the run by libcurl's cookie engine (a line over 5000 bytes, a name and value over 4096 bytes, or more than 50 in one response), so the virtual users that received them sent their later steps without those cookies.",
+      "count": 4 }
   ],
   "stream": { "...": "streaming runs only - see below" },
   "sampling": {
@@ -12751,6 +12819,17 @@ received that many more requests than the run counted, each of those
 requests' latency covers both attempts, and a non-idempotent one may have run
 twice; `count` equals `summary.connectionReplays`, and it is raised only when
 that is above 0 (see [What counts as an error](#what-counts-as-an-error)).
+`cookies_dropped` ([#3307](https://github.com/athrvk/vayu/issues/3307)) means
+libcurl's cookie engine discarded `count` `Set-Cookie` headers from the run's
+responses, summed over every response and redirect hop: a line over 5000 bytes,
+a cookie whose name and value pass 4096, or one past the 50th of its response,
+the limits a design send reports per cookie (see [Cookies](#cookies)). A
+virtual user that lost a session cookie this way sent its later steps without
+it. The message names no cookie. Only a scenario load
+run's steps carry cookies, so only it can raise this; a step with
+`disableCookies` drops nothing. The outgoing caps (a `Cookie` line over 8190
+bytes, more than 150 jar cookies) are not detected under load: reading libcurl's
+notice needs `CURLOPT_VERBOSE` on every transfer.
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every

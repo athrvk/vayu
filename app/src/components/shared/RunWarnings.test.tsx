@@ -104,6 +104,26 @@ describe("RunWarnings", () => {
 		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
 	});
 
+	// Mutation check: drop the cookies_dropped title and this reads the generic
+	// "did not do everything it was asked", which this run did.
+	it("reports dropped Set-Cookie headers under their own title, with the engine's count", () => {
+		render(
+			<RunWarnings
+				warnings={[
+					{
+						code: "cookies_dropped",
+						message:
+							"3 Set-Cookie headers were dropped across the run by libcurl's cookie engine",
+						count: 3,
+					},
+				]}
+			/>
+		);
+		expect(screen.getByText("Some cookies the server set were dropped")).toBeTruthy();
+		expect(screen.getByText(/3 Set-Cookie headers were dropped across the run/)).toBeTruthy();
+		expect(screen.queryByText("This run did not do everything it was asked")).toBeNull();
+	});
+
 	it("renders one callout per warning when a run carries both", () => {
 		render(
 			<RunWarnings

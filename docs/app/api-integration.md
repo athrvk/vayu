@@ -1836,6 +1836,7 @@ replay puts the run's recorded list back on its seeded rows.
   httpVersion: "HTTP/1.1",
   httpVersionDowngraded: false,
   // authNotice: "auth mode 'ntlm' is not executed by Vayu; ..."  (absent here)
+  warnings: [],  // [{ code: "cookie_not_sent", message: "..." }, ...]
   clientCertificate: "",
   bodyCapped: false,
   headerLines: [{ name: "Content-Type", value: "application/json" }],
@@ -1904,7 +1905,11 @@ reused one before answering ([#2799](https://github.com/athrvk/vayu/issues/2799)
 The app does not draw the number: the engine's `connection_replayed` entry in
 `report.warnings` is the surface, and `RunWarnings` renders it as a callout
 titled "Some requests were re-sent after a dropped connection" with the count in
-its message. The number is for MCP and export readers. Unlike
+its message. The number is for MCP and export readers. The same list carries
+`cookies_dropped` ([#3307](https://github.com/athrvk/vayu/issues/3307)): the
+`Set-Cookie` headers libcurl's cookie engine discarded across the run (`count`),
+titled "Some cookies the server set were dropped" in `RunWarnings`, the count
+again in the engine's message and no cookie name in it. Unlike
 `httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
 and saw none, absent a run stored before the count existed.
 
@@ -1921,6 +1926,26 @@ both set `ResponseState.authNotice` (an empty string reads as absent), held
 together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
 warning `Callout` between the status band and the tabs, so it shows on every
 tab and on a 401 from the target, which is the response it explains.
+
+`warnings` lists what the engine did to a design send that the response does not
+show ([#3307](https://github.com/athrvk/vayu/issues/3307)), each as
+`{ code, message }`: a jar cookie libcurl left off the `Cookie` line
+(`cookie_not_sent`, `cookie_limit_reached`) or a `Set-Cookie` it discarded unread
+(`cookie_dropped_oversized`, `cookie_dropped_too_many`). A warning never fails
+the send, and the message names a cookie by name, never by value. The live body
+**always** carries the array, `[]` when empty; the stored trace holds it at the
+top level of `trace` (beside `clientCertificate`, not under `response`) and only
+when non-empty, so a failed exchange with no `response` node still has it. A
+streaming send's `202` carries none, since it is answered before the exchange
+runs. Both funnels read it through `receivedWarnings` (`lib/exchange-warnings.ts`),
+which maps an empty list, an absent key and entries that are not a string `code`
+and `message` to `undefined`, so `ResponseState.warnings` is a non-empty list or
+absent and `warnings-funnels.test.ts` holds the two together.
+`ResponseViewer` draws one warning `Callout` per entry, from `ExchangeWarnings`,
+between the status band and the tabs, so it shows on every tab and on a
+`status: 0` failure; a collection run's step card draws the same component above
+its response viewer. The title comes from the code and an unknown code gets a
+neutral one, since the engine adds codes without the app learning them first.
 
 `clientCertificate` names the client-certificate registry entry the exchange
 presented, as `host` or `host:port`, and `""` when none matched (issue #707).
