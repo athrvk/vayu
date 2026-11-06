@@ -6487,6 +6487,26 @@ describe("inline body bounds", () => {
 		}
 	});
 
+	// Mutation check (#3307): have boundRunReport rebuild a bounded trace from its
+	// request and response nodes alone and the top-level `warnings` is lost.
+	test("get_run_report keeps a stored trace's warnings, also when a body was cut", async () => {
+		const warnings = [
+			{ code: "cookie_limit_reached", message: "More than 150 cookies matched." },
+		];
+		const out = await runReport(
+			reported({
+				summary: {},
+				results: [
+					{ id: 1, trace: { request: { url: "u" }, response: { body: huge }, warnings } },
+				],
+			})
+		);
+
+		const trace = (out.results as Array<{ trace: Record<string, unknown> }>)[0].trace;
+		expect(trace.warnings).toEqual(warnings);
+		expect((trace.response as Record<string, unknown>).bodyTruncated).toBe(true);
+	});
+
 	// Mutation check (#2820): have boundRunReport or markPartialReport rebuild the
 	// report without its `scenario` section and this fails.
 	test("get_run_report hands a scenario load report's assertions through unchanged", async () => {
@@ -17160,6 +17180,28 @@ describe("secret withholding", () => {
 		// empty field for an executed mode.
 		const plain = runClient({ executeRequest: vi.fn().mockResolvedValue(EXECUTE_ANSWER) });
 		expect("authNotice" in (await sendRequest(plain)).body).toBe(false);
+	});
+
+	test("run_request passes the engine's warnings through, masked or revealed, empty or not (#3307)", async () => {
+		// An agent debugging a cookie-bearing flow needs to be told a cookie was
+		// left off the line or discarded; the message names it, never its value.
+		const warnings = [
+			{
+				code: "cookie_not_sent",
+				message: "The cookie 'session' did not fit in the Cookie header and was left out.",
+			},
+		];
+		const client = runClient({
+			executeRequest: vi.fn().mockResolvedValue({ ...EXECUTE_ANSWER, warnings }),
+		});
+		expect((await sendRequest(client)).body.warnings).toEqual(warnings);
+		expect((await sendRequest(client, REVEAL)).body.warnings).toEqual(warnings);
+		// The live body always carries the key, `[]` when empty: kept as is, so an
+		// agent can tell "none" from an engine too old to warn.
+		const none = runClient({
+			executeRequest: vi.fn().mockResolvedValue({ ...EXECUTE_ANSWER, warnings: [] }),
+		});
+		expect((await sendRequest(none)).body.warnings).toEqual([]);
 	});
 
 	test("run_request masks the header an inline API-key auth names", async () => {
