@@ -260,7 +260,8 @@ size_t read_approved (char* buffer, size_t size, size_t nitems, void* arg) {
     return *got;
 }
 
-/// libcurl rewinds the body for a redirect or an auth retry. It passes only
+/// libcurl rewinds a form part's body at the start of each transfer, and for
+/// an auth retry. It passes only
 /// `SEEK_SET` (as of 8.23, to an upload's and a part's callback alike), so any
 /// other origin is answered as unseekable rather than guessed at.
 int seek_approved (void* arg, curl_off_t offset, int origin) {
@@ -336,9 +337,9 @@ bool attach_binary (CURL* curl, const Request& request, BodySource& source) {
     curl, static_cast<curl_off_t> (file.approved->size ()));
     set_opt<CURLOPT_READFUNCTION> (curl, &read_approved);
     set_opt<CURLOPT_READDATA> (curl, &source.stream);
-    // Mandatory, not an optimisation: a redirect and the second leg of Digest
-    // or NTLM rewind the body, and without a seek callback libcurl fails that
-    // leg instead of resending.
+    // Mandatory, not an optimisation: the second leg of Digest or NTLM (and a
+    // form part's resend on a redirect hop) rewinds the body, and without a
+    // seek callback libcurl fails that leg instead of resending.
     set_opt<CURLOPT_SEEKFUNCTION> (curl, &seek_approved);
     set_opt<CURLOPT_SEEKDATA> (curl, &source.stream);
     return true;

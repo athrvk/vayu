@@ -299,8 +299,9 @@ Response error_response (const Error& error);
  * that open saw, a read callback at this transfer's own offset, and a **seek
  * callback**, which libcurl needs to rewind the body for the second leg of
  * Digest/NTLM - without it that leg fails rather than resending. A redirect
- * that resends the body is rewound by the engine, in
- * `RedirectChain::apply_method` through `rewind_body_source`.
+ * that resends the body is rewound by the engine for a streamed upload
+ * (`RedirectChain::apply_method` through `rewind_body_source`); a form part
+ * is rewound by libcurl through this callback.
  * `UPLOAD` means PUT to libcurl, so the method is re-asserted with
  * `CURLOPT_CUSTOMREQUEST` afterwards.
  *
@@ -572,9 +573,8 @@ CurlPhaseTimes read_phase_times (CURL* curl);
 /**
  * @brief Add one hop's timers to a chain's, field by field (#3300).
  *
- * What libcurl's own counters did across the redirects it followed, each timer
- * summed over the requests: a chain the engine follows one transfer per hop
- * reads each hop's timers and sums them here, so its wire time covers every
+ * Each timer summed over the requests of a chain: the engine follows one
+ * transfer per hop, reads each hop's timers and sums them here, so its wire time covers every
  * hop and the queue wait does not absorb the earlier ones.
  */
 void add_phase_times (CurlPhaseTimes& total, const CurlPhaseTimes& hop);

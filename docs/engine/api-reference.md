@@ -1243,8 +1243,8 @@ which sent people looking for a network fault when every hop had been answered.
 redirected more than N times (see Maximum redirects). Maximum (N) redirects
 followed`, which is the engine's own text and ends there (the engine follows
 redirects itself), or `The response could not be decoded: the server sent
-Content-Encoding X.`, which is followed by libcurl's own text. The codes are **appended** to the enumeration like `PROXY_ERROR`, so
-stored numeric values are unchanged, but a script that tested
+Content-Encoding X.`, which is followed by libcurl's own text. The codes are
+**appended** to the enumeration like `PROXY_ERROR`, so stored numeric values are unchanged, but a script that tested
 `err.code === 'CONNECTION_FAILED'` (`pm.sendRequest`) or
 `pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees
 the new spelling. A load run records them under the error types
