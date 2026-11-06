@@ -305,6 +305,14 @@ const vayu::Response& response) {
         trace["clientCertificate"] = response.client_certificate;
     }
 
+    // The engine's per-exchange warnings (issue #3307), top level on the same
+    // reasoning: a failed exchange has no `response` node and can still carry
+    // one. Omitted when empty, like `clientCertificate`, so a row stored before
+    // the field and a clean exchange read the same.
+    if (!response.warnings.empty ()) {
+        trace["warnings"] = vayu::json::serialize_warnings (response.warnings);
+    }
+
     const auto& timing   = response.timing;
     trace["totalMs"]     = timing.total_ms;
     trace["wireMs"]      = timing.wire_ms;

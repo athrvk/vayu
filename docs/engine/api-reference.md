@@ -8205,6 +8205,7 @@ run-shaped way of stating the same field, not a second store.
   "bodyCapped": false,
   "httpVersion": "HTTP/1.1",
   "httpVersionDowngraded": true,
+  "warnings": [],
   "timing": {
     "totalMs": 245.5,
     "wireMs": 245.1,
@@ -8461,6 +8462,18 @@ the same hops as
 [`pm.response.redirects`](scripting.md#pmresponseredirects---the-hops-a-send-followed)
 (`code`/`status`/`headers` for `status`/`statusText`/`headerLines`), absent where
 the chain is not recorded.
+
+**`warnings` lists what the engine did to the exchange that the response does
+not show** (issue #3307), each as `{code, message}` in the order it was found:
+`code` is a stable snake_case identifier a client branches on, `message` the
+sentence a person reads. A warning never fails the send. It is always present on
+a design answer, an empty array when there is nothing to say, so a client can
+tell "no warnings" from an engine too old to warn. The stored
+`trace_data` carries it at the top level, beside `clientCertificate` and not
+inside `response`, because a send that failed has no `response` node and can
+still have warned; it is written only when non-empty, so a row stored before the
+field reads as having none. A load-run sample records none. Codes are listed
+here as the engine starts producing them.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

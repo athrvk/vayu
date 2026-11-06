@@ -1436,6 +1436,14 @@ Json serialize_redirects (const std::vector<RedirectHop>& hops) {
     return out;
 }
 
+Json serialize_warnings (const std::vector<ResponseWarning>& warnings) {
+    Json out = Json::array ();
+    for (const auto& warning : warnings) {
+        out.push_back ({ { "code", warning.code }, { "message", warning.message } });
+    }
+    return out;
+}
+
 namespace {
 
 /// `serialize`'s `body` for a text body: its parse, or `null` when the caller
@@ -1486,6 +1494,12 @@ Json serialize (const Response& response, bool include_parsed_body) {
     // facts. `build_result_trace` writes the same value under the same name, so
     // the live pane and a restored one read one field.
     json["clientCertificate"] = response.client_certificate;
+
+    // Always present, an empty array when the engine had nothing to say about
+    // this exchange (issue #3307): a pane must tell "no warnings" from "this
+    // engine is too old to warn". `build_result_trace` stores the same array
+    // under the same name, so the live pane and a restored one read one field.
+    json["warnings"] = serialize_warnings (response.warnings);
 
     // Decided once, by `response_body_text` (issue #2458): a JSON string holds
     // only UTF-8, so bytes that are not text travel as base64 rather than

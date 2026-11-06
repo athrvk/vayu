@@ -950,6 +950,18 @@ struct RedirectHop {
 };
 
 /**
+ * @brief One thing the engine did or declined to do to an exchange that the
+ *        response alone does not show (issue #3307).
+ *
+ * `code` is a stable snake_case identifier a client branches on; `message` is
+ * the sentence a person reads. A warning never fails the exchange.
+ */
+struct ResponseWarning {
+    std::string code;
+    std::string message;
+};
+
+/**
  * @brief HTTP Response
  */
 // `optin.performance.Padding` is right that size-ordering these fields would
@@ -1120,6 +1132,17 @@ struct Response {
      * for every transfer in it.
      */
     std::string client_certificate;
+
+    /**
+     * @brief What the engine did to this exchange that the response does not
+     *        show, in the order it was found (issue #3307); empty when nothing.
+     *
+     * On the *response* for the reason `client_certificate` is: the live
+     * `/execute` body and the stored trace both carry it, so a restored
+     * response warns about what the live one did. Design funnels only; the
+     * load path does not fill it.
+     */
+    std::vector<ResponseWarning> warnings;
 
     /**
      * @brief Events this transfer delivered, when it was a bounded stream

@@ -376,6 +376,32 @@ TEST (JsonTest, SerializesNoRedirectHopsAsAnEmptyArray) {
     EXPECT_TRUE (json["redirects"].empty ());
 }
 
+// The engine's warnings (issue #3307). Always present on the live body, an
+// empty array when there are none, on the `redirects` rule above.
+TEST (JsonTest, SerializesWarningsAsCodeAndMessageInOrder) {
+    Response response;
+    response.status_code = 200;
+    response.warnings    = { { "first_code", "first message" },
+        { "second_code", "second message" } };
+
+    auto json = serialize (response);
+
+    EXPECT_EQ (json["warnings"],
+    Json::array ({ { { "code", "first_code" }, { "message", "first message" } },
+    { { "code", "second_code" }, { "message", "second message" } } }));
+}
+
+TEST (JsonTest, SerializesNoWarningsAsAnEmptyArray) {
+    Response response;
+    response.status_code = 200;
+
+    auto json = serialize (response);
+
+    ASSERT_TRUE (json.contains ("warnings"));
+    EXPECT_TRUE (json["warnings"].is_array ());
+    EXPECT_TRUE (json["warnings"].empty ());
+}
+
 // The live body's read cap (issue #1157). Always present, so a pane can tell
 // "not capped" from "this engine cannot say" - the same rule `httpVersion`
 // above is held to, and the one that decides whether a prefix is shown as the

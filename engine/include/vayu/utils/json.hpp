@@ -262,6 +262,11 @@ inline constexpr std::string_view BODY_ENCODING_BASE64 = "base64";
 /// order they arrived (issue #2461).
 [[nodiscard]] Json serialize_redirects (const std::vector<RedirectHop>& hops);
 
+/// `Response::warnings` as `[{code, message}]`, in the order they were found
+/// (issue #3307). The one spelling behind `serialize`'s `warnings` and the
+/// stored trace's top-level `warnings`.
+[[nodiscard]] Json serialize_warnings (const std::vector<ResponseWarning>& warnings);
+
 /**
  * @brief Serialize a Response to JSON
  *
