@@ -622,7 +622,7 @@ makes a session survive from one design-mode request to the next.
   lines (`IncomingCookieWatch`, `client.cpp`) when the send has a jar, and the
   response carries `cookie_dropped_oversized` / `cookie_dropped_too_many`.
   A `disableCookies` send has no jar, libcurl's engine is off and nothing is
-  reported. The streaming path (`sse_stream.cpp`) does not count them. The
+  reported. The streaming path (`sse_stream.cpp`) does not count them (#3315). The
   rules are one copy, `SetCookieLimits` (`http/set_cookie_limits.hpp`), which
   the event loop's `header_callback` also runs, allocation-free, on a transfer
   that tracks cookies (a scenario load run's step): it counts what was dropped
