@@ -231,7 +231,7 @@ ratios, not the absolute numbers.
 The harness is the hook's (`ab_redirect_hook.py`, whose labels keep the hook's
 name): the arm is the run's own `followRedirects` against a target that never
 redirects, 8 pairs of 15 s runs, the first arm alternating per pair, and a null
-test with following on on both sides. `blob1mib` was not run.
+test with following on on both sides. The comparison is following on against off, not before against after #3302: the status parse and the flag check run in both arms, so only the completion-time status read is isolated. `blob1mib` was not run.
 
 ```bash
 python build.py --prod -e

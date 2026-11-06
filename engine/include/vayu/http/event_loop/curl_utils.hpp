@@ -668,8 +668,9 @@ struct RedirectState {
     /// The finished hops' wire bytes, likewise.
     WireBytes bytes;
     /// Why the chain ended on a redirect it was answered with rather than
-    /// following it: the limit, a refused `Location`, the timeout spent, or
-    /// curl refusing the next hop's handle.
+    /// following it: the limit, a refused `Location` or the timeout spent.
+    /// A handle curl will not take back for the next hop completes as a bare
+    /// error instead (`deliver`).
     std::optional<Error> refusal;
 };
 
