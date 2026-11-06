@@ -1313,7 +1313,56 @@ bool proxy_certificate_rejected (CURL* curl, CURLcode code) {
     return verify_result != 0;
 }
 
+/// libcurl clears the primary address when a transfer starts and sets it once
+/// a connection, new or reused, is up at the IP level, even when the TLS
+/// handshake above it then fails. A redirect's earlier hop leaves it set for a
+/// later hop's refusal.
+bool reached_a_peer (CURL* curl) {
+    char* ip = nullptr;
+    return curl != nullptr && get_info<CURLINFO_PRIMARY_IP> (curl, &ip) == CURLE_OK &&
+    ip != nullptr && *ip != '\0';
+}
+
+/// Whether a `CURLE_UNSUPPORTED_PROTOCOL` is the peer's reply ("Received
+/// HTTP/0.9 when not allowed", an unknown HTTP version) rather than a scheme
+/// the handle refused. A reached peer alone does not decide it: a redirect to
+/// `ftp://` that libcurl follows itself is refused with the earlier hop's
+/// address still set, so the URL the handle stopped at must be sendable too.
+bool peer_spoke_another_protocol (CURL* curl, std::string_view stopped_at) {
+    return reached_a_peer (curl) && !vayu::http::url_scheme (stopped_at).empty () &&
+    !vayu::http::unsendable_scheme (stopped_at);
+}
+
+/// The sentence for a peer that answered in something other than HTTP/1.x,
+/// ahead of libcurl's own text. `http2` is `CURL_HTTP_VERSION_2TLS`, which
+/// sends HTTP/1.1 over `http://`, so an h2c-only server answers that request
+/// with its binary preface; the hint names that case. @p stopped_at is the
+/// handle's URL rather than the request's, so a redirect onto `http://` is
+/// judged by the hop that failed.
+std::string protocol_mismatch_message (const Request* request,
+std::string_view stopped_at,
+const std::string& curl_text) {
+    std::string text =
+    "The server answered in a protocol other than HTTP/1.x: " + curl_text;
+    if (request != nullptr && request->http_version == HttpVersion::Http2 &&
+    vayu::utils::ascii_lower_equal (vayu::http::url_scheme (stopped_at), "http")) {
+        text +=
+        ". HTTP/2 is only negotiated over https://; this server may speak h2c, "
+        "which Vayu does not send";
+    }
+    return text;
+}
+
 } // namespace
+
+std::string effective_url (CURL* curl) {
+    char* url = nullptr;
+    if (curl == nullptr ||
+    get_info<CURLINFO_EFFECTIVE_URL> (curl, &url) != CURLE_OK || url == nullptr) {
+        return {};
+    }
+    return url;
+}
 
 Error curl_to_error (CURL* curl,
 CURLcode code,
@@ -1421,9 +1470,20 @@ const ConnectedPeerCheck* peer_check) {
             }
         }
         break;
-    // A scheme the handle's allowlist refuses: a redirect's, or one libcurl
-    // guessed for a URL naming none. libcurl's text names the scheme.
-    case CURLE_UNSUPPORTED_PROTOCOL: error.code = ErrorCode::InvalidUrl; break;
+    // A scheme the handle's allowlist refuses (a redirect's, or one libcurl
+    // guessed for a URL naming none), in libcurl's words; or a peer that
+    // answered in another protocol, which is no fault of the URL (#3306).
+    case CURLE_UNSUPPORTED_PROTOCOL: {
+        const std::string stopped_at = effective_url (curl);
+        if (peer_spoke_another_protocol (curl, stopped_at)) {
+            error.code = ErrorCode::ProtocolMismatch;
+            error.message =
+            protocol_mismatch_message (request, stopped_at, error.message);
+        } else {
+            error.code = ErrorCode::InvalidUrl;
+        }
+        break;
+    }
     default:
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::InternalError;
@@ -1461,16 +1521,6 @@ namespace {
 /// handshake, after the TCP connect.
 bool refused_before_connecting (CURLcode code) {
     return code == CURLE_URL_MALFORMAT || code == CURLE_UNSUPPORTED_PROTOCOL;
-}
-
-/// libcurl clears the primary address when a transfer starts and sets it once
-/// a connection, new or reused, is up at the IP level, even when the TLS
-/// handshake above it then fails. A redirect's earlier hop leaves it set for a
-/// later hop's refusal.
-bool reached_a_peer (CURL* curl) {
-    char* ip = nullptr;
-    return curl != nullptr && get_info<CURLINFO_PRIMARY_IP> (curl, &ip) == CURLE_OK &&
-    ip != nullptr && *ip != '\0';
 }
 
 } // namespace

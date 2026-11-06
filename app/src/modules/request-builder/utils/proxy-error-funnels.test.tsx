@@ -117,13 +117,15 @@ describe("the response pane", () => {
 	});
 });
 
-// The redirect-loop and content-encoding codes (#2462) take the same two
-// routes as PROXY_ERROR, and a pane that mapped them live but not restored
-// would show History a different heading than the send showed.
+// The redirect-loop, content-encoding (#2462) and protocol-mismatch (#3306)
+// codes take the same two routes as PROXY_ERROR, and a pane that mapped them
+// live but not restored would show History a different heading than the send
+// showed.
 // Mutation-check: delete a code's ErrorTitles entry and its heading check fails.
 describe.each([
 	["TOO_MANY_REDIRECTS", "Too many redirects"],
 	["BAD_CONTENT_ENCODING", "Couldn't decode the response"],
+	["PROTOCOL_MISMATCH", "The server answered in another protocol"],
 ])("%s through both funnels", (code, title) => {
 	it("reaches the same heading live and restored", () => {
 		const live = responseFromExecuteResult({

@@ -780,14 +780,20 @@ enum class ErrorCode : std::uint8_t {
     /// #2467). Raised by the payload reader, so it is a refusal a route answers
     /// as `invalid_header_name` and never reaches a stored trace. Appended for
     /// the same reason `ProxyError` was.
-    InvalidHeaderName
+    InvalidHeaderName,
+    /// The target answered in a protocol other than HTTP/1.x, usually an h2c
+    /// server's binary preface to a request `CURL_HTTP_VERSION_2TLS` sent as
+    /// HTTP/1.1 over `http://` (issue #3306). Distinct because the target was
+    /// reached and the URL is fine, so `InvalidUrl` sent users to the wrong
+    /// fault. Appended for the same reason `ProxyError` was.
+    ProtocolMismatch
 };
 
 /// How many `ErrorCode` values there are, for a table indexed by one. Names the
 /// last enumerator by hand: appending a code does not move it. The
 /// `static_assert` after `to_string` fails the build when one is appended.
 inline constexpr std::size_t ERROR_CODE_COUNT =
-static_cast<std::size_t> (ErrorCode::InvalidHeaderName) + 1;
+static_cast<std::size_t> (ErrorCode::ProtocolMismatch) + 1;
 
 /**
  * @brief The name a load run reports an error under: a stored error trace's
@@ -813,6 +819,7 @@ static_cast<std::size_t> (ErrorCode::InvalidHeaderName) + 1;
     case ErrorCode::Cancelled: return "cancelled";
     case ErrorCode::TooManyRedirects: return "too_many_redirects";
     case ErrorCode::BadContentEncoding: return "bad_content_encoding";
+    case ErrorCode::ProtocolMismatch: return "protocol_mismatch";
     default: return "unknown";
     }
 }
@@ -840,6 +847,7 @@ constexpr const char* to_string (ErrorCode code) {
     case ErrorCode::TooManyRedirects: return "TOO_MANY_REDIRECTS";
     case ErrorCode::BadContentEncoding: return "BAD_CONTENT_ENCODING";
     case ErrorCode::InvalidHeaderName: return "INVALID_HEADER_NAME";
+    case ErrorCode::ProtocolMismatch: return "PROTOCOL_MISMATCH";
     }
     return "UNKNOWN";
 }

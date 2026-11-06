@@ -1062,7 +1062,12 @@ logged as a warning: it means a client skipped composition.
   refusal lands under TLS 1.3. The rule is the shape,
   never a list of codes, consulted only after every mapping more specific than
   "the target failed the exchange". An unresolvable target host is
-  `DnsError`, never `ConnectionFailed`.
+  `DnsError`, never `ConnectionFailed`. A peer that answers in something other
+  than HTTP/1.x (an h2c server's preface) is `ProtocolMismatch` (#3306): libcurl
+  calls it `CURLE_UNSUPPORTED_PROTOCOL`, the code a refused scheme shares, so
+  it is told apart by a reached peer (`CURLINFO_PRIMARY_IP`) at an `http` or
+  `https` `CURLINFO_EFFECTIVE_URL`; a redirect onto `ftp://` keeps the earlier
+  hop's address and stays `InvalidUrl`.
 - **No transfer reaches Vayu's own ports** (#2355): `include/vayu/http/loopback_guard.hpp`
   is the one predicate (loopback in any spelling, on the engine port the
   daemon registers with the set-once `set_engine_port` before it listens, or on

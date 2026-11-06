@@ -59,10 +59,19 @@ class DnsCache;
  * limit and the `Content-Encoding` are read off @p curl, so without a handle
  * the sentence names neither.
  *
+ * `CURLE_UNSUPPORTED_PROTOCOL` is `InvalidUrl` (a scheme the handle refused,
+ * libcurl's text unchanged) unless @p curl reached a peer and stopped at an
+ * `http` or `https` URL: then the peer answered in something other than
+ * HTTP/1.x, usually an h2c server's preface, and it is `ProtocolMismatch`
+ * (issue #3306), with a hint about h2c when the request asked for `http2` and
+ * the handle's `CURLINFO_EFFECTIVE_URL` is `http://`. Without a handle it
+ * stays `InvalidUrl`.
+ *
  * @param request The request the transfer sent, read only to say *why* a URL
  *                libcurl refused as malformed was: a space or control byte in
  *                it is named, and the toggle that would send it as typed is
- *                suggested only while `disableUrlEncoding` is off. May be null,
+ *                suggested only while `disableUrlEncoding` is off; and for its
+ *                `http_version`, which decides the h2c hint above. May be null,
  *                and then libcurl's own text stands.
  *
  * @param peer_check The state the transfer's `apply_transport_policy` was
@@ -85,6 +94,15 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * read as no proxy. Read before anything else reuses the handle.
  */
 [[nodiscard]] bool proxy_was_used (CURL* curl);
+
+/**
+ * @brief libcurl's current request URL on @p curl (`CURLINFO_EFFECTIVE_URL`):
+ *        the last hop's when libcurl followed a redirect itself.
+ *
+ * Copied because libcurl's buffer is only valid until the next call into the
+ * handle. Empty for a null handle and when libcurl reports none.
+ */
+[[nodiscard]] std::string effective_url (CURL* curl);
 
 /**
  * @brief The proxy's refusal when a transfer that completed is a forwarding
