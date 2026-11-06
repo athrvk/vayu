@@ -89,7 +89,8 @@ json script_elements (const std::string& pre, const std::string& post = "") {
  * and one that connects and then says nothing at all. Beside them, `/canned`
  * answers whatever status, `Content-Type` and chunks `can()` was given - the
  * reply a stream asked for and did not get (a JSON 404, NDJSON) - and `/hop`
- * redirects to it with a JSON body of its own, for the per-hop rules.
+ * redirects to it with a body of its own (JSON unless `hop_body` says
+ * otherwise), for the per-hop rules.
  *
  * `/scripted` writes whatever chunks it was built with, so a test supplies the
  * shape it needs - several events in one write, one event split across two,
@@ -182,9 +183,17 @@ class StreamServer {
         });
 
         svr_.Get ("/hop", [this] (const httplib::Request&, httplib::Response& res) {
-            res.status = 302;
+            hop_count_.fetch_add (1);
+            // In slices, so a stopping fixture is not held by a long delay.
+            const auto until = std::chrono::steady_clock::now () +
+            std::chrono::milliseconds (hop_delay_ms_.load ());
+            while (!stopping_.load () && std::chrono::steady_clock::now () < until) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (20));
+            }
+            const Canned body = hop_reply ();
+            res.status        = 302;
             res.set_header ("Location", hop_location ());
-            res.set_content (R"({"hop":"first"})", "application/json");
+            res.set_content (body.chunks.front (), body.content_type);
         });
 
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
@@ -274,6 +283,22 @@ class StreamServer {
         hop_location_ = std::move (location);
     }
 
+    /// The body `/hop`'s redirect carries from now on, instead of its JSON.
+    void hop_body (std::string content_type, std::string body) {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        hop_reply_ = Canned{ 302, std::move (content_type), { std::move (body) } };
+    }
+
+    /// Make `/hop` wait @p ms before it answers. Set before the request.
+    void delay_hop (int ms) {
+        hop_delay_ms_ = ms;
+    }
+
+    /// Redirects `/hop` has answered or is answering.
+    int hops_received () const {
+        return hop_count_.load ();
+    }
+
     private:
     struct Canned {
         int status = 200;
@@ -289,6 +314,11 @@ class StreamServer {
     std::string hop_location () const {
         std::lock_guard<std::mutex> lock (received_mutex_);
         return hop_location_.empty () ? url ("/canned") : hop_location_;
+    }
+
+    Canned hop_reply () const {
+        std::lock_guard<std::mutex> lock (received_mutex_);
+        return hop_reply_;
     }
 
     std::string set_cookie_value () const {
@@ -315,7 +345,10 @@ class StreamServer {
     std::map<std::string, std::string, std::less<>> received_headers_;
     std::string set_cookie_;
     std::string hop_location_;
+    Canned hop_reply_{ 302, "application/json", { R"({"hop":"first"})" } };
     Canned canned_;
+    std::atomic<int> hop_delay_ms_{ 0 };
+    std::atomic<int> hop_count_{ 0 };
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
     std::atomic<int> token_delay_ms_{ 0 };
@@ -343,6 +376,19 @@ vayu::http::SseLimits brisk_limits () {
     limits.idle_timeout_ms        = sse_constants::MIN_IDLE_TIMEOUT_MS;
     limits.max_stream_duration_ms = 30000;
     return limits;
+}
+
+/// The payloads of the `open` frames the ring is holding, in order.
+std::vector<json> open_frames (const SseStreamContext& context) {
+    std::vector<json> out;
+    for (const auto& frame : context.events_since (0).payloads) {
+        const auto data_at = frame.find ("data: ");
+        if (!frame.starts_with ("event: open\n") || data_at == std::string::npos) {
+            continue;
+        }
+        out.push_back (json::parse (frame.substr (data_at + 6)));
+    }
+    return out;
 }
 
 /// The upstream payloads the ring is holding, in order.
@@ -718,6 +764,162 @@ TEST (SseConsumer, ARedirectHopThatNeverConnectsIsATimeoutErrorNotIdle) {
     EXPECT_EQ (response.error_code, vayu::ErrorCode::Timeout) << response.error_message;
 }
 
+// ---------------------------------------------------------------------------
+// The stream follows its own redirects (#3301)
+//
+// One transfer per hop through the shared `RedirectChain`, so everything a
+// stream counts spans the chain and a followed hop's body is the chain's to
+// drop. The mTLS hop is in `mutual_tls_test.cpp`.
+// ---------------------------------------------------------------------------
+
+// The 302 is itself shaped as an event stream, so a body that reached the
+// stream would publish an `open` for the redirect, dispatch its event and count
+// its bytes. Mutation checks: publish the `open` frame per hop (ahead of the
+// `discard` return, `announced` reset in `begin_response_hop`) and two frames
+// are published; drop the `discard` return and the redirect's event and its
+// `open` are recorded.
+TEST (SseConsumer, AFollowedRedirectsBodyIsNoPartOfTheStream) {
+    StreamServer server;
+    server.hop_body ("text/event-stream", "data: from-the-redirect\n\n");
+    server.can (200, "text/event-stream", { "data: a\n\n" });
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/hop"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Completed) << response.error_message;
+    const auto opens = open_frames (context);
+    ASSERT_EQ (opens.size (), 1u);
+    EXPECT_EQ (opens[0]["statusCode"], 200);
+    EXPECT_EQ (context.total_events (), 1);
+    const auto payloads = ring_payloads (context);
+    ASSERT_EQ (payloads.size (), 2u);
+    EXPECT_EQ (payloads[1]["data"], "a");
+    ASSERT_HAS_VALUE (response.stream_body_bytes);
+    EXPECT_EQ (*response.stream_body_bytes, 9u);
+}
+
+// With `followRedirects` off the 302 is the stream's answer: its own `open`,
+// its body kept, and the target never asked.
+TEST (SseConsumer, ARedirectNotFollowedIsTheStreamsAnswer) {
+    StreamServer server;
+    auto spec = spec_for (server.url ("/hop"), brisk_limits ());
+    spec.request.follow_redirects = false;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Completed) << response.error_message;
+    EXPECT_EQ (response.status_code, 302);
+    EXPECT_EQ (response.body, R"({"hop":"first"})");
+    const auto opens = open_frames (context);
+    ASSERT_EQ (opens.size (), 1u);
+    EXPECT_EQ (opens[0]["statusCode"], 302);
+    EXPECT_EQ (server.requests_received (), 0);
+}
+
+// `/hop` redirects to itself, so its third answer would be the third redirect
+// followed against a limit of two: the chain refuses it, in libcurl's words.
+TEST (SseConsumer, ARedirectPastTheLimitIsTooManyRedirects) {
+    StreamServer server;
+    server.hop_to (server.url ("/hop"));
+    auto spec = spec_for (server.url ("/hop"), brisk_limits ());
+    spec.request.max_redirects = 2;
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::TooManyRedirects)
+    << response.error_message;
+    EXPECT_NE (response.error_message.find ("Maximum (2) redirects followed"),
+    std::string::npos)
+    << response.error_message;
+    EXPECT_EQ (server.hops_received (), 3);
+    EXPECT_TRUE (response.transfer_attempted);
+    EXPECT_TRUE (open_frames (context).empty ());
+}
+
+// A `Location` naming a scheme the engine does not send is the chain's
+// refusal, not a hop: nothing is dialled for it.
+TEST (SseConsumer, ARedirectToAnotherSchemeIsRefused) {
+    StreamServer server;
+    server.hop_to ("ftp://127.0.0.1/file");
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/hop"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
+    EXPECT_NE (response.error_message.find (R"(Protocol "ftp" is disabled (in redirect))"),
+    std::string::npos)
+    << response.error_message;
+}
+
+// `localhost` is another origin than `127.0.0.1` on the same listener, so the
+// hop there goes without `Authorization` and the same-origin hop keeps it.
+TEST (SseConsumer, AuthorizationStaysWithTheOriginTheStreamStartedAt) {
+    StreamServer server ({ "data: a\n\n" });
+    auto spec            = spec_for (server.url ("/hop"), brisk_limits ());
+    spec.request.headers = { { "Authorization", "Bearer secret" } };
+
+    server.hop_to (server.url ("/scripted"));
+    SseStreamContext same_origin ("run_test", brisk_limits ());
+    vayu::http::consume_sse_stream (spec, same_origin);
+    EXPECT_EQ (same_origin.end_reason (), SseEndReason::Completed);
+    EXPECT_EQ (server.received_header ("Authorization"), "Bearer secret");
+
+    std::string elsewhere = server.url ("/scripted");
+    elsewhere.replace (elsewhere.find ("127.0.0.1"), 9, "localhost");
+    server.hop_to (elsewhere);
+    SseStreamContext other_origin ("run_test", brisk_limits ());
+    vayu::http::consume_sse_stream (spec, other_origin);
+    EXPECT_EQ (other_origin.end_reason (), SseEndReason::Completed);
+    EXPECT_EQ (server.requests_received (), 2);
+    EXPECT_EQ (server.received_header ("Authorization"), "");
+}
+
+// The redirect takes 1200 ms and the stream behind it 1200 ms more (eight
+// writes 150 ms apart), each inside the 2000 ms cap and the two together past
+// it. The sleeps are lower bounds, so the healthy reading, the cap ending the
+// stream on its second hop, only comes earlier in the stream on a slow runner;
+// a clock restarted per hop lets the second hop complete. The idle window is
+// widened past the redirect's wait, which is silence on a made connection.
+// Mutation check: reset `started_at` before each hop in `run_stream_chain` and
+// this reads Completed with all eight events.
+TEST (SseConsumer, TheDurationCapCountsFromTheFirstHop) {
+    StreamServer server (std::vector<std::string> (8, "data: tick\n\n"));
+    server.pace (150);
+    server.delay_hop (1200);
+    server.hop_to (server.url ("/scripted"));
+    auto limits            = brisk_limits ();
+    limits.idle_timeout_ms = 10000;
+    auto spec              = spec_for (server.url ("/hop"), limits);
+    spec.max_duration_ms   = 2000;
+    SseStreamContext context ("run_test", limits);
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::MaxDuration) << response.error_message;
+    EXPECT_EQ (server.requests_received (), 1);
+    EXPECT_LT (context.total_events (), 8);
+}
+
+// The idle window holds on a redirect hop as on the final one: `/hop` takes
+// the request and says nothing for 6 s against the 1000 ms window, so the
+// stream ends Idle there (about 1 to 2 s in) and the target is never asked.
+// Mutation check: make `hop_connected` wait for a second request past the
+// hop's baseline and the redirect is answered, so the stream reads Completed.
+TEST (SseConsumer, ASilentRedirectHopEndsIdle) {
+    StreamServer server;
+    server.delay_hop (6000);
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (
+    spec_for (server.url ("/hop"), brisk_limits ()), context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Idle) << response.error_message;
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::None) << response.error_message;
+    EXPECT_EQ (server.requests_received (), 0);
+}
+
 TEST (SseConsumer, RecordsTheInitialResponseHeaders) {
     StreamServer server;
     auto spec = spec_for (server.url ("/silent"), brisk_limits ());
@@ -798,8 +1000,8 @@ TEST (SseConsumer, AnEventStreamIsKnownByItsMediaTypeWhateverItsCaseOrCharset) {
 }
 
 // The final hop's type decides, not the redirect's: `/hop` answers 302 as
-// JSON and the stream it lands on is SSE. libcurl never hands a followed hop's
-// body to the write callback, so the count is the final hop's either way.
+// JSON and the stream it lands on is SSE. The chain discards a followed hop's
+// body before the write callback counts it, so the count is the final hop's.
 // Mutation check: drop `response.headers.clear ()` from `begin_response_hop`
 // and the folded type reads as JSON, so the event bytes are kept as a body.
 TEST (SseConsumer, TheFinalHopsContentTypeDecides) {

@@ -29,6 +29,7 @@
 #include "vayu/http/curl_version_map.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/sse_parser.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/utils/logger.hpp"
@@ -307,22 +308,34 @@ nlohmann::json stream_trace_node (const SseStreamContext& context) {
 
 namespace {
 
-/// What one in-flight stream transfer needs from its callbacks.
+/// What one in-flight stream needs from its callbacks, across every hop of its
+/// redirect chain.
 struct TransferState {
     const SseStreamRequest* request = nullptr;
     SseStreamContext* context       = nullptr;
     SseParser* parser               = nullptr;
     vayu::Response* response        = nullptr;
-    /// The handle the callbacks run for, read for `CURLINFO_REDIRECT_COUNT`.
-    CURL* curl = nullptr;
-    /// Counts the requests libcurl has written on a made connection, which,
-    /// against the redirects followed so far, is how the progress callback
-    /// knows the current hop's connect phase is over.
-    const detail::ConnectedPeerCheck* peer_check = nullptr;
-    /// Set the moment the initial response's header block is complete, so the
-    /// `open` frame is published once even across a redirect chain.
+    /// The transport policy's connect-time state. It counts the requests
+    /// libcurl has written on a made connection, which, against the count the
+    /// hop in flight started at, is how the progress callback knows the hop's
+    /// connect phase is over.
+    detail::ConnectedPeerCheck* peer_check = nullptr;
+    /// Redirects the chain followed before the hop in flight.
+    int hop = 0;
+    /// `peer_check->requests_started` as the hop's transfer began, so a
+    /// request libcurl re-sent for an earlier hop (#2799) is not read as this
+    /// hop's.
+    int hop_requests_before = 0;
+    /// Numeric status of the header block being read, 0 before the first one.
+    int block_status = 0;
+    /// Set at the end of a header block the chain follows (a redirect with a
+    /// `Location`): that hop's body is no part of the stream, so it reaches no
+    /// `open` frame, no parser and no byte count.
+    bool discard = false;
+    /// Set at the final hop's first body byte, so the `open` frame is
+    /// published once per chain.
     bool announced = false;
-    /// Set by the progress callback when it aborts the transfer, so the
+    /// Set by the callback or the chain that ended the stream by a rule, so the
     /// resulting `CURLE_ABORTED_BY_CALLBACK` can name which rule fired rather
     /// than being reported as a generic failure.
     std::optional<SseEndReason> abort_reason;
@@ -330,17 +343,18 @@ struct TransferState {
     /// overrides and the configured defaults.
     int64_t max_events      = 0;
     int64_t max_duration_ms = 0;
+    /// Set once, before the first hop, so the duration cap spans the chain.
     std::chrono::steady_clock::time_point started_at;
     /// When the connection last showed life: a body byte or a header line.
     /// Empty until the progress callback first sees a hop connected, so the
     /// connect and TLS phases, which have their own bound, never count as
     /// silence.
     std::optional<std::chrono::steady_clock::time_point> last_byte_at;
-    /// The hop (redirects followed so far) that stamped `last_byte_at`. A stamp
-    /// from an earlier hop says nothing about the current connection: the
-    /// redirect response's last header line predates the next hop's DNS, TCP and
-    /// TLS, and libcurl runs no progress callback while a hop connects.
-    long last_byte_hop      = 0;
+    /// The hop that stamped `last_byte_at`. A stamp from an earlier hop says
+    /// nothing about the current connection: the redirect response's last
+    /// header line predates the next hop's DNS, TCP and TLS, and libcurl runs
+    /// no progress callback while a hop connects.
+    int last_byte_hop       = 0;
     int64_t idle_timeout_ms = 0;
     /// Body bytes the current hop delivered, kept or not. Reset per hop, so it
     /// ends as the final response's count.
@@ -378,8 +392,8 @@ void hold_body_bytes (TransferState& state, std::string_view bytes) {
     response.body.append (bytes.substr (0, room));
 }
 
-/// Forget what an earlier hop (a followed redirect, a 1xx) left behind, so
-/// the response describes the final hop alone.
+/// Forget what an earlier header block (a followed redirect, a 1xx) left
+/// behind, so the response describes the final hop alone.
 void begin_response_hop (TransferState& state) {
     vayu::Response& response = *state.response;
     response.headers.clear ();
@@ -388,24 +402,21 @@ void begin_response_hop (TransferState& state) {
     response.body_truncated = false;
     state.delivered_bytes   = 0;
     state.keeps_body.reset ();
-}
-
-/// The hop in flight: how many redirects libcurl has followed.
-long current_hop (const TransferState& state) {
-    long redirects = 0;
-    get_info<CURLINFO_REDIRECT_COUNT> (state.curl, &redirects);
-    return redirects;
+    state.discard = false;
 }
 
 void note_activity (TransferState& state) {
     state.last_byte_at  = std::chrono::steady_clock::now ();
-    state.last_byte_hop = current_hop (state);
+    state.last_byte_hop = state.hop;
 }
 
 size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* state             = static_cast<TransferState*> (userdata);
     const size_t total_size = size * nmemb;
     note_activity (*state);
+    if (state->discard) {
+        return total_size;
+    }
     const std::string_view bytes (ptr, total_size);
 
     // The header block is complete by the time the first body byte arrives, so
@@ -448,11 +459,15 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
     while (!line.empty () && (line.back () == '\r' || line.back () == '\n')) {
         line.pop_back ();
     }
+    auto* response = state->response;
     if (line.empty ()) {
+        state->discard = state->request->request.follow_redirects &&
+        is_redirect_status (state->block_status) &&
+        location_of (response->header_lines).has_value ();
         return total_size;
     }
-    auto* response = state->response;
     if (line.starts_with ("HTTP/")) {
+        state->block_status    = 0;
         const auto first_space = line.find (' ');
         if (first_space != std::string::npos) {
             const auto second_space = line.find (' ', first_space + 1);
@@ -475,11 +490,11 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
             const std::optional<int> parsed = vayu::utils::parse_number<int> (code);
             if (parsed.has_value ()) {
                 response->status_code = *parsed;
+                state->block_status   = *parsed;
             }
         }
-        // Cleared between redirect hops so the final hop's headers and body
-        // are what the run reports - the same rule client.cpp's callback
-        // follows for headers.
+        // Every block starts the record over, so the final hop's headers and
+        // body are what the run reports.
         begin_response_hop (*state);
         return total_size;
     }
@@ -487,9 +502,14 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
     return total_size;
 }
 
+/// Whether the hop in flight has written its request on a made connection,
+/// which ends the connect phase the connect bound judges.
+bool hop_connected (const TransferState& state) {
+    return state.peer_check->requests_started > state.hop_requests_before;
+}
+
 /// Whether the connection has been silent for the idle window. The clock waits
-/// while the current hop is connecting - libcurl has written no more requests
-/// than it has followed redirects - and is armed by the first progress call
+/// while the current hop is connecting and is armed by the first progress call
 /// that finds the hop connected, unless a byte of this hop armed it already.
 /// libcurl calls the progress callback about once a second while idle, and a
 /// connection that completes between two calls arms the clock up to a second
@@ -497,30 +517,39 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
 /// at the millisecond.
 bool idle_window_elapsed (TransferState& state) {
     const auto now = std::chrono::steady_clock::now ();
-    const long hop = current_hop (state);
-    if (state.peer_check->requests_started <= hop) {
+    if (!hop_connected (state)) {
         return false;
     }
-    if (!state.last_byte_at || state.last_byte_hop != hop) {
+    if (!state.last_byte_at || state.last_byte_hop != state.hop) {
         state.last_byte_at  = now;
-        state.last_byte_hop = hop;
+        state.last_byte_hop = state.hop;
     }
     const auto silent_for =
     std::chrono::duration_cast<std::chrono::milliseconds> (now - *state.last_byte_at);
     return silent_for.count () >= state.idle_timeout_ms;
 }
 
-int stream_progress_callback (void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
-    auto* state = static_cast<TransferState*> (userdata);
-    if (state->context->should_stop.load (std::memory_order_acquire)) {
-        state->abort_reason = SseEndReason::Stopped;
-        return 1;
+/// Whether a stop or the duration cap ends the stream now, recording which.
+/// Asked by the progress callback during a transfer and by the chain before a
+/// redirected hop's, so neither rule loses its hold between two hops.
+bool stopped_or_out_of_time (TransferState& state) {
+    if (state.context->should_stop.load (std::memory_order_acquire)) {
+        state.abort_reason = SseEndReason::Stopped;
+        return true;
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
-    std::chrono::steady_clock::now () - state->started_at)
+    std::chrono::steady_clock::now () - state.started_at)
                          .count ();
-    if (elapsed >= state->max_duration_ms) {
-        state->abort_reason = SseEndReason::MaxDuration;
+    if (elapsed >= state.max_duration_ms) {
+        state.abort_reason = SseEndReason::MaxDuration;
+        return true;
+    }
+    return false;
+}
+
+int stream_progress_callback (void* userdata, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    auto* state = static_cast<TransferState*> (userdata);
+    if (stopped_or_out_of_time (*state)) {
         return 1;
     }
     if (idle_window_elapsed (*state)) {
@@ -528,6 +557,116 @@ int stream_progress_callback (void* userdata, curl_off_t, curl_off_t, curl_off_t
         return 1;
     }
     return 0;
+}
+
+/// How a stream's redirect chain ended, for `consume_sse_stream` to build the
+/// response from.
+struct StreamChainOutcome {
+    /// The last transfer's code.
+    CURLcode code = CURLE_OK;
+    /// The chain's own failure, which no transfer reported: a redirect it will
+    /// not follow, or its limit.
+    std::optional<Error> refusal;
+    /// Every hop's timers, summed.
+    detail::CurlPhaseTimes phases;
+    /// The registry entry the last transfer presented, or null.
+    const ClientCertRule* certificate = nullptr;
+    int followed                      = 0;
+};
+
+/**
+ * @brief Runs the stream as one transfer per hop, following redirects itself
+ *        rather than through `CURLOPT_FOLLOWLOCATION` (#3301).
+ *
+ * `Client::send`'s `run_chain` shape on the same `RedirectChain`: the handle is
+ * never reset in between, so its cookie engine and connections serve the whole
+ * chain, and the transport policy is applied per hop, which matches the client
+ * certificate against that hop's own origin. Nothing a stream counts restarts
+ * at a hop: the duration clock, the event cap and the `open` frame are the
+ * state's, and a stop or the cap is checked before each redirected hop too.
+ * Ending there leaves the last transfer's `CURLE_OK` with an `abort_reason`.
+ */
+StreamChainOutcome
+run_stream_chain (CURL* curl, TransferState& state, RedirectChain& chain, CurlErrorBuffer& errors) {
+    StreamChainOutcome out;
+    const SseStreamRequest& spec = *state.request;
+    std::optional<HopCookies> cookies;
+    if (spec.request.follow_redirects && spec.cookie_jar != nullptr) {
+        cookies.emplace (curl);
+    }
+    while (true) {
+        const Hop& hop = chain.hop ();
+        if (hop.followed > 0) {
+            if (stopped_or_out_of_time (state)) {
+                return out;
+            }
+            errors.clear ();
+        }
+        state.hop                 = hop.followed;
+        state.hop_requests_before = state.peer_check->requests_started;
+        out.certificate = detail::apply_transport_policy (curl, spec.transport,
+        spec.request.verify_ssl, hop.url, state.peer_check);
+        if (cookies) {
+            cookies->before_hop (hop.url);
+        }
+        out.code = curl_easy_perform (curl);
+        if (cookies) {
+            cookies->after_hop ();
+        }
+        detail::add_phase_times (out.phases, detail::read_phase_times (curl));
+        if (out.code != CURLE_OK) {
+            return out;
+        }
+        long status = 0;
+        get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
+        auto next = chain.redirect_target (
+        state.response->header_lines, static_cast<int> (status));
+        if (!next) {
+            return out;
+        }
+        if (!next->has_value ()) {
+            out.refusal = std::move (next->error ());
+            return out;
+        }
+        chain.advance (curl, static_cast<int> (status), std::move (**next));
+        out.followed = chain.hop ().followed;
+    }
+}
+
+/**
+ * @brief The rule the stream ended by, with the failure recorded on
+ *        @p response when it is an error.
+ *
+ * An `abort_reason` is "we ended it" in any of its three spellings: the
+ * progress callback's abort, the write callback's short return, or the chain
+ * stopping before a hop (the last transfer's `CURLE_OK`). Either way the
+ * transfer did what it was asked to, so it is not an error. An abort with no
+ * reason is the transport's pre-request refusal (#2355), an error like any
+ * other. `CURLE_OPERATION_TIMEDOUT` is an error too: the connect bound is the
+ * only timeout set, and its expiry is an error like a refused connect.
+ */
+SseEndReason settle_end_reason (vayu::Response& response,
+const TransferState& state,
+const StreamChainOutcome& chain,
+CURL* curl,
+const CurlErrorBuffer& errors) {
+    const bool ended_by_rule = chain.code == CURLE_ABORTED_BY_CALLBACK ||
+    chain.code == CURLE_WRITE_ERROR || chain.code == CURLE_OK;
+    if (!chain.refusal && state.abort_reason && ended_by_rule) {
+        return *state.abort_reason;
+    }
+    if (!chain.refusal && chain.code == CURLE_OK) {
+        return SseEndReason::Completed;
+    }
+    // The handle describes the hop that failed, so the code is that hop's.
+    const Error error      = chain.refusal ?
+    *chain.refusal :
+    detail::curl_to_error (curl, chain.code, errors, &state.request->request);
+    response.status_code   = 0;
+    response.status_text   = vayu::http::status_text (0);
+    response.error_code    = error.code;
+    response.error_message = error.message;
+    return SseEndReason::Error;
 }
 
 } // namespace
@@ -562,7 +701,6 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
 
     TransferState state;
     state.request         = &request;
-    state.curl            = curl;
     state.context         = &context;
     state.parser          = &parser;
     state.response        = &response;
@@ -574,17 +712,17 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     state.started_at = std::chrono::steady_clock::now ();
 
     errors.attach (curl);
-    // Also what the client-certificate match below reads, so it keys on the
-    // host and port the transfer dials.
-    const std::string url = vayu::http::wire_url (request.request);
-    set_opt<CURLOPT_URL> (curl, url.c_str ());
     detail::BodySource body_source;
     detail::apply_method_and_body (curl, request.request, body_source);
-
-    struct curl_slist* headers_list = detail::build_request_header_list (
-    request.request, request.default_headers, &response.request_headers);
-    if (headers_list) {
-        set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
+    // The request lines are recorded from the first hop's list; a later hop's
+    // is filtered from it.
+    RedirectChain chain (request.request,
+    detail::build_request_header_list (
+    request.request, request.default_headers, &response.request_headers),
+    body_source);
+    set_opt<CURLOPT_URL> (curl, chain.hop ().url.c_str ());
+    if (chain.first_headers () != nullptr) {
+        set_opt<CURLOPT_HTTPHEADER> (curl, chain.first_headers ());
     }
     detail::apply_default_header_options (curl, request.request, request.default_headers);
 
@@ -611,18 +749,10 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
     static_cast<long> (constants::server::connect_timeout_ms (request.request.timeout_ms)));
 
-    if (request.request.follow_redirects) {
-        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
-        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.request.max_redirects));
-    }
-    // Until #705 this path set no proxy option at all, so a configured proxy
-    // covered every send and every load run and silently skipped streams. The
-    // shared applier is what makes that unrepeatable. The peer check carries no
-    // rule; its count is what tells the idle rule the connection is made.
-    if (const ClientCertRule* certificate = detail::apply_transport_policy (
-        curl, request.transport, request.request.verify_ssl, url, &peer_check)) {
-        response.client_certificate = client_cert_label (*certificate);
-    }
+    // The transport policy (TLS, the proxy, the client certificate) goes on
+    // per hop, in `run_stream_chain`, through the one shared applier: until
+    // #705 this path set no proxy option at all, and a configured proxy
+    // silently skipped streams.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.request.http_version));
     std::vector<std::string> jar_seeded_from;
@@ -632,12 +762,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     }
 
     const auto submitted_at = std::chrono::steady_clock::now ();
-    const CURLcode result   = curl_easy_perform (curl);
-    const auto completion   = std::chrono::steady_clock::now ();
+    const StreamChainOutcome outcome = run_stream_chain (curl, state, chain, errors);
+    const auto completion = std::chrono::steady_clock::now ();
 
-    if (headers_list) {
-        curl_slist_free_all (headers_list);
-    }
     if (request.cookie_jar) {
         detail::capture_jar_cookies (
         curl, *request.cookie_jar, request.cookie_scope, jar_seeded_from);
@@ -654,13 +781,17 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         }
     }
 
-    const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
     const double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
-    detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
-    response.transfer_attempted = detail::curl_transfer_attempted (curl, result);
+    detail::apply_transfer_timing (response.timing, outcome.phases, perceived_ms);
+    // A followed hop was answered, so a later hop's refusal still timed a send.
+    response.transfer_attempted =
+    outcome.followed > 0 || detail::curl_transfer_attempted (curl, outcome.code);
     response.body_size         = response.body.size ();
     response.stream_body_bytes = state.delivered_bytes;
+    // The identity the last hop presented: see Response::client_certificate.
+    response.client_certificate =
+    outcome.certificate != nullptr ? client_cert_label (*outcome.certificate) : "";
 
     long negotiated_version = 0;
     get_info<CURLINFO_HTTP_VERSION> (curl, &negotiated_version);
@@ -675,27 +806,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
         }
     }
 
-    SseEndReason reason = SseEndReason::Completed;
-    if (state.abort_reason &&
-    (result == CURLE_ABORTED_BY_CALLBACK || result == CURLE_WRITE_ERROR)) {
-        // Both spellings of "we ended it": the progress callback's abort and
-        // the write callback's short return. Either way the transfer did what
-        // it was asked to, so it is not an error - the reason says which rule.
-        // An abort with no reason is the transport's pre-request refusal
-        // (#2355), an error like any other.
-        reason = *state.abort_reason;
-    } else if (result != CURLE_OK) {
-        // `CURLE_OPERATION_TIMEDOUT` lands here too: the connect bound is the
-        // only timeout set, and its expiry is an error like a refused connect.
-        reason = SseEndReason::Error;
-        const Error error =
-        detail::curl_to_error (curl, result, errors, &request.request);
-        response.status_code   = 0;
-        response.status_text   = vayu::http::status_text (0);
-        response.error_code    = error.code;
-        response.error_message = error.message;
-    }
-
+    const SseEndReason reason = settle_end_reason (response, state, outcome, curl, errors);
     if (response.status_code == 0 && reason != SseEndReason::Error) {
         // A stream ended by a cap before any status line arrived is still not
         // an error, but it has nothing to report either - say so rather than

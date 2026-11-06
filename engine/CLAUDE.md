@@ -957,12 +957,15 @@ logged as a warning: it means a client skipped composition.
   `verify_ssl`, #706). Both clients send them on every execute and load test
   rather than eliding defaults, because the engine defaults to following and
   verifying: an omitted `false` would follow the 3xx the user asked to see, or
-  verify the certificate they opted out for. `Client::send` follows a redirect
-  itself, one transfer per hop on the same handle (`run_chain`, #3300), with
-  every between-hop decision in `http/redirect_policy.hpp`: the `Location`, the
-  method and body, the lines that stay with the first origin, the cookies a
-  hop set, the limit. SSE and the load path still set
-  `CURLOPT_FOLLOWLOCATION` (#3301, #3302). A request's own `timeout`
+  verify the certificate they opted out for. `Client::send` (`run_chain`,
+  #3300) and the SSE consumer (`run_stream_chain`, #3301) follow a redirect
+  themselves, one transfer per hop on the same handle, with every between-hop
+  decision in `http/redirect_policy.hpp`: the `Location`, the method and body
+  and the lines that stay with the first origin (`RedirectChain`, which both
+  drivers advance), the cookies a hop set (`HopCookies`), the limit. Each
+  driver keeps its own sinks and deadlines; a stream discards a followed hop's
+  body itself and publishes one `open` frame per chain. Only the load path
+  still sets `CURLOPT_FOLLOWLOCATION` (#3302). A request's own `timeout`
   (`requests.timeout_ms`, nullable, #2937) is the deliberate exception:
   `payload_from_stored` emits it only when stated, because its absent default
   is the live `defaultTimeout` setting, resolved at send by
@@ -1120,9 +1123,10 @@ logged as a warning: it means a client skipped composition.
   `client_certificates`). The registry rides inside the `TransportPolicy`,
   read once per run on the load and collection paths;
   `match_client_certificate` picks the entry per transfer (per redirect hop on
-  a design send, where `run_chain` re-applies the transport policy to each
-  hop's URL, because libcurl hands a certificate only to the origin a transfer
-  started at, #3300) in three tiers
+  a design send and a stream, where `run_chain` and `run_stream_chain`
+  re-apply the transport policy to each hop's URL, because libcurl hands a
+  certificate only to the origin a transfer started at, #3300, #3301) in three
+  tiers
   (#803): closest host first (exact beats wildcard, longer wildcard beats
   shorter), then port-specific beating catch-all. The only pattern is
   `*.example.com`, a label suffix that never matches the domain itself or an
