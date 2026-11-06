@@ -13,8 +13,9 @@
  *
  * Silent for no warnings, which is every send that had nothing to report and
  * every exchange stored before the field. The response pane draws it as a band
- * above its tabs and a collection run's step card inside its expansion; a
- * streaming send is answered before the exchange runs and carries none (#3315).
+ * above its tabs and a collection run's step card inside its expansion. A
+ * streaming send's `202` carries none, so they appear only when the stream ends
+ * and the pane swaps in the run's stored trace (#3315).
  */
 
 import { Callout } from "./Callout";

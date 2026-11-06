@@ -24,7 +24,8 @@
  *   a timeline looks real.
  * - **Swap the live rows for the stored trace when it ends.** The completed
  *   run's `events` node is the record, and the only copy carrying the truthful
- *   `totalEvents` / `eventsTruncated` markers.
+ *   `totalEvents` / `eventsTruncated` markers. The trace's top-level `warnings`
+ *   (#3315) arrive the same way: neither the `202` nor a relay frame has them.
  *
  * The events hook is stubbed: it opens an `EventSource`, which jsdom has none
  * of, and what is under test is the branch around it - the store is driven
@@ -34,8 +35,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
-import { render, act, waitFor } from "@testing-library/react";
+import { render, act, waitFor, screen } from "@testing-library/react";
 import { useResponseStore, useExecutionEventsStore } from "@/stores";
+import { ExchangeWarnings } from "@/components/shared/ExchangeWarnings";
 import type {
 	RequestBuilderContextValue,
 	RequestState,
@@ -99,6 +101,11 @@ function Capture() {
 	return null;
 }
 
+/** What the response pane draws above its tabs, read from the same context. */
+function WarningsBand() {
+	return <ExchangeWarnings warnings={useRequestBuilderContext().response?.warnings} />;
+}
+
 function renderFor(
 	id: string,
 	onExecuteStream: (r: RequestState) => Promise<StreamStartResult | null>
@@ -111,6 +118,7 @@ function renderFor(
 				onExecuteStream={onExecuteStream}
 			>
 				<Capture />
+				<WarningsBand />
 			</RequestBuilderProvider>
 		</TestQueryClient>
 	);
@@ -123,7 +131,7 @@ const started = async (): Promise<StreamStartResult> => ({
 });
 
 /** A report whose one result carries a stored `events` node. */
-function reportWithEvents(body: string) {
+function reportWithEvents(body: string, warnings?: unknown[]) {
 	return {
 		results: [
 			{
@@ -140,6 +148,7 @@ function reportWithEvents(body: string) {
 						eventsTruncated: true,
 						endReason: "completed" as const,
 					},
+					...(warnings && { warnings }),
 				},
 			},
 		],
@@ -241,6 +250,31 @@ describe("the streaming send branch", () => {
 		// stores (see response-store.ts).
 		const stored = useResponseStore.getState().getResponse("A") as ResponseState | null;
 		expect(stored?.totalEvents).toBe(9);
+	});
+
+	it("draws the warnings on the stored trace when the stream ends, and not before (#3315)", async () => {
+		const warning = { code: "cookie_not_sent", message: "The cookie 'session' was left out." };
+		getRunReport.mockResolvedValue(reportWithEvents("stored body", [warning]));
+		render(renderFor("A", started));
+		await act(async () => {
+			await ctx().executeRequest();
+		});
+
+		// Live: the `202` and the relay carry none, so there is nothing to draw.
+		expect(ctx().response?.warnings).toBeUndefined();
+		expect(document.body.textContent).not.toContain(warning.message);
+
+		act(() => {
+			useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+		});
+
+		// Mutation check: drop `...warningsFromTrace` from `responseFromRunResult`
+		// and the events swap in but this never appears.
+		expect(await screen.findByText(warning.message, { exact: false })).toBeDefined();
+		expect(ctx().response?.warnings).toEqual([warning]);
+		expect(ctx().response?.events).toEqual([{ event: "token", data: "stored" }]);
+		const stored = useResponseStore.getState().getResponse("A") as ResponseState | null;
+		expect(stored?.warnings).toEqual([warning]);
 	});
 
 	it("keeps the rows on screen when the stored copy cannot be fetched", async () => {

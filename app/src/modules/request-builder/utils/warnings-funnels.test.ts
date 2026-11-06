@@ -104,6 +104,44 @@ describe("the restore funnel", () => {
 	});
 });
 
+/**
+ * A streaming send answers `202` before the exchange runs, so its warnings are
+ * on the stored trace beside the `events` node (issue #3315) and nowhere else.
+ */
+const streamRunResult = (warnings?: ExchangeWarning[]): RunResultSample =>
+	({
+		timestamp: 1_700_000_000_000,
+		statusCode: 200,
+		statusText: "OK",
+		latencyMs: 40,
+		trace: {
+			request: { method: "GET", url: "https://api.example.com/stream", headers: {} },
+			response: { status: 200, headers: { "content-type": "text/event-stream" }, body: "" },
+			events: {
+				items: [{ event: "token", data: "a" }],
+				totalEvents: 1,
+				eventsTruncated: false,
+				endReason: "completed",
+			},
+			...(warnings === undefined ? {} : { warnings }),
+		},
+	}) as unknown as RunResultSample;
+
+describe("a streaming send's stored trace", () => {
+	it("restores the events and the warnings together", () => {
+		const restored = responseFromRunResult(streamRunResult(WARNINGS));
+		expect(restored?.warnings).toEqual(WARNINGS);
+		expect(restored?.events).toEqual([{ event: "token", data: "a" }]);
+		expect(restored?.streamEndReason).toBe("completed");
+	});
+
+	it("restores the events alone when the stream had nothing to report", () => {
+		const restored = responseFromRunResult(streamRunResult());
+		expect(restored?.events).toHaveLength(1);
+		expect(restored?.warnings).toBeUndefined();
+	});
+});
+
 describe("funnel parity", () => {
 	it("says the same thing live and restored", () => {
 		const live = responseFromExecuteResult(executeResult(WARNINGS));
