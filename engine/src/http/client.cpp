@@ -113,6 +113,41 @@ constexpr std::string_view COOKIE_LIMIT_PREFIX =
 constexpr int COOKIE_HEADER_LIMIT_BYTES = 8190;
 constexpr int COOKIE_SEND_LIMIT         = 150;
 
+/// How much of a cookie name a warning carries.
+constexpr size_t DROPPED_NAME_MAX_BYTES = 64;
+/// libcurl formats a notice into a 2048-byte line and ends one that does not
+/// fit in "...".
+constexpr std::string_view NOTICE_CUT_MARK = "...";
+
+/// @p name as a message may carry it, cut to `DROPPED_NAME_MAX_BYTES` with
+/// "..." marking the cut, or nothing for a name that is not text. A name is
+/// wire bytes, and a message that is not valid UTF-8 makes the serializer
+/// throw: a name that is not text is left out rather than repaired.
+std::optional<std::string> bounded_cookie_name (std::string_view name) {
+    if (!vayu::utils::is_valid_utf8_text (name)) {
+        return std::nullopt;
+    }
+    const bool cut = name.size () > DROPPED_NAME_MAX_BYTES;
+    name = vayu::utils::without_incomplete_utf8_tail (name.substr (0, DROPPED_NAME_MAX_BYTES));
+    return std::string (name) + (cut ? "..." : "");
+}
+
+/// The cookie name in the text after the header-size notice's prefix: up to its
+/// suffix, or, when libcurl cut the line short of the suffix, whatever it kept
+/// less the "..." it ended on. Then a cut name loses at most the half
+/// character at its end.
+std::string_view restricted_cookie_name (std::string_view rest) {
+    if (rest.ends_with (COOKIE_RESTRICTED_SUFFIX)) {
+        // Up to the suffix's quote, so a name holding a quote of its own stays
+        // whole.
+        return rest.substr (0, rest.size () - COOKIE_RESTRICTED_SUFFIX.size ());
+    }
+    if (rest.ends_with (NOTICE_CUT_MARK)) {
+        rest.remove_suffix (NOTICE_CUT_MARK.size ());
+    }
+    return vayu::utils::without_incomplete_utf8_tail (rest);
+}
+
 /// The warning a `CURLINFO_TEXT` @p notice stands for, or nothing for any other
 /// line. The cookie is named and its value never is: the notice carries only
 /// the name, and a value does not belong in a message that is stored.
@@ -125,17 +160,14 @@ std::optional<ResponseWarning> cookie_warning_from_notice (std::string_view noti
             "libcurl sends at most " + std::to_string (COOKIE_SEND_LIMIT) +
             " cookies from the jar on one request; the rest were left off." };
     }
-    if (!notice.starts_with (COOKIE_RESTRICTED_PREFIX) ||
-    !notice.ends_with (COOKIE_RESTRICTED_SUFFIX) ||
-    notice.size () < COOKIE_RESTRICTED_PREFIX.size () + COOKIE_RESTRICTED_SUFFIX.size ()) {
+    if (!notice.starts_with (COOKIE_RESTRICTED_PREFIX)) {
         return std::nullopt;
     }
-    // Between the prefix's quote and the suffix's, so a name holding a quote
-    // of its own stays whole.
-    const auto name = notice.substr (COOKIE_RESTRICTED_PREFIX.size (),
-    notice.size () - COOKIE_RESTRICTED_PREFIX.size () - COOKIE_RESTRICTED_SUFFIX.size ());
+    const auto name = bounded_cookie_name (
+    restricted_cookie_name (notice.substr (COOKIE_RESTRICTED_PREFIX.size ())));
     return ResponseWarning{ std::string (CODE_COOKIE_NOT_SENT),
-        "Cookie " + std::string (name) + " was not sent: the Cookie header would pass libcurl's " +
+        (name ? "Cookie " + *name : std::string ("A cookie")) +
+        " was not sent: the Cookie header would pass libcurl's " +
         std::to_string (COOKIE_HEADER_LIMIT_BYTES) +
         "-byte limit. Any typed Cookie rows were dropped with it." };
 }
@@ -210,9 +242,8 @@ constexpr std::string_view CODE_COOKIE_DROPPED_OVERSIZED =
 "cookie_dropped_oversized";
 constexpr std::string_view CODE_COOKIE_DROPPED_TOO_MANY =
 "cookie_dropped_too_many";
-/// How many dropped cookies a warning names, and how much of one name.
-constexpr size_t NAMED_DROPPED_COOKIES  = 5;
-constexpr size_t DROPPED_NAME_MAX_BYTES = 64;
+/// How many dropped cookies a warning names.
+constexpr size_t NAMED_DROPPED_COOKIES = 5;
 
 /// The `Set-Cookie` headers of one send that libcurl's cookie engine discarded
 /// without a word (#3307). Fed by `header_callback` only when the send has a
@@ -243,17 +274,9 @@ struct IncomingCookieWatch {
         if (!cookie || oversized_names.size () >= NAMED_DROPPED_COOKIES) {
             return;
         }
-        // A name is wire bytes, and a message that is not valid UTF-8 makes the
-        // serializer throw: a name that is not text is left out rather than
-        // repaired.
-        std::string_view name = cookie->name;
-        if (!vayu::utils::is_valid_utf8_text (name)) {
-            return;
+        if (auto name = bounded_cookie_name (cookie->name)) {
+            oversized_names.push_back (std::move (*name));
         }
-        const bool cut = name.size () > DROPPED_NAME_MAX_BYTES;
-        name           = vayu::utils::without_incomplete_utf8_tail (
-        name.substr (0, DROPPED_NAME_MAX_BYTES));
-        oversized_names.push_back (std::string (name) + (cut ? "..." : ""));
     }
 };
 

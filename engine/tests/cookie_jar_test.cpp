@@ -756,6 +756,21 @@ size_t value_bytes) {
     jar.store (scope, std::move (lines));
 }
 
+/// Three loopback jar cookies of exactly the @p names, each @p value_bytes of
+/// value.
+void store_named_loopback_cookies (CookieJar& jar,
+const std::string& scope,
+const std::vector<std::string>& names,
+size_t value_bytes) {
+    std::vector<std::string> lines;
+    lines.reserve (names.size ());
+    for (const auto& name : names) {
+        lines.push_back (netscape_line ("127.0.0.1", "FALSE", "/", "FALSE",
+        std::to_string (FAR_FUTURE), name, std::string (value_bytes, 'v')));
+    }
+    jar.store (scope, std::move (lines));
+}
+
 vayu::Response send_with_typed_cookie (CookieJar& jar, const std::string& url) {
     ClientConfig config;
     config.cookie_jar   = &jar;
@@ -888,6 +903,57 @@ TEST (CookieJarWarnings, ARedirectedSendNamesTheWithheldCookieOnce) {
     ASSERT_EQ (response.status_code, 200) << response.error_message;
     ASSERT_EQ (response.redirect_hops.size (), 1U);
     EXPECT_EQ (warnings_with_code (response, "cookie_not_sent").size (), 1U);
+}
+
+// A jar cookie name is wire bytes. One past 0x7F that is not UTF-8 would make
+// the live body's `dump ()` throw if the warning quoted it, so the warning
+// leaves the name out and still reads as a sentence. Mutation-check: put the
+// notice's name into the message unchecked and the `dump ()` throws.
+TEST (CookieJarWarnings, AWithheldCookieWhoseNameIsNotTextIsLeftUnnamed) {
+    CookieServer server;
+    CookieJar jar;
+    store_named_loopback_cookies (
+    jar, "env_a", { "\xFF\xFE_a", "\xFF\xFE_b", "\xFF\xFE_c" }, 3000);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, "cookie_not_sent");
+    ASSERT_EQ (found.size (), 1U);
+    EXPECT_TRUE (found.front ().message.starts_with ("A cookie was not sent:"))
+    << found.front ().message;
+    EXPECT_TRUE (std::ranges::all_of (found.front ().message,
+    [] (const char byte) { return static_cast<unsigned char> (byte) < 0x80; }))
+    << "a byte that is not text reached the message";
+    EXPECT_NO_THROW ((void)vayu::json::serialize_warnings (response.warnings).dump ());
+    EXPECT_FALSE (response.request_headers.contains ("Cookie"));
+}
+
+// libcurl formats the notice into 2048 bytes and ends a longer one in "...",
+// so a name this long loses the notice's own suffix. The warning is still
+// raised (and with it the typed row dropped from the record), naming the
+// first 64 bytes. Mutation-check: require the suffix again and no warning
+// arrives, so the typed row stays in `request_headers`.
+TEST (CookieJarWarnings, AWithheldCookieWithAVeryLongNameIsStillReportedAndCutShort) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string stem (2100, 'n');
+    store_named_loopback_cookies (
+    jar, "env_a", { stem + "0", stem + "1", stem + "2" }, 1000);
+
+    const vayu::Response response = send_with_typed_cookie (jar, server.url ("/echo"));
+
+    ASSERT_EQ (response.status_code, 200);
+    const auto found = warnings_with_code (response, "cookie_not_sent");
+    ASSERT_EQ (found.size (), 1U)
+    << "no warning for a notice libcurl cut short (client.cpp)";
+    EXPECT_NE (found.front ().message.find ("Cookie " + std::string (64, 'n') + "... was not sent"),
+    std::string::npos)
+    << found.front ().message;
+    EXPECT_EQ (found.front ().message.find (std::string (65, 'n')), std::string::npos);
+    EXPECT_FALSE (response.request_headers.contains ("Cookie"))
+    << "request_headers still claims a Cookie row the wire never carried";
+    EXPECT_EQ (response.body.find ("typed"), std::string::npos);
 }
 
 // ============================================================================
