@@ -76,7 +76,7 @@ const ErrorHints: Record<string, string> = {
 	BAD_CONTENT_ENCODING:
 		"The server sent a response in an encoding Vayu can't read. Set Accept-Encoding to identity in the Headers tab and send again.",
 	PROTOCOL_MISMATCH:
-		"Set Protocol to Auto or HTTP/1.x in this request's Settings tab, or use https:// so HTTP/2 can be negotiated.",
+		"Vayu sends HTTP/1.1 over http://, and this server answered with something else, often HTTP/2 without TLS. Use https:// for it, or point the request at an endpoint that accepts HTTP/1.1.",
 	ENGINE_ERROR: ENGINE_NO_ANSWER,
 	AUTH_REQUIRED: "Open the Auth tab to get a token, then send again.",
 	AUTH_FAILED: "Check the Auth tab's token settings, then send again.",

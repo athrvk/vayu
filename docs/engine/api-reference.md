@@ -1253,8 +1253,8 @@ A target that answers in something other than HTTP/1.x is `PROTOCOL_MISMATCH`
 (issue #3306), error type `protocol_mismatch`. The usual case is an `h2c`
 server (HTTP/2 over cleartext) sent a request over `http://`: Vayu speaks
 HTTP/1.1 there whatever `httpVersion` says (the Protocol paragraph under
-[POST /execute](#post-execute)), and the server answers with its binary HTTP/2 preface, which libcurl
-reports as `Received HTTP/0.9 when not allowed`. That failure used to come back
+[POST /execute](#post-execute)), and the server answers with its binary HTTP/2
+preface, which libcurl reports as `Received HTTP/0.9 when not allowed`. That failure used to come back
 as `INVALID_URL`, which sent people to a URL that was fine. `errorMessage`
 opens with `The server answered in a protocol other than HTTP/1.x:` followed by
 libcurl's text, and when the request asked for `http2` and the hop that failed
@@ -8154,8 +8154,7 @@ that speaks only h2c answers that HTTP/1.1 request with its HTTP/2 preface,
 and the send fails as `PROTOCOL_MISMATCH` with a hint naming h2c (the
 transport error codes are described under [Proxy settings](#proxy-settings));
 serve it over TLS or let it accept HTTP/1.1, since Vayu never sends h2c. This
-is what was
-*requested*; the response's own `httpVersion` (below) reports what was
+is what was *requested*; the response's own `httpVersion` (below) reports what was
 actually negotiated, and the two can differ. The renderer always sends this
 field on every execute, never eliding it even when it equals the default - the
 same rule `followRedirects` follows, and for the same reason: an omitted field

@@ -111,7 +111,7 @@ describe("ClientErrorView for the redirect, encoding and protocol codes", () => 
 		[
 			"PROTOCOL_MISMATCH",
 			"The server answered in another protocol",
-			/Set Protocol to Auto or HTTP\/1\.x in this request's Settings tab, or use https:\/\//,
+			/Vayu sends HTTP\/1\.1 over http:\/\/, and this server answered with something else.*Use https:\/\/ for it/,
 		],
 	])("names %s rather than an unreachable server", (code, title, hint) => {
 		render(<ClientErrorView errorCode={code} errorMessage="detail" />);
