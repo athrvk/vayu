@@ -136,8 +136,14 @@ class CookieServer {
             res.set_redirect (req.get_param_value ("to"), 302);
         });
         // `count` cookies in one response (#3307); libcurl keeps the first 50.
+        // `bare` lines that name no cookie go first.
         svr.Get (R"(/set-many/(\d+))",
         [] (const httplib::Request& req, httplib::Response& res) {
+            const int bare =
+            req.has_param ("bare") ? std::stoi (req.get_param_value ("bare")) : 0;
+            for (int i = 0; i < bare; ++i) {
+                res.set_header ("Set-Cookie", "bare" + std::to_string (i));
+            }
             set_numbered_cookies (res, std::stoi (req.matches[1].str ()));
             res.set_content ("{}", "application/json");
         });
@@ -970,6 +976,23 @@ TEST (CookieJarIncoming, FiftySetCookieHeadersWarnOfNothing) {
     EXPECT_NE (kept_cookies (jar, server).find ("c49="), std::string::npos);
 }
 
+// A line that names no cookie is not stored, so libcurl does not count it
+// against the 50: three of them before 50 cookies keep all 50. Mutation-check:
+// drop the `NotACookie` return in `SetCookieLimits::note` and three are
+// reported ignored here and under load.
+TEST (CookieJarIncoming, ALineThatNamesNoCookieIsNotCountedAgainstTheCap) {
+    CookieServer server;
+    CookieJar jar;
+    const std::string url = server.url ("/set-many/50?bare=3");
+
+    const vayu::Response response = response_in_scope (jar, "env_a", url);
+
+    ASSERT_EQ (response.status_code, 200);
+    EXPECT_TRUE (response.warnings.empty ());
+    EXPECT_NE (kept_cookies (jar, server).find ("c49="), std::string::npos)
+    << "libcurl counted a line that names no cookie, so the rule is wrong";
+}
+
 TEST (CookieJarIncoming, TheWarningCountsEveryHeaderPastTheCap) {
     CookieServer server;
     CookieJar jar;
@@ -1204,6 +1227,7 @@ TEST (CookieJarIncomingUnderLoad, ATransferThatTracksCookiesCountsEveryHeaderLib
 
     EXPECT_EQ (tracked (server.url ("/set-many/50")), 0U);
     EXPECT_EQ (tracked (server.url ("/set-many/53")), 3U);
+    EXPECT_EQ (tracked (server.url ("/set-many/50?bare=3")), 0U);
     EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES)), 0U);
     EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES + 1)), 1U);
     EXPECT_EQ (tracked (pair_of (NAME_VALUE_LIMIT)), 0U);
