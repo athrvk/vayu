@@ -456,7 +456,7 @@ MetricsCollector::~MetricsCollector () {
 }
 
 void MetricsCollector::allocate_live_stream_metrics () {
-    live_stream_events_ = std::make_shared<std::atomic<size_t>> (0);
+    live_streams_ = std::make_shared<LiveStreamCounts> ();
     if (stream_first_event_histogram_ == nullptr) {
         return;
     }
@@ -1253,15 +1253,8 @@ std::optional<double> first_event_ms) {
     }
 }
 
-std::shared_ptr<std::atomic<size_t>> MetricsCollector::live_stream_event_counter () const {
-    return live_stream_events_;
-}
-
-std::optional<size_t> MetricsCollector::live_stream_events () const {
-    if (live_stream_events_ == nullptr) {
-        return std::nullopt;
-    }
-    return live_stream_events_->load (std::memory_order_relaxed);
+std::shared_ptr<LiveStreamCounts> MetricsCollector::live_stream_counts () const {
+    return live_streams_;
 }
 
 std::optional<MetricsCollector::StreamTotals> MetricsCollector::stream_totals () const {
@@ -1603,11 +1596,13 @@ const Percentiles* window_percentiles) const {
 
     // A streaming run's events so far and its open streams (#3236), counted
     // as the events arrive, so a run of long streams is not blank until the
-    // first one ends. Absent rather than zero on every other run, the
-    // report's `stream` rule.
-    if (const auto stream_events = live_stream_events ()) {
-        stats["streamEvents"] = *stream_events;
-        stats["streamsOpen"]  = current_active;
+    // first one ends. Open streams are the streaming transfers alone (#3304),
+    // never `current_active`, which also counts a collection run's ordinary
+    // steps. Absent rather than zero on every other run, the report's
+    // `stream` rule.
+    if (live_streams_ != nullptr) {
+        stats["streamEvents"] = live_streams_->events.load (std::memory_order_relaxed);
+        stats["streamsOpen"] = live_streams_->open.load (std::memory_order_relaxed);
     }
 
     // This run's custom metrics so far (issue #1500), on the same tick the

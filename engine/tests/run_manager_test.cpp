@@ -2075,29 +2075,29 @@ std::string stream_keys_in (const nlohmann::json& frame) {
 // `streamEvents`, and that tally's trailing-window rate, as `eventsPerSecond`.
 // The tally is fed by hand here as the write callback would, through the
 // bounds every request of the run is given. Mutation checks: drop the
-// `live_events` assignment from the RunContext constructor and the wiring
+// `live` assignment from the RunContext constructor and the wiring
 // assertion fails; leave `stream_events` out of `put_trailing_window`'s
 // counters and the wait for a positive rate runs out.
 TEST (CollectMetrics, AStreamingRunsFramesCarryItsEventsAndTheirRate) {
     const nlohmann::json cfg{ { "stream", true } };
-    std::shared_ptr<std::atomic<size_t>> tally;
+    std::shared_ptr<vayu::LiveStreamCounts> live;
     const auto frames = frames_until ("stream_rate", cfg, [&] (RunContext& ctx) {
-        if (!tally) {
+        if (!live) {
             EXPECT_TRUE (ctx.stream_bounds.has_value ());
-            tally = ctx.stream_bounds ? ctx.stream_bounds->live_events : nullptr;
-            EXPECT_NE (tally, nullptr) << "the run's requests carry no tally";
-            EXPECT_EQ (tally, ctx.metrics_collector->live_stream_event_counter ());
-            if (!tally) {
+            live = ctx.stream_bounds ? ctx.stream_bounds->live : nullptr;
+            EXPECT_NE (live, nullptr) << "the run's requests carry no tally";
+            EXPECT_EQ (live, ctx.metrics_collector->live_stream_counts ());
+            if (!live) {
                 return true;
             }
         }
-        tally->fetch_add (5);
+        live->events.fetch_add (5);
         const auto seen = live_frames (ctx);
         return std::ranges::any_of (seen, [] (const nlohmann::json& frame) {
             return frame.value ("eventsPerSecond", 0.0) > 0.0;
         });
     });
-    ASSERT_NE (tally, nullptr);
+    ASSERT_NE (live, nullptr);
     ASSERT_FALSE (frames.empty ());
 
     for (const auto& frame : frames) {
@@ -2105,7 +2105,7 @@ TEST (CollectMetrics, AStreamingRunsFramesCarryItsEventsAndTheirRate) {
             EXPECT_TRUE (frame.contains (key)) << key << ": " << frame.dump ();
         }
     }
-    EXPECT_EQ (frames.back ().at ("streamEvents").get<size_t> (), tally->load ())
+    EXPECT_EQ (frames.back ().at ("streamEvents").get<size_t> (), live->events.load ())
     << "the settled frame reads the whole tally";
 }
 

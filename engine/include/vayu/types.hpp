@@ -482,6 +482,23 @@ inline const std::vector<HttpVersion>& all_http_versions () {
 constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
 
 /**
+ * @brief A load run's live stream counters (issues #3236, #3304), shared by
+ *        every streaming transfer of the run and read by the live tick.
+ *
+ * Owned by the run's `MetricsCollector` and reached by a transfer only
+ * through `StreamBounds::live`, so a transfer that does not stream can never
+ * count into it. `StreamTally` is the one writer of both fields.
+ */
+struct LiveStreamCounts {
+    /// Events delivered so far, counted as they arrive.
+    std::atomic<std::size_t> events{ 0 };
+    /// Streaming transfers started and not yet ended. Every ending path
+    /// decrements it (a cap, the server's close, an error, a cancel), so a
+    /// settled run reads 0.
+    std::atomic<std::size_t> open{ 0 };
+};
+
+/**
  * @brief The caps that end a bounded streaming transfer (issue #576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
@@ -503,13 +520,11 @@ struct StreamBounds {
     int64_t max_duration_ms = 0;
     /// Ceiling on events delivered, counted by `SseFrameCounter`.
     int64_t max_events = 0;
-    /// The run's tally of events as they arrive (issue #3236), shared by every
-    /// transfer of the run and read by the live tick. Owned by the run's
-    /// `MetricsCollector`; null when the run reports no stream metrics, which
-    /// leaves the write path one null check. The initializer is what lets a
-    /// caller spell the two caps alone (`StreamBounds{ ms, events }`) under
-    /// `-Wmissing-field-initializers`.
-    std::shared_ptr<std::atomic<std::size_t>> live_events = nullptr;
+    /// The run's live stream counters. Null when the run reports no stream
+    /// metrics, which leaves the write path one null check. The initializer
+    /// is what lets a caller spell the two caps alone
+    /// (`StreamBounds{ ms, events }`) under `-Wmissing-field-initializers`.
+    std::shared_ptr<LiveStreamCounts> live = nullptr;
 };
 
 /**

@@ -28,7 +28,7 @@ struct CumulativeCounters {
     size_t latency_samples   = 0; // MetricsCollector::latency_samples
     double latency_sum_ms    = 0.0;
     double queue_wait_sum_ms = 0.0;
-    size_t stream_events = 0; // MetricsCollector::live_stream_events, 0 if none
+    size_t stream_events     = 0; // the frame's `streamEvents`, 0 if none
 };
 
 /**

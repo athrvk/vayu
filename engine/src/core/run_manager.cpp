@@ -985,10 +985,10 @@ const EngineDefaults& engine_defaults)
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
-    // Every transfer carries the run's live event tally on its bounds, so the
-    // write callback can count into it without knowing about the collector.
+    // Every transfer carries the run's live counters on its bounds, so its
+    // tally can count into them without knowing about the collector.
     if (stream_bounds) {
-        stream_bounds->live_events = metrics_collector->live_stream_event_counter ();
+        stream_bounds->live = metrics_collector->live_stream_counts ();
     }
 }
 

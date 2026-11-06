@@ -660,8 +660,8 @@ struct RunContext {
      * every `Request` the executors submit. Resolved here rather than per
      * submission because it is the same two numbers for every transfer of the
      * run, and per-submission it would be two string-keyed JSON lookups on the
-     * strategy thread's hot path. Also carries the collector's live event
-     * tally (`StreamBounds::live_events`, issue #3236) to every transfer.
+     * strategy thread's hot path. Also carries the collector's live stream
+     * counters (`StreamBounds::live`, issue #3236) to every transfer.
      */
     std::optional<vayu::StreamBounds> stream_bounds;
 
