@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "connection_drop_server.hpp"
 #include "optional_assert.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
@@ -523,19 +524,33 @@ TEST (CurlToError, AnUndecodableBodyIsBadContentEncoding) {
     << "libcurl's own text must travel with the plain statement: " << error.message;
 }
 
-// The new codes spell themselves the way the API and a script's err.code do.
+// The new codes spell themselves the way the API and a script's err.code do,
+// and a load run stores them under their own error type. Mutation-check: drop
+// ProtocolMismatch from `error_type_name` and its type reads "unknown".
 TEST (CurlToError, TheNewCodesKeepTheirWireSpelling) {
     EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::TooManyRedirects), "TOO_MANY_REDIRECTS");
     EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::BadContentEncoding), "BAD_CONTENT_ENCODING");
+    EXPECT_STREQ (vayu::to_string (vayu::ErrorCode::ProtocolMismatch), "PROTOCOL_MISMATCH");
+    EXPECT_STREQ (vayu::error_type_name (vayu::ErrorCode::ProtocolMismatch), "protocol_mismatch");
 }
 
 // A scheme the handle's allowlist refuses - a redirect's, or one libcurl
 // guessed - is the same fault the URL check reports for a typed one, under the
-// same code. Mutation-check: drop the case and this reads INTERNAL_ERROR.
+// same code. With no handle, or one that reached no peer, nothing says a peer
+// answered, so the code keeps that reading (#3306). Mutation-check: drop the
+// case and this reads INTERNAL_ERROR; map it to ProtocolMismatch
+// unconditionally and it reads PROTOCOL_MISMATCH.
 TEST (CurlToError, AnUnsupportedProtocolIsAnInvalidUrl) {
+    CURL* fresh = curl_easy_init ();
+    ASSERT_NE (fresh, nullptr);
     const vayu::http::CurlErrorBuffer errors;
-    EXPECT_EQ (curl_to_error (nullptr, CURLE_UNSUPPORTED_PROTOCOL, errors).code,
-    vayu::ErrorCode::InvalidUrl);
+    for (CURL* handle : { static_cast<CURL*> (nullptr), fresh }) {
+        const vayu::Error error =
+        curl_to_error (handle, CURLE_UNSUPPORTED_PROTOCOL, errors);
+        EXPECT_EQ (error.code, vayu::ErrorCode::InvalidUrl);
+        EXPECT_EQ (error.message, curl_easy_strerror (CURLE_UNSUPPORTED_PROTOCOL));
+    }
+    curl_easy_cleanup (fresh);
 }
 
 // libcurl words a refused space as the component it sat in ("Bad query"), which
@@ -594,7 +609,8 @@ TEST (CurlToError, AMalformedUrlWithNoSpaceKeepsLibcurlsText) {
 }
 
 // The scheme refusal shares the code and keeps its own message even when the
-// URL holds a space.
+// URL holds a space. A null handle, so the reached-peer reading (#3306) never
+// applies.
 TEST (CurlToError, AnUnsupportedProtocolKeepsItsSchemeMessageWhateverTheUrlHolds) {
     const vayu::http::CurlErrorBuffer errors;
     vayu::Request request;
@@ -646,6 +662,47 @@ TEST (CurlToError, ARefusedConnectWithNoProxyBehindItIsTheTargets) {
         vayu::ErrorCode::ConnectionFailed);
     }
     curl_easy_cleanup (curl);
+}
+
+// Every driver hands `curl_to_error` its handle and its request, so an h2c
+// server's preface is coded and hinted alike on a send, a load run and a
+// stream (#3306). `http_client_test.cpp` pins the unhinted `auto` case and a
+// redirect onto the server. Mutation-check: map CURLE_UNSUPPORTED_PROTOCOL back
+// to InvalidUrl unconditionally and all three read INVALID_URL.
+TEST (CurlToError, EveryDriverCodesAnH2cPrefaceAsAProtocolMismatch) {
+    const vayu::tests::ConnectionDropServer server (
+    vayu::tests::ConnectionDropServer::first_on_each_connection,
+    vayu::tests::ConnectionDropServer::Reply::Http2Preface);
+    ASSERT_NE (server.port (), 0);
+    vayu::Request request;
+    request.method       = vayu::HttpMethod::GET;
+    request.url          = server.url ();
+    request.http_version = vayu::HttpVersion::Http2;
+    request.timeout_ms   = 5000;
+
+    const auto expect_hinted = [] (const vayu::Response& response, const char* driver) {
+        EXPECT_EQ (response.error_code, vayu::ErrorCode::ProtocolMismatch)
+        << driver << ": " << response.error_message;
+        EXPECT_NE (response.error_message.find ("this server may speak h2c"), std::string::npos)
+        << driver << ": " << response.error_message;
+    };
+
+    const auto sent = vayu::http::Client{}.send (request);
+    ASSERT_TRUE (sent.is_ok ()) << sent.error ().message;
+    expect_hinted (sent.value (), "client");
+
+    vayu::http::EventLoop loop;
+    loop.start ();
+    const auto looped = loop.submit_async (request).future.get ();
+    loop.stop ();
+    ASSERT_TRUE (looped.is_ok ()) << looped.error ().message;
+    expect_hinted (looped.value (), "event loop");
+
+    vayu::http::SseStreamRequest spec;
+    spec.run_id  = "run_h2c_preface";
+    spec.request = request;
+    vayu::http::SseStreamContext context (spec.run_id, spec.limits);
+    expect_hinted (vayu::http::consume_sse_stream (spec, context), "stream");
 }
 
 // A 407 is the proxy's only when a proxy carried the transfer; without one

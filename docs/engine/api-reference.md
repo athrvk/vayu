@@ -1249,6 +1249,21 @@ stored numeric values are unchanged, but a script that tested
 the new spelling. A load run records them under the error types
 `too_many_redirects` and `bad_content_encoding`.
 
+A target that answers in something other than HTTP/1.x is `PROTOCOL_MISMATCH`
+(issue #3306), error type `protocol_mismatch`. The usual case is an `h2c`
+server (HTTP/2 over cleartext) sent a request over `http://`: Vayu speaks
+HTTP/1.1 there whatever `httpVersion` says (the Protocol paragraph under
+[POST /execute](#post-execute)), and the server answers with its binary HTTP/2
+preface, which libcurl reports as `Received HTTP/0.9 when not allowed`. That failure used to come back
+as `INVALID_URL`, which sent people to a URL that was fine. `errorMessage`
+opens with `The server answered in a protocol other than HTTP/1.x:` followed by
+libcurl's text, and when the request asked for `http2` and the hop that failed
+was `http://` (after any redirect) it adds `HTTP/2 is only negotiated over
+https://; this server may speak h2c, which Vayu does not send`. A scheme the
+transfer refuses, a redirect onto `ftp://` included, is still `INVALID_URL`.
+The code is appended like the others, and a script sees it as `err.code`
+(`pm.sendRequest`) or `pm.response.errorCode`.
+
 A send still in flight when the engine shuts down is cancelled rather than
 waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
 making: the send answers, and its trace records, `CANCELLED` with
@@ -5681,15 +5696,13 @@ proxy, a load run and a collection run read the registry **once at run start**
 and hold it, because libcurl reuses a pooled connection only when its TLS
 identity matches.
 
-**A redirect is matched hop by hop on a design send and a load run.**
-`POST /execute`, the `pm.sendRequest` calls inside it, the OAuth token fetch, a
-typed `POST /import/fetch` and every request of a load run follow a redirect
-one transfer per hop, and the registry is asked about each hop's own host and
-port: a send that starts at `http://host` and is redirected to an mTLS
-`https://host` presents the entry that answers for the second, and a hop no
-entry answers for presents nothing. An SSE stream still lets libcurl follow,
-and libcurl gives the certificate only to the origin the transfer started at,
-so there a redirect to another origin goes without one.
+**A redirect is matched hop by hop on a design send, a stream and a load run.**
+`POST /execute` (buffered or `stream: true`), the `pm.sendRequest` calls inside
+it, the OAuth token fetch, a typed `POST /import/fetch` and every request of a
+load run follow a redirect one transfer per hop, and the registry is asked about
+each hop's own host and port: a send that starts at `http://host` and is
+redirected to an mTLS `https://host` presents the entry that answers for the
+second, and a hop no entry answers for presents nothing.
 
 **Matching is by host, and most specific wins.** A `host` is either an exact
 name (`api.example.com`) or the one wildcard form, `*.example.com`, which is
@@ -6717,8 +6730,8 @@ origin, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the origin the redirect leads to, **including
 over `http` after an `https` hop**. That is a documented exception, not an
-oversight: it is libcurl's rule, kept as it was on all three drivers. A stream
-lets libcurl follow; a design send and a load run run the engine's own
+oversight: it is libcurl's rule, kept as it was on all three drivers. A design
+send, a stream and a load run run the engine's own
 redirect loop, which withholds exactly what libcurl withheld, so the three
 cannot disagree about what reaches the next origin. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
@@ -7809,7 +7822,7 @@ timeout happened to fire":
 | `completed` | The server closed the stream |
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
 | `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
-| `maxStreamDurationMs` | The duration cap elapsed |
+| `maxStreamDurationMs` | The duration cap elapsed, counted from the first hop of a redirect chain |
 | `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` on a made connection; a header line counts as arriving, and each redirect hop's own connect is bounded by the connect deadline below, not counted as silence. The stream ends within a couple of seconds of the setting (the engine checks about once a second) |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
@@ -8111,8 +8124,9 @@ To keep verification on for a host with an internal authority, add the CA under
 [TLS trust settings](#tls-trust-settings) instead.
 
 **A redirect that crosses origins drops the cookies the hop set.** On a design
-send, and on a scenario load run's per-virtual-user session, a `Set-Cookie`
-returned by one hop is not applied to a later hop of the same send whose origin (scheme, host and port) is a different one; a
+send, a stream and a scenario load run's per-virtual-user session, a
+`Set-Cookie` returned by one hop is not applied to a later hop of the same send
+whose origin (scheme, host and port) is a different one; a
 same-origin hop is unchanged, and a hop back to the origin that set the cookie
 carries it again. This is Vayu's own rule, held by the engine's redirect loop,
 and it is not configurable. The reason is the one behind **curl 8.21.0**'s
@@ -8120,8 +8134,7 @@ hardening (`http: don't pass on set cookies to new origins`, which the engine
 picked up with the vcpkg baseline bump of #679): what one origin handed the
 client is not the next origin's to read. libcurl's cookie engine matches by host
 and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride
-a redirect to `127.0.0.1:9090`. A streaming request still lets libcurl
-follow, and there a hop's cookie is matched by libcurl's engine. A flow
+a redirect to `127.0.0.1:9090`. A flow
 that depended on a cookie surviving a cross-origin hop (a login that bounces
 through an identity provider is the usual shape) sends the follow-up request
 without it. Nothing about the [cookie jar](#cookies) itself changed: it is
@@ -8134,8 +8147,12 @@ says what the server sent, not what went on to the next origin.
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
 HTTP/1.1, and `"http2"` attempts h2 over TLS and falls back to 1.1
 (`CURL_HTTP_VERSION_2TLS` - against a plain `http://` URL this silently
-negotiates 1.1, since h2 is not offered over cleartext). This is what was
-*requested*; the response's own `httpVersion` (below) reports what was
+negotiates 1.1, since h2 is not offered over cleartext). A server on `http://`
+that speaks only h2c answers that HTTP/1.1 request with its HTTP/2 preface,
+and the send fails as `PROTOCOL_MISMATCH` with a hint naming h2c (the
+transport error codes are described under [Proxy settings](#proxy-settings));
+serve it over TLS or let it accept HTTP/1.1, since Vayu never sends h2c. This
+is what was *requested*; the response's own `httpVersion` (below) reports what was
 actually negotiated, and the two can differ. The renderer always sends this
 field on every execute, never eliding it even when it equals the default - the
 same rule `followRedirects` follows, and for the same reason: an omitted field
@@ -8626,7 +8643,10 @@ attempts it - the fallback noted above under the request's `httpVersion` is
 exactly the case this field is for, and it is honest rather than a false
 positive: h2 was asked for and HTTP/1.1 was used. A local dev server on
 `http://` with the protocol set to HTTP/2 will show the warning on every
-request; either switch the request to `auto`, or serve over TLS.
+request; either switch the request to `auto`, or serve over TLS. A server
+there that speaks only h2c never gets as far as a downgrade: it cannot read
+the HTTP/1.1 request, so the send fails as `PROTOCOL_MISMATCH` with the h2c
+hint instead, and `auto` meets the same failure without the hint.
 
 This exists because the failure it names is invisible otherwise: a `200`, a
 latency and a body look identical whether or not the protocol you asked for was
@@ -8921,8 +8941,11 @@ The same count reaches the [live frames](#get-runsrunidlive) as the events
 arrive (issue #3236): `streamEvents`, `eventsPerSecond` and `streamsOpen` on
 every frame, and `streamTimeToFirstEvent` on gate frames, so a run of long
 streams shows its progress before the first one ends rather than zero
-completions until then. Only a single-request streaming run carries them; a
-collection run's live frames have none of the four.
+completions until then. A single-request streaming run carries them, and so
+does a collection load run with a streaming step (issue #3304), whose
+`streamsOpen` counts only its streaming steps' transfers; a run with no
+stream, and a design (sequential) collection run, which has no live frames,
+carry none of the four.
 
 On a single-request run, `stream` is refused beside `transient` (as on a send)
 and each cap is refused without `stream` - a cap on a non-streaming run reads
@@ -11497,7 +11520,7 @@ no frame.
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
-| `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, not a collection run whose steps stream), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streams open at the sample, which is `activeConnections` because every transfer of such a run is a stream. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
+| `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, or a collection load run with a streaming step, #3304), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streaming transfers open at the sample, which on a collection run that mixes streaming and ordinary steps is fewer than `activeConnections` (that one counts every transfer). A stream leaves `streamsOpen` however it ends (a cap, the server's close, an error, a Stop), so the settled frame reads `0`. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
 | `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |
@@ -11619,7 +11642,10 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
 ```
 
 - `open` is published once, as soon as the response's header block arrives, so
-  even a late consumer learns what the stream connected to.
+  even a late consumer learns what the stream connected to. With
+  `followRedirects` on it describes the hop the stream ends at: a redirect the
+  stream follows publishes no `open`, and its body is neither an event nor
+  counted.
 - `message` carries one upstream event: its `event` name (`message` when the
   origin sent none), its `data` (multiple `data:` lines joined with `\n`), the
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than

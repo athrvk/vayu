@@ -7,8 +7,8 @@
 
 /**
  * @file tests/execute_transport_failure_test.cpp
- * @brief A redirect loop and an undecodable body through the real
- *        `POST /execute` (issue #2462).
+ * @brief A redirect loop, an undecodable body and an h2c server's preface
+ *        through the real `POST /execute` (issues #2462, #3306).
  *
  * Both used to answer `CONNECTION_FAILED` ("Couldn't connect") though the
  * server had answered every hop. `http_client_test.cpp` pins the codes at the
@@ -35,6 +35,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "connection_drop_server.hpp"
 #include "task_queue.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/run_manager.hpp"
@@ -185,6 +186,29 @@ TEST_F (ExecuteTransportFailureTest, AnUndecodableBodyAnswersBadContentEncoding)
         std::string (encoding) + ". "))
         << message;
     }
+}
+
+// An h2c server's preface to an `http2` send over http:// (#3306): the route
+// carries the code and the hint to the pane and to `pm.response.errorCode`.
+// Mutation-check: map the reached-peer case of CURLE_UNSUPPORTED_PROTOCOL back
+// to InvalidUrl and errorCode reads INVALID_URL.
+TEST_F (ExecuteTransportFailureTest, AnH2cPrefaceAnswersProtocolMismatch) {
+    const vayu::tests::ConnectionDropServer server (
+    vayu::tests::ConnectionDropServer::first_on_each_connection,
+    vayu::tests::ConnectionDropServer::Reply::Http2Preface);
+    ASSERT_NE (server.port (), 0);
+    const json answer = execute (
+    { { "method", "GET" }, { "url", server.url () }, { "httpVersion", "http2" } });
+
+    EXPECT_EQ (answer.value ("status", -1), 0) << answer.dump (2);
+    EXPECT_EQ (answer.value ("errorCode", ""), "PROTOCOL_MISMATCH") << answer.dump (2);
+    const auto message = answer.value ("errorMessage", std::string ());
+    EXPECT_TRUE (message.starts_with (
+    "The server answered in a protocol other than HTTP/1.x: "))
+    << message;
+    EXPECT_NE (
+    message.find ("this server may speak h2c, which Vayu does not send"), std::string::npos)
+    << message;
 }
 
 } // namespace

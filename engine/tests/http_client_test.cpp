@@ -17,10 +17,12 @@
 #include <future>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "connection_drop_server.hpp"
 #include "mock_server.hpp"
 #include "optional_assert.hpp"
 #include "silent_listener.hpp"
@@ -605,6 +607,77 @@ TEST_F (HttpClientTest, ARefusedConnectionIsStillConnectionFailed) {
 
     ASSERT_TRUE (result.is_ok ()) << result.error ().message;
     EXPECT_EQ (result.value ().error_code, ErrorCode::ConnectionFailed);
+}
+
+namespace {
+
+constexpr std::string_view H2C_HINT =
+"HTTP/2 is only negotiated over https://; this server may speak h2c, which "
+"Vayu does not send";
+
+/// A server that answers with an HTTP/2 preface, the way an h2c-only one does.
+vayu::tests::ConnectionDropServer h2c_server () {
+    return vayu::tests::ConnectionDropServer (vayu::tests::ConnectionDropServer::first_on_each_connection,
+    vayu::tests::ConnectionDropServer::Reply::Http2Preface);
+}
+
+} // namespace
+
+// An h2c server answers the HTTP/1.1 request `http2` sends over http:// with
+// its binary preface: the target answered, so neither the URL nor the network
+// is at fault (#3306). The hint is for the request that asked for HTTP/2.
+// Mutation-check: map the reached-peer case back to InvalidUrl and the code
+// reads INVALID_URL.
+TEST_F (HttpClientTest, AnH2cPrefaceIsAProtocolMismatchHintedOnlyForHttp2) {
+    const auto server = h2c_server ();
+    ASSERT_NE (server.port (), 0);
+    for (const auto version : { HttpVersion::Http2, HttpVersion::Auto }) {
+        Request request;
+        request.method       = HttpMethod::GET;
+        request.url          = server.url ();
+        request.http_version = version;
+        request.timeout_ms   = 5000;
+
+        auto result = client_->send (request);
+
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        const auto& response    = result.value ();
+        const std::string label = vayu::to_string (version);
+        EXPECT_EQ (response.error_code, ErrorCode::ProtocolMismatch) << label;
+        EXPECT_TRUE (response.transfer_attempted) << label;
+        EXPECT_TRUE (response.error_message.starts_with (
+        "The server answered in a protocol other than HTTP/1.x: "))
+        << label << ": " << response.error_message;
+        const bool hinted = response.error_message.find (H2C_HINT) != std::string::npos;
+        EXPECT_EQ (hinted, version == HttpVersion::Http2)
+        << label << ": " << response.error_message;
+    }
+}
+
+// The hint reads the URL the failing hop was sent to, not the request's: an
+// https:// request redirected onto an h2c server still asked for HTTP/2 over
+// cleartext. Mutation-check: read `request->url` instead of the handle's
+// effective URL and the hint is lost.
+TEST_F (HttpClientTest, AnHttpsRequestRedirectedOntoAnH2cServerIsHinted) {
+    const auto server = h2c_server ();
+    ASSERT_NE (server.port (), 0);
+    const vayu::tests::TestCertificateAuthority ca;
+    const vayu::tests::TlsServer tls (ca);
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = tls.url ("/bounce?to=" + server.url ());
+    request.http_version     = HttpVersion::Http2;
+    request.verify_ssl       = false;
+    request.follow_redirects = true;
+    request.timeout_ms       = 5000;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.error_code, ErrorCode::ProtocolMismatch) << response.error_message;
+    EXPECT_NE (response.error_message.find (H2C_HINT), std::string::npos)
+    << response.error_message;
 }
 
 TEST_F (HttpClientTest, SendsPostRequest) {

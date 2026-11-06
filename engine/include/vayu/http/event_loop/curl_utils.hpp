@@ -61,10 +61,19 @@ class DnsCache;
  * limit and the `Content-Encoding` are read off @p curl, so without a handle
  * the sentence names neither.
  *
+ * `CURLE_UNSUPPORTED_PROTOCOL` is `InvalidUrl` (a scheme the handle refused,
+ * libcurl's text unchanged) unless @p curl reached a peer and stopped at an
+ * `http` or `https` URL: then the peer answered in something other than
+ * HTTP/1.x, usually an h2c server's preface, and it is `ProtocolMismatch`
+ * (issue #3306), with a hint about h2c when the request asked for `http2` and
+ * the handle's `CURLINFO_EFFECTIVE_URL` is `http://`. Without a handle it
+ * stays `InvalidUrl`.
+ *
  * @param request The request the transfer sent, read only to say *why* a URL
  *                libcurl refused as malformed was: a space or control byte in
  *                it is named, and the toggle that would send it as typed is
- *                suggested only while `disableUrlEncoding` is off. May be null,
+ *                suggested only while `disableUrlEncoding` is off; and for its
+ *                `http_version`, which decides the h2c hint above. May be null,
  *                and then libcurl's own text stands.
  *
  * @param peer_check The state the transfer's `apply_transport_policy` was
@@ -87,6 +96,15 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * read as no proxy. Read before anything else reuses the handle.
  */
 [[nodiscard]] bool proxy_was_used (CURL* curl);
+
+/**
+ * @brief libcurl's current request URL on @p curl (`CURLINFO_EFFECTIVE_URL`):
+ *        the last hop's when libcurl followed a redirect itself.
+ *
+ * Copied because libcurl's buffer is only valid until the next call into the
+ * handle. Empty for a null handle and when libcurl reports none.
+ */
+[[nodiscard]] std::string effective_url (CURL* curl);
 
 /**
  * @brief The proxy's refusal when a transfer that completed is a forwarding
@@ -147,8 +165,10 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
- * for the two URLs it never sees - a redirect's `Location`, and the scheme
- * libcurl guesses for a URL that names none (`ftp.example.com/x` is FTP).
+ * for the two URLs it never sees - a redirect's `Location` where libcurl
+ * follows (the load path; a `RedirectChain` driver refuses one itself, in
+ * `resolve_redirect_target`), and the scheme libcurl guesses for a URL that
+ * names none (`ftp.example.com/x` is FTP).
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.

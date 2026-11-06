@@ -41,7 +41,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <expected>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -350,16 +349,6 @@ struct HeaderSink {
     /// The body sink a redirect's body is kept out of.
     BodySink* body = nullptr;
 };
-
-/// libcurl's current request URL, copied because the buffer is only valid until
-/// the next call into the handle; empty when libcurl reports none.
-std::string effective_url (CURL* curl) {
-    char* url = nullptr;
-    if (get_info<CURLINFO_EFFECTIVE_URL> (curl, &url) != CURLE_OK || url == nullptr) {
-        return {};
-    }
-    return url;
-}
 
 /// The names a request's auth-written query parameter can appear under in a
 /// URL: as typed, and as `append_query_param` percent-encodes it.
@@ -678,16 +667,10 @@ void fail_if_proxy_refused (Response& response, CURL* curl, long status) {
 // The redirect chain (#3300)
 // ============================================================================
 
-struct SlistDeleter {
-    void operator() (curl_slist* list) const {
-        curl_slist_free_all (list);
-    }
-};
-using SlistPtr = std::unique_ptr<curl_slist, SlistDeleter>;
-
 /**
  * @brief What one send hands libcurl pointers into, kept on the send's frame
- *        so it outlives every hop of the chain.
+ *        so it outlives every hop of the chain. The header lists the hops send
+ *        are the `RedirectChain`'s.
  */
 struct SendFrame {
     Response response;
@@ -697,23 +680,8 @@ struct SendFrame {
     detail::ConnectedPeerCheck peer_check;
     ProgressWatch progress_watch;
     TransferDebug transfer_debug;
-    /// The list the first hop sends, which a later hop's is filtered from.
-    SlistPtr first_headers;
-    /// The list a later hop sends when it leaves out lines of the first.
-    SlistPtr hop_headers;
     /// What the jar put on the handle, for the reconcile after the chain.
     std::vector<std::string> jar_seeded_from;
-};
-
-/// Where one hop of a send goes and what it carries.
-struct Hop {
-    std::string url;
-    HttpMethod method = HttpMethod::GET;
-    bool carries_body = false;
-    /// A 301, 302 or 303 changed the request, so no line about a body goes.
-    bool rewritten = false;
-    /// Redirects followed before this hop.
-    int followed = 0;
 };
 
 /// How a chain ended, for `Client::send` to build the response from.
@@ -731,65 +699,6 @@ struct ChainOutcome {
     int followed                      = 0;
 };
 
-/// The next hop's URL, or the error that ends the chain.
-using NextHop = std::expected<std::string, Error>;
-
-/// The name of one header-list line: what precedes `:`, or `;` in libcurl's
-/// spelling of a blank header, without blanks.
-std::string_view header_line_name (std::string_view line) {
-    return trim_field_whitespace (line.substr (0, line.find_first_of (":;")));
-}
-
-/// @p first without the lines a hop to another origin, or a rewritten hop,
-/// does not send. Null when no line is left.
-SlistPtr filtered_header_list (const curl_slist* first, bool other_origin, bool rewritten) {
-    curl_slist* list = nullptr;
-    for (const curl_slist* item = first; item != nullptr; item = item->next) {
-        const std::string_view name = header_line_name (item->data);
-        if ((other_origin && is_origin_bound_header (name)) ||
-        (rewritten && is_body_header (name))) {
-            continue;
-        }
-        list = curl_slist_append (list, item->data);
-    }
-    return SlistPtr (list);
-}
-
-/**
- * @brief Points the handle's request lines at @p hop.
- *
- * `Authorization` and the typed `Cookie` rows (`CURLOPT_COOKIE`) go only to
- * the origin the send started at, as libcurl compared against its first
- * origin: a hop back there carries them again.
- */
-void apply_hop_headers (CURL* curl, SendFrame& frame, const Request& request, const Hop& hop, bool first_origin) {
-    const bool filtered = !first_origin || hop.rewritten;
-    SlistPtr next       = filtered ?
-    filtered_header_list (frame.first_headers.get (), !first_origin, hop.rewritten) :
-    nullptr;
-    set_opt<CURLOPT_HTTPHEADER> (
-    curl, filtered ? next.get () : frame.first_headers.get ());
-    frame.hop_headers = std::move (next);
-    // libcurl copies a string option, so the value need not outlive the call.
-    const std::string cookies = first_origin ? detail::typed_cookie_value (request) : "";
-    set_opt<CURLOPT_COOKIE> (curl, cookies.empty () ? nullptr : cookies.c_str ());
-}
-
-/// Puts the method and body a @p status redirect asks for on the handle.
-void apply_hop_method (CURL* curl, SendFrame& frame, Hop& hop, int status) {
-    const RedirectedRequest next = redirected_request (status, hop.method);
-    if (next.method != hop.method || (hop.carries_body && !next.keeps_body)) {
-        detail::apply_bodyless_method (curl, next.method, frame.body_source);
-        hop.method       = next.method;
-        hop.carries_body = false;
-        hop.rewritten    = true;
-        return;
-    }
-    if (hop.carries_body) {
-        detail::rewind_body_source (frame.body_source);
-    }
-}
-
 /// Moves the @p status redirect just received into `redirect_hops`, as the
 /// hop that led to @p next_url.
 void record_hop (Response& response,
@@ -797,7 +706,7 @@ CURL* curl,
 int status,
 const std::string& next_url,
 const std::vector<std::string>& secret_params) {
-    const std::string url = effective_url (curl);
+    const std::string url = detail::effective_url (curl);
     int omitted           = 0;
     response.redirect_hops.push_back ({ status,
     response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
@@ -807,23 +716,6 @@ const std::vector<std::string>& secret_params) {
     response.status_text.clear ();
     response.headers.clear ();
     response.header_lines.clear ();
-}
-
-/// Where a finished hop's @p status answer sends the chain: nullopt when it
-/// is the final answer, else the next URL or the error the chain ends with.
-std::optional<NextHop>
-redirect_target (const Response& response, const Request& request, const Hop& hop, int status) {
-    if (!request.follow_redirects || !is_redirect_status (status)) {
-        return std::nullopt;
-    }
-    const auto location = location_of (response.header_lines);
-    if (!location) {
-        return std::nullopt;
-    }
-    if (redirect_limit_reached (hop.followed, request.max_redirects)) {
-        return NextHop (std::unexpect, too_many_redirects_error (request.max_redirects));
-    }
-    return resolve_redirect_target (hop.url, *location);
 }
 
 /**
@@ -860,35 +752,24 @@ std::chrono::steady_clock::time_point started) {
     return std::nullopt;
 }
 
-/// Points the handle at the hop @p next_url, after a @p status redirect.
-void advance_hop (CURL* curl, SendFrame& frame, const Request& request, Hop& hop, int status, std::string next_url) {
-    apply_hop_method (curl, frame, hop, status);
-    hop.url = std::move (next_url);
-    ++hop.followed;
-    set_opt<CURLOPT_URL> (curl, hop.url.c_str ());
-    apply_hop_headers (curl, frame, request, hop,
-    same_origin (vayu::http::wire_url (request), hop.url));
-}
-
 /**
  * @brief Runs the send as one transfer per hop, following redirects itself
  *        rather than through `CURLOPT_FOLLOWLOCATION` (#3300).
  *
  * The handle is configured for the first hop already and is never reset in
  * between, so its cookie engine and its connections serve the whole chain.
- * What a hop changes is re-asserted per hop: the URL, the method and body, the
- * lines that stay with the first origin, and the transport policy, which
- * matches the client certificate against this hop's own origin.
+ * What a hop changes is re-asserted per hop: the URL, the method and body and
+ * the lines that stay with the first origin (@p chain), and the transport
+ * policy, which matches the client certificate against this hop's own origin.
  */
 ChainOutcome run_chain (CURL* curl,
 const Request& request,
 const ClientConfig& config,
 SendFrame& frame,
+RedirectChain& chain,
 CurlErrorBuffer& errors,
 std::chrono::steady_clock::time_point started) {
     ChainOutcome out;
-    Hop hop{ vayu::http::wire_url (request), request.method,
-        vayu::http::has_wire_body (request) };
     const auto secret_params = auth_param_names (request);
     std::optional<HopCookies> cookies;
     if (request.follow_redirects && config.cookie_jar) {
@@ -896,6 +777,7 @@ std::chrono::steady_clock::time_point started) {
     }
     while (true) {
         frame.sink.start_hop ();
+        const Hop& hop = chain.hop ();
         if (hop.followed > 0) {
             out.refusal = start_redirected_hop (
             curl, request, config, frame.progress_watch, started);
@@ -920,8 +802,8 @@ std::chrono::steady_clock::time_point started) {
         }
         long status = 0;
         get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
-        auto next =
-        redirect_target (frame.response, request, hop, static_cast<int> (status));
+        auto next = chain.redirect_target (
+        frame.response.header_lines, static_cast<int> (status));
         if (!next) {
             return out;
         }
@@ -930,9 +812,8 @@ std::chrono::steady_clock::time_point started) {
             return out;
         }
         record_hop (frame.response, curl, static_cast<int> (status), **next, secret_params);
-        advance_hop (curl, frame, request, hop, static_cast<int> (status),
-        std::move (**next));
-        out.followed = hop.followed;
+        chain.advance (curl, static_cast<int> (status), std::move (**next));
+        out.followed = chain.hop ().followed;
     }
 }
 
@@ -1072,11 +953,13 @@ Result<Response> Client::send (const Request& request) {
     detail::apply_method_and_body (curl, request, frame.body_source);
 
     // Set headers, and record the same set as what was sent.
-    frame.first_headers.reset (detail::build_request_header_list (
-    request, impl_->config.default_headers, &response.request_headers));
+    RedirectChain redirect_chain (request,
+    detail::build_request_header_list (
+    request, impl_->config.default_headers, &response.request_headers),
+    frame.body_source);
 
-    if (frame.first_headers) {
-        set_opt<CURLOPT_HTTPHEADER> (curl, frame.first_headers.get ());
+    if (redirect_chain.first_headers () != nullptr) {
+        set_opt<CURLOPT_HTTPHEADER> (curl, redirect_chain.first_headers ());
     }
 
     // The one default that rides an option rather than a header line.
@@ -1164,9 +1047,9 @@ Result<Response> Client::send (const Request& request) {
     if (const auto& bounds = request.stream_bounds) {
         sink.stream.start (*bounds, submitted_at);
     }
-    const ChainOutcome chain =
-    run_chain (curl, request, impl_->config, frame, impl_->errors, submitted_at);
-    auto completion = std::chrono::steady_clock::now ();
+    const ChainOutcome chain = run_chain (curl, request, impl_->config, frame,
+    redirect_chain, impl_->errors, submitted_at);
+    auto completion          = std::chrono::steady_clock::now ();
     flush_transfer_debug (frame.transfer_debug);
     const CURLcode res = chain.code;
 

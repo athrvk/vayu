@@ -15,9 +15,9 @@
  * the next one is, rather than leaving `CURLOPT_FOLLOWLOCATION` to do it inside
  * one transfer: libcurl hands a client certificate only to the origin a
  * transfer started at, so every hop has to be its own transfer for the
- * certificate registry to be consulted for it (#3300). The load path's event
- * loop drives its chains through `RedirectChain` (#3302), and `Client::send`
- * through its own `run_chain`; SSE (#3301) still lets libcurl follow.
+ * certificate registry to be consulted for it (#3300). `Client::send`, the SSE
+ * consumer (#3301) and the load path's event loop (#3302) drive their chains
+ * through `RedirectChain`.
  *
  * The rules restate what libcurl did, so a send behaves as it did when libcurl
  * followed: which statuses are followed, how a `Location` resolves, which

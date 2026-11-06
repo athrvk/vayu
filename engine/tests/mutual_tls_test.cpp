@@ -403,13 +403,13 @@ TEST_P (MutualTlsTest, ADesignSendCompletesTheHandshakeAndNamesTheEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// A redirect is a hop of its own (#3300)
+// A redirect is a hop of its own (#3300, #3301)
 // ---------------------------------------------------------------------------
 //
 // libcurl following inside one transfer handed the certificate only to the
 // origin the transfer started at, and the registry was never asked about the
-// origin a redirect led to. The design send now runs one transfer per hop and
-// matches each hop's own origin.
+// origin a redirect led to. The design send and the SSE stream run one
+// transfer per hop and match each hop's own origin.
 
 // The send starts at `localhost`, which the `127.0.0.1` entry does not answer
 // for, so only a match made for the second hop can present it. Mutation-check:
@@ -486,6 +486,33 @@ TEST_P (MutualTlsTest, ARefusalOnARedirectedHopIsCodedFromThatHop) {
     << to_string (response.error_code) << ": " << response.error_message;
     EXPECT_EQ (response.redirect_hops.size (), 1U);
     EXPECT_TRUE (response.transfer_attempted);
+}
+
+// The stream starts at `localhost`, which the `127.0.0.1` entry does not
+// answer for, so only a match made for the redirected hop can present it.
+// Mutation-check: apply the transport policy for the first hop alone in
+// `run_stream_chain` and this fails as an `SSL_ERROR`.
+TEST_P (MutualTlsTest, AnSseStreamRedirectedToTheMtlsListenerPresentsTheCertificate) {
+    TlsServer server (ca_, ca_);
+    const vayu::tests::EchoServer plain;
+    const ClientIdentity client = identity ("sse_redirected", ca_);
+    register_entry (client);
+
+    SseStreamRequest spec;
+    spec.run_id = "run-mtls-sse-redirect";
+    spec.request = get_request ("http://localhost:" + std::to_string (plain.port ()) +
+    "/redirect?to=" + server.url ("/events"));
+    spec.transport = policy ();
+
+    SseStreamContext context (spec.run_id, spec.limits);
+    const Response response = consume_sse_stream (spec, context);
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "the hop to the mTLS listener went without the certificate: "
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (context.total_events (), 2);
+    EXPECT_EQ (response.client_certificate, "127.0.0.1");
 }
 
 TEST_P (MutualTlsTest, AnSseStreamPresentsTheCertificate) {

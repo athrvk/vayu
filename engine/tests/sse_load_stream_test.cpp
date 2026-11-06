@@ -33,6 +33,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -45,6 +46,7 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/types.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -409,6 +411,101 @@ TEST (SseLoadStreamTest, BalancedAccountingUnderConcurrency) {
 }
 
 // ---------------------------------------------------------------------------
+// The run's live counters (#3236, #3304)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Fresh live counters, put on @p request's bounds the way a run puts its own.
+std::shared_ptr<vayu::LiveStreamCounts> count_live (vayu::Request& request) {
+    auto live = std::make_shared<vayu::LiveStreamCounts> ();
+    if (request.stream_bounds) {
+        request.stream_bounds->live = live;
+    }
+    return live;
+}
+
+/// What the live counters read as one stream ended on its own loop.
+struct LiveEnding {
+    size_t open_at_completion = 0;
+    size_t open_after_stop    = 0;
+    size_t events             = 0;
+    bool errored              = false;
+};
+
+LiveEnding end_one_stream (const vayu::http::EventLoopConfig& config, vayu::Request request) {
+    const auto live = count_live (request);
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+    std::atomic<bool> done{ false };
+    LiveEnding ending;
+    loop.submit (request, [&] (size_t, const vayu::Result<vayu::Response>& result) {
+        ending.open_at_completion = live->open.load ();
+        ending.errored = !result.is_ok () || result.value ().has_error ();
+        done.store (true);
+    });
+    EXPECT_TRUE (vayu::tests::wait_until ([&] () { return done.load (); }))
+    << "the stream never completed";
+    loop.stop ();
+    ending.open_after_stop = live->open.load ();
+    ending.events          = live->events.load ();
+    return ending;
+}
+
+} // namespace
+
+// A stream leaves the run's open gauge by the time its completion is seen,
+// whichever rule ended it: a cap, the server's close, or the byte cap's error.
+// Read again once the loop has stopped and the transfer's state is gone, where
+// a second decrement would show as a wrapped count. Mutation checks: drop
+// `close_live` from `StreamTally::report` and every completion reads 1; drop
+// the handle reset from `close_live` and every stopped read wraps.
+TEST (SseLoadStreamTest, EveryEndingTakesAStreamOffTheOpenGaugeBeforeItsCompletion) {
+    LoadStreamServer server;
+    auto error_config                    = one_worker ();
+    error_config.max_response_body_bytes = 256;
+    struct EndingCase {
+        const char* name;
+        vayu::http::EventLoopConfig config;
+        vayu::Request request;
+        bool errors;
+    };
+    const std::vector<EndingCase> cases{
+        { "event cap", one_worker (), stream_request (server.url ("/endless"), 5, 30000), false },
+        { "server close", one_worker (),
+        stream_request (server.url ("/finite"), 1000, 30000), false },
+        { "byte cap", error_config,
+        stream_request (server.url ("/endless"), 10000000, 30000), true },
+    };
+    for (const auto& c : cases) {
+        const auto ending = end_one_stream (c.config, c.request);
+        EXPECT_EQ (ending.open_at_completion, 0u) << c.name;
+        EXPECT_EQ (ending.open_after_stop, 0u) << c.name;
+        EXPECT_GT (ending.events, 0u) << c.name << ": the counters were not wired";
+        EXPECT_EQ (ending.errored, c.errors) << c.name;
+    }
+}
+
+// A Stop cancels a stream that is still open; the loop discards the transfer
+// without reporting it, so the gauge comes down as its state is destroyed.
+// Mutation check: drop `close_live` from `~StreamTally` and the stopped read
+// is 1.
+TEST (SseLoadStreamTest, AStopTakesAnOpenStreamOffTheOpenGauge) {
+    LoadStreamServer server;
+    auto request    = stream_request (server.url ("/silent"), 1000000, 30000);
+    const auto live = count_live (request);
+    vayu::http::EventLoop loop (one_worker ());
+    loop.start ();
+    loop.submit (request, [] (size_t, const vayu::Result<vayu::Response>&) {});
+
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&] () { return live->open.load () == 1; }))
+    << "the stream never counted as open";
+    loop.stop (false);
+    EXPECT_EQ (live->open.load (), 0u);
+}
+
+// ---------------------------------------------------------------------------
 // The same bounds on the single-request client (#3235)
 // ---------------------------------------------------------------------------
 
@@ -523,4 +620,33 @@ TEST (SseClientStreamTest, AnOrdinarySendCarriesNoEventCount) {
     EXPECT_EQ (response.body, "not a stream");
     EXPECT_FALSE (response.stream_events.has_value ());
     EXPECT_FALSE (response.stream_capped);
+}
+
+// The client keeps the same gauge: open while the stream delivers, and down
+// once the send returns, a cancelled stream's and a server-closed one's alike.
+TEST (SseClientStreamTest, AStreamIsOpenOnTheGaugeUntilTheSendReturns) {
+    LoadStreamServer server;
+    auto cancelled_request = stream_request (server.url ("/endless"), 10000000, 30000);
+    const auto cancelled_live = count_live (cancelled_request);
+    std::atomic<bool> cancel{ false };
+    std::atomic<size_t> open_while_streaming{ 0 };
+    vayu::http::ClientConfig config;
+    config.cancel           = &cancel;
+    config.on_body_progress = [&] (uint64_t, std::optional<uint64_t>) {
+        open_while_streaming.store (cancelled_live->open.load ());
+        cancel.store (true);
+        return true;
+    };
+    const auto cancelled = send_one (cancelled_request, std::move (config));
+    EXPECT_FALSE (cancelled.has_error ()) << cancelled.error_message;
+    EXPECT_EQ (open_while_streaming.load (), 1u);
+    EXPECT_EQ (cancelled_live->open.load (), 0u);
+    EXPECT_GT (cancelled_live->events.load (), 0u);
+
+    auto finite_request = stream_request (server.url ("/finite"), 1000, 30000);
+    const auto finite_live = count_live (finite_request);
+    const auto finite      = send_one (finite_request);
+    EXPECT_FALSE (finite.has_error ()) << finite.error_message;
+    EXPECT_EQ (finite_live->open.load (), 0u);
+    EXPECT_EQ (finite_live->events.load (), 3u);
 }

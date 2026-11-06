@@ -10,11 +10,16 @@
  * is a raw-socket listener on port 0, one thread per connection, counting
  * every request head it reads. It reads heads only, which is all the tests
  * that use it send (a GET); a body would be read as the next request.
+ *
+ * It can also answer a request with an HTTP/2 server preface instead of an
+ * HTTP/1.1 response (`Reply::Http2Preface`, #3306): what an h2c-only server
+ * sends to an HTTP/1.1 request, and again something httplib cannot write.
  */
 
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -50,8 +55,18 @@ class ConnectionDropServer {
         return on_connection == 1;
     }
 
-    explicit ConnectionDropServer (AnswerRule rule = first_on_each_connection)
-    : rule_ (std::move (rule)) {
+    /// What an answered request is sent.
+    enum class Reply : std::uint8_t {
+        /// `HTTP/1.1 200 OK` with a two-byte body.
+        Http1Ok,
+        /// An HTTP/2 server preface: an empty SETTINGS frame and nothing else.
+        Http2Preface,
+    };
+
+    explicit ConnectionDropServer (AnswerRule rule = first_on_each_connection,
+    Reply reply                                    = Reply::Http1Ok)
+    : rule_ (std::move (rule)),
+      reply_bytes_ (reply == Reply::Http2Preface ? HTTP2_PREFACE : HTTP1_OK) {
 #ifdef _WIN32
         WSADATA wsa{};
         WSAStartup (MAKEWORD (2, 2), &wsa);
@@ -144,9 +159,12 @@ class ConnectionDropServer {
     static constexpr int SEND_FLAGS = 0;
 #endif
 
-    static constexpr std::string_view RESPONSE =
+    static constexpr std::string_view HTTP1_OK =
     "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: "
     "2\r\n\r\nok";
+    /// RFC 9113 4.1: a 24-bit length of 0, type 0x4 (SETTINGS), flags 0,
+    /// stream 0. The length is given because the literal holds NUL bytes.
+    static constexpr std::string_view HTTP2_PREFACE{ "\0\0\0\x04\0\0\0\0\0", 9 };
     static constexpr std::string_view HEAD_END = "\r\n\r\n";
 
     /// Whether @p socket has something to read (a connection, bytes, or the
@@ -211,7 +229,7 @@ class ConnectionDropServer {
                 dropped_.fetch_add (1);
                 break;
             }
-            if (!send_all (client, RESPONSE)) {
+            if (!send_all (client, reply_bytes_)) {
                 break;
             }
         }
@@ -231,6 +249,7 @@ class ConnectionDropServer {
     }
 
     AnswerRule rule_;
+    std::string_view reply_bytes_;
     Socket listener_ = NO_SOCKET;
     int port_        = 0;
     std::atomic<bool> stopping_{ false };

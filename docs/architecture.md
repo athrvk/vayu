@@ -604,9 +604,9 @@ registry of host to certificate (Settings > Network & connectivity), matches an
 entry per transfer by host and optional port - an exact name, or `*.example.com`
 for every subdomain of it but never the domain itself - and presents it on every
 one of the paths above without any request naming it. A design send and a
-load run follow a redirect one transfer per hop, so each hop is matched against
-its own host; a stream lets libcurl follow, which presents the certificate only
-to the origin the transfer started at. Only the file *paths* are
+stream follow a redirect one transfer per hop, so each hop is matched against
+its own host; a load run follows one transfer per hop the same way, so the
+certificate reaches the origin each hop names. Only the file *paths* are
 stored, so the private key stays where the user's own tooling put it; a
 cert-authenticated exchange reports which entry it used, live and from History
 alike. See [Client

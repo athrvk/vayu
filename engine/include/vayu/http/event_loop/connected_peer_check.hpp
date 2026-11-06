@@ -51,11 +51,11 @@ struct ConnectedPeerCheck {
     /// How many times libcurl was about to write a request on a connection,
     /// over every transfer this check was handed to: once per transfer (a
     /// load transfer's redirect hops each being one, #3302), plus once per
-    /// redirect libcurl followed inside one (`CURLINFO_REDIRECT_COUNT`, the
-    /// SSE consumer), plus once per request libcurl re-sent on a new
-    /// connection after a reused one was dropped or refused before answering
-    /// (#2799), which nothing else records. `connection_replays` reads it
-    /// back. A plain int: a transfer's callbacks run on one thread.
+    /// request libcurl re-sent on a new connection after a reused one was
+    /// dropped or refused before answering (#2799), which nothing else
+    /// records. `connection_replays` reads it back for a load transfer; the
+    /// SSE consumer compares it with its value at a hop's start. A plain int:
+    /// a transfer's callbacks run on one thread.
     int requests_started = 0;
 };
 

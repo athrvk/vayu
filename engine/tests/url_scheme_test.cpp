@@ -279,8 +279,12 @@ TEST (UrlSchemeRedirect, ARedirectToAFileUrlIsAProtocolErrorNotARead) {
 // its default redirect allowlist is HTTP, HTTPS, FTP and FTPS. Port 1 refuses
 // the connection, so a handle that followed would report CONNECTION_FAILED.
 // The refusal's code is the one a refused URL gets, but the first hop was
-// answered, so the transfer is timed (#2412). Mutation-check: drop the peer
-// half of `curl_transfer_attempted` and both drivers read it as never sent.
+// answered, so the transfer is timed (#2412), and the event loop's handle still
+// holds that hop's address, which must not make the refusal a peer's
+// `ProtocolMismatch` (#3306). Mutation-check: drop the peer half of
+// `curl_transfer_attempted` and both drivers read it as never sent; drop the
+// scheme half of `peer_spoke_another_protocol` and the event loop reads
+// PROTOCOL_MISMATCH.
 TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
     const vayu::tests::EchoServer server;
     auto request = get (server.redirect_to ("ftp://127.0.0.1:1/pub/x"));

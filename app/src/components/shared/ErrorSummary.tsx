@@ -60,6 +60,7 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
 	proxy_error: "Proxy error",
 	too_many_redirects: "Too many redirects",
 	bad_content_encoding: "Bad content encoding",
+	protocol_mismatch: "Protocol mismatch",
 	internal_error: "Internal error",
 	unknown: "Unknown",
 };

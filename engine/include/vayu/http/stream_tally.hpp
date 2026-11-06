@@ -15,13 +15,15 @@
  * loop's `TransferData` and the single-request `Client` (a collection run's
  * sequential steps, #3235). It is the one place that decides when a cap is
  * reached and what the ended stream reports, so the two drivers cannot come
- * to disagree about either. It also feeds the run's live event tally
- * (`StreamBounds::live_events`, #3236) as the events arrive, so a live tick
- * sees a stream's events while it is still open and the settled live total
- * equals the report's.
+ * to disagree about either. It also keeps the run's live counters
+ * (`StreamBounds::live`, #3236, #3304): it counts the events as they arrive,
+ * so a live tick sees a stream's events while it is still open and the
+ * settled live total equals the report's, and it holds the run's open-stream
+ * gauge up from `start` until `report` or, on a path that never reports (a
+ * cancelled or discarded transfer), its destructor.
  *
  * Not thread-safe: one tally belongs to one transfer, which libcurl drives
- * from one thread. The live tally it feeds is shared, and atomic.
+ * from one thread. The live counters it feeds are shared, and atomic.
  */
 
 #include <atomic>
@@ -42,15 +44,28 @@ class StreamTally {
     public:
     using Clock = std::chrono::steady_clock;
 
+    StreamTally () = default;
+    ~StreamTally () {
+        close_live ();
+    }
+    StreamTally (const StreamTally&)            = delete;
+    StreamTally& operator= (const StreamTally&) = delete;
+    StreamTally (StreamTally&&)                 = delete;
+    StreamTally& operator= (StreamTally&&)      = delete;
+
     /// Bound this transfer by @p bounds, timed from @p started_at, the instant
-    /// the transfer's latency is measured from. A tally never started is
-    /// inactive, and its owner calls nothing but `report` on it.
+    /// the transfer's latency is measured from, and count it open. A tally
+    /// never started is inactive, and its owner calls nothing but `report` on
+    /// it. Called at most once.
     void start (const StreamBounds& bounds, Clock::time_point started_at) {
-        active_      = true;
-        max_events_  = bounds.max_events;
-        live_events_ = bounds.live_events;
-        started_at_  = started_at;
+        active_     = true;
+        max_events_ = bounds.max_events;
+        live_       = bounds.live;
+        started_at_ = started_at;
         deadline_ = started_at + std::chrono::milliseconds (bounds.max_duration_ms);
+        if (live_ != nullptr) {
+            live_->open.fetch_add (1, std::memory_order_relaxed);
+        }
     }
 
     [[nodiscard]] bool active () const {
@@ -100,9 +115,10 @@ class StreamTally {
      * mid-way still delivered the events it delivered. Counts an unterminated
      * last frame the close completed, which leaves the first-event time unset
      * when it was the only one: no write delivered it at a time to measure.
-     * That frame reaches the live tally too. An inactive tally reports
-     * nothing, so an ordinary transfer's `stream_events` stays absent rather
-     * than zero. Called once per transfer.
+     * That frame reaches the live tally too, and the stream stops counting as
+     * open. An inactive tally reports nothing, so an ordinary transfer's
+     * `stream_events` stays absent rather than zero. Called once per
+     * transfer.
      */
     void report (Response& response) {
         if (!active_) {
@@ -111,6 +127,7 @@ class StreamTally {
         const std::size_t before = counter_.events ();
         counter_.finish ();
         publish_since (before);
+        close_live ();
         response.stream_events         = counter_.events ();
         response.stream_capped         = cap_reached_;
         response.stream_first_event_ms = first_event_ms_;
@@ -122,16 +139,27 @@ class StreamTally {
     /// ordered against anything else the transfer wrote.
     void publish_since (std::size_t before) const {
         const std::size_t after = counter_.events ();
-        if (after == before || live_events_ == nullptr) {
+        if (after == before || live_ == nullptr) {
             return;
         }
-        live_events_->fetch_add (after - before, std::memory_order_relaxed);
+        live_->events.fetch_add (after - before, std::memory_order_relaxed);
+    }
+
+    /// Take this stream off the run's open gauge, once: releasing the handle
+    /// is what makes the second call (the destructor after `report`) a no-op.
+    void close_live () noexcept {
+        if (live_ == nullptr) {
+            return;
+        }
+        live_->open.fetch_sub (1, std::memory_order_relaxed);
+        live_.reset ();
     }
 
     bool active_        = false;
     int64_t max_events_ = 0;
-    /// Null unless the run reports stream metrics live.
-    std::shared_ptr<std::atomic<std::size_t>> live_events_;
+    /// Null unless the run reports stream metrics live, and once the stream
+    /// has been reported.
+    std::shared_ptr<LiveStreamCounts> live_;
     Clock::time_point started_at_;
     Clock::time_point deadline_;
     SseFrameCounter counter_;
