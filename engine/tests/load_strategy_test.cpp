@@ -917,12 +917,14 @@ TEST_F (LoadStrategyTest, TransportErrorResultIsRecordedAndClearsInFlight) {
 
 // #2462: a redirect loop and an undecodable body are stored under their own
 // error_type, on both ways a failure arrives (a transport Error, and a
-// Response the event loop completed with an error code). Mutation-check: drop
-// either case from error_type_name and its row reads "unknown".
+// Response the event loop completed with an error code); so is a peer that
+// answered in another protocol (#3306). Mutation-check: drop any case from
+// error_type_name and its row reads "unknown".
 TEST_F (LoadStrategyTest, RedirectAndContentEncodingFailuresKeepTheirOwnErrorType) {
     const auto cases = std::to_array<std::pair<vayu::ErrorCode, const char*>> ({
     { vayu::ErrorCode::TooManyRedirects, "too_many_redirects" },
     { vayu::ErrorCode::BadContentEncoding, "bad_content_encoding" },
+    { vayu::ErrorCode::ProtocolMismatch, "protocol_mismatch" },
     });
     for (const auto& [code, type_name] : cases) {
         const auto error_types_after = [&] (const vayu::Result<vayu::Response>& result) {

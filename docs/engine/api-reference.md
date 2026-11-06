@@ -1249,6 +1249,21 @@ stored numeric values are unchanged, but a script that tested
 the new spelling. A load run records them under the error types
 `too_many_redirects` and `bad_content_encoding`.
 
+A target that answers in something other than HTTP/1.x is `PROTOCOL_MISMATCH`
+(issue #3306), error type `protocol_mismatch`. The usual case is an `h2c`
+server (HTTP/2 over cleartext) sent a request over `http://`: Vayu speaks
+HTTP/1.1 there whatever `httpVersion` says (the Protocol paragraph under
+[POST /execute](#post-execute)), and the server answers with its binary HTTP/2 preface, which libcurl
+reports as `Received HTTP/0.9 when not allowed`. That failure used to come back
+as `INVALID_URL`, which sent people to a URL that was fine. `errorMessage`
+opens with `The server answered in a protocol other than HTTP/1.x:` followed by
+libcurl's text, and when the request asked for `http2` and the hop that failed
+was `http://` (after any redirect) it adds `HTTP/2 is only negotiated over
+https://; this server may speak h2c, which Vayu does not send`. A scheme the
+transfer refuses, a redirect onto `ftp://` included, is still `INVALID_URL`.
+The code is appended like the others, and a script sees it as `err.code`
+(`pm.sendRequest`) or `pm.response.errorCode`.
+
 A send still in flight when the engine shuts down is cancelled rather than
 waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
 making: the send answers, and its trace records, `CANCELLED` with
@@ -8134,7 +8149,12 @@ says what the server sent, not what went on to the next origin.
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
 HTTP/1.1, and `"http2"` attempts h2 over TLS and falls back to 1.1
 (`CURL_HTTP_VERSION_2TLS` - against a plain `http://` URL this silently
-negotiates 1.1, since h2 is not offered over cleartext). This is what was
+negotiates 1.1, since h2 is not offered over cleartext). A server on `http://`
+that speaks only h2c answers that HTTP/1.1 request with its HTTP/2 preface,
+and the send fails as `PROTOCOL_MISMATCH` with a hint naming h2c (the
+transport error codes are described under [Proxy settings](#proxy-settings));
+serve it over TLS or let it accept HTTP/1.1, since Vayu never sends h2c. This
+is what was
 *requested*; the response's own `httpVersion` (below) reports what was
 actually negotiated, and the two can differ. The renderer always sends this
 field on every execute, never eliding it even when it equals the default - the
@@ -8626,7 +8646,10 @@ attempts it - the fallback noted above under the request's `httpVersion` is
 exactly the case this field is for, and it is honest rather than a false
 positive: h2 was asked for and HTTP/1.1 was used. A local dev server on
 `http://` with the protocol set to HTTP/2 will show the warning on every
-request; either switch the request to `auto`, or serve over TLS.
+request; either switch the request to `auto`, or serve over TLS. A server
+there that speaks only h2c never gets as far as a downgrade: it cannot read
+the HTTP/1.1 request, so the send fails as `PROTOCOL_MISMATCH` with the h2c
+hint instead, and `auto` meets the same failure without the hint.
 
 This exists because the failure it names is invisible otherwise: a `200`, a
 latency and a body look identical whether or not the protocol you asked for was

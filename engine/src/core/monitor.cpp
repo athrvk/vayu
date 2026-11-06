@@ -402,6 +402,7 @@ const char* transport_failure_cause (vayu::ErrorCode code) {
     case vayu::ErrorCode::InvalidUrl: return "URL refused";
     case vayu::ErrorCode::TooManyRedirects: return "too many redirects";
     case vayu::ErrorCode::BadContentEncoding: return "undecodable body";
+    case vayu::ErrorCode::ProtocolMismatch: return "protocol mismatch";
     case vayu::ErrorCode::ResponseTooLarge: return "response too large";
     default: return "transport error";
     }

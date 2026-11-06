@@ -402,6 +402,8 @@ TEST (ScrapeFailureCause, ATransportFailureIsAFixedPhrase) {
     "host not found");
     EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::SslError)),
     "TLS handshake failed");
+    EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::ProtocolMismatch)),
+    "protocol mismatch");
     EXPECT_EQ (scrape_failure_cause (response_with (0, vayu::ErrorCode::InternalError)),
     "transport error");
 }

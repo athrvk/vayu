@@ -351,16 +351,6 @@ struct HeaderSink {
     BodySink* body = nullptr;
 };
 
-/// libcurl's current request URL, copied because the buffer is only valid until
-/// the next call into the handle; empty when libcurl reports none.
-std::string effective_url (CURL* curl) {
-    char* url = nullptr;
-    if (get_info<CURLINFO_EFFECTIVE_URL> (curl, &url) != CURLE_OK || url == nullptr) {
-        return {};
-    }
-    return url;
-}
-
 /// The names a request's auth-written query parameter can appear under in a
 /// URL: as typed, and as `append_query_param` percent-encodes it.
 std::vector<std::string> auth_param_names (const Request& request) {
@@ -797,7 +787,7 @@ CURL* curl,
 int status,
 const std::string& next_url,
 const std::vector<std::string>& secret_params) {
-    const std::string url = effective_url (curl);
+    const std::string url = detail::effective_url (curl);
     int omitted           = 0;
     response.redirect_hops.push_back ({ status,
     response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
