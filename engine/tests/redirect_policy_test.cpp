@@ -69,8 +69,7 @@ TEST (RedirectTarget, TheFragmentIsDroppedAndASpaceIsEncoded) {
     EXPECT_EQ (resolve_redirect_target ("http://a.test/x", "/a b"), "http://a.test/a%20b");
 }
 
-// The scheme rule `CURLOPT_REDIR_PROTOCOLS_STR` held while libcurl followed,
-// in the words it used. Mutation-check: drop the scheme check and the ftp
+// The refusal is worded as libcurl worded it. Mutation-check: drop the scheme check and the ftp
 // target resolves.
 TEST (RedirectTarget, ASchemeOtherThanHttpIsRefusedAsAnInvalidUrl) {
     for (const auto& [location, scheme] : std::vector<std::pair<std::string, std::string>>{
