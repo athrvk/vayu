@@ -284,6 +284,49 @@ ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json) {
     return read_execute_flag (json, "includeParsedBody", true);
 }
 
+namespace {
+
+/// One cap into @p out; a non-integer or out-of-range value is refused on
+/// @p flag, naming the key.
+bool read_stream_cap (const nlohmann::json& json,
+const char* key,
+int64_t low,
+int64_t high,
+std::optional<int64_t>& out,
+StreamFlag& flag) {
+    const auto field = json.find (key);
+    if (field == json.end () || field->is_null ()) {
+        return true;
+    }
+    if (!field->is_number_integer ()) {
+        flag.ok    = false;
+        flag.error = std::string ("'") + key + "' must be an integer (got " +
+        field->type_name () + ")";
+        return false;
+    }
+    const int64_t value = field->get<int64_t> ();
+    if (value < low || value > high) {
+        flag.ok    = false;
+        flag.error = std::string ("'") + key + "' must be between " +
+        std::to_string (low) + " and " + std::to_string (high) + " (got " +
+        std::to_string (value) + ")";
+        return false;
+    }
+    out = value;
+    return true;
+}
+
+/// `maxStreamDurationMs` and `maxStreamEvents`, each range-checked.
+bool read_stream_caps (const nlohmann::json& json, StreamFlag& flag) {
+    namespace sse_limits = vayu::core::constants::sse;
+    return read_stream_cap (json, "maxStreamDurationMs", sse_limits::MIN_STREAM_DURATION_MS,
+           sse_limits::STREAM_DURATION_MS_CEILING, flag.max_duration_ms, flag) &&
+    read_stream_cap (json, "maxStreamEvents", sse_limits::MIN_STREAM_EVENTS,
+    sse_limits::STREAM_EVENTS_CEILING, flag.max_events, flag);
+}
+
+} // namespace
+
 /**
  * @brief Read a payload's `stream` flag and its caps (issue #573), for both
  *        `POST /execute` and - since #576 - `POST /runs`.
@@ -293,33 +336,6 @@ ExecuteFlag read_include_parsed_body_flag (const nlohmann::json& json) {
  */
 StreamFlag read_stream_flag (const nlohmann::json& json) {
     StreamFlag flag;
-
-    // A cap on a non-streaming payload is refused too. It reads as a bound the
-    // caller expects to apply, and silently ignoring it is how an unbounded run
-    // gets mistaken for a capped one.
-    const auto read_cap = [&json, &flag] (const char* key, int64_t low,
-                          int64_t high, std::optional<int64_t>& out) {
-        const auto field = json.find (key);
-        if (field == json.end () || field->is_null ()) {
-            return true;
-        }
-        if (!field->is_number_integer ()) {
-            flag.ok    = false;
-            flag.error = std::string ("'") + key +
-            "' must be an integer (got " + field->type_name () + ")";
-            return false;
-        }
-        const int64_t value = field->get<int64_t> ();
-        if (value < low || value > high) {
-            flag.ok    = false;
-            flag.error = std::string ("'") + key + "' must be between " +
-            std::to_string (low) + " and " + std::to_string (high) + " (got " +
-            std::to_string (value) + ")";
-            return false;
-        }
-        out = value;
-        return true;
-    };
 
     const auto field = json.find ("stream");
     if (field != json.end () && !field->is_null ()) {
@@ -335,14 +351,13 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         flag.value = field->get<bool> ();
     }
 
-    namespace sse_limits = vayu::core::constants::sse;
-    if (!read_cap ("maxStreamDurationMs", sse_limits::MIN_STREAM_DURATION_MS,
-        sse_limits::STREAM_DURATION_MS_CEILING, flag.max_duration_ms) ||
-    !read_cap ("maxStreamEvents", sse_limits::MIN_STREAM_EVENTS,
-    sse_limits::STREAM_EVENTS_CEILING, flag.max_events)) {
+    if (!read_stream_caps (json, flag)) {
         return flag;
     }
 
+    // A cap on a non-streaming payload is refused too. It reads as a bound the
+    // caller expects to apply, and silently ignoring it is how an unbounded run
+    // gets mistaken for a capped one.
     if (!flag.value) {
         if (flag.max_duration_ms || flag.max_events) {
             flag.ok = false;
@@ -364,6 +379,21 @@ StreamFlag read_stream_flag (const nlohmann::json& json) {
         return flag;
     }
 
+    return flag;
+}
+
+StreamFlag read_collection_run_stream_caps (const nlohmann::json& json) {
+    StreamFlag flag;
+    const auto field = json.find ("stream");
+    if (field != json.end () && !field->is_null ()) {
+        flag.ok = false;
+        flag.error =
+        "'stream' is not valid on a collection run - a step streams when its "
+        "stored request has 'stream' set. 'maxStreamDurationMs' and "
+        "'maxStreamEvents' bound those steps without it, so drop 'stream'";
+        return flag;
+    }
+    read_stream_caps (json, flag);
     return flag;
 }
 
@@ -1320,8 +1350,13 @@ const vayu::core::MonitorLimits& monitor_limits) {
     // changed is that a load stream now always ends, by a cap resolved below.
     //
     // The `transient` rule inside that parser is unreachable from here: a run
-    // carrying `transient` was already rejected above.
-    if (const auto stream = read_stream_flag (config); !stream.ok) {
+    // carrying `transient` was already rejected above. A collection run reads
+    // the caps alone, for the steps whose stored request streams (#3235).
+    const bool is_collection_run =
+    config.contains ("scenario") && !config["scenario"].is_null ();
+    if (const auto stream = is_collection_run ? read_collection_run_stream_caps (config) :
+                                                read_stream_flag (config);
+    !stream.ok) {
         return stream.error;
     }
 
@@ -2911,6 +2946,8 @@ nlohmann::json& scenario_manifest) {
     }
     options.cancel           = &ctx.server_stopping;
     options.timeout_ms       = resolve_request_timeout_ms (json, ctx.db);
+    options.stream_bounds    = vayu::http::resolve_stream_bounds (json,
+    vayu::http::default_stream_bounds (vayu::http::read_sse_limits (ctx.db)));
     options.limits.max_steps = static_cast<size_t> (ctx.db.get_config_int (
     "maxScenarioSteps", static_cast<int> (vayu::core::constants::scenario::MAX_STEPS)));
     options.limits.max_data_rows =

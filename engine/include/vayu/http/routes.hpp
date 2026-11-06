@@ -1554,6 +1554,17 @@ struct StreamFlag {
 StreamFlag read_stream_flag (const nlohmann::json& json);
 
 /**
+ * The collection-run reading of the same keys (#3235). A step streams when its
+ * stored request does, so the run's `maxStreamDurationMs` / `maxStreamEvents`
+ * stand alone, range-checked as `read_stream_flag` checks them, and bound
+ * only those steps. A top-level `stream` is refused, either value: `true`
+ * cannot make a stored non-streaming request stream and `false` cannot stop a
+ * streaming one, so accepting it would let a caller believe it did either.
+ * The answer's `value` is always false.
+ */
+StreamFlag read_collection_run_stream_caps (const nlohmann::json& json);
+
+/**
  * Who started a run, as the starting client asserted it (#1817).
  *
  * Metadata, not identity: any caller of the API can claim any kind, so nothing

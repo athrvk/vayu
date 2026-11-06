@@ -59,10 +59,11 @@ export interface BudgetField {
 	 */
 	seededHint?: string;
 	/**
-	 * Judged on a stream section, which only a streaming load run has: the
-	 * engine reports it not evaluated, and so failed, on any other run. The
-	 * collection runner never streams and the load dialog shows these only for
-	 * a streaming request - use {@link budgetFieldsFor}, not the whole table.
+	 * Judged on a stream section, which only a run that streams has (a
+	 * streaming request's load run, or a collection run with a streaming step):
+	 * the engine reports it not evaluated, and so failed, on any other run. Both
+	 * dialogs show these only then - use {@link budgetFieldsFor}, not the whole
+	 * table.
 	 */
 	streamOnly?: boolean;
 }

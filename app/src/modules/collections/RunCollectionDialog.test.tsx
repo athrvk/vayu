@@ -1067,7 +1067,7 @@ describe("pass/fail budgets", () => {
 		expect(mutate.mock.calls[0][0]).not.toHaveProperty("thresholds");
 	});
 
-	it("never offers a stream budget: a collection run has no stream section to judge (#3234)", () => {
+	it("offers no stream budget when no step streams: there is no stream section to judge (#3234)", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();
 		expect(screen.getByLabelText(/error rate/i)).toBeInTheDocument();
@@ -1903,5 +1903,224 @@ describe("the OAuth 2.0 token guard", () => {
 			enableLoadTest();
 			expect(run()).toBeEnabled();
 		});
+	});
+});
+
+describe("the stream caps of a collection with a streaming request (#3235)", () => {
+	const stored = (collectionId: string, stream: boolean) =>
+		({
+			id: `req_${collectionId}_${stream}`,
+			collectionId,
+			stream,
+			url: "https://api.test/events",
+			params: [],
+			headers: [],
+			body: { mode: "none" },
+			elements: [],
+			auth: { mode: "none" },
+		}) as unknown as Request;
+	const childCollection = {
+		id: "col_child",
+		name: "Child",
+		parentId: "col_1",
+		elements: [],
+	} as unknown as Collection;
+	const seedStreaming = (collectionId = "col_1") =>
+		requestsByCollection.set(collectionId, [
+			stored(collectionId, false),
+			stored(collectionId, true),
+		]);
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+	const capField = (name: RegExp) => screen.queryByRole("spinbutton", { name });
+	const open = () =>
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+	const run = () => fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+
+	// Mutation check: pass `isStreamingRequest={false}` back to ProfileFields, or
+	// gate the design-run block on `loadTest`, and the matching case reds.
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("shows both caps on $label when a step streams", ({ load }) => {
+		seedStreaming();
+		open();
+		if (load) enableLoadTest();
+
+		expect(capField(/stop each stream after/i)).toBeInTheDocument();
+		expect(capField(/or after this many events/i)).toBeInTheDocument();
+	});
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("shows neither cap on $label when no step streams", ({ load }) => {
+		requestsByCollection.set("col_1", [stored("col_1", false)]);
+		open();
+		if (load) enableLoadTest();
+
+		expect(capField(/stop each stream after/i)).not.toBeInTheDocument();
+		expect(capField(/or after this many events/i)).not.toBeInTheDocument();
+	});
+
+	it("reads Include nested collections: a streaming step in a sub-collection brings the caps", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		expect(capField(/stop each stream after/i)).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("switch", { name: /include nested collections/i }));
+		expect(capField(/stop each stream after/i)).toBeInTheDocument();
+	});
+
+	// Mutation check: drop the seconds-to-ms conversion in `scenarioStreamCaps`,
+	// or send them unconditionally, and these two redden.
+	it("sends the typed caps as milliseconds beside the design run, and never `stream`", () => {
+		seedStreaming();
+		open();
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "20" } });
+		fireEvent.change(capField(/or after this many events/i)!, { target: { value: "250" } });
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({ maxStreamDurationMs: 20_000, maxStreamEvents: 250 });
+		expect(payload).not.toHaveProperty("stream");
+		expect(payload).not.toHaveProperty("mode");
+	});
+
+	it("sends the caps on a load run too, beside its profile and never `stream`", () => {
+		seedStreaming();
+		open();
+		enableLoadTest();
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "5" } });
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).toMatchObject({ mode: "constant_concurrency", maxStreamDurationMs: 5000 });
+		expect(payload).toHaveProperty("maxStreamEvents");
+		expect(payload).not.toHaveProperty("stream");
+	});
+
+	it.each([{ load: false }, { load: true }])(
+		"sends no cap when no step streams (load test: $load)",
+		({ load }) => {
+			requestsByCollection.set("col_1", [stored("col_1", false)]);
+			open();
+			if (load) enableLoadTest();
+			run();
+
+			const payload = mutate.mock.calls[0][0];
+			expect(payload).not.toHaveProperty("maxStreamDurationMs");
+			expect(payload).not.toHaveProperty("maxStreamEvents");
+			expect(payload).not.toHaveProperty("stream");
+		}
+	);
+
+	// The typed cap outlives the field: turning Include nested collections off
+	// removes the only streaming step. Mutation check: send `scenarioStreamCaps`
+	// unconditionally and this reds.
+	it("does not send a cap typed while a streaming step was in scope once none is", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		fireEvent.change(capField(/or after this many events/i)!, { target: { value: "7" } });
+		fireEvent.click(nested);
+		run();
+
+		const payload = mutate.mock.calls[0][0];
+		expect(payload).not.toHaveProperty("maxStreamDurationMs");
+		expect(payload).not.toHaveProperty("maxStreamEvents");
+	});
+
+	// Mutation check: validate the caps whatever `anyStreams` says and the second
+	// half reds; drop the check and the first does.
+	it("refuses an out-of-range cap while the field is on screen, and not once it is hidden", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		fireEvent.change(capField(/stop each stream after/i)!, { target: { value: "0" } });
+
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
+		expect(
+			screen.getByText(/stream duration must be a number from 1 to 86,400/i)
+		).toBeVisible();
+
+		fireEvent.click(nested);
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+	});
+
+	/*
+	 * The engine judges a collection run's stream section (#3234, #3235), so a
+	 * streaming step brings the stream budgets, and the note on what a latency
+	 * budget measures for one. Mutation check: render `budgetFieldsFor(false)`
+	 * again and the offer cases red; build the thresholds without `anyStreams`
+	 * and the payload ones do.
+	 */
+	const openBudgets = () =>
+		fireEvent.click(screen.getByRole("button", { name: /pass\/fail budgets/i }));
+	const budgetField = (name: RegExp) => screen.queryByRole("spinbutton", { name });
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("offers the stream budgets on $label when a step streams", ({ load }) => {
+		seedStreaming();
+		open();
+		if (load) enableLoadTest();
+		openBudgets();
+
+		expect(budgetField(/time to first event/i)).toBeInTheDocument();
+		expect(budgetField(/events per second/i)).toBeInTheDocument();
+		expect(screen.getByText(STREAM_LATENCY_NOTE)).toBeInTheDocument();
+	});
+
+	it.each([
+		{ label: "a design run", load: false },
+		{ label: "a load run", load: true },
+	])("sends a typed stream budget under the engine's key on $label", ({ load }) => {
+		seedStreaming();
+		open();
+		if (load) enableLoadTest();
+		openBudgets();
+		fireEvent.change(budgetField(/time to first event/i)!, { target: { value: "300" } });
+		fireEvent.change(budgetField(/events per second/i)!, { target: { value: "2" } });
+		run();
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({
+			streamTimeToFirstEventP95Ms: 300,
+			streamEventsPerSecondMin: 2,
+		});
+	});
+
+	// The typed value outlives the field: turning Include nested collections off
+	// removes the only streaming step, and a stream budget sent then would be
+	// reported not evaluated, and so missed. Mutation check: build the
+	// thresholds, the error or the summary with `true` for `anyStreams` and the
+	// matching assertion reds.
+	it("neither sends, counts nor checks a stream budget typed while a streaming step was in scope once none is", () => {
+		collections.push(childCollection);
+		seedStreaming("col_child");
+		open();
+		const nested = screen.getByRole("switch", { name: /include nested collections/i });
+		fireEvent.click(nested);
+		openBudgets();
+		fireEvent.change(budgetField(/events per second/i)!, { target: { value: "-1" } });
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeDisabled();
+		fireEvent.change(budgetField(/time to first event/i)!, { target: { value: "300" } });
+		fireEvent.change(budgetField(/error rate/i)!, { target: { value: "1" } });
+
+		fireEvent.click(nested);
+		expect(budgetField(/time to first event/i)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /pass\/fail budgets/i })).toHaveTextContent(
+			"1 budget active - Error rate at most 1%"
+		);
+		expect(screen.getByRole("button", { name: /^run$/i })).toBeEnabled();
+		run();
+
+		expect(mutate.mock.calls[0][0].thresholds).toEqual({ maxErrorRatePct: 1 });
 	});
 });

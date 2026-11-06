@@ -394,6 +394,27 @@ export const streamInput = z
 		`Consume the response as a text/event-stream instead of buffering it (default false). BOUNDED, ALWAYS: this tool does not stream to you - it reads the run's events for at most \`streamBudgetMs\` milliseconds (default ${DEFAULT_STREAM_BUDGET_MS}) and returns at most \`maxStreamEvents\` of them (default ${DEFAULT_STREAM_MAX_EVENTS}). The result says which bound it stopped at (\`completed\`, \`capReached\`, \`budgetExhausted\`) and carries \`totalEvents\` where the engine knows it, so a partial read is never mistaken for the whole stream. The run keeps going engine-side after this returns; read it later with get_run_report, or end it with stop_run.`
 	);
 
+/**
+ * The engine's `constants::sse` ranges for a run's stream caps (`POST /runs`),
+ * shared by `start_load_run` and `run_collection`: a value either schema
+ * accepts is one the engine accepts, so a bad one is a named refusal here and
+ * not an opaque 400.
+ */
+export const streamDurationMsSchema = z.number().int().min(1000).max(86_400_000);
+export const streamEventsSchema = z.number().int().min(1).max(10_000_000);
+
+/** `run_collection`'s caps: they bound each streaming step and need no `stream` (#3235). */
+export const collectionStreamDurationMsInput = streamDurationMsSchema
+	.optional()
+	.describe(
+		"Wall-clock cap on each streaming step's stream, in ms; a step whose saved request does not stream ignores it. Defaults to the engine's sseMaxStreamDurationMs."
+	);
+export const collectionStreamEventsInput = streamEventsSchema
+	.optional()
+	.describe(
+		"Event cap on each streaming step's stream; a step whose saved request does not stream ignores it. Defaults to the engine's sseMaxStreamEvents."
+	);
+
 export const maxStreamEventsInput = z
 	.number()
 	.int()

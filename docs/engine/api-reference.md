@@ -5588,6 +5588,10 @@ whether or not a later hop carried them.
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
+`SameSite` is parsed and ignored, on purpose: an API client has no cross-site
+initiator to restrict, so every cookie whose domain, path and `Secure` flag
+match is sent whatever its `SameSite` value (`Strict`, `Lax` or `None`).
+
 ### GET /cookies
 
 Every jar that holds anything, one entry per scope, in scope-key order (the
@@ -8780,9 +8784,9 @@ Start a load test run (Vayu Mode).
   "followRedirects": true,   // Optional, default true - see POST /execute
   "maxRedirects": 10,        // Optional, default 10
   "httpVersion": "auto",     // Optional: "auto" | "http1.1" | "http2", default "auto" - see POST /execute
-  "stream": false,           // Optional - consume each response as text/event-stream; see below
-  "maxStreamDurationMs": 600000,  // Optional, streaming only - see below
-  "maxStreamEvents": 100000,      // Optional, streaming only - see below
+  "stream": false,           // Optional, single-request only - consume each response as text/event-stream; see below
+  "maxStreamDurationMs": 600000,  // Optional, streaming only (a collection run's streaming steps) - see below
+  "maxStreamEvents": 100000,      // Optional, streaming only (a collection run's streaming steps) - see below
   "stream_metrics": true     // Optional - feed the histograms behind the report's `stream` section
 }
 ```
@@ -8917,16 +8921,43 @@ The same count reaches the [live frames](#get-runsrunidlive) as the events
 arrive (issue #3236): `streamEvents`, `eventsPerSecond` and `streamsOpen` on
 every frame, and `streamTimeToFirstEvent` on gate frames, so a run of long
 streams shows its progress before the first one ends rather than zero
-completions until then.
+completions until then. Only a single-request streaming run carries them; a
+collection run's live frames have none of the four.
 
-`stream` is refused beside `transient` (as on a send) and each cap is refused
-without `stream` - a cap on a non-streaming run reads as a bound the caller
-expects to apply, and ignoring it is how an unbounded run gets mistaken for a
-capped one.
+On a single-request run, `stream` is refused beside `transient` (as on a send)
+and each cap is refused without `stream` - a cap on a non-streaming run reads
+as a bound the caller expects to apply, and ignoring it is how an unbounded run
+gets mistaken for a capped one.
 
-Streaming is **not** supported on a scenario run: `scenario` composes its steps
-at plan time and each step is its own request, so there is no single stream for
-the caps to bound.
+**A collection run (`scenario`) streams the steps whose stored request has
+`stream` set** (#3235), and only those. The plan reads the flag off each stored
+request, so the run declares nothing: `maxStreamDurationMs` and
+`maxStreamEvents` are accepted *without* `stream` here, range-checked as above,
+and bound every streaming step, each falling back to its `sse*` setting on its
+own. A step that does not stream ignores them. A top-level `stream` is a `400`
+(`invalid_run_config`) on a collection run, `true` or `false`: it cannot make a
+stored request stream or stop one streaming, so accepting it would let a caller
+believe it did either. A collection **load** run sends a streaming step through
+the same event loop as a streaming single-request run, so the table above
+holds per step: a cap or the server's close ends it as a success, its events
+land in the report's `stream` section, its stored exchange keeps its event
+count (so `GET /runs/:runId/samples` reads its `events` back), and the step's own `timeout` (or the run's) bounds only its
+connect phase - the whole-transfer timeout is the duration cap plus the 5s
+backstop. A load run's natural end waits for the longest streaming step's cap
+plus that backstop, or for the run's `timeout` where that is longer (its
+ordinary steps are still bounded by it), before cancelling what is still in
+flight. A sequential
+(design-mode) collection run sends a streaming step through the single-request
+client by the same rules: a cap or the server's close ends it as a pass, its
+own `timeout` bounds only its connect phase, and a `POST /runs/:runId/stop`
+ends the stream in flight rather than waiting out its cap (a stream the server
+had not yet answered is a cancelled step). The body is the `text/event-stream`
+bytes, held to `maxDesignResponseBodyBytes` like any step's (reaching it ends
+the stream, with `bodyCapped`); the step's stored trace carries the parsed
+`events` node (`items`, `totalEvents`, `eventsTruncated`) a load sample's does,
+and the run's summary and report gain the same `stream` section, which its
+`stream*` budgets judge. A duration cap that passes before any status line is a
+`timeout` error naming the cap.
 
 #### The `data` rows (a data-driven load run)
 
@@ -10541,10 +10572,10 @@ default, and whose message names the offending field and why the bound exists:
 | `rampUpDuration` | non-negative, optional unit (`ms`\|`s`\|`m`\|`h`); a JSON number is seconds; `0` is an instant ramp | Read by `ramp_up` only, but checked in every mode, like `duration`. It was not checked here at all, so `"10sec"` created a row that went `running` and then `failed`. Checked by asking the run-time reader itself, so it accepts exactly what the ramp will read - zero and a JSON number included, both of which `duration` refuses. |
 | `iterations` | `1`-`2147483647` | An `iterations` run stops on its request count alone, read as a `size_t`, so `-1` was ~1.8e19 requests and a run that never ended until stopped. The ceiling is the one `scenario.iterations` has. |
 | `rps` / `targetRps` | `0`-`1000000`, fractions allowed | The open-loop arrival rate per second; `0` asks for none. The ceiling is the highest RPS cap the app and MCP settings can be raised to. `constant_rps` needs one of the two positive, and every other mode refuses a positive one - see below. |
-| `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. |
-| `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamDurationMs` setting. |
-| `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream`. Defaults to the `sseMaxStreamEvents` setting. |
-| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
+| `stream` | boolean | Accepted since streaming under load landed; read through the same parser `POST /execute` uses. A non-boolean is a `400` rather than a silent buffered run the caller would wait forever for. Refused on a collection run, either value: there a step streams when its stored request does (#3235). |
+| `maxStreamDurationMs` | `1000`-`86400000` ms | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamDurationMs` setting. |
+| `maxStreamEvents` | `1`-`10000000` | Streaming only - refused without `stream` on a single-request run; on a collection run accepted alone and applied to the steps whose stored request streams. Defaults to the `sseMaxStreamEvents` setting. |
+| `stream_metrics` | boolean | Whether the run feeds the per-completion event and time-to-first-event histograms, and, on a single-request streaming run, its live event tally. `false` leaves the report's `stream` section out entirely rather than zeroing it, and the [live frames](#get-runsrunidlive)' stream keys with it. Run-config only - there is no engine-wide setting beside it, because the cost is paid only by runs that stream. |
 | `sloMs` | `1`-`60000` ms | `capacity` only. A non-positive budget has no edge to find, and one past a minute is longer than the transfers any realistic run measures. Matches the app's own clamp on the p99 threshold setting. |
 | `carriedBudgets` | array of at most `64` strings, each at most `512` bytes of UTF-8 | Stored in the snapshot and echoed in every report, and nothing downstream reads the entries, so these bounds are the only ones the list gets. See [Carried-over budgets](#carried-over-budgets-carriedbudgets). |
 
@@ -10887,7 +10918,8 @@ flight after its effective timeout (the run's `timeout`, else the
 `defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
 streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
 stream backstop plus the same 2s, issue #2834), so a stream still within its
-cap is never cut. A non-stream request cancelled there never answered: it stays
+cap is never cut. A collection run with a streaming step waits for whichever
+of the two bounds is longer (issue #3235). A non-stream request cancelled there never answered: it stays
 an error, under status code `0`, and its stored error record carries
 `error_type` `cancelled` (`errors.types` in the report).
 
@@ -11465,7 +11497,7 @@ no frame.
 | `secondSamples`, `secondP50Ms` / `secondP95Ms` / `secondP99Ms` | **Gate frames only** (issue #2385): the frame of the tick that wrote a [stored row](#get-runsrunidmetrics), about once a second, carries that row's figures - every window since the previous gate merged, and how many completions they held. The final frame carries them too, for the partial second since the last gate, which is stored nowhere. The percentiles are `null` when `secondSamples` is `0`. Absent from every other frame |
 | `cumulativeLatency` | **Gate frames only** (issue #2782), the final frame included: the run-so-far latency distribution, `{minMs, p50Ms, p75Ms, p90Ms, p95Ms, p99Ms, p999Ms, maxMs, count}`, over the same completions as the `cumulative*Ms` keys. `null` until something has completed, never zeros. The final frame merges the last window after the drain, so its figures are the report's [`latency`](#get-runsrunidreport) block. Absent from every other frame |
 | `cumulativePhases` | **Gate frames only** (issue #2782): `{dns, connect, tls, firstByte, download}`, each `{meanMs, p50Ms, p95Ms, p99Ms, maxMs, count}`, from the same per-phase histograms as the report's [`timingBreakdown`](#get-runsrunidreport), which every successful completion feeds. `null` until a completion has recorded its phases; **absent** when the run has the [phase histograms](#post-runs) off, so absent means "not measured" and `null` means "nothing yet". Read while the run is still recording, one phase at a time, so a mid-run reading's phase counts can differ from each other and from its frame's counts by the completions that landed between the reads; the final frame is read after the drain and its means are the report's `avg*Ms`. Absent from every other frame |
-| `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streams open at the sample, which is `activeConnections` because every transfer of such a run is a stream. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
+| `streamEvents` / `streamsOpen` | **Streaming runs only** (issue #3236; a single-request run with `stream`, not a collection run whose steps stream), on every frame, and only while [`stream_metrics`](#post-runs) is on: the events delivered so far, counted on the write path as they arrive rather than when a stream completes, so a run of long streams is not blank until the first one ends; and the streams open at the sample, which is `activeConnections` because every transfer of such a run is a stream. Once the run settles, the final frame's `streamEvents` equals the report's [`stream.totalEvents`](#get-runsrunidreport), the unterminated last frame a close completes included; a run a Stop ended also counts the events of the streams it cancelled, which the report does not. Absent from every other run's frames, never zeroed |
 | `eventsPerSecond` | **Streaming runs only** (issue #3236), on the same frames as `streamEvents`: events per second over the trailing window `currentRps` covers, from the difference of `streamEvents` across it. `0` on the first frame and for a window with nothing in it. Live only: no [stored row](#get-runsrunidmetrics) carries it |
 | `streamTimeToFirstEvent` | **Gate frames only** (issue #3236), on the runs that carry `streamEvents`: `{p50, p95, p99, max, count}` in milliseconds, from submission to the first event, over the streams **completed** so far, from the histogram behind the report's [`stream.timeToFirstEvent`](#get-runsrunidreport); a stream still open is not in it. Absent until a completed stream delivered a timed event, and from every other frame |
 | `bytesSent` / `bytesReceived` | Cumulative wire bytes: every hop's headers and body, each counted once, so a followed redirect counts its own response (body included) and, for a `307`/`308`, the request body it sent again (issue #2893) |

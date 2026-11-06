@@ -160,8 +160,10 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
  * it is not positive). A stream is not bounded by the request timeout: its
  * transfer runs to `max_duration_ms` and is backstopped
  * `LOAD_STREAM_TIMEOUT_GRACE_MS` later (`curl_utils.cpp`), so a drain sized by
- * the timeout cancels a healthy stream long before its cap. A user Stop does
- * not drain at all and never reads this.
+ * the timeout cancels a healthy stream long before its cap. A single-request
+ * run is one or the other; a collection run can be both, which is
+ * `collection_natural_end_drain_ms`. A user Stop does not drain at all and
+ * never reads this.
  */
 [[nodiscard]] inline int64_t
 natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, int timeout_ms) {
@@ -172,6 +174,21 @@ natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, in
     const int64_t transfer_ms =
     timeout_ms > 0 ? timeout_ms : constants::server::DEFAULT_TIMEOUT_MS;
     return transfer_ms + constants::event_loop::STOP_DRAIN_GRACE_MS;
+}
+
+/**
+ * @brief The natural-end wait of a collection load run: the longer of
+ *        `natural_end_drain_ms`'s two answers, because one plan can hold
+ *        streaming steps (bounded by @p longest_stream, from
+ *        `longest_stream_bounds`) beside ordinary ones (bounded by
+ *        @p timeout_ms), and the wait must outlast whichever is still in
+ *        flight. With no streaming step it is the ordinary wait.
+ */
+[[nodiscard]] inline int64_t collection_natural_end_drain_ms (
+const std::optional<vayu::StreamBounds>& longest_stream,
+int timeout_ms) {
+    return std::max (natural_end_drain_ms (longest_stream, timeout_ms),
+    natural_end_drain_ms (std::nullopt, timeout_ms));
 }
 
 /**
@@ -199,13 +216,11 @@ struct EngineDefaults {
     /// histograms behind the report's `timingBreakdown.phases`.
     bool phase_histograms = constants::metrics_collector::DEFAULT_PHASE_HISTOGRAMS;
 
-    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents` - the same
-    /// two the design path's stream defaults from, read here so a load stream
-    /// the caller gave no caps is bounded by the user's own settings rather
-    /// than by a second set of numbers that happen to live in the load code
-    /// (issue #576).
-    int64_t stream_max_duration_ms = constants::sse::MAX_STREAM_DURATION_MS;
-    int64_t stream_max_events      = constants::sse::MAX_STREAM_EVENTS;
+    /// Config keys `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
+    /// (`vayu::http::default_stream_bounds`), so a load stream the caller gave
+    /// no caps is bounded by the user's own settings (issue #576).
+    vayu::StreamBounds stream_defaults{ constants::sse::MAX_STREAM_DURATION_MS,
+        constants::sse::MAX_STREAM_EVENTS };
 
     /// Config key `maxElementBodyBytes` (issue #1514's reopen):
     /// `ElementContext::max_body_bytes` for a scenario load run's own
@@ -1147,7 +1162,7 @@ struct RunContext {
     RunContext (const std::string& id,
     nlohmann::json cfg,
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS,
-    EngineDefaults engine_defaults = {});
+    const EngineDefaults& engine_defaults = {});
     ~RunContext ();
     RunContext (const RunContext&)            = delete;
     RunContext& operator= (const RunContext&) = delete;

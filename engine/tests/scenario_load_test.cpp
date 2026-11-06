@@ -47,6 +47,7 @@
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/event_loop.hpp"
 #include "vayu/http/routes.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "wait_until.hpp"
 
@@ -4379,4 +4380,90 @@ TEST_F (ScenarioLoadTest, ARunWhoseSamplesWereThinnedStillReportsHonestly) {
     EXPECT_GT (context_->metrics_collector->response_samples_dropped (), 0u)
     << "what was thinned must be reported, or the tallies read as the whole "
        "run";
+}
+
+// #3235: a collection whose request is stored with `stream` set runs that step
+// as a stream under load. `/sse-ticks` holds its response open for 6 s, far
+// past the step's own 200 ms timeout, and the event cap ends it as a success.
+// Through the plan `POST /runs` resolves and the run manager that reports it,
+// so the stored step result and the run's `stream` section are read back.
+// Mutation check: drop the `row.stream` copy in `resolve_step` and the step
+// times out at 200 ms - a failure, no event count and no section.
+TEST_F (ScenarioLoadTest, AStoredStreamingRequestRunsAsAStreamToItsCap) {
+    const vayu::tests::SlowMockServer upstream;
+
+    vayu::db::Collection collection;
+    collection.id         = "col_stream";
+    collection.name       = "Streams";
+    collection.created_at = 1;
+    collection.updated_at = 1;
+    db_->create_collection (collection);
+    vayu::db::Request stored;
+    stored.id            = "req_stream";
+    stored.collection_id = collection.id;
+    stored.name          = "events";
+    stored.method        = vayu::HttpMethod::GET;
+    stored.url           = upstream.sse_ticks_url ();
+    stored.timeout_ms    = 200;
+    stored.stream        = true;
+    stored.created_at    = 1;
+    stored.updated_at    = 1;
+    db_->save_request (stored);
+
+    constexpr int64_t EVENT_CAP = 5;
+    const json config = { { "mode", "iterations" }, { "iterations", 1 },
+        { "concurrency", 1 }, { "maxStreamEvents", EVENT_CAP },
+        { "scenario", { { "source", "collection" }, { "collectionId", collection.id } } } };
+
+    vayu::core::ScenarioResolveOptions options;
+    options.timeout_ms           = 30000;
+    options.limits.max_steps     = 10;
+    options.limits.max_data_rows = 10;
+    options.limits.max_data_bytes = vayu::core::constants::scenario::MAX_DATA_BYTES;
+    options.stream_bounds = vayu::http::resolve_stream_bounds (config,
+    vayu::http::default_stream_bounds (vayu::http::read_sse_limits (*db_)));
+    auto resolved = vayu::core::resolve_scenario (*db_, config.at ("scenario"), options);
+    ASSERT_TRUE (resolved.ok) << resolved.error;
+    auto execution     = std::make_shared<vayu::core::ScenarioExecution> ();
+    execution->request = std::move (resolved.request);
+    execution->plan    = std::move (resolved.plan);
+    execution->files   = std::move (resolved.files);
+
+    const std::string run_id = "run_scenario_stream";
+    vayu::db::Run run;
+    run.id              = run_id;
+    run.type            = vayu::RunType::Load;
+    run.status          = vayu::RunStatus::Pending;
+    run.config_snapshot = config.dump ();
+    run.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    db_->create_run (run);
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db_, execution));
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return manager.get_run (run_id) == nullptr; }))
+    << "the run never finished";
+
+    const auto [status, report] = vayu::http::routes::run_report_response (*db_, run_id);
+    ASSERT_EQ (status, 200) << report.dump ();
+    const auto& summary = report.at ("summary");
+    EXPECT_EQ (summary.at ("successfulRequests").get<size_t> (), 1u) << report.dump ();
+    EXPECT_EQ (summary.at ("failedRequests").get<size_t> (), 0u) << report.dump ();
+    EXPECT_FALSE (report.at ("errors").at ("types").contains ("timeout"))
+    << report.dump ();
+
+    ASSERT_TRUE (report.contains ("stream")) << report.dump ();
+    const auto& stream = report.at ("stream");
+    EXPECT_EQ (stream.at ("completions").get<size_t> (), 1u) << stream.dump ();
+    EXPECT_EQ (stream.at ("totalEvents").get<int64_t> (), EVENT_CAP) << stream.dump ();
+    EXPECT_EQ (stream.at ("capped").get<size_t> (), 1u) << stream.dump ();
+
+    const auto bodies = db_->get_result_bodies_paginated (run_id, 10, 0);
+    ASSERT_EQ (bodies.size (), 1u) << "the step's exchange was not stored";
+    ASSERT_HAS_VALUE (bodies.front ().stream_events);
+    EXPECT_EQ (*bodies.front ().stream_events, EVENT_CAP);
+
+    manager.shutdown ();
 }

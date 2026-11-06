@@ -55,8 +55,9 @@ export function isScenarioLoadMode(mode: string): mode is ScenarioLoadMode {
  * virtual-user count (and by the pass count, in Fixed passes), so numbers
  * borrowed from a lone request would aim a folder's worth of requests at a
  * target nobody has decided to load. The fields no scenario mode reads (`rps`,
- * `stepDuration`, `sloMs`, the stream caps) are the single-request defaults and
- * never leave `profileParams`.
+ * `stepDuration`, `sloMs`) are the single-request defaults and never leave
+ * `profileParams`. The stream caps are read by `scenarioStreamCaps`, and only when
+ * a step streams.
  */
 export const SCENARIO_PROFILE_DEFAULTS: ScenarioLoadProfile = {
 	mode: "constant_concurrency",
@@ -71,6 +72,25 @@ export const SCENARIO_PROFILE_DEFAULTS: ScenarioLoadProfile = {
 	streamDuration: LOAD_TEST_DEFAULTS.STREAM_DURATION_S,
 	streamMaxEvents: LOAD_TEST_DEFAULTS.STREAM_MAX_EVENTS,
 };
+
+/**
+ * The run-level stream caps of a collection run, in the engine's spelling
+ * (milliseconds). Sent whether or not the run is a load test, and only when a
+ * step of the collection streams (#3235): the engine bounds the streaming steps
+ * with them and ignores them for the rest, so a cap sent for a collection
+ * without one would promise a bound nothing applies.
+ */
+export type ScenarioStreamCaps = Pick<
+	StartScenarioRunRequest,
+	"maxStreamDurationMs" | "maxStreamEvents"
+>;
+
+export function scenarioStreamCaps(profile: ScenarioLoadProfile): ScenarioStreamCaps {
+	return {
+		maxStreamDurationMs: Math.round(profile.streamDuration * 1000),
+		maxStreamEvents: profile.streamMaxEvents,
+	};
+}
 
 /** The load half of a scenario payload, and the dashboard's seed for the run. */
 export type ScenarioLoadFields = Pick<
@@ -95,12 +115,14 @@ function rangeError(
 	label: string,
 	value: number,
 	range: LimitRange,
-	{ whole }: { whole: boolean }
+	{ whole, engineBound = false }: { whole: boolean; engineBound?: boolean }
 ): string | null {
 	const shape = whole ? "a whole number" : "a number";
 	const within = Number.isFinite(value) && value >= range.MIN && value <= range.MAX;
 	if (within && (!whole || Number.isInteger(value))) return null;
-	return `${label} must be ${shape} from ${range.MIN.toLocaleString("en-US")} to ${range.MAX.toLocaleString("en-US")}, the ceiling set in Settings.`;
+	// The stream caps are the engine's fixed bounds, not a ceiling Settings moves.
+	const source = engineBound ? "" : ", the ceiling set in Settings";
+	return `${label} must be ${shape} from ${range.MIN.toLocaleString("en-US")} to ${range.MAX.toLocaleString("en-US")}${source}.`;
 }
 
 /**
@@ -121,6 +143,27 @@ export function scenarioProfileError(
 				})
 			: rangeError("Duration", duration, limits.DURATION_S, { whole: false })) ??
 		(mode === "ramp_up" ? rampError(profile, limits) : null)
+	);
+}
+
+/**
+ * The stream caps' own check, apart from `scenarioProfileError` because a design
+ * run has caps and no load profile. The caller asks only when a step streams: the
+ * fields are hidden otherwise, and a value the user cannot see must not hold Run.
+ */
+export function scenarioStreamCapError(
+	{ streamDuration, streamMaxEvents }: ScenarioLoadProfile,
+	limits: LoadTestLimits
+): string | null {
+	return (
+		rangeError("Stream duration", streamDuration, limits.STREAM_DURATION_S, {
+			whole: false,
+			engineBound: true,
+		}) ??
+		rangeError("Stream events", streamMaxEvents, limits.STREAM_MAX_EVENTS, {
+			whole: true,
+			engineBound: true,
+		})
 	);
 }
 

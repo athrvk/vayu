@@ -63,6 +63,13 @@
  * engine's default and Postman's: a step whose script threw is reported on its
  * step and the iteration walks on.
  *
+ * **Pass/fail budgets** are the seventh (issue #1564, at their state below),
+ * and **the stream caps** the eighth (issue #3235), shown only when a request
+ * the run sends has `stream` set, load test or not. Whether a step streams is
+ * read off each stored request by the engine, so the run sends no `stream`
+ * (a `400` on a collection run) and carries only the two caps, top-level, which
+ * bound the streaming steps and nothing else.
+ *
  * Only the three closed-loop modes exist for a scenario (`SCENARIO_LOAD_MODES`),
  * so the load profile is the request dialog's own `ProfilePicker` and
  * `ProfileFields` narrowed to them. `constant_rps` is a `400` engine-side - an
@@ -73,7 +80,7 @@
  * that memo describes one request, and a sequence multiplies its load.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
 import {
 	Dialog,
@@ -95,7 +102,11 @@ import {
 } from "@/components/ui";
 import { resolveLoadTestLimits } from "@/constants/load-test";
 import { Callout, NumberField } from "@/components/shared";
-import { useCollectionsQuery, useStartScenarioRunMutation } from "@/queries";
+import {
+	useCollectionsQuery,
+	useFullCollectionRequests,
+	useStartScenarioRunMutation,
+} from "@/queries";
 import { useClientSettingsStore, useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
@@ -106,6 +117,8 @@ import { useColumnAudit } from "@/hooks/useColumnAudit";
 import type { Collection } from "@/types";
 import {
 	BUDGETS_EXPLAINER,
+	STREAM_LATENCY_NOTE,
+	STREAM_LATENCY_NOTE_AFTER,
 	budgetFieldsFor,
 	summariseBudgets,
 	type BudgetDraft,
@@ -124,6 +137,7 @@ import OAuth2LoadTestGuard from "@/modules/request-builder/components/OAuth2Load
 import { OAUTH2_GATE_REASON } from "@/modules/request-builder/components/oauth2-load-test-coverage";
 import { usesDuration } from "@/modules/request-builder/components/LoadTestConfigDialog/profile";
 import { ProfileFields } from "@/modules/request-builder/components/LoadTestConfigDialog/ProfileFields";
+import { StreamCapFields } from "@/modules/request-builder/components/LoadTestConfigDialog/StreamCapFields";
 import {
 	ProfilePicker,
 	type ProfilePickerCopy,
@@ -134,6 +148,8 @@ import {
 	isScenarioLoadMode,
 	scenarioLoadFields,
 	scenarioProfileError,
+	scenarioStreamCapError,
+	scenarioStreamCaps,
 	type ScenarioLoadProfile,
 } from "@/modules/request-builder/components/LoadTestConfigDialog/scenarioProfile";
 import { summarise } from "@/modules/request-builder/components/LoadTestConfigDialog/summary";
@@ -366,6 +382,16 @@ export default function RunCollectionDialog({
 	);
 	const fileColumns = dataFile?.parsed.columns ?? NO_COLUMNS;
 	const { audit } = useColumnAudit(auditedCollectionIds, fileColumns);
+	/*
+	 * Whether any request this run sends streams (#3235): the engine reads the
+	 * flag off each stored request, so the run declares nothing itself and the
+	 * stream caps are offered only when there is a step for them to bound. The
+	 * same full-row query the audit above reads, which TanStack dedupes.
+	 */
+	const { requestsByCollection } = useFullCollectionRequests(auditedCollectionIds);
+	const anyStreams = auditedCollectionIds.some((id) =>
+		requestsByCollection.get(id)?.some((request) => request.stream)
+	);
 
 	/*
 	 * A duration-based load run is the only one a token's lifetime can cut short
@@ -415,12 +441,16 @@ export default function RunCollectionDialog({
 	 * what is wrong while the field still has focus.
 	 */
 	const profileError = scenarioProfileError(profile, limits);
+	const streamCapsError = anyStreams ? scenarioStreamCapError(profile, limits) : null;
 
-	const budgetsError = budgetError(budgets) ?? customBudgetsError(customBudgets);
+	// The stream budgets are judged on the report's `stream` section, which only
+	// a run with a streaming step has; read off `anyStreams` like the caps, so a
+	// value typed while one was in scope is neither checked nor sent once none is.
+	const budgetsError = budgetError(budgets, anyStreams) ?? customBudgetsError(customBudgets);
 
 	const settingsValid = loadTest
-		? !profileError && !dataFileError && !budgetsError
-		: iterationsValid && !dataFileError && !budgetsError;
+		? !profileError && !streamCapsError && !dataFileError && !budgetsError
+		: iterationsValid && !streamCapsError && !dataFileError && !budgetsError;
 	const canRun = settingsValid && !oauthGated;
 
 	/*
@@ -479,7 +509,7 @@ export default function RunCollectionDialog({
 
 	const handleRun = () => {
 		if (!canRun) return;
-		const thresholds = buildThresholds(budgets, failRun, customBudgets);
+		const thresholds = buildThresholds(budgets, failRun, customBudgets, anyStreams);
 		// Top-level, matching where the engine reads it
 		// (`validate_elements_run_override` looks at the run payload directly,
 		// not inside `scenario`) - and, unlike `mode`/`concurrency`/`duration`
@@ -494,6 +524,10 @@ export default function RunCollectionDialog({
 				: {}),
 		};
 		const loadFields = loadTest ? scenarioLoadFields(profile) : null;
+		// Read at Run, never held in the profile: a cap typed while a streaming
+		// step was in scope (Include nested collections on) is dropped when the
+		// scope no longer has one, rather than sent as a bound nothing applies.
+		const streamCaps = anyStreams ? scenarioStreamCaps(profile) : null;
 		startRun.mutate(
 			{
 				/*
@@ -507,6 +541,7 @@ export default function RunCollectionDialog({
 				 * when the switch is off.
 				 */
 				...loadFields,
+				...streamCaps,
 				...(Object.keys(elementsOverride).length > 0 ? { elements: elementsOverride } : {}),
 				scenario: {
 					source: "collection",
@@ -655,7 +690,7 @@ export default function RunCollectionDialog({
 								profile={profile}
 								onChange={updateProfile}
 								limits={limits}
-								isStreamingRequest={false}
+								isStreamingRequest={anyStreams}
 								iterationsLabel="Passes through the sequence"
 							/>
 
@@ -663,9 +698,9 @@ export default function RunCollectionDialog({
 								{summarise(profile, profileError !== null, "sequence")}
 							</p>
 
-							{profileError && (
+							{(profileError ?? streamCapsError) && (
 								<Callout severity="blocking" title="Load test">
-									{profileError}
+									{profileError ?? streamCapsError}
 								</Callout>
 							)}
 
@@ -698,6 +733,28 @@ export default function RunCollectionDialog({
 									</ToggleGroupItem>
 								</ToggleGroup>
 							</div>
+						</>
+					)}
+
+					{/*
+					 * A load run shows the caps inside its profile fields; a design
+					 * run has no profile, but its streaming steps are bounded by the
+					 * same two numbers (#3235).
+					 */}
+					{!loadTest && anyStreams && (
+						<>
+							<div className="grid grid-cols-2 gap-3">
+								<StreamCapFields
+									profile={profile}
+									onChange={updateProfile}
+									limits={limits}
+								/>
+							</div>
+							{streamCapsError && (
+								<Callout severity="blocking" title="Stream caps">
+									{streamCapsError}
+								</Callout>
+							)}
 						</>
 					)}
 
@@ -745,28 +802,33 @@ export default function RunCollectionDialog({
 						open={budgetsOpen}
 						onOpenChange={setBudgetsOpen}
 						title="Pass/fail budgets"
-						summary={summariseBudgets(budgets, customBudgets)}
+						summary={summariseBudgets(budgets, customBudgets, anyStreams)}
 					>
 						<p className="text-label leading-relaxed text-muted-foreground">
 							{BUDGETS_EXPLAINER}
 						</p>
-						{/* A collection run never streams, so it has no stream section to judge. */}
-						{budgetFieldsFor(false).map((field) => (
-							<NumberField
-								key={field.key}
-								id={`run-collection-${field.id}`}
-								label={field.label}
-								unit={field.unit}
-								optional
-								value={budgets[field.key]}
-								onChange={(raw) =>
-									setBudgets((prev) => ({ ...prev, [field.key]: raw }))
-								}
-								min={field.min}
-								max={field.max}
-								placeholder="No budget"
-								hint={field.hint}
-							/>
+						{budgetFieldsFor(anyStreams).map((field) => (
+							<Fragment key={field.key}>
+								<NumberField
+									id={`run-collection-${field.id}`}
+									label={field.label}
+									unit={field.unit}
+									optional
+									value={budgets[field.key]}
+									onChange={(raw) =>
+										setBudgets((prev) => ({ ...prev, [field.key]: raw }))
+									}
+									min={field.min}
+									max={field.max}
+									placeholder="No budget"
+									hint={field.hint}
+								/>
+								{anyStreams && field.key === STREAM_LATENCY_NOTE_AFTER && (
+									<p className="text-label leading-relaxed text-muted-foreground">
+										{STREAM_LATENCY_NOTE}
+									</p>
+								)}
+							</Fragment>
 						))}
 
 						{/*

@@ -376,7 +376,9 @@ Manages the lifecycle of load test runs:
   `timeout` + 2s. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
   stream's duration cap (`maxStreamDurationMs`) plus the 5s backstop grace plus 2s
   (`natural_end_drain_ms`, issue #2834), so the drain never cuts a healthy stream short of its
-  cap. A request the drain deadline cancels is recorded as an error; one a user stop
+  cap. A collection run waits for the longer of the two: its longest streaming step's cap the
+  same way (`longest_stream_bounds`, issue #3235), or `timeout` + 2s for its ordinary steps
+  (`collection_natural_end_drain_ms`). A request the drain deadline cancels is recorded as an error; one a user stop
   cancels is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
   its error count, so `requests_sent` is always the total plus the cancelled count.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
@@ -1271,7 +1273,8 @@ throughput: `maxHealthy*` is the last level tried, which overshoots it.
 ### Bounded streams under load
 
 A load run may consume `text/event-stream` responses (`POST /runs` with
-`"stream": true`, issue #576), and the design principle is one line:
+`"stream": true`, issue #576; a collection load run, for each step whose stored
+request has `stream` set, issue #3235), and the design principle is one line:
 **under load, every SSE stream is bounded by construction.**
 
 That follows from the refill loop below rather than from taste. The loop is
@@ -1281,7 +1284,11 @@ it leaks its concurrency slot for the rest of the run, and a run of *N* endless
 streams stops sending anything at all once *N* reaches the target. So a
 streaming request carries `Request::stream_bounds`, and both caps are always
 set - the payload's, or the `sseMaxStreamDurationMs` / `sseMaxStreamEvents`
-settings - with no zero-means-unbounded spelling for either.
+settings - with no zero-means-unbounded spelling for either. A collection run's
+plan gives the bounds to each streaming step, reading the stored row because
+composition drops the flag, so both executors receive the step already bounded:
+the event loop under load, and the single-request `Client` for a sequential run,
+which ends the stream by the same two caps.
 
 The two caps are enforced in the two places that can see them:
 
@@ -1291,12 +1298,15 @@ The two caps are enforced in the two places that can see them:
   frame carrying no `data` field is not one), so a load run and a design run
   report the same count for the same stream; `sse_frame_counter_test.cpp` drives
   both over one table and asserts they match. The same callback stamps the
-  write that completes the first event (`TransferData::stream_first_event_ms`,
-  issue #3234), measured from `submitted_at` like the latency, and the
-  completion copies it to `Response::stream_first_event_ms`. It is the report's
+  write that completes the first event (issue #3234), measured from
+  `submitted_at` like the latency, and the completion copies it to
+  `Response::stream_first_event_ms`. It is the report's
   `stream.timeToFirstEvent`, and it cannot be read off libcurl: the
   start-transfer time ends at the response headers, which a gateway that
-  answers `200` and then thinks sends long before its first event.
+  answers `200` and then thinks sends long before its first event. Both caps,
+  the stamp and what the ended stream reports live in one `StreamTally`
+  (`http/stream_tally.hpp`), which the event loop's `TransferData` and `Client`
+  each keep one of (#3235).
 - **Duration** in the progress callback, which libcurl runs at least once a
   second whether or not bytes arrive - which is the only place a stream that has
   gone *quiet* can be ended. The whole-transfer timeout is moved to a grace
@@ -1316,25 +1326,35 @@ two-minute streams completes nothing for two minutes and every
 completion-driven figure on the dashboard reads zero until then. The write
 callback adds what each chunk completed to a run-wide atomic, and the
 completion adds the unterminated last frame `SseFrameCounter::finish` counts
-(`TransferData::count_stream_chunk` / `finish_stream_count`, the only two
-places the counter is fed). The http layer knows nothing of the collector: the
-atomic is owned by the run's `MetricsCollector`, allocated only for a
-streaming run with `stream_metrics` on, and reaches every transfer as
-`StreamBounds::live_events`, so a non-streaming transfer never sees it and a
-streaming one pays a null check and one relaxed `fetch_add` per chunk that
-completed an event. The tally is kept apart from the completion counters
-behind the report's `stream` section, which `record_stream_completion` feeds,
-so nothing is counted twice; once the run settles the two agree, except that a
-stream a Stop cancelled delivered events the live total counts and the report
-does not. `get_current_stats` reads it as `streamEvents`, with `streamsOpen`
-as the active transfer count; the trailing window turns it into
-`eventsPerSecond` beside `currentRps`; and a gate frame adds
-`streamTimeToFirstEvent` from the completed streams' histogram, read through a
-snapshot as `cumulativePhases` is. All four are live only, never stored.
+(`StreamTally::feed` / `report`, the only two places the counter is fed). The
+http layer knows nothing of the collector: the atomic is owned by the run's
+`MetricsCollector`, allocated only for a `POST /runs` run with `stream` and
+`stream_metrics` on, and reaches every transfer as `StreamBounds::live_events`,
+so a non-streaming transfer never sees it and a streaming one pays a null check
+and one relaxed `fetch_add` per chunk that completed an event. A collection
+run's streaming steps carry no tally, so its live frames have no stream keys;
+its report's `stream` section is unaffected. The tally is kept apart from the
+completion counters behind the report's `stream` section, which
+`record_stream_completion` feeds, so nothing is counted twice; once the run
+settles the two agree, except that a stream a Stop cancelled delivered events
+the live total counts and the report does not. `get_current_stats` reads it as
+`streamEvents`, with `streamsOpen` as the active transfer count; the trailing
+window turns it into `eventsPerSecond` beside `currentRps`; and a gate frame
+adds `streamTimeToFirstEvent` from the completed streams' histogram, read
+through a snapshot as `cumulativePhases` is. All four are live only, never
+stored.
 
-The design path is deliberately not affected. `POST /execute` with `stream` is
-still `SseStreamManager`'s one-thread-per-stream model with no whole-transfer
-deadline; only the flag's spelling is shared, through `read_stream_flag`.
+`POST /execute` is deliberately not affected. With `stream` it is still
+`SseStreamManager`'s one-thread-per-stream model with no whole-transfer
+deadline; only the flag's spelling is shared, through `read_stream_flag`. A
+sequential collection run's streaming step is the other design-side sender
+(#3235): `Client::send` honours `stream_bounds` with the load path's rules
+(whole-transfer timeout the cap plus the grace, a cap ending it as a success),
+the runner passes it `RunContext::should_stop` as its cancel so a stop ends the
+stream once answered, its step trace gains the `events` node parsed back from
+the body (`buffered_stream_events_node`), and its completion feeds the run's
+`MetricsCollector`, whose `stream_totals` the sequential summary stores through
+the same `build_stream_summary_payload` a load run's uses.
 
 ### Closed-loop controller
 

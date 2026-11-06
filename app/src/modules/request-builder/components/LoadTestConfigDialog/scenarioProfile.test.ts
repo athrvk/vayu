@@ -16,6 +16,8 @@ import {
 	isScenarioLoadMode,
 	scenarioLoadFields,
 	scenarioProfileError,
+	scenarioStreamCapError,
+	scenarioStreamCaps,
 	type ScenarioLoadProfile,
 } from "./scenarioProfile";
 
@@ -113,5 +115,57 @@ describe("scenarioProfileError", () => {
 
 	it("does not apply the ramp rules to the other modes", () => {
 		expect(scenarioProfileError(profile({ duration: 5, rampDuration: 10 }), limits)).toBeNull();
+	});
+});
+
+describe("scenarioStreamCaps (#3235)", () => {
+	it("spells the caps as the engine's milliseconds and carries no `stream`", () => {
+		const caps = scenarioStreamCaps(profile({ streamDuration: 20, streamMaxEvents: 250 }));
+		expect(caps).toEqual({ maxStreamDurationMs: 20_000, maxStreamEvents: 250 });
+	});
+
+	it("rounds a fractional second to a whole millisecond, which the engine requires", () => {
+		expect(scenarioStreamCaps(profile({ streamDuration: 1.0004 })).maxStreamDurationMs).toBe(
+			1000
+		);
+	});
+});
+
+describe("scenarioStreamCapError (#3235)", () => {
+	it("passes the defaults and both ends of each range", () => {
+		expect(scenarioStreamCapError(profile(), limits)).toBeNull();
+		const { STREAM_DURATION_S: d, STREAM_MAX_EVENTS: e } = limits;
+		expect(
+			scenarioStreamCapError(
+				profile({ streamDuration: d.MIN, streamMaxEvents: e.MIN }),
+				limits
+			)
+		).toBeNull();
+		expect(
+			scenarioStreamCapError(
+				profile({ streamDuration: d.MAX, streamMaxEvents: e.MAX }),
+				limits
+			)
+		).toBeNull();
+	});
+
+	it.each([
+		{
+			patch: { streamDuration: 0 },
+			message: /Stream duration must be a number from 1 to 86,400\./,
+		},
+		{ patch: { streamDuration: 86_401 }, message: /Stream duration/ },
+		{ patch: { streamDuration: Number.NaN }, message: /Stream duration/ },
+		{ patch: { streamMaxEvents: 0 }, message: /Stream events must be a whole number from 1/ },
+		{ patch: { streamMaxEvents: 1.5 }, message: /Stream events/ },
+		{ patch: { streamMaxEvents: 10_000_001 }, message: /Stream events/ },
+	])("refuses $patch", ({ patch, message }) => {
+		expect(scenarioStreamCapError(profile(patch), limits)).toMatch(message);
+	});
+
+	it("does not call an engine bound a Settings ceiling", () => {
+		expect(scenarioStreamCapError(profile({ streamDuration: 0 }), limits)).not.toMatch(
+			/Settings/
+		);
 	});
 });

@@ -12,6 +12,7 @@ import {
 	loadTestModeLabel,
 } from "@/constants/load-test-modes";
 import { NumberField } from "@/components/shared";
+import { StreamCapFields } from "./StreamCapFields";
 import { usesDuration } from "./profile";
 import type { LoadTestProfile } from "./useSavedLoadTestConfig";
 
@@ -19,7 +20,7 @@ interface ProfileFieldsProps {
 	profile: LoadTestProfile;
 	onChange: (patch: Partial<LoadTestProfile>) => void;
 	limits: LoadTestLimits;
-	/** True when the request streams: the two stream caps are shown. */
+	/** True when the request (or, for a collection run, any step) streams: the two stream caps are shown. */
 	isStreamingRequest: boolean;
 	/**
 	 * The label of the Fixed request count mode's count. "Requests" for a single request; a
@@ -166,36 +167,8 @@ export function ProfileFields({
 				/>
 			)}
 
-			{/*
-			 * The stream caps sit with the other run parameters, not under
-			 * Advanced: for a streaming request they are what decides when each
-			 * transfer ends, which is the same kind of decision Duration makes for
-			 * the run. Reaching either is a *completed* stream, so the hints say so
-			 * - a user who read them as timeouts would read the run's 0% error rate
-			 * as luck.
-			 */}
 			{isStreamingRequest && (
-				<>
-					<NumberField
-						id="lt-stream-duration"
-						label="Stop each stream after"
-						unit="s"
-						value={profile.streamDuration}
-						onChange={set("streamDuration")}
-						min={limits.STREAM_DURATION_S.MIN}
-						max={limits.STREAM_DURATION_S.MAX}
-						hint="A stream that reaches this counts as completed, not as a timeout."
-					/>
-					<NumberField
-						id="lt-stream-events"
-						label="Or after this many events"
-						value={profile.streamMaxEvents}
-						onChange={set("streamMaxEvents")}
-						min={limits.STREAM_MAX_EVENTS.MIN}
-						max={limits.STREAM_MAX_EVENTS.MAX}
-						hint="Whichever comes first ends the stream. Under load a stream is always bounded."
-					/>
-				</>
+				<StreamCapFields profile={profile} onChange={onChange} limits={limits} />
 			)}
 		</div>
 	);

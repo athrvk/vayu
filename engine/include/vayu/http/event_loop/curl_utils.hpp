@@ -231,6 +231,22 @@ int extract_port (const std::string& url);
 [[nodiscard]] std::optional<Error> validate_transferable (const Request& request);
 
 /**
+ * @brief The `CURLOPT_TIMEOUT_MS` a transfer of @p request is given, by both
+ *        drivers that send one (the event loop and `Client`).
+ *
+ * `timeout_ms` for an ordinary transfer. For a bounded stream
+ * (`Request::stream_bounds`) it is a *backstop* around the duration cap
+ * rather than the deadline itself: the cap is meant to end the stream
+ * successfully `LOAD_STREAM_TIMEOUT_GRACE_MS` before this fires, so reaching
+ * this one means the progress callback never ran, which is a genuine failure
+ * and is reported as the timeout it is. `timeout_ms` instead would kill a
+ * legitimately long stream as an error at the ordinary per-request timeout,
+ * which for a 10-minute cap and a 30s timeout is every stream. The connect
+ * phase stays bounded by `timeout_ms` either way (#2835).
+ */
+[[nodiscard]] long whole_transfer_timeout_ms (const Request& request);
+
+/**
  * @brief A request that never reached the wire, in the shape every consumer
  *        already handles: HTTP status 0 plus the error fields.
  *

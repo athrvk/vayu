@@ -128,6 +128,20 @@ class SlowMockServer {
             res.set_content ("{}", "application/json");
         });
 
+        // An ordinary answer that takes OUTLAST_STREAM_DRAIN_MS: in flight
+        // longer than a short-capped stream's natural-end drain, well within
+        // a timeout above it. Ends early on `released`, like /hang.
+        svr.Get ("/outlast-stream-drain",
+        [this] (const httplib::Request&, httplib::Response& res) {
+            const auto answers = std::chrono::steady_clock::now () +
+            std::chrono::milliseconds (OUTLAST_STREAM_DRAIN_MS);
+            while (!released.load (std::memory_order_relaxed) &&
+            std::chrono::steady_clock::now () < answers) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+            res.set_content ("{}", "application/json");
+        });
+
         // A healthy server-sent-events source: one event every SSE_TICK_MS
         // for SSE_TICKS_FOR_MS, then a clean close. It outlives any ordinary
         // request timeout while never going quiet for long.
@@ -226,6 +240,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/sse-ticks";
     }
 
+    std::string outlast_stream_drain_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/outlast-stream-drain";
+    }
+
     std::string sse_held_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/sse-held";
     }
@@ -261,6 +279,8 @@ class SlowMockServer {
     /// `/sse-ticks`' cadence and how long it streams before closing.
     static constexpr int SSE_TICK_MS      = 100;
     static constexpr int SSE_TICKS_FOR_MS = 6000;
+    /// How long `/outlast-stream-drain` takes to answer.
+    static constexpr int OUTLAST_STREAM_DRAIN_MS = 10000;
 
     /// How many times either vitals endpoint has been scraped.
     int scrape_count () const {
