@@ -9,6 +9,7 @@
 
 #include <curl/curl.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,6 +21,7 @@
 #include "vayu/http/event_loop/connected_peer_check.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/loopback_guard.hpp"
+#include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/types.hpp"
 
@@ -645,7 +647,94 @@ DnsCache* dns_cache = nullptr);
 
 /**
  * @brief Extract response from completed CURL transfer
+ *
+ * A transfer that followed redirects (`TransferData::redirects`) reports every
+ * hop's timers and wire bytes, the earlier hops' summed with this one's, and
+ * a chain that ended on a redirect it would not follow reports that refusal
+ * in place of the redirect's status.
  */
 Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode result);
+
+// ---------------------------------------------------------------------------
+// Redirects, one transfer per hop (#3302)
+// ---------------------------------------------------------------------------
+
+/// A transfer's bytes on the wire, headers and bodies both ways: received is
+/// `CURLINFO_SIZE_DOWNLOAD_T` plus `CURLINFO_HEADER_SIZE`, sent is
+/// `CURLINFO_REQUEST_SIZE`, which already holds every body byte sent.
+struct WireBytes {
+    size_t down = 0;
+    size_t up   = 0;
+};
+
+/**
+ * @brief What a transfer that follows redirects keeps across its hops, made at
+ *        the first redirect it follows, so a transfer never redirected carries
+ *        none of it.
+ *
+ * Each hop is a transfer of its own on the transfer's handle, which is never
+ * reset in between: its cookie engine and connections serve the whole chain.
+ */
+struct RedirectState {
+    /// Takes over `TransferData::headers_list`, the first hop's lines.
+    explicit RedirectState (TransferData& data);
+
+    RedirectChain chain;
+    /// Present when the transfer carries a cookie session
+    /// (`Request::track_cookies`).
+    std::optional<HopCookies> cookies;
+    /// The finished hops' timers, summed; the last hop's are read at completion.
+    CurlPhaseTimes phases;
+    /// The finished hops' wire bytes, likewise.
+    WireBytes bytes;
+    /// Why the chain ended on a redirect it was answered with rather than
+    /// following it: the limit, a refused `Location` or the timeout spent.
+    /// A handle curl will not take back for the next hop completes as a bare
+    /// error instead (`deliver`).
+    std::optional<Error> refusal;
+};
+
+/// The hop a finished transfer's redirect sends it to next.
+struct RedirectHop {
+    /// The redirect status that asked for it.
+    int status = 0;
+    std::string url;
+    /// What is left of the request's timeout for it, 0 to leave the handle's.
+    long timeout_ms = 0;
+};
+
+/**
+ * @brief The redirect a transfer of @p data that finished with @p result on
+ *        @p curl follows next, or nullopt when what it finished with is the
+ *        request's answer.
+ *
+ * Reads the status only after a `CURLE_OK` on a request that follows, and the
+ * `Location` only after a 3xx, so a transfer that is not redirected pays one
+ * status read. A redirect the chain will not follow (the request's
+ * `max_redirects`, negative being no limit; a `Location`
+ * `resolve_redirect_target` refuses; the timeout spent) is recorded on
+ * `RedirectState::refusal` and answers nullopt. A hop that is followed has
+ * its timers and wire bytes folded into `TransferData::redirects`.
+ *
+ * Call before anything resets @p curl; it may still be in its multi handle.
+ */
+[[nodiscard]] std::optional<RedirectHop>
+next_redirect_hop (CURL* curl, TransferData& data, CURLcode result);
+
+/**
+ * @brief Points @p curl, out of its multi handle, at @p hop: the URL, method,
+ *        body and request lines `RedirectChain::advance` puts there, the
+ *        hop's share of the timeout, the DNS pin for its host, and the
+ *        transport policy matched against its own origin, which is what
+ *        presents the client certificate registered for it. What the last hop
+ *        wrote is cleared.
+ *
+ * Requires @p hop to be what `next_redirect_hop` answered for @p data.
+ */
+void start_redirect_hop (CURL* curl,
+TransferData& data,
+RedirectHop hop,
+const EventLoopConfig& config,
+DnsCache* dns_cache);
 
 } // namespace vayu::http::detail

@@ -407,52 +407,58 @@ bool EventLoopWorker::submit_pending_transfers (size_t& local_active) {
 
 bool EventLoopWorker::drain_completions () {
     bool did_work = false;
-    // 3. Process completions
-    // Check often to free up slots
     int msgs_left = 0;
     CURLMsg* msg  = nullptr;
     while ((msg = curl_multi_info_read (multi_handle, &msgs_left))) {
         did_work = true;
+        if (msg->msg != CURLMSG_DONE) {
+            continue;
+        }
+        CURL* easy = msg->easy_handle;
+        // `CURLMsg::data` is a union whose active member is named by `msg`,
+        // and libcurl documents `CURLMSG_DONE` as the one that selects
+        // `result` - the guard above is that check. A variant is not on
+        // offer: the struct is libcurl's.
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
+        const CURLcode result = msg->data.result;
 
-        if (msg->msg == CURLMSG_DONE) {
-            CURL* easy = msg->easy_handle;
-            // `CURLMsg::data` is a union whose active member is named by
-            // `msg`, and libcurl documents `CURLMSG_DONE` as the one that
-            // selects `result` - the branch above is that check. A variant
-            // is not on offer: the struct is libcurl's.
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-union-access)
-            CURLcode result = msg->data.result;
-
-            // Named for the transfer that just finished rather than `data`,
-            // which is the fetch phase's handle on the transfer being
-            // *submitted* and stays in scope here (MSVC C4456).
-            std::unique_ptr<TransferData> completed;
-            {
-                // No lock needed - private resource
-                auto it = active_transfers.find (easy);
-                if (it != active_transfers.end ()) {
-                    completed = std::move (it->second);
-                    active_transfers.erase (it);
-                    // Update atomic size
-                    current_active_count.store (
-                    active_transfers.size (), std::memory_order_relaxed);
-                }
-            }
-
-            if (completed) {
-                auto response_result = extract_response (easy, completed.get (), result);
-                if (completed->callback)
-                    completed->callback (completed->request_id, response_result);
-                if (completed->has_promise)
-                    completed->promise.set_value (std::move (response_result));
-                local_processed.fetch_add (1, std::memory_order_relaxed);
-            }
-
+        const auto active = active_transfers.find (easy);
+        if (active == active_transfers.end ()) {
             curl_multi_remove_handle (multi_handle, easy);
             handle_pool_.release (easy);
+            continue;
+        }
+        if (!follow_redirect (active, result)) {
+            deliver (active, extract_response (easy, active->second.get (), result));
         }
     }
     return did_work;
+}
+
+bool EventLoopWorker::follow_redirect (ActiveTransfers::iterator active, CURLcode result) {
+    CURL* easy         = active->first;
+    TransferData& data = *active->second;
+    auto hop           = next_redirect_hop (easy, data, result);
+    if (!hop) {
+        return false;
+    }
+    curl_multi_remove_handle (multi_handle, easy);
+    start_redirect_hop (easy, data, std::move (*hop), config, &dns_cache ());
+    if (auto rejected = add_to_multi (multi_handle, easy)) {
+        deliver (active, *rejected);
+    }
+    return true;
+}
+
+void EventLoopWorker::deliver (ActiveTransfers::iterator active, Result<Response> result) {
+    CURL* easy                                   = active->first;
+    const std::unique_ptr<TransferData> finished = std::move (active->second);
+    active_transfers.erase (active);
+    current_active_count.store (active_transfers.size (), std::memory_order_relaxed);
+    complete_transfer (*finished, std::move (result));
+    local_processed.fetch_add (1, std::memory_order_relaxed);
+    curl_multi_remove_handle (multi_handle, easy);
+    handle_pool_.release (easy);
 }
 
 void EventLoopWorker::wait_for_work (int still_running) {

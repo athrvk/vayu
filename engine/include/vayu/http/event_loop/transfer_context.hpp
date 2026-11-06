@@ -33,6 +33,8 @@ std::function<void (size_t request_id, size_t downloaded, size_t total)>;
 
 namespace detail {
 
+struct RedirectState;
+
 /**
  * @brief One transfer's read position in a request body's `ApprovedFile`: a
  * streamed binary body's, or a form-data file part's.
@@ -98,15 +100,16 @@ struct TransferData {
     /// to buffer, the stream caps are the stream's intended end.
     StreamTally stream;
 
-    /// Set when the transfer follows redirects, which is what makes
-    /// progress_callback count the bodies of the hops before the last (#2893):
-    /// libcurl zeroes `CURLINFO_SIZE_DOWNLOAD_T` at each new hop, and never
-    /// hands a followed hop's body to write_callback.
-    bool counts_redirect_bodies = false;
-    /// The current hop's body bytes, as progress_callback last saw them.
-    curl_off_t hop_body_down = 0;
-    /// The body bytes of every hop already left behind.
-    curl_off_t earlier_hops_body_down = 0;
+    /// The status of the response block header_callback is reading, 0 before
+    /// the first.
+    int block_status = 0;
+    /// Set by header_callback when the block it finished is a redirect the
+    /// request follows, whose body is neither buffered, held to the byte cap
+    /// nor counted as a stream's events (#3302).
+    bool discard_body = false;
+    /// The redirect chain this transfer is following, made at the first
+    /// redirect it follows (#3302); null for a transfer never redirected.
+    std::unique_ptr<RedirectState> redirects;
 
     /// The redacted, per-line collector for the one `cat=client` record this
     /// transfer emits when verbosity reaches 2 (issue #1557); empty otherwise.
@@ -125,14 +128,18 @@ struct TransferData {
     ConnectedPeerCheck peer_check;
 
     CurlErrorBuffer errors;
+    /// The first hop's request lines; `RedirectChain` takes them over at the
+    /// first redirect followed.
     struct curl_slist* headers_list = nullptr;
-    struct curl_slist* resolve_list = nullptr; // DNS pre-resolution list
+    /// The current hop's DNS pin (`CURLOPT_RESOLVE`).
+    struct curl_slist* resolve_list = nullptr;
     /// The body source attached to the handle (a multipart tree, or the
     /// reader a large binary body streams through), released with the rest of
     /// this transfer's curl state.
     BodySource body;
 
-    TransferData () = default;
+    // Both out of line, where `RedirectState` is complete.
+    TransferData ();
     ~TransferData ();
     TransferData (const TransferData&)            = delete;
     TransferData& operator= (const TransferData&) = delete;
