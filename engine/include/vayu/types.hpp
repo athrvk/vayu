@@ -954,14 +954,14 @@ struct Response {
     std::vector<HeaderLine> header_lines;
 
     /**
-     * @brief The 3xx responses libcurl followed before the final one, in the
+     * @brief The 3xx responses the send followed before the final one, in the
      *        order they arrived (issue #2461).
      *
      * Filled only by `Client::send`, and only when `Request::follow_redirects`
      * is set; empty on the load path and when nothing was followed. Holds at
-     * most `Request::max_redirects` entries, so a loop that ends in
-     * `TooManyRedirects` reports the hops it made. A 1xx interim response is
-     * never a hop.
+     * most `Request::max_redirects` entries (every hop when it is negative, no
+     * limit), so a loop that ends in `TooManyRedirects` reports the hops it
+     * made. A 1xx interim response is never a hop.
      */
     std::vector<RedirectHop> redirect_hops;
 

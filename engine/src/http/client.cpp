@@ -30,6 +30,7 @@
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
+#include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/stream_tally.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -40,6 +41,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <expected>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -146,8 +149,20 @@ struct BodySink {
     std::optional<uint64_t> declared_total;
     bool total_resolved = false;
     /// The bounded stream this transfer is (`Request::stream_bounds`, #3235),
-    /// inactive for every other one.
+    /// inactive for every other one. It spans every hop of a chain.
     StreamTally stream;
+    /// Set by header_callback for a redirect the send will follow, whose body
+    /// is neither kept nor held to the bound (#3300).
+    bool discard = false;
+
+    /// Ready for the next hop of a chain: what the last one wrote is gone.
+    void start_hop () {
+        body.clear ();
+        limit_exceeded = false;
+        declared_total.reset ();
+        total_resolved = false;
+        discard        = false;
+    }
 };
 
 /// What the progress callback ends a transfer for: the flag a cancellable
@@ -219,6 +234,10 @@ std::optional<unsigned long long> declared_content_length (const Headers& header
 size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* sink        = static_cast<BodySink*> (userdata);
     size_t total_size = size * nmemb;
+
+    if (sink->discard) {
+        return total_size;
+    }
 
     // A bounded stream counts what it received before the byte bound is
     // applied, as the event loop's callback does: the events in this chunk
@@ -324,18 +343,12 @@ std::string too_large_message (const Headers& headers, size_t max_bytes) {
 /// tell one status block from the next.
 struct HeaderSink {
     Response* response = nullptr;
-    /// How many redirect hops may be recorded - `max_redirects` when the send
-    /// follows redirects, 0 when it does not.
-    size_t max_hops = 0;
+    /// Whether the send follows redirects, so a redirect's body is discarded.
+    bool following = false;
     /// Numeric status of the block being read, 0 before the first one.
     int block_status = 0;
-    /// The transfer whose `CURLINFO_EFFECTIVE_URL` names each block's request.
-    CURL* curl = nullptr;
-    /// The URL the block being read answered, unmasked; empty before the first
-    /// status line.
-    std::string block_url;
-    /// Query parameter names whose value a recorded hop URL must not carry.
-    std::vector<std::string> secret_params;
+    /// The body sink a redirect's body is kept out of.
+    BodySink* body = nullptr;
 };
 
 /// libcurl's current request URL, copied because the buffer is only valid until
@@ -375,33 +388,6 @@ std::optional<int> status_line_code (std::string_view line) {
 }
 
 /**
- * @brief Moves the block just finished into `redirect_hops`, when it is one.
- *
- * Only a 3xx counts: a 1xx interim response (`100 Continue`) is not a hop, and
- * the 2xx a proxy `CONNECT` answers with reaches this callback too. Run on the
- * next status line, which is the first moment the previous block is known to
- * be complete, and before the header containers are cleared.
- *
- * @p next_url is libcurl's effective URL read at that same status line. By then
- * libcurl has already followed the Location, so it is the URL of the block now
- * starting, not of the one finished: the finished block's URL is the one the
- * sink saved at the previous status line, and the pair gives the downgrade.
- */
-void record_finished_hop (HeaderSink& sink, const std::string& next_url) {
-    Response& response = *sink.response;
-    const int status   = sink.block_status;
-    if (status < 300 || status >= 400 || response.redirect_hops.size () >= sink.max_hops) {
-        return;
-    }
-    int omitted = 0;
-    response.redirect_hops.push_back ({ status,
-    response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
-    std::move (response.header_lines),
-    vayu::core::vayu_ext::redact_url_credentials (sink.block_url, sink.secret_params, omitted),
-    is_scheme_downgrade (sink.block_url, next_url) });
-}
-
-/**
  * @brief Callback for writing response headers.
  *
  * Captures BOTH:
@@ -414,15 +400,15 @@ void record_finished_hop (HeaderSink& sink, const std::string& next_url) {
  * line is just "HTTP/2 200". In that case status_text is cleared and the
  * caller falls back to its code→phrase lookup.
  *
- * On followed redirects, curl emits one status block per hop in order,
- * so overwriting each time leaves status_text reflecting the final hop.
- * The blocks that are overwritten are not lost: each finished 3xx one is
- * kept in `Response::redirect_hops` (issue #2461).
+ * One transfer can still emit more than one block: a 1xx interim response
+ * (`100 Continue`) and the 2xx a proxy `CONNECT` answers with precede the
+ * response, so each status line starts the record over and the last block is
+ * the one kept. A redirect hop is a transfer of its own, recorded by the
+ * chain (`record_hop`).
  *
  * A header name that arrives more than once in the same block keeps every
  * value, folded with ", " - see ingest_header_line for why. The lossless list
- * `Response::header_lines` is filled beside the map (issue #2460), and cleared
- * with it between hops.
+ * `Response::header_lines` is filled beside the map (issue #2460).
  */
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
     auto* sink         = static_cast<HeaderSink*> (userdata);
@@ -437,14 +423,16 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     }
 
     if (line.empty ()) {
+        // The block is complete: a redirect the chain will follow has a body
+        // nobody reads, which is not kept and not held to the bound.
+        sink->body->discard = sink->following &&
+        is_redirect_status (sink->block_status) &&
+        location_of (response->header_lines).has_value ();
         return total_size;
     }
 
     // Status line: "HTTP/<version> <code> [<reason phrase>]"
     if (line.starts_with ("HTTP/")) {
-        const std::string url = effective_url (sink->curl);
-        record_finished_hop (*sink, url);
-        sink->block_url  = url;
         auto first_space = line.find (' ');
         if (first_space != std::string::npos) {
             auto second_space = line.find (' ', first_space + 1);
@@ -456,7 +444,6 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
             }
         }
         sink->block_status = status_line_code (line).value_or (0);
-        // Also clear headers between redirect hops so we don't accumulate them.
         response->headers.clear ();
         response->header_lines.clear ();
         return total_size;
@@ -687,6 +674,268 @@ void fail_if_proxy_refused (Response& response, CURL* curl, long status) {
     }
 }
 
+// ============================================================================
+// The redirect chain (#3300)
+// ============================================================================
+
+struct SlistDeleter {
+    void operator() (curl_slist* list) const {
+        curl_slist_free_all (list);
+    }
+};
+using SlistPtr = std::unique_ptr<curl_slist, SlistDeleter>;
+
+/**
+ * @brief What one send hands libcurl pointers into, kept on the send's frame
+ *        so it outlives every hop of the chain.
+ */
+struct SendFrame {
+    Response response;
+    BodySink sink;
+    HeaderSink header_sink;
+    detail::BodySource body_source;
+    detail::ConnectedPeerCheck peer_check;
+    ProgressWatch progress_watch;
+    TransferDebug transfer_debug;
+    /// The list the first hop sends, which a later hop's is filtered from.
+    SlistPtr first_headers;
+    /// The list a later hop sends when it leaves out lines of the first.
+    SlistPtr hop_headers;
+    /// What the jar put on the handle, for the reconcile after the chain.
+    std::vector<std::string> jar_seeded_from;
+};
+
+/// Where one hop of a send goes and what it carries.
+struct Hop {
+    std::string url;
+    HttpMethod method = HttpMethod::GET;
+    bool carries_body = false;
+    /// A 301, 302 or 303 changed the request, so no line about a body goes.
+    bool rewritten = false;
+    /// Redirects followed before this hop.
+    int followed = 0;
+};
+
+/// How a chain ended, for `Client::send` to build the response from.
+struct ChainOutcome {
+    CURLcode code = CURLE_OK;
+    /// The chain's own failure, which no transfer reported: a redirect it will
+    /// not follow, its limit, its deadline, a cancel between hops.
+    std::optional<Error> refusal;
+    /// Every hop's timers, summed.
+    detail::CurlPhaseTimes phases;
+    /// The URL the last transfer was sent to.
+    std::string last_url;
+    /// The registry entry the last transfer presented, or null.
+    const ClientCertRule* certificate = nullptr;
+    int followed                      = 0;
+};
+
+/// The next hop's URL, or the error that ends the chain.
+using NextHop = std::expected<std::string, Error>;
+
+/// The name of one header-list line: what precedes `:`, or `;` in libcurl's
+/// spelling of a blank header, without blanks.
+std::string_view header_line_name (std::string_view line) {
+    return trim_field_whitespace (line.substr (0, line.find_first_of (":;")));
+}
+
+/// @p first without the lines a hop to another origin, or a rewritten hop,
+/// does not send. Null when no line is left.
+SlistPtr filtered_header_list (const curl_slist* first, bool other_origin, bool rewritten) {
+    curl_slist* list = nullptr;
+    for (const curl_slist* item = first; item != nullptr; item = item->next) {
+        const std::string_view name = header_line_name (item->data);
+        if ((other_origin && is_origin_bound_header (name)) ||
+        (rewritten && is_body_header (name))) {
+            continue;
+        }
+        list = curl_slist_append (list, item->data);
+    }
+    return SlistPtr (list);
+}
+
+/**
+ * @brief Points the handle's request lines at @p hop.
+ *
+ * `Authorization` and the typed `Cookie` rows (`CURLOPT_COOKIE`) go only to
+ * the origin the send started at, as libcurl compared against its first
+ * origin: a hop back there carries them again.
+ */
+void apply_hop_headers (CURL* curl, SendFrame& frame, const Request& request, const Hop& hop, bool first_origin) {
+    const bool filtered = !first_origin || hop.rewritten;
+    SlistPtr next       = filtered ?
+    filtered_header_list (frame.first_headers.get (), !first_origin, hop.rewritten) :
+    nullptr;
+    set_opt<CURLOPT_HTTPHEADER> (
+    curl, filtered ? next.get () : frame.first_headers.get ());
+    frame.hop_headers = std::move (next);
+    // libcurl copies a string option, so the value need not outlive the call.
+    const std::string cookies = first_origin ? detail::typed_cookie_value (request) : "";
+    set_opt<CURLOPT_COOKIE> (curl, cookies.empty () ? nullptr : cookies.c_str ());
+}
+
+/// Puts the method and body a @p status redirect asks for on the handle.
+void apply_hop_method (CURL* curl, SendFrame& frame, Hop& hop, int status) {
+    const RedirectedRequest next = redirected_request (status, hop.method);
+    if (next.method != hop.method || (hop.carries_body && !next.keeps_body)) {
+        detail::apply_bodyless_method (curl, next.method, frame.body_source);
+        hop.method       = next.method;
+        hop.carries_body = false;
+        hop.rewritten    = true;
+        return;
+    }
+    if (hop.carries_body) {
+        detail::rewind_body_source (frame.body_source);
+    }
+}
+
+/// Moves the @p status redirect just received into `redirect_hops`, as the
+/// hop that led to @p next_url.
+void record_hop (Response& response,
+CURL* curl,
+int status,
+const std::string& next_url,
+const std::vector<std::string>& secret_params) {
+    const std::string url = effective_url (curl);
+    int omitted           = 0;
+    response.redirect_hops.push_back ({ status,
+    response.status_text.empty () ? vayu::http::status_text (status) : response.status_text,
+    std::move (response.header_lines),
+    vayu::core::vayu_ext::redact_url_credentials (url, secret_params, omitted),
+    is_scheme_downgrade (url, next_url) });
+    response.status_text.clear ();
+    response.headers.clear ();
+    response.header_lines.clear ();
+}
+
+/// Where a finished hop's @p status answer sends the chain: nullopt when it
+/// is the final answer, else the next URL or the error the chain ends with.
+std::optional<NextHop>
+redirect_target (const Response& response, const Request& request, const Hop& hop, int status) {
+    if (!request.follow_redirects || !is_redirect_status (status)) {
+        return std::nullopt;
+    }
+    const auto location = location_of (response.header_lines);
+    if (!location) {
+        return std::nullopt;
+    }
+    if (redirect_limit_reached (hop.followed, request.max_redirects)) {
+        return NextHop (std::unexpect, too_many_redirects_error (request.max_redirects));
+    }
+    return resolve_redirect_target (hop.url, *location);
+}
+
+/**
+ * @brief Why the chain stops before a redirected hop's transfer, or nullopt
+ *        to send it, with the hop's share of the request's timeout set.
+ *
+ * One deadline spans the chain, as one transfer's did: a later hop gets what
+ * the earlier ones left. Stall mode has no total bound to share; its window
+ * and the cancel flag are watched by each transfer on its own.
+ */
+std::optional<Error> start_redirected_hop (CURL* curl,
+const Request& request,
+const ClientConfig& config,
+const ProgressWatch& progress,
+std::chrono::steady_clock::time_point started) {
+    if (progress.cancel != nullptr && progress.cancel->load (std::memory_order_acquire)) {
+        return Error{ ErrorCode::Cancelled, "Request cancelled" };
+    }
+    // A bounded stream has no whole-transfer bound to share: its duration cap
+    // is the progress callback's, and spans the chain.
+    if (config.stall_timeout_ms > 0 || request.timeout_ms <= 0 || request.stream_bounds) {
+        return std::nullopt;
+    }
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started);
+    const long remaining =
+    static_cast<long> (request.timeout_ms) - static_cast<long> (spent.count ());
+    if (remaining <= 0) {
+        return Error{ ErrorCode::Timeout,
+            "Operation timed out after " + std::to_string (request.timeout_ms) +
+            " milliseconds, following redirects" };
+    }
+    set_opt<CURLOPT_TIMEOUT_MS> (curl, remaining);
+    return std::nullopt;
+}
+
+/// Points the handle at the hop @p next_url, after a @p status redirect.
+void advance_hop (CURL* curl, SendFrame& frame, const Request& request, Hop& hop, int status, std::string next_url) {
+    apply_hop_method (curl, frame, hop, status);
+    hop.url = std::move (next_url);
+    ++hop.followed;
+    set_opt<CURLOPT_URL> (curl, hop.url.c_str ());
+    apply_hop_headers (curl, frame, request, hop,
+    same_origin (vayu::http::wire_url (request), hop.url));
+}
+
+/**
+ * @brief Runs the send as one transfer per hop, following redirects itself
+ *        rather than through `CURLOPT_FOLLOWLOCATION` (#3300).
+ *
+ * The handle is configured for the first hop already and is never reset in
+ * between, so its cookie engine and its connections serve the whole chain.
+ * What a hop changes is re-asserted per hop: the URL, the method and body, the
+ * lines that stay with the first origin, and the transport policy, which
+ * matches the client certificate against this hop's own origin.
+ */
+ChainOutcome run_chain (CURL* curl,
+const Request& request,
+const ClientConfig& config,
+SendFrame& frame,
+CurlErrorBuffer& errors,
+std::chrono::steady_clock::time_point started) {
+    ChainOutcome out;
+    Hop hop{ vayu::http::wire_url (request), request.method,
+        vayu::http::has_wire_body (request) };
+    const auto secret_params = auth_param_names (request);
+    std::optional<HopCookies> cookies;
+    if (request.follow_redirects && config.cookie_jar) {
+        cookies.emplace (curl);
+    }
+    while (true) {
+        frame.sink.start_hop ();
+        if (hop.followed > 0) {
+            out.refusal = start_redirected_hop (
+            curl, request, config, frame.progress_watch, started);
+            if (out.refusal) {
+                return out;
+            }
+            errors.clear ();
+        }
+        out.certificate = detail::apply_transport_policy (
+        curl, config.transport, request.verify_ssl, hop.url, &frame.peer_check);
+        out.last_url = hop.url;
+        if (cookies) {
+            cookies->before_hop (hop.url);
+        }
+        out.code = curl_easy_perform (curl);
+        if (cookies) {
+            cookies->after_hop ();
+        }
+        detail::add_phase_times (out.phases, detail::read_phase_times (curl));
+        if (out.code != CURLE_OK) {
+            return out;
+        }
+        long status = 0;
+        get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
+        auto next =
+        redirect_target (frame.response, request, hop, static_cast<int> (status));
+        if (!next) {
+            return out;
+        }
+        if (!next->has_value ()) {
+            out.refusal = std::move (next->error ());
+            return out;
+        }
+        record_hop (frame.response, curl, static_cast<int> (status), **next, secret_params);
+        advance_hop (curl, frame, request, hop, static_cast<int> (status),
+        std::move (**next));
+        out.followed = hop.followed;
+    }
+}
+
 /**
  * @brief Whether a bounded stream ended the way one is meant to, once the
  *        server had answered: at a cap, or at a stop (`ClientConfig::cancel`).
@@ -718,6 +967,7 @@ bool stream_ended_by_rule (const StreamTally& stream, const ProgressWatch& watch
  * that passed before the server answered.
  */
 std::optional<Error> engine_abort_error (const BodySink& sink,
+const Headers& headers,
 const ProgressWatch& watch,
 const Request& request) {
     if (watch.cancelled) {
@@ -725,7 +975,7 @@ const Request& request) {
     }
     if (sink.limit_exceeded) {
         return Error{ ErrorCode::ResponseTooLarge,
-            too_large_message (*sink.headers, sink.max_bytes) };
+            too_large_message (headers, sink.max_bytes) };
     }
     const auto& bounds = request.stream_bounds;
     if (sink.stream.cap_reached () && bounds) {
@@ -798,35 +1048,35 @@ Result<Response> Client::send (const Request& request) {
     impl_->reset ();
     CURL* curl = impl_->curl;
 
-    // Response data
-    Response response;
-    BodySink sink;
-    sink.max_bytes   = impl_->config.max_response_bytes;
-    sink.on_progress = &impl_->config.on_body_progress;
-    sink.headers     = &response.headers;
+    SendFrame frame;
+    Response& response = frame.response;
+    BodySink& sink     = frame.sink;
+    sink.max_bytes     = impl_->config.max_response_bytes;
+    sink.on_progress   = &impl_->config.on_body_progress;
+    sink.headers       = &response.headers;
 
     // `request_headers` is the *sent* record and is filled by
     // build_request_header_list below, from the very appends that build the
-    // slist - see its contract for why it is not snapshotted here.
+    // slist - see its contract for why it is not snapshotted here. It records
+    // the first hop's list; a later hop's is filtered from it.
 
     impl_->errors.attach (curl);
 
-    // Also what the client-certificate match and the h2 hint below read, so
-    // both see the host, port and scheme the transfer dials.
+    // Also what the h2 hint below reads, so it sees the scheme the transfer
+    // dials.
     const std::string url = vayu::http::wire_url (request);
     set_opt<CURLOPT_URL> (curl, url.c_str ());
 
     // Set method and body (shared with the event loop path so the two cannot
     // disagree about what goes on the wire - see apply_method_and_body)
-    detail::BodySource body_source;
-    detail::apply_method_and_body (curl, request, body_source);
+    detail::apply_method_and_body (curl, request, frame.body_source);
 
     // Set headers, and record the same set as what was sent.
-    struct curl_slist* headers_list = detail::build_request_header_list (
-    request, impl_->config.default_headers, &response.request_headers);
+    frame.first_headers.reset (detail::build_request_header_list (
+    request, impl_->config.default_headers, &response.request_headers));
 
-    if (headers_list) {
-        set_opt<CURLOPT_HTTPHEADER> (curl, headers_list);
+    if (frame.first_headers) {
+        set_opt<CURLOPT_HTTPHEADER> (curl, frame.first_headers.get ());
     }
 
     // The one default that rides an option rather than a header line.
@@ -839,15 +1089,10 @@ Result<Response> Client::send (const Request& request) {
     set_opt<CURLOPT_WRITEFUNCTION> (curl, write_callback);
     set_opt<CURLOPT_WRITEDATA> (curl, &sink);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, header_callback);
-    const size_t max_hops = request.follow_redirects ?
-    static_cast<size_t> (std::max (request.max_redirects, 0)) :
-    0;
-    HeaderSink header_sink;
-    header_sink.response      = &response;
-    header_sink.max_hops      = max_hops;
-    header_sink.curl          = curl;
-    header_sink.secret_params = auth_param_names (request);
-    set_opt<CURLOPT_HEADERDATA> (curl, &header_sink);
+    frame.header_sink.response  = &response;
+    frame.header_sink.following = request.follow_redirects;
+    frame.header_sink.body      = &sink;
+    set_opt<CURLOPT_HEADERDATA> (curl, &frame.header_sink);
 
     // Set timeout. The connect bound is set on every send because the handle
     // is reused, and in stall mode it is the only bound the handshake has: the
@@ -872,30 +1117,16 @@ Result<Response> Client::send (const Request& request) {
         static_cast<long> (server_limits::connect_timeout_ms (request.timeout_ms)));
     }
 
-    ProgressWatch progress_watch;
-    progress_watch.cancel = impl_->config.cancel;
-    progress_watch.stream = &sink.stream;
-    watch_progress (curl, progress_watch, request);
+    frame.progress_watch.cancel = impl_->config.cancel;
+    frame.progress_watch.stream = &sink.stream;
+    watch_progress (curl, frame.progress_watch, request);
 
-    // Set redirect options
-    if (request.follow_redirects) {
-        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
-        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.max_redirects));
-    }
-
-    // TLS verification, the proxy and this target's client certificate, all
-    // through the one shared applier. The matched registry entry is recorded on
-    // the response rather than looked up again by a reader: see
-    // Response::client_certificate. The peer check is libcurl's callback data,
-    // so it lives on this frame, past `curl_easy_perform`.
-    detail::ConnectedPeerCheck peer_check;
+    // TLS verification, the proxy and the client certificate go on per hop
+    // (`run_chain`), through the one shared applier. The peer check is
+    // libcurl's callback data, so it lives on the frame, past every transfer.
     const auto& local_peer_rule = impl_->config.local_peer_rule;
     if (local_peer_rule) {
-        peer_check.local_peers = &*local_peer_rule;
-    }
-    if (const ClientCertRule* certificate = detail::apply_transport_policy (
-        curl, impl_->config.transport, request.verify_ssl, url, &peer_check)) {
-        response.client_certificate = client_cert_label (*certificate);
+        frame.peer_check.local_peers = &*local_peer_rule;
     }
 
     // Protocol selection. This path (POST /execute, "Send") previously set no
@@ -912,55 +1143,54 @@ Result<Response> Client::send (const Request& request) {
     // libcurl's own additions (jar cookies above all) can be read from. Whether
     // the frames are also logged is `debug_callback`'s own read of the
     // logger's level - see TransferDebug.
-    TransferDebug transfer_debug;
-    transfer_debug.secret_header_names = request.secret_header_names;
+    frame.transfer_debug.secret_header_names = request.secret_header_names;
     set_opt<CURLOPT_VERBOSE> (curl, 1L);
     set_opt<CURLOPT_DEBUGFUNCTION> (curl, debug_callback);
-    set_opt<CURLOPT_DEBUGDATA> (curl, &transfer_debug);
+    set_opt<CURLOPT_DEBUGDATA> (curl, &frame.transfer_debug);
 
     // Cookie jar (issue #301) - only when a caller opted in; see
     // ClientConfig::cookie_jar.
-    std::vector<std::string> jar_seeded_from;
     if (impl_->config.cookie_jar) {
-        jar_seeded_from = detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
+        frame.jar_seeded_from = detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
         impl_->config.cookie_scope, impl_->config.cookie_writes);
     }
 
     // Perform the request. Stamp submission just before perform so that
     // perceived latency excludes our own setup cost above but covers everything
-    // libcurl does on this thread. For single-shot sends there is no generator
-    // queue, so queue_wait_ms will be near zero - that's the correct contract.
+    // libcurl does on this thread, every hop of a redirect chain included. For
+    // single-shot sends there is no generator queue, so queue_wait_ms will be
+    // near zero - that's the correct contract.
     auto submitted_at = std::chrono::steady_clock::now ();
     if (const auto& bounds = request.stream_bounds) {
         sink.stream.start (*bounds, submitted_at);
     }
-    CURLcode res    = curl_easy_perform (curl);
+    const ChainOutcome chain =
+    run_chain (curl, request, impl_->config, frame, impl_->errors, submitted_at);
     auto completion = std::chrono::steady_clock::now ();
-    flush_transfer_debug (transfer_debug);
-
-    // Cleanup headers, which had to outlive the transfer that just finished;
-    // the body source (a multipart tree, a streamed file) releases itself.
-    if (headers_list) {
-        curl_slist_free_all (headers_list);
-    }
+    flush_transfer_debug (frame.transfer_debug);
+    const CURLcode res = chain.code;
 
     // Before any error return below: a failed transfer can still have
     // collected cookies - see capture_jar_cookies.
     if (impl_->config.cookie_jar) {
         detail::capture_jar_cookies (curl, *impl_->config.cookie_jar,
-        impl_->config.cookie_scope, jar_seeded_from);
+        impl_->config.cookie_scope, frame.jar_seeded_from);
     }
 
-    // Get timing info (try to get even on errors, as curl may have partial timing)
-    const detail::CurlPhaseTimes phase_times = detail::read_phase_times (curl);
-
     // The event loop's semantics through the shared helper, which had drifted
-    // from this code once already (negative TLS ms on the load path).
+    // from this code once already (negative TLS ms on the load path). The
+    // phase timers are every hop's, summed.
     double perceived_ms =
     std::chrono::duration<double, std::milli> (completion - submitted_at).count ();
-    detail::apply_transfer_timing (response.timing, phase_times, perceived_ms);
-    response.transfer_attempted = detail::curl_transfer_attempted (curl, res);
-    response.proxy_used         = detail::proxy_was_used (curl);
+    detail::apply_transfer_timing (response.timing, chain.phases, perceived_ms);
+    // A followed hop was answered, so a later hop's refusal still timed a send.
+    response.transfer_attempted =
+    chain.followed > 0 || detail::curl_transfer_attempted (curl, res);
+    response.proxy_used = detail::proxy_was_used (curl);
+    // The identity the last hop presented, recorded rather than looked up again
+    // by a reader: see Response::client_certificate.
+    response.client_certificate =
+    chain.certificate != nullptr ? client_cert_label (*chain.certificate) : "";
 
     // Negotiated protocol (try to get even on errors, same as timing above -
     // a transfer that fails after the connection was established still knows
@@ -976,8 +1206,9 @@ Result<Response> Client::send (const Request& request) {
         // it rather than leaving the reader to wonder whether the engine is
         // broken: CURL_HTTP_VERSION_2TLS offers h2 over TLS only, so an
         // `http://` request never attempts it. Naming that is why this is one
-        // message with a suffix and not two call sites.
-        const bool cleartext = url.rfind ("http://", 0) == 0;
+        // message with a suffix and not two call sites. The last hop's URL,
+        // because that is the connection the version was negotiated on.
+        const bool cleartext = chain.last_url.rfind ("http://", 0) == 0;
         vayu::utils::log_warning ("client",
         "HTTP/2 was requested but the connection negotiated " + response.http_version +
         " - " + vayu::utils::strip_url_secrets (request.url) +
@@ -994,9 +1225,17 @@ Result<Response> Client::send (const Request& request) {
     // libcurl adds itself, which since the cookie jar includes `Cookie`
     // (issue #339). A transfer that never sent anything has no frame; it falls
     // back to the composed request, which is all that ever existed for it.
-    response.raw_request = transfer_debug.last_header_out.empty () ?
+    const std::string& last_header_out = frame.transfer_debug.last_header_out;
+    response.raw_request               = last_header_out.empty () ?
     synthesize_raw_request (request, response) :
-    raw_request_from_wire (transfer_debug.last_header_out, raw_view_body (request));
+    raw_request_from_wire (last_header_out, raw_view_body (request));
+
+    // The chain stopped itself: the timing and the hops it followed are real,
+    // the answer it stopped at is not one.
+    if (chain.refusal) {
+        mark_failed (response, *chain.refusal);
+        return std::move (response);
+    }
 
     // The bound was reached and this caller asked to keep what was read
     // (issue #1157). Everything the transfer did produce before the write
@@ -1010,20 +1249,24 @@ Result<Response> Client::send (const Request& request) {
 
     // What a bounded stream delivered, on every path below.
     sink.stream.report (response);
-    const bool stream_ended = stream_ended_by_rule (sink.stream, progress_watch, curl);
+    const bool stream_ended =
+    stream_ended_by_rule (sink.stream, frame.progress_watch, curl);
 
     // Check for errors
     if (res != CURLE_OK && !keep_truncated_body && !stream_ended) {
-        auto error = engine_abort_error (sink, progress_watch, request);
+        // The handle describes the hop that failed, so the code is that hop's.
+        auto error =
+        engine_abort_error (sink, response.headers, frame.progress_watch, request);
         if (!error) {
-            error = detail::curl_to_error (curl, res, impl_->errors, &request, &peer_check);
+            error = detail::curl_to_error (
+            curl, res, impl_->errors, &request, &frame.peer_check);
         }
 
         // Return Response object with error details (Postman-compatible approach).
         // raw_request and timing are already populated above; headers and body
         // stay as the transfer left them (empty when nothing answered).
         mark_failed (response, *error);
-        return response;
+        return std::move (response);
     }
 
     // Get response info for successful requests
@@ -1052,7 +1295,7 @@ Result<Response> Client::send (const Request& request) {
     // A forwarding proxy's 407 completes as an ordinary response; the proxy
     // answered, not the target (#3257). The status survives in the message.
     fail_if_proxy_refused (response, curl, http_code);
-    return response;
+    return std::move (response);
 }
 
 Result<Response> Client::get (const std::string& url, const Headers& headers) {

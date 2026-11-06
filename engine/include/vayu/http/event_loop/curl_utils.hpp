@@ -290,6 +290,23 @@ Response error_response (const Error& error);
 void apply_method_and_body (CURL* curl, const Request& request, BodySource& source);
 
 /**
+ * @brief Put a body-less @p method on a handle that carried a body for the
+ *        previous hop of a redirect chain (#3300).
+ *
+ * The handle is not reset between hops (its cookie engine and connections
+ * must survive), so the verb and the upload a previous hop set are cleared
+ * first; then `apply_method_and_body` asserts the method as it would for a
+ * request that never had a body.
+ */
+void apply_bodyless_method (CURL* curl, HttpMethod method, BodySource& source);
+
+/**
+ * @brief Rewind a streamed body so the next hop of a chain that keeps the
+ *        body (307, 308) sends it from the start.
+ */
+void rewind_body_source (BodySource& source);
+
+/**
  * @brief The Content-Type value the body implies, or empty.
  *
  * Empty when the request already declares a Content-Type (a header the user
@@ -326,8 +343,8 @@ void apply_method_and_body (CURL* curl, const Request& request, BodySource& sour
  * Every row named `Cookie` that has a value (`has_header_value`), trimmed of its edge
  * whitespace and joined with `; ` in row order; empty when there is none.
  * libcurl writes this after the jar's matches on one `Cookie` line, so a
- * request never carries two (RFC 6265 section 5.4, issue #2788), and drops it
- * on a cross-host redirect as it would a listed `Cookie` header.
+ * request never carries two (RFC 6265 section 5.4, issue #2788); a redirect
+ * to another origin drops it, as it would a listed `Cookie` header.
  */
 [[nodiscard]] std::string typed_cookie_value (const Request& request);
 
@@ -524,6 +541,16 @@ struct CurlPhaseTimes {
  * @brief Read the phase timers off a handle (valid even after a failed transfer).
  */
 CurlPhaseTimes read_phase_times (CURL* curl);
+
+/**
+ * @brief Add one hop's timers to a chain's, field by field (#3300).
+ *
+ * What libcurl's own counters did across the redirects it followed, each timer
+ * summed over the requests: a chain the engine follows one transfer per hop
+ * reads each hop's timers and sums them here, so its wire time covers every
+ * hop and the queue wait does not absorb the earlier ones.
+ */
+void add_phase_times (CurlPhaseTimes& total, const CurlPhaseTimes& hop);
 
 /**
  * @brief How long libcurl held the transfer waiting for a connection slot, in

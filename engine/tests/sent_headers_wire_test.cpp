@@ -886,8 +886,8 @@ TEST_F (SentHeadersWireTest, TwoTypedCookieRowsArriveAsOneLineInRowOrder) {
 // libcurl keeps a typed cookie on the host it was typed for, as it did when the
 // row rode the header list. Another port is another host to it. No jar here:
 // jar cookies key on the host, not the port, so one would follow the hop.
-// Mutation check: set `CURLOPT_UNRESTRICTED_AUTH` in
-// `apply_default_header_options` and `manual=1` reaches the second server.
+// Mutation check: stop clearing `CURLOPT_COOKIE` off the first origin in
+// `apply_hop_headers` and `manual=1` reaches the second server.
 TEST_F (SentHeadersWireTest, ARedirectToAnotherHostDropsTheTypedCookie) {
     EchoServer other;
     Request request = typed_cookie_request (server_->redirect_to (other.url ()));

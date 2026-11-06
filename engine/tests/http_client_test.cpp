@@ -57,6 +57,13 @@ static_assert ((DRIBBLE_BYTES / DRIBBLE_CHUNK) * 120 > 300,
 /// that turn a POST into a body-less GET, and the two that keep the method.
 constexpr std::array<int, 5> REDIRECT_CODES = { 301, 302, 303, 307, 308 };
 
+/// How long each hop of `/slow-hop` takes to answer: long beside the engine's
+/// own work between two hops, which is what the chain timing cases measure.
+constexpr std::chrono::milliseconds SLOW_HOP{ 600 };
+
+/// A redirect's body, far over the bound the redirect-body case sets.
+constexpr size_t REDIRECT_BODY_BYTES = size_t{ 64 } * 1024;
+
 class MockHttpBin {
     public:
     MockHttpBin () {
@@ -220,6 +227,24 @@ class MockHttpBin {
         });
         svr_.Post ("/landing", [] (const httplib::Request&, httplib::Response& res) {
             res.set_content ("landed", "text/plain");
+        });
+
+        // /slow-hop -> /slow-landing, each answer SLOW_HOP late (#3300).
+        svr_.Get ("/slow-hop", [] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (SLOW_HOP);
+            res.set_redirect ("/slow-landing", 302);
+        });
+        svr_.Get ("/slow-landing", [] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (SLOW_HOP);
+            res.set_content ("landed", "text/plain");
+        });
+
+        // A 302 carrying a body larger than any bound a test sets, as an
+        // error page a server sends beside its Location can be.
+        svr_.Get ("/redirect-with-body", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content (std::string (REDIRECT_BODY_BYTES, 'r'), "text/html");
+            res.status = 302;
+            res.set_header ("Location", "/landing");
         });
 
         // /redirect-from/<code> answers GET and POST with that redirect to
@@ -826,6 +851,72 @@ TEST_F (HttpClientTest, AnInterimContinueIsNotARedirectHop) {
     EXPECT_EQ (result.value ().status_code, 200);
     ASSERT_EQ (result.value ().redirect_hops.size (), 1U);
     EXPECT_EQ (result.value ().redirect_hops.front ().status_code, 307);
+}
+
+// The body of a redirect the send follows is nobody's answer, so it is neither
+// kept nor held to the bound; the bound is the final body's (#3300).
+// Mutation-check: let write_callback keep a discarded block's bytes and the
+// send fails RESPONSE_TOO_LARGE on the redirect.
+TEST_F (HttpClientTest, AFollowedRedirectsBodyIsNotHeldToTheBodyBound) {
+    ClientConfig config;
+    config.max_response_bytes = 1024;
+    Client bounded (config);
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/redirect-with-body");
+    request.follow_redirects = true;
+
+    auto result = bounded.send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& response = result.value ();
+    EXPECT_EQ (response.error_code, ErrorCode::None) << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (response.body, "landed");
+    ASSERT_EQ (response.redirect_hops.size (), 1U);
+}
+
+// One deadline spans the chain, as it spanned one transfer that followed: two
+// hops of SLOW_HOP (1200ms at least) cannot fit a 900ms timeout, while either
+// hop alone would. Healthy: TIMEOUT, whatever the runner's speed. Broken (each
+// hop given the whole timeout): a 200 after about 1200ms. Mutation-check: drop
+// the remaining-time `CURLOPT_TIMEOUT_MS` in `start_redirected_hop` and this
+// reads 200.
+TEST_F (HttpClientTest, OneTimeoutSpansEveryHopOfARedirectChain) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/slow-hop");
+    request.follow_redirects = true;
+    request.timeout_ms       = 900;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    EXPECT_EQ (result.value ().error_code, ErrorCode::Timeout)
+    << to_string (result.value ().error_code) << ": " << result.value ().error_message;
+    EXPECT_EQ (result.value ().status_code, 0);
+}
+
+// Every hop's wire time is counted, so the time spent on an earlier hop is not
+// reported as waiting in a queue. Healthy: a queue wait of a few milliseconds
+// (the engine's own work between hops). Broken (the last hop's timers alone):
+// the first hop's SLOW_HOP, 600ms or more. The bound sits between, at half of
+// SLOW_HOP. Mutation-check: keep only the last hop's timers in `run_chain` and
+// the queue wait reads about 600ms.
+TEST_F (HttpClientTest, ARedirectChainsQueueWaitDoesNotAbsorbItsEarlierHops) {
+    Request request;
+    request.method           = HttpMethod::GET;
+    request.url              = mock_->url ("/slow-hop");
+    request.follow_redirects = true;
+
+    auto result = client_->send (request);
+
+    ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+    const auto& timing = result.value ().timing;
+    EXPECT_EQ (result.value ().status_code, 200);
+    EXPECT_GE (timing.total_ms, 2.0 * static_cast<double> (SLOW_HOP.count ()));
+    EXPECT_LT (timing.queue_wait_ms, static_cast<double> (SLOW_HOP.count ()) / 2.0)
+    << "wire " << timing.wire_ms << "ms of a " << timing.total_ms << "ms send";
 }
 
 // libcurl stops at max_redirects, and so does the record: a loop reports the

@@ -66,6 +66,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "echo_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "tls_backend.hpp"
@@ -399,6 +400,92 @@ TEST_P (MutualTlsTest, ADesignSendCompletesTheHandshakeAndNamesTheEntry) {
     // The same field the design funnels print, now on an exchange that could
     // not have happened without the entry it names.
     EXPECT_EQ (response.client_certificate, "127.0.0.1");
+}
+
+// ---------------------------------------------------------------------------
+// A redirect is a hop of its own (#3300)
+// ---------------------------------------------------------------------------
+//
+// libcurl following inside one transfer handed the certificate only to the
+// origin the transfer started at, and the registry was never asked about the
+// origin a redirect led to. The design send now runs one transfer per hop and
+// matches each hop's own origin.
+
+// The send starts at `localhost`, which the `127.0.0.1` entry does not answer
+// for, so only a match made for the second hop can present it. Mutation-check:
+// apply the transport policy for the first hop alone in `run_chain` and this
+// fails with "tlsv13 alert certificate required".
+TEST_P (MutualTlsTest, ARedirectToTheMtlsListenerPresentsTheCertificate) {
+    TlsServer server (ca_, ca_);
+    const vayu::tests::EchoServer plain;
+    const ClientIdentity client = identity ("redirected", ca_);
+    register_entry (client);
+
+    const Response response = send_through (policy (),
+    "http://localhost:" + std::to_string (plain.port ()) +
+    "/redirect?to=" + server.url ("/hello"));
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << "the hop to the mTLS listener went without the certificate: "
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (response.redirect_hops.size (), 1U);
+    EXPECT_EQ (response.client_certificate, "127.0.0.1");
+}
+
+// The first hop's origin matches no entry and the second's does: the identity
+// is found for the hop that needs it, and the response names it. Mutation-check:
+// record the first hop's match instead of the last's and the label is empty.
+TEST_P (MutualTlsTest, AnUnregisteredOriginRedirectingToARegisteredOnePresentsItsIdentity) {
+    TlsServer server (ca_, ca_);
+    const vayu::tests::EchoServer plain;
+    const ClientIdentity client = identity ("port_only", ca_);
+    register_entry (client, server.port ());
+
+    const Response response =
+    send_through (policy (), plain.redirect_to (server.url ("/hello")));
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (
+    response.client_certificate, "127.0.0.1:" + std::to_string (server.port ()));
+}
+
+// The other way: the entry answers for the first hop only, so the hop that
+// answered presented nothing and the response names nothing.
+TEST_P (MutualTlsTest, AHopToAnUnregisteredOriginReportsNoIdentity) {
+    const vayu::tests::EchoServer registered;
+    const vayu::tests::EchoServer elsewhere;
+    const ClientIdentity client = identity ("left_behind", ca_);
+    register_entry (client, registered.port ());
+
+    const Response response =
+    send_through (policy (), registered.redirect_to (elsewhere.url ()));
+
+    ASSERT_EQ (response.error_code, ErrorCode::None)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.status_code, 200);
+    EXPECT_EQ (elsewhere.requests_seen (), 1);
+    EXPECT_EQ (response.client_certificate, "")
+    << "the response named an identity the hop that answered never presented";
+}
+
+// The refusal is the hop's that failed: an https hop with no response line,
+// which is a TLS error, not the plain first hop's 302. Mutation-check: code
+// the error off the first hop's transfer and this reads CONNECTION_FAILED.
+TEST_P (MutualTlsTest, ARefusalOnARedirectedHopIsCodedFromThatHop) {
+    TlsServer server (ca_, ca_);
+    const vayu::tests::EchoServer plain;
+
+    const Response response =
+    send_through (policy (), plain.redirect_to (server.url ("/hello")));
+
+    EXPECT_EQ (response.status_code, 0);
+    EXPECT_EQ (response.error_code, ErrorCode::SslError)
+    << to_string (response.error_code) << ": " << response.error_message;
+    EXPECT_EQ (response.redirect_hops.size (), 1U);
+    EXPECT_TRUE (response.transfer_attempted);
 }
 
 TEST_P (MutualTlsTest, AnSseStreamPresentsTheCertificate) {

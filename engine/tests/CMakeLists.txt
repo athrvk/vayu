@@ -197,6 +197,7 @@ add_executable(vayu_tests
     path_variables_test.cpp
     auth_header_precedence_test.cpp
     redirect_credentials_test.cpp
+    redirect_policy_test.cpp
     query_encoding_test.cpp
     implied_content_type_test.cpp
     url_encoding_test.cpp

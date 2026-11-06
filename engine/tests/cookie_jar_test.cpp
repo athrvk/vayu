@@ -110,6 +110,16 @@ class CookieServer {
             res.set_header ("Set-Cookie", name + "=" + name + "-value; Path=/");
             res.set_content ("{}", "application/json");
         });
+        // A login that bounces: sets a cookie and redirects to `to`, which
+        // may be another origin (#3300).
+        svr.Get ("/set-and-go", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "hop=1; Path=/");
+            res.set_redirect (req.get_param_value ("to"), 302);
+        });
+        // A redirect to `to` that sets nothing.
+        svr.Get ("/go", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_redirect (req.get_param_value ("to"), 302);
+        });
         // Expires the cookie the way a logout does.
         svr.Get ("/logout", [] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("Set-Cookie",
@@ -496,6 +506,34 @@ TEST (CookieJarTransfer, ACookieSetByOneRequestIsSentOnTheNext) {
 
     EXPECT_NE (echoed.find ("session=abc123"), std::string::npos)
     << "the session did not survive to the second request; got: " << echoed;
+}
+
+// A login that bounces through another origin (#3300): the cookie the first
+// origin set stays off the hop to the second, is stored for the first, and
+// goes out again when the chain comes back to it. Cookies ignore the port, so
+// the second origin is a second listener on the same host, the one case
+// libcurl's own matching would have sent it to. Mutation-check: construct no
+// `HopCookies` in `run_chain` and the second origin echoes `hop=1`.
+TEST (CookieJarTransfer, ACookieAHopSetStaysWithTheOriginThatSetIt) {
+    CookieServer origin;
+    CookieServer other;
+    CookieJar jar;
+
+    const vayu::Response away = response_in_scope (
+    jar, "env_a", origin.url ("/set-and-go?to=" + other.url ("/echo")));
+    ASSERT_EQ (away.status_code, 200) << away.error_message;
+    EXPECT_EQ (away.body, "")
+    << "a cookie the first origin set reached the second";
+    EXPECT_NE (send_in_scope (jar, "env_a", origin.url ("/echo")).find ("hop=1"),
+    std::string::npos)
+    << "the cookie was not kept for the origin that set it";
+
+    const vayu::Response back = response_in_scope (jar, "env_b",
+    origin.url ("/set-and-go?to=" + other.url ("/go?to=" + origin.url ("/echo"))));
+    ASSERT_EQ (back.status_code, 200) << back.error_message;
+    EXPECT_EQ (back.redirect_hops.size (), 2U);
+    EXPECT_EQ (back.body, "hop=1")
+    << "a hop back to the origin that set the cookie went without it";
 }
 
 TEST (CookieJarTransfer, CookiesDoNotCrossAnEnvironmentBoundary) {
