@@ -15,8 +15,20 @@
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/redirect_policy.hpp"
+#include "vayu/utils/parse.hpp"
 
 namespace vayu::http::detail {
+
+namespace {
+
+/// Whether a response's headers name a non-blank `Location`.
+bool names_location (const Headers& headers) {
+    const auto location = headers.find ("location");
+    return location != headers.end () && !location->second.empty ();
+}
+
+} // namespace
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
@@ -32,6 +44,10 @@ int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, v
 size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* data        = static_cast<TransferData*> (userdata);
     size_t total_size = size * nmemb;
+
+    if (data->discard_body) {
+        return total_size;
+    }
 
     // A bounded stream (issue #576) counts what it just received and ends at
     // the event cap. Decided before the byte cap below because the two mean
@@ -92,6 +108,11 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     }
 
     if (line.empty ()) {
+        // The block is complete. A redirect the request follows is a hop of
+        // its own (#3302), and its body is nobody's response.
+        data->discard_body = data->request.follow_redirects &&
+        is_redirect_status (data->block_status) &&
+        names_location (data->response.headers);
         return total_size;
     }
 
@@ -101,8 +122,13 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     // HTTP/2+ status lines have no phrase - leave status_text empty and
     // let the caller fall back to a code→phrase lookup.
     if (line.starts_with ("HTTP/")) {
-        auto first_space = line.find (' ');
+        data->block_status = 0;
+        auto first_space   = line.find (' ');
         if (first_space != std::string::npos) {
+            const std::string_view code =
+            std::string_view (line).substr (first_space + 1);
+            data->block_status =
+            vayu::utils::parse_number<int> (code.substr (0, code.find (' '))).value_or (0);
             auto second_space = line.find (' ', first_space + 1);
             if (second_space != std::string::npos && second_space + 1 < line.size ()) {
                 data->response.status_text = line.substr (second_space + 1);
@@ -110,8 +136,8 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
                 data->response.status_text.clear ();
             }
         }
-        // Reset headers between redirect hops so we end up with the
-        // final response's set.
+        // A 1xx interim block, or a proxy's CONNECT answer, precedes the
+        // response; the last block is the one kept.
         data->response.headers.clear ();
         return total_size;
     }
@@ -124,23 +150,12 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     return total_size;
 }
 
-void track_hop_body (TransferData& data, curl_off_t body_now) {
-    if (body_now < data.hop_body_down) {
-        data.earlier_hops_body_down += data.hop_body_down;
-    }
-    data.hop_body_down = body_now;
-}
-
 int progress_callback (void* clientp,
 curl_off_t dltotal,
 curl_off_t dlnow,
 curl_off_t /*ultotal*/,
 curl_off_t /*ulnow*/) {
     auto* data = static_cast<TransferData*> (clientp);
-    if (data->counts_redirect_bodies) {
-        track_hop_body (*data, dlnow);
-    }
-
     if (data->progress) {
         data->progress (data->request_id, static_cast<size_t> (dlnow),
         static_cast<size_t> (dltotal));

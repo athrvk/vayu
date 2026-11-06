@@ -548,6 +548,42 @@ TEST_P (MutualTlsTest, ALoadRunPresentsTheCertificate) {
     }
 }
 
+// The load path's redirect is a hop of its own too (#3302). Each transfer
+// starts at `localhost`, which the `127.0.0.1` entry does not answer for, so
+// only a match made for the redirected hop can present it; three of them, so
+// pooled handles are covered as above. Mutation-check: drop the
+// `apply_transport_policy` call from `start_redirect_hop` and every transfer
+// fails with an `SSL_ERROR`.
+TEST_P (MutualTlsTest, ALoadRunRedirectedToTheMtlsListenerPresentsTheCertificate) {
+    TlsServer server (ca_, ca_);
+    const vayu::tests::EchoServer plain;
+    const ClientIdentity client = identity ("load_redirected", ca_);
+    register_entry (client);
+
+    EventLoopConfig config;
+    config.transport = policy ();
+    EventLoop loop (config);
+    loop.start ();
+    std::vector<Request> requests;
+    requests.reserve (3);
+    for (int i = 0; i < 3; ++i) {
+        requests.push_back (get_request ("http://localhost:" +
+        std::to_string (plain.port ()) + "/redirect?to=" + server.url ("/hello")));
+    }
+    const auto batch = loop.execute_batch (requests);
+    loop.stop ();
+
+    ASSERT_EQ (batch.responses.size (), 3u);
+    for (const auto& result : batch.responses) {
+        ASSERT_TRUE (result.is_ok ()) << result.error ().message;
+        EXPECT_EQ (result.value ().error_code, ErrorCode::None)
+        << "the hop to the mTLS listener went without the certificate: "
+        << to_string (result.value ().error_code) << ": " << result.value ().error_message;
+        EXPECT_EQ (result.value ().status_code, 200);
+        EXPECT_NE (result.value ().body.find ("over"), std::string::npos);
+    }
+}
+
 TEST_P (MutualTlsTest, PmSendRequestPresentsTheCertificate) {
     // `pm.sendRequest` builds its own ClientConfig inside the script engine, so
     // the registry reaches it through the context or not at all - and a script

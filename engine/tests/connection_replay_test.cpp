@@ -127,7 +127,7 @@ TEST_F (ConnectionReplayTransferTest, AReplayThatFailsIsStillCounted) {
 }
 
 // A redirect hop is a second request on a connection too, the same callback
-// fires for it, and it is not a replay. Mutation check: drop the redirect
+// fires for it, and it is not a replay. Mutation check: drop the `followed`
 // count from `connection_replays` in curl_utils.cpp and this reads 1.
 TEST_F (ConnectionReplayTransferTest, ARedirectIsNotAReplay) {
     httplib::Server target;

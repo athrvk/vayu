@@ -31,17 +31,6 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata);
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata);
 
 /**
- * @brief Records one reading of libcurl's body count for the current hop
- * (`CURLINFO_SIZE_DOWNLOAD_T`, or the progress callback's `dlnow`), moving a
- * finished hop's bytes into `earlier_hops_body_down` (#2893).
- *
- * libcurl makes one forced progress call with a hop's final count before it
- * starts the next (`multi_done`), then reports the next hop from 0, so a
- * reading lower than the last closes the hop the last reading measured.
- */
-void track_hop_body (TransferData& data, curl_off_t body_now);
-
-/**
  * @brief CURL progress callback wrapper
  */
 int progress_callback (void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow);
