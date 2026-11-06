@@ -833,7 +833,7 @@ TEST (CookieJarWarnings, ACookiePastTheHeaderLimitIsNamedAndTakesTheTypedRowWith
         const auto found = warnings_with_code (response, "cookie_not_sent");
         ASSERT_EQ (found.size (), 1U)
         << "verbosity "
-        << verbosity << ": no warning, or libcurl reworded its header-size notice (client.cpp)";
+        << verbosity << ": no warning, or libcurl reworded its header-size notice (cookie_warnings.cpp)";
         EXPECT_NE (found.front ().message.find ("Cookie big"), std::string::npos)
         << found.front ().message;
         EXPECT_NE (found.front ().message.find ("8190"), std::string::npos)
@@ -866,7 +866,8 @@ TEST (CookieJarWarnings, TheCookieCountCapIsReportedAndLeavesTheTypedRowSent) {
     ASSERT_EQ (response.status_code, 200);
     const auto found = warnings_with_code (response, "cookie_limit_reached");
     ASSERT_EQ (found.size (), 1U)
-    << "no warning, or libcurl reworded its cookie-count notice (client.cpp)";
+    << "no warning, or libcurl reworded its cookie-count notice "
+       "(cookie_warnings.cpp)";
     EXPECT_NE (found.front ().message.find ("150"), std::string::npos)
     << found.front ().message;
     EXPECT_TRUE (warnings_with_code (response, "cookie_not_sent").empty ());
@@ -946,7 +947,7 @@ TEST (CookieJarWarnings, AWithheldCookieWithAVeryLongNameIsStillReportedAndCutSh
     ASSERT_EQ (response.status_code, 200);
     const auto found = warnings_with_code (response, "cookie_not_sent");
     ASSERT_EQ (found.size (), 1U)
-    << "no warning for a notice libcurl cut short (client.cpp)";
+    << "no warning for a notice libcurl cut short (cookie_warnings.cpp)";
     EXPECT_NE (found.front ().message.find ("Cookie " + std::string (64, 'n') + "... was not sent"),
     std::string::npos)
     << found.front ().message;
