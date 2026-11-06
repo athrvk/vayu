@@ -50,7 +50,13 @@ import { memo, useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge, Button } from "@/components/ui";
-import { Callout, ExtractorMisses, SentBodyFileNote, UnresolvedTokens } from "@/components/shared";
+import {
+	Callout,
+	ExchangeWarnings,
+	ExtractorMisses,
+	SentBodyFileNote,
+	UnresolvedTokens,
+} from "@/components/shared";
 import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
@@ -368,6 +374,7 @@ function ScenarioStepCard({
 					{response.httpVersionDowngraded && (
 						<HttpVersionDowngradeNote httpVersion={response.httpVersion} />
 					)}
+					<ExchangeWarnings warnings={response.warnings} />
 					<UnifiedResponseViewer
 						response={{
 							body: response.body,

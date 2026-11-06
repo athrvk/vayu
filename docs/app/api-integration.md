@@ -1905,7 +1905,11 @@ reused one before answering ([#2799](https://github.com/athrvk/vayu/issues/2799)
 The app does not draw the number: the engine's `connection_replayed` entry in
 `report.warnings` is the surface, and `RunWarnings` renders it as a callout
 titled "Some requests were re-sent after a dropped connection" with the count in
-its message. The number is for MCP and export readers. Unlike
+its message. The number is for MCP and export readers. The same list carries
+`cookies_dropped` ([#3307](https://github.com/athrvk/vayu/issues/3307)): the
+`Set-Cookie` headers libcurl's cookie engine discarded across the run (`count`),
+titled "Some cookies the server set were dropped" in `RunWarnings`, the count
+again in the engine's message and no cookie name in it. Unlike
 `httpVersionDowngraded`, **absent and `0` differ**: `0` is a run that counted
 and saw none, absent a run stored before the count existed.
 
@@ -1939,7 +1943,8 @@ and `message` to `undefined`, so `ResponseState.warnings` is a non-empty list or
 absent and `warnings-funnels.test.ts` holds the two together.
 `ResponseViewer` draws one warning `Callout` per entry, from `ExchangeWarnings`,
 between the status band and the tabs, so it shows on every tab and on a
-`status: 0` failure. The title comes from the code and an unknown code gets a
+`status: 0` failure; a collection run's step card draws the same component above
+its response viewer. The title comes from the code and an unknown code gets a
 neutral one, since the engine adds codes without the app learning them first.
 
 `clientCertificate` names the client-certificate registry entry the exchange
