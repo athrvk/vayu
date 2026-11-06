@@ -2277,36 +2277,40 @@ std::string live_stream_keys_in (const nlohmann::json& frame) {
 
 } // namespace
 
-// The tally the write callback counts into is what the tick reads, and every
-// transfer of a streaming run is a stream, so the active count is the open
-// streams. Mutation check: read `stream_events_total_` (completions only) into
-// `streamEvents` and the first assertion reads 0.
+// The counters the streams' tallies feed are what the tick reads. The open
+// streams are the gauge, not the active transfer count, which on a collection
+// run also counts its ordinary steps (#3304): five transfers in flight, two of
+// them streams. Mutation checks: read `stream_events_total_` (completions
+// only) into `streamEvents` and the first assertion reads 0; read
+// `current_active` into `streamsOpen` and the second reads 5.
 TEST_F (MetricsCollectorTest, AStreamingRunsTickCarriesTheLiveTallyAndItsOpenStreams) {
     MetricsCollector streaming ("stream_live", streaming_config (true));
-    const auto tally = streaming.live_stream_event_counter ();
-    ASSERT_NE (tally, nullptr)
-    << "a streaming run with stream_metrics has a tally";
-    tally->fetch_add (7);
+    const auto live = streaming.live_stream_counts ();
+    ASSERT_NE (live, nullptr)
+    << "a streaming run with stream_metrics has live counters";
+    live->events.fetch_add (7);
+    live->open.fetch_add (2);
 
-    const auto stats = streaming.get_current_stats (3, 1.0, 3);
+    const auto stats = streaming.get_current_stats (5, 1.0, 5);
 
     EXPECT_EQ (stats.at ("streamEvents").get<size_t> (), 7u) << stats.dump ();
-    EXPECT_EQ (stats.at ("streamsOpen").get<size_t> (), 3u) << stats.dump ();
+    EXPECT_EQ (stats.at ("streamsOpen").get<size_t> (), 2u) << stats.dump ();
+    EXPECT_EQ (stats.at ("activeConnections").get<size_t> (), 5u)
+    << "every transfer is still an active connection: " << stats.dump ();
     EXPECT_EQ (stats.at ("totalRequests").get<size_t> (), 0u)
     << "nothing completed, and the events are on the frame anyway";
 }
 
 // Absent, not zero, on both runs that are not a reporting stream: one that does
 // not stream (the default `stream_metrics: true` included) and a stream with
-// `stream_metrics: false`. Neither has a tally for a transfer to count into.
+// `stream_metrics: false`. Neither has counters for a transfer to count into.
 TEST_F (MetricsCollectorTest, ATickCarriesNoStreamKeysUnlessTheRunStreamsWithStreamMetrics) {
     MetricsCollector plain ("plain", MetricsCollectorConfig{});
     MetricsCollector metrics_off ("stream_off_live", streaming_config (false));
 
     for (auto* run : { &plain, &metrics_off }) {
         run->record_stream_completion (4, false, 25.0);
-        EXPECT_EQ (run->live_stream_event_counter (), nullptr);
-        EXPECT_FALSE (run->live_stream_events ().has_value ());
+        EXPECT_EQ (run->live_stream_counts (), nullptr);
         auto stats = run->get_current_stats (1, 1.0, 1);
         run->put_gate_distributions (stats);
         EXPECT_EQ (live_stream_keys_in (stats), "") << stats.dump ();

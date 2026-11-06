@@ -157,9 +157,12 @@ consumes it.
   frames carry no block renders exactly as before.
 - **A streaming run's stream card is gated on its frames, and an absent figure
   is not 0** (#3236). The engine sends `streamEvents` (cumulative), `streamsOpen`
-  and `eventsPerSecond` on every frame of a streaming run with stream metrics on,
-  and `streamTimeToFirstEvent` on gate frames once a stream with a timed first
-  event has completed. `mapSseMetrics` passes all four through as sent
+  and `eventsPerSecond` on every frame of a run with a streaming request (a
+  single-request run with `stream`, or a collection load run with a streaming
+  step, #3304) and stream metrics on, and `streamTimeToFirstEvent` on gate
+  frames once a stream with a timed first event has completed. `streamsOpen`
+  counts streaming transfers alone, so on a collection that mixes streaming and
+  ordinary steps it is below `activeConnections`. `mapSseMetrics` passes all four through as sent
   (`stream_events`, `streams_open`, `events_per_second`,
   `stream_time_to_first_event`), so a real `0` is a reading and an absent key is
   "not measured"; a `|| 0` there would draw "0 events/sec" on every ordinary

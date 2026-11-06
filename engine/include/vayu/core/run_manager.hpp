@@ -660,8 +660,10 @@ struct RunContext {
      * every `Request` the executors submit. Resolved here rather than per
      * submission because it is the same two numbers for every transfer of the
      * run, and per-submission it would be two string-keyed JSON lookups on the
-     * strategy thread's hot path. Also carries the collector's live event
-     * tally (`StreamBounds::live_events`, issue #3236) to every transfer.
+     * strategy thread's hot path. Also carries the collector's live stream
+     * counters (`StreamBounds::live`, issue #3236) to every transfer. A
+     * collection run's streaming steps carry their own bounds from the plan
+     * and are handed the counters per submission (`scenario_load.cpp`).
      */
     std::optional<vayu::StreamBounds> stream_bounds;
 
@@ -708,7 +710,8 @@ struct RunContext {
     /**
      * The plan a *load-mode* scenario run executes, or null for a
      * single-request load run. Resolved before the run row existed and shared
-     * immutably, exactly as the design-mode runner's is.
+     * immutably, exactly as the design-mode runner's is. Set by the
+     * constructor, so it is in place before any of the run's threads starts.
      *
      * It lives on the context rather than being threaded through
      * `execute_load_test` as a parameter because the whole lifecycle around the
@@ -1158,11 +1161,14 @@ struct RunContext {
     // constructor argument rather than something set afterwards because the
     // collector sizes its error store from it up front; RunManager::start_run
     // reads the key, and the default keeps direct constructions (tests, and any
-    // caller without a database to hand) on the stock cap.
+    // caller without a database to hand) on the stock cap. `load_scenario`
+    // becomes `scenario` for the same reason: whether its plan has a streaming
+    // step decides whether the collector keeps live stream counters (#3304).
     RunContext (const std::string& id,
     nlohmann::json cfg,
     size_t max_errors = constants::metrics_collector::DEFAULT_MAX_ERRORS,
-    const EngineDefaults& engine_defaults = {});
+    const EngineDefaults& engine_defaults                  = {},
+    std::shared_ptr<const ScenarioExecution> load_scenario = nullptr);
     ~RunContext ();
     RunContext (const RunContext&)            = delete;
     RunContext& operator= (const RunContext&) = delete;
@@ -1668,6 +1674,8 @@ class RunManager {
      * `start_scenario_run` come through here rather than each keeping a copy of
      * that reasoning.
      *
+     * @param load_scenario The plan of a load-mode scenario run, handed to
+     *              the context's constructor; null for every other run.
      * @param spawn Builds the worker thread from the registered context. Called
      *              with the lock held, and may spawn helper threads onto the
      *              context first (the load path's metrics thread).
@@ -1675,6 +1683,7 @@ class RunManager {
     bool spawn_run (const std::string& run_id,
     const nlohmann::json& config,
     vayu::db::Database& db,
+    std::shared_ptr<const ScenarioExecution> load_scenario,
     const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn);
 
     public:

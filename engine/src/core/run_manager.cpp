@@ -845,12 +845,23 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     }
 }
 
+namespace {
+
+/// Whether a collection load plan has a step that streams (#3304).
+bool plan_streams (const std::shared_ptr<const ScenarioExecution>& scenario) {
+    return scenario != nullptr && longest_stream_bounds (scenario->plan).has_value ();
+}
+
+} // namespace
+
 RunContext::RunContext (const std::string& id,
 nlohmann::json cfg,
 size_t max_errors,
-const EngineDefaults& engine_defaults)
+const EngineDefaults& engine_defaults,
+std::shared_ptr<const ScenarioExecution> load_scenario)
 : run_id (id),
-  config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()) {
+  config (cfg.is_object () ? std::move (cfg) : nlohmann::json::object ()),
+  scenario (std::move (load_scenario)) {
     // Initialize MetricsCollector with configuration from test config
     MetricsCollectorConfig mc_config;
     mc_config.max_errors = max_errors;
@@ -904,7 +915,7 @@ const EngineDefaults& engine_defaults)
         stream_bounds =
         vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
     }
-    mc_config.streams = stream_bounds.has_value ();
+    mc_config.streams = stream_bounds.has_value () || plan_streams (scenario);
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
@@ -985,10 +996,10 @@ const EngineDefaults& engine_defaults)
     }
 
     metrics_collector = std::make_unique<MetricsCollector> (id, mc_config);
-    // Every transfer carries the run's live event tally on its bounds, so the
-    // write callback can count into it without knowing about the collector.
+    // Every transfer carries the run's live counters on its bounds, so its
+    // tally can count into them without knowing about the collector.
     if (stream_bounds) {
-        stream_bounds->live_events = metrics_collector->live_stream_event_counter ();
+        stream_bounds->live = metrics_collector->live_stream_counts ();
     }
 }
 
@@ -1315,6 +1326,7 @@ std::vector<std::shared_ptr<RunContext>> RunManager::get_all_active_runs () cons
 bool RunManager::spawn_run (const std::string& run_id,
 const nlohmann::json& config,
 vayu::db::Database& db,
+std::shared_ptr<const ScenarioExecution> load_scenario,
 const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
     // See the declaration for why `workers_mtx_` is held across the whole
     // block rather than just the insert.
@@ -1359,7 +1371,7 @@ const std::function<std::thread (const std::shared_ptr<RunContext>&)>& spawn) {
         auto context = std::make_shared<RunContext> (run_id, config,
         static_cast<size_t> (db.get_config_int ("maxStoredErrors",
         static_cast<int> (vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS))),
-        engine_defaults);
+        engine_defaults, std::move (load_scenario));
         register_run (run_id, context);
 
         // Sweep stale retained runs on each new registration so that headless /
@@ -1394,12 +1406,12 @@ std::shared_ptr<const ScenarioExecution> scenario,
 std::unique_ptr<LoadDataSet> data,
 LoadAuthPlan auth_plan,
 std::shared_ptr<vayu::http::FilePlan> files) {
-    return spawn_run (run_id, config, db, [&] (const std::shared_ptr<RunContext>& context) {
-        // Set before either thread starts: the worker reads it to choose an
-        // executor, and a later write would race the run it is meant to shape.
-        context->scenario = std::move (scenario);
-        // Same rule, same moment: the worker splits this set's request template
-        // before its first submission and every strategy reads it after.
+    return spawn_run (run_id, config, db, std::move (scenario),
+    [&] (const std::shared_ptr<RunContext>& context) {
+        // Set before either thread starts: the worker splits this set's
+        // request template before its first submission and every strategy
+        // reads it after, so a later write would race the run it is meant to
+        // shape.
         context->load_data = std::move (data);
         // And the credential plan beside it, which `build_load_request` reads
         // to decide whether the build resolves this run's auth at all.
@@ -1434,7 +1446,9 @@ const nlohmann::json& config,
 std::shared_ptr<const ScenarioExecution> execution,
 vayu::db::Database& db,
 vayu::http::CookieJar& cookie_jar) {
-    return spawn_run (run_id, config, db,
+    // A design run's plan travels to its runner, never onto the context: its
+    // steps take the sequential path, which keeps no live ticks.
+    return spawn_run (run_id, config, db, nullptr,
     [&, execution = std::move (execution)] (const std::shared_ptr<RunContext>& context) {
         return std::thread ([context, execution, &db, &cookie_jar, this] () {
             execute_scenario_run (context, execution, &db, &cookie_jar, *this);

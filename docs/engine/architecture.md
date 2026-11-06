@@ -1327,22 +1327,33 @@ completion-driven figure on the dashboard reads zero until then. The write
 callback adds what each chunk completed to a run-wide atomic, and the
 completion adds the unterminated last frame `SseFrameCounter::finish` counts
 (`StreamTally::feed` / `report`, the only two places the counter is fed). The
-http layer knows nothing of the collector: the atomic is owned by the run's
-`MetricsCollector`, allocated only for a `POST /runs` run with `stream` and
-`stream_metrics` on, and reaches every transfer as `StreamBounds::live_events`,
-so a non-streaming transfer never sees it and a streaming one pays a null check
-and one relaxed `fetch_add` per chunk that completed an event. A collection
-run's streaming steps carry no tally, so its live frames have no stream keys;
-its report's `stream` section is unaffected. The tally is kept apart from the
-completion counters behind the report's `stream` section, which
-`record_stream_completion` feeds, so nothing is counted twice; once the run
-settles the two agree, except that a stream a Stop cancelled delivered events
-the live total counts and the report does not. `get_current_stats` reads it as
-`streamEvents`, with `streamsOpen` as the active transfer count; the trailing
-window turns it into `eventsPerSecond` beside `currentRps`; and a gate frame
-adds `streamTimeToFirstEvent` from the completed streams' histogram, read
+http layer knows nothing of the collector: the counters (`LiveStreamCounts`,
+an event tally and an open-stream gauge) are owned by the run's
+`MetricsCollector`, allocated only for a load run that streams with
+`stream_metrics` on, and reach each streaming transfer as `StreamBounds::live`,
+so a non-streaming transfer never sees them and a streaming one pays a null
+check and one relaxed `fetch_add` per chunk that completed an event. A load run
+streams when it is a `POST /runs` run with `stream`, whose every transfer
+carries the counters from `RunContext::stream_bounds`, or a collection run
+whose plan has a streaming step (issue #3304, `longest_stream_bounds` non-empty,
+read by the `RunContext` constructor from the plan it is built with), whose
+streaming steps are handed them per submission in
+`ScenarioLoadDriver::submit_one` while its ordinary steps never are. The tally
+is kept apart from the completion counters behind the report's `stream`
+section, which `record_stream_completion` feeds, so nothing is counted twice;
+once the run settles the two agree, except that a stream a Stop cancelled
+delivered events the live total counts and the report does not.
+`get_current_stats` reads the tally as `streamEvents` and the gauge as
+`streamsOpen`: `StreamTally::start` raises the gauge and `report` lowers it
+before the completion is handed on, or the tally's destructor does for a
+transfer that is cancelled or discarded unreported, so it counts streaming
+transfers alone (never `activeConnections`, which on a mixed collection also
+counts the ordinary steps) and reads 0 once the run settles. The trailing
+window turns the tally into `eventsPerSecond` beside `currentRps`; and a gate
+frame adds `streamTimeToFirstEvent` from the completed streams' histogram, read
 through a snapshot as `cumulativePhases` is. All four are live only, never
-stored.
+stored. A design collection run has no metrics thread and no live frames, so
+its streaming steps are counted only in its report.
 
 `POST /execute` is deliberately not affected. With `stream` it is still
 `SseStreamManager`'s one-thread-per-stream model with no whole-transfer

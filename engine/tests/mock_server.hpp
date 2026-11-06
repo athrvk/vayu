@@ -180,6 +180,27 @@ class SlowMockServer {
             });
         });
 
+        // `/sse-held` for its first request only; every later one is a
+        // stream that sends one event and closes. Two virtual users on one
+        // streaming step diverge on it: one stays in its stream, the other
+        // moves on to the next step.
+        svr.Get ("/sse-held-first", [this] (const httplib::Request&, httplib::Response& res) {
+            const bool held = ++sse_held_first_hits == 1;
+            res.set_chunked_content_provider (
+            "text/event-stream", [this, held] (size_t, httplib::DataSink& sink) {
+                const std::string body =
+                held ? "data: one\n\ndata: two\n\ndata: three\n\n" : "data: only\n\n";
+                if (!sink.write (body.data (), body.size ())) {
+                    return false;
+                }
+                if (held) {
+                    hold_until_released ();
+                }
+                sink.done ();
+                return true;
+            });
+        });
+
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
 
@@ -248,6 +269,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/sse-held";
     }
 
+    std::string sse_held_first_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/sse-held-first";
+    }
+
     std::string vitals_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/vitals";
     }
@@ -313,6 +338,7 @@ class SlowMockServer {
     std::atomic<int> scrapes{ 0 };
     std::atomic<int> stall_hits{ 0 };
     std::atomic<int> hang_every_hits{ 0 };
+    std::atomic<int> sse_held_first_hits{ 0 };
     std::mutex stall_window_mutex;
     int stall_window_hits = 0; // stall_window_mutex
     std::chrono::steady_clock::time_point stall_window_closes; // stall_window_mutex
