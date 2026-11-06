@@ -1060,8 +1060,9 @@ logged as a warning: it means a client skipped composition.
   https transfer that failed for an unmapped code, or for one of the
   target-failed-the-exchange codes (`CURLE_RECV_ERROR` and its kin, among them
   `CURLE_PARTIAL_FILE`, a chunked reply closed without its final chunk, #3240;
-  otherwise `ConnectionFailed`; a redirect loop and an undecodable body are not among
-  them, they are `TooManyRedirects` and `BadContentEncoding`, #2462), with no
+  otherwise `ConnectionFailed`; an undecodable body is not among them, it is
+  `BadContentEncoding`, #2462, and a redirect loop is `TooManyRedirects`, raised by
+  the chain and not by a libcurl code), with no
   response line is an `SslError`, which is where every client-certificate
   refusal lands under TLS 1.3. The rule is the shape,
   never a list of codes, consulted only after every mapping more specific than
@@ -1070,8 +1071,9 @@ logged as a warning: it means a client skipped composition.
   than HTTP/1.x (an h2c server's preface) is `ProtocolMismatch` (#3306): libcurl
   calls it `CURLE_UNSUPPORTED_PROTOCOL`, the code a refused scheme shares, so
   it is told apart by a reached peer (`CURLINFO_PRIMARY_IP`) at an `http` or
-  `https` `CURLINFO_EFFECTIVE_URL`; a redirect onto `ftp://` keeps the earlier
-  hop's address and stays `InvalidUrl`.
+  `https` `CURLINFO_EFFECTIVE_URL`. A redirect onto `ftp://` never gets that
+  far: the engine's `resolve_redirect_target` refuses it as `InvalidUrl`
+  before the hop is made.
 - **No transfer reaches Vayu's own ports** (#2355): `include/vayu/http/loopback_guard.hpp`
   is the one predicate (loopback in any spelling, on the engine port the
   daemon registers with the set-once `set_engine_port` before it listens, or on

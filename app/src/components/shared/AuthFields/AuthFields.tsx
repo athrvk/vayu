@@ -165,7 +165,7 @@ export default function AuthFields({
 					{value.in === "header" ? "header" : "query parameter"}.
 				</p>
 
-				{/* A header key rides a redirect to the next host: libcurl drops only
+				{/* A header key rides a redirect to the next host: the engine drops only
 				    Authorization and Cookie there (issue #2476). A query key is part
 				    of the URL sent, and a redirect continues at whatever `Location`
 				    names, so the note is the header's alone. */}

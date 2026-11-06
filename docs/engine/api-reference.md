@@ -1240,9 +1240,10 @@ response declares a `Content-Encoding` that its bytes are not in or that this
 libcurl has no decoder for. Both previously came back as `CONNECTION_FAILED`,
 which sent people looking for a network fault when every hop had been answered.
 `errorMessage` opens with a plain statement - `Too many redirects: the server
-redirected more than N times (see Maximum redirects).` or `The response could
-not be decoded: the server sent Content-Encoding X.` - followed by libcurl's own
-text. The codes are **appended** to the enumeration like `PROXY_ERROR`, so
+redirected more than N times (see Maximum redirects). Maximum (N) redirects
+followed`, which is the engine's own text and ends there (the engine follows
+redirects itself), or `The response could not be decoded: the server sent
+Content-Encoding X.`, which is followed by libcurl's own text. The codes are **appended** to the enumeration like `PROXY_ERROR`, so
 stored numeric values are unchanged, but a script that tested
 `err.code === 'CONNECTION_FAILED'` (`pm.sendRequest`) or
 `pm.response.errorCode === 'CONNECTION_FAILED'` for these two failures now sees
@@ -6749,14 +6750,14 @@ fetched and the script's header replaces what auth wrote.
 **Redirects.** With `followRedirects` on, a redirect to a different scheme, host
 name or port drops the `Authorization` header and a typed `Cookie`, so
 `bearer`, `basic` and an `oauth2` token placed in the header stop at the first
-origin, as libcurl does.
+origin.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the origin the redirect leads to, **including
 over `http` after an `https` hop**. That is a documented exception, not an
-oversight: it is libcurl's rule, kept as it was on all three drivers. A design
-send, a stream and a load run run the engine's own
-redirect loop, which withholds exactly what libcurl withheld, so the three
-cannot disagree about what reaches the next origin. A query-located
+oversight: it is the rule libcurl applied while it followed redirects, kept as
+it was. A design send, a stream and a load run all run the engine's own
+redirect loop, so the three cannot disagree about what reaches the next
+origin. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
 `Location` names, so the key reaches it only if that URL repeats it. Set
 `followRedirects: false` on a request whose key must not leave the origin it was
@@ -7301,14 +7302,18 @@ A scheme is what libcurl reads as one: letters, digits, `+`, `-` and `.`
 after a leading letter, followed by `:/`. A URL with no scheme is sent as
 before, with the scheme libcurl guesses from the host - `http` for
 `localhost:8080/x` or `example.com/x`. Every transfer handle is also held to
-`http,https` (`CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR`), which
-covers what the URL check cannot see: a redirect whose `Location` names another
-scheme, and a guessed one (`ftp.example.com/x` would be FTP). Either fails as
-status `0` with error code `INVALID_URL` and libcurl's own message
-(`Protocol "ftp" is disabled`, followed by ` (in redirect)` for a redirect),
-and nothing is read. The libcurl the engine links carries every protocol curl
-builds by default, so these two options, set on every handle, are what restrict
-each transfer to `http` and `https`; the build does not.
+`http,https` (`CURLOPT_PROTOCOLS_STR`), which covers what the URL check cannot
+see: a guessed scheme (`ftp.example.com/x` would be FTP). It fails as status
+`0` with error code `INVALID_URL` and libcurl's own message
+(`Protocol "ftp" is disabled`), and nothing is read. A redirect's `Location`
+never reaches the handle's allowlist: the engine follows redirects itself and
+refuses a `Location` naming another scheme before making the hop, as status
+`0` with error code `INVALID_URL` and the message
+`Protocol "ftp" is disabled (in redirect)`, worded as libcurl worded it. A
+`Location` that does not parse is `INVALID_URL` too, with `The redirect target
+URL could not be parsed: ` and the reason. The libcurl the engine links carries
+every protocol curl builds by default, so the check and the option, not the
+build, are what restrict each transfer to `http` and `https`.
 
 A URL libcurl cannot parse is also status `0` with error code `INVALID_URL`.
 When the URL the transfer was handed holds a space, a C0 control character or
@@ -8146,25 +8151,27 @@ skips both the chain and the hostname check (`CURLOPT_SSL_VERIFYPEER` and
 To keep verification on for a host with an internal authority, add the CA under
 [TLS trust settings](#tls-trust-settings) instead.
 
-**A redirect that crosses origins drops the cookies the hop set.** On a design
+**A redirect hop's cookie stays with the origin that set it.** On a design
 send, a stream and a scenario load run's per-virtual-user session, a
-`Set-Cookie` returned by one hop is not applied to a later hop of the same send
-whose origin (scheme, host and port) is a different one; a
-same-origin hop is unchanged, and a hop back to the origin that set the cookie
-carries it again. This is Vayu's own rule, held by the engine's redirect loop,
-and it is not configurable. The reason is the one behind **curl 8.21.0**'s
-hardening (`http: don't pass on set cookies to new origins`, which the engine
-picked up with the vcpkg baseline bump of #679): what one origin handed the
-client is not the next origin's to read. libcurl's cookie engine matches by host
-and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride
-a redirect to `127.0.0.1:9090`. A flow
-that depended on a cookie surviving a cross-origin hop (a login that bounces
+`Set-Cookie` returned by one hop is stored in the [cookie jar](#cookies) under
+the origin that set it, exactly as before, but is applied to the follow-up
+request only when that request's origin - scheme, host **and port** - is the
+same. A redirect that changes any of the three therefore starts without the
+hop's cookie: that includes a port-only change (`127.0.0.1:8080` to
+`127.0.0.1:9090`) and a hop to a sibling domain. A same-origin hop is
+unchanged, and a hop back to the origin that set the cookie carries it again.
+Later requests use the jar as normal. This is Vayu's own rule, held by the
+engine's redirect loop, and it is not configurable. The reason is the one
+behind **curl 8.21.0**'s hardening (`http: don't pass on set cookies to new
+origins`, which the engine picked up with the vcpkg baseline bump of #679):
+what one origin handed the client is not the next origin's to read. libcurl's
+cookie engine matches by host and path alone, so without the rule a cookie set
+on `127.0.0.1:8080` would ride a redirect to `127.0.0.1:9090`. A flow that
+depended on a cookie surviving a cross-origin hop (a login that bounces
 through an identity provider is the usual shape) sends the follow-up request
-without it. Nothing about the [cookie jar](#cookies) itself changed: it is
-domain-scoped as before, so a cookie is still stored under the origin that set
-it and still sent on a later request back to that origin. A hop's `Set-Cookie`
-is reported in `redirects` whether or not a later hop carried it, so the member
-says what the server sent, not what went on to the next origin.
+without it. A hop's `Set-Cookie` is reported in `redirects` whether or not a
+later hop carried it, so the member says what the server sent, not what went
+on to the next origin.
 
 **Protocol.** `httpVersion` selects which HTTP version curl attempts:
 `"auto"` lets ALPN negotiate (curl's own default), `"http1.1"` forces
@@ -8532,8 +8539,8 @@ chunked`). So it carries what libcurl added on its own - the cookies the
 and an h2 request rendered in HTTP/1 form - none of which appear in
 `requestHeaders`. The jar's cookies and the request's typed `Cookie` rows share
 one `Cookie` line, the jar's first and the typed rows after them joined with
-`"; "` (issue #2788); a redirect to another host drops the typed part, as it
-drops a typed `Authorization`. The app's Headers tab lists the sent request
+`"; "` (issue #2788); a redirect to another scheme, host or port drops the
+typed part, as it drops a typed `Authorization`. The app's Headers tab lists the sent request
 from this block, line by line in wire order, so the tab shows the whole wire while the
 script-visible record stays the engine's. When the final hop sent no body, the
 string ends at the blank line that closes the header block: a `POST` answered
@@ -11064,10 +11071,12 @@ split to report. A scenario step's histogram follows the same rule as the
 run's.
 
 Where libcurl reports the failure, the test is whether the transfer reached
-the network, not which error it ended with. A redirect to a scheme the engine
-does not send, an unparsable redirect `Location`, and a reply libcurl cannot
-read come back with the same codes as a refused URL, but after real hops, so
-they are timed. So are a DNS failure, a refused connection, and a client
+the network, not which error it ended with. A reply libcurl cannot read comes
+back with the same code as a refused URL, but after a real hop, so it is
+timed. A redirect to a scheme the engine does not send and an unparsable
+redirect `Location` are the engine's own refusals, reported by the engine
+rather than libcurl; the hops before them were answered, so they are timed
+too. So are a DNS failure, a refused connection, and a client
 certificate or CA file libcurl cannot read: libcurl reads those files during
 the TLS handshake, after the TCP connect, so that failure has a duration. (A
 client certificate whose file is already unreadable when the run resolves its

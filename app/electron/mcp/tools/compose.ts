@@ -905,11 +905,12 @@ export const MAX_RESPONSE_SAMPLES_BOUND = 1_000_000;
 /**
  * The redirect ceiling `apply_request_fields` clamps a stored request to
  * (`std::clamp (r.max_redirects, 0, 100)`). `POST /runs` has no guard of its
- * own - the field reaches `CURLOPT_MAXREDIRS` as an `int`, where a negative
- * means *unlimited* - so this schema is the only thing between an agent's
- * `maxRedirects: -1` and a run that follows redirect chains forever. Refused
- * rather than clamped, like every other bound here: a value silently changed is
- * a run measuring something the agent did not ask for.
+ * own - the field reaches the engine's redirect chain as an `int`, where a
+ * negative means *unlimited* (`redirect_limit_reached`) - so this schema is the
+ * only thing between an agent's `maxRedirects: -1` and a run that follows
+ * redirect chains forever. Refused rather than clamped, like every other bound
+ * here: a value silently changed is a run measuring something the agent did not
+ * ask for.
  *
  * Read by both surfaces that take the field - `requestSettingsInput`, which
  * writes it onto a saved request (issue #759), and `start_load_run`, which lays

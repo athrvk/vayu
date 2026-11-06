@@ -295,12 +295,13 @@ the Linux AppImage then download it in the background; macOS and the Linux
 `.deb` only tell you. There is no setting to turn the check off.
 
 On a redirect to a different scheme, host name or port the engine drops
-`Authorization` and `Cookie`, as curl does; every other header you set,
+`Authorization` and `Cookie`, as curl did; every other header you set,
 including API-key headers, follows the redirect - over `http` too, after an
-`https` hop. A design send and a load run follow a redirect one hop at a time
-and present the client certificate registered for each hop's own host, none
-where no entry matches it; a streaming request presents the certificate only
-to the host it started at. A design send's answer marks a downgrading hop
+`https` hop. A cookie a redirect hop sets reaches a later hop only when that
+hop's scheme, host and port are the setter's. A design send, a streaming
+request and a load run follow a redirect one hop at a time and present the
+client certificate registered for each hop's own host, none where no entry
+matches it. A design send's answer marks a downgrading hop
 (`redirects[].schemeDowngrade`). The API Key
 editor says so; turn off follow-redirects on a request whose key must stay on
 one origin.

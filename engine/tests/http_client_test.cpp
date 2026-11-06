@@ -464,9 +464,9 @@ TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
 }
 
 // What the final hop sent is what the view shows (issue #2462). A 301, 302 or
-// 303 answer to a POST makes libcurl re-send as a body-less GET, so the view
-// ends at the header block; appending the composed body there showed a body no
-// hop had carried. Mutation-check: append the body unconditionally and the
+// 303 answer to a POST is re-sent by the redirect chain as a body-less GET, so
+// the view ends at the header block; appending the composed body there showed
+// a body no hop had carried. Mutation-check: append the body unconditionally and the
 // three body-less rows fail while 307 and 308 still pass.
 TEST_F (HttpClientTest, RawRequestOfAPostRedirectedToAGetEndsAtTheHeaderBlock) {
     for (const int code : { 301, 302, 303 }) {
@@ -994,7 +994,7 @@ TEST_F (HttpClientTest, ARedirectChainsQueueWaitDoesNotAbsorbItsEarlierHops) {
     << "wire " << timing.wire_ms << "ms of a " << timing.total_ms << "ms send";
 }
 
-// libcurl stops at max_redirects, and so does the record: a loop reports the
+// The chain stops at max_redirects, and so does the record: a loop reports the
 // hops it made and no more.
 TEST_F (HttpClientTest, ARedirectLoopRecordsAtMostMaxRedirectsHops) {
     for (const int limit : { 0, 1, 3 }) {

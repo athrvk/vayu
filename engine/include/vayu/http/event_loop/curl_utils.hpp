@@ -100,7 +100,7 @@ const ConnectedPeerCheck* peer_check = nullptr);
 
 /**
  * @brief libcurl's current request URL on @p curl (`CURLINFO_EFFECTIVE_URL`):
- *        the last hop's when libcurl followed a redirect itself.
+ *        the current hop's, since a redirect chain reuses the one handle.
  *
  * Copied because libcurl's buffer is only valid until the next call into the
  * handle. Empty for a null handle and when libcurl reports none.
@@ -127,9 +127,11 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *        which is what `Response::transfer_attempted` records (#2412).
  *
  * False only for a URL libcurl could not parse or a scheme the handle refuses,
- * and then only while @p curl never reached a peer: a redirect whose target
- * is refused, and a reply libcurl cannot read, arrive as the same codes after
- * real hops. Every other code, a resolve failure and an unreadable client
+ * and then only while @p curl never reached a peer: a reply libcurl cannot
+ * read arrives as the same code after a real hop. A redirect the engine
+ * refuses (`resolve_redirect_target`, the limit) is not a libcurl code: the
+ * hop that asked for it finished with `CURLE_OK`, so it is an attempt. Every
+ * other code, a resolve failure and an unreadable client
  * certificate included, is an attempt. Read before anything else reuses the
  * handle. A null handle reads as one that reached no peer.
  */
@@ -164,12 +166,12 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * request libcurl re-sent on a new connection is seen at all (#2799,
  * `connection_replays`).
  *
- * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
- * on every handle: the backstop behind `validate_transferable`'s scheme rule
- * for the two URLs it never sees - a redirect's `Location` where libcurl
- * follows (the load path; a `RedirectChain` driver refuses one itself, in
- * `resolve_redirect_target`), and the scheme libcurl guesses for a URL that
- * names none (`ftp.example.com/x` is FTP).
+ * `CURLOPT_PROTOCOLS_STR` is `http,https` on every handle: the backstop behind
+ * `validate_transferable`'s scheme rule for the one URL it cannot judge, the
+ * scheme libcurl guesses for a URL that names none (`ftp.example.com/x` is
+ * FTP). A redirect's `Location` is never handed to it: `RedirectChain` refuses
+ * a scheme other than `http` or `https` in `resolve_redirect_target`, as an
+ * `InvalidUrl` worded `Protocol "ftp" is disabled (in redirect)`.
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
@@ -295,8 +297,10 @@ Response error_response (const Error& error);
  * larger one streams from the file the plan opened (`FileRef::approved`,
  * #2678), never from `src`: `CURLOPT_UPLOAD` with `INFILESIZE_LARGE` the size
  * that open saw, a read callback at this transfer's own offset, and a **seek
- * callback**, which libcurl needs to rewind the body for a redirect or the
- * second leg of Digest/NTLM - without it that leg fails rather than resending.
+ * callback**, which libcurl needs to rewind the body for the second leg of
+ * Digest/NTLM - without it that leg fails rather than resending. A redirect
+ * that resends the body is rewound by the engine, in
+ * `RedirectChain::apply_method` through `rewind_body_source`.
  * `UPLOAD` means PUT to libcurl, so the method is re-asserted with
  * `CURLOPT_CUSTOMREQUEST` afterwards.
  *

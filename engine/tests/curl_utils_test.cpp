@@ -521,9 +521,10 @@ TEST (CurlToError, TheNewCodesKeepTheirWireSpelling) {
     EXPECT_STREQ (vayu::error_type_name (vayu::ErrorCode::ProtocolMismatch), "protocol_mismatch");
 }
 
-// A scheme the handle's allowlist refuses - a redirect's, or one libcurl
-// guessed - is the same fault the URL check reports for a typed one, under the
-// same code. With no handle, or one that reached no peer, nothing says a peer
+// A scheme the handle's allowlist refuses - only one libcurl guessed for a URL
+// naming none reaches it, a redirect's being refused by the engine first - is
+// the same fault the URL check reports for a typed one, under the same code.
+// With no handle, or one that reached no peer, nothing says a peer
 // answered, so the code keeps that reading (#3306). Mutation-check: drop the
 // case and this reads INTERNAL_ERROR; map it to ProtocolMismatch
 // unconditionally and it reads PROTOCOL_MISMATCH.

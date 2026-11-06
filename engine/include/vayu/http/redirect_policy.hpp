@@ -42,7 +42,7 @@ namespace vayu::http {
 
 /**
  * @brief Whether a response with @p status is a redirect a following send acts
- *        on, given that it names a `Location`: any 3xx, as libcurl follows.
+ *        on, given that it names a `Location`: any 3xx.
  */
 [[nodiscard]] bool is_redirect_status (int status);
 

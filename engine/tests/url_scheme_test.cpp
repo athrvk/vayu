@@ -10,7 +10,7 @@
  * @brief Only `http` and `https` leave the engine.
  *
  * libcurl is a multi-protocol library, so a handle given a `file://` URL reads
- * the file and hands it back as a body. Two layers keep every transfer to the
+ * the file and hands it back as a body. Three checks keep every transfer to the
  * two schemes this product sends:
  *
  * 1. `unsendable_scheme`, asked by `validate_transferable` of the URL every
@@ -19,14 +19,15 @@
  *    refusal is the ordinary status-0 response, so `POST /execute`, a run,
  *    `pm.sendRequest`, an import fetch and an OAuth token request all report it
  *    the same way.
- * 2. `CURLOPT_PROTOCOLS_STR` / `CURLOPT_REDIR_PROTOCOLS_STR`, set on every
- *    handle by `apply_transport_policy`, for the URLs layer 1 never sees: a
- *    redirect's `Location`, and the scheme libcurl guesses for a URL that names
- *    none.
+ * 2. `CURLOPT_PROTOCOLS_STR`, set on every handle by `apply_transport_policy`,
+ *    for the scheme libcurl guesses for a URL that names none, which layer 1
+ *    cannot judge.
+ * 3. `resolve_redirect_target`, which refuses a redirect's `Location` naming
+ *    any scheme but `http` and `https` before the engine makes the hop.
  *
  * libcurl is linked with every protocol curl builds by default (the vcpkg port
- * has no `HTTP_ONLY` switch since 8.23, #2321), so the build backs neither
- * layer up: `apply_transport_policy` is the guard, and
+ * has no `HTTP_ONLY` switch since 8.23, #2321), so the build backs none of them
+ * up: `apply_transport_policy` is the guard for the handle, and
  * `UrlSchemeGuard.EveryFileThatCreatesAHandleAppliesTheTransportPolicy` keeps
  * it on every handle the engine creates.
  *
@@ -254,9 +255,9 @@ TEST (UrlSchemeTransfer, ALeadingSpaceDoesNotHideAFileUrl) {
 // The handle's own allowlist: what the URL check never sees
 // ---------------------------------------------------------------------------
 
-/// A redirect is followed inside libcurl, so its `Location` reaches no check
-/// of ours. `CURLOPT_REDIR_PROTOCOLS_STR` refuses it there, as the protocol
-/// error it is - never as a successful read of the target.
+/// A refused scheme, whether a redirect's `Location` (the chain refuses it) or
+/// one libcurl guessed (the handle's allowlist does), is the protocol error it
+/// is - never a successful read of the target.
 void expect_protocol_refusal (const vayu::Response& response) {
     EXPECT_EQ (response.status_code, 0);
     EXPECT_EQ (response.error_code, vayu::ErrorCode::InvalidUrl) << response.error_message;
@@ -275,16 +276,11 @@ TEST (UrlSchemeRedirect, ARedirectToAFileUrlIsAProtocolErrorNotARead) {
     expect_protocol_refusal (result.value ());
 }
 
-// libcurl's own default already keeps a redirect off `file`, but not off FTP:
-// its default redirect allowlist is HTTP, HTTPS, FTP and FTPS. Port 1 refuses
-// the connection, so a handle that followed would report CONNECTION_FAILED.
-// The refusal's code is the one a refused URL gets, but the first hop was
-// answered, so the transfer is timed (#2412), and the event loop's handle still
-// holds that hop's address, which must not make the refusal a peer's
-// `ProtocolMismatch` (#3306). Mutation-check: drop the peer half of
-// `curl_transfer_attempted` and both drivers read it as never sent; drop the
-// scheme half of `peer_spoke_another_protocol` and the event loop reads
-// PROTOCOL_MISMATCH.
+// A redirect onto FTP is refused by the engine, not dialled: port 1 refuses
+// the connection, so a hop that went out would report CONNECTION_FAILED. The
+// refusal's code is the one a refused URL gets, but the first hop was
+// answered, so the transfer is timed (#2412). Mutation-check: change the
+// refusal's code in `resolve_redirect_target` and both drivers fail.
 TEST (UrlSchemeRedirect, ARedirectToFtpIsRefusedOnBothDrivers) {
     const vayu::tests::EchoServer server;
     auto request = get (server.redirect_to ("ftp://127.0.0.1:1/pub/x"));

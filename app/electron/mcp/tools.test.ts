@@ -13767,8 +13767,9 @@ describe("start_load_run recording knobs", () => {
 
 	/**
 	 * `POST /runs` has no guard on `maxRedirects` - it reaches
-	 * `CURLOPT_MAXREDIRS`, where a negative means *unlimited* - so this schema is
-	 * the only thing between `-1` and a run that follows chains forever.
+	 * the engine's redirect chain, where a negative means *unlimited*
+	 * (`redirect_limit_reached`) - so this schema is the only thing between `-1`
+	 * and a run that follows chains forever.
 	 */
 	test("the redirect policy reaches composition, and a negative ceiling is refused", async () => {
 		const { client } = await start({ followRedirects: false, maxRedirects: 3 });
