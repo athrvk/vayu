@@ -49,14 +49,13 @@ struct ConnectedPeerCheck {
     /// `curl_to_error` can name that rule rather than libcurl's abort.
     bool refused_local_peer = false;
     /// How many times libcurl was about to write a request on a connection,
-    /// over every transfer this check was handed to: once per transfer, plus
-    /// once per redirect libcurl followed itself (`CURLINFO_REDIRECT_COUNT`,
-    /// the load path) or auth reload, plus once per request libcurl re-sent on
-    /// a new connection after a reused one was dropped or refused before
-    /// answering (#2799), which nothing else records. `connection_replays`
-    /// reads it back for a load transfer; the SSE consumer compares it with its
-    /// value at a hop's start. A plain int: a transfer's callbacks run on one
-    /// thread.
+    /// over every transfer this check was handed to: once per transfer (a
+    /// load transfer's redirect hops each being one, #3302), plus once per
+    /// request libcurl re-sent on a new connection after a reused one was
+    /// dropped or refused before answering (#2799), which nothing else
+    /// records. `connection_replays` reads it back for a load transfer; the
+    /// SSE consumer compares it with its value at a hop's start. A plain int:
+    /// a transfer's callbacks run on one thread.
     int requests_started = 0;
 };
 

@@ -958,14 +958,18 @@ logged as a warning: it means a client skipped composition.
   rather than eliding defaults, because the engine defaults to following and
   verifying: an omitted `false` would follow the 3xx the user asked to see, or
   verify the certificate they opted out for. `Client::send` (`run_chain`,
-  #3300) and the SSE consumer (`run_stream_chain`, #3301) follow a redirect
+  #3300), the SSE consumer (`run_stream_chain`, #3301) and the load path's event
+  loop (`next_redirect_hop` / `start_redirect_hop`, #3302) follow a redirect
   themselves, one transfer per hop on the same handle, with every between-hop
   decision in `http/redirect_policy.hpp`: the `Location`, the method and body
-  and the lines that stay with the first origin (`RedirectChain`, which both
-  drivers advance), the cookies a hop set (`HopCookies`), the limit. Each
+  and the lines that stay with the first origin (`RedirectChain`, which all
+  three drivers advance), the cookies a hop set (`HopCookies`), the limit. Each
   driver keeps its own sinks and deadlines; a stream discards a followed hop's
-  body itself and publishes one `open` frame per chain. Only the load path
-  still sets `CURLOPT_FOLLOWLOCATION` (#3302). A request's own `timeout`
+  body itself and publishes one `open` frame per chain. The event loop sends
+  the next hop in the same `drain_completions` call, so the transfer never
+  leaves `active_transfers` and a stop or a drain sees the chain as one
+  request; a transfer that is not redirected reads no `Location` and builds no
+  chain. No driver sets `CURLOPT_FOLLOWLOCATION`. A request's own `timeout`
   (`requests.timeout_ms`, nullable, #2937) is the deliberate exception:
   `payload_from_stored` emits it only when stated, because its absent default
   is the live `defaultTimeout` setting, resolved at send by
@@ -1128,9 +1132,10 @@ logged as a warning: it means a client skipped composition.
   `client_certificates`). The registry rides inside the `TransportPolicy`,
   read once per run on the load and collection paths;
   `match_client_certificate` picks the entry per transfer (per redirect hop on
-  a design send and a stream, where `run_chain` and `run_stream_chain`
-  re-apply the transport policy to each hop's URL, because libcurl hands a
-  certificate only to the origin a transfer started at, #3300, #3301) in three
+  a design send, a stream and a load run, where `run_chain`,
+  `run_stream_chain` and the event loop's `start_redirect_hop` re-apply the
+  transport policy to each hop's URL, because libcurl hands a certificate only
+  to the origin a transfer started at, #3300, #3301, #3302) in three
   tiers
   (#803): closest host first (exact beats wildcard, longer wildcard beats
   shorter), then port-specific beating catch-all. The only pattern is

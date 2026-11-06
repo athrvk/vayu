@@ -15,9 +15,9 @@
  * the next one is, rather than leaving `CURLOPT_FOLLOWLOCATION` to do it inside
  * one transfer: libcurl hands a client certificate only to the origin a
  * transfer started at, so every hop has to be its own transfer for the
- * certificate registry to be consulted for it (#3300). `Client::send` and the
- * SSE consumer (#3301) drive their chains through `RedirectChain`; the load
- * path still lets libcurl follow (#3302).
+ * certificate registry to be consulted for it (#3300). `Client::send`, the SSE
+ * consumer (#3301) and the load path's event loop (#3302) drive their chains
+ * through `RedirectChain`.
  *
  * The rules restate what libcurl did, so a send behaves as it did when libcurl
  * followed: which statuses are followed, how a `Location` resolves, which
@@ -267,6 +267,18 @@ class RedirectChain {
 class HopCookies {
     public:
     explicit HopCookies (CURL* curl) : curl_ (curl) {
+    }
+
+    /**
+     * @brief For a driver that seeded the engine itself and starts keeping
+     *        track only once the first hop, to @p first_hop_url, has finished
+     *        (the load path, #3302): @p held_before is what the engine held as
+     *        that hop started, in `CURLINFO_COOKIELIST`'s own spelling. Call
+     *        `after_hop` next.
+     */
+    HopCookies (CURL* curl, std::string first_hop_url, std::vector<std::string> held_before)
+    : curl_ (curl), hop_url_ (std::move (first_hop_url)),
+      before_ (std::move (held_before)) {
     }
 
     /// Before the transfer to @p hop_url.

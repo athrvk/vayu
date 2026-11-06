@@ -5696,15 +5696,13 @@ proxy, a load run and a collection run read the registry **once at run start**
 and hold it, because libcurl reuses a pooled connection only when its TLS
 identity matches.
 
-**A redirect is matched hop by hop on a design send and a stream.**
+**A redirect is matched hop by hop on a design send, a stream and a load run.**
 `POST /execute` (buffered or `stream: true`), the `pm.sendRequest` calls inside
-it, the OAuth token fetch and a typed `POST /import/fetch` follow a redirect one
-transfer per hop, and the registry is asked about each hop's own host and port:
-a send that starts at `http://host` and is redirected to an mTLS `https://host`
-presents the entry that answers for the second, and a hop no entry answers for
-presents nothing. A load run still lets libcurl follow, and libcurl gives the
-certificate only to the origin the transfer started at, so there a redirect to
-another origin goes without one.
+it, the OAuth token fetch, a typed `POST /import/fetch` and every request of a
+load run follow a redirect one transfer per hop, and the registry is asked about
+each hop's own host and port: a send that starts at `http://host` and is
+redirected to an mTLS `https://host` presents the entry that answers for the
+second, and a hop no entry answers for presents nothing.
 
 **Matching is by host, and most specific wins.** A `host` is either an exact
 name (`api.example.com`) or the one wildcard form, `*.example.com`, which is
@@ -6732,8 +6730,8 @@ origin, as libcurl does.
 Nothing else is dropped: an `apikey` with `in: "header"` - and any other header
 the request carries - is sent to the origin the redirect leads to, **including
 over `http` after an `https` hop**. That is a documented exception, not an
-oversight: it is libcurl's rule, kept as it was on all three drivers. A load
-run lets libcurl follow; a design send and a stream run the engine's own
+oversight: it is libcurl's rule, kept as it was on all three drivers. A design
+send, a stream and a load run run the engine's own
 redirect loop, which withholds exactly what libcurl withheld, so the three
 cannot disagree about what reaches the next origin. A query-located
 key is part of the URL as sent; the next hop is whatever the response's
@@ -8126,9 +8124,9 @@ To keep verification on for a host with an internal authority, add the CA under
 [TLS trust settings](#tls-trust-settings) instead.
 
 **A redirect that crosses origins drops the cookies the hop set.** On a design
-send and a stream, a `Set-Cookie` returned by one hop is not applied to a
-later hop of the same send whose origin (scheme, host and port) is a different
-one; a
+send, a stream and a scenario load run's per-virtual-user session, a
+`Set-Cookie` returned by one hop is not applied to a later hop of the same send
+whose origin (scheme, host and port) is a different one; a
 same-origin hop is unchanged, and a hop back to the origin that set the cookie
 carries it again. This is Vayu's own rule, held by the engine's redirect loop,
 and it is not configurable. The reason is the one behind **curl 8.21.0**'s
@@ -8136,8 +8134,7 @@ hardening (`http: don't pass on set cookies to new origins`, which the engine
 picked up with the vcpkg baseline bump of #679): what one origin handed the
 client is not the next origin's to read. libcurl's cookie engine matches by host
 and path alone, so without the rule a cookie set on `127.0.0.1:8080` would ride
-a redirect to `127.0.0.1:9090`. A load run still lets libcurl follow, and
-there a hop's cookie is matched by libcurl's engine. A flow
+a redirect to `127.0.0.1:9090`. A flow
 that depended on a cookie surviving a cross-origin hop (a login that bounces
 through an identity provider is the usual shape) sends the follow-up request
 without it. Nothing about the [cookie jar](#cookies) itself changed: it is

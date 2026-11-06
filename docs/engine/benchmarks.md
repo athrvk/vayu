@@ -218,7 +218,48 @@ that. `phaseHistograms` (engine config) and `phase_histograms` (per run) turn it
 off for anyone whose target proves otherwise; off leaves the bank unallocated,
 so the completion path pays one null check.
 
+### Following redirects costs a request that is not redirected nothing measurable (2026-11-06, engine 0.49.0)
+
+Since issue #3302 a load transfer follows a redirect one transfer per hop, so
+the redirect-hop progress hook in the entry below is gone. What a following
+transfer that is not redirected still pays is one status read at completion
+(`next_redirect_hop`), a status parse per response block and a flag check per
+body write. **Same hardware as the entries below**: a 4-core Xeon 2.1 GHz Linux
+container, release build, the mock server on the same cores, so read the
+ratios, not the absolute numbers.
+
+The harness is the hook's (`ab_redirect_hook.py`, whose labels keep the hook's
+name): the arm is the run's own `followRedirects` against a target that never
+redirects, 8 pairs of 15 s runs, the first arm alternating per pair, and a null
+test with following on on both sides. The comparison is following on against off, not before against after #3302: the status parse and the flag check run in both arms, so only the completion-time status read is isolated. `blob1mib` was not run.
+
+```bash
+python build.py --prod -e
+(cd scripts/test && go build -o mock-server mock-server.go)
+for case in rps20000 cc64; do
+  python scripts/perf/ab_redirect_hook.py --engine engine/build-release/vayu-engine \
+      --mock scripts/test/mock-server --case $case --seconds 15 --pairs 8
+done
+python scripts/perf/ab_redirect_hook.py --engine engine/build-release/vayu-engine \
+    --mock scripts/test/mock-server --case cc64 --seconds 15 --pairs 8 --null
+```
+
+| case | req/s on vs off | CPU per request on vs off |
+|---|---:|---:|
+| `rps20000` | 19,998 vs 19,998 (0.00%) | -0.81% |
+| `cc64` | 56,704 vs 56,378 (+0.58%) | -0.43% |
+| `cc64` null (on vs on) | 58,299 vs 57,640 (+1.14%) | -0.26% |
+
+The open-loop case held 20,000 req/s in both arms (full achievement, no
+skipped requests). The closed-loop per-arm spread was 11.6%, and the null test
+moves req/s further than the on/off pair does.
+
+**Verdict: nothing to resolve.** Both CPU deltas are inside the noise and of the
+opposite sign to a cost; the 1.2-1.7% per request the hook cost below is gone.
+
 ### The redirect-hop progress hook costs about 1.5% CPU per request (2026-10-26, engine 0.45.0)
+
+Superseded by the entry above (#3302): the hook no longer exists.
 
 Counting every redirect hop's body (issue #2893) installs libcurl's xferinfo
 callback and sets `NOPROGRESS=0` on any request that follows redirects, which is

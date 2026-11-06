@@ -14,6 +14,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -24,10 +29,9 @@
 #include "task_queue.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/event_loop.hpp"
-#include "vayu/http/event_loop/curl_callbacks.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
-#include "vayu/http/event_loop/transfer_context.hpp"
 #include "vayu/http/set_cookie.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -78,9 +82,8 @@ class MethodEchoServer {
             res.set_header ("X-Hop", "first");
             res.set_redirect ("/repeated-headers");
         });
-        // A redirect hop with a body of its own, which libcurl reads off the
-        // wire and never hands to the write callback (#2893). `to` overrides
-        // where it points.
+        // A redirect hop with a body of its own, which is counted as received
+        // and never kept (#2893, #3302). `to` overrides where it points.
         const auto moved = [] (int status) {
             return [status] (const httplib::Request& req, httplib::Response& res) {
                 res.status = status;
@@ -648,13 +651,11 @@ class RedirectBytesTest : public CurlTransferTest {
 
 } // namespace
 
-// A followed hop's body never reaches write_callback and libcurl zeroes
-// SIZE_DOWNLOAD_T when the next hop starts, so the count read at completion was
-// the last hop's body alone; its headers were already summed over both hops.
-// The two hops measured apart are the exact expectation, since the server
-// answers each the same way either time. Mutation check: drop
-// `counts_redirect_bodies` from the progress-callback condition in
-// `setup_easy_handle` and the followed count is short by the 200-byte body.
+// Each hop is a transfer of its own (#3302), and libcurl resets every count when
+// a transfer starts, so the chain's are the hops' summed. The two hops measured
+// apart are the exact expectation, since the server answers each the same way
+// either time. Mutation check: drop the `add_wire_bytes` fold from
+// `next_redirect_hop` and the followed counts are the landing hop's alone.
 TEST_F (RedirectBytesTest, AFollowedRedirectsBodyAndHeadersAreReceivedBytes) {
     vayu::Request request;
     request.method                  = vayu::HttpMethod::GET;
@@ -672,10 +673,10 @@ TEST_F (RedirectBytesTest, AFollowedRedirectsBodyAndHeadersAreReceivedBytes) {
     EXPECT_EQ (followed.bytes_up, redirect.bytes_up + landing.bytes_up);
 }
 
-// A 307 sends the body again; REQUEST_SIZE counts both copies already, so
-// SIZE_UPLOAD_T added to it counted the last one a third time, and one POST
-// with no redirect twice. Mutation check: add SIZE_UPLOAD_T back to
-// `bytes_up` in `extract_response` and the two upper bounds and the sum fail.
+// A 307 sends the body again; REQUEST_SIZE counts each hop's copy already, so
+// SIZE_UPLOAD_T added to it would count one POST's body twice. Mutation check:
+// add SIZE_UPLOAD_T to `WireBytes::up` in `read_wire_bytes` and the two upper
+// bounds and the sum fail.
 TEST_F (RedirectBytesTest, A307SendsAndCountsTheBodyOnBothHops) {
     const auto [followed, redirect] =
     followed_and_alone (text_post (server->url ("/moved-307")), 307);
@@ -692,8 +693,8 @@ TEST_F (RedirectBytesTest, A307SendsAndCountsTheBodyOnBothHops) {
 
 // A 301 turns the POST into a bodyless GET, so the body went out once, on the
 // hop that was redirected, and SIZE_UPLOAD_T (the GET's, 0) never holds it.
-// Mutation check: read `bytes_up` from SIZE_UPLOAD_T and the body is lost; drop
-// the progress hook as above and the received count is short by the 301's body.
+// Mutation check: read `WireBytes::up` from SIZE_UPLOAD_T and the body is lost;
+// drop the fold as above and the received count is short by the 301's.
 TEST_F (RedirectBytesTest, A301SendsTheBodyOnlyOnTheRedirectedHop) {
     const auto [followed, redirect] =
     followed_and_alone (text_post (server->url ("/moved-301")), 301);
@@ -709,10 +710,9 @@ TEST_F (RedirectBytesTest, A301SendsTheBodyOnlyOnTheRedirectedHop) {
     EXPECT_EQ (followed.bytes_down, redirect.bytes_down + landing.bytes_down);
 }
 
-// A next hop refused before it connects gets no progress call, so the body of
-// the hop before it is still the last reading when libcurl zeroes the count.
-// Mutation check: drop the `track_hop_body` call from `extract_response` and
-// the failed transfer is short by the redirect's body.
+// A next hop refused before it connects received nothing, and the hop before
+// it still counts. Mutation check: drop the earlier hops' bytes from
+// `extract_response` and the failed transfer reports nothing received.
 TEST_F (RedirectBytesTest, AHopRefusedBeforeItConnectsKeepsTheRedirectsBody) {
     int closed_port = 0;
     {
@@ -734,17 +734,6 @@ TEST_F (RedirectBytesTest, AHopRefusedBeforeItConnectsKeepsTheRedirectsBody) {
 
     EXPECT_EQ (refused.bytes_down, redirect.bytes_down)
     << "the redirect's body and headers, and nothing from the refused hop";
-}
-
-// The fold itself, on readings the test controls: each hop climbs from 0, and
-// a drop closes the hop the reading before it measured.
-TEST (TrackHopBody, ADropClosesTheHopTheLastReadingMeasured) {
-    vayu::http::detail::TransferData data;
-    for (const curl_off_t reading : { 0, 500, 500, 0, 0, 100, 0, 30 }) {
-        vayu::http::detail::track_hop_body (data, reading);
-    }
-    EXPECT_EQ (data.earlier_hops_body_down, 600);
-    EXPECT_EQ (data.hop_body_down, 30) << "the current hop is not folded";
 }
 
 // A load stream's total is a backstop past its duration cap, so before #2835 a
@@ -776,6 +765,317 @@ TEST_F (CurlTransferTest, ALoadStreamTimesOutAHungHandshakeAtTheRequestTimeout) 
     ASSERT_HAS_VALUE (after_ms) << response.error_message;
     EXPECT_GE (*after_ms, 1000) << response.error_message;
     EXPECT_LT (*after_ms, 10000) << response.error_message;
+}
+
+// ============================================================================
+// A load transfer follows a redirect one transfer per hop (#3302)
+// ============================================================================
+
+namespace {
+
+/// An httplib server on a free loopback port, serving until destroyed.
+class LoopbackServer {
+    public:
+    explicit LoopbackServer (const std::function<void (httplib::Server&)>& routes) {
+        routes (svr_);
+        port_   = svr_.bind_to_any_port ("127.0.0.1");
+        thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
+        svr_.wait_until_ready ();
+    }
+    ~LoopbackServer () {
+        svr_.stop ();
+        thread_.join ();
+    }
+    LoopbackServer (const LoopbackServer&)            = delete;
+    LoopbackServer& operator= (const LoopbackServer&) = delete;
+    LoopbackServer (LoopbackServer&&)                 = delete;
+    LoopbackServer& operator= (LoopbackServer&&)      = delete;
+
+    std::string url (const std::string& path) const {
+        return "http://127.0.0.1:" + std::to_string (port_) + path;
+    }
+
+    private:
+    httplib::Server svr_;
+    std::thread thread_;
+    int port_ = 0;
+};
+
+/// Redirects `/hop` to `/held`, which answers only once the test releases it,
+/// so a chain is caught with its redirected hop on the wire.
+class HeldHopServer {
+    public:
+    HeldHopServer ()
+    : server_ (std::make_unique<LoopbackServer> ([this] (httplib::Server& svr) {
+          svr.Get ("/hop", [] (const httplib::Request&, httplib::Response& res) {
+              res.set_redirect ("/held");
+          });
+          svr.Get ("/held", [this] (const httplib::Request&, httplib::Response& res) {
+              arrivals_.fetch_add (1);
+              std::unique_lock<std::mutex> lock (mutex_);
+              released_cv_.wait_for (
+              lock, vayu::tests::WAIT_DEADLINE, [this] () { return released_; });
+              res.set_content ("late", "text/plain");
+          });
+      })) {
+    }
+    // Released first: the server's stop joins the handler holding the answer.
+    ~HeldHopServer () {
+        release ();
+        server_.reset ();
+    }
+    HeldHopServer (const HeldHopServer&)            = delete;
+    HeldHopServer& operator= (const HeldHopServer&) = delete;
+    HeldHopServer (HeldHopServer&&)                 = delete;
+    HeldHopServer& operator= (HeldHopServer&&)      = delete;
+
+    std::string url (const std::string& path) const {
+        return server_->url (path);
+    }
+    int arrivals () const {
+        return arrivals_.load ();
+    }
+    void release () {
+        {
+            const std::lock_guard<std::mutex> lock (mutex_);
+            released_ = true;
+        }
+        released_cv_.notify_all ();
+    }
+
+    private:
+    std::atomic<int> arrivals_{ 0 };
+    std::mutex mutex_;
+    std::condition_variable released_cv_;
+    bool released_ = false;
+    std::unique_ptr<LoopbackServer> server_;
+};
+
+vayu::Request load_get (const std::string& url) {
+    vayu::Request request;
+    request.method = vayu::HttpMethod::GET;
+    request.url    = url;
+    return request;
+}
+
+vayu::Request load_post (const std::string& url, const std::string& body) {
+    vayu::Request request;
+    request.method       = vayu::HttpMethod::POST;
+    request.url          = url;
+    request.body.mode    = vayu::BodyMode::Text;
+    request.body.content = body;
+    return request;
+}
+
+} // namespace
+
+// The redirect asks for the request a hop sends: a 301 turns a POST into a
+// bodyless GET, a 307 keeps both. Mutation check: drop the
+// `RedirectChain::advance` call from `start_redirect_hop` and each hop goes
+// back to the redirect until the limit ends the chain.
+TEST_F (CurlTransferTest, ALoadRedirectSendsTheMethodAndBodyItAsksFor) {
+    const auto rewritten =
+    run_once (load_post (server->url ("/moved-301?to=/echo"), "hi"));
+    ASSERT_TRUE (rewritten.is_ok ());
+    EXPECT_EQ (rewritten.value ().status_code, 200) << rewritten.value ().error_message;
+    EXPECT_EQ (rewritten.value ().body, "GET:");
+
+    const auto kept = run_once (load_post (server->url ("/moved-307?to=/echo"), "hi"));
+    ASSERT_TRUE (kept.is_ok ());
+    EXPECT_EQ (kept.value ().status_code, 200) << kept.value ().error_message;
+    EXPECT_EQ (kept.value ().body, "POST:hi");
+}
+
+// Two redirects (the second `/moved-301` names no `to`, so it lands): the
+// request's own `maxRedirects` decides, negative being no limit, and the chain
+// ends with the limit's own error rather than the redirect's status. Mutation
+// check: drop the `refusal` recorded in `next_redirect_hop` and the limited
+// chains answer 301 with no error.
+TEST_F (CurlTransferTest, ALoadRedirectChainStopsAtTheRequestsLimit) {
+    auto request = load_get (server->url ("/moved-301?to=/moved-301"));
+    for (const int limit : { 2, -1 }) {
+        request.max_redirects = limit;
+        const auto followed   = run_once (request);
+        ASSERT_TRUE (followed.is_ok ());
+        EXPECT_EQ (followed.value ().status_code, 200)
+        << "limit " << limit << ": " << followed.value ().error_message;
+    }
+    for (const int limit : { 0, 1 }) {
+        request.max_redirects = limit;
+        const auto limited    = run_once (request);
+        ASSERT_TRUE (limited.is_ok ());
+        const auto& response = limited.value ();
+        EXPECT_EQ (response.status_code, 0) << "limit " << limit;
+        EXPECT_EQ (response.error_code, vayu::ErrorCode::TooManyRedirects)
+        << "limit " << limit;
+        EXPECT_NE (response.error_message.find (
+                   "Maximum (" + std::to_string (limit) + ") redirects followed"),
+        std::string::npos)
+        << response.error_message;
+        EXPECT_TRUE (response.body.empty ())
+        << "a redirect's body is nobody's answer";
+        EXPECT_TRUE (response.transfer_attempted);
+    }
+}
+
+// A followed redirect's body is not the answer, so it is neither kept nor held
+// to the byte cap: the 200-byte redirect body is over this 100-byte cap and
+// the 2-byte landing is under it. Mutation check: drop the `discard_body`
+// return from `write_callback` and the chain fails at the cap.
+TEST_F (CurlTransferTest, ALoadRedirectsBodyIsNotHeldToTheByteCap) {
+    vayu::http::EventLoopConfig config;
+    config.max_response_body_bytes = 100;
+
+    const auto result =
+    run_once (load_get (server->url ("/moved-301?to=/small")), config);
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 200) << result.value ().error_message;
+    EXPECT_EQ (result.value ().body, "ok");
+}
+
+// The redirect takes `kHopDelay` to answer and the landing next to nothing, so
+// a chain's wire time is at least the delay when it covers both hops (healthy:
+// >= 300ms) and about a millisecond when it covers only the last (broken), the
+// first hop's time then landing in the queue wait. A lower bound cannot fail
+// slow. Mutation check: drop the `add_phase_times` call from
+// `extract_response` and the wire time is the landing hop's.
+TEST_F (CurlTransferTest, ALoadRedirectsWireTimeSpansEveryHop) {
+    constexpr auto kHopDelay = std::chrono::milliseconds (300);
+    const LoopbackServer slow ([kHopDelay] (httplib::Server& svr) {
+        svr.Get ("/late-redirect",
+        [kHopDelay] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (kHopDelay);
+            res.set_redirect ("/landed");
+        });
+        svr.Get ("/landed", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_content ("ok", "text/plain");
+        });
+    });
+
+    const auto result = run_once (load_get (slow.url ("/late-redirect")));
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 200) << response.error_message;
+    EXPECT_GE (response.timing.wire_ms, static_cast<double> (kHopDelay.count ()))
+    << "queue wait " << response.timing.queue_wait_ms;
+}
+
+// A cookie a hop set goes to a later hop only at that hop's origin, while one
+// the virtual user already held is matched as always (`HopCookies`, the rule a
+// design send keeps). The session is captured from a first transfer, which is
+// how a virtual user's comes about. Mutation checks: drop the `HopCookies` from
+// `redirect_state` and the other origin receives `hop=1`; seed it with no
+// lines instead of the session and it receives nothing.
+TEST_F (CurlTransferTest, ALoadRedirectKeepsAHopsCookieAtItsOrigin) {
+    const LoopbackServer elsewhere ([] (httplib::Server& svr) {
+        svr.Get ("/cookie", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_content (req.get_header_value ("Cookie"), "text/plain");
+        });
+    });
+    const LoopbackServer origin ([] (httplib::Server& svr) {
+        svr.Get ("/session", [] (const httplib::Request&, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "jar=1; Path=/");
+            res.set_content ("ok", "text/plain");
+        });
+        svr.Get ("/set-and-move", [] (const httplib::Request& req, httplib::Response& res) {
+            res.set_header ("Set-Cookie", "hop=1; Path=/");
+            res.set_redirect (req.get_param_value ("to"));
+        });
+    });
+    auto session_request          = load_get (origin.url ("/session"));
+    session_request.track_cookies = true;
+    const auto session            = run_once (session_request);
+    ASSERT_TRUE (session.is_ok ());
+    ASSERT_EQ (session.value ().cookie_lines.size (), 1U);
+
+    auto request =
+    load_get (origin.url ("/set-and-move?to=" + elsewhere.url ("/cookie")));
+    request.track_cookies = true;
+    request.cookie_lines  = session.value ().cookie_lines;
+    const auto result     = run_once (request);
+
+    ASSERT_TRUE (result.is_ok ());
+    const auto& response = result.value ();
+    EXPECT_EQ (response.status_code, 200) << response.error_message;
+    EXPECT_EQ (response.body, "jar=1");
+    EXPECT_EQ (response.cookie_lines.size (), 2U)
+    << "the withheld cookie is the session's again after the hop";
+}
+
+// One deadline spans the chain, as it did when libcurl followed: each hop takes
+// `kHopDelay` of a timeout that covers one of them and not two, so the second
+// hop gets what the first left (about 300ms) and times out (healthy), where a
+// hop given the whole timeout again answers 200 (broken). A slow runner only
+// makes the healthy timeout likelier. Mutation check: drop the
+// `CURLOPT_TIMEOUT_MS` share from `start_redirect_hop`.
+TEST_F (CurlTransferTest, ALoadRedirectChainSharesOneTimeout) {
+    constexpr auto kHopDelay = std::chrono::milliseconds (700);
+    const LoopbackServer slow ([kHopDelay] (httplib::Server& svr) {
+        svr.Get ("/late-redirect",
+        [kHopDelay] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (kHopDelay);
+            res.set_redirect ("/late");
+        });
+        svr.Get ("/late", [kHopDelay] (const httplib::Request&, httplib::Response& res) {
+            std::this_thread::sleep_for (kHopDelay);
+            res.set_content ("ok", "text/plain");
+        });
+    });
+    auto request       = load_get (slow.url ("/late-redirect"));
+    request.timeout_ms = 1000;
+
+    const auto result = run_once (request);
+
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 0);
+    EXPECT_EQ (result.value ().error_code, vayu::ErrorCode::Timeout)
+    << result.value ().error_message;
+}
+
+// The chain is one request to the worker: in the active set, and reached by a
+// stop, while its redirected hop is on the wire. Mutation check: erase the
+// transfer from `active_transfers` in `follow_redirect` (keeping its data
+// alive elsewhere) and the count reads 0 and the cancel never arrives.
+TEST_F (CurlTransferTest, AStopCancelsALoadChainWhoseRedirectedHopIsInFlight) {
+    HeldHopServer held;
+    vayu::http::EventLoop loop (vayu::http::EventLoopConfig{});
+    loop.start ();
+    auto handle = loop.submit_async (load_get (held.url ("/hop")));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] () { return held.arrivals () > 0; }));
+
+    EXPECT_EQ (loop.active_count (), 1U);
+    loop.stop (false);
+
+    ASSERT_EQ (handle.future.wait_for (vayu::tests::WAIT_DEADLINE), std::future_status::ready)
+    << "the stop never reached the redirected hop";
+    const auto result = handle.future.get ();
+    ASSERT_FALSE (result.is_ok ());
+    EXPECT_EQ (result.error ().code, vayu::ErrorCode::Cancelled);
+}
+
+// A draining stop waits the chain out and counts it once.
+TEST_F (CurlTransferTest, ADrainingStopAwaitsALoadChainWhoseRedirectedHopIsInFlight) {
+    HeldHopServer held;
+    vayu::http::EventLoop loop (vayu::http::EventLoopConfig{});
+    loop.start ();
+    auto handle = loop.submit_async (load_get (held.url ("/hop")));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] () { return held.arrivals () > 0; }));
+
+    std::thread releaser ([&held] () { held.release (); });
+    loop.stop (true);
+    releaser.join ();
+
+    ASSERT_EQ (handle.future.wait_for (vayu::tests::WAIT_DEADLINE), std::future_status::ready)
+    << "the drain left the redirected hop behind";
+    const auto result = handle.future.get ();
+    ASSERT_TRUE (result.is_ok ());
+    EXPECT_EQ (result.value ().status_code, 200) << result.value ().error_message;
+    EXPECT_EQ (result.value ().body, "late");
+    EXPECT_EQ (loop.total_processed (), 1U) << "a chain is one request";
 }
 
 // ============================================================================

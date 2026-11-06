@@ -7,6 +7,8 @@
 
 #include "vayu/http/event_loop/transfer_context.hpp"
 
+#include "vayu/http/event_loop/curl_utils.hpp"
+
 namespace vayu::http::detail {
 
 BodySource::~BodySource () {
@@ -18,6 +20,8 @@ BodySource::~BodySource () {
         curl_mime_free (mime);
     }
 }
+
+TransferData::TransferData () = default;
 
 TransferData::~TransferData () {
     if (headers_list) {

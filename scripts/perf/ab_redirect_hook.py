@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""A/B the redirect-hop progress hook on one engine daemon (issue #2940).
+"""A/B `followRedirects` on a target that never redirects, on one engine daemon.
 
-`setup_easy_handle` installs libcurl's xferinfo callback and sets NOPROGRESS=0
-whenever a request follows redirects, which is the default. The arm is the
-run's own `followRedirects`: `false` skips the branch (hook off), `true` takes
-it (hook on). Same daemon, same target, same run config, so no restart
-separates the arms and the only other difference is CURLOPT_FOLLOWLOCATION.
+Written for the redirect-hop progress hook (issue #2940), which a request that
+followed redirects installed. Since #3302 the engine follows a load
+redirect one transfer per hop and the hook is gone: what a following transfer
+that is not redirected still pays is the completion's status read
+(`next_redirect_hop`), which this measures. The arm is the run's own
+`followRedirects`: `false` skips it (off), `true` takes it (on). Same daemon,
+same target, same run config, so no restart separates the arms. The flag and
+the labels keep the hook's name so the dated entries in
+docs/engine/benchmarks.md stay runnable.
 
 Pairs are interleaved ABBA-style (the first arm alternates per pair) so drift
 lands on both arms. `--null` runs the hook-on arm on both sides: the spread

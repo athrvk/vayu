@@ -15,11 +15,15 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/curl_options.hpp"
@@ -1132,17 +1136,14 @@ int /*conn_local_port*/) {
  *
  * libcurl does that on its own (`Curl_retry_request`, no option turns it off)
  * and reports nothing; the pre-request callback is the one trace it leaves.
- * Each request written is one call, and a redirect hop or an auth reload is
- * the only other reason for a second, which `CURLINFO_REDIRECT_COUNT` counts
- * and a replay does not. A transfer that never reached the callback reads 0.
- * `CURLINFO_NUM_CONNECTS` cannot answer this: a fresh request and a replay of
- * a dead reused connection both open one.
+ * Each request written is one call, and each of the @p followed redirect hops
+ * is one more, which is not a replay: `check` counts over the whole chain. A
+ * transfer that never reached the callback reads 0. `CURLINFO_NUM_CONNECTS`
+ * cannot answer this: a fresh request and a replay of a dead reused
+ * connection both open one.
  */
-int connection_replays (CURL* curl, const ConnectedPeerCheck& check) {
-    long redirects = 0;
-    get_info<CURLINFO_REDIRECT_COUNT> (curl, &redirects);
-    const long replays = check.requests_started - 1L - std::max (0L, redirects);
-    return static_cast<int> (std::max (0L, replays));
+int connection_replays (const ConnectedPeerCheck& check, int followed) {
+    return std::max (0, check.requests_started - 1 - followed);
 }
 
 } // namespace
@@ -1572,6 +1573,138 @@ ConnectedPeerCheck* peer_check) {
     return apply_client_certificate (curl, policy, url);
 }
 
+namespace {
+
+/**
+ * Pins @p url's host to the address the shared cache holds for it
+ * (`CURLOPT_RESOLVE`), which keeps a high-rate run off the system resolver,
+ * replacing the pin an earlier hop of the transfer left. An IP-literal URL has
+ * nothing to resolve and is never pinned, which also keeps a malformed literal
+ * out of the cache's blocking lookup.
+ */
+void pin_resolved_address (CURL* curl,
+TransferData& data,
+const std::string& url,
+const EventLoopConfig& config,
+DnsCache* dns_cache) {
+    if (dns_cache == nullptr) {
+        return;
+    }
+    struct curl_slist* pin       = nullptr;
+    const UrlAuthority authority = parse_authority (url);
+    if (!authority.host.empty () && !authority.is_ip_literal) {
+        pin = dns_cache->get_resolve_list (
+        authority.host, authority.port, config.dns_cache_timeout);
+    }
+    if (pin == nullptr && data.resolve_list == nullptr) {
+        return;
+    }
+    // libcurl reads the list as a transfer starts, so the one an earlier hop
+    // started with is no longer referenced.
+    set_opt<CURLOPT_RESOLVE> (curl, pin);
+    curl_slist_free_all (data.resolve_list);
+    data.resolve_list = pin;
+}
+
+/// The finished transfer's bytes on the wire. libcurl resets each count when
+/// a transfer starts, so a chain sums them hop by hop.
+WireBytes read_wire_bytes (CURL* curl) {
+    curl_off_t body_down = 0;
+    long header_bytes    = 0;
+    long request_bytes   = 0;
+    get_info<CURLINFO_SIZE_DOWNLOAD_T> (curl, &body_down);
+    get_info<CURLINFO_HEADER_SIZE> (curl, &header_bytes);
+    get_info<CURLINFO_REQUEST_SIZE> (curl, &request_bytes);
+    return { static_cast<size_t> (std::max<curl_off_t> (0, body_down)) +
+        static_cast<size_t> (std::max (0L, header_bytes)),
+        static_cast<size_t> (std::max (0L, request_bytes)) };
+}
+
+void add_wire_bytes (WireBytes& total, const WireBytes& hop) {
+    total.down += hop.down;
+    total.up += hop.up;
+}
+
+/// The `Location` lines of the last response @p curl received, through
+/// libcurl's header API: the load path's header callback keeps only the folded
+/// map, and builds no line list per transfer for the one status that needs it.
+std::vector<HeaderLine> location_lines (CURL* curl) {
+    std::vector<HeaderLine> lines;
+    curl_header* header = nullptr;
+    for (size_t index = 0;
+    curl_easy_header (curl, "Location", index, CURLH_HEADER, -1, &header) == CURLHE_OK &&
+    header != nullptr;
+    ++index) {
+        lines.push_back ({ header->name, header->value });
+        if (index + 1 >= header->amount) {
+            break;
+        }
+    }
+    return lines;
+}
+
+/**
+ * What is left of @p request's timeout for a redirected hop once the chain's
+ * transfers have taken @p spent_seconds: one deadline spans the chain, as it
+ * did when libcurl followed inside one transfer. 0 where there is no
+ * whole-chain bound to share: no timeout, or a bounded stream, whose duration
+ * cap spans the chain on its own.
+ */
+std::expected<long, Error> hop_timeout_ms (const Request& request, double spent_seconds) {
+    if (request.timeout_ms <= 0 || request.stream_bounds) {
+        return 0L;
+    }
+    const long remaining = static_cast<long> (request.timeout_ms) -
+    static_cast<long> (spent_seconds * 1000.0);
+    if (remaining <= 0) {
+        return std::unexpected (Error{ ErrorCode::Timeout,
+        "Operation timed out after " + std::to_string (request.timeout_ms) +
+        " milliseconds, following redirects" });
+    }
+    return remaining;
+}
+
+/// The transfer's chain, made at its first redirect.
+RedirectState& redirect_state (CURL* curl, TransferData& data) {
+    if (data.redirects) {
+        return *data.redirects;
+    }
+    data.redirects       = std::make_unique<RedirectState> (data);
+    RedirectState& state = *data.redirects;
+    if (data.request.track_cookies) {
+        // As the first hop started the engine held exactly the session
+        // `setup_easy_handle` seeded, in libcurl's own spelling: a virtual
+        // user's session is only ever replaced from a `CURLINFO_COOKIELIST`
+        // capture. Reading it back per transfer would cost every send what
+        // only a redirect needs.
+        state.cookies.emplace (curl, state.chain.hop ().url, data.request.cookie_lines);
+        state.cookies->after_hop ();
+    }
+    return state;
+}
+
+/// Why a finished transfer failed, or nullopt when it answered.
+std::optional<Error> transfer_failure (CURL* curl, const TransferData& data, CURLcode result) {
+    if (data.redirects && data.redirects->refusal) {
+        return data.redirects->refusal;
+    }
+    if (result == CURLE_OK) {
+        return std::nullopt;
+    }
+    if (data.body_limit_exceeded) {
+        return Error{ ErrorCode::InternalError,
+            "Response body exceeded the " + std::to_string (data.max_response_bytes) +
+            " byte cap (maxResponseBodyBytes)" };
+    }
+    return curl_to_error (curl, result, data.errors, &data.request);
+}
+
+} // namespace
+
+RedirectState::RedirectState (TransferData& data)
+: chain (data.request, std::exchange (data.headers_list, nullptr), data.body) {
+}
+
 CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& config, DnsCache* dns_cache) {
     // Use provided handle or create new one
     if (!curl) {
@@ -1590,21 +1723,7 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     const std::string url = vayu::http::wire_url (request);
     set_opt<CURLOPT_URL> (curl, url.c_str ());
 
-    // DNS Pre-resolution: Use cached DNS to bypass system resolver
-    // This is critical for high-RPS loads (prevents DNS saturation)
-    // An IP-literal URL has nothing to resolve, so it is never pinned - that
-    // also keeps a malformed literal out of the cache's blocking lookup path.
-    if (dns_cache) {
-        const UrlAuthority authority = parse_authority (url);
-        if (!authority.host.empty () && !authority.is_ip_literal) {
-            struct curl_slist* resolve_list = dns_cache->get_resolve_list (
-            authority.host, authority.port, config.dns_cache_timeout);
-            if (resolve_list) {
-                set_opt<CURLOPT_RESOLVE> (curl, resolve_list);
-                data->resolve_list = resolve_list; // Store for cleanup
-            }
-        }
-    }
+    pin_resolved_address (curl, *data, url, config, dns_cache);
 
     // Set method and body (shared with the single-request client - see
     // apply_method_and_body for why the two are set together and in that order)
@@ -1669,11 +1788,8 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
 
     // Progress callback. A bounded stream needs it whether or not the caller
     // asked for progress: it is where the duration cap is enforced, and a quiet
-    // stream produces no writes to enforce it from (issue #576). A followed
-    // redirect needs it to count the bodies of the hops before the last (#2893);
-    // a negative `max_redirects` is libcurl's "no limit".
-    data->counts_redirect_bodies = request.follow_redirects && request.max_redirects != 0;
-    if (data->progress || data->stream.active () || data->counts_redirect_bodies) {
+    // stream produces no writes to enforce it from (issue #576).
+    if (data->progress || data->stream.active ()) {
         set_opt<CURLOPT_XFERINFOFUNCTION> (curl, progress_callback);
         set_opt<CURLOPT_XFERINFODATA> (curl, data);
         set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
@@ -1688,18 +1804,17 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     static_cast<long> (
     vayu::core::constants::server::connect_timeout_ms (request.timeout_ms)));
 
-    // Set redirect options
-    if (request.follow_redirects) {
-        set_opt<CURLOPT_FOLLOWLOCATION> (curl, 1L);
-        set_opt<CURLOPT_MAXREDIRS> (curl, static_cast<long> (request.max_redirects));
-    }
+    // No CURLOPT_FOLLOWLOCATION: a redirect is a transfer of its own
+    // (`next_redirect_hop`, #3302), because libcurl hands a client certificate
+    // only to the origin a transfer started at.
 
     // TLS verification and the proxy, both from the run-scoped policy. Run-
     // scoped rather than per-request because libcurl only reuses a cached
     // connection when its proxy and TLS config match, so varying either per
     // transfer would partition every worker's pool and multiply handshakes
     // (epic decision 3 of #704). The transfer's own check carries no rule here;
-    // it is what counts a replay (#2799).
+    // it is what counts a replay (#2799). A redirect hop applies it again,
+    // against its own URL.
     apply_transport_policy (
     curl, config.transport, request.verify_ssl, url, &data->peer_check);
 
@@ -1775,7 +1890,14 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // requests out of the throughput metrics and left load_strategy's
     // "errors sometimes carry timing" branch permanently dead. The
     // single-request client has always extracted first for this reason.
-    const CurlPhaseTimes phase_times = read_phase_times (curl);
+    CurlPhaseTimes phase_times = read_phase_times (curl);
+    WireBytes wire_bytes       = read_wire_bytes (curl);
+    int followed               = 0;
+    if (data->redirects) {
+        add_phase_times (phase_times, data->redirects->phases);
+        add_wire_bytes (wire_bytes, data->redirects->bytes);
+        followed = data->redirects->chain.hop ().followed;
+    }
 
     // Negotiated protocol - what actually got used, not what was requested.
     // Empty when curl reports CURL_HTTP_VERSION_NONE or anything this driver
@@ -1795,7 +1917,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
 
     // Read before the error branch: a replay that then failed still put the
     // request on the wire twice.
-    response.connection_replays = connection_replays (curl, data->peer_check);
+    response.connection_replays = connection_replays (data->peer_check, followed);
 
     // Perceived latency: wall-clock from submit() to now. steady_clock is
     // monotonic so it's not affected by NTP jumps.
@@ -1821,26 +1943,11 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     }
     response.transfer_attempted = curl_transfer_attempted (curl, result);
 
-    // Wire bytes over every hop, headers and body (#2893). HEADER_SIZE and
-    // REQUEST_SIZE accumulate across hops; SIZE_DOWNLOAD_T is the last hop's
-    // body alone, the earlier ones counted by track_hop_body, which reads it
-    // once more here for a next hop that failed before any progress call.
-    // REQUEST_SIZE already holds every body byte sent (POSTFIELDS, multipart
-    // and a streamed upload alike), so SIZE_UPLOAD_T added to it counts the
-    // last hop's body twice.
-    //   bytes_down = earlier hops' bodies + SIZE_DOWNLOAD_T + HEADER_SIZE
-    //   bytes_up   = REQUEST_SIZE
-    curl_off_t dl_bytes = 0;
-    long header_bytes = 0, request_bytes = 0;
-    get_info<CURLINFO_SIZE_DOWNLOAD_T> (curl, &dl_bytes);
-    get_info<CURLINFO_HEADER_SIZE> (curl, &header_bytes);
-    get_info<CURLINFO_REQUEST_SIZE> (curl, &request_bytes);
-    dl_bytes = std::max<curl_off_t> (0, dl_bytes);
-    track_hop_body (*data, dl_bytes);
-    response.timing.bytes_down = static_cast<size_t> (data->earlier_hops_body_down) +
-    static_cast<size_t> (dl_bytes) +
-    static_cast<size_t> (std::max<long> (0, header_bytes));
-    response.timing.bytes_up = static_cast<size_t> (std::max<long> (0, request_bytes));
+    // Wire bytes over every hop, headers and body (#2893). REQUEST_SIZE
+    // already holds every body byte sent (POSTFIELDS, multipart and a streamed
+    // upload alike), so SIZE_UPLOAD_T added to it would count the body twice.
+    response.timing.bytes_down = wire_bytes.down;
+    response.timing.bytes_up   = wire_bytes.up;
 
     // Set body. On a failed transfer this is whatever arrived before the
     // failure, which is also the truncated prefix when the body cap tripped.
@@ -1889,16 +1996,11 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
         return response;
     }
 
-    if (result != CURLE_OK) {
+    if (const auto failure = transfer_failure (curl, *data, result)) {
         // Not returned as an Error: the load strategy processes this as a
         // "failed response" rather than an "unexpected error".
-        const Error error      = data->body_limit_exceeded ?
-        Error{ ErrorCode::InternalError,
-            "Response body exceeded the " + std::to_string (data->max_response_bytes) +
-            " byte cap (maxResponseBodyBytes)" } :
-        curl_to_error (curl, result, data->errors, &data->request);
-        response.error_code    = error.code;
-        response.error_message = error.message;
+        response.error_code    = failure->code;
+        response.error_message = failure->message;
         response.status_code   = 0;
         response.status_text   = vayu::http::status_text (0);
         return response;
@@ -1916,6 +2018,66 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     }
 
     return response;
+}
+
+std::optional<RedirectHop> next_redirect_hop (CURL* curl, TransferData& data, CURLcode result) {
+    if (data.redirects && data.redirects->cookies) {
+        data.redirects->cookies->after_hop ();
+    }
+    if (result != CURLE_OK || !data.request.follow_redirects) {
+        return std::nullopt;
+    }
+    long status = 0;
+    get_info<CURLINFO_RESPONSE_CODE> (curl, &status);
+    if (!is_redirect_status (static_cast<int> (status))) {
+        return std::nullopt;
+    }
+    const std::vector<HeaderLine> locations = location_lines (curl);
+    if (!location_of (locations)) {
+        return std::nullopt;
+    }
+    RedirectState& state = redirect_state (curl, data);
+    auto target = state.chain.redirect_target (locations, static_cast<int> (status));
+    if (!target) {
+        return std::nullopt;
+    }
+    if (!target->has_value ()) {
+        state.refusal = std::move (target->error ());
+        return std::nullopt;
+    }
+    const CurlPhaseTimes finished = read_phase_times (curl);
+    auto timeout = hop_timeout_ms (data.request, state.phases.total + finished.total);
+    if (!timeout) {
+        state.refusal = std::move (timeout.error ());
+        return std::nullopt;
+    }
+    add_phase_times (state.phases, finished);
+    add_wire_bytes (state.bytes, read_wire_bytes (curl));
+    return RedirectHop{ static_cast<int> (status), std::move (**target), *timeout };
+}
+
+void start_redirect_hop (CURL* curl,
+TransferData& data,
+RedirectHop hop,
+const EventLoopConfig& config,
+DnsCache* dns_cache) {
+    RedirectState& state = redirect_state (curl, data);
+    state.chain.advance (curl, hop.status, std::move (hop.url));
+    const std::string& url = state.chain.hop ().url;
+    if (hop.timeout_ms > 0) {
+        set_opt<CURLOPT_TIMEOUT_MS> (curl, hop.timeout_ms);
+    }
+    pin_resolved_address (curl, data, url, config, dns_cache);
+    apply_transport_policy (
+    curl, config.transport, data.request.verify_ssl, url, &data.peer_check);
+    if (state.cookies) {
+        state.cookies->before_hop (url);
+    }
+    data.errors.clear ();
+    data.response_body.clear ();
+    data.discard_body = false;
+    data.response.headers.clear ();
+    data.response.status_text.clear ();
 }
 
 } // namespace vayu::http::detail

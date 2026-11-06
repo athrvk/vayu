@@ -408,7 +408,7 @@ Notes:
   an ad-hoc target has. A scenario run refuses both by name, as it does every
   other single-target field - each step keeps the policy stored on it.
   `maxRedirects` is bounded 0-100 here because `POST /runs` has no guard of its
-  own and the value reaches `CURLOPT_MAXREDIRS`, where a negative means
+  own and the value becomes the redirect limit, where a negative means
   *unlimited*.
   **The tool exposes no per-run `timeout`, and that is not an omission**:
   `POST /runs` accepts one, but a run started here takes the timeout of the

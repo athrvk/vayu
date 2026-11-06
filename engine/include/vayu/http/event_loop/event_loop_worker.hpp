@@ -219,9 +219,26 @@ class EventLoopWorker {
     /// @return whether anything came off the pending queue.
     bool submit_pending_transfers (size_t& local_active);
 
+    using ActiveTransfers = std::unordered_map<CURL*, std::unique_ptr<TransferData>>;
+
     /// Deliver every transfer curl has finished. Worker-thread only.
     /// @return whether any completion was read.
     bool drain_completions ();
+
+    /**
+     * When the transfer @p active names finished with a redirect it follows,
+     * sends the next hop on the same handle, in this call (#3302): the
+     * transfer never leaves `active_transfers` between hops, so the active
+     * count, a drain and a cancel all see the chain as the one request it
+     * is, and `local_processed` counts it once. A handle curl will not take
+     * back completes with that error.
+     * @return false when what it finished with is the request's answer.
+     */
+    bool follow_redirect (ActiveTransfers::iterator active, CURLcode result);
+
+    /// Completes the transfer @p active names with @p result and gives its
+    /// handle back to the pool.
+    void deliver (ActiveTransfers::iterator active, Result<Response> result);
 
     /// Park until there is IO or new work. Spins briefly before the idle park.
     /// Worker-thread only; called only when a pass found nothing to do.
@@ -260,7 +277,7 @@ class EventLoopWorker {
     std::atomic<size_t> current_active_count{ 0 };
 
     // Only accessed by worker thread - no mutex needed
-    std::unordered_map<CURL*, std::unique_ptr<TransferData>> active_transfers;
+    ActiveTransfers active_transfers;
 
     EventLoopConfig config;
 
