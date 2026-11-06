@@ -271,10 +271,12 @@ struct MetricsCollectorConfig {
     /// an ordinary run pays a null check per completion and nothing else.
     bool stream_metrics = constants::metrics_collector::DEFAULT_STREAM_METRICS;
 
-    /// Whether this run's transfers are load streams (`Request::stream_bounds`
-    /// set, issue #576). With `stream_metrics` on, it allocates the live
-    /// counters the live frames' stream keys are read from (issue #3236);
-    /// either off leaves those keys absent rather than zero.
+    /// Whether any of this run's transfers is a load stream
+    /// (`Request::stream_bounds` set, issue #576): a single-request run with
+    /// `stream`, or a collection run whose plan has a streaming step (#3304).
+    /// With `stream_metrics` on, it allocates the live counters the live
+    /// frames' stream keys are read from (issue #3236); either off leaves
+    /// those keys absent rather than zero.
     bool streams = false;
 };
 

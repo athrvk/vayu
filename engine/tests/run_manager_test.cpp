@@ -2131,6 +2131,220 @@ TEST (CollectMetrics, OnlyAStreamingRunWithStreamMetricsCarriesTheStreamKeys) {
 
 namespace {
 
+/// One step of a hand-built collection plan, streaming when @p bounds is set.
+ScenarioStep collection_step (const std::string& name,
+const std::string& url,
+std::optional<vayu::StreamBounds> bounds = std::nullopt) {
+    ScenarioStep step;
+    step.request_id            = "req_" + name;
+    step.name                  = name;
+    step.request.method        = vayu::HttpMethod::GET;
+    step.request.url           = url;
+    step.request.timeout_ms    = 20000;
+    step.request.stream_bounds = bounds;
+    step.stored_url            = url;
+    return step;
+}
+
+/// A collection load run of @p steps, @p vus virtual users each running one
+/// iteration.
+struct CollectionLoadRun {
+    std::shared_ptr<ScenarioExecution> execution;
+    nlohmann::json config;
+};
+
+CollectionLoadRun collection_load_run (const std::string& collection_id,
+std::vector<ScenarioStep> steps,
+size_t vus) {
+    auto execution                   = std::make_shared<ScenarioExecution> ();
+    execution->request.source        = "collection";
+    execution->request.collection_id = collection_id;
+    execution->plan.steps            = std::move (steps);
+    nlohmann::json config{ { "mode", "iterations" }, { "iterations", vus },
+        { "concurrency", vus }, { "timeout", 20000 }, { "workers", 1 },
+        { "scenario", { { "source", "collection" }, { "collectionId", collection_id } } } };
+    return { std::move (execution), std::move (config) };
+}
+
+/// The newest frame of @p context's run that satisfies @p wanted, once one
+/// does; null when none did before the deadline.
+template <typename Predicate>
+nlohmann::json wait_for_frame (const RunContext& context, Predicate wanted) {
+    nlohmann::json found;
+    const bool seen = vayu::tests::wait_until ([&] () {
+        const auto frames = live_frames (context);
+        if (frames.empty () || !wanted (frames.back ())) {
+            return false;
+        }
+        found = frames.back ();
+        return true;
+    });
+    EXPECT_TRUE (seen) << "no live frame matched";
+    return found;
+}
+
+/// The frames of @p run_id once it has finished and emitted its settled one.
+std::vector<nlohmann::json> settled_frames (vayu::db::Database& db,
+const std::string& run_id,
+const RunContext& context) {
+    const auto stored = wait_for_terminal_run (db, run_id);
+    if (!stored || stored->status != vayu::RunStatus::Completed) {
+        ADD_FAILURE ()
+        << "the run did not complete: " << (stored ? stored->summary : "no row");
+        return {};
+    }
+    EXPECT_TRUE (
+    vayu::tests::wait_until ([&] () { return context.closed.load (); }))
+    << "the metrics thread never emitted its settled frame";
+    return live_frames (context);
+}
+
+} // namespace
+
+// #3304: a collection run whose step streams counts that stream's events live,
+// as a single-request stream run does, and holds it on `streamsOpen` until it
+// closes. `/sse-held` keeps the one stream open until released. Mutation
+// checks: leave the plan out of the RunContext constructor's `streams` and the
+// frames carry no stream keys; drop the `live` hand-off in
+// `ScenarioLoadDriver::submit_one` and no frame counts an event.
+TEST (LoadStream, ACollectionRunsStreamingStepIsCountedLiveWhileOpen) {
+    const std::string db_path = "test_load_stream_collection_live.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        vayu::tests::SlowMockServer server;
+
+        std::vector<ScenarioStep> steps;
+        steps.push_back (collection_step (
+        "events", server.sse_held_url (), vayu::StreamBounds{ 20000, 100000 }));
+        const auto run = collection_load_run ("col_stream_live", std::move (steps), 1);
+        const std::string run_id = "run_load_stream_collection_live";
+        create_load_run (db, run_id, run.config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, run.config, db, run.execution));
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+
+        const auto open_frame = wait_for_frame (*context, [] (const nlohmann::json& frame) {
+            return frame.value ("streamEvents", size_t{ 0 }) > 0;
+        });
+        server.released.store (true, std::memory_order_relaxed);
+        if (!open_frame.is_null ()) {
+            EXPECT_EQ (open_frame.at ("streamsOpen").get<size_t> (), 1u)
+            << open_frame.dump ();
+            EXPECT_EQ (open_frame.at ("totalRequests").get<size_t> (), 0u)
+            << "the stream had not completed: " << open_frame.dump ();
+            EXPECT_TRUE (open_frame.contains ("eventsPerSecond")) << open_frame.dump ();
+        }
+
+        const auto frames = settled_frames (db, run_id, *context);
+        ASSERT_FALSE (frames.empty ());
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        EXPECT_EQ (frames.back ().at ("streamEvents").get<size_t> (),
+        report.at ("stream").at ("totalEvents").get<size_t> ())
+        << "the settled live total is the report's: " << frames.back ().dump ();
+        EXPECT_EQ (frames.back ().at ("streamsOpen").get<size_t> (), 0u);
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #3304: `streamsOpen` counts streaming transfers, not every active one. Two
+// virtual users open the streaming step; `/sse-held-first` holds the first
+// and closes the second at once, whose user moves on to `/hang`. A frame that
+// has seen that one completion with two transfers in flight holds one stream
+// and one ordinary request. Mutation check: read the active transfer count
+// into `streamsOpen` in `get_current_stats` and that frame reads 2.
+TEST (LoadStream, AMixedCollectionRunCountsOnlyItsStreamsOpen) {
+    const std::string db_path = "test_load_stream_collection_mixed.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        vayu::tests::SlowMockServer server;
+
+        std::vector<ScenarioStep> steps;
+        steps.push_back (collection_step ("events",
+        server.sse_held_first_url (), vayu::StreamBounds{ 20000, 100000 }));
+        steps.push_back (collection_step ("held", server.hang_url ()));
+        const auto run = collection_load_run ("col_stream_mixed", std::move (steps), 2);
+        const std::string run_id = "run_load_stream_collection_mixed";
+        create_load_run (db, run_id, run.config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, run.config, db, run.execution));
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+
+        const auto mixed_frame =
+        wait_for_frame (*context, [] (const nlohmann::json& frame) {
+            return frame.value ("totalRequests", size_t{ 0 }) == 1 &&
+            frame.value ("activeConnections", size_t{ 0 }) == 2;
+        });
+        server.released.store (true, std::memory_order_relaxed);
+        if (!mixed_frame.is_null ()) {
+            EXPECT_EQ (mixed_frame.at ("streamsOpen").get<size_t> (), 1u)
+            << mixed_frame.dump ();
+            EXPECT_GT (mixed_frame.at ("streamEvents").get<size_t> (), 0u)
+            << mixed_frame.dump ();
+        }
+
+        const auto frames = settled_frames (db, run_id, *context);
+        ASSERT_FALSE (frames.empty ());
+        EXPECT_EQ (frames.back ().at ("streamsOpen").get<size_t> (), 0u)
+        << frames.back ().dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #3304: a collection run with no streaming step is not a stream run: none of
+// its frames carries a stream key. Mutation check: allocate the counters for
+// every collection run (`streams` true whenever the context has a plan) and
+// the frames carry `streamEvents` and `streamsOpen`.
+TEST (LoadStream, ACollectionRunWithNoStreamingStepCarriesNoStreamKeys) {
+    const std::string db_path = "test_load_stream_collection_plain.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        vayu::tests::SlowMockServer server;
+
+        std::vector<ScenarioStep> steps;
+        steps.push_back (collection_step ("plain", server.fast_url ()));
+        const auto run = collection_load_run ("col_stream_plain", std::move (steps), 1);
+        const std::string run_id = "run_load_stream_collection_plain";
+        create_load_run (db, run_id, run.config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, run.config, db, run.execution));
+        const auto context = manager.get_run_or_retained (run_id);
+        ASSERT_NE (context, nullptr);
+
+        const auto frames = settled_frames (db, run_id, *context);
+        ASSERT_FALSE (frames.empty ());
+        for (const auto& frame : frames) {
+            EXPECT_EQ (stream_keys_in (frame), "") << frame.dump ();
+        }
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+namespace {
+
 /// @p entries' counts summed per class.
 StatusClassCounts class_totals (const nlohmann::json& entries) {
     StatusClassCounts totals{};

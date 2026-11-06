@@ -857,7 +857,8 @@ class ScenarioLoadDriver {
     size_t max_iterations)
     : context_ (context), db_ (db), execution_ (execution),
       state_ (std::move (state)), max_iterations_ (max_iterations),
-      live_vus_ (state_->vus.size ()) {
+      live_vus_ (state_->vus.size ()),
+      live_streams_ (context_->metrics_collector->live_stream_counts ()) {
         auth_headers_.reserve (context_->auth_refresh_states.size ());
         for (const auto& credential : context_->auth_refresh_states) {
             auth_headers_.emplace_back (credential);
@@ -896,6 +897,11 @@ class ScenarioLoadDriver {
         const size_t iteration = vu->iteration;
         const size_t vu_index  = vu->index;
         vayu::Request request  = step.request;
+        // The plan is shared and immutable, so a streaming step is handed the
+        // run's live counters here; an ordinary step never sees them.
+        if (request.stream_bounds) {
+            request.stream_bounds->live = live_streams_;
+        }
         // Before the bind and `step.before`, so a pre-request script reads the
         // credential this submission actually sends.
         follow_refreshed_auth (step_index, request);
@@ -1652,6 +1658,9 @@ class ScenarioLoadDriver {
     // One per `context_->auth_refresh_states` entry, in the same order. Read
     // and written by the strategy thread only, never by a completion callback.
     std::vector<AuthHeaderCache> auth_headers_;
+    // The collector's live stream counters (#3304), null when the plan has no
+    // streaming step or the run turned `stream_metrics` off.
+    std::shared_ptr<LiveStreamCounts> live_streams_;
 };
 
 std::shared_ptr<ScenarioLoadState> execute_scenario_load (
