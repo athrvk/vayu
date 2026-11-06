@@ -216,6 +216,14 @@ std::optional<Error> validate_transferable (const Request& request) {
     return std::nullopt;
 }
 
+long whole_transfer_timeout_ms (const Request& request) {
+    if (const auto& bounds = request.stream_bounds) {
+        return static_cast<long> (bounds->max_duration_ms +
+        vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS);
+    }
+    return static_cast<long> (request.timeout_ms);
+}
+
 Response error_response (const Error& error) {
     Response response;
     response.error_code    = error.code;
@@ -1533,10 +1541,8 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // is the run's own view of when this transfer began, and it is what
     // `queue_wait_ms` is measured from, so the duration cap covers the same
     // span the report attributes to the transfer.
-    if (request.stream_bounds) {
-        data->stream_bounds   = request.stream_bounds;
-        data->stream_deadline = data->submitted_at +
-        std::chrono::milliseconds (request.stream_bounds->max_duration_ms);
+    if (const auto& bounds = request.stream_bounds) {
+        data->stream.start (*bounds, data->submitted_at);
     }
 
     // Set headers. No sent record is kept on this path - a load run's captures
@@ -1586,28 +1592,17 @@ CURL* setup_easy_handle (CURL* curl, TransferData* data, const EventLoopConfig& 
     // redirect needs it to count the bodies of the hops before the last (#2893);
     // a negative `max_redirects` is libcurl's "no limit".
     data->counts_redirect_bodies = request.follow_redirects && request.max_redirects != 0;
-    if (data->progress || data->stream_bounds || data->counts_redirect_bodies) {
+    if (data->progress || data->stream.active () || data->counts_redirect_bodies) {
         set_opt<CURLOPT_XFERINFOFUNCTION> (curl, progress_callback);
         set_opt<CURLOPT_XFERINFODATA> (curl, data);
         set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
     }
 
-    // Set timeout. For a bounded stream the whole-transfer deadline is a
-    // *backstop* around the duration cap rather than the deadline itself: the
-    // cap is meant to end the stream successfully a grace period before this
-    // fires, so reaching this one means the progress callback never ran, which
-    // is a genuine failure and is reported as the timeout it is. Setting it to
-    // `timeout_ms` instead would kill a legitimately long stream as an error at
-    // the ordinary per-request timeout, which for a 10-minute cap and a 30s
-    // timeout is every stream. The connect phase is bounded by the request
-    // timeout either way (#2835), so a stream's dead target fails at the
-    // timeout and not at the backstop; set per submission, as the handle is
-    // pooled.
-    const long transfer_timeout_ms = request.stream_bounds ?
-    static_cast<long> (request.stream_bounds->max_duration_ms +
-    vayu::core::constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS) :
-    static_cast<long> (request.timeout_ms);
-    set_opt<CURLOPT_TIMEOUT_MS> (curl, transfer_timeout_ms);
+    // Set timeout: the whole-transfer bound `whole_transfer_timeout_ms`
+    // states, and the connect phase bounded by the request timeout either way
+    // (#2835), so a stream's dead target fails at the timeout and not at the
+    // backstop; set per submission, as the handle is pooled.
+    set_opt<CURLOPT_TIMEOUT_MS> (curl, whole_transfer_timeout_ms (request));
     set_opt<CURLOPT_CONNECTTIMEOUT_MS> (curl,
     static_cast<long> (
     vayu::core::constants::server::connect_timeout_ms (request.timeout_ms)));
@@ -1791,12 +1786,7 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     // transfer the server killed mid-stream still delivered the events it
     // delivered, and dropping the count on the error path would make a partial
     // stream indistinguishable from one that carried nothing.
-    if (data->stream_bounds) {
-        data->finish_stream_count ();
-        response.stream_events         = data->stream_counter.events ();
-        response.stream_capped         = data->stream_cap_reached;
-        response.stream_first_event_ms = data->stream_first_event_ms;
-    }
+    data->stream.report (response);
 
     // A cap ended this stream, which is what a bounded stream under load is
     // *supposed* to do (issue #576), so it completes successfully rather than
@@ -1807,8 +1797,8 @@ Result<Response> extract_response (CURL* curl, TransferData* data, CURLcode resu
     //
     // `body_limit_exceeded` still wins - it is checked first below only because
     // it cannot be set at the same time as this: write_callback returns at the
-    // byte cap without ever setting `stream_cap_reached`.
-    if (result != CURLE_OK && data->stream_cap_reached && !data->body_limit_exceeded) {
+    // byte cap without ever marking the tally's cap reached.
+    if (result != CURLE_OK && data->stream.cap_reached () && !data->body_limit_exceeded) {
         long stream_code = 0;
         get_info<CURLINFO_RESPONSE_CODE> (curl, &stream_code);
         response.status_code = static_cast<int> (stream_code);

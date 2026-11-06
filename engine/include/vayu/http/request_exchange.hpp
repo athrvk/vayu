@@ -611,8 +611,10 @@ struct ExchangeInputs {
     /// `pm.sendRequest` its scripts make and the OAuth 2.0 token @ref late_auth
     /// acquires (issue #2683): `POST /execute` passes
     /// `RouteContext::server_stopping`, so `Server::stop()` ends the transfer
-    /// rather than waiting on it. Null leaves all three uncancellable, as the
-    /// scenario runner's are.
+    /// rather than waiting on it. The scenario runner passes
+    /// `RunContext::should_stop` for a streaming step alone (#3235), whose
+    /// transfer only a cap or a stop ends; null leaves all three
+    /// uncancellable, as its other steps are.
     const std::atomic<bool>* cancel = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by

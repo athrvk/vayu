@@ -223,6 +223,33 @@ TEST (NaturalEndDrainMs, AStreamWaitsItsCapPlusTheBackstopAndTheGrace) {
     EXPECT_EQ (natural_end_drain_ms (bounds, 0), 4000 + 5000 + 2000);
 }
 
+// #3235: a collection plan can hold a streaming step beside ordinary ones, so
+// its wait is whichever bound is longer. Mutation check: return the stream's
+// wait alone whenever a stream exists and the timeout-longer case fails here,
+// and `LoadDrain` below sees the ordinary step cancelled.
+TEST (NaturalEndDrainMs, ACollectionRunWaitsTheLongerOfItsStreamsAndItsTimeout) {
+    const vayu::StreamBounds short_cap{ 4000, 10 };
+    EXPECT_EQ (collection_natural_end_drain_ms (short_cap, 30000), 30000 + 2000);
+    EXPECT_EQ (collection_natural_end_drain_ms (short_cap, 200), 4000 + 5000 + 2000);
+    EXPECT_EQ (collection_natural_end_drain_ms (std::nullopt, 30000), 30000 + 2000);
+}
+
+// The route reads a `null` cap as absent, so the run must too: it is read
+// after the run row exists, where a throw strands the row `pending`.
+// Mutation check: read the caps with `config.value (key, default)` again and
+// this throws `type_error`.
+TEST (RunContextStreamBounds, ANullCapFallsBackToTheSetting) {
+    EngineDefaults defaults;
+    defaults.stream_defaults = vayu::StreamBounds{ 45000, 12 };
+    const nlohmann::json config{ { "stream", true },
+        { "maxStreamDurationMs", nullptr }, { "maxStreamEvents", 3 } };
+    const RunContext context ("r", config,
+    vayu::core::constants::metrics_collector::DEFAULT_MAX_ERRORS, defaults);
+    ASSERT_HAS_VALUE (context.stream_bounds);
+    EXPECT_EQ (context.stream_bounds->max_duration_ms, 45000);
+    EXPECT_EQ (context.stream_bounds->max_events, 3);
+}
+
 TEST (NaturalEndDrainMs, ATimeoutThatIsNotPositiveFallsBackToTheDefault) {
     const int64_t expected =
     vayu::core::constants::server::DEFAULT_TIMEOUT_MS + int64_t{ 2000 };
@@ -1343,14 +1370,144 @@ TEST (LoadDrain, AStreamingRunsNaturalEndWaitsForTheStreamsCap) {
     vayu::tests::remove_database_files (db_path);
 }
 
+// #3235: a collection run's streams are its steps', so its natural end waits
+// for the longest step's cap rather than for the run's 200 ms timeout. One
+// virtual user opens `/sse-ticks` (6 s) at the start of a 1 s run; the step's
+// 4 s cap ends it as a success, where a drain sized by the timeout gives up
+// at about 3.2 s and records it cancelled. Asserted on the recorded outcome.
+// Mutation check: size the drain by `context->stream_bounds` alone again in
+// `execute_load_test` and every assertion below fails.
+TEST (LoadDrain, ACollectionRunsNaturalEndWaitsForItsStreamingStepsCap) {
+    const std::string db_path = "test_load_drain_scenario_stream.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        auto execution            = std::make_shared<ScenarioExecution> ();
+        execution->request.source = "collection";
+        execution->request.collection_id = "col_drain_stream";
+        ScenarioStep step;
+        step.request_id            = "req_stream";
+        step.name                  = "events";
+        step.request.method        = vayu::HttpMethod::GET;
+        step.request.url           = server.sse_ticks_url ();
+        step.request.timeout_ms    = 200;
+        step.request.stream_bounds = vayu::StreamBounds{ 4000, 100000 };
+        step.stored_url            = step.request.url;
+        execution->plan.steps.push_back (std::move (step));
+
+        const nlohmann::json config{ { "mode", "constant_concurrency" },
+            { "concurrency", 1 }, { "duration", "1s" }, { "timeout", 200 },
+            { "scenario",
+            { { "source", "collection" }, { "collectionId", "col_drain_stream" } } } };
+        const std::string run_id = "run_load_drain_scenario_stream";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db, execution));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& summary = report.at ("summary");
+        EXPECT_EQ (summary.at ("successfulRequests").get<size_t> (), 1u)
+        << report.dump ();
+        EXPECT_EQ (summary.at ("failedRequests").get<size_t> (), 0u) << report.dump ();
+        EXPECT_FALSE (report.at ("errors").at ("types").contains ("cancelled"))
+        << report.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
+// #3235: a streaming step does not shorten the wait for a collection run's
+// ordinary steps. One virtual user streams for its step's 500 ms cap, then
+// sends a request that answers 10 s later, inside its 20 s timeout and in
+// flight at the end of the 1 s run. Healthy: the drain waits the timeout plus
+// the grace (22 s) and the request succeeds. Broken: a drain sized by the
+// stream alone gives up 7.5 s after the end and records it cancelled.
+// Asserted on the recorded outcome. Mutation check: size a collection run's
+// drain by `natural_end_drain_ms (longest_stream_bounds (...))` alone again in
+// `execute_load_test` and every assertion below fails.
+TEST (LoadDrain, AStreamingStepDoesNotCutACollectionRunsOrdinaryStepShort) {
+    constexpr int64_t STREAM_CAP_MS = 500;
+    constexpr int TIMEOUT_MS        = 20000;
+    static_assert (vayu::tests::SlowMockServer::OUTLAST_STREAM_DRAIN_MS > STREAM_CAP_MS +
+    constants::sse::LOAD_STREAM_TIMEOUT_GRACE_MS + constants::event_loop::STOP_DRAIN_GRACE_MS);
+    static_assert (vayu::tests::SlowMockServer::OUTLAST_STREAM_DRAIN_MS < TIMEOUT_MS);
+
+    const std::string db_path = "test_load_drain_scenario_mixed.db";
+    vayu::tests::remove_database_files (db_path);
+    vayu::http::global_init ();
+    {
+        vayu::db::Database db (db_path);
+        db.init ();
+        const vayu::tests::SlowMockServer server;
+
+        auto execution            = std::make_shared<ScenarioExecution> ();
+        execution->request.source = "collection";
+        execution->request.collection_id = "col_drain_mixed";
+        ScenarioStep stream_step;
+        stream_step.request_id         = "req_stream";
+        stream_step.name               = "events";
+        stream_step.request.method     = vayu::HttpMethod::GET;
+        stream_step.request.url        = server.sse_ticks_url ();
+        stream_step.request.timeout_ms = TIMEOUT_MS;
+        stream_step.request.stream_bounds = vayu::StreamBounds{ STREAM_CAP_MS, 100000 };
+        stream_step.stored_url = stream_step.request.url;
+        execution->plan.steps.push_back (std::move (stream_step));
+        ScenarioStep ordinary_step;
+        ordinary_step.request_id         = "req_ordinary";
+        ordinary_step.name               = "slow";
+        ordinary_step.request.method     = vayu::HttpMethod::GET;
+        ordinary_step.request.url        = server.outlast_stream_drain_url ();
+        ordinary_step.request.timeout_ms = TIMEOUT_MS;
+        ordinary_step.stored_url         = ordinary_step.request.url;
+        execution->plan.steps.push_back (std::move (ordinary_step));
+
+        const nlohmann::json config{ { "mode", "constant_concurrency" },
+            { "concurrency", 1 }, { "duration", "1s" }, { "timeout", TIMEOUT_MS },
+            { "scenario",
+            { { "source", "collection" }, { "collectionId", "col_drain_mixed" } } } };
+        const std::string run_id = "run_load_drain_scenario_mixed";
+        create_load_run (db, run_id, config);
+
+        RunManager manager;
+        ASSERT_TRUE (manager.start_run (run_id, config, db, execution));
+        const auto stored = wait_for_terminal_run (db, run_id);
+        ASSERT_HAS_VALUE (stored);
+        ASSERT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+
+        const auto [status, report] = vayu::http::routes::run_report_response (db, run_id);
+        ASSERT_EQ (status, 200);
+        const auto& summary = report.at ("summary");
+        EXPECT_EQ (summary.at ("successfulRequests").get<size_t> (), 2u)
+        << report.dump ();
+        EXPECT_EQ (summary.at ("failedRequests").get<size_t> (), 0u) << report.dump ();
+        EXPECT_FALSE (report.at ("errors").at ("types").contains ("cancelled"))
+        << report.dump ();
+
+        manager.shutdown ();
+    }
+    vayu::http::global_cleanup ();
+    vayu::tests::remove_database_files (db_path);
+}
+
 // #3236: a streaming run's live frames count its events while its one stream
 // is still open, and settle on the report's total once it closes. `/sse-held`
 // sends three events and the start of a fourth, then holds until released, so
 // the mid-stream tick is taken while nothing has completed; the fourth event
 // is the unterminated frame only the close completes. Mutation checks: count
-// only at completion (publish nothing from `count_stream_chunk` and the whole
-// count from `finish_stream_count`) and the mid-stream wait runs out; drop the
-// delta `finish_stream_count` publishes and the settled frame reads 3, not 4.
+// only at completion (publish nothing from `StreamTally::feed` and the whole
+// count from `StreamTally::report`) and the mid-stream wait runs out; drop the
+// delta `report` publishes and the settled frame reads 3, not 4.
 TEST (LoadStream, ATickWhileTheStreamIsOpenCarriesItsEvents) {
     const std::string db_path = "test_load_stream_live.db";
     vayu::tests::remove_database_files (db_path);

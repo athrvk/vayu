@@ -1662,4 +1662,17 @@ void put_interval_percentiles (nlohmann::json& stats,
 std::string_view prefix,
 const MetricsCollector::Percentiles& interval);
 
+/**
+ * @brief `summary["stream"]`'s value (issue #576), in the shape both run modes
+ *        store - a load run's and, since #3235, a sequential collection run's -
+ *        so `GET /runs/:id/report` passes one shape through either way.
+ *
+ * `eventsPerSecond` is derived over @p duration_s, the run's `test_duration`
+ * that the report's `rps` is read off: two rates a reader compares must come
+ * off one clock. `timeToFirstEvent` (#3234) is omitted when no stream
+ * delivered a timed event, on the section's own absent-not-zeros rule.
+ */
+[[nodiscard]] nlohmann::json
+build_stream_summary_payload (const MetricsCollector::StreamTotals& stream, double duration_s);
+
 } // namespace vayu::core

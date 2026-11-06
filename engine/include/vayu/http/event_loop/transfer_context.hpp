@@ -16,12 +16,11 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/event_loop/connected_peer_check.hpp"
-#include "vayu/http/sse_frame_counter.hpp"
+#include "vayu/http/stream_tally.hpp"
 #include "vayu/types.hpp"
 
 namespace vayu::http {
@@ -90,28 +89,13 @@ struct TransferData {
     /// can name the cap instead of reporting curl's generic write failure.
     bool body_limit_exceeded = false;
 
-    /// The caps this transfer streams under, copied from the request when the
-    /// handle is configured; absent for every non-streaming transfer, which is
-    /// what keeps the counter and both cap checks off the ordinary hot path.
-    std::optional<StreamBounds> stream_bounds;
-    /// Events delivered so far. Fed by write_callback, finished and read once
-    /// at completion, both through the two members below so the run's live
-    /// tally sees every event the counter does.
-    SseFrameCounter stream_counter;
-    /// Milliseconds from `submitted_at` to the write that completed the first
-    /// event (issue #3234), stamped once by write_callback. An event only
-    /// `SseFrameCounter::finish` counts, an unterminated last frame the close
-    /// completed, leaves it unset: no write delivered it at a time to measure.
-    std::optional<double> stream_first_event_ms;
-    /// When the duration cap expires. Computed at configure time from
-    /// `stream_bounds->max_duration_ms`, so the clock is read once per transfer
-    /// rather than once per callback.
-    std::chrono::steady_clock::time_point stream_deadline;
-    /// Set by whichever cap ended the transfer, so the completion can report a
-    /// **success** where curl reports an aborted write. Distinct from
+    /// The bounded stream this transfer is, started from the request's
+    /// `stream_bounds` when the handle is configured and inactive for every
+    /// non-streaming transfer, which is what keeps the counter and both cap
+    /// checks off the ordinary hot path. Its cap is distinct from
     /// `body_limit_exceeded`, which stays an error: the byte cap is a refusal
     /// to buffer, the stream caps are the stream's intended end.
-    bool stream_cap_reached = false;
+    StreamTally stream;
 
     /// Set when the transfer follows redirects, which is what makes
     /// progress_callback count the bodies of the hops before the last (#2893):
@@ -141,14 +125,6 @@ struct TransferData {
     /// reader a large binary body streams through), released with the rest of
     /// this transfer's curl state.
     BodySource body;
-
-    /// Feed @p chunk to `stream_counter`, adding the events it completed to
-    /// `stream_bounds->live_events` as they arrive (issue #3236).
-    void count_stream_chunk (std::string_view chunk);
-    /// Finish `stream_counter` at completion, adding the unterminated last
-    /// frame it may count to the same tally, so the live total settles on the
-    /// report's.
-    void finish_stream_count ();
 
     TransferData () = default;
     ~TransferData ();

@@ -464,6 +464,11 @@ struct ScenarioSummaryInputs {
     /// off the run's `MetricsCollector` after the last iteration - the same
     /// absent-when-none rule `coverage` follows.
     std::optional<std::map<std::string, CustomMetricSummary>> custom_metrics;
+    /// What this run's streaming steps delivered (#3235), read off the run's
+    /// `MetricsCollector` after the last iteration as `custom_metrics` is, and
+    /// stored as the load path's `stream` section; absent for a run in which
+    /// no step streamed.
+    std::optional<MetricsCollector::StreamTotals> stream;
 };
 
 /**

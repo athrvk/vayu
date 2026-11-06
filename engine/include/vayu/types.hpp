@@ -482,11 +482,14 @@ inline const std::vector<HttpVersion>& all_http_versions () {
 constexpr HttpVersion DEFAULT_HTTP_VERSION = HttpVersion::Auto;
 
 /**
- * @brief The caps that end a streaming transfer under load (issue #576).
+ * @brief The caps that end a bounded streaming transfer (issue #576).
  *
  * Present on a `Request` exactly when that request is a stream driven by the
- * load event loop, and absent everywhere else - including on the design path,
- * whose stream is managed by `SseStreamManager` and ends by rules of its own.
+ * load event loop, or a collection run's step whose stored request streams
+ * (#3235; the plan sets it, and the event loop or, for a sequential run,
+ * `Client` honours it through `StreamTally`). Absent everywhere else -
+ * including on `POST /execute`'s stream, which `SseStreamManager` manages and
+ * ends by rules of its own.
  *
  * Both caps are always set, never zero-for-unbounded: the load loop is
  * completion-driven (`in_flight() = sent - completed`, refill per completion),
@@ -503,8 +506,10 @@ struct StreamBounds {
     /// The run's tally of events as they arrive (issue #3236), shared by every
     /// transfer of the run and read by the live tick. Owned by the run's
     /// `MetricsCollector`; null when the run reports no stream metrics, which
-    /// leaves the write path one null check.
-    std::shared_ptr<std::atomic<std::size_t>> live_events;
+    /// leaves the write path one null check. The initializer is what lets a
+    /// caller spell the two caps alone (`StreamBounds{ ms, events }`) under
+    /// `-Wmissing-field-initializers`.
+    std::shared_ptr<std::atomic<std::size_t>> live_events = nullptr;
 };
 
 /**
@@ -672,7 +677,7 @@ struct Request {
     /**
      * @brief Consume this transfer as a bounded `text/event-stream` (#576).
      *
-     * Absent for every ordinary transfer, and for the design path's stream -
+     * Absent for every ordinary transfer, and for `POST /execute`'s stream -
      * see `StreamBounds`. Set, it changes three things about the transfer and
      * nothing else: events are counted as they arrive, either cap ends it as a
      * **success**, and the whole-transfer timeout becomes a backstop around the
@@ -1103,8 +1108,9 @@ struct Response {
      * every connection before the first event is exactly the one where telling
      * them apart matters.
      *
-     * Counted by `SseFrameCounter` on the write callback, which agrees with
-     * `SseParser` on what an event is - see that header.
+     * Counted by `SseFrameCounter` on the write callback (through
+     * `StreamTally`, on either curl driver), which agrees with `SseParser` on
+     * what an event is - see that header.
      */
     std::optional<std::size_t> stream_events;
 
@@ -1136,7 +1142,7 @@ struct Response {
      *        transfer, rather than the server closing the stream (issue #576).
      *
      * Both are successful completions - reaching the cap *is* a bounded
-     * stream's intended end under load - so the status code cannot tell them
+     * stream's intended end - so the status code cannot tell them
      * apart and this is what the report's `capped` tally counts.
      */
     bool stream_capped = false;

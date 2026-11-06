@@ -197,7 +197,11 @@ struct ClientConfig {
      *
      * Read from libcurl's progress callback, which runs about once a second
      * while a transfer waits on a silent peer, so a cancel lands within about
-     * that. The response reports `ErrorCode::Cancelled`.
+     * that. The response reports `ErrorCode::Cancelled` - except for a bounded
+     * stream the server has answered, which the cancel *ends* rather than
+     * fails: a collection run's stop, the way `POST /runs/:id/stop` ends a
+     * design stream (#3235). Set from `RunContext::should_stop` by the
+     * sequential runner's streaming steps.
      */
     const std::atomic<bool>* cancel = nullptr;
 };
@@ -230,6 +234,14 @@ class Client {
 
     /**
      * @brief Send an HTTP request and return the response
+     *
+     * A request carrying `stream_bounds` is sent as a bounded stream, by the
+     * event loop's rules (`StreamTally`, #3235): its events are counted as
+     * they arrive, either cap (or a cancel once the server answered) ends it
+     * as a **success**, and the whole-transfer timeout is the duration cap
+     * plus `LOAD_STREAM_TIMEOUT_GRACE_MS`, so its own `timeout_ms` bounds the
+     * connect phase alone. The body is the `text/event-stream` bytes, held to
+     * `max_response_bytes` like any other.
      *
      * @param request The request to send
      * @return Result<Response> The response or an error

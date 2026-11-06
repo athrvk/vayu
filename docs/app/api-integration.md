@@ -2233,6 +2233,12 @@ engine's default is the user's `sseMaxStreamDurationMs` setting, which the
 dialog does not show, so eliding would leave the run bounded by a number the
 user was never told about while two others were on screen.
 
+A collection run takes the caps without `stream` (issue #3235): the engine reads
+the flag off each stored request, so `RunCollectionDialog` sends top-level
+`maxStreamDurationMs` / `maxStreamEvents` (seconds converted to ms) only when a
+request it runs streams, for a design run and a load run alike, and never
+`stream`, which is a `400` there.
+
 Under load a stream is bounded by construction, and **reaching a cap is a
 successful completion, not a timeout** - so a streaming run's clean error rate
 is not evidence the caps went unused. The report answers that with a `stream`
@@ -2314,14 +2320,16 @@ derived from the steps it actually sent.
 **Stream budgets** (issue #3234): `streamTimeToFirstEventP95Ms` (a ceiling on
 `stream.timeToFirstEvent.p95`, ms) and `streamEventsPerSecondMin` (a floor on
 `stream.eventsPerSecond`) judge the report's `stream` section, which only a
-streaming load run has. On any other run the engine reports them not evaluated,
+streaming request's load run and a collection run with a streaming step
+(#3235, design or load) have. On any other run the engine reports them not evaluated,
 and that counts as failed, so the dialog treats them as a property of the
 request: `BUDGET_FIELDS` marks them `streamOnly`, and `budgetFieldsFor(streaming)`
 is the one list the load dialog's fields, validation, closed-card summary and
 payload read. A request that does not stream is offered neither, validates and
 sends neither (a value the global memo holds for them stays in the memo for the
-next streaming request, and is not named as carried over), and
-`RunCollectionDialog` never offers them. A streaming request's latency budgets
+next streaming request, and is not named as carried over).
+`RunCollectionDialog` reads the same list with `anyStreams`, whether a request
+the run sends streams, so it offers, checks and sends them only then. A streaming request's latency budgets
 read on each stream's full duration, from sending the request to the stream
 closing, and the section says so under the p99 field.
 

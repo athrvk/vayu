@@ -164,6 +164,13 @@
  * #3236's streaming-keys sentence in `get_live_metrics` is paid once per row.
  * The rows measure 149,222 / 146,626 / 219,631 / 215,364 B, and the four caps
  * went to 149,500 / 146,900 / 219,900 / 215,700.
+ *
+ * #3235's stream caps on a collection run: `run_collection` gains
+ * `maxStreamDurationMs` and `maxStreamEvents` (two arguments and a sentence),
+ * and `start_load_run`'s three stream arguments say which of them a `scenario`
+ * accepts. That is 874 B on every row, taking them to 150,096 / 147,500 /
+ * 220,505 / 216,238 B; the four caps went to 150,100 / 147,600 / 220,600 /
+ * 216,300, the least that holds them.
  */
 
 import { describe, it, expect } from "vitest";
@@ -183,10 +190,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 149_300 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 146_700 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 219_700 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 215_400 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_100 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 220_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

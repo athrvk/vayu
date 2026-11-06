@@ -517,6 +517,12 @@ nlohmann::json& raw_elements_out) {
     step.request_id = row.id;
     step.name       = row.name;
     step.request    = std::move (built.request);
+    // A stored stream runs as one under either executor (#3235), ended by a
+    // cap or by the server's close rather than by the step's timeout.
+    // Composition does not carry the flag, so it is read off the row.
+    if (row.stream) {
+        step.request.stream_bounds = options.stream_bounds;
+    }
     // The only script source since issue #1514's cut-over: `elements`
     // resolved the collection chain's and the request's own script.pre /
     // script.post entries beside every declarative kind, the same list
@@ -1021,6 +1027,17 @@ bool step_has_script (const ScenarioStep& step, std::string_view kind) {
         return element.kind == kind &&
         !is_blank_script_element (element.kind, element.config);
     });
+}
+
+std::optional<vayu::StreamBounds> longest_stream_bounds (const ScenarioPlan& plan) {
+    std::optional<vayu::StreamBounds> longest;
+    for (const auto& step : plan.steps) {
+        const auto& bounds = step.request.stream_bounds;
+        if (bounds && (!longest || bounds->max_duration_ms > longest->max_duration_ms)) {
+            longest = bounds;
+        }
+    }
+    return longest;
 }
 
 bool step_has_deferred_script (const ScenarioStep& step,

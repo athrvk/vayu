@@ -1194,6 +1194,25 @@ const std::map<std::string, CustomMetricSummary>& metrics) {
     return out;
 }
 
+nlohmann::json build_stream_summary_payload (const MetricsCollector::StreamTotals& stream,
+double duration_s) {
+    nlohmann::json out      = { { "completions", stream.completions },
+        { "totalEvents", stream.total_events }, { "capped", stream.capped },
+        { "eventsPerSecond", stream.events_per_second (duration_s) },
+        { "events",
+        { { "min", stream.events.min }, { "max", stream.events.max },
+        { "p50", stream.events.p50 }, { "p90", stream.events.p90 },
+        { "p95", stream.events.p95 }, { "p99", stream.events.p99 },
+        { "count", stream.events.count } } } };
+    const auto& first_event = stream.time_to_first_event;
+    if (first_event.count > 0) {
+        out["timeToFirstEvent"] = { { "p50", first_event.p50 },
+            { "p95", first_event.p95 }, { "p99", first_event.p99 },
+            { "max", first_event.max }, { "count", first_event.count } };
+    }
+    return out;
+}
+
 void put_interval_percentiles (nlohmann::json& stats,
 std::string_view prefix,
 const MetricsCollector::Percentiles& interval) {

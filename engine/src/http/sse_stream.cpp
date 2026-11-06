@@ -93,6 +93,26 @@ SseLimits read_sse_limits (vayu::db::Database& db) {
     return limits;
 }
 
+vayu::StreamBounds default_stream_bounds (const SseLimits& limits) {
+    vayu::StreamBounds bounds;
+    bounds.max_duration_ms = limits.max_stream_duration_ms;
+    bounds.max_events      = limits.max_stream_events;
+    return bounds;
+}
+
+vayu::StreamBounds resolve_stream_bounds (const nlohmann::json& config,
+const vayu::StreamBounds& defaults) {
+    const auto cap = [&config] (const char* key, int64_t fallback) {
+        const auto field = config.find (key);
+        return field == config.end () || field->is_null () ? fallback :
+                                                             field->get<int64_t> ();
+    };
+    vayu::StreamBounds bounds;
+    bounds.max_duration_ms = cap ("maxStreamDurationMs", defaults.max_duration_ms);
+    bounds.max_events = cap ("maxStreamEvents", defaults.max_events);
+    return bounds;
+}
+
 // ---------------------------------------------------------------------------
 // SseStreamContext
 // ---------------------------------------------------------------------------

@@ -284,16 +284,26 @@ const SINGLE_TARGET_LOAD_FIELDS: ReadonlyArray<[string, string]> = [
 	["maxInFlight", "in-flight requests are bounded by the virtual-user count (`concurrency`)"],
 	["sloMs", "that is `capacity` mode's field, and a scenario cannot run in capacity mode"],
 	["stepDuration", "that is `capacity` mode's field, and a scenario cannot run in capacity mode"],
-	["stream", "run-level stream bounds are applied to a single-target run's request only"],
 	[
-		"maxStreamDurationMs",
-		"run-level stream bounds are applied to a single-target run's request only",
-	],
-	[
-		"maxStreamEvents",
-		"run-level stream bounds are applied to a single-target run's request only",
+		"stream",
+		"each step streams or not by its own saved request's Event stream setting, which this run cannot change - set it on the request; `maxStreamDurationMs` and `maxStreamEvents` do bound the steps that stream",
 	],
 ];
+
+/**
+ * The run-level stream caps an agent gave, as the engine reads them (#3235): on a
+ * collection run they are accepted without `stream` and bound the steps whose
+ * saved request streams. Never `stream` itself, which is a 400 there. Zod has
+ * bounded both values, so they travel as given.
+ */
+export function scenarioStreamCaps(args: Record<string, unknown>): Record<string, number> {
+	const caps: Record<string, number> = {};
+	for (const key of ["maxStreamDurationMs", "maxStreamEvents"]) {
+		const value = args[key];
+		if (typeof value === "number") caps[key] = value;
+	}
+	return caps;
+}
 
 /** The modes the engine will drive a scenario with (`validate_scenario_load_config`). */
 const SCENARIO_LOAD_MODES = ["constant_concurrency", "ramp_up", "iterations"] as const;
@@ -421,6 +431,7 @@ export async function startScenarioLoadRun(
 		...loadShapePayload(shape),
 		scenario: scenarioBlock(scenario, recursive),
 		...(environmentId !== undefined ? { environmentId } : {}),
+		...scenarioStreamCaps(args),
 	};
 	// Both travel verbatim for the same reason they do on the single-target
 	// path: the keys are the engine's own and it is what judges the values.

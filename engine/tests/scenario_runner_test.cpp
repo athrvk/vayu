@@ -53,6 +53,7 @@
 #include "vayu/core/scenario_runner.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/routes.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "wait_until.hpp"
@@ -169,6 +170,55 @@ class ScenarioMockServer {
             R"({"authorization":")" + req.get_header_value ("Authorization") + "\"}",
             "application/json");
         });
+        // Event streams for a stored streaming request (#3235): three events
+        // over about 450 ms and a close, past any 200 ms step timeout; one
+        // with an event always ready, which only a cap ends; and one that
+        // answers and then says nothing until the fixture stops.
+        svr.Get ("/sse-short", [record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_chunked_content_provider (
+            "text/event-stream", [] (size_t, httplib::DataSink& sink) {
+                for (int event = 0; event < SHORT_STREAM_EVENTS; ++event) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (150));
+                    const std::string frame = "data: tick\n\n";
+                    if (!sink.write (frame.data (), frame.size ())) {
+                        return false;
+                    }
+                }
+                sink.done ();
+                return true;
+            });
+        });
+        svr.Get ("/sse-endless",
+        [this, record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                while (!stopping.load ()) {
+                    const std::string frame = "data: tick\n\n";
+                    if (!sink.write (frame.data (), frame.size ())) {
+                        return false;
+                    }
+                    std::this_thread::sleep_for (std::chrono::milliseconds (5));
+                }
+                sink.done ();
+                return true;
+            });
+        });
+        svr.Get ("/sse-silent",
+        [this, record] (const httplib::Request& req, httplib::Response& res) {
+            record (req);
+            res.set_chunked_content_provider (
+            "text/event-stream", [this] (size_t, httplib::DataSink& sink) {
+                const std::string keep_alive = ": open\n\n";
+                sink.write (keep_alive.data (), keep_alive.size ());
+                while (!stopping.load ()) {
+                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                }
+                sink.done ();
+                return true;
+            });
+        });
 
         port   = svr.bind_to_any_port ("127.0.0.1");
         thread = std::thread ([this] () { svr.listen_after_bind (); });
@@ -176,6 +226,7 @@ class ScenarioMockServer {
     }
 
     ~ScenarioMockServer () {
+        stopping.store (true);
         svr.stop ();
         if (thread.joinable ()) {
             thread.join ();
@@ -198,6 +249,9 @@ class ScenarioMockServer {
     /// Called on the server thread while the run is in flight.
     std::function<void ()> observer;
 
+    /// The events `/sse-short` sends before it closes.
+    static constexpr int SHORT_STREAM_EVENTS = 3;
+
     private:
     httplib::Server svr;
     std::thread thread;
@@ -205,6 +259,8 @@ class ScenarioMockServer {
     mutable std::mutex mtx;
     std::vector<SeenRequest> seen;
     std::atomic<int> logins{ 0 };
+    /// Ends the streams that only a client or the fixture ends.
+    std::atomic<bool> stopping{ false };
 };
 
 class ScenarioRunnerTest : public ::testing::Test {
@@ -349,6 +405,32 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->save_request (r);
     }
 
+    /// A request in `col_1` stored with `stream` set, as the request editor
+    /// saves one, under its own @p timeout_ms (#3235).
+    void seed_streaming_request (const std::string& id, int order, const std::string& path, int timeout_ms) {
+        vayu::db::Request r;
+        r.id            = id;
+        r.collection_id = "col_1";
+        r.name          = "Step " + id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = server_->url (path);
+        r.stream        = true;
+        r.timeout_ms    = timeout_ms;
+        r.order         = order;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db_->save_request (r);
+    }
+
+    /// Every stored step's trace, in step order.
+    [[nodiscard]] std::vector<json> stored_traces (const std::string& run_id) {
+        std::vector<json> traces;
+        for (const auto& row : db_->get_results (run_id)) {
+            traces.push_back (json::parse (row.trace_data));
+        }
+        return traces;
+    }
+
     /// A request in `col_1` carrying an arbitrary `elements` array (issue
     /// #1514's phase-0 kinds - `extract.*` / `assert.*` / `timer.think` -
     /// which `seed_request` above has no parameters for).
@@ -457,6 +539,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         // This fixture runs the sequential runner, as `POST /runs` resolves
         // its plan.
         options.oauth2_after_scripts = true;
+        if (stream_bounds_) {
+            options.stream_bounds = *stream_bounds_;
+        }
 
         auto resolved = vayu::core::resolve_scenario (*db_, scenario, options);
         EXPECT_TRUE (resolved.ok) << resolved.error;
@@ -602,6 +687,9 @@ class ScenarioRunnerTest : public ::testing::Test {
     size_t runs_started_ = 0;
     /// Runs `col_1` with its sub-folders (`scenario.recursive`).
     bool recursive_ = false;
+    /// The caps a streaming step is bounded by, as `POST /runs` resolves them;
+    /// unset keeps the plan's compiled-in default.
+    std::optional<vayu::StreamBounds> stream_bounds_;
 };
 
 // ============================================================================
@@ -1866,6 +1954,140 @@ TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     // The whole iteration would be 4 steps; the stop landed inside one.
     EXPECT_LT (executed, 8u);
     EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 0u);
+}
+
+// ============================================================================
+// A stored streaming request (#3235)
+// ============================================================================
+
+// A step whose stored request streams runs as a stream: `/sse-short` holds
+// its response open for about 450 ms, past the step's 200 ms timeout, and its
+// close ends the step as a pass. Its events reach the stored trace, the run's
+// `stream` section and the report; the ordinary step beside it is unchanged.
+// Mutation check: send `timeout_ms` as the whole-transfer timeout in
+// `Client::send` again and the streaming step errors with a timeout.
+TEST_F (ScenarioRunnerTest, AStoredStreamingRequestRunsAsAStreamToTheServersClose) {
+    seed_collection ("col_1");
+    seed_request ("req_plain", 0, "/ok");
+    seed_streaming_request ("req_stream", 1, "/sse-short", /*timeout_ms=*/200);
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    EXPECT_FALSE (traces[0].contains ("events"))
+    << "an ordinary step has no events";
+    const auto& streamed = traces[1];
+    EXPECT_EQ (streamed["outcome"].get<std::string> (), "passed") << streamed.dump ();
+    EXPECT_FALSE (streamed.contains ("error_type")) << streamed.dump ();
+    ASSERT_TRUE (streamed.contains ("events")) << streamed.dump ();
+    const auto& events = streamed["events"];
+    EXPECT_EQ (events["totalEvents"].get<int64_t> (), ScenarioMockServer::SHORT_STREAM_EVENTS);
+    EXPECT_EQ (events["items"].size (),
+    static_cast<size_t> (ScenarioMockServer::SHORT_STREAM_EVENTS));
+    EXPECT_FALSE (events["eventsTruncated"].get<bool> ());
+
+    const auto summary = summary_of (run_id);
+    ASSERT_TRUE (summary.contains ("stream")) << summary.dump ();
+    const auto& stream = summary["stream"];
+    EXPECT_EQ (stream["completions"].get<size_t> (), 1u)
+    << "only the streaming step";
+    EXPECT_EQ (stream["totalEvents"].get<int64_t> (), ScenarioMockServer::SHORT_STREAM_EVENTS);
+    EXPECT_EQ (stream["capped"].get<size_t> (), 0u) << "the server ended it";
+    ASSERT_TRUE (stream.contains ("timeToFirstEvent")) << stream.dump ();
+    EXPECT_EQ (stream["timeToFirstEvent"]["count"].get<size_t> (), 1u);
+    // A lower bound only: the server holds the first event 150 ms.
+    EXPECT_GE (stream["timeToFirstEvent"]["max"].get<double> (), 150.0);
+
+    const auto [status, report] = vayu::http::routes::run_report_response (*db_, run_id);
+    ASSERT_EQ (status, 200) << report.dump ();
+    ASSERT_TRUE (report.contains ("stream")) << report.dump ();
+    EXPECT_EQ (report["stream"]["completions"].get<size_t> (), 1u);
+}
+
+// Either cap ends a streaming step as a pass, and the run's `stream` section
+// says a cap did. Mutation check: ignore `stream_bounds` in `Client::send`
+// (no tally started, `timeout_ms` as the whole-transfer timeout) and both
+// steps error at their 200 ms timeout instead.
+TEST_F (ScenarioRunnerTest, EitherCapEndsAStreamingStepAsAPass) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_events", 0, "/sse-endless", /*timeout_ms=*/200);
+    seed_streaming_request ("req_quiet", 1, "/sse-silent", /*timeout_ms=*/200);
+    constexpr int64_t EVENT_CAP = 4;
+    stream_bounds_              = vayu::StreamBounds{ 1000, EVENT_CAP };
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 2u);
+    for (const auto& trace : traces) {
+        EXPECT_EQ (trace["outcome"].get<std::string> (), "passed") << trace.dump ();
+    }
+    EXPECT_GE (traces[0].at ("events").at ("totalEvents").get<int64_t> (), EVENT_CAP)
+    << "the event cap ended the endless stream";
+    EXPECT_EQ (traces[1].at ("events").at ("totalEvents").get<int64_t> (), 0)
+    << "the duration cap ended the silent one";
+
+    const auto stream = summary_of (run_id)["stream"];
+    EXPECT_EQ (stream["completions"].get<size_t> (), 2u) << stream.dump ();
+    EXPECT_EQ (stream["capped"].get<size_t> (), 2u) << stream.dump ();
+}
+
+// The stream budgets read the section the run just stored. Mutation check:
+// drop `threshold_inputs.stream` in `execute_scenario_run` and both checks
+// report no data.
+TEST_F (ScenarioRunnerTest, ACollectionRunJudgesItsStreamBudgets) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_stream", 0, "/sse-short", /*timeout_ms=*/200);
+
+    const auto run_id = start_with_thresholds (/*iterations=*/1,
+    json{ { "streamTimeToFirstEventP95Ms", 60000 }, { "streamEventsPerSecondMin", 0.001 } });
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto thresholds = summary_of (run_id)["thresholds"];
+    ASSERT_EQ (thresholds.at ("checks").size (), 2u) << thresholds.dump ();
+    for (const auto& check : thresholds["checks"]) {
+        EXPECT_TRUE (check.at ("evaluated").get<bool> ()) << check.dump ();
+        EXPECT_TRUE (check.at ("passed").get<bool> ()) << check.dump ();
+    }
+}
+
+TEST_F (ScenarioRunnerTest, ARunWithNoStreamingStepHasNoStreamSection) {
+    seed_collection ("col_1");
+    seed_request ("req_plain", 0, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    EXPECT_FALSE (summary_of (run_id).contains ("stream"));
+    EXPECT_FALSE (stored_traces (run_id).at (0).contains ("events"));
+}
+
+// A stop reaches into an in-flight stream, which nothing else would end
+// before its 30 s cap. Healthy, the run is stopped within about a second
+// (libcurl's progress cadence); broken, it waits out the cap, so the 10 s
+// bound sits between the two. Mutation check: drop the `inputs.cancel` a
+// streaming step sets in `run_step_exchange` and the bound fails.
+TEST_F (ScenarioRunnerTest, AStopEndsAnInFlightStreamingStepPromptly) {
+    seed_collection ("col_1");
+    seed_streaming_request ("req_stream", 0, "/sse-silent", /*timeout_ms=*/200);
+    stream_bounds_ = vayu::StreamBounds{ 30000, 1000000 };
+
+    const auto run_id = start (/*iterations=*/1);
+    auto context      = manager_.get_run (run_id);
+    ASSERT_TRUE (context != nullptr);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] () { return !server_->requests ().empty (); }));
+
+    const auto stopped_at = std::chrono::steady_clock::now ();
+    context->should_stop  = true;
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);
+    const auto took = std::chrono::steady_clock::now () - stopped_at;
+
+    EXPECT_LT (took, std::chrono::seconds (10));
+    EXPECT_EQ (summary_of (run_id)["scenario"]["steps_executed"].get<size_t> (), 1u);
 }
 
 // ============================================================================

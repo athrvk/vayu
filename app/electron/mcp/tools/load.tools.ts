@@ -70,6 +70,8 @@ import {
 	dataFileHashInput,
 	dataFileCastNumbersInput,
 	scenarioRecursiveInput,
+	streamDurationMsSchema,
+	streamEventsSchema,
 	thresholdsInput,
 	validationScriptAliasInput,
 	validationScriptInput,
@@ -105,7 +107,7 @@ export const LOAD_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Start a load test against a URL, or against a saved request via `requestId` - which composes it exactly as the app does, including the collection chain's and its own test scripts, so a load run checks the same assertions a Send does. GUARDED: the host must be on the allowlist, and RPS, `concurrency` (virtual users) and duration must be within Vayu's caps. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain; pass an `auth` block to authenticate the load (bearer/basic/apikey/oauth2, applied engine-side). Pass a `postRequestScript` - the same assertions you would give run_request - to validate responses under load; it runs against sampled responses. A pre-request script is not offered here for a single target: the engine runs one on a single request only, never on a load run. " +
 			agentScriptGateSentence("`postRequestScript` or `tests`") +
-			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, `responseSamplePeriod` and `maxResponseSamples` which are captured for get_run_samples, and `comment` stamps the run with why it exists; all of them apply to a scenario run as well. There is no per-run timeout argument: a request that states its own `timeout` (set it with create_request or update_request) sends with that, and every other transfer takes the engine's `defaultTimeout` setting (change it with update_engine_config), OAuth 2.0 token fetches and refreshes included, so a slow target is a stored-request or config change and not an argument here. A streamed response (`stream: true`) is the one exception: its own duration and event caps bound it instead. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`." +
+			" Pass `scenario` INSTEAD of url/requestId to load-test a collection's ordered sequence: `concurrency` then means virtual users, each walking the plan with its own cookies and running every step's stored scripts, and only constant_concurrency, ramp_up and iterations can drive it. `{{$vu}}` and `{{$iteration}}` in the URL, headers or body are bound fresh by the engine immediately before each send, never at compose time: for a scenario run `{{$vu}}` is the sending virtual user's own 1-based number and `{{$iteration}}` its 0-based pass through the plan; for a single-target run (no `scenario`) `{{$vu}}` is always 1 - one URL repeated under load is one user's iterations, however many are in flight - and `{{$iteration}}` is the 0-based submission index. What the run *keeps* is yours to set too - `successSamplePeriod`, `slowRequestThresholdMs` and `saveTimingBreakdown` decide which responses are traced, `responseSamplePeriod` and `maxResponseSamples` which are captured for get_run_samples, and `comment` stamps the run with why it exists; all of them apply to a scenario run as well. There is no per-run timeout argument: a request that states its own `timeout` (set it with create_request or update_request) sends with that, and every other transfer takes the engine's `defaultTimeout` setting (change it with update_engine_config), OAuth 2.0 token fetches and refreshes included, so a slow target is a stored-request or config change and not an argument here. A streamed response (`stream: true`) is the one exception: its own duration and event caps bound it instead, and so they do a scenario's steps whose saved request streams. Confirmation is required: if the client supports elicitation the user is prompted directly; otherwise call once for a preview, then again with `confirmed: true`." +
 			withheldPointer(config, "preview") +
 			" " +
 			ENGINE_DEFAULT_HEADERS_POINTER +
@@ -227,32 +229,26 @@ export const LOAD_TOOLS: McpTool[] = [
 			// thresholds precedent: the engine validates before the run row
 			// exists, so a value this schema accepts is one `POST /runs`
 			// accepts, and re-deriving the rule here would be a second copy to
-			// keep in step. The caps are refused there without `stream`, which
-			// is what keeps an unbounded run from being mistaken for a capped
-			// one - so this schema does not quietly drop them either.
+			// keep in step. A single-target run's caps are refused there without
+			// `stream`, which is what keeps an unbounded run from being mistaken
+			// for a capped one - so this schema does not quietly drop them either.
+			// On a `scenario` they are accepted alone and bound the steps whose
+			// saved request streams (#3235); `stream` itself is refused there.
 			stream: z
 				.boolean()
 				.optional()
 				.describe(
-					"Consume each response as a text/event-stream. Under load a stream is bounded by construction: reaching a cap below completes it successfully rather than failing it."
+					"Consume each response as a text/event-stream. Under load a stream is bounded by construction: reaching a cap below completes it successfully rather than failing it. Not for a `scenario`, whose steps stream per their saved request's Event stream setting."
 				),
-			maxStreamDurationMs: z
-				.number()
-				.int()
-				.min(1000)
-				.max(86_400_000)
+			maxStreamDurationMs: streamDurationMsSchema
 				.optional()
 				.describe(
-					"Wall-clock cap on one stream, in ms (requires `stream`). Defaults to the engine's sseMaxStreamDurationMs."
+					"Wall-clock cap on one stream, in ms. Requires `stream`, except on a `scenario`, where it bounds each streaming step. Defaults to the engine's sseMaxStreamDurationMs."
 				),
-			maxStreamEvents: z
-				.number()
-				.int()
-				.min(1)
-				.max(10_000_000)
+			maxStreamEvents: streamEventsSchema
 				.optional()
 				.describe(
-					"Event cap on one stream (requires `stream`). Defaults to the engine's sseMaxStreamEvents."
+					"Event cap on one stream. Requires `stream`, except on a `scenario`, where it bounds each streaming step. Defaults to the engine's sseMaxStreamEvents."
 				),
 			// A pending-request ceiling read as a `size_t`, so `-1` - the natural
 			// "unlimited" spelling - removes the ceiling instead of tightening it.

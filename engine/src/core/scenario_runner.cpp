@@ -28,6 +28,7 @@
 #include "vayu/core/transaction_histograms.hpp"
 #include "vayu/http/request_exchange.hpp"
 #include "vayu/http/script_parts.hpp"
+#include "vayu/http/sse_stream.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/utils/json.hpp"
@@ -594,6 +595,11 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
     if (inputs.thresholds.has_value ()) {
         summary["thresholds"] = build_threshold_outcome_payload (*inputs.thresholds);
     }
+    // The load path's section, through its writer, over the same
+    // `test_duration` this summary's `rps` uses (#3235).
+    if (inputs.stream.has_value ()) {
+        summary["stream"] = build_stream_summary_payload (*inputs.stream, inputs.duration_s);
+    }
     return summary;
 }
 
@@ -636,6 +642,9 @@ struct StepContext {
     /// The token cache a step's OAuth 2.0 config acquires through after its
     /// pre-request script (`ExchangeInputs::token_cache`, #2521).
     vayu::db::Database* token_cache = nullptr;
+    /// The `sse*` settings, read once for the run: what bounds a streaming
+    /// step's stored `events` list (#3235).
+    const vayu::http::SseLimits& sse_limits;
 };
 
 /**
@@ -695,6 +704,12 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.rng             = &ctx.context->rng;
     inputs.timers_override = &ctx.context->timers_override;
     inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
+    // A stop ends a streaming step's transfer (#3235): its own timeout bounds
+    // only the connect phase, so nothing else would end it before a cap. An
+    // ordinary step is left to finish within its timeout, as it always was.
+    if (step.request.stream_bounds) {
+        inputs.cancel = &ctx.context->should_stop;
+    }
     // `metric.record` and `pm.metrics` (issue #1500) record into this run's
     // own collector - a design send binds neither and reports "not
     // available here" instead.
@@ -914,6 +929,15 @@ ScenarioStepStore& store) {
     }
     stamp_step_identity (record.trace, record);
     vayu::json::cap_trace_bodies (record.trace, ctx.max_trace_body_bytes);
+    // A streaming step's events (#3235), parsed back out of the body the way
+    // a load sample's are (`GET /runs/:id/samples`), into the `events` node a
+    // design stream's trace carries. After the body cap, as there: the list
+    // carries its own bound, and it reads the response's whole held body.
+    if (const auto& events = exchange.response.stream_events; exchange.sent && events) {
+        record.trace["events"] =
+        vayu::http::buffered_stream_events_node (exchange.response.body, ctx.sse_limits,
+        static_cast<int64_t> (*events), !exchange.response.body_truncated);
+    }
 
     // What the scripts produced, on the node design mode already
     // writes and `restore-response.ts` already reads (issue #724).
@@ -967,6 +991,12 @@ ScenarioStepStore& store) {
     if (exchange.sent) {
         coverage.record (step.index, record.status_code);
         ++summary.status_codes[record.status_code];
+        // Every stream that ended, success or failure, as the load path counts
+        // them (`handle_result`).
+        if (const auto& events = exchange.response.stream_events) {
+            ctx.context->metrics_collector->record_stream_completion (*events,
+            exchange.response.stream_capped, exchange.response.stream_first_event_ms);
+        }
         if (exchange.response.http_version_downgraded) {
             ++summary.http_version_downgraded;
         }
@@ -1418,6 +1448,7 @@ RunManager& manager) {
         // reopen): a step's `extract.json` / `assert.jsonpath` must not read
         // a different bound because Settings changed mid-sequence.
         const auto max_element_body_bytes = vayu::http::routes::element_body_bound (db);
+        const auto sse_limits = vayu::http::read_sse_limits (db);
         ScenarioStepStore store (
         static_cast<size_t> (db.get_config_int ("maxScenarioStoredSteps",
         static_cast<int> (constants::scenario::MAX_STORED_STEPS))));
@@ -1493,9 +1524,10 @@ RunManager& manager) {
             // above rather than by the plan's length.
             const StepContext step_ctx{ context, execution, schema_index,
                 script_send.transport, script_send.default_headers, cookie_scope,
-                data_rows, data_row_index, iteration, asked.iterations, fail_on_schema_error,
-                stop_on_error, max_trace_body_bytes, script_send.max_response_bytes,
-                max_element_body_bytes, element_spans, controller_state, &db };
+                data_rows, data_row_index, iteration, asked.iterations,
+                fail_on_schema_error, stop_on_error, max_trace_body_bytes,
+                script_send.max_response_bytes, max_element_body_bytes,
+                element_spans, controller_state, &db, sse_limits };
             summary.steps_not_run += run_iteration (script_engine, cookie_jar,
             cookie_scope, scopes, step_ctx, plan, step_index,
             max_steps_per_iteration, coverage, summary, store, transactions);
@@ -1558,6 +1590,7 @@ RunManager& manager) {
     .count ();
     summary.coverage = coverage.build ();
     summary.custom_metrics = context->metrics_collector->custom_metric_summaries ();
+    summary.stream = context->metrics_collector->stream_totals ();
 
     // The run's verdict against its declared budgets (issue #1564), judged
     // once off the numbers just tallied above - never re-derived later, on
@@ -1596,6 +1629,9 @@ RunManager& manager) {
     // declared `custom.<name>.<stat>` budget would report "no data" on a
     // collection run despite the value sitting right there in the summary.
     threshold_inputs.custom_metrics = summary.custom_metrics;
+    // A stream budget reads the same section, over the same duration (#3235).
+    threshold_inputs.stream          = summary.stream;
+    threshold_inputs.test_duration_s = summary.duration_s;
     summary.thresholds = evaluate_thresholds (context->config, threshold_inputs);
 
     // A stopped run keeps reporting Stopped regardless of verdict, and a run
