@@ -609,7 +609,13 @@ makes a session survive from one design-mode request to the next.
   frame too, since it goes out on the same transfer. A `Cookie` the request
   types joins that line rather than going out beside it (issue #2788): its rows
   ride `CURLOPT_COOKIE`, which libcurl writes after the jar's matches on the
-  one line, so a request never carries two `Cookie` headers.
+  one line, so a request never carries two `Cookie` headers. The one exception
+  is a line libcurl cuts at 8190 bytes, which drops the typed rows with it:
+  `request_headers` records them before the transfer, so `apply_cookie_notices`
+  (`client.cpp`) removes them afterwards and the response carries a
+  `cookie_not_sent` warning, as it carries `cookie_limit_reached` past 150 jar
+  cookies. Both come from libcurl's `CURLINFO_TEXT` notices (issue #3307), read
+  before the verbosity gate because they are the response's, not the log's.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the

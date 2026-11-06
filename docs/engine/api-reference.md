@@ -2077,7 +2077,10 @@ null-vs-absent rule (absent keeps on update, `null` resets):
   request carries still goes out, and a pre-request script's
   `pm.cookies.jar()` write is still persisted. With the jar on, a typed
   `Cookie` and the jar's matches go out as one `Cookie` line, the jar's
-  first, never as two (issue #2788).
+  first, never as two (issue #2788). The one case it does not go out is a jar
+  line that reaches libcurl's 8190-byte limit: libcurl drops the typed rows with
+  the jar cookie it leaves off, and the answer says so under `warnings`
+  (`cookie_not_sent`, issue #3307).
 - `disabledSystemHeaders` names headers the engine does not add on its own. It
   is stored lowercased and deduplicated in first-appearance order, and
   unioned on every send with the per-send `disabledDefaultHeaders` (see
@@ -5600,6 +5603,12 @@ for what a redirect that changes origin does to cookies. The `Set-Cookie` lines
 of those intermediate hops are reported on the answer's `redirects` member,
 whether or not a later hop carried them.
 
+libcurl caps what it attaches: 150 jar cookies, and a `Cookie` line of 8190
+bytes. A send that hits either still succeeds and says so in the answer's
+`warnings` (`cookie_limit_reached`, `cookie_not_sent`; see
+[POST /execute](#post-execute)). The 8190-byte cap also drops the request's
+typed `Cookie` rows, which share the line; the 150 cap does not.
+
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
@@ -8473,7 +8482,18 @@ tell "no warnings" from an engine too old to warn. The stored
 inside `response`, because a send that failed has no `response` node and can
 still have warned; it is written only when non-empty, so a row stored before the
 field reads as having none. A load-run sample records none. Codes are listed
-here as the engine starts producing them.
+here as the engine starts producing them:
+
+- `cookie_not_sent`: libcurl would not let the `Cookie` line pass 8190 bytes
+  and left out the first jar cookie that did not fit, named in the message (the
+  name only, never a value). It also drops every typed `Cookie` row with the
+  line, so `requestHeaders` carries no `Cookie` entry then. libcurl skips the
+  jar cookies after the named one without saying so.
+- `cookie_limit_reached`: more than 150 jar cookies matched the URL and libcurl
+  sent the first 150. A typed `Cookie` row is still sent in this case.
+
+Both are read off libcurl's own notices at any log verbosity, once per cookie
+however many hops of a redirect chain report them.
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

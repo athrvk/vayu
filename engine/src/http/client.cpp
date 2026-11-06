@@ -88,27 +88,117 @@ struct TransferDebug {
     std::vector<std::string> debug_lines;
     /// `Request::secret_header_names`, redacted beyond the shared field list.
     std::vector<std::string> secret_header_names;
+    /// What libcurl's own notices said about the cookies it attached, across
+    /// every hop of a chain (#3307).
+    std::vector<ResponseWarning> cookie_warnings;
 };
+
+// The two notices libcurl writes (lib/http.c `http_cookies`, lib/cookie.c
+// `Curl_cookie_getlist`) when it withholds or caps the cookies it attaches. It
+// reports them nowhere but this text channel, so a reworded notice stops the
+// warning silently; the transfer tests in cookie_jar_test.cpp run a real
+// libcurl through both and fail instead.
+constexpr std::string_view CODE_COOKIE_NOT_SENT      = "cookie_not_sent";
+constexpr std::string_view CODE_COOKIE_LIMIT_REACHED = "cookie_limit_reached";
+constexpr std::string_view COOKIE_RESTRICTED_PREFIX =
+"Restricted outgoing cookies due to header size, '";
+constexpr std::string_view COOKIE_RESTRICTED_SUFFIX = "' not sent";
+constexpr std::string_view COOKIE_LIMIT_PREFIX =
+"Included max number of cookies (";
+
+/// libcurl's MAX_COOKIE_HEADER_LEN and MAX_COOKIE_SEND_AMOUNT.
+constexpr int COOKIE_HEADER_LIMIT_BYTES = 8190;
+constexpr int COOKIE_SEND_LIMIT         = 150;
+
+/// The warning a `CURLINFO_TEXT` @p notice stands for, or nothing for any other
+/// line. The cookie is named and its value never is: the notice carries only
+/// the name, and a value does not belong in a message that is stored.
+std::optional<ResponseWarning> cookie_warning_from_notice (std::string_view notice) {
+    while (!notice.empty () && (notice.back () == '\n' || notice.back () == '\r')) {
+        notice.remove_suffix (1);
+    }
+    if (notice.starts_with (COOKIE_LIMIT_PREFIX)) {
+        return ResponseWarning{ std::string (CODE_COOKIE_LIMIT_REACHED),
+            "libcurl sends at most " + std::to_string (COOKIE_SEND_LIMIT) +
+            " cookies from the jar on one request; the rest were left off." };
+    }
+    if (!notice.starts_with (COOKIE_RESTRICTED_PREFIX) ||
+    !notice.ends_with (COOKIE_RESTRICTED_SUFFIX) ||
+    notice.size () < COOKIE_RESTRICTED_PREFIX.size () + COOKIE_RESTRICTED_SUFFIX.size ()) {
+        return std::nullopt;
+    }
+    // Between the prefix's quote and the suffix's, so a name holding a quote
+    // of its own stays whole.
+    const auto name = notice.substr (COOKIE_RESTRICTED_PREFIX.size (),
+    notice.size () - COOKIE_RESTRICTED_PREFIX.size () - COOKIE_RESTRICTED_SUFFIX.size ());
+    return ResponseWarning{ std::string (CODE_COOKIE_NOT_SENT),
+        "Cookie " + std::string (name) + " was not sent: the Cookie header would pass libcurl's " +
+        std::to_string (COOKIE_HEADER_LIMIT_BYTES) +
+        "-byte limit. Any typed Cookie rows were dropped with it." };
+}
+
+/// Keeps a cookie notice once however many hops report it.
+void note_cookie_notice (TransferDebug& debug, std::string_view notice) {
+    auto warning = cookie_warning_from_notice (notice);
+    if (!warning) {
+        return;
+    }
+    const auto same = [&] (const ResponseWarning& kept) {
+        return kept.code == warning->code && kept.message == warning->message;
+    };
+    if (std::ranges::none_of (debug.cookie_warnings, same)) {
+        debug.cookie_warnings.push_back (std::move (*warning));
+    }
+}
 
 int debug_callback (CURL* handle, curl_infotype type, char* data, size_t size, void* userptr) {
     (void)handle;
     auto* debug = static_cast<TransferDebug*> (userptr);
+    if (debug == nullptr) {
+        return 0;
+    }
 
-    if (debug != nullptr && type == CURLINFO_HEADER_OUT) {
+    if (type == CURLINFO_HEADER_OUT) {
         debug->last_header_out.assign (data, size);
+    }
+    // Before the verbosity gate: a warning is part of the response, not of the
+    // log, so it is collected at any level.
+    if (type == CURLINFO_TEXT) {
+        note_cookie_notice (*debug, std::string_view (data, size));
     }
     // Nothing else to do when the caller only wanted the capture: the frames
     // below are logging, and DATA_OUT can be a whole request body. Gated on
     // the logger's own level (issue #1510), not a bool threaded down from the
     // daemon's `-v` flag through `Server`/`RouteContext`/`execute_exchange` -
     // `-v 2` is what these frames have always meant "debug" as.
-    if (debug == nullptr || vayu::utils::Logger::instance ().get_verbosity () < 2) {
+    if (vayu::utils::Logger::instance ().get_verbosity () < 2) {
         return 0;
     }
 
     vayu::http::detail::collect_debug_frame (debug->debug_lines, type,
     std::string_view (data, size), debug->secret_header_names);
     return 0;
+}
+
+/// Moves the cookie notices onto @p response, and takes the typed `Cookie` rows
+/// out of its `request_headers` when libcurl dropped them. The rows are
+/// recorded before the transfer (`build_request_header_list`), but a withheld
+/// jar cookie takes the whole `CURLOPT_COOKIE` line with it (lib/http.c), so
+/// the record would otherwise claim a cookie the wire never carried. Every
+/// `Cookie` entry is a typed row: none rides `CURLOPT_HTTPHEADER`. The cap of
+/// 150 jar cookies leaves the typed rows on the wire, so it prunes nothing.
+void apply_cookie_notices (TransferDebug& debug, Response& response) {
+    for (auto& warning : debug.cookie_warnings) {
+        response.warnings.push_back (std::move (warning));
+    }
+    debug.cookie_warnings.clear ();
+    const bool withheld =
+    std::ranges::any_of (response.warnings, [] (const ResponseWarning& warning) {
+        return warning.code == CODE_COOKIE_NOT_SENT;
+    });
+    if (withheld) {
+        response.request_headers.erase ("Cookie");
+    }
 }
 
 /// Emits @p debug's collected lines as one `cat=client` record, if verbosity
@@ -1051,6 +1141,7 @@ Result<Response> Client::send (const Request& request) {
     redirect_chain, impl_->errors, submitted_at);
     auto completion          = std::chrono::steady_clock::now ();
     flush_transfer_debug (frame.transfer_debug);
+    apply_cookie_notices (frame.transfer_debug, response);
     const CURLcode res = chain.code;
 
     // Before any error return below: a failed transfer can still have
