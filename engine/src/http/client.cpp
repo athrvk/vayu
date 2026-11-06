@@ -31,6 +31,7 @@
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/redirect_policy.hpp"
+#include "vayu/http/set_cookie.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/stream_tally.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -52,6 +53,7 @@
 #include <nlohmann/json.hpp>
 
 #include "vayu/utils/ascii_case.hpp"
+#include "vayu/utils/encoding.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
 #include "vayu/version.hpp"
@@ -198,6 +200,114 @@ void apply_cookie_notices (TransferDebug& debug, Response& response) {
     });
     if (withheld) {
         response.request_headers.erase ("Cookie");
+    }
+}
+
+// libcurl's cookie engine discards a response's cookies in three ways it never
+// returns an error for (lib/cookie.c: `MAX_COOKIE_LINE`, `MAX_NAME`,
+// `MAX_SET_COOKIE_AMOUNT`), and the line limit and the count leave no notice
+// either, so the header callback counts the lines itself. cookie_jar_test.cpp
+// runs a real libcurl at the boundary of each limit, so a changed one fails there.
+constexpr std::string_view CODE_COOKIE_DROPPED_OVERSIZED =
+"cookie_dropped_oversized";
+constexpr std::string_view CODE_COOKIE_DROPPED_TOO_MANY =
+"cookie_dropped_too_many";
+constexpr std::string_view SET_COOKIE_FIELD = "Set-Cookie";
+/// A line libcurl measures from the byte after `Set-Cookie:`, terminator
+/// included; longer than this is discarded unread.
+constexpr size_t SET_COOKIE_LINE_LIMIT_BYTES = 5000;
+/// The first pair of a cookie, name plus value, trimmed.
+constexpr size_t COOKIE_NAME_VALUE_LIMIT_BYTES = 4096;
+/// Cookies one response may add to the jar; the next is ignored.
+constexpr size_t SET_COOKIES_PER_RESPONSE_LIMIT = 50;
+/// How many dropped cookies a warning names, and how much of one name.
+constexpr size_t NAMED_DROPPED_COOKIES  = 5;
+constexpr size_t DROPPED_NAME_MAX_BYTES = 64;
+
+/// The `Set-Cookie` headers of one send that libcurl's cookie engine discarded
+/// without a word (#3307). Fed by `header_callback` only when the send has a
+/// jar: without one libcurl's engine is off and discards nothing.
+struct IncomingCookieWatch {
+    /// Lines libcurl would have stored in the response being read. It counts a
+    /// cookie once stored, so a line it rejects for being malformed is not one.
+    size_t stored_in_response = 0;
+    /// Beyond the per-response limit, summed over every hop of the chain.
+    size_t ignored   = 0;
+    size_t oversized = 0;
+    /// Names of the first oversized cookies. Never a value.
+    std::vector<std::string> oversized_names;
+
+    /// libcurl's count restarts with each response (`Curl_req_soft_reset`), and
+    /// `header_callback` starts the record over at each status line the same way.
+    void start_response () {
+        stored_in_response = 0;
+    }
+
+    /// @p value is what follows `Set-Cookie:`; @p libcurl_line_bytes is what
+    /// libcurl measures for the length limit.
+    void note (std::string_view value, size_t libcurl_line_bytes) {
+        const auto cookie = vayu::http::parse_set_cookie_line (value);
+        if (libcurl_line_bytes > SET_COOKIE_LINE_LIMIT_BYTES ||
+        (cookie && cookie->name.size () + cookie->value.size () > COOKIE_NAME_VALUE_LIMIT_BYTES)) {
+            note_oversized (cookie);
+            return;
+        }
+        if (cookie && ++stored_in_response > SET_COOKIES_PER_RESPONSE_LIMIT) {
+            ++ignored;
+        }
+    }
+
+    private:
+    void note_oversized (const std::optional<SetCookie>& cookie) {
+        ++oversized;
+        if (!cookie || oversized_names.size () >= NAMED_DROPPED_COOKIES) {
+            return;
+        }
+        // A name is wire bytes, and a message that is not valid UTF-8 makes the
+        // serializer throw: a name that is not text is left out rather than
+        // repaired.
+        std::string_view name = cookie->name;
+        if (!vayu::utils::is_valid_utf8_text (name)) {
+            return;
+        }
+        const bool cut = name.size () > DROPPED_NAME_MAX_BYTES;
+        name           = vayu::utils::without_incomplete_utf8_tail (
+        name.substr (0, DROPPED_NAME_MAX_BYTES));
+        oversized_names.push_back (std::string (name) + (cut ? "..." : ""));
+    }
+};
+
+/// "1 header" / "2 headers".
+std::string count_of_headers (size_t count) {
+    return std::to_string (count) + (count == 1 ? " Set-Cookie header" : " Set-Cookie headers");
+}
+
+std::string oversized_message (const IncomingCookieWatch& watch) {
+    std::string message = "libcurl dropped " +
+    count_of_headers (watch.oversized) + " it cannot store (a line over " +
+    std::to_string (SET_COOKIE_LINE_LIMIT_BYTES) + " bytes, or a name and value over " +
+    std::to_string (COOKIE_NAME_VALUE_LIMIT_BYTES) + " bytes)";
+    for (size_t i = 0; i < watch.oversized_names.size (); ++i) {
+        message += (i == 0 ? ": " : ", ") + watch.oversized_names[i];
+    }
+    const size_t unnamed = watch.oversized - watch.oversized_names.size ();
+    if (unnamed > 0) {
+        message += (watch.oversized_names.empty () ? ": " : ", ") +
+        std::string ("and ") + std::to_string (unnamed) + " more";
+    }
+    return message + ".";
+}
+
+/// Moves what @p watch saw onto @p response. Names a cookie, never a value.
+void apply_incoming_cookies (const IncomingCookieWatch& watch, Response& response) {
+    if (watch.oversized > 0) {
+        response.warnings.push_back (
+        { std::string (CODE_COOKIE_DROPPED_OVERSIZED), oversized_message (watch) });
+    }
+    if (watch.ignored > 0) {
+        response.warnings.push_back ({ std::string (CODE_COOKIE_DROPPED_TOO_MANY),
+        "libcurl keeps at most " + std::to_string (SET_COOKIES_PER_RESPONSE_LIMIT) + " cookies from one response; " +
+        count_of_headers (watch.ignored) + " after that were ignored." });
     }
 }
 
@@ -438,6 +548,9 @@ struct HeaderSink {
     int block_status = 0;
     /// The body sink a redirect's body is kept out of.
     BodySink* body = nullptr;
+    /// Where a `Set-Cookie` line is counted, or null for a send with no jar:
+    /// libcurl's cookie engine is off then and drops nothing.
+    IncomingCookieWatch* cookies = nullptr;
 };
 
 /// The names a request's auth-written query parameter can appear under in a
@@ -464,6 +577,21 @@ std::optional<int> status_line_code (std::string_view line) {
     }
     const std::string_view rest = line.substr (first_space + 1);
     return vayu::utils::parse_number<int> (rest.substr (0, rest.find (' ')));
+}
+
+/// Hands @p line to @p watch if it is a `Set-Cookie` header. @p raw_bytes is
+/// what the callback was given, line ending included: libcurl's length limit
+/// counts from the byte after the colon to the end of that.
+void watch_set_cookie (IncomingCookieWatch* watch, std::string_view line, size_t raw_bytes) {
+    if (watch == nullptr) {
+        return;
+    }
+    const size_t colon = line.find (':');
+    if (colon == std::string_view::npos ||
+    !vayu::utils::ascii_lower_equal (line.substr (0, colon), SET_COOKIE_FIELD)) {
+        return;
+    }
+    watch->note (line.substr (colon + 1), raw_bytes - colon - 1);
 }
 
 /**
@@ -525,12 +653,16 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         sink->block_status = status_line_code (line).value_or (0);
         response->headers.clear ();
         response->header_lines.clear ();
+        if (sink->cookies != nullptr) {
+            sink->cookies->start_response ();
+        }
         return total_size;
     }
 
     // Parse header: "Key: Value". A repeated name folds rather than replaces -
     // see ingest_header_line.
     vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
+    watch_set_cookie (sink->cookies, line, total_size);
 
     return total_size;
 }
@@ -770,6 +902,7 @@ struct SendFrame {
     detail::ConnectedPeerCheck peer_check;
     ProgressWatch progress_watch;
     TransferDebug transfer_debug;
+    IncomingCookieWatch incoming_cookies;
     /// What the jar put on the handle, for the reconcile after the chain.
     std::vector<std::string> jar_seeded_from;
 };
@@ -1126,6 +1259,7 @@ Result<Response> Client::send (const Request& request) {
     if (impl_->config.cookie_jar) {
         frame.jar_seeded_from = detail::apply_jar_cookies (curl, *impl_->config.cookie_jar,
         impl_->config.cookie_scope, impl_->config.cookie_writes);
+        frame.header_sink.cookies = &frame.incoming_cookies;
     }
 
     // Perform the request. Stamp submission just before perform so that
@@ -1142,6 +1276,7 @@ Result<Response> Client::send (const Request& request) {
     auto completion          = std::chrono::steady_clock::now ();
     flush_transfer_debug (frame.transfer_debug);
     apply_cookie_notices (frame.transfer_debug, response);
+    apply_incoming_cookies (frame.incoming_cookies, response);
     const CURLcode res = chain.code;
 
     // Before any error return below: a failed transfer can still have

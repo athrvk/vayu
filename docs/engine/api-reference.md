@@ -5609,6 +5609,14 @@ bytes. A send that hits either still succeeds and says so in the answer's
 [POST /execute](#post-execute)). The 8190-byte cap also drops the request's
 typed `Cookie` rows, which share the line; the 150 cap does not.
 
+libcurl also silently discards what a response sets past three limits: a
+`Set-Cookie` line over 5000 bytes, a cookie whose name and value together pass
+4096 bytes, and every cookie after the first 50 of one response. The answer says
+so under `warnings` (`cookie_dropped_oversized`, `cookie_dropped_too_many`),
+naming a dropped cookie and never its value. A request sent with
+`disableCookies` has no jar and so no warning: libcurl's cookie engine is off
+and drops nothing.
+
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
@@ -8492,8 +8500,24 @@ here as the engine starts producing them:
 - `cookie_limit_reached`: more than 150 jar cookies matched the URL and libcurl
   sent the first 150. A typed `Cookie` row is still sent in this case.
 
-Both are read off libcurl's own notices at any log verbosity, once per cookie
-however many hops of a redirect chain report them.
+- `cookie_dropped_oversized`: a response carried `Set-Cookie` headers libcurl
+  discarded unread, because the line was over 5000 bytes (counted from after
+  `Set-Cookie:` to the end of the line) or the cookie's name and value together
+  were over 4096. One warning counts them, across every hop, and names up to five
+  (name only, cut at 64 bytes; a line that names no cookie, or whose name is not
+  text, is counted but not named).
+- `cookie_dropped_too_many`: a single response set more than 50 cookies and
+  libcurl ignored the rest. The count restarts with each hop's response, so 30
+  cookies on each of two hops is not an overflow; one warning gives the total
+  ignored over the chain. It counts the `Set-Cookie` lines libcurl would have
+  stored, so a later cookie it rejects for another reason (a public suffix, a
+  `__Secure-` prefix) can make the count one too high.
+
+`cookie_not_sent` and `cookie_limit_reached` are read off libcurl's own notices
+at any log verbosity, once per cookie however many hops of a redirect chain
+report them. The two `cookie_dropped_*` codes are counted from the response's
+header lines instead, only on a send that has a cookie jar, and are not reported
+on the streaming path (`stream: true`).
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when

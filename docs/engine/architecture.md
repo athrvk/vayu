@@ -616,6 +616,13 @@ makes a session survive from one design-mode request to the next.
   `cookie_not_sent` warning, as it carries `cookie_limit_reached` past 150 jar
   cookies. Both come from libcurl's `CURLINFO_TEXT` notices (issue #3307), read
   before the verbosity gate because they are the response's, not the log's.
+  The incoming side has no notice to read: libcurl discards a `Set-Cookie` line
+  over 5000 bytes, a cookie whose name and value pass 4096 and every cookie
+  past the 50th of a response without a word, so `header_callback` counts the
+  lines (`IncomingCookieWatch`, `client.cpp`) when the send has a jar, and the
+  response carries `cookie_dropped_oversized` / `cookie_dropped_too_many`.
+  A `disableCookies` send has no jar, libcurl's engine is off and nothing is
+  reported. The streaming path (`sse_stream.cpp`) does not count them.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the
