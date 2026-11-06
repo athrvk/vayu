@@ -15,9 +15,9 @@
  * the next one is, rather than leaving `CURLOPT_FOLLOWLOCATION` to do it inside
  * one transfer: libcurl hands a client certificate only to the origin a
  * transfer started at, so every hop has to be its own transfer for the
- * certificate registry to be consulted for it (#3300). `Client::send` is the
- * driver on this unit today; SSE (#3301) and the load path (#3302) still let
- * libcurl follow.
+ * certificate registry to be consulted for it (#3300). `Client::send` drives
+ * its chain through `RedirectChain`; SSE (#3301) and the load path (#3302)
+ * still let libcurl follow.
  *
  * The rules restate what libcurl did, so a send behaves as it did when libcurl
  * followed: which statuses are followed, how a `Location` resolves, which
@@ -29,6 +29,7 @@
 #include <curl/curl.h>
 
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -132,6 +133,103 @@ struct RedirectedRequest {
  */
 [[nodiscard]] std::string
 too_many_redirects_message (std::optional<long> limit, std::string_view detail);
+
+// ---------------------------------------------------------------------------
+// The request a chain sends next
+// ---------------------------------------------------------------------------
+
+namespace detail {
+struct BodySource;
+} // namespace detail
+
+/// Where one hop of a chain goes and what it carries.
+struct Hop {
+    std::string url;
+    HttpMethod method = HttpMethod::GET;
+    bool carries_body = false;
+    /// A 301, 302 or 303 changed the request, so no line about a body goes.
+    bool rewritten = false;
+    /// Redirects followed before this hop.
+    int followed = 0;
+};
+
+/// The next hop's URL, or the error that ends the chain.
+using NextHop = std::expected<std::string, Error>;
+
+/**
+ * @brief The request side of a chain a driver follows itself, one transfer
+ *        per hop on one handle: where each hop goes, and the method, body and
+ *        request lines the handle sends there.
+ *
+ * A driver configures the handle for the first hop and puts `first_headers ()`
+ * on it; after each transfer it asks `redirect_target` where the answer leads
+ * and `advance`s to it. What surrounds a transfer stays the driver's: the
+ * transport policy for `hop ().url`, which matches the client certificate
+ * against that hop's own origin, its sinks, its deadlines and `HopCookies`.
+ *
+ * The handle points into the header lists held here and into the body source
+ * it was given, so the chain outlives every transfer of it, and the handle is
+ * not reset between hops.
+ */
+class RedirectChain {
+    public:
+    /**
+     * @param first_headers The list `build_request_header_list` built for
+     *        @p request, taken over; null for none.
+     * @param body What `apply_method_and_body` filled for the first hop.
+     */
+    RedirectChain (const Request& request, curl_slist* first_headers, detail::BodySource& body);
+
+    /// The hop the next transfer sends.
+    [[nodiscard]] const Hop& hop () const {
+        return hop_;
+    }
+
+    /// The list the first hop sends, or null for none.
+    [[nodiscard]] curl_slist* first_headers () const {
+        return first_headers_.get ();
+    }
+
+    /**
+     * @brief Where the finished hop's @p status answer, whose header lines are
+     *        @p lines, sends the chain.
+     *
+     * Nullopt when it is the final answer: the request does not follow, the
+     * status is no redirect, or it names no `Location`. Otherwise the next
+     * URL, or the error the chain ends with: the request's `max_redirects`
+     * (negative is no limit), or a `Location` `resolve_redirect_target`
+     * refuses.
+     */
+    [[nodiscard]] std::optional<NextHop>
+    redirect_target (const std::vector<HeaderLine>& lines, int status) const;
+
+    /**
+     * @brief Points @p curl at @p next_url after a @p status redirect: the
+     *        URL, the method and body the redirect asks for, and the request
+     *        lines that go to its origin.
+     *
+     * `Authorization` and the typed `Cookie` rows (`CURLOPT_COOKIE`) go only to
+     * the origin the chain started at, as libcurl compared against its first
+     * origin: a hop back there carries them again.
+     */
+    void advance (CURL* curl, int status, std::string next_url);
+
+    private:
+    struct SlistDeleter {
+        void operator() (curl_slist* list) const;
+    };
+    using SlistPtr = std::unique_ptr<curl_slist, SlistDeleter>;
+
+    void apply_method (CURL* curl, int status);
+    void apply_headers (CURL* curl, bool first_origin);
+
+    const Request* request_   = nullptr;
+    detail::BodySource* body_ = nullptr;
+    Hop hop_;
+    SlistPtr first_headers_;
+    /// The list a later hop sends when it leaves out lines of the first.
+    SlistPtr hop_headers_;
+};
 
 // ---------------------------------------------------------------------------
 // Cookies a hop set
