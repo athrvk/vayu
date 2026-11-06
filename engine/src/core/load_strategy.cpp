@@ -269,6 +269,12 @@ const ResultAnnotations& annotations) {
         context->metrics_collector->record_connection_replays (
         static_cast<size_t> (response.connection_replays));
     }
+    // Before the split too: a failed last hop still dropped what the hops
+    // before it set.
+    if (response.set_cookie_headers_dropped > 0) {
+        context->metrics_collector->record_set_cookie_headers_dropped (
+        response.set_cookie_headers_dropped);
+    }
 
     // Counted here, before the success/error split, for the reason the
     // downgrade above is: a stream the target killed after 30 events delivered

@@ -622,7 +622,14 @@ makes a session survive from one design-mode request to the next.
   lines (`IncomingCookieWatch`, `client.cpp`) when the send has a jar, and the
   response carries `cookie_dropped_oversized` / `cookie_dropped_too_many`.
   A `disableCookies` send has no jar, libcurl's engine is off and nothing is
-  reported. The streaming path (`sse_stream.cpp`) does not count them.
+  reported. The streaming path (`sse_stream.cpp`) does not count them. The
+  rules are one copy, `SetCookieLimits` (`http/set_cookie_limits.hpp`), which
+  the event loop's `header_callback` also runs, allocation-free, on a transfer
+  that tracks cookies (a scenario load run's step): it counts what was dropped
+  on `Response::set_cookie_headers_dropped`, `handle_result` sums that in the
+  `MetricsCollector`, and the run reports one `cookies_dropped` warning with the
+  count and no name. The outgoing caps are not detected under load, because
+  reading libcurl's notices needs `CURLOPT_VERBOSE` on every transfer.
 - **History keeps that frame too, cookies included.** The jar itself is never
   persisted, but a design or scenario run stores the message its transfer sent
   as `trace_data.request.rawRequest` (`build_result_trace`), so reopening the

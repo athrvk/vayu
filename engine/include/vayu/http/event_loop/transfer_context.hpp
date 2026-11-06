@@ -20,6 +20,7 @@
 
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/event_loop/connected_peer_check.hpp"
+#include "vayu/http/set_cookie_limits.hpp"
 #include "vayu/http/stream_tally.hpp"
 #include "vayu/types.hpp"
 
@@ -113,6 +114,11 @@ struct TransferData {
     /// Header names the debug collector redacts beyond the shared list - the
     /// request's `Request::secret_header_names`.
     std::vector<std::string> secret_header_names;
+
+    /// What libcurl's cookie engine has stored from the response being read,
+    /// for `Response::set_cookie_headers_dropped`; fed only when the transfer
+    /// tracks cookies.
+    SetCookieLimits set_cookie_limits;
 
     /// The `CURLOPT_PREREQDATA` this transfer's handle carries: no peer rule on
     /// this path, only the count `connection_replays` is read from (#2799).

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -44,12 +45,14 @@
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/curl_options.hpp"
+#include "vayu/http/event_loop.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/list_page.hpp"
 #include "vayu/runtime/script_engine.hpp"
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "wait_until.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -1143,6 +1146,84 @@ TEST (CookieJarIncoming, ASendWithNoJarWarnsOfNoDroppedCookies) {
         ASSERT_EQ (response.status_code, 200);
         EXPECT_TRUE (response.warnings.empty ()) << "no jar, no cookie engine: " << url;
     }
+}
+
+// ============================================================================
+// The same limits on the load path's transfers (issue #3307)
+// ============================================================================
+
+namespace {
+
+/// What the event loop counted as dropped on one transfer of @p url, given the
+/// per-transfer cookie engine a scenario virtual user's step gets when
+/// @p tracks_cookies. The load path counts and never names.
+size_t dropped_under_load (const std::string& url, bool tracks_cookies) {
+    vayu::http::EventLoopConfig config;
+    config.num_workers = 1;
+    vayu::http::EventLoop loop (config);
+    loop.start ();
+    auto request          = get_request (url);
+    request.track_cookies = tracks_cookies;
+    auto pending          = loop.submit_async (request);
+    if (pending.future.wait_for (vayu::tests::WAIT_DEADLINE) != std::future_status::ready) {
+        ADD_FAILURE () << "no completion for " << url;
+        return 0;
+    }
+    const auto result = pending.future.get ();
+    loop.stop ();
+    if (!result.is_ok () || result.value ().status_code != 200) {
+        ADD_FAILURE () << "the transfer of " << url << " did not answer 200";
+        return 0;
+    }
+    EXPECT_TRUE (result.value ().warnings.empty ())
+    << "the load path names nothing";
+    return result.value ().set_cookie_headers_dropped;
+}
+
+} // namespace
+
+// Each limit at its boundary, through the event loop's own header callback: the
+// rule is shared with the design send, the callback and its status-line reset
+// are not. Mutation-check: drop the `count_dropped_set_cookie` call in
+// `curl_callbacks.cpp` and every count reads 0; drop
+// `set_cookie_limits.start_response ()` there and the 30 + 30 chain counts 10.
+TEST (CookieJarIncomingUnderLoad, ATransferThatTracksCookiesCountsEveryHeaderLibcurlDrops) {
+    CookieServer server;
+    const auto tracked = [] (const std::string& url) {
+        return dropped_under_load (url, true);
+    };
+    const std::string name = "linecookie";
+    const auto line_of     = [&] (size_t measured) {
+        return sized_cookie_url (
+        server, name, 10, pad_for_measured_line (name, 10, measured));
+    };
+    // A cookie `nv` whose name and value are `total` bytes.
+    const auto pair_of = [&] (size_t total) {
+        return sized_cookie_url (server, "nv", total - 2, 0);
+    };
+
+    EXPECT_EQ (tracked (server.url ("/set-many/50")), 0U);
+    EXPECT_EQ (tracked (server.url ("/set-many/53")), 3U);
+    EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES)), 0U);
+    EXPECT_EQ (tracked (line_of (LINE_LIMIT_BYTES + 1)), 1U);
+    EXPECT_EQ (tracked (pair_of (NAME_VALUE_LIMIT)), 0U);
+    EXPECT_EQ (tracked (pair_of (NAME_VALUE_LIMIT + 1)), 1U);
+    EXPECT_EQ (
+    tracked (server.url ("/set-many-and-go/30?to=" + server.url ("/set-many/30"))), 0U)
+    << "the per-response count carried over a hop";
+    EXPECT_EQ (
+    tracked (server.url ("/set-many-and-go/51?to=" + server.url ("/set-many/52"))), 3U)
+    << "a chain sums what each of its hops dropped";
+}
+
+// Off by default and for every single-request load run: libcurl's engine is
+// off, drops nothing, and nothing is counted. Mutation-check: drop the
+// `track_cookies` test in `header_callback` and these read 10 and 1.
+TEST (CookieJarIncomingUnderLoad, ATransferWithoutCookiesCountsNothing) {
+    CookieServer server;
+    EXPECT_EQ (dropped_under_load (server.url ("/set-many/60"), false), 0U);
+    EXPECT_EQ (
+    dropped_under_load (sized_cookie_url (server, "nv", NAME_VALUE_LIMIT, 0), false), 0U);
 }
 
 // ============================================================================

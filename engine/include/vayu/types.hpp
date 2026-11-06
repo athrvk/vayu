@@ -1140,9 +1140,23 @@ struct Response {
      * On the *response* for the reason `client_certificate` is: the live
      * `/execute` body and the stored trace both carry it, so a restored
      * response warns about what the live one did. Design funnels only; the
-     * load path does not fill it.
+     * load path counts instead (`set_cookie_headers_dropped`), because a
+     * per-transfer list of strings is a hot-path cost for what a run reports
+     * as one number.
      */
     std::vector<ResponseWarning> warnings;
+
+    /**
+     * @brief `Set-Cookie` headers libcurl's cookie engine discarded, over
+     *        every hop (`set_cookie_limits.hpp`, #3307); 0 when none.
+     *
+     * Filled by the event loop (`header_callback`) only, and only for a
+     * transfer that tracks cookies (`Request::track_cookies`): without one
+     * libcurl's engine is off and discards nothing. A run sums it into its
+     * `cookies_dropped` warning. A design send names what it dropped in
+     * `warnings` instead and reads 0 here.
+     */
+    std::size_t set_cookie_headers_dropped = 0;
 
     /**
      * @brief Events this transfer delivered, when it was a bounded stream

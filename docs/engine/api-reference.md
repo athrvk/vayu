@@ -5617,6 +5617,12 @@ naming a dropped cookie and never its value. A request sent with
 `disableCookies` has no jar and so no warning: libcurl's cookie engine is off
 and drops nothing.
 
+Under load the same three limits apply to a scenario load run's
+per-virtual-user cookies, and what they drop is counted across the run in one
+`cookies_dropped` [run warning](#get-runsrunidreport) that names no cookie. A
+single-request load run keeps no cookies, so it drops none. The two outgoing
+caps above are not detected under load.
+
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
@@ -8517,7 +8523,9 @@ here as the engine starts producing them:
 at any log verbosity, once per cookie however many hops of a redirect chain
 report them. The two `cookie_dropped_*` codes are counted from the response's
 header lines instead, only on a send that has a cookie jar, and are not reported
-on the streaming path (`stream: true`).
+on the streaming path (`stream: true`). Under load the same two checks feed the
+run's `cookies_dropped` warning instead (see
+[GET /runs/:runId/report](#get-runsrunidreport)).
 
 **`rawRequest` is the header block libcurl actually sent**, captured from the
 transfer's last outbound header frame and followed by the request body *when
@@ -12529,7 +12537,10 @@ are HTTP-only, the same rule a failed assertion follows
       "count": 12, "names": ["token"] },
     { "code": "pre_request_script_skipped",
       "message": "1 step carries a pre-request script that does not run under load",
-      "steps": 1 }
+      "steps": 1 },
+    { "code": "cookies_dropped",
+      "message": "4 Set-Cookie headers were dropped across the run by libcurl's cookie engine (a line over 5000 bytes, a name and value over 4096 bytes, or more than 50 in one response), so the virtual users that received them sent their later steps without those cookies.",
+      "count": 4 }
   ],
   "stream": { "...": "streaming runs only - see below" },
   "sampling": {
@@ -12811,6 +12822,17 @@ received that many more requests than the run counted, each of those
 requests' latency covers both attempts, and a non-idempotent one may have run
 twice; `count` equals `summary.connectionReplays`, and it is raised only when
 that is above 0 (see [What counts as an error](#what-counts-as-an-error)).
+`cookies_dropped` ([#3307](https://github.com/athrvk/vayu/issues/3307)) means
+libcurl's cookie engine discarded `count` `Set-Cookie` headers from the run's
+responses, summed over every response and redirect hop: a line over 5000 bytes,
+a cookie whose name and value pass 4096, or one past the 50th of its response,
+the limits a design send reports per cookie (see [Cookies](#cookies)). A
+virtual user that lost a session cookie this way sent its later steps without
+it. The message names no cookie. Only a scenario load
+run's steps carry cookies, so only it can raise this; a step with
+`disableCookies` drops nothing. The outgoing caps (a `Cookie` line over 8190
+bytes, more than 150 jar cookies) are not detected under load: reading libcurl's
+notice needs `CURLOPT_VERBOSE` on every transfer.
 Absent, not an empty array, for a run
 with nothing to report - which is every run before this field existed and
 every run that genuinely had nothing to say. `unresolved_tokens` covers every

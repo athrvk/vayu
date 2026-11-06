@@ -15,6 +15,7 @@
 #include "vayu/http/debug_redact.hpp"
 #include "vayu/http/event_loop/curl_utils.hpp"
 #include "vayu/http/event_loop/transfer_context.hpp"
+#include "vayu/http/set_cookie_limits.hpp"
 
 namespace vayu::http::detail {
 
@@ -80,6 +81,20 @@ size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
     return total_size;
 }
 
+namespace {
+
+/// Counts @p line on @p data's response if it is a `Set-Cookie` header
+/// libcurl's cookie engine discards. @p raw_bytes is what the callback was
+/// handed, line ending included.
+void count_dropped_set_cookie (TransferData& data, std::string_view line, size_t raw_bytes) {
+    const auto value = set_cookie_header_value (line);
+    if (value && is_dropped (data.set_cookie_limits.note (*value, raw_bytes))) {
+        ++data.response.set_cookie_headers_dropped;
+    }
+}
+
+} // namespace
+
 size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata) {
     auto* data        = static_cast<TransferData*> (userdata);
     size_t total_size = size * nitems;
@@ -113,6 +128,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         // Reset headers between redirect hops so we end up with the
         // final response's set.
         data->response.headers.clear ();
+        data->set_cookie_limits.start_response ();
         return total_size;
     }
 
@@ -120,6 +136,12 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
     // see ingest_header_line. Two arguments on purpose: the lossless
     // `header_lines` is a design-send field, and this is the hot path.
     ingest_header_line (line, data->response.headers);
+
+    // Counted here because the folded `headers` above has lost the line count.
+    // No jar, no cookie engine, nothing dropped.
+    if (data->request.track_cookies) {
+        count_dropped_set_cookie (*data, line, total_size);
+    }
 
     return total_size;
 }
