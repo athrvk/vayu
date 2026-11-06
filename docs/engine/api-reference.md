@@ -5587,6 +5587,10 @@ them.
 A storage failure answers `507`, `503` or `500`, never `400` - see
 [A storage failure is not a 400](#a-storage-failure-is-not-a-400).
 
+`SameSite` is parsed and ignored, on purpose: an API client has no cross-site
+initiator to restrict, so every cookie whose domain, path and `Secure` flag
+match is sent whatever its `SameSite` value (`Strict`, `Lax` or `None`).
+
 ### GET /cookies
 
 Every jar that holds anything, one entry per scope, in scope-key order (the
