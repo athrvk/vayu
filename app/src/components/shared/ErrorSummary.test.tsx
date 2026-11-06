@@ -63,21 +63,26 @@ describe("ErrorSummary", () => {
 		expect(screen.queryByText("By status code")).toBeNull();
 	});
 
-	// The `error_type_name` keys for a redirect loop and an undecodable body
-	// (#2462). The sentence-cased fallback spells both the same way, so this pins
-	// the wording, not the table lookup.
-	// Mutation-check: change either label's wording in ERROR_TYPE_LABELS and this
+	// The `error_type_name` keys for a redirect loop, an undecodable body (#2462)
+	// and a peer that answered in a protocol other than HTTP/1.x (#3306). The
+	// sentence-cased fallback spells all three the same way, so this pins the
+	// wording, not the table lookup.
+	// Mutation-check: change any label's wording in ERROR_TYPE_LABELS and this
 	// fails; deleting the entry alone does not, the fallback renders it identically.
-	it("labels the redirect-loop and content-encoding types", () => {
+	it("labels the redirect-loop, content-encoding and protocol-mismatch types", () => {
 		render(
 			<ErrorSummary
 				{...props({
 					errors: {
-						total: 5,
-						withDetails: 5,
-						types: { too_many_redirects: 3, bad_content_encoding: 2 },
+						total: 6,
+						withDetails: 6,
+						types: {
+							too_many_redirects: 3,
+							bad_content_encoding: 2,
+							protocol_mismatch: 1,
+						},
 					},
-					noResponse: 5,
+					noResponse: 6,
 				})}
 			/>
 		);
@@ -85,7 +90,9 @@ describe("ErrorSummary", () => {
 		expect(screen.getByText("Too many redirects").nextSibling?.textContent).toBe("3");
 		expect(screen.getByText("Bad content encoding").nextSibling?.textContent).toBe("2");
 		expect(screen.queryByText("too_many_redirects")).toBeNull();
+		expect(screen.getByText("Protocol mismatch").nextSibling?.textContent).toBe("1");
 		expect(screen.queryByText("bad_content_encoding")).toBeNull();
+		expect(screen.queryByText("protocol_mismatch")).toBeNull();
 	});
 
 	it("falls back to a sentence-cased label for a type it has no entry for", () => {

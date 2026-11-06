@@ -89,12 +89,14 @@ describe("ClientErrorView heading for INVALID_URL", () => {
 });
 
 // The engine answers a redirect loop and an undecodable body under their own
-// codes (#2462); both used to arrive as CONNECTION_FAILED and read as an
-// unreachable server.
-// Mutation-check: delete the TOO_MANY_REDIRECTS (or BAD_CONTENT_ENCODING) entry
+// codes (#2462), and a peer speaking something other than HTTP/1.x under
+// PROTOCOL_MISMATCH (#3306); each used to arrive as CONNECTION_FAILED or
+// INVALID_URL and read as an unreachable server or a bad URL.
+// Mutation-check: delete the TOO_MANY_REDIRECTS (BAD_CONTENT_ENCODING or
+// PROTOCOL_MISMATCH) entry
 // from ErrorTitles or ErrorHints and the row falls back to "Couldn't get a
 // response" or loses its tip.
-describe("ClientErrorView for the redirect and encoding codes", () => {
+describe("ClientErrorView for the redirect, encoding and protocol codes", () => {
 	it.each([
 		[
 			"TOO_MANY_REDIRECTS",
@@ -106,12 +108,18 @@ describe("ClientErrorView for the redirect and encoding codes", () => {
 			"Couldn't decode the response",
 			/Set Accept-Encoding to identity in the Headers tab/,
 		],
+		[
+			"PROTOCOL_MISMATCH",
+			"The server answered in another protocol",
+			/Set Protocol to Auto or HTTP\/1\.x in this request's Settings tab, or use https:\/\//,
+		],
 	])("names %s rather than an unreachable server", (code, title, hint) => {
 		render(<ClientErrorView errorCode={code} errorMessage="detail" />);
 
 		expect(screen.getByText(title)).toBeInTheDocument();
 		expect(screen.getByText(hint)).toBeInTheDocument();
 		expect(screen.queryByText("Couldn't connect to the server")).not.toBeInTheDocument();
+		expect(screen.queryByText("Couldn't send to this URL")).not.toBeInTheDocument();
 		expect(screen.queryByText("Couldn't get a response")).not.toBeInTheDocument();
 	});
 
@@ -150,6 +158,7 @@ describe("ClientErrorView glyphs", () => {
 			"DNS_ERROR",
 			"TOO_MANY_REDIRECTS",
 			"BAD_CONTENT_ENCODING",
+			"PROTOCOL_MISMATCH",
 		].map(glyph);
 		const own = ["ENGINE_ERROR", "INTERNAL_ERROR", "UNKNOWN_ERROR", "internal_error"].map(
 			glyph
@@ -160,17 +169,19 @@ describe("ClientErrorView glyphs", () => {
 		for (const g of own) expect(network).not.toContain(g);
 	});
 
-	// Mutation-check: delete either getErrorIcon case and that code falls to the
-	// generic alert glyph, which the fallback comparison below catches. The glyph
+	// Mutation-check: delete any of these getErrorIcon cases and that code falls
+	// to the generic alert glyph, which the fallback comparison below catches. The glyph
 	// names are not pinned: lucide renames icons across versions (FileWarning
 	// renders as lucide-file-exclamation-point in 1.35).
-	it("gives a redirect loop and an undecodable body glyphs of their own", () => {
+	it("gives a redirect loop, an undecodable body and a protocol mismatch glyphs of their own", () => {
 		const fallback = glyph("SOMETHING_UNMAPPED");
 		const redirects = glyph("TOO_MANY_REDIRECTS");
 		const encoding = glyph("BAD_CONTENT_ENCODING");
+		const mismatch = glyph("PROTOCOL_MISMATCH");
+		const glyphs = [redirects, encoding, mismatch];
 
-		expect(redirects).not.toBe(encoding);
-		expect([redirects, encoding]).not.toContain(fallback);
-		expect([redirects, encoding]).not.toContain("lucide-server-off");
+		expect(new Set(glyphs).size).toBe(glyphs.length);
+		expect(glyphs).not.toContain(fallback);
+		expect(glyphs).not.toContain("lucide-server-off");
 	});
 });

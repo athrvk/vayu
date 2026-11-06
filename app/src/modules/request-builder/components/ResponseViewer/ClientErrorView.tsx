@@ -21,6 +21,7 @@ import {
 	Route,
 	Repeat,
 	FileWarning,
+	Unplug,
 	ServerOff,
 	ServerCrash,
 	Lightbulb,
@@ -74,6 +75,8 @@ const ErrorHints: Record<string, string> = {
 		"The server kept redirecting. Raise Maximum redirects in this request's Settings tab, or turn off Follow redirects to see where it goes.",
 	BAD_CONTENT_ENCODING:
 		"The server sent a response in an encoding Vayu can't read. Set Accept-Encoding to identity in the Headers tab and send again.",
+	PROTOCOL_MISMATCH:
+		"Set Protocol to Auto or HTTP/1.x in this request's Settings tab, or use https:// so HTTP/2 can be negotiated.",
 	ENGINE_ERROR: ENGINE_NO_ANSWER,
 	AUTH_REQUIRED: "Open the Auth tab to get a token, then send again.",
 	AUTH_FAILED: "Check the Auth tab's token settings, then send again.",
@@ -111,6 +114,7 @@ const ErrorTitles: Record<string, string> = {
 	INVALID_URL: "Couldn't send to this URL",
 	TOO_MANY_REDIRECTS: "Too many redirects",
 	BAD_CONTENT_ENCODING: "Couldn't decode the response",
+	PROTOCOL_MISMATCH: "The server answered in another protocol",
 	ENGINE_ERROR: "Vayu's engine didn't respond",
 	INTERNAL_ERROR: "Couldn't send the request",
 	AUTH_FAILED: "Couldn't get an OAuth 2.0 token",
@@ -140,6 +144,8 @@ function getErrorIcon(errorCode?: string) {
 			return Repeat;
 		case "BAD_CONTENT_ENCODING":
 			return FileWarning;
+		case "PROTOCOL_MISMATCH":
+			return Unplug;
 		case "DNS_ERROR":
 			return WifiOff;
 		// Vayu's own failures get a glyph a target's failure never uses
