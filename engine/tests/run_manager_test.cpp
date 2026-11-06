@@ -2141,7 +2141,7 @@ std::optional<vayu::StreamBounds> bounds = std::nullopt) {
     step.request.method        = vayu::HttpMethod::GET;
     step.request.url           = url;
     step.request.timeout_ms    = 20000;
-    step.request.stream_bounds = bounds;
+    step.request.stream_bounds = std::move (bounds);
     step.stored_url            = url;
     return step;
 }
