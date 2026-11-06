@@ -845,6 +845,15 @@ const std::vector<std::optional<ScriptValidationTotals>>& per_step) {
     }
 }
 
+namespace {
+
+/// Whether a collection load plan has a step that streams (#3304).
+bool plan_streams (const std::shared_ptr<const ScenarioExecution>& scenario) {
+    return scenario != nullptr && longest_stream_bounds (scenario->plan).has_value ();
+}
+
+} // namespace
+
 RunContext::RunContext (const std::string& id,
 nlohmann::json cfg,
 size_t max_errors,
@@ -906,8 +915,7 @@ std::shared_ptr<const ScenarioExecution> load_scenario)
         stream_bounds =
         vayu::http::resolve_stream_bounds (config, engine_defaults.stream_defaults);
     }
-    mc_config.streams = stream_bounds.has_value () ||
-    (scenario != nullptr && longest_stream_bounds (scenario->plan).has_value ());
+    mc_config.streams = stream_bounds.has_value () || plan_streams (scenario);
     mc_config.max_exemplar_results =
     static_cast<size_t> (config.value ("max_exemplar_results",
     static_cast<int64_t> (constants::metrics_collector::DEFAULT_MAX_EXEMPLAR_RESULTS)));
