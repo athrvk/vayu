@@ -145,8 +145,10 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *
  * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
  * on every handle: the backstop behind `validate_transferable`'s scheme rule
- * for the two URLs it never sees - a redirect's `Location`, and the scheme
- * libcurl guesses for a URL that names none (`ftp.example.com/x` is FTP).
+ * for the two URLs it never sees - a redirect's `Location` where libcurl
+ * follows (the load path; a `RedirectChain` driver refuses one itself, in
+ * `resolve_redirect_target`), and the scheme libcurl guesses for a URL that
+ * names none (`ftp.example.com/x` is FTP).
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
