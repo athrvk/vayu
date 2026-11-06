@@ -878,29 +878,29 @@ TEST (SseConsumer, AuthorizationStaysWithTheOriginTheStreamStartedAt) {
     EXPECT_EQ (server.received_header ("Authorization"), "");
 }
 
-// The redirect takes 1200 ms and the stream behind it 1200 ms more (eight
-// writes 150 ms apart), each inside the 2000 ms cap and the two together past
-// it. The sleeps are lower bounds, so the healthy reading, the cap ending the
+// The redirect takes 1000 ms and the stream behind it 2400 ms more (sixteen
+// writes 150 ms apart), each inside the 3000 ms cap and the two together past
+// it, with 2 s of slack for the first hop on a slow runner. The sleeps are lower bounds, so the healthy reading, the cap ending the
 // stream on its second hop, only comes earlier in the stream on a slow runner;
 // a clock restarted per hop lets the second hop complete. The idle window is
 // widened past the redirect's wait, which is silence on a made connection.
 // Mutation check: reset `started_at` before each hop in `run_stream_chain` and
-// this reads Completed with all eight events.
+// this reads Completed with all sixteen events.
 TEST (SseConsumer, TheDurationCapCountsFromTheFirstHop) {
-    StreamServer server (std::vector<std::string> (8, "data: tick\n\n"));
+    StreamServer server (std::vector<std::string> (16, "data: tick\n\n"));
     server.pace (150);
-    server.delay_hop (1200);
+    server.delay_hop (1000);
     server.hop_to (server.url ("/scripted"));
     auto limits            = brisk_limits ();
     limits.idle_timeout_ms = 10000;
     auto spec              = spec_for (server.url ("/hop"), limits);
-    spec.max_duration_ms   = 2000;
+    spec.max_duration_ms   = 3000;
     SseStreamContext context ("run_test", limits);
     const auto response = vayu::http::consume_sse_stream (spec, context);
 
     EXPECT_EQ (context.end_reason (), SseEndReason::MaxDuration) << response.error_message;
     EXPECT_EQ (server.requests_received (), 1);
-    EXPECT_LT (context.total_events (), 8);
+    EXPECT_LT (context.total_events (), 16);
 }
 
 // The idle window holds on a redirect hop as on the final one: `/hop` takes
