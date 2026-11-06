@@ -32,6 +32,7 @@
 #include "vayu/http/form_body.hpp"
 #include "vayu/http/redirect_policy.hpp"
 #include "vayu/http/set_cookie.hpp"
+#include "vayu/http/set_cookie_limits.hpp"
 #include "vayu/http/status.hpp"
 #include "vayu/http/stream_tally.hpp"
 #include "vayu/http/url_parts.hpp"
@@ -203,23 +204,12 @@ void apply_cookie_notices (TransferDebug& debug, Response& response) {
     }
 }
 
-// libcurl's cookie engine discards a response's cookies in three ways it never
-// returns an error for (lib/cookie.c: `MAX_COOKIE_LINE`, `MAX_NAME`,
-// `MAX_SET_COOKIE_AMOUNT`), and the line limit and the count leave no notice
-// either, so the header callback counts the lines itself. cookie_jar_test.cpp
-// runs a real libcurl at the boundary of each limit, so a changed one fails there.
+// libcurl's cookie engine discards a response's cookies without an error
+// (`set_cookie_limits.hpp`); a design send names the cookies it dropped.
 constexpr std::string_view CODE_COOKIE_DROPPED_OVERSIZED =
 "cookie_dropped_oversized";
 constexpr std::string_view CODE_COOKIE_DROPPED_TOO_MANY =
 "cookie_dropped_too_many";
-constexpr std::string_view SET_COOKIE_FIELD = "Set-Cookie";
-/// A line libcurl measures from the byte after `Set-Cookie:`, terminator
-/// included; longer than this is discarded unread.
-constexpr size_t SET_COOKIE_LINE_LIMIT_BYTES = 5000;
-/// The first pair of a cookie, name plus value, trimmed.
-constexpr size_t COOKIE_NAME_VALUE_LIMIT_BYTES = 4096;
-/// Cookies one response may add to the jar; the next is ignored.
-constexpr size_t SET_COOKIES_PER_RESPONSE_LIMIT = 50;
 /// How many dropped cookies a warning names, and how much of one name.
 constexpr size_t NAMED_DROPPED_COOKIES  = 5;
 constexpr size_t DROPPED_NAME_MAX_BYTES = 64;
@@ -228,32 +218,22 @@ constexpr size_t DROPPED_NAME_MAX_BYTES = 64;
 /// without a word (#3307). Fed by `header_callback` only when the send has a
 /// jar: without one libcurl's engine is off and discards nothing.
 struct IncomingCookieWatch {
-    /// Lines libcurl would have stored in the response being read. It counts a
-    /// cookie once stored, so a line it rejects for being malformed is not one.
-    size_t stored_in_response = 0;
+    SetCookieLimits limits;
     /// Beyond the per-response limit, summed over every hop of the chain.
     size_t ignored   = 0;
     size_t oversized = 0;
     /// Names of the first oversized cookies. Never a value.
     std::vector<std::string> oversized_names;
 
-    /// libcurl's count restarts with each response (`Curl_req_soft_reset`), and
-    /// `header_callback` starts the record over at each status line the same way.
-    void start_response () {
-        stored_in_response = 0;
-    }
-
-    /// @p value is what follows `Set-Cookie:`; @p libcurl_line_bytes is what
-    /// libcurl measures for the length limit.
-    void note (std::string_view value, size_t libcurl_line_bytes) {
-        const auto cookie = vayu::http::parse_set_cookie_line (value);
-        if (libcurl_line_bytes > SET_COOKIE_LINE_LIMIT_BYTES ||
-        (cookie && cookie->name.size () + cookie->value.size () > COOKIE_NAME_VALUE_LIMIT_BYTES)) {
-            note_oversized (cookie);
-            return;
-        }
-        if (cookie && ++stored_in_response > SET_COOKIES_PER_RESPONSE_LIMIT) {
-            ++ignored;
+    /// @p value and @p raw_line_bytes as `SetCookieLimits::note` takes them.
+    void note (std::string_view value, size_t raw_line_bytes) {
+        switch (limits.note (value, raw_line_bytes)) {
+        case SetCookieFate::Oversized:
+            note_oversized (vayu::http::parse_set_cookie_line (value));
+            break;
+        case SetCookieFate::Ignored: ++ignored; break;
+        case SetCookieFate::NotACookie:
+        case SetCookieFate::Stored: break;
         }
     }
 
@@ -580,18 +560,14 @@ std::optional<int> status_line_code (std::string_view line) {
 }
 
 /// Hands @p line to @p watch if it is a `Set-Cookie` header. @p raw_bytes is
-/// what the callback was given, line ending included: libcurl's length limit
-/// counts from the byte after the colon to the end of that.
+/// what the callback was given, line ending included.
 void watch_set_cookie (IncomingCookieWatch* watch, std::string_view line, size_t raw_bytes) {
     if (watch == nullptr) {
         return;
     }
-    const size_t colon = line.find (':');
-    if (colon == std::string_view::npos ||
-    !vayu::utils::ascii_lower_equal (line.substr (0, colon), SET_COOKIE_FIELD)) {
-        return;
+    if (const auto value = set_cookie_header_value (line)) {
+        watch->note (*value, raw_bytes);
     }
-    watch->note (line.substr (colon + 1), raw_bytes - colon - 1);
 }
 
 /**
@@ -654,7 +630,7 @@ size_t header_callback (char* buffer, size_t size, size_t nitems, void* userdata
         response->headers.clear ();
         response->header_lines.clear ();
         if (sink->cookies != nullptr) {
-            sink->cookies->start_response ();
+            sink->cookies->limits.start_response ();
         }
         return total_size;
     }
