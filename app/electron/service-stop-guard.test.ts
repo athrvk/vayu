@@ -296,6 +296,27 @@ describe("createServiceStopGuard", () => {
 		expect(log).toHaveBeenCalled();
 	});
 
+	it("says what a gesture would stop, with no memory of an earlier answer", async () => {
+		const { guard, answerDialog } = fakeGuard();
+		expect(guard.wouldStop("window-close")).toBe(false);
+
+		guard.publish([inbox]);
+		const proceed = guard.confirm("window-close");
+		answerDialog(true);
+		await proceed;
+
+		expect(guard.wouldStop("window-close")).toBe(true);
+		expect(guard.wouldStop("quit")).toBe(true);
+	});
+
+	it("says a macOS close stops nothing, and a macOS quit does", () => {
+		const { guard } = fakeGuard({ platform: "darwin" });
+		guard.publish([inbox]);
+
+		expect(guard.wouldStop("window-close")).toBe(false);
+		expect(guard.wouldStop("quit")).toBe(true);
+	});
+
 	it("forgets the snapshot when told the renderer went away", () => {
 		const { guard } = fakeGuard();
 		guard.publish([inbox]);
@@ -369,6 +390,7 @@ describe("registerRunningServicesIpc", () => {
 				snapshot = [];
 			},
 			running: () => snapshot,
+			wouldStop: () => snapshot.length > 0,
 			isCleared: () => snapshot.length === 0,
 			confirm: () => Promise.resolve(true),
 			markQuitUnattended: () => {},

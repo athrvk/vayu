@@ -27,6 +27,7 @@ import {
 	buildFlushFailurePrompt,
 	createFlushFailureGate,
 	flushNeedsConfirmation,
+	parseFlushResult,
 	FLUSH_TIMEOUT_MS,
 	type FlushResult,
 	type FlushTransport,
@@ -440,6 +441,36 @@ describe("asking before a failed flush is discarded (#1489)", () => {
 
 		expect(await gate.confirm("window-close", failed)).toBe(false);
 		expect(ask).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("parseFlushResult", () => {
+	it("reads a report, keeping a disk-full reason and nothing else", () => {
+		expect(parseFlushResult({ saved: 2, failed: 1, pending: 0 })).toEqual({
+			saved: 2,
+			failed: 1,
+			pending: 0,
+		});
+		expect(parseFlushResult({ saved: 0, failed: 1, pending: 0, reason: "disk-full" })).toEqual({
+			saved: 0,
+			failed: 1,
+			pending: 0,
+			reason: "disk-full",
+		});
+		expect(parseFlushResult({ saved: 0, failed: 1, pending: 0, reason: "gremlins" })).toEqual({
+			saved: 0,
+			failed: 1,
+			pending: 0,
+		});
+	});
+
+	it("refuses anything that is not a report, so it is asked about rather than trusted", () => {
+		expect(parseFlushResult(undefined)).toBeNull();
+		expect(parseFlushResult(null)).toBeNull();
+		expect(parseFlushResult({ saved: 1, failed: 0 })).toBeNull();
+		expect(parseFlushResult({ saved: 1, failed: -1, pending: 0 })).toBeNull();
+		expect(parseFlushResult({ saved: 1.5, failed: 0, pending: 0 })).toBeNull();
+		expect(parseFlushResult({ saved: "1", failed: 0, pending: 0 })).toBeNull();
 	});
 });
 

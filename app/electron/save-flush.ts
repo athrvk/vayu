@@ -55,6 +55,21 @@ export interface FlushResult {
 	reason?: "disk-full";
 }
 
+/**
+ * Read the renderer's report off the ACK, or `null` for anything that is not
+ * one. `null` is what an unanswered flush reports too, so a report main cannot
+ * read is asked about rather than taken as clean.
+ */
+export function parseFlushResult(raw: unknown): FlushResult | null {
+	if (typeof raw !== "object" || raw === null) return null;
+	const { saved, failed, pending, reason } = raw as Record<string, unknown>;
+	if (!isCount(saved) || !isCount(failed) || !isCount(pending)) return null;
+	return reason === "disk-full" ? { saved, failed, pending, reason } : { saved, failed, pending };
+}
+
+const isCount = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && value >= 0;
+
 /** The slice of Electron this needs, so a test can pass a fake. */
 export interface FlushTransport {
 	/**

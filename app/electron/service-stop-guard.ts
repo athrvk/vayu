@@ -154,6 +154,12 @@ export interface ServiceStopGuard {
 	/** What the last snapshot said, as the prompt would name it. */
 	running: () => RunningService[];
 	/**
+	 * Whether `gesture` would stop something running right now, on this
+	 * platform. No memory of earlier answers: that belongs to the quit flow,
+	 * which knows when an answer stops counting.
+	 */
+	wouldStop: (gesture: StopGesture) => boolean;
+	/**
 	 * Whether `gesture` may proceed without asking - nothing is running, the
 	 * gesture stops nothing on this platform, the user already said yes, or
 	 * nobody is at the keyboard to answer.
@@ -195,11 +201,15 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 
 	const running = (): RunningService[] => (rendererGone() ? [] : snapshot);
 
+	const wouldStop = (gesture: StopGesture): boolean => {
+		if (gesture === "window-close" && !closeStopsServices) return false;
+		return running().length > 0;
+	};
+
 	const isCleared = (gesture: StopGesture): boolean => {
 		if (confirmed) return true;
 		if (gesture === "quit" && unattendedQuit) return true;
-		if (gesture === "window-close" && !closeStopsServices) return true;
-		return running().length === 0;
+		return !wouldStop(gesture);
 	};
 
 	return {
@@ -212,6 +222,8 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 		},
 
 		running,
+
+		wouldStop,
 
 		isCleared,
 
