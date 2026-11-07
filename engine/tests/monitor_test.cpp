@@ -27,17 +27,25 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
 using nlohmann::json;
+using vayu::core::after_scrape_failure;
 using vayu::core::monitor_config_from;
+using vayu::core::MonitorBackedOff;
+using vayu::core::MonitorBackoff;
+using vayu::core::MonitorFailing;
 using vayu::core::MonitorFormat;
+using vayu::core::MonitorHealthy;
 using vayu::core::MonitorTotals;
 using vayu::core::parse_json_metrics;
 using vayu::core::parse_prometheus_exposition;
 using vayu::core::resolve_scrape_timeout_ms;
+using vayu::core::scrape_cancelled;
 using vayu::core::scrape_failure_cause;
+using vayu::core::scrape_interval_ms;
 using vayu::core::validate_monitor_config;
 using vayu::tests::SlowMockServer;
 using Clock = std::chrono::steady_clock;
@@ -408,6 +416,24 @@ TEST (ScrapeFailureCause, ATransportFailureIsAFixedPhrase) {
     "transport error");
 }
 
+// A cancel arrives as either shape `Client::send` answers a failed transfer
+// with: a marked response (the transfer ran) or an error result (it never
+// started). Mutation check: read only `sent.error ()` in `scrape_cancelled`
+// and the marked response, which is what a cancelled scrape gets, reads as
+// an answer.
+TEST (ScrapeCancelled, ACancelInEitherShapeAndNothingElse) {
+    EXPECT_TRUE (scrape_cancelled (response_with (0, vayu::ErrorCode::Cancelled)));
+    const vayu::Result<vayu::Response> refused_to_start (
+    vayu::Error{ vayu::ErrorCode::Cancelled, "Request cancelled" });
+    EXPECT_TRUE (scrape_cancelled (refused_to_start));
+
+    EXPECT_FALSE (scrape_cancelled (response_with (200)));
+    EXPECT_FALSE (scrape_cancelled (response_with (0, vayu::ErrorCode::Timeout)));
+    const vayu::Result<vayu::Response> timed_out (
+    vayu::Error{ vayu::ErrorCode::Timeout, "Operation timed out after 750 ms" });
+    EXPECT_FALSE (scrape_cancelled (timed_out));
+}
+
 // The report is exported and shared, and libcurl's message can quote a URL
 // whose userinfo holds a password. Mutation check: return the transport's
 // `message` from `scrape_failure_cause` and this fails.
@@ -418,6 +444,37 @@ TEST (ScrapeFailureCause, NeverCarriesTheTransportMessage) {
     ASSERT_HAS_VALUE (cause);
     EXPECT_EQ (cause->find ("hunter2"), std::string::npos) << *cause;
     EXPECT_EQ (*cause, "unreachable");
+}
+
+// ---------------------------------------------------------------------------
+// The scrape loop's backoff
+// ---------------------------------------------------------------------------
+
+// A failing endpoint is scraped at the configured cadence until the
+// `FAILURES_BEFORE_BACKOFF`-th failure in a row, then at twice it, however many
+// more fail. Mutation check: back off on `>` rather than `>=` the threshold and
+// the fifth failure leaves the loop at `MonitorFailing{ 5 }`.
+TEST (MonitorBackoffTest, BacksOffAtTheThresholdAndStaysThere) {
+    constexpr int INTERVAL_MS = 1000;
+    MonitorBackoff state      = MonitorHealthy{};
+    EXPECT_EQ (scrape_interval_ms (state, INTERVAL_MS), INTERVAL_MS);
+    for (int failed = 1;
+    failed < vayu::core::constants::monitor::FAILURES_BEFORE_BACKOFF; ++failed) {
+        state = after_scrape_failure (state);
+        EXPECT_EQ (state, MonitorBackoff (MonitorFailing{ failed }));
+        EXPECT_EQ (scrape_interval_ms (state, INTERVAL_MS), INTERVAL_MS);
+    }
+    state = after_scrape_failure (state);
+    EXPECT_EQ (state, MonitorBackoff (MonitorBackedOff{}));
+    EXPECT_EQ (scrape_interval_ms (state, INTERVAL_MS), 2 * INTERVAL_MS);
+    EXPECT_EQ (after_scrape_failure (state), MonitorBackoff (MonitorBackedOff{}));
+}
+
+// Doubling never takes the cadence past the ceiling a block may name itself.
+TEST (MonitorBackoffTest, TheBackedOffIntervalIsCapped) {
+    constexpr int MAX = vayu::core::constants::monitor::MAX_INTERVAL_MS;
+    EXPECT_EQ (scrape_interval_ms (MonitorBackedOff{}, MAX), MAX);
+    EXPECT_EQ (scrape_interval_ms (MonitorBackedOff{}, (MAX / 2) + 1), MAX);
 }
 
 // ---------------------------------------------------------------------------
@@ -770,6 +827,53 @@ ASlowExpositionScrapesNothingOnTheDerivedBudgetAndScrapesOnceItIsRaisedAtTheSame
     auto summary = json::parse (stored->summary);
     ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
     EXPECT_GE (summary["monitor"]["samples"].get<size_t> (), 1u);
+}
+
+// A Stop with a scrape in flight against an endpoint that never answers
+// finalises within the stop grace, and the scrape it cut short is no failure
+// (#3343). At a 60 s interval the scrape's own budget is 45 s and `/hang`
+// holds for 30 s: healthy, the run settles about a second after the Stop (one
+// libcurl progress tick after the worker's join cancels the scrape); broken,
+// it waits out those 30 s. Mutation checks: drop `monitor_client_config.cancel`
+// in `collect_monitor` and the run is still registered at `wait_until`'s 20 s
+// deadline; drop the `scrape_cancelled` check after the send and `failures`
+// is 1.
+TEST_F (MonitorRunTest, AStopDoesNotWaitOutAScrapeInFlight) {
+    const std::string run_id = "run-monitor-stop";
+    create_run_row (run_id);
+    json config        = run_config (json{ { "url", server->hang_url () },
+    { "intervalMs", 60000 }, { "series", json::array ({ "vayu_test_cpu" }) } });
+    config["duration"] = "60s";
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return server->hang_count () > 0; }))
+    << "the monitor never scraped";
+
+    const auto stopped   = Clock::now ();
+    context->should_stop = true;
+    context->notify_refill ();
+    const bool settled =
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; });
+    const auto stop_ms =
+    std::chrono::duration_cast<std::chrono::milliseconds> (Clock::now () - stopped)
+    .count ();
+    manager.shutdown (std::chrono::milliseconds (15000));
+
+    ASSERT_TRUE (settled) << "the Stop waited on the monitor endpoint";
+    EXPECT_LT (stop_ms, vayu::core::constants::server::RUN_SHUTDOWN_GRACE_MS)
+    << "the Stop took " << stop_ms << "ms with a scrape in flight";
+    auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
+    const auto summary = json::parse (stored->summary);
+    ASSERT_TRUE (summary.contains ("monitor")) << stored->summary;
+    EXPECT_EQ (summary["monitor"]["samples"].get<size_t> (), 0u);
+    EXPECT_EQ (summary["monitor"]["failures"].get<size_t> (), 0u)
+    << "a scrape the Stop cancelled was recorded as a failure: " << stored->summary;
 }
 
 TEST_F (MonitorRunTest, ARunWithoutAMonitorScrapesNothingAndReportsNoSection) {

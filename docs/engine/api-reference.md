@@ -9660,7 +9660,9 @@ fixes:
 
 Neither fails the run. After five consecutive failures the engine logs once
 and backs off to twice the configured interval until a scrape is answered; a
-no-match is an answer, so it ends the backoff rather than extending it.
+no-match is an answer, so it ends the backoff rather than extending it. A
+scrape still in flight when the run ends is cancelled rather than waited out,
+and counts as neither.
 
 Three of the limits are settings rather than constants: `intervalMs` defaults to
 **`monitorIntervalMs`** when the block omits it, the `series` ceiling is

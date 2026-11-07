@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -3444,42 +3445,23 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
 /**
  * A scrape that got no 2xx answer: the URL or the endpoint is at fault. Nothing
  * is stored, because a sample with no readings would draw a line through a
- * hole in the data.
- *
- * The interval is doubled once, not per failure: the point is to stop hammering
- * an endpoint that is gone, not to drift so far out that a recovered one is
- * noticed minutes later.
+ * hole in the data. Logged once, on the failure that backs the loop off.
  */
 void note_monitor_failure (const std::shared_ptr<RunContext>& context,
 const MonitorConfig& config,
 std::string cause,
-int& consecutive_failures,
-bool& backoff_logged,
-int& interval_ms) {
-    ++consecutive_failures;
-    if (consecutive_failures == constants::monitor::FAILURES_BEFORE_BACKOFF) {
-        if (!backoff_logged) {
-            vayu::utils::log_warning ("run",
-            "Monitor endpoint failed " + std::to_string (consecutive_failures) +
-            " scrapes in a row; backing off, the series will show gaps",
-            { { "runId", context->run_id }, { "monitorUrl", config.url }, { "cause", cause } });
-            backoff_logged = true;
-        }
-        interval_ms = std::min (config.interval_ms * 2, constants::monitor::MAX_INTERVAL_MS);
+MonitorBackoff& backoff) {
+    const bool was_backed_off = std::holds_alternative<MonitorBackedOff> (backoff);
+    backoff = after_scrape_failure (backoff);
+    if (!was_backed_off && std::holds_alternative<MonitorBackedOff> (backoff)) {
+        vayu::utils::log_warning ("run",
+        "Monitor endpoint failed " + std::to_string (constants::monitor::FAILURES_BEFORE_BACKOFF) +
+        " scrapes in a row; backing off, the series will show gaps",
+        { { "runId", context->run_id }, { "monitorUrl", config.url }, { "cause", cause } });
     }
     if (context->monitor_totals) {
         context->monitor_totals->record_failure (std::move (cause));
     }
-}
-
-/// The endpoint answered, so a failure streak and its backoff are over.
-void reset_monitor_backoff (const MonitorConfig& config,
-int& consecutive_failures,
-bool& backoff_logged,
-int& interval_ms) {
-    consecutive_failures = 0;
-    backoff_logged       = false;
-    interval_ms          = config.interval_ms;
 }
 
 /**
@@ -3487,27 +3469,16 @@ int& interval_ms) {
  * and the names are at fault (#3120), so it is counted apart from a failure and
  * does not back off. Like a failure it stores and publishes nothing.
  */
-void note_monitor_no_match (const std::shared_ptr<RunContext>& context,
-const MonitorConfig& config,
-int& consecutive_failures,
-bool& backoff_logged,
-int& interval_ms) {
-    reset_monitor_backoff (config, consecutive_failures, backoff_logged, interval_ms);
+void note_monitor_no_match (const std::shared_ptr<RunContext>& context) {
     if (context->monitor_totals) {
         context->monitor_totals->record_no_match ();
     }
 }
 
-/** A scrape that read values: stored, published, and the backoff reset. */
+/** A scrape that read values: stored and published. */
 void record_monitor_sample (const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
-const MonitorConfig& config,
-const std::map<std::string, double>& values,
-int& consecutive_failures,
-bool& backoff_logged,
-int& interval_ms) {
-    reset_monitor_backoff (config, consecutive_failures, backoff_logged, interval_ms);
-
+const std::map<std::string, double>& values) {
     const int64_t sample_wall_ms = now_ms ();
     auto payload = build_monitor_sample_payload (sample_wall_ms, values);
     if (context->monitor_totals) {
@@ -3559,11 +3530,10 @@ const MonitorConfig& config) {
     // the loop below runs for the length of the run.
     vayu::http::ClientConfig monitor_client_config;
     monitor_client_config.transport = vayu::http::resolve_transport_policy (db);
+    monitor_client_config.cancel    = &context->aux_cancel;
     vayu::http::Client client{ monitor_client_config };
 
-    int consecutive_failures = 0;
-    bool backoff_logged      = false;
-    int interval_ms          = config.interval_ms;
+    MonitorBackoff backoff = MonitorHealthy{};
 
     // Guarded whole, for the same reason collect_metrics is: an exception out
     // of a thread function calls std::terminate, and a scrape failure must
@@ -3578,24 +3548,26 @@ const MonitorConfig& config) {
             request.timeout_ms = timeout_ms;
 
             const auto sent = client.send (request);
+            if (scrape_cancelled (sent)) {
+                break; // The run ended under it, which says nothing about the endpoint.
+            }
             if (auto cause = scrape_failure_cause (sent)) {
-                note_monitor_failure (context, config, std::move (*cause),
-                consecutive_failures, backoff_logged, interval_ms);
+                note_monitor_failure (context, config, std::move (*cause), backoff);
             } else {
+                backoff = MonitorHealthy{};
                 const auto values =
                 parse_monitor_body (config.format, sent.value ().body, config.series);
                 if (values.empty ()) {
-                    note_monitor_no_match (context, config,
-                    consecutive_failures, backoff_logged, interval_ms);
+                    note_monitor_no_match (context);
                 } else {
-                    record_monitor_sample (context, db, config, values,
-                    consecutive_failures, backoff_logged, interval_ms);
+                    record_monitor_sample (context, db, values);
                 }
             }
 
             // Sleep out the remainder of the interval in short slices. A run
             // that finishes joins this thread, so a single sleep_for would hold
             // the whole run open for up to a minute at the maximum interval.
+            const int interval_ms = scrape_interval_ms (backoff, config.interval_ms);
             const auto deadline = scrape_started + std::chrono::milliseconds (interval_ms);
             while (context->is_running && std::chrono::steady_clock::now () < deadline) {
                 std::this_thread::sleep_for (
