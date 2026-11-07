@@ -171,6 +171,12 @@
  * accepts. That is 874 B on every row, taking them to 150,096 / 147,500 /
  * 220,505 / 216,238 B; the four caps went to 150,100 / 147,600 / 220,600 /
  * 216,300, the least that holds them.
+ *
+ * #3260's `usable` / `problem` clause in `list_client_certificates` (and
+ * "offered" for "answered" in `diagnose_connection`) added 76 B to every row,
+ * taking them to 150,172 / 147,576 / 220,581 / 216,314 B; the two caps
+ * that no longer held (writes off with reveal off, writes on with reveal on)
+ * went to 150,200 / 216,400, the other two stay.
  */
 
 import { describe, it, expect } from "vitest";
@@ -190,10 +196,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_100 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_200 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_600 },
 	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 220_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
