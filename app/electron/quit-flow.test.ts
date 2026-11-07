@@ -9,10 +9,7 @@
  * Every edge of the quit / close flow, driven through fakes for the renderer,
  * the two dialogs, the ceiling timer and the deferred resume.
  *
- * The defect behind it (#3335): Keep working on the loss question did nothing,
- * so the flush stayed settled and the services answer stayed latched, and the
- * next quit or close went straight through - no flush, no question - and
- * discarded the very edits the user had just chosen to keep.
+ * Defect: #3335 (Keep working left the next quit or close with no flush).
  *
  * Mutation checks: make Keep working stay in `confirmingLoss` instead of going
  * to `idle` and "Keep working, then quit again" reddens; drop the ticket check
@@ -531,6 +528,19 @@ describe("a quit nobody is behind", () => {
 		expect(h.loss.ask).not.toHaveBeenCalled();
 		expect(h.resumeQuit).toHaveBeenCalledTimes(1);
 		expect(h.log).toHaveBeenCalledWith(expect.any(String), { result: FAILED });
+	});
+
+	it("proceeds on an unanswered ceiling too, and logs that nothing answered", () => {
+		const h = harness();
+		h.flow.markQuitUnattended();
+
+		h.quit();
+		h.expire();
+		h.runDeferred();
+
+		expect(h.loss.ask).not.toHaveBeenCalled();
+		expect(h.resumeQuit).toHaveBeenCalledTimes(1);
+		expect(h.log).toHaveBeenCalledWith(expect.any(String), { result: null });
 	});
 
 	it("takes over a services question already on screen", async () => {
