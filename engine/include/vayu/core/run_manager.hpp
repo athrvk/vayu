@@ -415,6 +415,12 @@ struct RunContext {
     std::vector<std::optional<size_t>> step_auth_refresh;
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
+    /// The `ClientConfig::cancel` of every transfer an auxiliary thread makes
+    /// (each watchdog's refresh), set by `join_aux_threads` before it joins
+    /// (#3343), so a join never waits out a network timeout. Not
+    /// `should_stop`: a natural end never sets that, and its join must not
+    /// wait either. A transfer it ends is the run ending, never a failure.
+    std::atomic<bool> aux_cancel{ false };
     nlohmann::json config;
     // Monotonic reading (`steady_clock`, milliseconds) at the instant load
     // began: stamped by the worker beside the final report's `test_start`,
@@ -1854,7 +1860,9 @@ const MonitorConfig& config);
  * once when the watchdog arms (`read_auth_refresh_tuning`).
  *
  * Returns as soon as the run stops, or once the published token no longer
- * expires. Inert (returns immediately) for a null @p state.
+ * expires. A refresh still in flight when the run ends is cancelled through
+ * `RunContext::aux_cancel` and recorded as nothing. Inert (returns
+ * immediately) for a null @p state.
  */
 void run_auth_refresh (const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<AuthRefreshState>& state,

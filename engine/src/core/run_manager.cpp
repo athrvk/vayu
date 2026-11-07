@@ -1064,6 +1064,7 @@ RunContext::~RunContext () {
 }
 
 void RunContext::join_aux_threads () {
+    aux_cancel.store (true, std::memory_order_release);
     if (metrics_thread.joinable ()) {
         metrics_thread.join ();
     }
