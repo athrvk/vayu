@@ -35,7 +35,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui";
-import { useLayoutStore } from "@/stores";
+import { useLayoutStore, useToastStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
 import { useCommandContext } from "@/hooks/useCommandContext";
 import { isModalOpen } from "@/lib/modal";
@@ -44,6 +44,9 @@ import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker"
 import { PaletteResults } from "./PaletteResults";
 import { useCommandSurfaces } from "./useCommandSurfaces";
 import type { PaletteItem } from "./types";
+
+/** Shown when the chord is refused because another dialog is open (#3320). */
+const PALETTE_BLOCKED_MESSAGE = "Close the dialog to use the command palette";
 
 export function CommandPalette() {
 	const paletteOpen = useLayoutStore((s) => s.paletteOpen);
@@ -122,7 +125,16 @@ export function CommandPalette() {
 			 * still toggle it shut. Before the claim below, so the key stays the
 			 * dialog's own.
 			 */
-			if (!useLayoutStore.getState().paletteOpen && isModalOpen()) return;
+			if (!useLayoutStore.getState().paletteOpen && isModalOpen()) {
+				/*
+				 * Say why nothing happened. `showToast` drops an identical open toast
+				 * before appending, so a held key leaves one toast with a fresh timer
+				 * rather than a stack. The toast viewport sits at z-[100], above the
+				 * dialogs' z-50, and Radix announces it through its live region.
+				 */
+				useToastStore.getState().showToast(PALETTE_BLOCKED_MESSAGE, "info");
+				return;
+			}
 			e.preventDefault();
 			/*
 			 * And stopped here, not merely prevented. `preventDefault` cancels the

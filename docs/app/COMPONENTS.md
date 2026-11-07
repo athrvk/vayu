@@ -1191,7 +1191,7 @@ Design rationale: `app/src/modules/welcome/README.md`
 The ⌘K/Ctrl+K overlay: reach any open tab, saved request, collection or app view by name, and
 run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
 
-- **`CommandPalette.tsx`** - the dialog, the chord (capture phase; refused while another dialog is open, but still toggles the palette closed, #3320), focus restoration, the open flag
+- **`CommandPalette.tsx`** - the dialog, the chord (capture phase; refused while another dialog is open, with an info toast saying to close it, but still toggles the palette closed, #3320), focus restoration, the open flag
   (`useLayoutStore.paletteOpen` / `setPaletteOpen`, deliberately not persisted), and the host
   for the dialogs its commands open (see `useCommandSurfaces.ts` below).
 - **`sources/`** - one hook per family, each returning `PaletteItem[]`. Two shapes of source:

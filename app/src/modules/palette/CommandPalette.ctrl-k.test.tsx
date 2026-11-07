@@ -49,15 +49,16 @@ async function mountOn(platform: "darwin" | "linux") {
 	// `ElectronAPI` is 35 methods this listener never touches.
 	(window as unknown as { electronAPI: { platform: string } }).electronAPI = { platform };
 	const { CommandPalette } = await import("./CommandPalette");
-	const { useLayoutStore } = await import("@/stores");
+	const { useLayoutStore, useToastStore } = await import("@/stores");
 	useLayoutStore.setState({ paletteOpen: false });
+	useToastStore.setState({ toasts: [] });
 	const view = render(
 		<QueryClientProvider client={new QueryClient()}>
 			<CommandPalette />
 			<input aria-label="a field" defaultValue="type here" autoFocus />
 		</QueryClientProvider>
 	);
-	return { view, useLayoutStore, field: view.getByLabelText("a field") };
+	return { view, useLayoutStore, useToastStore, field: view.getByLabelText("a field") };
 }
 
 /** Returns whether the palette's capture listener claimed the press. */
@@ -173,6 +174,33 @@ describe("with another dialog open", () => {
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
 	});
 
+	it("says why, with one info toast", async () => {
+		const { useToastStore, field } = await mountOn("linux");
+		mountDialog("open");
+		pressK(field, { ctrl: true });
+		const { toasts } = useToastStore.getState();
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0]).toMatchObject({
+			message: "Close the dialog to use the command palette",
+			variant: "info",
+		});
+	});
+
+	it("does not stack a toast on a repeated press", async () => {
+		const { useToastStore, field } = await mountOn("linux");
+		mountDialog("open");
+		pressK(field, { ctrl: true });
+		pressK(field, { ctrl: true });
+		pressK(field, { ctrl: true });
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+	});
+
+	it("shows no toast when no dialog is open", async () => {
+		const { useToastStore, field } = await mountOn("linux");
+		pressK(field, { ctrl: true });
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+
 	it("opens once that dialog has closed", async () => {
 		const { useLayoutStore, field } = await mountOn("linux");
 		mountDialog("closed");
@@ -189,5 +217,12 @@ describe("with another dialog open", () => {
 		expect(document.querySelector('[data-slot="dialog-content"]')).not.toBeNull();
 		expect(pressK(field, { ctrl: true })).toBe(true);
 		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+	});
+
+	it("shows no toast when the chord closes the open palette", async () => {
+		const { useToastStore, field } = await mountOn("linux");
+		pressK(field, { ctrl: true });
+		pressK(field, { ctrl: true });
+		expect(useToastStore.getState().toasts).toHaveLength(0);
 	});
 });
