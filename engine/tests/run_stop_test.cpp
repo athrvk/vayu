@@ -410,8 +410,7 @@ TEST_F (RunStopAccountingTest, StoppedRunAccountsForItsCancelledRequests) {
     std::thread stopper ([&context] () {
         (void)vayu::tests::wait_until (
         [&context] () { return context->requests_sent.load () > 0; });
-        context->should_stop = true;
-        context->notify_refill ();
+        context->request_stop ();
     });
 
     auto strategy = vayu::core::LoadStrategy::create (config);
@@ -477,8 +476,7 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
 
     const size_t sent_at_stop = context->requests_sent.load ();
     auto stop_start           = Clock::now ();
-    context->should_stop      = true;
-    context->notify_refill ();
+    context->request_stop ();
 
     // retain_run() is the worker's last act, so this is "the run is fully done".
     // Waits well past the assertion below on purpose: the detached worker holds

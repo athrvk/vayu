@@ -137,6 +137,7 @@ add_executable(vayu_tests
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
+    run_phase_test.cpp
     run_shutdown_test.cpp
     run_retention_release_test.cpp
     run_config_validation_test.cpp

@@ -1595,10 +1595,7 @@ int64_t stop_wait_ms) {
     if (auto context = run_manager.get_run (run_id)) {
         vayu::utils::log_info (
         "run", "DELETE /runs/:id - Run is active, stopping it first: " + run_id);
-        context->should_stop = true;
-        // Wake the closed-loop controller so it observes should_stop without
-        // waiting out its `CONTROLLER_TICK_MS` safety-net timeout.
-        context->notify_refill ();
+        context->request_stop ();
 
         // retain_run() is the worker's last act, after the final metrics flush
         // and status update, so "no longer active" is the only signal that says
@@ -1669,10 +1666,7 @@ int grace_seconds) {
     const auto& run_id = context.run_id;
     vayu::utils::log_info (
     "run", "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
-    context.should_stop = true;
-    // Wake the closed-loop controller for immediate cancellation (otherwise it
-    // waits up to its 50ms safety-net timeout).
-    context.notify_refill ();
+    context.request_stop ();
     vayu::utils::MetricsHelper::wait_for_graceful_stop (context, grace_seconds);
 
     if (run_type == vayu::RunType::Scenario) {
@@ -1709,8 +1703,7 @@ const std::string& run_id) {
     // moved its row to Running before the move above, is sending: signal it.
     // One that had not is refused its move to Running and ends unsent.
     if (const auto raced = run_manager.get_run (run_id)) {
-        raced->should_stop = true;
-        raced->notify_refill ();
+        raced->request_stop ();
     }
     return { 200, vayu::utils::MetricsHelper::create_inactive_response (run_id) };
 }

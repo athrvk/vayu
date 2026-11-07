@@ -1053,8 +1053,7 @@ TEST_F (ScenarioMidRunRefreshTest, ACollectionRunOutlivingItsTokenSendsARefreshe
     [&] { return context->load_start_steady_ms.load () != 0; }));
     const size_t credentials = context->auth_refresh_states.size ();
     const size_t watchdogs   = context->auth_refresh_threads.size ();
-    context->should_stop     = true;
-    context->notify_refill ();
+    context->request_stop ();
     EXPECT_TRUE (
     vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
     << "the run never finished";

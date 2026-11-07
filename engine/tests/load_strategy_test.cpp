@@ -327,7 +327,7 @@ TEST (MaintainConcurrency, AStoppedRunGetsNoFinalRefill) {
     auto context = std::make_shared<vayu::core::RunContext> (
     "test-stopped-final-refill", nlohmann::json{ { "mode", "ramp_up" } });
     CountingSubmitter submitter{ context,
-        [&context] () { context->should_stop = true; } };
+        [&context] () { context->request_stop (); } };
 
     vayu::core::maintain_concurrency (
     context, std::ref (submitter), final_refill_ramp, unbounded_budget,
@@ -701,8 +701,7 @@ TEST_F (LoadStrategyTest, StopWakesControllerPromptly) {
 
     std::thread stopper ([context] () {
         std::this_thread::sleep_for (std::chrono::milliseconds (200));
-        context->should_stop = true;
-        context->notify_refill (); // mirrors the production stop path
+        context->request_stop ();
     });
 
     auto t0 = std::chrono::steady_clock::now ();
@@ -822,7 +821,7 @@ TEST_F (LoadStrategyTest, StopCancelledResultIsCountedApartFromErrors) {
     vayu::db::Database db (TEST_DB_PATH);
 
     context->requests_sent++;
-    context->should_stop = true;
+    context->request_stop ();
     vayu::core::handle_result (context, db, cancellation_result ());
 
     const auto& mc = *context->metrics_collector;
@@ -875,7 +874,7 @@ TEST_F (LoadStrategyTest, OtherErrorsDuringAStopStayErrors) {
     vayu::db::Database db (TEST_DB_PATH);
 
     context->requests_sent++;
-    context->should_stop = true;
+    context->request_stop ();
     vayu::core::handle_result (context, db,
     vayu::Result<vayu::Response> (
     vayu::Error{ vayu::ErrorCode::InternalError, "Failed to create curl handle" }));
@@ -2419,8 +2418,8 @@ TEST_F (LoadStrategyTest, LiveFramesCarryTheCapacitySearchState) {
     EXPECT_FALSE (live.contains ("stopReason"))
     << "a live search has no stop reason: " << live.dump ();
 
-    context->should_stop = true;
-    const auto summary   = search.finish ();
+    context->request_stop ();
+    const auto summary = search.finish ();
     producer.stop ();
 
     EXPECT_EQ (summary.stop_reason, vayu::core::capacity_stop::STOPPED);

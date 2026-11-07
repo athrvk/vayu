@@ -1051,16 +1051,29 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 }
 
 RunContext::~RunContext () {
-    should_stop = true;
-    // Wake the closed-loop controller so it observes should_stop without
-    // waiting out its `CONTROLLER_TICK_MS` safety-net timeout before the
-    // join below.
-    notify_refill ();
+    request_stop ();
     // The worker joins these itself before it returns; the join here only
     // covers a context destroyed before its worker ever ran. The *worker*
     // thread is owned by RunManager (run_workers_), never by the context - see
     // the declaration for why.
     join_aux_threads ();
+}
+
+void RunContext::request_stop () {
+    const RunPhase observed = phase_latch_.latch_stop ();
+    should_stop.store (true);
+    // Wakes the closed-loop controller so it sees should_stop without waiting
+    // out its `CONTROLLER_TICK_MS` safety-net timeout.
+    notify_refill ();
+    // Before the drain the strategy is still submitting, and a cancelled loop
+    // consumes nothing, so its producer would block on a full queue.
+    if (observed < RunPhase::draining) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock (event_loop_mtx);
+    if (event_loop) {
+        event_loop->cancel ();
+    }
 }
 
 void RunContext::join_aux_threads () {
@@ -1274,8 +1287,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     // of them is waited on, so the grace period is shared rather than serial.
     auto active = get_all_active_runs ();
     for (const auto& context : active) {
-        context->should_stop = true;
-        context->notify_refill ();
+        context->request_stop ();
     }
 
     if (!active.empty ()) {

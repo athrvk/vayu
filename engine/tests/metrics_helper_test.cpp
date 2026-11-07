@@ -26,8 +26,7 @@ class MetricsHelperTest : public ::testing::Test {
             test_context->metrics_collector->record_error (
             vayu::ErrorCode::Timeout, "Test error");
         }
-        test_context->is_running  = false;
-        test_context->should_stop = false;
+        test_context->is_running = false;
     }
 
     std::unique_ptr<vayu::core::RunContext> test_context;
