@@ -423,10 +423,12 @@ struct RunContext {
     std::atomic<bool> is_running{ false };
 
     /**
-     * @brief Ask the run to stop, from any thread; calling it again changes
-     *        nothing (#3341).
+     * @brief Ask the run to stop, from any thread (#3341).
      *
-     * Latches the phase the first call lands in, then raises `should_stop`
+     * Safe to repeat: only the first call latches, but every call re-reads
+     * the phase, so one made after the worker reached the drain still cancels
+     * the event loop. The first call latches the phase it lands in; each
+     * call then raises `should_stop`
      * and wakes the closed-loop controller. In the drain or later it also
      * cancels the event loop, so a Stop cuts a natural-end drain short
      * instead of waiting out its deadline; earlier, the strategy sees
@@ -441,6 +443,8 @@ struct RunContext {
         phase_latch_.advance (next);
     }
 
+    /// Where the worker is now. No production code branches on it; tests wait
+    /// on it to know a run reached its drain.
     [[nodiscard]] RunPhase phase () const noexcept {
         return phase_latch_.phase ();
     }
