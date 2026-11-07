@@ -746,7 +746,9 @@ applied to the outgoing request rather than being left to the UI. This lives in
   password, authorization_code), the [`oauth_tokens`](db-schema.md#oauth_tokens)
   cache (expiry skew min(45s, lifetime/2), refresh-token rotation, one refresh
   in flight per cache key and a compare-before-delete on a refused refresh,
-  #3344), and RFC 6749 client auth. An
+  #3344; only an `invalid_grant` or `invalid_client` refusal clears the row,
+  and an unavailable endpoint on a refresh is an `oauth2_network_error`,
+  #3360), and RFC 6749 client auth. An
   interactive call skips the cache and always exchanges its code. It never logs
   token bodies/headers.
 - **`oauth_authorize`** - the interactive Authorization Code manager: an

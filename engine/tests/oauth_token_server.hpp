@@ -76,7 +76,11 @@ inline constexpr std::string_view GATEWAY_ERROR_PAGE =
 /// until the test `release`s it by hit number, then rotates: it honours only
 /// the refresh token it issued last (`GATED_REFRESH_TOKEN` first), answering
 /// `AT-REFRESHED-<hit>` with refresh token `RT-<hit>`, and refuses any other
-/// with `invalid_grant` (#3344).
+/// with `invalid_grant` (#3344). `/refresh-flaky` answers its first request
+/// 503 with `GATEWAY_ERROR_PAGE`, its second 429, and then `AT-AFTER-OUTAGE`;
+/// `/refresh-scope-refused` and `/refresh-client-refused` refuse a refresh with
+/// 400 `invalid_scope` and 401 `invalid_client` (#3360). Each of the three
+/// answers a fresh grant `FRESH-GRANT`.
 class MockTokenServer {
     public:
     MockTokenServer () {
@@ -142,6 +146,18 @@ class MockTokenServer {
                     res.set_content (R"({"access_token":"FRESH-AFTER-REJECT","expires_in":3600})",
                     "application/json");
                 }
+            } else if (req.path == "/refresh-flaky" && grant == "refresh_token") {
+                answer_flaky_refresh (hit, res);
+            } else if (req.path == "/refresh-scope-refused" && grant == "refresh_token") {
+                res.status = 400;
+                res.set_content (R"({"error":"invalid_scope"})", "application/json");
+            } else if (req.path == "/refresh-client-refused" && grant == "refresh_token") {
+                res.status = 401;
+                res.set_content (R"({"error":"invalid_client"})", "application/json");
+            } else if (req.path == "/refresh-flaky" || req.path == "/refresh-scope-refused" ||
+            req.path == "/refresh-client-refused") {
+                res.set_content (R"({"access_token":"FRESH-GRANT","expires_in":3600})",
+                "application/json");
             } else if (req.path == "/token-hang") {
                 hang ();
             } else if (req.path == "/refresh-rejected-then-hang") {
@@ -246,6 +262,22 @@ class MockTokenServer {
         while (!released_.load (std::memory_order_relaxed) && !released () &&
         std::chrono::steady_clock::now () < cap) {
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+
+    /// An endpoint in an outage: a gateway page, then a rate limit, then a
+    /// token. Keyed by the server's request count, so the test using it sends
+    /// this fixture nothing else first.
+    static void answer_flaky_refresh (int hit, httplib::Response& res) {
+        if (hit == 1) {
+            res.status = 503;
+            res.set_content (std::string (GATEWAY_ERROR_PAGE), "text/html");
+        } else if (hit == 2) {
+            res.status = 429;
+            res.set_content (R"({"error":"temporarily_unavailable"})", "application/json");
+        } else {
+            res.set_content (R"({"access_token":"AT-AFTER-OUTAGE","expires_in":3600})",
+            "application/json");
         }
     }
 

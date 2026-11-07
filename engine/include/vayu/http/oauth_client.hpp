@@ -145,10 +145,14 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  * One refresh is in flight per cache key (#3344): a call that needs one while
  * another is posting waits for it, under its own deadline and cancel, and
  * answers with the row it wrote; if that refresh failed, the waiting call
- * makes its own. A refresh the provider refuses deletes the row only while it
- * still holds the refresh token that was refused
+ * makes its own. A refresh whose refresh token the provider refuses (HTTP 400
+ * or 401 with `invalid_grant` or `invalid_client`) deletes the row only while
+ * it still holds the refresh token that was refused
  * (`Database::delete_oauth_token_if_refresh_matches`), then falls through to a
- * fresh grant.
+ * fresh grant. Any other refresh failure keeps the row and is the answer; one
+ * from an unavailable endpoint (a 5xx, a 429, a reply with no RFC 6749
+ * `error`) is a 502 `oauth2_network_error` carrying the provider's reply
+ * (#3360).
  *
  * A call with `interactive` never reads the cache: it always exchanges the
  * code and overwrites the cached row with the result, whatever `force_refresh`

@@ -6823,8 +6823,10 @@ many sends, runs and `POST /oauth2/token` calls find the same token expired at
 once, the provider sees one `grant_type=refresh_token` post, and the others wait
 for it, each under its own timeout and cancel, and answer with the row it wrote.
 If that refresh fails (it timed out or was cancelled), a waiting call makes its
-own rather than reporting the other call's error. A refresh the provider
-refuses deletes the cached row only while the row still holds the refresh token
+own rather than reporting the other call's error. A refresh whose refresh
+token the provider refuses (`invalid_grant` or `invalid_client`; every other
+refresh failure keeps the row, see [POST /oauth2/token](#post-oauth2token))
+deletes the cached row only while the row still holds the refresh token
 that was refused, so a rotating provider's `invalid_grant` for a spent token
 never deletes the token that replaced it; an `authorization_code` user is not
 sent back to sign in by a race. A refresh that issues no new refresh token
@@ -6926,7 +6928,20 @@ form. The
 token request is bounded by the `defaultTimeout` setting (this route takes no
 `timeout` of its own), and the bound covers the whole acquisition: a refresh
 the provider rejects falls back to a fresh grant that gets only what the
-refresh left (issue #2833). The same bound holds for the token exchange of the
+refresh left (issue #2833).
+
+Only a refusal of the refresh token itself clears the cached token: a refresh
+answered `400` or `401` with an RFC 6749 `error` of `invalid_grant` or
+`invalid_client` deletes the row (while it still holds that refresh token) and
+falls back to a fresh grant, which for `authorization_code` is the `409` above.
+Every other refresh failure keeps the row, so the next call refreshes again
+(issue #3360). A refresh the endpoint could not answer - a 5xx, a `429`, or a
+reply carrying no RFC 6749 `error`, an unparseable body included - is a `502`
+`oauth2_network_error` whose message reads `Token refresh failed: Token
+endpoint error (HTTP 503): unparseable response`, still carrying
+`providerStatus` and the rest of the provider's reply. Any other refusal of a
+refresh (`invalid_scope`, say) answers as the `401` `oauth2_provider_error`
+above. A fresh grant's failure is unaffected: it is always that `401`. The same bound holds for the token exchange of the
 interactive flow below.
 A token response nested past 100 levels is treated as unparseable (`401`
 `oauth2_provider_error`, "unparseable response"), never cached (issue #2413).
