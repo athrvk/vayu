@@ -1,6 +1,7 @@
 /**
  * @file tests/server_bind_test.cpp
- * @brief The engine listener's bind outcome (issue #983).
+ * @brief The engine listener's bind outcome (issue #983), and what `stop()`
+ *        ends before it returns (#2667, #2683, #3345).
  *
  * A taken port used to be reported nowhere: `listen()` folded the bind into the
  * serve loop, returned false into a thread nobody read, and the daemon saw only
@@ -36,7 +37,9 @@
 #include "vayu/http/server.hpp"
 #include "vayu/utils/logger.hpp"
 
+#include "held_request.hpp"
 #include "mock_server.hpp"
+#include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "wait_until.hpp"
@@ -604,6 +607,183 @@ TEST_F (ServerBindTest, StopEndsALiveMetricsRelayOfARunStillGoing) {
     }))
     << "stop() did not end a live relay whose run had not ended";
     run_manager_.unregister_run (run_id);
+}
+
+// ---------------------------------------------------------------------------
+// `stop()` shuts down every listener a manager owns (#3345)
+// ---------------------------------------------------------------------------
+
+/// The longest pacing delay the managers allow, which each held request below
+/// is given: what a `stop()` that waited one out would take.
+constexpr int HELD_DELAY_MS = 30000;
+
+/// A port nothing holds once this returns, for a `Server` to bind.
+int released_port () {
+    PortHolder holder;
+    return holder.port ();
+}
+
+/// The answer to POST @p path with @p body on the engine at @p port, or null
+/// with the failure recorded when it is not a 200.
+nlohmann::json post_to_engine (int port, const std::string& path, const nlohmann::json& body) {
+    httplib::Client client ("127.0.0.1", port);
+    const auto response = client.Post (path, body.dump (), "application/json");
+    if (!response || response->status != 200) {
+        ADD_FAILURE ()
+        << path << " answered "
+        << (response ? response->body : httplib::to_string (response.error ()));
+        return nullptr;
+    }
+    return nlohmann::json::parse (response->body);
+}
+
+/// The port in a listener URL, `http://127.0.0.1:<port>` with any path after.
+int port_of (const std::string& url) {
+    const auto colon = url.rfind (':');
+    return colon == std::string::npos ? 0 : std::stoi (url.substr (colon + 1));
+}
+
+/// Stops @p server while a request is held in the handler of the listener on
+/// @p listener_port, and checks the stop ended that handler rather than
+/// leaving it, or waiting it out. Healthy: milliseconds for a paced answer,
+/// about a second for a token exchange (one libcurl progress tick). Broken:
+/// the whole 30s delay or exchange timeout. Ten seconds sits between them.
+/// Mutation checks: drop the managers' `shutdown ()` calls from `stop()`, and
+/// the listener still accepts once it returns; put one handler's
+/// `std::this_thread::sleep_for` back, or drop the cancel from the callback's
+/// `acquire_token`, and that stop takes 30s.
+void expect_stop_ends_the_held_handler (vayu::http::Server& server, int listener_port) {
+    const auto began = std::chrono::steady_clock::now ();
+    server.stop ();
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2)
+    << "stop() waited out a listener's handler";
+    EXPECT_FALSE (vayu::tests::accepts_connections (listener_port))
+    << "stop() returned with the listener still accepting";
+}
+
+/// The held request's status once it has ended, or 0 when it is still waiting.
+int held_status_once_ended (vayu::tests::HeldRequest& held) {
+    if (!vayu::tests::wait_until ([&held] { return held.finished (); })) {
+        ADD_FAILURE () << "the held request was never answered";
+        return 0;
+    }
+    return held.held_status ();
+}
+
+TEST_F (ServerBindTest, StopWakesAMockResponseInsideItsLatency) {
+    vayu::db::Collection collection;
+    collection.id   = "col_mock";
+    collection.name = "Mocked";
+    db_->create_collection (collection);
+    vayu::db::Request request;
+    request.id            = "req_ping";
+    request.collection_id = collection.id;
+    request.name          = "Ping";
+    request.method        = vayu::HttpMethod::GET;
+    request.url           = "{{baseUrl}}/ping";
+    db_->save_request (request);
+    vayu::db::RequestExample example;
+    example.id         = "exa_ping";
+    example.request_id = request.id;
+    example.name       = "pong";
+    example.status     = 200;
+    example.headers    = "[]";
+    db_->save_request_example (example);
+
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const auto mock = post_to_engine (port, "/mock/start",
+    { { "collectionId", collection.id }, { "latencyMs", HELD_DELAY_MS } });
+    ASSERT_TRUE (mock.is_object ());
+    const int mock_port = mock.value ("port", 0);
+
+    vayu::tests::HeldRequest held (mock_port, vayu::tests::preflight_opener ("/ping"),
+    vayu::tests::closing_request ("GET", "/ping"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the mock never answered the preflight";
+
+    expect_stop_ends_the_held_handler (server, mock_port);
+    EXPECT_EQ (held_status_once_ended (held), 200);
+}
+
+TEST_F (ServerBindTest, StopWakesAnInboxCaptureInsideItsCannedDelay) {
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const auto inbox = post_to_engine (port, "/inbox/start",
+    { { "port", 0 }, { "response", { { "status", 202 }, { "delayMs", HELD_DELAY_MS } } } });
+    ASSERT_TRUE (inbox.is_object ());
+    const int inbox_port = inbox.value ("port", 0);
+
+    vayu::tests::HeldRequest held (inbox_port, vayu::tests::preflight_opener ("/hook"),
+    vayu::tests::closing_request ("POST", "/hook", "order=7"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the inbox never answered the preflight";
+
+    expect_stop_ends_the_held_handler (server, inbox_port);
+    EXPECT_EQ (held_status_once_ended (held), 202);
+}
+
+TEST_F (ServerBindTest, StopWakesAMockIssuerInSlowMode) {
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const auto issuer = post_to_engine (port, "/mock-issuer/start",
+    { { "failureMode", "slow" }, { "slowMs", HELD_DELAY_MS } });
+    ASSERT_TRUE (issuer.is_object ());
+    const int issuer_port = port_of (issuer.value ("issuerUrl", ""));
+
+    // `/authorize` is not slowed, so it opens the connection.
+    vayu::tests::HeldRequest held (issuer_port,
+    vayu::tests::opener_request (
+    "GET", "/authorize?client_id=cid&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb"),
+    vayu::tests::closing_request ("POST", "/token", "grant_type=client_credentials&client_id=cid"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the issuer never answered /authorize";
+
+    expect_stop_ends_the_held_handler (server, issuer_port);
+    EXPECT_EQ (held_status_once_ended (held), 200);
+}
+
+// The callback is held inside its token exchange, a libcurl transfer, which
+// `daemon.cpp`'s `curl_global_cleanup` right after `stop()` would otherwise
+// tear down beneath it. The cancelled exchange still settles the attempt, so
+// the callback's tab is told it failed.
+TEST_F (ServerBindTest, StopCancelsAnOAuthCallbackHeldAtTheTokenEndpoint) {
+    vayu::tests::MockTokenServer idp;
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+    const nlohmann::json config = { { "grantType", "authorization_code" },
+        { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", idp.url ("/token-hang") }, { "clientId", "cid" } };
+    const auto attempt = post_to_engine (port, "/oauth2/authorize/start",
+    { { "config", config }, { "mode", "loopback" } });
+    ASSERT_TRUE (attempt.is_object ());
+    const std::string authorize_url = attempt.value ("authorizeUrl", "");
+    const auto state_at             = authorize_url.find ("state=") + 6;
+    const std::string state =
+    authorize_url.substr (state_at, authorize_url.find ('&', state_at) - state_at);
+    const std::string redirect_uri = attempt.value ("redirectUri", "");
+    const int callback_port =
+    port_of (redirect_uri.substr (0, redirect_uri.rfind ('/')));
+
+    auto callback = std::async (std::launch::async, [callback_port, state] () {
+        httplib::Client client ("127.0.0.1", callback_port);
+        client.set_read_timeout (40, 0);
+        const auto response = client.Get ("/callback?code=AUTHCODE&state=" + state);
+        return response ? response->body : httplib::to_string (response.error ());
+    });
+    ASSERT_TRUE (vayu::tests::wait_until ([&idp] { return idp.hits () > 0; }))
+    << "the callback never reached the token endpoint";
+
+    expect_stop_ends_the_held_handler (server, callback_port);
+    const std::string page = callback.get ();
+    EXPECT_NE (page.find ("Token exchange failed"), std::string::npos) << page;
 }
 
 #if defined(__linux__)

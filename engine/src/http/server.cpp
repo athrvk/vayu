@@ -216,13 +216,19 @@ void Server::stop () {
     is_running_ = false;
 
     // After the listener is down, because "the server has stopped" must mean
-    // no engine work is still in flight (#646). A stream consumer is a worker
-    // like a run worker: it holds `db_`, reads `cookie_jar_` and is inside a
-    // curl transfer. `daemon.cpp` runs `curl_global_cleanup` between this call
-    // and `~Server`, so a stream joined only by the member destructor would
-    // still be transferring while curl's global state was torn down underneath
-    // it - the #125 defect, in the one worker RunManager does not own.
-    // Draining an idle manager is immediate.
+    // no engine work is still in flight (#646), and with no route left to
+    // start or stop anything they own. Each listener manager's handlers write
+    // through `db_`, and an OAuth callback is inside a curl transfer; a stream
+    // consumer holds `db_`, reads `cookie_jar_` and is inside one too.
+    // `daemon.cpp` runs `curl_global_cleanup` between this call and `~Server`,
+    // so a worker joined only by a member destructor would still be
+    // transferring while curl's global state was torn down underneath it - the
+    // #125 defect. Each shutdown signals its whole registry before joining any
+    // of it (#3345), and draining an idle manager is immediate.
+    mock_server_manager_.shutdown ();
+    inbox_manager_.shutdown ();
+    mock_issuer_manager_.shutdown ();
+    oauth_authorize_manager_.shutdown ();
     sse_manager_.shutdown ();
 }
 

@@ -949,7 +949,9 @@ The response is sent **before** shutdown begins, so the client always receives
 the `200`. The handler sets the body and then calls the shutdown callback
 inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
-The daemon then stops the server, stops and joins active runs, refreshes the
+The daemon then stops the server (and with it every mock server, inbox, mock
+issuer and OAuth callback listener, a paced answer going out at once and a
+callback's token exchange cancelled), stops and joins active runs, refreshes the
 recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
 what is left of the app's 5 s window; on a timeout the previous backup stands,
 see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the

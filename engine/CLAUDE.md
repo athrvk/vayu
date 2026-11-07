@@ -247,8 +247,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   drain) names the healthy and the broken reading in its comment and sits
   between them, with the mutation check that proves the broken side. The root
   `CLAUDE.md` testing section has the full rule set. `sleep_for` remains right
-  in a mock handler that paces its own answer, and as the poll interval
-  inside a deadline loop.
+  in a test mock's handler that paces its own answer (an engine listener's
+  waits on its `StopSignal` instead, below), and as the poll interval inside a
+  deadline loop.
 - **A fixture that opens a scratch `Database` cleans up with
   `vayu::tests::remove_database_files`** (`engine/tests/temp_database.hpp`),
   never a hand-written suffix list: an opened database writes six files (#413).
@@ -755,7 +756,13 @@ logged as a warning: it means a client skipped composition.
   it writes through goes away** (#646): `Server::stop()` calls
   `SseStreamManager::shutdown()`, which signals every stream and *joins* its
   worker, because `daemon.cpp` runs `curl_global_cleanup` between that call and
-  `~Server`. A fixture holding a manager beside a `Database` it resets owes the
+  `~Server`. The four listener managers are shut down the same way, just before
+  it (#3345): `ListenerRegistry::shutdown` requests every entry's
+  `StopSignal` (`utils/stop_signal.hpp`) before joining any, so a handler that
+  paces its answer waits on `stop_signal.wait_for`, never `sleep_for`, and an
+  OAuth callback's token exchange takes `stop_signal.flag ()` as its cancel;
+  a handler woken early answers as it would have, without the rest of its
+  delay. A fixture holding a manager beside a `Database` it resets owes the
   same order (keep the manager in a `unique_ptr` reset first). The worker
   closes the context only after the completion callback has written the run
   row, on every path including a throw (#3239): `consume_sse_stream` records
@@ -769,7 +776,9 @@ logged as a warning: it means a client skipped composition.
   parameter, and an SSE relay loop ends on it. `Server::stop()` sets it, then
   joins every handler and never detaches one, because the daemon destroys
   curl's global state and the database right after; a send that does not carry
-  it holds shutdown open for its whole timeout.
+  it holds shutdown open for its whole timeout. A listener a manager owns is
+  not a management-API handler: what ends its handler's transfer or wait is
+  its entry's `StopSignal`, above.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,
