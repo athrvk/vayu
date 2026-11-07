@@ -38,6 +38,7 @@ import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui
 import { useLayoutStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
 import { useCommandContext } from "@/hooks/useCommandContext";
+import { isModalOpen } from "@/lib/modal";
 import RunCollectionDialog from "@/modules/collections/RunCollectionDialog";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { PaletteResults } from "./PaletteResults";
@@ -113,6 +114,15 @@ export function CommandPalette() {
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (!matchesChord(e, PALETTE_CHORD)) return;
+			/*
+			 * Not over another dialog (#3320): the palette would stack on it, and
+			 * running a command from there acts on the page the dialog belongs to.
+			 * Guarded on the palette being closed because the palette is itself a
+			 * dialog - while it is open `isModalOpen()` is true, and the chord must
+			 * still toggle it shut. Before the claim below, so the key stays the
+			 * dialog's own.
+			 */
+			if (!useLayoutStore.getState().paletteOpen && isModalOpen()) return;
 			e.preventDefault();
 			/*
 			 * And stopped here, not merely prevented. `preventDefault` cancels the
