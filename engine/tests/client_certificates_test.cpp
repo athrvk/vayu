@@ -1050,9 +1050,13 @@ TEST_F (ClientCertificateDbTest, ARowWhoseFileWentMissingIsListedUnusableWithThe
                .first,
     200);
     {
-        vayu::db::ClientCertificate broken =
-        *db_->client_certificate_for_target ("api.example.com", std::nullopt, "");
-        broken.cert_path = "/nope/gone.pem";
+        auto stored =
+        db_->client_certificate_for_target ("api.example.com", std::nullopt, "");
+        if (!stored) {
+            FAIL () << "the row just created is missing";
+        }
+        vayu::db::ClientCertificate broken = *stored;
+        broken.cert_path                   = "/nope/gone.pem";
         db_->save_client_certificate (broken);
     }
 
