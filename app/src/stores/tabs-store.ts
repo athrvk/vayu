@@ -334,6 +334,33 @@ function forgetLocations(
 }
 
 /**
+ * Drops the dirty tabs from a bulk close while the engine cannot take a save
+ * (#3324), and says once how many stayed.
+ *
+ * `closeTab` refuses a dirty tab for the same reason (#1489): the unmount flush
+ * would fail into a pane that no longer exists. A bulk close that skipped the
+ * check would discard exactly those edits, so the clean tabs close and the
+ * dirty ones are held back. `closeSavedTabs` needs none of this - it never
+ * selects a dirty tab.
+ */
+function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<string>) {
+	if (useEngineStore.getState().engineStatus === "connected") return closing;
+	const contexts = useSaveStore.getState().contexts;
+	const kept = new Set(
+		openTabs.filter((t) => closing.has(t.id) && isTabDirty(t, contexts)).map((t) => t.id)
+	);
+	if (kept.size === 0) return closing;
+	const noun = kept.size === 1 ? "tab" : "tabs";
+	useToastStore
+		.getState()
+		.showToast(
+			`Not saved - Vayu's engine is unreachable; kept ${kept.size} unsaved ${noun} open`,
+			"error"
+		);
+	return new Set([...closing].filter((id) => !kept.has(id)));
+}
+
+/**
  * Remove every tab the id set names, and answer where that leaves the user.
  *
  * One function behind every close in this store, because "which tab takes the
@@ -744,7 +771,10 @@ export const useTabsStore = create<TabsState>()(
 			closeOtherTabs: (tabId) => {
 				const { openTabs } = get();
 				if (!openTabs.some((t) => t.id === tabId)) return;
-				const closing = new Set(openTabs.filter((t) => t.id !== tabId).map((t) => t.id));
+				const closing = withoutUnsavableTabs(
+					openTabs,
+					new Set(openTabs.filter((t) => t.id !== tabId).map((t) => t.id))
+				);
 				const next = closeTabs(get(), closing);
 				if (next) set(next);
 			},
@@ -753,7 +783,10 @@ export const useTabsStore = create<TabsState>()(
 				const { openTabs } = get();
 				const index = openTabs.findIndex((t) => t.id === tabId);
 				if (index === -1) return;
-				const closing = new Set(openTabs.slice(index + 1).map((t) => t.id));
+				const closing = withoutUnsavableTabs(
+					openTabs,
+					new Set(openTabs.slice(index + 1).map((t) => t.id))
+				);
 				const next = closeTabs(get(), closing);
 				if (next) set(next);
 			},
