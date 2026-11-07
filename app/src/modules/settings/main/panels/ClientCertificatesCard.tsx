@@ -74,7 +74,7 @@ import { EmptyState } from "@/components/shared";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { useToastStore } from "@/stores";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
-import type { ClientCertificate, ClientCertificateFormat } from "@/types";
+import type { ClientCertificateFormat, ClientCertificateListEntry } from "@/types";
 import { fileBaseName } from "@/lib/file-path";
 import { appSetting } from "../app-settings";
 
@@ -83,7 +83,7 @@ import { appSetting } from "../app-settings";
 const CLIENT_CERTIFICATES = appSetting("clientCertificates");
 
 /** What an entry is called: the same `host` / `host:port` the engine traces. */
-function targetLabel(certificate: ClientCertificate): string {
+function targetLabel(certificate: ClientCertificateListEntry): string {
 	return certificate.port === null ? certificate.host : `${certificate.host}:${certificate.port}`;
 }
 
@@ -234,7 +234,7 @@ export function ClientCertificatesCard() {
 
 	const [draft, setDraft] = useState(EMPTY_DRAFT);
 	const [adding, setAdding] = useState(false);
-	const [confirming, setConfirming] = useState<ClientCertificate | null>(null);
+	const [confirming, setConfirming] = useState<ClientCertificateListEntry | null>(null);
 
 	const closeForm = () => {
 		setAdding(false);
@@ -275,7 +275,7 @@ export function ClientCertificatesCard() {
 		}
 	};
 
-	const remove = async (certificate: ClientCertificate) => {
+	const remove = async (certificate: ClientCertificateListEntry) => {
 		setConfirming(null);
 		try {
 			await deleteCertificate.mutateAsync(certificate.id);

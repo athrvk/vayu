@@ -29,7 +29,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-import type { ClientCertificate } from "@/types";
+import type { ClientCertificateListEntry } from "@/types";
 import { ClientCertificatesCard } from "./ClientCertificatesCard";
 
 /**
@@ -56,7 +56,7 @@ const showToast = vi.fn();
 const ENGINE_TARGET_TAKEN =
 	"Client certificate 'cert_1' cannot be restored - 'api.example.com:8443' is already registered to client certificate 'cert_9', so delete that entry first";
 
-const certificates: ClientCertificate[] = [
+const certificates: ClientCertificateListEntry[] = [
 	{
 		id: "cert_1",
 		host: "api.example.com",
@@ -83,7 +83,7 @@ const certificates: ClientCertificate[] = [
 	},
 ];
 
-let queryResult: { data?: ClientCertificate[]; isError: boolean; isLoading?: boolean } = {
+let queryResult: { data?: ClientCertificateListEntry[]; isError: boolean; isLoading?: boolean } = {
 	data: certificates,
 	isError: false,
 };

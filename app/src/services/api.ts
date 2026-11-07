@@ -65,6 +65,7 @@ import type {
 	GetCookiesResponse,
 	ClearCookiesResponse,
 	ClientCertificate,
+	ClientCertificateListEntry,
 	ClientCertificateInput,
 	FileRoot,
 	ConnectionTestResult,
@@ -643,8 +644,10 @@ export const apiService = {
 	},
 
 	// Client-certificate registry (issue #707)
-	async getClientCertificates(): Promise<ClientCertificate[]> {
-		return await httpClient.get<ClientCertificate[]>(API_ENDPOINTS.CLIENT_CERTIFICATES);
+	async getClientCertificates(): Promise<ClientCertificateListEntry[]> {
+		return await httpClient.get<ClientCertificateListEntry[]>(
+			API_ENDPOINTS.CLIENT_CERTIFICATES
+		);
 	},
 
 	async createClientCertificate(input: ClientCertificateInput): Promise<ClientCertificate> {

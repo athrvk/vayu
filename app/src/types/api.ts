@@ -1193,11 +1193,19 @@ export interface ClientCertificate {
 	hasPassphrase: boolean;
 	createdAt: number;
 	updatedAt: number;
+}
+
+/**
+ * A row as `GET /client-certificates` answers it: the stored entry plus
+ * whether the engine would present it, judged against the files as they are
+ * now (issue #3260). Only the list judges - a create or update refuses an
+ * unusable row and answers a bare `ClientCertificate` - so a result of either
+ * must never be patched into a list cache as if it said `usable`.
+ */
+export interface ClientCertificateListEntry extends ClientCertificate {
 	/**
-	 * Whether the engine would present this entry, judged against the files as
-	 * they are now (issue #3260). `false` for a row whose file moved or whose
-	 * format was edited around the routes: the engine leaves it out of every
-	 * send. Carried by the list only - a create or update refuses such a row.
+	 * `false` for a row whose file moved or whose format was edited around the
+	 * routes: the engine leaves it out of every send.
 	 */
 	usable: boolean;
 	/** Why the entry is not presented; present only when `usable` is `false`. */
