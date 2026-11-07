@@ -1059,8 +1059,7 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
         if (!format) {
             vayu::utils::log_error ("client",
             "Client certificate '" + row.id + "' for host '" + row.host +
-            "' declares an unknown format '" + row.cert_format +
-            "'; requests to that host will be sent without it");
+            "' declares an unknown format '" + row.cert_format + "'; this entry is not used");
             continue;
         }
         if (const auto rejection = client_cert_rejection (
@@ -1071,8 +1070,8 @@ TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
             // failure against the endpoint, which is precisely the "the API is
             // down" misdiagnosis this epic exists to end.
             vayu::utils::log_error ("client",
-            "Client certificate '" + row.id + "' for host '" + row.host + "' is unusable (" +
-            *rejection + "); requests to that host will be sent without it");
+            "Client certificate '" + row.id + "' for host '" + row.host +
+            "' is unusable (" + *rejection + "); this entry is not used");
             continue;
         }
         ClientCertRule rule;
