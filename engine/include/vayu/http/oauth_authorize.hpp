@@ -8,11 +8,9 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/listener_registry.hpp"
 
 #include <atomic>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -49,13 +47,14 @@ struct AuthorizeStatus {
  * the engine. In embedded mode the app captures the redirect URL and hands it
  * back via complete(); the engine still owns state validation and the exchange.
  *
- * Thread-safe. The destructor stops and joins every live listener, so a
- * Database passed to start() must outlive the manager.
+ * Thread-safe. The destructor shuts down (see `shutdown`), so a Database
+ * passed to start() must outlive the manager.
  */
 class OAuth2AuthorizeManager {
     public:
     // Constructor and destructor are defined out-of-line (in the .cpp) because
-    // the map holds unique_ptr<Attempt> and Attempt is an incomplete type here.
+    // the registry holds unique_ptr<Attempt> and Attempt is an incomplete type
+    // here.
     OAuth2AuthorizeManager ();
     ~OAuth2AuthorizeManager ();
 
@@ -78,13 +77,18 @@ class OAuth2AuthorizeManager {
     AuthorizeStatus status (const std::string& attempt_id);
     void cancel (const std::string& attempt_id);
 
+    /// Stop every loopback listener, drop every attempt, and refuse every
+    /// later start with a 503. Terminal and idempotent; the destructor runs it
+    /// too.
+    void shutdown ();
+
     private:
     struct Attempt;
-    std::mutex mutex_;
-    std::map<std::string, std::unique_ptr<Attempt>> attempts_;
+    using Attempts = ListenerRegistry<Attempt>;
+    Attempts attempts_;
 
-    void teardown_locked (Attempt& attempt);
-    void reap_timed_out_locked ();
+    /// Called under the registry's lock with its entries.
+    static void reap_timed_out_locked (Attempts::Entries& attempts);
 };
 
 /**

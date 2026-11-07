@@ -28,6 +28,7 @@
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
+#include "vayu/utils/stop_signal.hpp"
 
 #include <httplib.h>
 
@@ -641,14 +642,17 @@ struct InboxManager::Inbox {
     /// the capture handler reads it with no lock.
     routes::CorsPolicy cors;
     /// One live SSE stream per inbox; see InboxManager::try_claim_live. Guarded
-    /// by InboxManager::mutex_ - every accessor locks it - which is the
-    /// externally-locked-by-its-owner contract LiveClaimSlot is written to.
+    /// by the manager's registry lock - every accessor runs under it - which is
+    /// the externally-locked-by-its-owner contract LiveClaimSlot is written to.
     LiveClaimSlot live_claim;
 
     /// Guards `response` only. The capture handler takes this and never the
-    /// manager's lock, so a teardown holding the manager lock can always join.
+    /// registry's lock, so a teardown holding that lock can always join.
     std::mutex response_mutex;
     InboxCannedResponse response;
+
+    /// Requested when the inbox stops, before its listener is joined.
+    vayu::utils::StopSignal stop_signal;
 
     /// Declared last so it is destroyed first: the capture handler reads the
     /// limits and the canned response above it while the accept loop is alive.
@@ -680,24 +684,24 @@ InboxManager::InboxManager (LocalAddressSource local_addresses)
     }
 }
 
-InboxManager::~InboxManager () {
-    std::lock_guard<std::mutex> lock (mutex_);
-    for (auto& [id, inbox] : inboxes_) {
-        teardown_locked (*inbox);
-    }
-    inboxes_.clear ();
-}
+// A capture in its configured delay is still holding a listener thread, so
+// every join of one (`stop`, `remove`, the registry's shutdown) waits up to
+// inbox::MAX_RESPONSE_DELAY_MS - which is why that bound exists.
+InboxManager::~InboxManager () = default;
 
-void InboxManager::teardown_locked (Inbox& inbox) {
-    // A capture in its configured delay is still holding a listener thread, so
-    // the join inside stop() waits up to inbox::MAX_RESPONSE_DELAY_MS - which
-    // is why that bound exists.
-    inbox.listener.stop ();
+void InboxManager::shutdown () {
+    inboxes_.shutdown ();
 }
 
 InboxManager::StartResult
 InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     StartResult out;
+
+    auto slot = inboxes_.reserve ();
+    if (!slot) {
+        refuse_shut_down (out);
+        return out;
+    }
 
     auto inbox      = std::make_unique<Inbox> ();
     inbox->limits   = read_inbox_limits (db);
@@ -819,15 +823,17 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     }
     inbox->port = started.port;
 
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        {
-            // The listener is already accepting, so a capture handler may be
-            // reading `response` while this snapshot is taken.
-            std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
-            out.info = inbox->info_locked (local_addresses_);
-        }
-        inboxes_[inbox->id] = std::move (inbox);
+    // Under the registry's lock for `local_addresses_`, and under the response
+    // lock because the listener is already accepting, so a capture handler may
+    // be reading `response` while this snapshot is taken.
+    out.info = inboxes_.with_entries ([&] (const auto&) {
+        std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
+        return inbox->info_locked (local_addresses_);
+    });
+    if (!inboxes_.commit (std::move (*slot), out.info.inbox_id, std::move (inbox))) {
+        out = StartResult{};
+        refuse_shut_down (out);
+        return out;
     }
     out.ok          = true;
     out.http_status = 200;
@@ -836,88 +842,92 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
     return out;
 }
 
+// `stop` and `remove` retire the listener under the registry's lock rather
+// than outside it, as `ListenerRegistry::remove` does: `stop` keeps the record,
+// and `remove` must keep it until the captures are cleared, so neither can move
+// the entry out of the lock that keeps a concurrent `remove` from destroying it.
 bool InboxManager::stop (const std::string& inbox_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return false;
+    const bool found = inboxes_.with_entries ([&] (const auto& entries) {
+        const auto it = entries.find (inbox_id);
+        if (it == entries.end ()) {
+            return false;
+        }
+        retire_listener (*it->second);
+        return true;
+    });
+    if (found) {
+        vayu::utils::log_info ("inbox", "Inbox stopped: " + inbox_id);
     }
-    teardown_locked (*it->second);
-    vayu::utils::log_info ("inbox", "Inbox stopped: " + inbox_id);
-    return true;
+    return found;
 }
 
 std::optional<int64_t>
 InboxManager::remove (vayu::db::Database& db, const std::string& inbox_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return std::nullopt;
-    }
-    // Stop first: the join inside it is what makes "no capture can still be
-    // landing" true, so the clear below cannot race a webhook into rows that
-    // outlive the record. See the header for why the order is load-bearing.
-    teardown_locked (*it->second);
-    const int64_t deleted = db.clear_inbox_requests (inbox_id);
-    inboxes_.erase (it);
-    vayu::utils::log_info ("inbox",
-    "Inbox deleted: " + inbox_id + " (" + std::to_string (deleted) + " captures)");
-    return deleted;
+    return inboxes_.with_entries ([&] (auto& entries) -> std::optional<int64_t> {
+        const auto it = entries.find (inbox_id);
+        if (it == entries.end ()) {
+            return std::nullopt;
+        }
+        // Stop first: the join inside it is what makes "no capture can still
+        // be landing" true, so the clear below cannot race a webhook into rows
+        // that outlive the record. See the header for why the order is
+        // load-bearing.
+        retire_listener (*it->second);
+        const int64_t deleted = db.clear_inbox_requests (inbox_id);
+        entries.erase (it);
+        vayu::utils::log_info ("inbox",
+        "Inbox deleted: " + inbox_id + " (" + std::to_string (deleted) + " captures)");
+        return deleted;
+    });
 }
 
 std::optional<InboxInfo> InboxManager::get (const std::string& inbox_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return std::nullopt;
-    }
-    std::lock_guard<std::mutex> response_lock (it->second->response_mutex);
-    return it->second->info_locked (local_addresses_);
+    return inboxes_.with_entry (inbox_id, [this] (Inbox& inbox) {
+        std::lock_guard<std::mutex> response_lock (inbox.response_mutex);
+        return inbox.info_locked (local_addresses_);
+    });
 }
 
 std::vector<InboxInfo> InboxManager::list () {
-    std::lock_guard<std::mutex> lock (mutex_);
-    std::vector<InboxInfo> out;
-    out.reserve (inboxes_.size ());
-    for (const auto& [id, inbox] : inboxes_) {
-        std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
-        out.push_back (inbox->info_locked (local_addresses_));
-    }
-    return out;
+    return inboxes_.with_entries ([this] (const auto& entries) {
+        std::vector<InboxInfo> out;
+        out.reserve (entries.size ());
+        for (const auto& [id, inbox] : entries) {
+            std::lock_guard<std::mutex> response_lock (inbox->response_mutex);
+            out.push_back (inbox->info_locked (local_addresses_));
+        }
+        return out;
+    });
 }
 
 std::optional<InboxLimits> InboxManager::limits (const std::string& inbox_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return std::nullopt;
-    }
     // Const since start(); no per-inbox lock needed to read it.
-    return it->second->limits;
+    return inboxes_.with_entry (
+    inbox_id, [] (const Inbox& inbox) { return inbox.limits; });
 }
 
 InboxManager::UpdateResponseResult InboxManager::update_response (const std::string& inbox_id,
 const ResponseMergeFn& merge,
 const std::function<void ()>& before_write) {
-    UpdateResponseResult out;
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
+    return inboxes_
+    .with_entry (inbox_id,
+    [&] (Inbox& inbox) {
+        UpdateResponseResult out;
+        out.found = true;
+        std::lock_guard<std::mutex> response_lock (inbox.response_mutex);
+        auto merged = merge (inbox.response);
+        if (!merged) {
+            out.error = merged.error ();
+            return out;
+        }
+        if (before_write) {
+            before_write ();
+        }
+        inbox.response = std::move (*merged);
+        out.info       = inbox.info_locked (local_addresses_);
         return out;
-    }
-    out.found = true;
-    std::lock_guard<std::mutex> response_lock (it->second->response_mutex);
-    auto merged = merge (it->second->response);
-    if (!merged) {
-        out.error = merged.error ();
-        return out;
-    }
-    if (before_write) {
-        before_write ();
-    }
-    it->second->response = std::move (*merged);
-    out.info             = it->second->info_locked (local_addresses_);
-    return out;
+    })
+    .value_or (UpdateResponseResult{});
 }
 
 namespace {
@@ -934,29 +944,27 @@ std::chrono::milliseconds live_claim_stale_after (const InboxLimits& limits) {
 } // namespace
 
 std::optional<LiveClaim> InboxManager::try_claim_live (const std::string& inbox_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return std::nullopt;
-    }
-    Inbox& inbox = *it->second;
-    return inbox.live_claim.try_claim (live_claim_stale_after (inbox.limits));
+    return inboxes_
+    .with_entry (inbox_id,
+    [] (Inbox& inbox) {
+        return inbox.live_claim.try_claim (live_claim_stale_after (inbox.limits));
+    })
+    .value_or (std::nullopt);
 }
 
 bool InboxManager::note_live_write (const std::string& inbox_id, LiveClaim claim) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = inboxes_.find (inbox_id);
-    if (it == inboxes_.end ()) {
-        return false;
-    }
-    return it->second->live_claim.note_write (claim);
+    return inboxes_
+    .with_entry (inbox_id,
+    [claim] (Inbox& inbox) { return inbox.live_claim.note_write (claim); })
+    .value_or (false);
 }
 
 void InboxManager::release_live (const std::string& inbox_id, LiveClaim claim) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    if (auto it = inboxes_.find (inbox_id); it != inboxes_.end ()) {
-        it->second->live_claim.release (claim);
-    }
+    inboxes_.with_entries ([&] (const auto& entries) {
+        if (const auto it = entries.find (inbox_id); it != entries.end ()) {
+            it->second->live_claim.release (claim);
+        }
+    });
 }
 
 } // namespace vayu::http

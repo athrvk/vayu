@@ -21,11 +21,13 @@
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
+#include "vayu/utils/stop_signal.hpp"
 
 #include <httplib.h>
 
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -225,9 +227,10 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string cache_key;
 
     /// Take the one right to settle a pending attempt (#2369). The callback
-    /// handler writes `error` and `cache_key` without `mutex_`, which it cannot
-    /// take: teardown holds it while joining the handler's thread. The claim is
-    /// what keeps a late callback from rewriting a settled attempt's fields.
+    /// handler writes `error` and `cache_key` without the registry's lock,
+    /// which it cannot take: a teardown under `status` or the reaper holds it
+    /// while joining the handler's thread. The claim is what keeps a late
+    /// callback from rewriting a settled attempt's fields.
     bool claim () {
         int expected = kPending;
         return result_state.compare_exchange_strong (expected, kSettling);
@@ -241,6 +244,9 @@ struct OAuth2AuthorizeManager::Attempt {
         result_state.store (settled_state);
     }
 
+    /// Requested when the attempt's listener stops, before it is joined.
+    vayu::utils::StopSignal stop_signal;
+
     /// Loopback mode only - an embedded-mode attempt never starts it, and
     /// stopping an unstarted listener is a no-op. Declared last so it is
     /// destroyed first: the callback handler reads every field above it.
@@ -249,21 +255,19 @@ struct OAuth2AuthorizeManager::Attempt {
 
 OAuth2AuthorizeManager::OAuth2AuthorizeManager () = default;
 
-OAuth2AuthorizeManager::~OAuth2AuthorizeManager () {
-    std::lock_guard<std::mutex> lock (mutex_);
-    for (auto& [id, attempt] : attempts_) {
-        teardown_locked (*attempt);
-    }
-    attempts_.clear ();
+OAuth2AuthorizeManager::~OAuth2AuthorizeManager () = default;
+
+void OAuth2AuthorizeManager::shutdown () {
+    attempts_.shutdown ();
 }
 
-void OAuth2AuthorizeManager::teardown_locked (Attempt& attempt) {
-    attempt.listener.stop ();
-}
-
-void OAuth2AuthorizeManager::reap_timed_out_locked () {
+// The reaper and `status` retire an attempt's listener under the registry's
+// lock because they keep its record for the polls that follow. Each does so
+// only once the attempt is settled or claimed by itself, so no callback of it
+// is still in a token exchange for the join to wait on.
+void OAuth2AuthorizeManager::reap_timed_out_locked (Attempts::Entries& attempts) {
     const int64_t now = now_ms ();
-    for (auto it = attempts_.begin (); it != attempts_.end ();) {
+    for (auto it = attempts.begin (); it != attempts.end ();) {
         Attempt& attempt = *it->second;
         const int state  = attempt.result_state.load ();
         if (state == kPending && now > attempt.created_at + kAttemptTtlMs) {
@@ -271,14 +275,14 @@ void OAuth2AuthorizeManager::reap_timed_out_locked () {
             // callback claimed it since the load above.
             if (attempt.claim ()) {
                 attempt.publish (kFailed, "Authorization timed out", {});
-                teardown_locked (attempt);
+                retire_listener (attempt);
             }
             ++it;
         } else if (is_settled (state) && now > attempt.created_at + (2 * kAttemptTtlMs)) {
             // Terminal and well past the polling window → drop the record so the
             // map does not grow unbounded on a long-lived daemon.
-            teardown_locked (attempt);
-            it = attempts_.erase (it);
+            retire_listener (attempt);
+            it = attempts.erase (it);
         } else {
             ++it;
         }
@@ -295,6 +299,12 @@ const std::string& mode) {
         out.ok            = false;
         out.error_code    = "oauth2_invalid_config";
         out.error_message = "authorizationUrl and clientId are required";
+        return out;
+    }
+
+    auto slot = attempts_.reserve ();
+    if (!slot) {
+        refuse_shut_down (out);
         return out;
     }
 
@@ -378,10 +388,11 @@ const std::string& mode) {
     out.authorize_url = build_authorize_url (
     config, attempt->state, challenge, attempt->redirect_uri, attempt->pkce);
 
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        reap_timed_out_locked ();
-        attempts_[attempt_id] = std::move (attempt);
+    attempts_.with_entries (reap_timed_out_locked);
+    if (!attempts_.commit (std::move (*slot), attempt_id, std::move (attempt))) {
+        out = AuthorizeStart{};
+        refuse_shut_down (out);
+        return out;
     }
     vayu::utils::log_info ("oauth", "OAuth2 authorize started (" + mode + "): " + attempt_id);
     return out;
@@ -396,29 +407,31 @@ const std::atomic<bool>* cancel) {
     // other attempts (the manager is shared across all in-flight authorizations).
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        auto it = attempts_.find (attempt_id);
-        if (it == attempts_.end ()) {
-            return { "not_found", "", "" };
-        }
-        Attempt& attempt = *it->second;
+    const auto answered =
+    attempts_
+    .with_entry (attempt_id,
+    [&] (Attempt& attempt) -> std::optional<AuthorizeStatus> {
         if (const int s = attempt.result_state.load (); s != kPending) {
             // Settled (e.g. a duplicate complete) - return as-is; a claim held
             // by a loopback callback mid-exchange is still pending.
             if (!is_settled (s)) {
-                return { "pending", "", "" };
+                return AuthorizeStatus{ "pending", "", "" };
             }
-            return { s == kCompleted ? "completed" : "failed", attempt.error,
-                attempt.cache_key };
+            return AuthorizeStatus{ s == kCompleted ? "completed" : "failed",
+                attempt.error, attempt.cache_key };
         }
         if (!attempt.claim ()) {
-            return { "pending", "", "" };
+            return AuthorizeStatus{ "pending", "", "" };
         }
         state         = attempt.state;
         code_verifier = attempt.code_verifier;
         redirect_uri  = attempt.redirect_uri;
         config        = attempt.config;
+        return std::nullopt;
+    })
+    .value_or (AuthorizeStatus{ "not_found", "", "" });
+    if (answered) {
+        return *answered;
     }
 
     const auto qpos = callback_url.find ('?');
@@ -448,41 +461,38 @@ const std::atomic<bool>* cancel) {
 
     // Re-acquire the lock to store the outcome; the attempt may have been
     // cancelled while the exchange was in flight.
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto it = attempts_.find (attempt_id);
-    if (it == attempts_.end ()) {
-        return { "not_found", "", "" };
-    }
-    Attempt& attempt = *it->second;
-    attempt.publish (result_state, error, cache_key);
-    return { result_state == kCompleted ? "completed" : "failed", attempt.error,
-        attempt.cache_key };
+    return attempts_
+    .with_entry (attempt_id,
+    [&] (Attempt& attempt) {
+        attempt.publish (result_state, error, cache_key);
+        return AuthorizeStatus{ result_state == kCompleted ? "completed" : "failed",
+            attempt.error, attempt.cache_key };
+    })
+    .value_or (AuthorizeStatus{ "not_found", "", "" });
 }
 
 AuthorizeStatus OAuth2AuthorizeManager::status (const std::string& attempt_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    reap_timed_out_locked ();
-    auto it = attempts_.find (attempt_id);
-    if (it == attempts_.end ()) {
-        return { "not_found", "", "" };
-    }
-    Attempt& attempt = *it->second;
-    const int s      = attempt.result_state.load ();
-    if (!is_settled (s)) {
-        return { "pending", "", "" };
-    }
-    // Terminal: free the listener but keep the (small) result record so repeat
-    // polls are idempotent.
-    teardown_locked (attempt);
-    return { s == 1 ? "completed" : "failed", attempt.error, attempt.cache_key };
+    return attempts_.with_entries ([&] (Attempts::Entries& attempts) -> AuthorizeStatus {
+        reap_timed_out_locked (attempts);
+        const auto it = attempts.find (attempt_id);
+        if (it == attempts.end ()) {
+            return { "not_found", "", "" };
+        }
+        Attempt& attempt = *it->second;
+        const int s      = attempt.result_state.load ();
+        if (!is_settled (s)) {
+            return { "pending", "", "" };
+        }
+        // Terminal: free the listener but keep the (small) result record so
+        // repeat polls are idempotent.
+        retire_listener (attempt);
+        return { s == kCompleted ? "completed" : "failed", attempt.error,
+            attempt.cache_key };
+    });
 }
 
 void OAuth2AuthorizeManager::cancel (const std::string& attempt_id) {
-    std::lock_guard<std::mutex> lock (mutex_);
-    if (auto it = attempts_.find (attempt_id); it != attempts_.end ()) {
-        teardown_locked (*it->second);
-        attempts_.erase (it);
-    }
+    attempts_.remove (attempt_id);
 }
 
 } // namespace vayu::http

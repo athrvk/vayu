@@ -258,9 +258,16 @@ route lambdas holding references to a manager are gone before its destructor sto
 listener threads - and the `Database` those threads write to, being external to `Server`, is still
 alive at that point. All four managers run that lifecycle - bind, wait for the accept loop, stop,
 join, release - through one shared `ManagedListener`
-(`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
-one of four copies; what stays per-manager is the route registration, the error each bind failure
-answers with, and the OAuth attempt TTL sweep. Since #1140 a manager may hand it the
+(`engine/include/vayu/http/managed_listener.hpp`), and keep their records in one shared
+`ListenerRegistry` (`engine/include/vayu/http/listener_registry.hpp`, #3345), so a fix to either
+reaches every listener rather than one of four copies. The registry counts starts still in progress
+against a manager's cap under the same lock as the running entries, so simultaneous starts cannot
+overshoot it; it tears an erased entry down outside that lock, so a handler still sleeping holds up
+only the caller that stopped it; and its `shutdown()` is terminal, signalling every entry before it
+joins any. What stays per-manager is the route registration, the error each bind failure answers
+with, the OAuth attempt TTL sweep, and the two records that outlive their listener (a stopped inbox,
+a settled OAuth attempt), whose listener is torn down under the registry's lock because the record
+stays in it. Since #1140 a manager may hand the `ManagedListener` the
 `httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
 every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
 capture, and the other three take the plain server the listener builds for itself. The mock server

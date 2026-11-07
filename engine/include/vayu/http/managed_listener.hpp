@@ -20,9 +20,10 @@ namespace vayu::http {
  * One on-demand listener: an `httplib::Server`, the thread accepting on it, and
  * the start/stop discipline both need to be correct.
  *
- * The engine opens a listener per OAuth callback attempt, per mock issuer and
- * per webhook inbox (see docs/engine/architecture.md#listeners). Each of those
- * managers used to hand-roll the same four steps, and the steps are subtle:
+ * The engine opens a listener per OAuth callback attempt, per mock issuer, per
+ * webhook inbox and per mock server (see docs/engine/architecture.md#listeners).
+ * Each of those managers used to hand-roll the same four steps, and the steps
+ * are subtle:
  *
  * - **Bind before listening.** `bind_to_any_port` / `bind_to_port` report the
  *   failure a `listen()` on a taken port would only ever log, so the caller can
@@ -45,12 +46,12 @@ namespace vayu::http {
  *   response, an issuer's token maps, an attempt's config - must outlive the
  *   thread reading it, so the `ManagedListener` member is declared **last** in
  *   its owner and is therefore destroyed **first**. The same reverse-member-order
- *   rule puts the three managers before `server_` in server.hpp.
+ *   rule puts the four managers before `server_` in server.hpp.
  *
- * Thread-safe against concurrent `stop()`s and `is_listening()` reads only in
- * the sense each manager needs: `start()` and `stop()` are called under the
- * owning manager's lock (or on an object no other thread can reach yet), while
- * `is_listening()` is a plain atomic read.
+ * Not thread-safe against concurrent `start()` / `stop()`: each runs on an
+ * object only one thread can reach, either an entry not yet committed to its
+ * `ListenerRegistry` (listener_registry.hpp), one the registry has moved out,
+ * or one under the registry's lock. `is_listening()` is a plain atomic read.
  */
 class ManagedListener {
     public:

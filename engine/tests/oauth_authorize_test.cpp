@@ -366,6 +366,28 @@ TEST_F (OAuthAuthorizeTest, StatusNotFoundForUnknownAttempt) {
     EXPECT_EQ (mgr.status ("nope").state, "not_found");
 }
 
+TEST_F (OAuthAuthorizeTest, ShutdownStopsEveryAttemptAndRefusesLaterStarts) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    const json config = { { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    const auto start  = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok) << start.error_message;
+
+    mgr.shutdown ();
+    mgr.shutdown ();
+    EXPECT_EQ (mgr.status (start.attempt_id).state, "not_found");
+
+    httplib::Client cli (callback_origin (start));
+    cli.set_connection_timeout (1, 0);
+    EXPECT_EQ (cli.Get ("/callback"), nullptr)
+    << "the callback is still listening";
+
+    const auto refused = mgr.start (*db_, config, "loopback");
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+}
+
 TEST_F (OAuthAuthorizeTest, CancelStopsAttempt) {
     vayu::http::OAuth2AuthorizeManager mgr;
     const json config = { { "authorizationUrl", "https://idp/auth" },

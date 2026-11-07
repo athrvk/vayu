@@ -16,9 +16,11 @@
 #include <httplib.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <latch>
 #include <memory>
 #include <optional>
 #include <set>
@@ -1887,6 +1889,66 @@ TEST_F (MockServerTest, TheServerBudgetIsEnforced) {
     EXPECT_FALSE (refused.ok);
     EXPECT_EQ (refused.http_status, 409);
     EXPECT_EQ (refused.error_code, "mock_limit_reached");
+}
+
+TEST_F (MockServerTest, ConcurrentStartsCannotExceedTheServerBudget) {
+    // Every start is released at once, so they all ask for a slot while none
+    // has finished building its table and binding. The cap used to be checked
+    // under one acquisition of the manager's lock and the mock inserted under
+    // another, and every start between the two passed the check. Mutation
+    // check: count only `entries_.size ()` in `ListenerRegistry::reserve` and
+    // more than MAX_SERVERS of these succeed.
+    seed_pet_store ();
+    constexpr auto cap = mock_constants::MAX_SERVERS;
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    std::latch go (static_cast<std::ptrdiff_t> (cap * 2));
+    std::atomic<std::size_t> started{ 0 };
+    std::atomic<std::size_t> refused_at_cap{ 0 };
+    std::vector<std::thread> starters;
+    starters.reserve (cap * 2);
+    for (std::size_t i = 0; i < cap * 2; ++i) {
+        starters.emplace_back ([&] {
+            go.arrive_and_wait ();
+            const auto result = manager.start (*db_, request);
+            if (result.ok) {
+                started.fetch_add (1);
+            } else if (result.error_code == "mock_limit_reached") {
+                refused_at_cap.fetch_add (1);
+            }
+        });
+    }
+    for (auto& starter : starters) {
+        starter.join ();
+    }
+    EXPECT_EQ (started.load (), cap);
+    EXPECT_EQ (refused_at_cap.load (), cap);
+    EXPECT_EQ (manager.list ().size (), cap);
+}
+
+TEST_F (MockServerTest, ShutdownStopsEveryMockAndRefusesLaterStarts) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    manager.shutdown ();
+    manager.shutdown ();
+    EXPECT_TRUE (manager.list ().empty ());
+    EXPECT_FALSE (manager.get (started.info.mock_id).has_value ());
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (1);
+    EXPECT_FALSE (client.Get ("/pets")) << "the mock is still listening";
+
+    const auto refused = manager.start (*db_, request);
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+    EXPECT_TRUE (manager.list ().empty ());
 }
 
 // ---------------------------------------------------------------------------

@@ -1152,6 +1152,35 @@ TEST_F (InboxListenerTest, TearsDownCleanlyWithAListenerStillRunning) {
     SUCCEED ();
 }
 
+TEST_F (InboxListenerTest, ShutdownStopsEveryInboxAndRefusesLaterStarts) {
+    auto running = start ();
+    auto stopped = start ();
+    {
+        auto client = client_for (stopped.info);
+        ASSERT_TRUE (client.Post ("/hook", "{}", "application/json"));
+    }
+    ASSERT_TRUE (manager_->stop (stopped.info.inbox_id));
+
+    manager_->shutdown ();
+    manager_->shutdown ();
+    // Every record goes, a stopped one too; the captures stay where a stop
+    // leaves them.
+    EXPECT_TRUE (manager_->list ().empty ());
+    EXPECT_FALSE (manager_->stop (running.info.inbox_id));
+    EXPECT_EQ (db_->count_inbox_requests (stopped.info.inbox_id), 1);
+
+    httplib::Client client ("127.0.0.1", running.info.port);
+    client.set_connection_timeout (0, 300000); // 300ms
+    EXPECT_FALSE (client.Post ("/hook", "{}", "application/json"))
+    << "the inbox is still listening";
+
+    const auto refused = manager_->start (*db_, InboxStartRequest{});
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+    EXPECT_TRUE (manager_->list ().empty ());
+}
+
 TEST_F (InboxListenerTest, OneLiveStreamPerInbox) {
     auto started     = start ();
     const auto claim = manager_->try_claim_live (started.info.inbox_id);
