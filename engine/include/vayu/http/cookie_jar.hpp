@@ -58,7 +58,10 @@
  *   staging and `localhost:8080` production would otherwise share a session
  *   cookie. A jar per *run* would defeat the feature outright.
  * - **Lifetime: the engine process.** Cleared on exit and on request through
- *   `DELETE /cookies`.
+ *   `DELETE /cookies`. A scope outlives its environment's trash, so a restore
+ *   gets the session back; `GET /cookies` hides it meanwhile and purging the
+ *   environment clears it (#3349). The jar knows nothing of environments, so
+ *   both are the routes' doing.
  * - **Persistence: none, deliberately.** A stored jar is credential-grade
  *   material, and writing it beside the request store would open a new secrets
  *   path rather than reuse the one auth tokens already have. Session cookies
