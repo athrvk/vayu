@@ -3315,18 +3315,22 @@ always did; `close` did not, and `close` is what the X button fires - it
 destroys the WebContents and nulls the window handle, so the `before-quit` that
 followed found no renderer to ask and skipped the flush entirely (on macOS,
 `close` does not quit at all, so the edits were simply gone with the app still
-running). `electron/save-flush.ts` owns the once-only flush and the 2s ACK
-ceiling for both, which is also why "already flushed" is shared state: a quit
-that flushed and then closes the window must not ask a dying renderer twice.
-It lives outside `main.ts` so it can be tested - `main.ts` creates windows and
-starts the engine at import time.
+running). `electron/quit-flow.ts` is the one state machine both gestures go
+through - `idle`, `confirmingServices`, `flushing`, `confirmingLoss`,
+`proceeding` - and owns the flush and its 2s ACK ceiling, which is why
+"already flushed" is shared state: a quit that flushed and then closes the
+window must not ask a dying renderer twice. It lives outside `main.ts` so it
+can be tested - `main.ts` creates windows and starts the engine at import
+time. Once a quit is let through, `quit-shutdown.ts` stops the engine and the
+MCP server.
 
 **A running service is asked about before either path flushes** (#1363). A close
 or quit that would stop an inbox, mock server or mock issuer names it and waits
 for an answer first, and Cancel leaves the window, the renderer and every
 pending save exactly as they were - a flush run ahead of the question would have
 told the renderer its work was ending. Confirm, and the flush runs as it always
-did on the way out.
+did on the way out. The yes lasts for that one way out: the close and the quit
+it turns into are not asked twice, but Cancel or Keep working forgets it.
 
 **The flush settling is not the same as the flush landing** (#1489). Before,
 both paths closed the window the moment the round trip finished - the ACK, or
@@ -3337,14 +3341,22 @@ when the ceiling gave up all looked identical to a clean quit. The renderer's
 (`FlushResult`, `electron/save-flush.ts`), and a settle with no ACK at all (the
 ceiling won) is treated the same as a failure - nothing is known to have
 landed. Either case holds the close behind one native dialog,
-`createFlushFailureGate`: "Couldn't save N edits - the engine isn't
+`buildFlushFailurePrompt`: "Couldn't save N edits - the engine isn't
 responding" for a failure or the unanswered ceiling, "Couldn't save N edits -
 the disk is full" (detail: "Free up space, then keep working to save again")
 when every failure was a 507 and `FlushResult.reason` says so (#2423), and "N
 edits couldn't be saved as they are" when every loss is a blocked save (`pending` only, where the
 engine is fine), **Quit/Close anyway** or **Keep working**. A clean flush still
 closes with no dialog, exactly as before, and a quit from a signal never asks:
-it logs the flush result at warn and proceeds (#1908). `useTabsStore.closeTab`
+it logs the flush result at warn and proceeds (#1908). **Keep working returns
+the flow to `idle`** (#3335): the flush and the services answer are both
+forgotten, so the next quit or close flushes again and asks again rather than
+going straight through with the edits the user chose to keep. Each flush
+request carries a flush id on `before-quit`, the preload echoes it on
+`before-quit-flushed`, and an ACK whose id is not the flush in flight is
+dropped, so a late answer to the first flush cannot settle the second. A
+renderer that is replaced - a crash recovered, a hung one reloaded from the
+"not responding" dialog, a new window on macOS - resets the flow the same way. `useTabsStore.closeTab`
 asks the same
 question one tab early: closing a single dirty tab while the engine is not
 `connected` keeps the tab and toasts instead of letting the unmount flush fail
@@ -3372,7 +3384,7 @@ back their dirty tabs the same way (#3324).
 
 4. **Save manager integration:** Use `useSaveManager()` in any component that edits a persistable entity (request, environment, etc.) that autosaves. It handles debouncing, context registration, and centralized save state. Do not manually call `useSaveStore()` for auto-save. For an editor that holds a draft instead - committing it on blur or on an explicit button - use `useEntityDraft()` **plus `useDraftSaveContext()`** - the first owns the draft, the second puts it in the registry - and do not hand-roll the draft/resync/`isDirty`/mutation-reset parts again.
 
-5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed. `flushAll` reports what happened (`{ saved, failed, pending }`), and `main.ts` asks before discarding anything it did not save (#1489) rather than closing on faith.
+5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed. `flushAll` reports what happened (`{ saved, failed, pending }`), and the main process (`electron/quit-flow.ts`) asks before discarding anything it did not save (#1489) rather than closing on faith - on the window's close as well as on quit.
 
     Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 

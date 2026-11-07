@@ -671,9 +671,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	// Before quit flush handler. ACKs main once the callback settles, with the
 	// outcome the callback reports, so quit can resume immediately instead of
 	// waiting out the fallback timeout - and so a failed or incomplete flush is
-	// not read as a clean one (#1489).
+	// not read as a clean one (#1489). The flush id main sent is echoed back
+	// untouched: main drops an ACK whose id is not the flush in flight (#3335).
 	onBeforeQuit: (callback: () => Promise<FlushResult>) => {
-		const handler = async () => {
+		const handler = async (_event: unknown, flushId: unknown) => {
 			let result: FlushResult;
 			try {
 				result = await callback();
@@ -683,7 +684,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 				// closing on a failure this side could not measure.
 				result = { saved: 0, failed: 1, pending: 0 };
 			}
-			ipcRenderer.send("before-quit-flushed", result);
+			ipcRenderer.send("before-quit-flushed", flushId, result);
 		};
 		ipcRenderer.on("before-quit", handler);
 		return () => ipcRenderer.removeListener("before-quit", handler);

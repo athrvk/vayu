@@ -29,7 +29,8 @@ import {
 	MAX_RELOADS_PER_WINDOW,
 	type RendererRecoveryTransport,
 } from "./renderer-recovery";
-import { createSaveFlusher, FLUSH_TIMEOUT_MS } from "./save-flush";
+import { createQuitFlow } from "./quit-flow";
+import { FLUSH_TIMEOUT_MS } from "./save-flush";
 
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read.
@@ -221,6 +222,19 @@ describe("an unresponsive renderer", () => {
 		await t.settle();
 
 		expect(t.transport.reload).not.toHaveBeenCalled();
+		expect(t.transport.onRecovered).not.toHaveBeenCalled();
+	});
+
+	it("resets the quit flow for the renderer the reload brings up (#3335)", async () => {
+		// The hung renderer can never answer a flush asked of it, and the one
+		// that replaces it has unsaved work of its own.
+		const t = fakeTransport({ unresponsive: "reload" });
+		const recovery = createRendererRecovery(t.transport);
+
+		recovery.handleUnresponsive();
+		await t.settle();
+
+		expect(t.transport.onRecovered).toHaveBeenCalledTimes(1);
 	});
 
 	it("ignores a reload answered after the renderer has caught up", async () => {
@@ -265,21 +279,29 @@ describe("an unresponsive renderer", () => {
 });
 
 describe("closing a window whose renderer is gone", () => {
-	/** main.ts's flush transport: the same predicate, over a fake renderer. */
+	/** main.ts's quit flow: the same predicate, over a fake renderer. */
 	function wire(recovery: ReturnType<typeof createRendererRecovery>) {
 		let armedCeiling: (() => void) | null = null;
-		const flusher = createSaveFlusher({
-			requestFlush: () => {
-				if (recovery.isRendererGone()) return false;
-				return true; // a live renderer was asked; it has yet to answer
-			},
-			onFlushed: () => () => {},
-			schedule: (listener, ms) => {
+		const deferred: Array<() => void> = [];
+		const flow = createQuitFlow({
+			services: { wouldStop: () => false, confirm: () => Promise.resolve(true) },
+			requestFlush: () => !recovery.isRendererGone(),
+			schedule: (run, ms) => {
 				expect(ms).toBe(FLUSH_TIMEOUT_MS);
-				armedCeiling = listener;
+				armedCeiling = run;
 			},
+			defer: (run) => deferred.push(run),
+			askLoss: () => Promise.resolve(false),
+			log: () => {},
 		});
-		return { flusher, fireCeiling: () => armedCeiling?.() };
+		const close = vi.fn();
+		return {
+			flow,
+			close,
+			x: () => flow.gesture("window-close", { preventDefault: () => {} }, close),
+			fireCeiling: () => armedCeiling?.(),
+			runDeferred: () => deferred.splice(0).forEach((run) => run()),
+		};
 	}
 
 	it("settles at once rather than waiting out the ceiling", () => {
@@ -288,43 +310,44 @@ describe("closing a window whose renderer is gone", () => {
 		// for the full 2s. Nothing was going to be saved either way.
 		const t = fakeTransport();
 		const recovery = createRendererRecovery(t.transport);
-		const { flusher } = wire(recovery);
+		const w = wire(recovery);
 
 		recovery.handleRenderProcessGone(CRASHED);
-		const close = vi.fn();
-		flusher.flush(close);
+		w.x();
+		w.runDeferred();
 
-		expect(close).toHaveBeenCalledTimes(1);
-		expect(flusher.hasSettled()).toBe(true);
+		expect(w.close).toHaveBeenCalledTimes(1);
+		expect(w.flow.phase()).toBe("proceeding");
 	});
 
 	it("still waits for a live renderer - the skip is for the gone one only", () => {
 		const t = fakeTransport();
 		const recovery = createRendererRecovery(t.transport);
-		const { flusher, fireCeiling } = wire(recovery);
+		const w = wire(recovery);
 
-		const close = vi.fn();
-		flusher.flush(close);
-		expect(close).not.toHaveBeenCalled();
+		w.x();
+		w.runDeferred();
+		expect(w.close).not.toHaveBeenCalled();
+		expect(w.flow.phase()).toBe("flushing");
 
-		fireCeiling();
-		expect(close).toHaveBeenCalledTimes(1);
+		w.fireCeiling();
+		expect(w.flow.phase()).toBe("confirmingLoss");
 	});
 
 	it("waits again for the renderer that recovered", () => {
 		const t = fakeTransport();
 		const recovery = createRendererRecovery(t.transport);
-		const { flusher } = wire(recovery);
+		const w = wire(recovery);
 
 		recovery.handleRenderProcessGone(CRASHED);
-		flusher.flush(vi.fn());
+		w.x();
 		recovery.noteRendererAlive();
-		flusher.reset(); // what main.ts's onRecovered does
+		w.flow.reset(); // what main.ts's onRecovered does
 
-		const close = vi.fn();
-		flusher.flush(close);
+		w.x();
+		w.runDeferred();
 
-		expect(close).not.toHaveBeenCalled();
+		expect(w.flow.phase()).toBe("flushing");
 	});
 });
 
@@ -343,13 +366,14 @@ describe("main.ts wiring", () => {
 	});
 
 	it("teaches the flush transport that a gone renderer cannot ACK", () => {
-		const requestFlush = main.slice(main.indexOf("requestFlush: () => {"));
+		expect(main).toContain("requestFlush: (flushId) => {");
+		const requestFlush = main.slice(main.indexOf("requestFlush: (flushId) => {"));
 		expect(requestFlush.slice(0, requestFlush.indexOf("},"))).toContain(
 			"rendererRecovery.isRendererGone()"
 		);
 	});
 
-	it("resets the flush when a renderer replaces a dead one", () => {
-		expect(main).toContain("onRecovered: () => saveFlusher.reset()");
+	it("resets the quit flow when a renderer replaces the one main was talking to", () => {
+		expect(main).toContain("onRecovered: () => quitFlow.reset()");
 	});
 });

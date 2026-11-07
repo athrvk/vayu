@@ -66,7 +66,6 @@ describe("main.ts wiring", () => {
 	});
 
 	it("asks no question, because nobody can answer at logoff", () => {
-		expect(wiring).toContain("serviceStopGuard.markQuitUnattended()");
-		expect(wiring).toContain("flushFailureGate.markQuitUnattended()");
+		expect(wiring).toContain("quitFlow.markQuitUnattended()");
 	});
 });

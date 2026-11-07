@@ -13,7 +13,7 @@
  * from a huge response body being the realistic trigger for a load-testing tool
  * - left the BrowserWindow up, blank and frozen, with no reload, no dialog and
  * no diagnostics. The recovery story was "force-quit and relaunch, lose edits",
- * which is beneath the standard save-flush.ts sets for the ordinary close.
+ * which is beneath the standard quit-flow.ts and save-flush.ts set for the ordinary close.
  *
  * A reload is the whole recovery, and it has to be bounded: a renderer that
  * crashes on the content it reloads crashes again on the same content, so an
@@ -22,9 +22,9 @@
  *
  * The crash also matters to the *close* path. A dead renderer's WebContents
  * object outlives the process it drove, so `isDestroyed()` keeps reporting
- * false and the flusher would ask a renderer that can never ACK - burning the
+ * false and the quit flow would ask a renderer that can never ACK - burning the
  * full 2s ceiling on a window whose unsaved work is gone regardless. Hence
- * `isRendererGone`, which main.ts's flush transport reads to answer "there is
+ * `isRendererGone`, which main.ts's flush request reads to answer "there is
  * nobody to ask" straight away.
  *
  * Kept out of main.ts so it can be tested - main.ts creates windows and starts
@@ -83,10 +83,12 @@ export interface RendererRecoveryTransport {
 	/** Where a crash and a crash loop are reported. Category `"window"`. */
 	log: (msg: string, fields?: Record<string, unknown>) => void;
 	/**
-	 * A live renderer has replaced a gone one. Whatever the dead one still owed
-	 * is unrecoverable, so main.ts clears the save flush here - otherwise a
-	 * flush that settled early against the corpse would let the *recovered*
-	 * renderer's window close without ever being asked to save.
+	 * A new renderer has replaced the one main was talking to: a crashed one
+	 * came back, or a hung one was reloaded. Whatever the old one still owed is
+	 * unrecoverable, so main.ts resets the quit flow here - otherwise a flush
+	 * that settled against the old renderer would let the new one's window close
+	 * without ever being asked to save, and an answer it never sent would be
+	 * waited on.
 	 */
 	onRecovered: () => void;
 }
@@ -94,7 +96,7 @@ export interface RendererRecoveryTransport {
 export interface RendererRecovery {
 	/**
 	 * Whether the renderer process is known to be gone. True from the crash
-	 * until a renderer finishes loading again; read by the flush transport,
+	 * until a renderer finishes loading again; read by the flush request,
 	 * which cannot tell from `webContents.isDestroyed()`.
 	 */
 	isRendererGone: () => boolean;
@@ -162,7 +164,9 @@ export function createRendererRecovery(transport: RendererRecoveryTransport): Re
 				// Reloading a renderer that has since caught up would throw away
 				// the user's work to fix a hang that is already over.
 				if (responding) return;
-				if (choice === "reload") transport.reload();
+				if (choice !== "reload") return;
+				transport.reload();
+				transport.onRecovered();
 			});
 		},
 

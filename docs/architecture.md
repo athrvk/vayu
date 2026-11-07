@@ -417,9 +417,12 @@ which case the app picks a fallback (below).
   the Dock's persistent "Not saved" state a failure short of that leaves on
   screen.
 - **A quit or window-close asks before discarding a flush that did not land**
-  (issue #1489). `save-flush.ts`'s coordinator still waits out its round trip
-  unconditionally (the renderer's ACK, or a 2 s ceiling if it never comes) -
-  what changed is what happens once it settles. The renderer's `flushAll`
+  (issue #1489). Both gestures go through one state machine in the main
+  process, `quit-flow.ts`: `idle`, then the running-services question below,
+  then the flush, then the loss question, then `proceeding`, after which a quit
+  hands over to `quit-shutdown.ts` to stop the engine and the MCP server. The
+  flush waits out its round trip unconditionally (the renderer's ACK, or a 2 s
+  ceiling if it never comes); what matters is what happens once it settles. The renderer's `flushAll`
   resolves to how many contexts saved, failed or stayed pending (a save the
   editor declined to send); a ceiling with no ACK at all is read the same as
   a failure, since nothing is known to have landed. Either case holds the
@@ -428,11 +431,17 @@ which case the app picks a fallback (below).
   every failure was the engine's 507 `insufficient_storage` (the result then
   carries `reason: "disk-full"`, issue #2423), or "N edits couldn't be saved as they are" when
   the engine is fine and every loss is a pending edit, Quit/Close anyway or
-  Keep working - built by `createFlushFailureGate` in `save-flush.ts`
+  Keep working - built by `buildFlushFailurePrompt` in `save-flush.ts`
   and shown through the same `dialog.showMessageBox` primitive the crash and
   unresponsive-window prompts already use. A clean flush proceeds exactly as
   before, with no dialog, and so does a quit from a signal whatever the flush
-  reported: it logs the result at warn and goes on (issue #1908). Closing one
+  reported: it logs the result at warn and goes on (issue #1908). Keep working,
+  like Cancel on the services question, returns the flow to `idle` and forgets
+  both the flush and the services answer, so the next quit or close flushes
+  again and asks again (issue #3335). Each flush carries an id on
+  `before-quit` that the renderer echoes on its ACK, and an ACK whose id is not
+  the flush in flight is dropped. A renderer that is replaced (a crash
+  recovered, a hung one reloaded, a new window) also resets the flow. Closing one
   dirty tab (not the whole window) is the
   same question asked earlier: `useTabsStore.closeTab` keeps the tab and
   toasts instead of unmounting it when the tab is dirty and the engine is not
