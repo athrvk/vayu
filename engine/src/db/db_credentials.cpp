@@ -214,4 +214,15 @@ void Database::delete_oauth_token (const std::string& cache_key) {
     impl_->storage.remove_all<OAuthToken> (where (c (&OAuthToken::cache_key) == cache_key));
 }
 
+bool Database::delete_oauth_token_if_refresh_matches (const std::string& cache_key,
+const std::string& refresh_token) {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const auto stored = get_oauth_token (cache_key);
+    if (!stored || stored->refresh_token != refresh_token) {
+        return false;
+    }
+    delete_oauth_token (cache_key);
+    return true;
+}
+
 } // namespace vayu::db

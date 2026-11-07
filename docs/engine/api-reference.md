@@ -6815,7 +6815,17 @@ differ only in those. The recipe is `oauth::cache_key`
 (`engine/include/vayu/http/oauth_client.hpp`), and the app's
 `computeOAuth2CacheKey` matches it byte for byte against the shared vectors in
 `engine/tests/oauth_client_test.cpp`. Expiry uses a skew of min(45s, lifetime/2), so a 30s token is reused for 15s; a missing `expires_in`
-means non-expiring. A load run also refreshes its token **during** the run: a
+means non-expiring. One refresh is in flight per cache key (#3344): however
+many sends, runs and `POST /oauth2/token` calls find the same token expired at
+once, the provider sees one `grant_type=refresh_token` post, and the others wait
+for it, each under its own timeout and cancel, and answer with the row it wrote.
+If that refresh fails (it timed out or was cancelled), a waiting call makes its
+own rather than reporting the other call's error. A refresh the provider
+refuses deletes the cached row only while the row still holds the refresh token
+that was refused, so a rotating provider's `invalid_grant` for a spent token
+never deletes the token that replaced it; an `authorization_code` user is not
+sent back to sign in by a race. A refresh that issues no new refresh token
+keeps the old one in the same write. A load run also refreshes its token **during** the run: a
 watchdog re-acquires a header-placed, expiring token `oauth2RefreshLeadMs`
 (default 60s) before it expires and writes the new one into this same cache row
 (see [Load Test Mode](architecture.md#load-test-mode)). A collection load run
@@ -7781,8 +7791,8 @@ completion longer than that, a timeout above `3600000` that ran out, is counted
 at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
 0.1%) rather than the true duration, and the sample is never left out.
 The same deadline bounds the OAuth 2.0 token request an `auth` block makes
-(issue #2833), a refresh and the fresh grant a rejected refresh falls back to
-counted together: a token endpoint that does not answer within it fails the
+(issue #2833), a refresh, the wait for another call's refresh of the same
+token, and the fresh grant a rejected refresh falls back to counted together: a token endpoint that does not answer within it fails the
 send as `AUTH_FAILED` with `authErrorCode` `oauth2_timeout`, and the request
 itself is never sent. It is also the default timeout of every `pm.sendRequest`
 the send's scripts make, buffered or streamed; a call's own `timeout` option

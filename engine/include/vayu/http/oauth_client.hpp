@@ -138,9 +138,17 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  *
  * Cache-aware: returns a valid cached token unless `force_refresh`; refreshes
  * an expired token when a refresh_token is available (rotating it if the
- * provider issues a new one, deleting the row on refresh rejection); otherwise
- * performs a fresh grant. `authorization_code` requires `interactive` and
- * fails with 409 oauth2_interactive_required without it.
+ * provider issues a new one); otherwise performs a fresh grant.
+ * `authorization_code` requires `interactive` and fails with 409
+ * oauth2_interactive_required without it.
+ *
+ * One refresh is in flight per cache key (#3344): a call that needs one while
+ * another is posting waits for it, under its own deadline and cancel, and
+ * answers with the row it wrote; if that refresh failed, the waiting call
+ * makes its own. A refresh the provider refuses deletes the row only while it
+ * still holds the refresh token that was refused
+ * (`Database::delete_oauth_token_if_refresh_matches`), then falls through to a
+ * fresh grant.
  *
  * A call with `interactive` never reads the cache: it always exchanges the
  * code and overwrites the cached row with the result, whatever `force_refresh`
@@ -151,8 +159,9 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now_ms, int64_t skew_ms 
  *        whole acquisition, so the fresh grant after a rejected refresh gets
  *        what the refresh left. Running out of it is a 504 `oauth2_timeout`.
  * @param network_ms When non-null, the milliseconds this call spent waiting on
- *        the provider's token endpoint are added to it (a refresh and the fresh
- *        grant after a rejected refresh both count); a cache hit adds nothing.
+ *        the provider's token endpoint are added to it (a refresh, the fresh
+ *        grant after a rejected refresh, and the wait for another call's
+ *        refresh of the same token all count); a cache hit adds nothing.
  * @param cancel `ClientConfig::cancel` for the token request (issue #2683):
  *        a management-API handler's `RouteContext::server_stopping`, null
  *        everywhere else. A cancelled request is an `oauth2_network_error`.
@@ -164,6 +173,13 @@ const std::optional<InteractiveExchange>& interactive,
 int timeout_ms,
 double* network_ms              = nullptr,
 const std::atomic<bool>* cancel = nullptr);
+
+/**
+ * @brief How many calls are waiting on the refresh in flight for
+ *        @p cache_key, 0 when none is: what lets a test hold one refresh at
+ *        the provider and know a second call is waiting on it, not a sleep.
+ */
+int refresh_followers_waiting (const std::string& cache_key);
 
 /**
  * @brief Public JSON shape of a cached token (never includes the refresh token

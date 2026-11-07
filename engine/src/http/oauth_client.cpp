@@ -19,7 +19,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <future>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -299,8 +305,6 @@ const std::atomic<bool>* cancel) {
     token.scope         = field (body, "scope");
     token.expires_in    = parse_expires_in (body);
     token.created_at    = now_ms ();
-
-    db.save_oauth_token (token);
     return token;
 }
 
@@ -451,6 +455,228 @@ bool is_expired (const vayu::db::OAuthToken& t, int64_t now, int64_t skew_ms) {
 
 namespace {
 
+using TokenResult = std::variant<vayu::db::OAuthToken, TokenError>;
+
+/// How often a call waiting on another call's refresh looks at its own cancel
+/// flag and deadline.
+constexpr auto FOLLOWER_POLL = std::chrono::milliseconds (50);
+
+/// One refresh in flight, shared by its leader and every call following it.
+struct InFlightRefresh {
+    std::shared_future<void> landed;
+    std::atomic<int> followers{ 0 };
+};
+
+struct RefreshRegistry {
+    std::mutex mutex;
+    std::map<std::string, std::shared_ptr<InFlightRefresh>, std::less<>> flights;
+};
+
+RefreshRegistry& refresh_registry () {
+    static RefreshRegistry registry;
+    return registry;
+}
+
+/// For a destructor, which must not let an exception escape.
+void log_flight_failure () noexcept {
+    try {
+        vayu::utils::log_error ("oauth", "OAuth2: a refresh failed to release its followers");
+    } catch (...) {
+        // @deliberate: the logger failed while reporting from a destructor,
+        // which terminates if anything escapes it; there is nowhere left to
+        // report to.
+    }
+}
+
+/**
+ * The refresh in flight for one cache key (#3344). The first call to find
+ * none leads and posts; a call that finds one follows, waits for it to land
+ * and then reads the row again. A follower is never handed the leader's
+ * answer, because a leader's timeout or cancel is its own: the row says what
+ * the refresh left. The registry mutex guards the map alone, never a post.
+ */
+class RefreshFlight {
+    public:
+    explicit RefreshFlight (std::string key) : key_ (std::move (key)) {
+        auto& registry = refresh_registry ();
+        const std::lock_guard<std::mutex> lock (registry.mutex);
+        auto& slot = registry.flights[key_];
+        if (!slot) {
+            slot = std::make_shared<InFlightRefresh> ();
+            landing_.emplace ();
+            slot->landed = landing_->get_future ().share ();
+        }
+        flight_ = slot;
+    }
+
+    /// A leader lands on every exit, a throw included. The entry goes first,
+    /// so a follower that wakes and joins again finds no landed flight.
+    ~RefreshFlight () {
+        if (!landing_) {
+            return;
+        }
+        try {
+            {
+                auto& registry = refresh_registry ();
+                const std::lock_guard<std::mutex> lock (registry.mutex);
+                registry.flights.erase (key_);
+            }
+            landing_->set_value ();
+        } catch (...) {
+            log_flight_failure ();
+        }
+    }
+    RefreshFlight (const RefreshFlight&)            = delete;
+    RefreshFlight& operator= (const RefreshFlight&) = delete;
+    RefreshFlight (RefreshFlight&&)                 = delete;
+    RefreshFlight& operator= (RefreshFlight&&)      = delete;
+
+    [[nodiscard]] bool leads () const {
+        return landing_.has_value ();
+    }
+
+    /**
+     * Waits for the leader to land, in slices short enough to see this call's
+     * own @p cancel and @p deadline. The wait is added to @p network_ms: it is
+     * time spent on the token endpoint, through the leader's post, and
+     * `POST /execute` subtracts that from what it reports as the engine's own.
+     *
+     * @return this call's timeout or cancel, or nothing once the leader landed.
+     */
+    [[nodiscard]] std::optional<TokenError> await (const TokenDeadline& deadline,
+    double* network_ms,
+    const std::atomic<bool>* cancel) const {
+        const auto started = std::chrono::steady_clock::now ();
+        ++flight_->followers;
+        auto stopped = wait_for_landing (deadline, cancel);
+        --flight_->followers;
+        if (network_ms != nullptr) {
+            *network_ms += std::chrono::duration<double, std::milli> (
+            std::chrono::steady_clock::now () - started)
+                           .count ();
+        }
+        return stopped;
+    }
+
+    private:
+    [[nodiscard]] std::optional<TokenError> wait_for_landing (const TokenDeadline& deadline,
+    const std::atomic<bool>* cancel) const {
+        for (;;) {
+            if (cancel != nullptr && cancel->load (std::memory_order_acquire)) {
+                return transport_failure (
+                vayu::ErrorCode::Cancelled, "Request cancelled", deadline);
+            }
+            const auto left = std::chrono::milliseconds (deadline.remaining_ms ());
+            if (left <= std::chrono::milliseconds::zero ()) {
+                return token_timeout (deadline);
+            }
+            if (flight_->landed.wait_for (std::min (left, FOLLOWER_POLL)) ==
+            std::future_status::ready) {
+                return std::nullopt;
+            }
+        }
+    }
+
+    std::string key_;
+    std::shared_ptr<InFlightRefresh> flight_;
+    std::optional<std::promise<void>> landing_;
+};
+
+/// The same stored token, not merely a row under the same key.
+bool same_token (const vayu::db::OAuthToken& a, const vayu::db::OAuthToken& b) {
+    return a.access_token == b.access_token &&
+    a.refresh_token == b.refresh_token && a.created_at == b.created_at;
+}
+
+/// Posts @p spent's refresh token and, on success, stores the answer.
+TokenResult post_refresh (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::string& key,
+const std::string& token_url,
+const vayu::db::OAuthToken& spent,
+const TokenDeadline& deadline,
+double* network_ms,
+const std::atomic<bool>* cancel) {
+    std::string refresh_url = field (config, "refreshTokenUrl");
+    if (refresh_url.empty ()) {
+        refresh_url = token_url;
+    }
+    TokenRequest req;
+    req.form.emplace_back ("grant_type", "refresh_token");
+    req.form.emplace_back ("refresh_token", spent.refresh_token);
+    apply_client_auth (req, config);
+    append_extra_params (req, config, REFRESH_PARAMS);
+
+    vayu::utils::log_info ("oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
+    auto refreshed = post_token_request (
+    db, config, refresh_url, req, key, deadline, network_ms, cancel);
+    if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
+        // A provider that does not rotate issues no refresh token: keep the
+        // one spent, before the one save, so no reader sees a row without it.
+        if (token->refresh_token.empty ()) {
+            token->refresh_token = spent.refresh_token;
+        }
+        db.save_oauth_token (*token);
+    }
+    return refreshed;
+}
+
+/**
+ * Refreshes @p seen, the row this call found expired or was told to force
+ * past, with one refresh in flight per cache key (#3344).
+ *
+ * Each pass reads the row again once it leads or its leader has landed. A row
+ * that is no longer @p seen was written by another acquisition and, while
+ * unexpired, answers this call, `force_refresh` included: it is newer than
+ * the token the caller asked to replace.
+ *
+ * @return as `token_from_cache`.
+ */
+std::optional<TokenResult> refresh_once_per_key (vayu::db::Database& db,
+const nlohmann::json& config,
+const std::string& key,
+const std::string& token_url,
+vayu::db::OAuthToken seen,
+const TokenDeadline& deadline,
+double* network_ms,
+const std::atomic<bool>* cancel) {
+    for (;;) {
+        const RefreshFlight flight (key);
+        if (!flight.leads ()) {
+            if (auto stopped = flight.await (deadline, network_ms, cancel)) {
+                return *stopped;
+            }
+        }
+        const auto current = db.get_oauth_token (key);
+        if (!current) {
+            return std::nullopt; // a refused refresh cleared it
+        }
+        if (!same_token (*current, seen)) {
+            if (!is_expired (*current, now_ms ())) {
+                return *current;
+            }
+            seen = *current;
+        }
+        if (seen.refresh_token.empty ()) {
+            return std::nullopt;
+        }
+        if (!flight.leads ()) {
+            continue; // the leader left the row as it was: lead the next pass
+        }
+        auto refreshed =
+        post_refresh (db, config, key, token_url, seen, deadline, network_ms, cancel);
+        const auto* err = std::get_if<TokenError> (&refreshed);
+        if (err == nullptr || err->code != "oauth2_provider_error") {
+            return refreshed; // network errors don't invalidate the cache
+        }
+        if (db.delete_oauth_token_if_refresh_matches (key, seen.refresh_token)) {
+            return std::nullopt; // the refresh token is dead: a fresh grant
+        }
+        // Refused for a token the row no longer holds: another acquisition
+        // replaced it while this post was out, and the next pass reads that.
+    }
+}
+
 /**
  * The cached token, or the refresh this call can make from it.
  *
@@ -458,8 +684,7 @@ namespace {
  *         nothing at all - which means the cache had nothing usable and the
  *         caller should acquire a fresh grant.
  */
-std::optional<std::variant<vayu::db::OAuthToken, TokenError>> token_from_cache (
-vayu::db::Database& db,
+std::optional<TokenResult> token_from_cache (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& key,
 const std::string& token_url,
@@ -468,46 +693,18 @@ int64_t now,
 const TokenDeadline& deadline,
 double* network_ms,
 const std::atomic<bool>* cancel) {
-    // Cache hit
-    if (auto cached = db.get_oauth_token (key)) {
-        if (!force_refresh && !is_expired (*cached, now)) {
-            return *cached;
-        }
-        // Refresh path (also used for force_refresh when a refresh token exists)
-        if (!cached->refresh_token.empty () && flag (config, "autoRefreshToken", true)) {
-            std::string refresh_url = field (config, "refreshTokenUrl");
-            if (refresh_url.empty ()) {
-                refresh_url = token_url;
-            }
-            TokenRequest req;
-            req.form.emplace_back ("grant_type", "refresh_token");
-            req.form.emplace_back ("refresh_token", cached->refresh_token);
-            apply_client_auth (req, config);
-            append_extra_params (req, config, REFRESH_PARAMS);
-
-            vayu::utils::log_info (
-            "oauth", "OAuth2: refreshing token", { { "url", refresh_url } });
-            auto refreshed = post_token_request (
-            db, config, refresh_url, req, key, deadline, network_ms, cancel);
-            if (auto* token = std::get_if<vayu::db::OAuthToken> (&refreshed)) {
-                // Rotation: keep the previous refresh token when the provider
-                // did not issue a new one.
-                if (token->refresh_token.empty ()) {
-                    token->refresh_token = cached->refresh_token;
-                    db.save_oauth_token (*token);
-                }
-                return *token;
-            }
-            const auto& err = std::get<TokenError> (refreshed);
-            if (err.code == "oauth2_provider_error") {
-                // Rejected refresh token → clear and fall through to a fresh grant.
-                db.delete_oauth_token (key);
-            } else {
-                return err; // network errors don't invalidate the cache
-            }
-        }
+    auto cached = db.get_oauth_token (key);
+    if (!cached) {
+        return std::nullopt;
     }
-    return std::nullopt;
+    if (!force_refresh && !is_expired (*cached, now)) {
+        return *cached;
+    }
+    if (cached->refresh_token.empty () || !flag (config, "autoRefreshToken", true)) {
+        return std::nullopt;
+    }
+    return refresh_once_per_key (db, config, key, token_url,
+    std::move (*cached), deadline, network_ms, cancel);
 }
 
 /**
@@ -548,6 +745,15 @@ TokenRequest& req) {
 }
 
 } // namespace
+
+int refresh_followers_waiting (const std::string& cache_key) {
+    auto& registry = refresh_registry ();
+    const std::lock_guard<std::mutex> lock (registry.mutex);
+    const auto found = registry.flights.find (cache_key);
+    return found == registry.flights.end () || !found->second ?
+    0 :
+    found->second->followers.load ();
+}
 
 std::variant<vayu::db::OAuthToken, TokenError> acquire_token (vayu::db::Database& db,
 const nlohmann::json& config,
@@ -595,7 +801,12 @@ const std::atomic<bool>* cancel) {
 
     vayu::utils::log_info ("oauth", "OAuth2: requesting token",
     { { "grant", grant }, { "url", token_url } });
-    return post_token_request (db, config, token_url, req, key, deadline, network_ms, cancel);
+    auto granted =
+    post_token_request (db, config, token_url, req, key, deadline, network_ms, cancel);
+    if (const auto* token = std::get_if<vayu::db::OAuthToken> (&granted)) {
+        db.save_oauth_token (*token);
+    }
+    return granted;
 }
 
 nlohmann::json serialize_token (const vayu::db::OAuthToken& t) {
