@@ -189,7 +189,7 @@ four more are opened on demand, and the rule that separates them is where each m
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
 | Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
-| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
+| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode (at most 16 unsettled) | One `/callback` path, until the attempt settles or its 5-minute TTL expires, polled or not |
 | [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
 | [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
@@ -270,9 +270,13 @@ against a manager's cap under the same lock as the running entries, so simultane
 overshoot it; it tears an erased entry down outside that lock, so a handler still running holds up
 only the caller that stopped it; and its `shutdown()` is terminal, signalling every entry before it
 joins any. What stays per-manager is the route registration, the error each bind failure answers
-with, the OAuth attempt TTL sweep, and the two records that outlive their listener (a stopped inbox,
-a settled OAuth attempt), whose listener is torn down under the registry's lock because the record
-stays in it. Since #1140 a manager may hand the `ManagedListener` the
+with, the OAuth attempt reaper, and the records that outlive their listener. A stopped inbox's
+listener is torn down under the registry's lock because the record stays in it. A settled OAuth
+attempt's result moves out of the registry instead: the authorize manager owns a reaper thread
+(#3347) that fails each attempt still pending at its deadline, copies every settled result aside for
+the 10-minute polling window and retires the listener outside the lock, so an attempt nobody polls
+frees its port, the cap counts only unsettled attempts, and `GET /oauth2/authorize/:id` reads
+without writing. Since #1140 a manager may hand the `ManagedListener` the
 `httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
 every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
 capture, and the other three take the plain server the listener builds for itself. The mock server
@@ -754,7 +758,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
 - **`oauth_authorize`** - the interactive Authorization Code manager: an
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
-  the browser. Owned by the `Server` for a clean shutdown.
+  the browser. Its reaper thread expires attempts at their TTL whether or not
+  anyone polls (#3347). Owned by the `Server` for a clean shutdown.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity

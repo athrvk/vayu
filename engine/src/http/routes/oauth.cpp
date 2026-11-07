@@ -169,10 +169,11 @@ void register_oauth_routes (RouteContext& ctx) {
             return;
         }
         res.status = 200;
-        res.set_content (nlohmann::json{ { "attemptId", result.attempt_id },
-                         { "authorizeUrl", result.authorize_url },
-                         { "redirectUri", result.redirect_uri } }
-                         .dump (),
+        res.set_content (
+        nlohmann::json{ { "attemptId", result.attempt_id },
+        { "authorizeUrl", result.authorize_url },
+        { "redirectUri", result.redirect_uri }, { "expiresAt", result.expires_at } }
+        .dump (),
         "application/json");
     });
 
@@ -193,6 +194,8 @@ void register_oauth_routes (RouteContext& ctx) {
         "application/json");
     });
 
+    // Reads only, like every GET: the manager's reaper is what expires an
+    // attempt and frees its port (#3347).
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const auto st = ctx.authorize_manager.status (req.matches[1]);

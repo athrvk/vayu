@@ -6970,8 +6970,8 @@ hands it back.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri}` |
-| `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt}` |
+| `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}`; reads only |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
 
@@ -6981,18 +6981,35 @@ The authorize URL carries `response_type`, `client_id`, `redirect_uri`,
 navigation has no body or headers); a row naming a parameter already in the URL
 is skipped.
 
-Attempts time out after 5 minutes; on success the token is written to the cache
-and `cacheKey` is returned. Cancelling a loopback attempt, or the engine
-shutting down, cancels a token exchange its callback is still making: the
-callback's tab is told the exchange failed. A completion (the loopback callback and `POST
+An attempt times out 5 minutes after it starts. `expiresAt` is that instant in
+epoch milliseconds, the one deadline a client waits on. The engine enforces it
+whether or not anyone polls: within a second of `expiresAt` the attempt is
+failed with `Authorization timed out` and its loopback listener is closed, so an
+abandoned attempt never keeps its port. On success the token is written to the
+cache and `cacheKey` is returned. A settled result stays readable for 10 minutes
+from the start, then the attempt answers `not_found`.
+
+`GET /oauth2/authorize/:attemptId` reads only: polling never settles, fails or
+tears down an attempt. An attempt past `expiresAt` reads as `failed` with
+`Authorization timed out` from that instant on, and a callback or completion
+arriving after it cannot change that.
+
+At most 16 attempts may be unsettled at once, embedded ones included; the next
+start is refused with `429` `oauth2_authorize_limit_reached`. A settled attempt
+holds no listener and leaves the count.
+
+Cancelling a loopback attempt, or the engine shutting down, cancels a token
+exchange its callback is still making: the callback's tab is told the exchange
+failed. A completion (the loopback callback and `POST
 /oauth2/authorize/complete` alike) always exchanges its code and replaces any
 token already cached under that key.
 
 The loopback callback reads nothing before `state`, `error` included: a request
 with a missing or wrong `state` answers `400` and the attempt keeps waiting, so
 an IdP that omits `state` on its error redirect leaves the attempt pending until
-the 5-minute timeout. A loopback attempt settles once, and the first settlement
-wins: a later callback with the right `state` answers `409` and changes nothing.
+it times out. A callback with the right `state` after `expiresAt` answers `410`.
+A loopback attempt settles once, and the first settlement wins: a later callback
+with the right `state` answers `409` and changes nothing.
 
 ### Local mock issuer
 
@@ -13730,6 +13747,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 412 | A whole-record `PUT` or a `POST /globals` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
+| 429 | A start refused at its cap: `oauth2_authorize_limit_reached` (16 unsettled sign-in attempts), `mock_issuer_limit_reached` (8 mock issuers) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |
