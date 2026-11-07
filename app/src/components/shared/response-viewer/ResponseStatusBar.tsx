@@ -248,16 +248,18 @@ export function ResponseStatusBar({
 			{httpVersionDowngraded && <HttpVersionDowngradeNote httpVersion={httpVersion} />}
 
 			{/*
-			 * The client certificate this exchange presented (issue #707).
+			 * The client certificate this exchange offered (issue #707).
 			 * Shown only when one matched, on the same rule as the downgrade
-			 * above: a chip on every response is a chip nobody reads. Text, no
+			 * above: a chip on every response is a chip nobody reads. "Offered",
+			 * not "accepted": the server decides, and an `http://` send offers
+			 * nothing, so it never has the chip (#3260). Text, no
 			 * background - see the variant="chip" rule in badge-hover.test.tsx.
 			 */}
 			{clientCertificate && (
 				<div
 					className="flex items-center gap-1.5 text-xs text-muted-foreground"
 					title={
-						`Sent with the client certificate registered for ${clientCertificate} ` +
+						`Client certificate registered for ${clientCertificate} was offered ` +
 						`(Settings › Network & connectivity).`
 					}
 				>

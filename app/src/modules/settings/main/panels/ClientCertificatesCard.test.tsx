@@ -29,6 +29,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import type { ClientCertificateListEntry } from "@/types";
 import { ClientCertificatesCard } from "./ClientCertificatesCard";
 
 /**
@@ -55,7 +56,7 @@ const showToast = vi.fn();
 const ENGINE_TARGET_TAKEN =
 	"Client certificate 'cert_1' cannot be restored - 'api.example.com:8443' is already registered to client certificate 'cert_9', so delete that entry first";
 
-const certificates = [
+const certificates: ClientCertificateListEntry[] = [
 	{
 		id: "cert_1",
 		host: "api.example.com",
@@ -66,6 +67,7 @@ const certificates = [
 		hasPassphrase: true,
 		createdAt: 1,
 		updatedAt: 1,
+		usable: true,
 	},
 	{
 		id: "cert_2",
@@ -77,10 +79,11 @@ const certificates = [
 		hasPassphrase: false,
 		createdAt: 1,
 		updatedAt: 1,
+		usable: true,
 	},
 ];
 
-let queryResult: { data?: typeof certificates; isError: boolean; isLoading?: boolean } = {
+let queryResult: { data?: ClientCertificateListEntry[]; isError: boolean; isLoading?: boolean } = {
 	data: certificates,
 	isError: false,
 };
@@ -141,6 +144,39 @@ describe("ClientCertificatesCard", () => {
 		// that one is set.
 		expect(screen.getByText("Passphrase set")).toBeInTheDocument();
 		expect(screen.getByText("client.pem")).toBeInTheDocument();
+	});
+
+	// The engine leaves an entry it cannot present out of every send, silently;
+	// the list's `usable` / `problem` is the only way the card can say so (#3260).
+	describe("an entry the engine would not present", () => {
+		const PROBLEM = "certificate file '/home/ada/certs/moved.pem' is not a readable file";
+
+		it("flags the row and prints the engine's reason", () => {
+			queryResult = {
+				data: [
+					...certificates,
+					{
+						...certificates[0],
+						id: "cert_3",
+						host: "moved.example.com",
+						usable: false,
+						problem: PROBLEM,
+					},
+				],
+				isError: false,
+			};
+			renderCard();
+
+			expect(screen.getAllByText("Not presented")).toHaveLength(1);
+			expect(screen.getByText(`Skipped on every send - ${PROBLEM}`)).toBeInTheDocument();
+		});
+
+		it("says nothing on a row that is usable", () => {
+			renderCard();
+
+			expect(screen.queryByText("Not presented")).toBeNull();
+			expect(screen.queryByText(/Skipped on every send/)).toBeNull();
+		});
 	});
 
 	// A blank port is `null`, which is what "every port" is: `0` or `""` there

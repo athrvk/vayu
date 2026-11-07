@@ -1196,6 +1196,23 @@ export interface ClientCertificate {
 }
 
 /**
+ * A row as `GET /client-certificates` answers it: the stored entry plus
+ * whether the engine would present it, judged against the files as they are
+ * now (issue #3260). Only the list judges - a create or update refuses an
+ * unusable row and answers a bare `ClientCertificate` - so a result of either
+ * must never be patched into a list cache as if it said `usable`.
+ */
+export interface ClientCertificateListEntry extends ClientCertificate {
+	/**
+	 * `false` for a row whose file moved or whose format was edited around the
+	 * routes: the engine leaves it out of every send.
+	 */
+	usable: boolean;
+	/** Why the entry is not presented; present only when `usable` is `false`. */
+	problem?: string;
+}
+
+/**
  * A create or update body. `port: null` means every port, and on an update
  * `passphrase: null` clears a stored one - the engine's standard
  * null-vs-absent rule, which is why both are nullable rather than optional.
@@ -1258,7 +1275,11 @@ export interface ConnectionTestResult {
 		 */
 		source?: "environment";
 	};
-	/** The registry entry that answered for this host, `""` when none did. */
+	/**
+	 * The registry entry the probe offered, `""` when none matched or the URL
+	 * is `http://`, where nothing is presented (issue #3260). "Offered": the
+	 * handshake may still have refused it, which `outcome` reports.
+	 */
 	clientCertificate: string;
 	/** The status line, present only on `ok`. */
 	status?: number;

@@ -5766,7 +5766,9 @@ fails at handshake time as an SSL error against the endpoint, which reads as
 A cert-authenticated exchange says so. `POST /execute` returns
 `clientCertificate` on the response, the entry the **final** hop presented
 (`""` when none matched it), and the stored trace carries the same value under
-the same name, so a restored response names the entry a live one named.
+the same name, so a restored response names the entry a live one named. A
+certificate is presented in a TLS handshake only, so the field is `""` for an
+`http://` final hop whatever the registry holds for that host (#3260).
 
 **The row says what format its certificate is in, and the engine tells libcurl
 so.** `certFormat` is `pem` - a PEM certificate with its key in a second file -
@@ -5829,13 +5831,36 @@ Every registered entry; a trashed one is not listed.
     "certFormat": "pem",
     "hasPassphrase": true,
     "createdAt": 1767225600000,
-    "updatedAt": 1767225600000
+    "updatedAt": 1767225600000,
+    "usable": true
+  },
+  {
+    "id": "cert_2b9d4e60",
+    "host": "internal.example.com",
+    "port": null,
+    "certPath": "/home/ada/certs/moved.pem",
+    "keyPath": "/home/ada/certs/moved.key",
+    "certFormat": "pem",
+    "hasPassphrase": false,
+    "createdAt": 1767225600000,
+    "updatedAt": 1767225600000,
+    "usable": false,
+    "problem": "certificate file '/home/ada/certs/moved.pem' is not a readable file"
   }
 ]
 ```
 
 `port` is `null` - not `0` and not omitted - for an entry that answers on every
 port. `keyPath` is `""` for a `p12` entry, which stores no key path at all.
+
+**`usable` is whether the engine would present the entry**, judged by the check
+a write runs (and the transport policy re-runs on every row it reads) against
+the files as they are now. A row can fail it after being written: a file moved
+or deleted, or a row edited around the routes. The engine then leaves that
+entry out of every send, and `problem` says why - the failed check's own
+sentence, or for a `certFormat` the engine does not know, a sentence naming it.
+`problem` is absent on a usable row. Only this list carries the two fields; the
+`POST` and `PUT` responses do not, since those refuse an unusable row.
 
 ### POST /client-certificates
 
@@ -6031,7 +6056,7 @@ never named and report its proxy and certificate as this one's) and a fixed
 | `proxy.mode` | The `proxyMode` in force. Always present. |
 | `proxy.url` | The proxy the probe went through, **with its `user:password@` removed** (the body reaches a screen and an agent's context). Absent when the probe went direct. Under `manual`, and `system` with a resolved URL, it is the setting in force, left out when the probe completed without a proxy (a `proxyBypass` entry); a probe that failed still names it, since a failure at the proxy hop may not read as proxied. Under `environment`, and `system` with nothing resolved, it is what libcurl read from `http_proxy` / `https_proxy` / `all_proxy` for the target's scheme - reported only when libcurl really proxied the probe (`CURLINFO_USED_PROXY`), so a `no_proxy` exemption reads as direct. |
 | `proxy.source` | `"environment"` when `proxy.url` is not a Vayu setting: libcurl chose the proxy from the process environment. Absent otherwise. With `source` set and no `url`, the probe was proxied but the variable could not be read back. |
-| `clientCertificate` | The registry entry that answered for this host, `""` when none did. Always present, like `POST /execute`'s. |
+| `clientCertificate` | The registry entry that answered for this host, `""` when none did - always so for an `http://` probe, since a certificate is presented in a TLS handshake only (#3260). Always present, like `POST /execute`'s. |
 | `status` | The status line. Present only on `ok`. |
 | `errorCode` / `detail` | The engine's `ErrorCode` spelling and the message: libcurl's own, or for a forwarding proxy's `407` on an `http://` target (#3257) the engine's sentence naming the proxy. Absent on `ok`. |
 

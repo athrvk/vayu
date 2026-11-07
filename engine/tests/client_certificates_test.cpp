@@ -7,11 +7,11 @@
  * split is deliberate: this file is about the *registry* - which row a target
  * picks, and what a row may say - so its material is the bytes
  * `not-a-real-certificate`, and nothing in it puts a certificate on a wire.
- * That keeps the lookup asserted at the boundary, the lookup's *outcome*
- * asserted end to end through the design and stream drivers (both record the
- * entry they matched), and the backend's willingness to take the three curl
- * options at all probed per platform the way `TlsBackend` probes
- * `CURLOPT_CAINFO` - while the question of whether the bytes behind those paths
+ * That keeps the lookup asserted at the boundary, the cleartext rule asserted
+ * end to end through the design and stream drivers (neither records an entry
+ * for an `http://` send; the https side is `mutual_tls_test.cpp`), and the
+ * backend's willingness to take the three curl options at all probed per
+ * platform the way `TlsBackend` probes `CURLOPT_CAINFO` - while the question of whether the bytes behind those paths
  * are accepted by a server demanding a certificate is asked where a server
  * exists to answer it.
  */
@@ -63,6 +63,7 @@ const nlohmann::json& json,
 const std::function<void ()>& before_write);
 std::pair<int, nlohmann::json>
 delete_client_certificate_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json> list_client_certificates_response (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace vayu::http {
@@ -112,9 +113,8 @@ class ScratchFile {
     std::string path_;
 };
 
-/// Plain HTTP, because what is under test is *which entry was chosen*, not TLS:
-/// libcurl ignores the certificate options on a cleartext transfer, so the
-/// exchange still completes and the response still names the entry that matched.
+/// Plain HTTP: no handshake, so nothing here can present a certificate, and the
+/// drivers must report none even for a host the registry names (#3260).
 class MockUpstream {
     public:
     MockUpstream () {
@@ -1021,6 +1021,103 @@ TEST_F (ClientCertificateDbTest, ATrashedEntryNoLongerHoldsItsTarget) {
 }
 
 // ---------------------------------------------------------------------------
+// The list says which rows the engine would present
+// ---------------------------------------------------------------------------
+
+// Mutation check: set `usable` to true unconditionally in
+// `list_client_certificates_response` and the missing-file rows below stay
+// "usable"; drop the key and this reds on `contains`.
+TEST_F (ClientCertificateDbTest, AHealthyRowIsListedUsableWithNoProblem) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 1u) << rows.dump ();
+    EXPECT_EQ (rows[0]["usable"], true);
+    EXPECT_FALSE (rows[0].contains ("problem")) << rows.dump ();
+    EXPECT_EQ (rows[0]["host"], "api.example.com")
+    << "the stored fields are still there";
+}
+
+// The resolver drops this row and the list is how the app learns of it.
+// Mutation check: have the list skip `client_cert_rejection` and `usable` reads
+// true here.
+TEST_F (ClientCertificateDbTest, ARowWhoseFileWentMissingIsListedUnusableWithTheReason) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+    ASSERT_EQ (routes::create_client_certificate_response (*db_, body ("other.example.com"))
+               .first,
+    200);
+    {
+        auto stored =
+        db_->client_certificate_for_target ("api.example.com", std::nullopt, "");
+        if (!stored) {
+            FAIL () << "the row just created is missing";
+        }
+        vayu::db::ClientCertificate broken = *stored;
+        broken.cert_path                   = "/nope/gone.pem";
+        db_->save_client_certificate (broken);
+    }
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 2u) << rows.dump ();
+    for (const auto& row : rows) {
+        if (row["host"] == "api.example.com") {
+            EXPECT_EQ (row["usable"], false);
+            ASSERT_TRUE (row.contains ("problem")) << row.dump ();
+            EXPECT_NE (
+            row["problem"].get<std::string> ().find ("/nope/gone.pem"), std::string::npos)
+            << row["problem"];
+        } else {
+            EXPECT_EQ (row["usable"], true)
+            << "one broken row must not taint the rest";
+            EXPECT_FALSE (row.contains ("problem"));
+        }
+    }
+    // The list agrees with the resolver on which rows it presents: the one the
+    // list calls unusable is the one the policy drops.
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (match_client_certificate (policy, "api.example.com", 443), nullptr);
+    EXPECT_NE (match_client_certificate (policy, "other.example.com", 443), nullptr);
+}
+
+// Mutation check: drop the `client_cert_format_from_string` branch from
+// `check_client_cert_row` and the row is judged as PEM, listed usable and kept
+// by the policy; the agreement assertions below fail if the list and the
+// resolver ever judge a row by different checks again.
+TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsListedUnusableNamingIt) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+    {
+        vayu::db::ClientCertificate row = db_->get_client_certificates ().front ();
+        row.cert_format = "pkcs12";
+        db_->save_client_certificate (row);
+    }
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 1u) << rows.dump ();
+    EXPECT_EQ (rows[0]["usable"], false);
+    ASSERT_TRUE (rows[0].contains ("problem")) << rows.dump ();
+    EXPECT_NE (rows[0]["problem"].get<std::string> ().find ("'pkcs12'"), std::string::npos)
+    << rows[0]["problem"];
+    EXPECT_TRUE (resolve_transport_policy (*db_).client_certificates.empty ())
+    << "the row the list calls unusable is the one the policy drops";
+}
+
+// `usable` and `problem` belong to the list: a create or update answers 400 for
+// an unusable row, so its success body has nothing to say about usability.
+TEST_F (ClientCertificateDbTest, OnlyTheListCarriesUsability) {
+    const auto [status, created] =
+    routes::create_client_certificate_response (*db_, body ("api.example.com"));
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_FALSE (created.contains ("usable"));
+    EXPECT_FALSE (created.contains ("problem"));
+}
+
+// ---------------------------------------------------------------------------
 // Resolution into the policy
 // ---------------------------------------------------------------------------
 
@@ -1179,7 +1276,12 @@ TEST_F (ClientCertificateDbTest, TheStoredFormatReachesTheRuleTheApplierReads) {
 // Every driver applies the match
 // ---------------------------------------------------------------------------
 
-TEST (ClientCertificatePaths, ADesignSendRecordsTheEntryItMatched) {
+// The upstream is cleartext, so no certificate reaches the wire however the
+// registry matches, and the response must not claim one (#3260). The https
+// counterpart is `mutual_tls_test.cpp`, where a handshake can only complete with
+// the entry its response names. Mutation check: drop the https test from
+// `apply_client_certificate` and this reads "127.0.0.1:<port>".
+TEST (ClientCertificatePaths, ADesignSendOverCleartextRecordsNoEntry) {
     MockUpstream upstream;
     ScratchFile cert{ "paths_cert.pem" };
     ScratchFile key{ "paths_key.pem" };
@@ -1192,11 +1294,8 @@ TEST (ClientCertificatePaths, ADesignSendRecordsTheEntryItMatched) {
     const auto result = client.send (get_request (upstream.url ("/hello")));
     ASSERT_TRUE (result.is_ok ());
     EXPECT_EQ (result.value ().status_code, 200);
-    // The response carries which entry was used, which is what both funnels
-    // print and the only way "why here and not there" is answerable after the
-    // fact. Remove the applier's lookup and this is empty.
-    EXPECT_EQ (result.value ().client_certificate,
-    "127.0.0.1:" + std::to_string (upstream.port));
+    EXPECT_TRUE (result.value ().client_certificate.empty ())
+    << "claimed an entry over cleartext: " << result.value ().client_certificate;
 }
 
 TEST (ClientCertificatePaths, ADesignSendToAnUnregisteredHostRecordsNothing) {
@@ -1215,10 +1314,12 @@ TEST (ClientCertificatePaths, ADesignSendToAnUnregisteredHostRecordsNothing) {
     EXPECT_TRUE (result.value ().client_certificate.empty ());
 }
 
-TEST (ClientCertificatePaths, AnSseStreamRecordsTheEntryItMatched) {
+TEST (ClientCertificatePaths, AnSseStreamOverCleartextRecordsNoEntry) {
     // The path that had no proxy option at all before #705, and would have been
     // the one to miss certificates too if each driver configured its own
-    // transport. It reaches them through the same applier.
+    // transport. It reaches them through the same applier, so it shares the
+    // cleartext rule (#3260); `AnSseStreamPresentsTheCertificate` in
+    // `mutual_tls_test.cpp` is the https side.
     MockUpstream upstream;
     ScratchFile cert{ "paths_cert3.pem" };
     ScratchFile key{ "paths_key3.pem" };
@@ -1233,7 +1334,7 @@ TEST (ClientCertificatePaths, AnSseStreamRecordsTheEntryItMatched) {
     const auto response = consume_sse_stream (spec, context);
 
     EXPECT_EQ (response.status_code, 200);
-    EXPECT_EQ (response.client_certificate, "127.0.0.1");
+    EXPECT_TRUE (response.client_certificate.empty ()) << response.client_certificate;
 }
 
 TEST (ClientCertificatePaths, ALoadRunCarriesTheRegistryAndStillTransfers) {

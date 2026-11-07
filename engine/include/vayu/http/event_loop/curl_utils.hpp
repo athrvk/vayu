@@ -184,7 +184,8 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *                   the transfer; the applier writes its `proxy` and the
  *                   callback its refusal and its count into it.
  * @return The registry entry whose certificate was put on the handle, or null
- *         when none matched. Points into @p policy and lives exactly as long -
+ *         when none matched or @p url is not `https` (a certificate is only
+ *         presented in a TLS handshake, #3260). Points into @p policy and lives exactly as long -
  *         a caller that keeps it (both design funnels record the label on the
  *         response) must copy what it needs before the policy goes away.
  */

@@ -222,7 +222,8 @@ export function ConnectionTestCard() {
 						<p className="text-xs text-muted-foreground">{proxyLine(result.proxy)}</p>
 						{result.clientCertificate && (
 							<p className="text-xs text-muted-foreground">
-								Presented the certificate registered for {result.clientCertificate}
+								Client certificate registered for {result.clientCertificate} was
+								offered
 							</p>
 						)}
 					</div>

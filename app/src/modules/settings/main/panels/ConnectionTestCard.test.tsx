@@ -125,3 +125,40 @@ describe("ConnectionTestCard's proxy line", () => {
 		expect(await lineFor({ mode: "off" })).toBe("Sent direct - the proxy is switched off");
 	});
 });
+
+/**
+ * The engine's `clientCertificate` is the entry the probe offered, `""` for an
+ * `http://` URL or a host nothing matched (#3260). The card says "offered", not
+ * "presented": the handshake may still have refused it, and `outcome` reports
+ * that.
+ */
+describe("ConnectionTestCard's client-certificate line", () => {
+	async function textAfterTest(clientCertificate: string) {
+		testConnection.mockResolvedValueOnce({
+			url: "https://api.example.com/",
+			outcome: "ok",
+			proxy: { mode: "off" },
+			clientCertificate,
+			status: 200,
+		});
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<ConnectionTestCard />
+			</QueryClientProvider>
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Test" }));
+		await screen.findByText("Reached");
+	}
+
+	it("says which registered certificate was offered", async () => {
+		await textAfterTest("*.example.com");
+		expect(
+			screen.getByText("Client certificate registered for *.example.com was offered")
+		).toBeInTheDocument();
+	});
+
+	it("says nothing when none was offered", async () => {
+		await textAfterTest("");
+		expect(screen.queryByText(/Client certificate registered for/)).toBeNull();
+	});
+});

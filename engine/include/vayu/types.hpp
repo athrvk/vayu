@@ -1116,7 +1116,9 @@ struct Response {
 
     /**
      * @brief The client-certificate registry entry this transfer presented,
-     *        as `host` or `host:port`; empty when none matched (issue #707).
+     *        as `host` or `host:port`; empty when none matched or the final
+     *        hop was not `https`, where no certificate is presented
+     *        (issues #707, #3260).
      *
      * On the *response* rather than left to be re-derived, because "why did
      * this work here and fail there" is the question a per-host certificate

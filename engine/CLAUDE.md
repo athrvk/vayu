@@ -1147,7 +1147,14 @@ logged as a warning: it means a client skipped composition.
   the existing credential precedent and never echoed (reads answer
   `hasPassphrase`); both paths are checked at write time. The entry the final
   hop matched is recorded on `Response::client_certificate` and travels both design funnels
-  under `clientCertificate`, not the load path. **The row says what format its
+  under `clientCertificate`, not the load path. **A certificate is matched for
+  an `https` URL only** (`apply_client_certificate`, #3260): libcurl ignores
+  the options on a cleartext transfer, so an `http://` send records none. **The
+  list says which rows the engine would present**: `GET /client-certificates`
+  adds `usable` (and `problem` when not) per row from
+  `check_client_cert_row` (the format parse, then `client_cert_rejection`),
+  the one check `resolve_transport_policy` drops a row by, in the list handler
+  alone (`list_client_certificates_response`). **The row says what format its
   certificate is in** (`cert_format`, #833): the applier writes
   `CURLOPT_SSLCERTTYPE` from it, a PKCS#12 row stores no `key_path`, one
   `passphrase` column serves both, and the format is stored (defaulted at write

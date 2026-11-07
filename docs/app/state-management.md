@@ -2084,9 +2084,11 @@ click; refetching either removes it or proves it real.
 - **`useClientCertificatesQuery()`** and the create / update / delete mutations
   (`queries/client-certificates.ts`) - the engine's host-to-certificate registry
   for mTLS endpoints (issue #707), read and edited by `ClientCertificatesCard`
-  in Settings > Network & connectivity. The mutations invalidate rather than
-  patching: the engine refuses a second entry for a host+port pair already
-  taken, so the list is the authority on what a new entry may claim. The delete
+  in Settings > Network & connectivity. The list's rows carry `usable` and, when
+  false, `problem` (#3260): whether the engine would present the entry against
+  the files as they are now, which only the list answers. The mutations
+  invalidate rather than patching: the engine refuses a second entry for a
+  host+port pair already taken, so the list is the authority on what a new entry may claim. The delete
   is soft (#2973): it also invalidates `trash.all`, the card raises the shared
   "Moved to the Trash" toast with Undo through `useTrashUndo` (kind
   `clientCertificate`, read aloud as "client certificate"), and the Trash lists

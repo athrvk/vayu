@@ -17,6 +17,7 @@
 #include <cctype>
 #include <compare>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -1044,35 +1045,37 @@ std::string system_ca_bundle_pem () {
     return read_file (path);
 }
 
+std::expected<ClientCertFormat, std::string> check_client_cert_row (
+const vayu::db::ClientCertificate& row) {
+    const auto format = client_cert_format_from_string (row.cert_format);
+    if (!format) {
+        return std::unexpected ("declares an unknown format '" + row.cert_format + "'");
+    }
+    if (auto rejection = client_cert_rejection (
+        row.host, row.port, *format, row.cert_path, row.key_path)) {
+        return std::unexpected (std::move (*rejection));
+    }
+    return *format;
+}
+
 TransportPolicy resolve_transport_policy (vayu::db::Database& db) {
     TransportPolicy policy;
 
     // The client-certificate registry (issue #707), read whole because a policy
     // serves every host a run may reach - see TransportPolicy::client_certificates.
     for (const auto& row : db.get_client_certificates ()) {
-        // A spelling the route would have refused, so only a hand-edited row
-        // reaches it. Dropped with its own line rather than defaulted to PEM:
-        // presenting the wrong shape is a handshake failure against the
-        // endpoint, and "which format" is not a thing to guess on the user's
-        // behalf.
-        const auto format = client_cert_format_from_string (row.cert_format);
+        // The routes refuse every shape this drops, so only a hand-edited row or
+        // a file that has moved since it was registered reaches here. Named
+        // rather than swallowed, and named *now*: the alternative is a
+        // handshake failure against the endpoint, which is precisely the "the
+        // API is down" misdiagnosis this epic exists to end. A format is never
+        // defaulted to PEM on the user's behalf: presenting the wrong shape is
+        // the same handshake failure.
+        const auto format = check_client_cert_row (row);
         if (!format) {
             vayu::utils::log_error ("client",
             "Client certificate '" + row.id + "' for host '" + row.host +
-            "' declares an unknown format '" + row.cert_format +
-            "'; requests to that host will be sent without it");
-            continue;
-        }
-        if (const auto rejection = client_cert_rejection (
-            row.host, row.port, *format, row.cert_path, row.key_path)) {
-            // The routes refuse this shape, so only a hand-edited row or a file
-            // that has moved since it was registered reaches here. Named rather
-            // than swallowed, and named *now*: the alternative is a handshake
-            // failure against the endpoint, which is precisely the "the API is
-            // down" misdiagnosis this epic exists to end.
-            vayu::utils::log_error ("client",
-            "Client certificate '" + row.id + "' for host '" + row.host + "' is unusable (" +
-            *rejection + "); requests to that host will be sent without it");
+            "' is unusable (" + format.error () + "); this entry is not used");
             continue;
         }
         ClientCertRule rule;

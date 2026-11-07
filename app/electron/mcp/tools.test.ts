@@ -2212,6 +2212,14 @@ describe("trash tools", () => {
 		expect(description).toContain("neither listed nor presented");
 	});
 
+	test("list_client_certificates names usable and problem, which only the list carries", () => {
+		const description = String(
+			TOOLS.find((t) => t.name === "list_client_certificates")?.description
+		);
+		expect(description).toContain("`usable`");
+		expect(description).toContain("`problem`");
+	});
+
 	test("list_trash answers one page of entries, each as the engine wrote it", async () => {
 		const client = fakeClient({ listTrashPage: vi.fn().mockResolvedValue(page([TRASH_ITEM])) });
 		const res = await dispatchTool("list_trash", { q: "retired" }, ctxWith(client));

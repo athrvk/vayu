@@ -1950,13 +1950,15 @@ its response viewer. The title comes from the code and an unknown code gets a
 neutral one, since the engine adds codes without the app learning them first.
 
 `clientCertificate` names the client-certificate registry entry the exchange
-presented, as `host` or `host:port`, and `""` when none matched (issue #707).
+presented, as `host` or `host:port`, and `""` when none matched (issue #707) or
+the final hop was `http://`, where nothing is presented (#3260).
 It is the entry's own spelling, so a wildcard row reads as `*.example.com`
 rather than as the host that was dialled - which is the point: it says which
 row answered (issue #803).
 The renderer maps that empty string to `undefined` and `ResponseStatusBar` draws
 a chip only when there is one - the same show-it-only-when-it-happened rule the
-downgrade warning follows. Nothing on the request names a certificate (the
+downgrade warning follows. Its tooltip says the certificate was *offered*, not
+accepted: the server decides, and the connection test's line says the same. Nothing on the request names a certificate (the
 engine matches one per transfer by host), which is exactly why the *response*
 has to say which was used: two calls to what looks like the same API can differ
 only in which registry entry matched. The stored trace carries the same value
