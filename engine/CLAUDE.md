@@ -1151,9 +1151,10 @@ logged as a warning: it means a client skipped composition.
   an `https` URL only** (`apply_client_certificate`, #3260): libcurl ignores
   the options on a cleartext transfer, so an `http://` send records none. **The
   list says which rows the engine would present**: `GET /client-certificates`
-  adds `usable` (and `problem` when not) per row from the format parse and
-  `client_cert_rejection` the resolver runs, in the list handler alone
-  (`list_client_certificates_response`). **The row says what format its
+  adds `usable` (and `problem` when not) per row from
+  `check_client_cert_row` (the format parse, then `client_cert_rejection`),
+  the one check `resolve_transport_policy` drops a row by, in the list handler
+  alone (`list_client_certificates_response`). **The row says what format its
   certificate is in** (`cert_format`, #833): the applier writes
   `CURLOPT_SSLCERTTYPE` from it, a PKCS#12 row stores no `key_path`, one
   `passphrase` column serves both, and the format is stored (defaulted at write

@@ -233,30 +233,15 @@ bool is_create) {
     return {};
 }
 
-/**
- * Why the resolver would drop @p row, or nullopt when it presents it.
- *
- * The same two checks `resolve_transport_policy` runs, in its order: the format
- * must parse, then `client_cert_rejection` judges the paths and the bytes behind
- * them.
- */
-std::optional<std::string> client_certificate_problem (
-const vayu::db::ClientCertificate& row) {
-    const auto format = vayu::http::client_cert_format_from_string (row.cert_format);
-    if (!format) {
-        return "declares an unknown format '" + row.cert_format + "'";
-    }
-    return vayu::http::client_cert_rejection (
-    row.host, row.port, *format, row.cert_path, row.key_path);
-}
-
 } // namespace
 
 /**
  * Testable core of GET /client-certificates, returning {http_status, json_body}:
  * every live row as `serialize` writes it, plus `usable` and, when it is not,
- * `problem`. Those two are the list's alone - a create or update answers 400
- * for an unusable row, so its response never needs them.
+ * `problem`, judged by `check_client_cert_row`, the check
+ * `resolve_transport_policy` drops a row by. Those two are the list's alone - a
+ * create or update answers 400 for an unusable row, so its response never needs
+ * them.
  *
  * Reads the files each row names, so it runs outside the database lock: the
  * rows are fetched first (that call takes its own lock) and checked after.
@@ -265,10 +250,10 @@ std::pair<int, nlohmann::json> list_client_certificates_response (vayu::db::Data
     nlohmann::json response = nlohmann::json::array ();
     for (const auto& row : db.get_client_certificates ()) {
         nlohmann::json item = vayu::json::serialize (row);
-        const auto problem  = client_certificate_problem (row);
-        item["usable"]      = !problem.has_value ();
-        if (problem) {
-            item["problem"] = *problem;
+        const auto checked  = vayu::http::check_client_cert_row (row);
+        item["usable"]      = checked.has_value ();
+        if (!checked) {
+            item["problem"] = checked.error ();
         }
         response.push_back (std::move (item));
     }

@@ -1084,7 +1084,9 @@ TEST_F (ClientCertificateDbTest, ARowWhoseFileWentMissingIsListedUnusableWithThe
 }
 
 // Mutation check: drop the `client_cert_format_from_string` branch from
-// `client_certificate_problem` and the row is judged as PEM, and listed usable.
+// `check_client_cert_row` and the row is judged as PEM, listed usable and kept
+// by the policy; the agreement assertions below fail if the list and the
+// resolver ever judge a row by different checks again.
 TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsListedUnusableNamingIt) {
     ASSERT_EQ (
     routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
@@ -1101,6 +1103,8 @@ TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsListedUnusable
     ASSERT_TRUE (rows[0].contains ("problem")) << rows.dump ();
     EXPECT_NE (rows[0]["problem"].get<std::string> ().find ("'pkcs12'"), std::string::npos)
     << rows[0]["problem"];
+    EXPECT_TRUE (resolve_transport_policy (*db_).client_certificates.empty ())
+    << "the row the list calls unusable is the one the policy drops";
 }
 
 // `usable` and `problem` belong to the list: a create or update answers 400 for

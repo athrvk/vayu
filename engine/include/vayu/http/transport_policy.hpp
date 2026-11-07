@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,7 +31,8 @@
 
 namespace vayu::db {
 class Database;
-}
+struct ClientCertificate;
+} // namespace vayu::db
 
 namespace vayu::http {
 
@@ -284,6 +286,19 @@ const std::optional<int>& port,
 ClientCertFormat format,
 std::string_view cert_path,
 std::string_view key_path);
+
+/**
+ * @brief The format @p row declares, or why the resolver would drop the row.
+ *
+ * The one copy of "is this stored row presentable": the declared `cert_format`
+ * must parse, then `client_cert_rejection` judges the rest against the files as
+ * they are now. `resolve_transport_policy` drops a row this refuses and
+ * `GET /client-certificates` lists it as not usable with the same sentence, so
+ * the card can never promise a row the wire leaves out. The sentence is the
+ * rejection's own, or for an unparseable format one naming it.
+ */
+std::expected<ClientCertFormat, std::string> check_client_cert_row (
+const vayu::db::ClientCertificate& row);
 
 /**
  * @brief Everything the wire needs to know about how to leave this machine.
