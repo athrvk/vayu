@@ -25,6 +25,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "held_request.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/mock_issuer.hpp"
@@ -32,6 +33,7 @@
 #include "vayu/http/pkce.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/sha256.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::http::MockIssuerManager;
@@ -509,6 +511,33 @@ TEST_F (MockIssuerTest, SlowModeDelaysTheTokenEndpoint) {
                             .count ();
     EXPECT_TRUE (std::holds_alternative<vayu::db::OAuthToken> (result));
     EXPECT_GE (elapsed_ms, 300); // bounded below only - no flaky upper bound
+}
+
+// A stop wakes a token request inside the slow mode's delay instead of
+// waiting it out (#3345), and the token still goes out. `/authorize` is not
+// slowed, so it opens the connection. Healthy: the stop returns in
+// milliseconds. Broken: it waits out the whole 30s delay. Ten seconds sits
+// between them. Mutation check: put `std::this_thread::sleep_for` back in
+// `handle_token` and the stop takes 30s.
+TEST_F (MockIssuerTest, StoppingAnIssuerWakesASlowTokenRequest) {
+    MockIssuerManager mgr;
+    const auto issuer =
+    mgr.start (json{ { "failureMode", "slow" }, { "slowMs", 30000 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const int port = mgr.list ()["issuers"][0]["port"].get<int> ();
+
+    vayu::tests::HeldRequest held (port,
+    vayu::tests::opener_request (
+    "GET", "/authorize?client_id=cid&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb"),
+    vayu::tests::closing_request ("POST", "/token", "grant_type=client_credentials&client_id=cid"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the issuer never answered /authorize";
+
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_TRUE (mgr.stop (issuer.issuer_id));
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held.held_status (), 200);
 }
 
 TEST_F (MockIssuerTest, FailureModeFlipsOnALiveIssuer) {

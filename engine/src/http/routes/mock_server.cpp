@@ -46,7 +46,6 @@
 #include <map>
 #include <set>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 namespace vayu::http {
@@ -696,9 +695,6 @@ MockServerManager::MockServerManager ()
 : servers_ (constants::mock_server::MAX_SERVERS) {
 }
 
-// A response inside its configured latency is still holding a listener thread,
-// so the join in the registry's shutdown waits up to MAX_LATENCY_MS - which is
-// why that bound exists.
 MockServerManager::~MockServerManager () = default;
 
 void MockServerManager::shutdown () {
@@ -719,6 +715,8 @@ struct MockConfig {
     std::atomic<std::uint64_t>& example_roll;
     MockActivityLog& activity;
     const routes::CorsPolicy& cors;
+    /// Ends the latency wait when the mock stops.
+    const vayu::utils::StopSignal& stop_signal;
 };
 
 /**
@@ -748,8 +746,11 @@ httplib::Response& res) {
         return;
     }
 
+    // A stop cuts the wait short and the answer goes out without the rest of
+    // it: everything below reads the mock's own state, which the stop's join
+    // keeps alive until this returns.
     if (mock.latency_ms > 0) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
+        mock.stop_signal.wait_for (std::chrono::milliseconds (mock.latency_ms));
     }
 
     MockActivityEntry entry;
@@ -916,8 +917,8 @@ const MockStartRequest& request) {
     // unaffected.
     svr.set_pre_routing_handler (
     [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
-     raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors }] (
-    const httplib::Request& req, httplib::Response& res) {
+     raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors,
+     raw->stop_signal }] (const httplib::Request& req, httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });

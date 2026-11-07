@@ -30,6 +30,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "held_request.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -40,6 +41,7 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::http::MockMissKind;
@@ -1875,6 +1877,33 @@ TEST_F (MockServerTest, TeardownWhileALatentResponseIsInFlightStillJoins) {
     httplib::Client client ("127.0.0.1", port);
     client.set_connection_timeout (1);
     EXPECT_FALSE (client.Get ("/pets"));
+}
+
+// A stop wakes a response inside its latency instead of waiting it out
+// (#3345), and that answer still goes out. Healthy: the stop returns in
+// milliseconds. Broken: it waits out the whole 30s latency. Ten seconds sits
+// between them. Mutation check: put `std::this_thread::sleep_for` back in
+// `serve_mock_request` and the stop takes 30s.
+TEST_F (MockServerTest, StoppingAMockWakesAResponseInsideItsLatency) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    request.latency_ms    = mock_constants::MAX_LATENCY_MS;
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    vayu::tests::HeldRequest held (started.info.port,
+    vayu::tests::preflight_opener ("/pets"),
+    vayu::tests::closing_request ("GET", "/pets"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the mock never answered the preflight";
+
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_TRUE (manager.stop (started.info.mock_id));
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held.held_status (), 200);
 }
 
 TEST_F (MockServerTest, TheServerBudgetIsEnforced) {

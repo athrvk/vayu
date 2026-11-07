@@ -14,7 +14,8 @@
  * A handler that paces its own answer (a mock's latency, an inbox's canned
  * delay, an issuer's slow mode) used to `sleep_for` the whole delay, so the join
  * that stops its listener waited it out. `wait_for` is the same pause, ended
- * early by `request`.
+ * early by `request`; `flag` is the same request for a libcurl transfer to
+ * watch (an OAuth callback's token exchange).
  */
 
 #include <atomic>
@@ -40,6 +41,11 @@ class StopSignal {
 
     [[nodiscard]] bool stopped () const noexcept {
         return requested_.load (std::memory_order_acquire);
+    }
+
+    /// What `request` sets, in the shape `ClientConfig::cancel` takes.
+    [[nodiscard]] const std::atomic<bool>& flag () const noexcept {
+        return requested_;
     }
 
     /// Wait @p duration or until `request`, whichever comes first. True when

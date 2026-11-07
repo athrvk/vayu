@@ -33,7 +33,6 @@
 #include <map>
 #include <mutex>
 #include <string_view>
-#include <thread>
 
 namespace vayu::http {
 
@@ -560,8 +559,10 @@ const std::string& scope) {
 }
 
 void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Response& res) {
-    // The failure mode is read (and `slow` slept) before anything else, so a
-    // caller testing retry behaviour sees the same reply whatever it asked for.
+    // The failure mode is read (and `slow` waited out) before anything else, so
+    // a caller testing retry behaviour sees the same reply whatever it asked
+    // for. A stop cuts the wait short and the reply goes out without the rest
+    // of it; the stop's join keeps the issuer's state alive until then.
     std::string failure_mode;
     int64_t slow_ms = 0;
     {
@@ -578,7 +579,7 @@ void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Respons
         return;
     }
     if (failure_mode == "slow" && slow_ms > 0) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (slow_ms));
+        issuer.stop_signal.wait_for (std::chrono::milliseconds (slow_ms));
     }
 
     const std::string grant = req.get_param_value ("grant_type");

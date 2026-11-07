@@ -684,9 +684,6 @@ InboxManager::InboxManager (LocalAddressSource local_addresses)
     }
 }
 
-// A capture in its configured delay is still holding a listener thread, so
-// every join of one (`stop`, `remove`, the registry's shutdown) waits up to
-// inbox::MAX_RESPONSE_DELAY_MS - which is why that bound exists.
 InboxManager::~InboxManager () = default;
 
 void InboxManager::shutdown () {
@@ -767,8 +764,10 @@ InboxManager::start (vayu::db::Database& db, const InboxStartRequest& request) {
             std::lock_guard<std::mutex> lock (raw->response_mutex);
             canned = raw->response;
         }
+        // A stop or a delete cuts the delay short and the canned answer goes
+        // out without the rest of it; `canned` is this handler's own copy.
         if (canned.delay_ms > 0) {
-            std::this_thread::sleep_for (std::chrono::milliseconds (canned.delay_ms));
+            raw->stop_signal.wait_for (std::chrono::milliseconds (canned.delay_ms));
         }
 
         res.status                     = canned.status;

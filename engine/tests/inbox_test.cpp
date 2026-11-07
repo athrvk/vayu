@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 
 #include "competing_writer.hpp"
+#include "held_request.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -1179,6 +1180,54 @@ TEST_F (InboxListenerTest, ShutdownStopsEveryInboxAndRefusesLaterStarts) {
     EXPECT_EQ (refused.http_status, 503);
     EXPECT_EQ (refused.error_code, "unavailable");
     EXPECT_TRUE (manager_->list ().empty ());
+}
+
+/// An inbox whose canned answer waits the longest delay allowed, holding one
+/// capture inside that delay.
+class InboxHeldInItsDelayTest : public InboxListenerTest {
+    protected:
+    static constexpr int CANNED_STATUS = 202;
+
+    void SetUp () override {
+        InboxListenerTest::SetUp ();
+        InboxStartRequest request;
+        request.response.status = CANNED_STATUS;
+        request.response.delay_ms = vayu::core::constants::inbox::MAX_RESPONSE_DELAY_MS;
+        started_ = start (request);
+        held_ = std::make_unique<vayu::tests::HeldRequest> (started_.info.port,
+        vayu::tests::preflight_opener ("/hook"),
+        vayu::tests::closing_request ("POST", "/hook", "order=7"));
+        ASSERT_TRUE (
+        vayu::tests::wait_until ([this] { return held_->opener_answered (); }))
+        << "the inbox never answered the preflight";
+    }
+    void TearDown () override {
+        held_.reset ();
+        InboxListenerTest::TearDown ();
+    }
+
+    InboxManager::StartResult started_;
+    std::unique_ptr<vayu::tests::HeldRequest> held_;
+};
+
+// A stop, and a delete, each wake a capture inside its canned delay instead of
+// waiting it out (#3345), and the canned answer still goes out. Healthy: the
+// call returns in milliseconds. Broken: it waits out the whole 30s delay. Ten
+// seconds sits between them. Mutation check: put `std::this_thread::sleep_for`
+// back in the capture handler and both take 30s.
+TEST_F (InboxHeldInItsDelayTest, AStopWakesTheCapture) {
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_TRUE (manager_->stop (started_.info.inbox_id));
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held_->held_status (), CANNED_STATUS);
+    EXPECT_EQ (db_->count_inbox_requests (started_.info.inbox_id), 1);
+}
+
+TEST_F (InboxHeldInItsDelayTest, ADeleteWakesTheCapture) {
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_EQ (manager_->remove (*db_, started_.info.inbox_id), 1);
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held_->held_status (), CANNED_STATUS);
 }
 
 TEST_F (InboxListenerTest, OneLiveStreamPerInbox) {

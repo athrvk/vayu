@@ -183,13 +183,14 @@ const std::string& expected_state) {
 
 /**
  * The outcome of a callback whose state matched: the IdP's own refusal, or the
- * token exchange this redirect exists to make.
+ * token exchange this redirect exists to make, which @p cancel ends early.
  */
 CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& code_verifier,
 const std::string& redirect_uri,
-const std::map<std::string, std::string>& params) {
+const std::map<std::string, std::string>& params,
+const std::atomic<bool>& cancel) {
     CallbackOutcome outcome;
     if (auto refusal = redirect_refusal (params)) {
         outcome.error = std::move (*refusal);
@@ -200,7 +201,7 @@ const std::map<std::string, std::string>& params) {
     oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
     // Bounded by the setting: an exchange has no payload to carry a timeout.
     auto result = oauth::acquire_token (db, config, false, exchange,
-    routes::resolve_request_timeout_ms (nlohmann::json::object (), db));
+    routes::resolve_request_timeout_ms (nlohmann::json::object (), db), nullptr, &cancel);
     if (!std::holds_alternative<vayu::db::OAuthToken> (result)) {
         outcome.error   = std::get<oauth::TokenError> (result).message;
         outcome.heading = "Token exchange failed";
@@ -244,7 +245,10 @@ struct OAuth2AuthorizeManager::Attempt {
         result_state.store (settled_state);
     }
 
-    /// Requested when the attempt's listener stops, before it is joined.
+    /// Requested when the attempt's listener stops, before it is joined. The
+    /// callback's token exchange is cancelled by it, and still publishes its
+    /// failure, so the join waits one libcurl progress tick rather than the
+    /// exchange's timeout.
     vayu::utils::StopSignal stop_signal;
 
     /// Loopback mode only - an embedded-mode attempt never starts it, and
@@ -358,8 +362,8 @@ const std::string& mode) {
             }
             CallbackOutcome outcome;
             try {
-                outcome = resolve_oauth_callback (
-                db, raw->config, raw->code_verifier, raw->redirect_uri, params);
+                outcome = resolve_oauth_callback (db, raw->config, raw->code_verifier,
+                raw->redirect_uri, params, raw->stop_signal.flag ());
             } catch (const std::exception& e) {
                 // A claimed attempt that never publishes is never reaped.
                 outcome.error   = e.what ();
