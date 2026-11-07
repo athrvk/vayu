@@ -163,8 +163,9 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
  * `LOAD_STREAM_TIMEOUT_GRACE_MS` later (`curl_utils.cpp`), so a drain sized by
  * the timeout cancels a healthy stream long before its cap. A single-request
  * run is one or the other; a collection run can be both, which is
- * `collection_natural_end_drain_ms`. A user Stop does not drain at all and
- * never reads this.
+ * `collection_natural_end_drain_ms`. A Stop that latches while sending does
+ * not drain at all and never reads this; one that lands in the drain cancels
+ * it (`RunContext::request_stop`, #3341).
  */
 [[nodiscard]] inline int64_t
 natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, int timeout_ms) {

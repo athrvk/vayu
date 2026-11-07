@@ -67,7 +67,7 @@ TEST_F (MetricsHelperTest, StopSummaryCountsHttpErrorsLikeTheReport) {
     test_context->metrics_collector->status_code_distribution ());
     EXPECT_EQ (summary.errors, reported.failed);
 
-    auto response = MetricsHelper::create_stop_response ("run", summary);
+    auto response = MetricsHelper::create_stop_response ("run", summary, "stopped");
     EXPECT_EQ (response["summary"]["errors"], 15);
     EXPECT_EQ (response["summary"]["httpErrors"], 10);
     EXPECT_EQ (response["summary"]["noResponse"], 5);
@@ -87,7 +87,7 @@ TEST_F (MetricsHelperTest, StopSummaryReportsCancelledApartFromErrors) {
     EXPECT_EQ (summary.no_response, 5u);
     EXPECT_DOUBLE_EQ (summary.error_rate, 5.0);
 
-    auto response = MetricsHelper::create_stop_response ("run", summary);
+    auto response = MetricsHelper::create_stop_response ("run", summary, "stopped");
     EXPECT_EQ (response["summary"]["cancelled"], 7);
     EXPECT_EQ (response["summary"]["noResponse"], 5);
     EXPECT_EQ (response["summary"]["errors"], 5);
@@ -126,7 +126,7 @@ TEST_F (MetricsHelperTest, CreatesStopResponseCorrectly) {
     summary.avg_latency_ms = 150.0;
     summary.error_rate     = 5.0;
 
-    auto response = MetricsHelper::create_stop_response ("test_run_123", summary);
+    auto response = MetricsHelper::create_stop_response ("test_run_123", summary, "stopped");
 
     EXPECT_EQ (response["status"], "stopped");
     EXPECT_EQ (response["runId"], "test_run_123");

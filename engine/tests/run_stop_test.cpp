@@ -16,6 +16,8 @@
  *   6. EventLoop::cancel(), from another thread, turns a drain in progress
  *      (or one asked for later) into a cancelling stop on every worker
  *      (#3341).
+ *   7. A Stop that lands after the run's strategy returned on its own cuts
+ *      the natural-end drain short and leaves the run Completed (#3341).
  *
  * Every timing assertion is an upper bound measured against an upstream that
  * holds the connection open for 30s, so the margins are wide: a regression here
@@ -556,6 +558,162 @@ TEST_F (RunStopAccountingTest, AStopWhilePendingStandsAndTheRunSendsNothing) {
 }
 
 // ---------------------------------------------------------------------------
+// A Stop after the run's own end (#3341)
+//
+// Each run ends on its own with transfers in flight against /hang, so its
+// natural-end drain waits DRAIN_TIMEOUT_MS (the request timeout) plus the
+// grace before giving up. A Stop then lands in the drain. Healthy: the drain
+// is cancelled at once and the run settles within a second. Broken: it waits
+// out the timeout, ~15s. STOP_BUDGET_MS sits between, and the broken side
+// stays under wait_until's 20s deadline so it fails by name.
+// ---------------------------------------------------------------------------
+
+constexpr int DRAIN_TIMEOUT_MS = 15000;
+
+class StopAfterNaturalEndTest : public RunStopAccountingTest {
+    protected:
+    void create_pending_run (const std::string& run_id) {
+        vayu::db::Run row;
+        row.id              = run_id;
+        row.type            = vayu::RunType::Load;
+        row.status          = vayu::RunStatus::Pending;
+        row.config_snapshot = "{}";
+        // Now, not epoch: a terminal run is pruned by age.
+        row.start_time = std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+                         .count ();
+        db->create_run (row);
+    }
+
+    /// True once the worker is in its drain with @p in_flight transfers
+    /// still held by the upstream: the strategy has returned on its own.
+    static bool draining_with (const vayu::core::RunContext& context, size_t in_flight) {
+        return context.phase () == vayu::core::RunPhase::draining &&
+        context.active_transfer_count () == in_flight;
+    }
+
+    nlohmann::json parsed_summary (const std::string& run_id) {
+        const auto stored = db->get_run (run_id);
+        if (!stored) {
+            ADD_FAILURE () << "the run row is gone";
+            return nlohmann::json::object ();
+        }
+        return nlohmann::json::parse (stored->summary, nullptr, false);
+    }
+};
+
+// An `iterations` run returns on its last submission, so its four requests
+// are the drain. The Stop cuts it short; the run still completed on its own,
+// what the Stop cancelled is counted as cancelled (not as errors), and its
+// sending window is the whole run, as an `iterations` run's always is.
+// Mutation checks: read `should_stop` again for the final status in
+// `finish_load_test` and the run ends Stopped; drop the cancel from
+// `RunContext::request_stop` and the drain runs to its timeout; read
+// `should_stop` again in `sending_window` and the window is the submission
+// burst alone.
+TEST_F (StopAfterNaturalEndTest, AStopInTheDrainCompletesTheRunAndCutsTheDrain) {
+    constexpr size_t IN_FLIGHT = 4;
+    const std::string run_id   = "run-stop-after-end";
+    create_pending_run (run_id);
+    const nlohmann::json config = { { "mode", "iterations" }, { "iterations", IN_FLIGHT },
+        { "concurrency", IN_FLIGHT }, { "url", server->hang_url () },
+        { "method", "GET" }, { "timeout", DRAIN_TIMEOUT_MS }, { "workers", 1 } };
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return draining_with (*context, IN_FLIGHT); }))
+    << "the run never reached its drain with its requests in flight";
+
+    const auto stop_start = Clock::now ();
+    context->request_stop ();
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
+    << "the run never settled after the Stop";
+    const auto stop_ms = ms_since (stop_start);
+
+    EXPECT_LT (stop_ms, STOP_BUDGET_MS)
+    << "the drain outlived the Stop by " << stop_ms << "ms";
+    EXPECT_FALSE (context->stop_decides_outcome ());
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed)
+    << "a run that ended on its own was recorded as stopped";
+
+    const auto summary = parsed_summary (run_id);
+    ASSERT_TRUE (summary.is_object ()) << stored->summary;
+    EXPECT_EQ (summary.value ("cancelled", size_t{ 0 }), IN_FLIGHT) << stored->summary;
+    EXPECT_EQ (summary.value ("total_requests", size_t{ 99 }), 0U)
+    << "a request the Stop cancelled was recorded as an error";
+    EXPECT_DOUBLE_EQ (summary.value ("sending_duration", 0.0),
+    summary.value ("test_duration", -1.0))
+    << "a Stop after the end shortened the sending window";
+}
+
+// The same for a collection load run, stopped through the route: two virtual
+// users are held by the upstream when the 1s run ends. The route answers
+// within its grace with a status that is never `stopped` (the run's own end,
+// or `running` while the worker has not written it yet), and the run stores
+// Completed. Mutation checks: hardcode `stopped` in the route again and the
+// status assertion fails; read `should_stop` for the final status and the
+// stored status does.
+TEST_F (StopAfterNaturalEndTest, ACollectionRunStoppedInItsDrainAnswersItsOwnEnd) {
+    constexpr size_t IN_FLIGHT = 2;
+    const std::string run_id   = "run-stop-after-end-collection";
+    create_pending_run (run_id);
+
+    auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
+    execution->request.source        = "collection";
+    execution->request.collection_id = "col_stop_after_end";
+    vayu::core::ScenarioStep step;
+    step.request_id         = "req_hang";
+    step.name               = "hang";
+    step.request.method     = vayu::HttpMethod::GET;
+    step.request.url        = server->hang_url ();
+    step.request.timeout_ms = DRAIN_TIMEOUT_MS;
+    step.stored_url         = step.request.url;
+    execution->plan.steps.push_back (std::move (step));
+    const nlohmann::json config{ { "mode", "constant_concurrency" },
+        { "concurrency", IN_FLIGHT }, { "duration", "1s" },
+        { "timeout", DRAIN_TIMEOUT_MS }, { "workers", 1 },
+        { "scenario",
+        { { "source", "collection" }, { "collectionId", "col_stop_after_end" } } } };
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db, execution));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return draining_with (*context, IN_FLIGHT); }))
+    << "the run never reached its drain with its virtual users in flight";
+
+    // The route's grace is 5s and its wait answers when it runs out, so the
+    // broken reading is ~5s; the healthy one is the cancel plus one 100ms poll.
+    constexpr int GRACE_SECONDS = 5;
+    const auto stop_start       = Clock::now ();
+    auto body                   = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Load, GRACE_SECONDS);
+    const auto stop_ms = ms_since (stop_start);
+
+    EXPECT_LT (stop_ms, 4000)
+    << "the route waited out its grace: the drain was not cut";
+    const auto status = body.value ("status", "");
+    EXPECT_TRUE (status == "completed" || status == "running") << body.dump ();
+
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; }))
+    << "the run never settled after the Stop";
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed) << stored->summary;
+    const auto summary = parsed_summary (run_id);
+    ASSERT_TRUE (summary.is_object ()) << stored->summary;
+    EXPECT_EQ (summary.value ("cancelled", size_t{ 0 }), IN_FLIGHT) << stored->summary;
+}
+
+// ---------------------------------------------------------------------------
 // DELETE /runs/:id
 // ---------------------------------------------------------------------------
 
@@ -835,6 +993,47 @@ TEST_F (StopActiveRunTest, LoadRunAnswersFromItsCollector) {
     EXPECT_EQ (body["summary"]["noResponse"], 1);
     EXPECT_EQ (body["summary"]["cancelled"], 0);
     EXPECT_FALSE (body["summary"].contains ("stepsExecuted"));
+}
+
+// A load run stopped in its drain ends by its own verdict (#3341), so the
+// answer is the status the worker stored, here Completed. Mutation check:
+// answer `stopped` unconditionally in `stop_active_run_response`; this and
+// the next test fail.
+TEST_F (StopActiveRunTest, LoadRunStoppedInItsDrainAnswersItsStoredStatus) {
+    seed_running ("run_drained", vayu::RunType::Load);
+    auto context = make_context ("run_drained");
+    context->advance_phase (vayu::core::RunPhase::draining);
+    context->is_running = true;
+
+    // Stands in for the load worker's ending: is_running cleared, then the
+    // terminal status, as execute_load_test orders them.
+    std::thread worker ([this, context] () {
+        (void)vayu::tests::wait_until (
+        [&context] () { return context->stop_was_requested (); });
+        db->transition_run_status (
+        "run_drained", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
+        context->is_running = false;
+    });
+
+    auto body = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Load, SETTLE_GRACE_SECONDS);
+    worker.join ();
+
+    EXPECT_EQ (body["status"], "completed") << body.dump ();
+}
+
+// The same Stop before the worker has written anything: the run is still
+// running, not `stopped`, which it will never be.
+TEST_F (StopActiveRunTest, LoadRunStoppedInItsDrainIsNotAnsweredStopped) {
+    seed_running ("run_draining", vayu::RunType::Load);
+    auto context = make_context ("run_draining");
+    context->advance_phase (vayu::core::RunPhase::draining);
+    context->is_running = true;
+
+    auto body = vayu::http::routes::stop_active_run_response (
+    *db, *context, vayu::RunType::Load, 0);
+
+    EXPECT_EQ (body["status"], "running") << body.dump ();
 }
 
 } // namespace

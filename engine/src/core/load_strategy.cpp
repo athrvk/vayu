@@ -221,7 +221,7 @@ const ResultAnnotations& annotations) {
 } // namespace
 
 bool is_stop_cancellation (const RunContext& context, const vayu::Error& error) {
-    return error.code == vayu::ErrorCode::Cancelled && context.should_stop.load ();
+    return error.code == vayu::ErrorCode::Cancelled && context.stop_was_requested ();
 }
 
 void handle_result (const std::shared_ptr<RunContext>& context,
@@ -1662,7 +1662,8 @@ bool CapacitySearch::advance (int64_t elapsed_ms) {
 CapacitySummary CapacitySearch::finish () {
     const char* reason = stop_reason_;
     if (reason == nullptr) {
-        reason = context_->should_stop ? capacity_stop::STOPPED : capacity_stop::DEADLINE;
+        reason = context_->stop_decides_outcome () ? capacity_stop::STOPPED :
+                                                     capacity_stop::DEADLINE;
     }
     publish_progress (reason, steady_clock_ms ());
     return summarize_capacity (config_, history_, reason);

@@ -1657,6 +1657,23 @@ nlohmann::json scenario_stop_response (vayu::db::Database& db, const std::string
     return response;
 }
 
+/**
+ * A stopped load run's status (#3341): the stored one once the worker has
+ * written it, which `is_running` clearing does not wait for. Until then it is
+ * what the Stop will make it, which for a Stop that landed after the strategy
+ * returned on its own is nothing: that run still ends by its own verdict, so
+ * it is answered as still running.
+ */
+vayu::RunStatus load_stop_status (vayu::db::Database& db,
+const vayu::core::RunContext& context) {
+    if (const auto run = db.get_run (context.run_id);
+    run && vayu::is_terminal (run->status)) {
+        return run->status;
+    }
+    return context.stop_decides_outcome () ? vayu::RunStatus::Stopped :
+                                             vayu::RunStatus::Running;
+}
+
 } // namespace
 
 nlohmann::json stop_active_run_response (vayu::db::Database& db,
@@ -1681,7 +1698,8 @@ int grace_seconds) {
     vayu::utils::log_info ("run", "Run stopped",
     { { "runId", run_id }, { "totalRequests", summary.total_requests },
     { "errors", summary.errors }, { "cancelled", summary.cancelled } });
-    return vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
+    return vayu::utils::MetricsHelper::create_stop_response (
+    run_id, summary, to_string (load_stop_status (db, context)));
 }
 
 std::pair<int, nlohmann::json> stop_unregistered_run_response (vayu::db::Database& db,
