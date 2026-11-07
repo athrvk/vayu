@@ -540,6 +540,31 @@ TEST_F (ExecuteBinaryBodyTest, ASendThatThrowsFailsItsRunAndAnswersJson) {
     EXPECT_EQ (stored->status, vayu::RunStatus::Failed);
 }
 
+// The one move out of a terminal status (#3340): a send that recorded its
+// result and then threw fails its `completed` row, because its caller got no
+// response. Mutation check: drop Completed from `guard_recorded_send`'s edge
+// and the row stays `completed`.
+TEST_F (ExecuteBinaryBodyTest, ASendThatThrowsAfterRecordingFailsItsCompletedRun) {
+    vayu::db::Run run;
+    run.id     = "run_recorded_then_threw";
+    run.type   = vayu::RunType::Design;
+    run.status = vayu::RunStatus::Running;
+    db_->create_run (run);
+
+    httplib::Response res;
+    vayu::http::routes::guard_recorded_send (*db_, res, run.id, [this, &run] () {
+        ASSERT_TRUE (db_
+        ->transition_run_status (run.id, { vayu::RunStatus::Running }, vayu::RunStatus::Completed)
+        .applied);
+        throw std::runtime_error ("threw after the result was recorded");
+    });
+
+    EXPECT_EQ (res.status, 500);
+    const auto stored = db_->get_run (run.id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Failed);
+}
+
 // A transient send has no row to fail, and still gets an answer it can read -
 // even when the reason quotes a byte that is not UTF-8. Mutation check: put
 // `send_error`'s strict dump back and the error answer itself throws.

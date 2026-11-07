@@ -12034,8 +12034,9 @@ are not on this row; the report has them.
 
 `endTime` is `null` while a row's `status` is `pending` or `running` and the
 stored value once it is `completed`, `failed` or `stopped` (#2953). The database
-seeds the column with `startTime` when a run starts, which would read as a run
-that took no time; a client takes "still going" from the `null`, and the same
+seeds the column with `startTime` when a run is created, which would read as a
+run that took no time, and clears it to `0` once a load or collection run is
+running (#3340); a client takes "still going" from the `null`, and the same
 rule holds for `GET /runs/:runId`, the report's `metadata.endTime` and the
 `PUT /runs/:runId/baseline` row.
 
@@ -12249,7 +12250,13 @@ duration is in the sum).
 
 A run that is already finished answers `{"status": "<status>", "runId": ...,
 "message": "Run already <status>"}`; one that is not in memory answers
-`{"status": "stopped", "runId": ..., "message": "Run was not active"}`.
+`{"status": "stopped", "runId": ..., "message": "Run was not active"}`. That is
+a buffered design send, or a run still `pending` before its worker started
+(#3340): the row moves to `stopped` from `pending` or `running` only, so the stop
+stands. A worker that had not started yet finds the row `stopped` and ends
+without sending; one that started in the meantime is signalled too. A buffered
+send's exchange still completes and its result is stored, under a row that stays
+`stopped`.
 
 **A streaming design run** (`POST /execute` with `"stream": true`) is stopped
 here too: the endpoint asks its consumer worker to end the transfer, waits up to
@@ -12320,7 +12327,7 @@ given the totals of its last persisted tick instead (see "A run the engine died 
 A report read while the run is `pending` or `running` is therefore **partial**: `metadata.status`
 says the run is still in flight, and `thresholdValidation` is absent even when the run declared
 budgets, because the verdict is computed from the summary written at the end, and
-`metadata.endTime` is `null` (#2953), not the run's start time the database seeded it with. Read
+`metadata.endTime` is `null` (#2953), not the seed or the `0` the database holds for it. Read
 `metadata.status` before treating a report as final.
 
 A design or scenario run stores its `results` rows just before its status flips, and a client
@@ -12334,7 +12341,8 @@ run's in-memory counters instead, the ones the [live stream](#get-runsrunidlive)
 `noResponseRequests` split, `cancelledRequests`, `errorRate`, `statusCodes` and
 `errors.byStatusCode`, `droppedRequests`, `skippedRequests`, `stalledMs`, `peakConcurrency`,
 `avgQueueWaitMs`, `bytesSent`, `bytesReceived`, `httpVersionDowngraded`, `connectionReplays`, and `avgRps`, `throughput`,
-`sendRate` and `avgInFlight` over the time since `startTime`. `latency` is absent, because the percentiles come from histograms the run is
+`sendRate` and `avgInFlight` over the time from `startTime` to the read, which `testDuration` and
+`totalDurationSeconds` report (#3340). `latency` is absent, because the percentiles come from histograms the run is
 still writing and arrive with the summary. `results[]` is empty and `resultsStored` is `0`
 (`resultsCap` is unchanged), `errors.types` is `{}`, `errors.withDetails` is `0`, and
 `timingBreakdown` and `slowRequests` are absent. In the moment between the summary write and the

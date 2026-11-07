@@ -66,20 +66,6 @@ std::optional<Run> Database::get_run_snapshot (const std::string& id) {
     return runs.front ();
 }
 
-void Database::update_run_status (const std::string& id, RunStatus status) {
-    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
-    vayu::utils::log_debug ("db", "Updating run status",
-    { { "id", id }, { "status", std::string (vayu::to_string (status)) } });
-    auto run = get_run (id);
-    if (run) {
-        run->status   = status;
-        run->end_time = std::chrono::duration_cast<std::chrono::milliseconds> (
-        std::chrono::system_clock::now ().time_since_epoch ())
-                        .count ();
-        impl_->storage.update (*run);
-    }
-}
-
 void Database::update_run_end_time (const std::string& id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Updating run end_time", { { "id", id } });
@@ -90,11 +76,6 @@ void Database::update_run_end_time (const std::string& id) {
                         .count ();
         impl_->storage.update (*run);
     }
-}
-
-void Database::update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries) {
-    retry_on_busy ("update run status", max_retries,
-    std::chrono::milliseconds (100), [&] { update_run_status (id, status); });
 }
 
 namespace {
@@ -116,6 +97,14 @@ int64_t end_time_after (const Run& run, RunStatus to) {
         return run.end_time;
     }
     return run.end_time > run.start_time ? run.end_time : now_epoch_ms ();
+}
+
+nlohmann::json status_names (std::initializer_list<RunStatus> statuses) {
+    auto names = nlohmann::json::array ();
+    for (const auto status : statuses) {
+        names.push_back (vayu::to_string (status));
+    }
+    return names;
 }
 } // namespace
 
@@ -141,9 +130,15 @@ RunStatus to) {
         impl_->storage.update (*run);
         outcome = RunStatusTransition{ .applied = true, .current = to };
     });
-    vayu::utils::log_debug ("db", "Run status transition",
-    { { "id", id }, { "to", std::string (vayu::to_string (to)) },
-    { "applied", outcome.applied },
+    if (outcome.applied) {
+        vayu::utils::log_debug ("db", "Run status transition",
+        { { "id", id }, { "to", vayu::to_string (to) } });
+        return outcome;
+    }
+    // Info, not a throw: a refusal is the guard holding (a Stop that landed
+    // first, a row deleted under its worker), and the caller reads `current`.
+    vayu::utils::log_info ("db", "Run status transition refused",
+    { { "id", id }, { "from", status_names (allowed_from) }, { "to", vayu::to_string (to) },
     { "current",
     outcome.current ? std::string (vayu::to_string (*outcome.current)) :
                       std::string ("missing") } });

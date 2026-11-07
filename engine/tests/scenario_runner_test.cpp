@@ -589,6 +589,9 @@ class ScenarioRunnerTest : public ::testing::Test {
         run.start_time = started_at;
         run.end_time   = started_at;
         db_->create_run (run);
+        if (before_worker_) {
+            before_worker_ (run_id);
+        }
 
         EXPECT_TRUE (manager_.start_scenario_run (run_id, config, execution, *db_, jar_));
         return run_id;
@@ -690,6 +693,9 @@ class ScenarioRunnerTest : public ::testing::Test {
     /// The caps a streaming step is bounded by, as `POST /runs` resolves them;
     /// unset keeps the plan's compiled-in default.
     std::optional<vayu::StreamBounds> stream_bounds_;
+    /// Called with the run id between the row's insert and its worker's
+    /// registration, the window a Stop that finds no context lands in.
+    std::function<void (const std::string&)> before_worker_;
 };
 
 // ============================================================================
@@ -714,6 +720,34 @@ TEST_F (ScenarioRunnerTest, TheIterationIdentityBindsOnEveryPassOfADesignRun) {
     EXPECT_EQ (seen[2].target, "/ok?u=1&i=2")
     << "the identity must advance with the pass rather than freezing at "
        "composition";
+}
+
+// #3340: a Stop that lands while the run is still `pending`, before its worker
+// registers, finds no context and writes the row itself. The worker's move to
+// Running is refused, so the run ends without a step and the row stays
+// `stopped`. Mutation check: ignore the refusal in `execute_scenario_run` and
+// the steps reach the mock.
+TEST_F (ScenarioRunnerTest, AStopWhilePendingStandsAndTheRunSendsNothing) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok");
+    before_worker_ = [this] (const std::string& run_id) {
+        const auto [status, body] =
+        vayu::http::routes::stop_unregistered_run_response (*db_, manager_, run_id);
+        EXPECT_EQ (status, 200);
+        EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+    };
+
+    const auto run_id = start (/*iterations=*/3);
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return manager_.get_run (run_id) == nullptr; }))
+    << "the refused worker never handed the run back";
+
+    const auto row = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->status, vayu::RunStatus::Stopped);
+    EXPECT_TRUE (row->summary.empty ()) << row->summary;
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "a stopped run sent its steps";
 }
 
 // Issue #995 moved the generator family out of plan composition, and a design

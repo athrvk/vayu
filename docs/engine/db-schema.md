@@ -1546,16 +1546,31 @@ caller names that exact status as the one being left. The read, the decision and
 write hold one DB mutex acquisition. A busy database is retried; a terminal write is
 retried until it lands, because a lost final status leaves the run `running`, which
 retention never prunes. A graceful shutdown waits for that worker, and a daemon killed
-before the write lands leaves the row to startup reconciliation (below). The writers
-still on the older `update_run_status`, which takes any edge and stamps `end_time` each
-time, move onto it under the same issue.
+before the write lands leaves the row to startup reconciliation (below). A refused move
+is logged (run id, the statuses named, the one found) and answered, never thrown.
+
+Every status write after the insert goes through it, each naming its real edge. A load
+or collection run is inserted `pending` and a design send `running`. A worker moves
+`pending` to `running` as it starts and `running` to its terminal status as it ends; a
+run that fails before its worker starts, or whose move to `running` threw, fails from
+`pending`. `POST /runs/:runId/stop` on a run no worker holds (a buffered design send, or a
+run whose worker has not registered yet) moves `pending` or `running` to `stopped`. A
+Stop in that window therefore stands: the worker's move to `running` is refused and it
+ends without sending, and a buffered send's result is stored under a row that stays
+`stopped`. A worker that registered and moved to `running` between the route's look-up
+and the move is signalled as well. The one move out of a terminal status is `completed`
+to `failed`, when a design send throws after its result was recorded
+(`guard_recorded_send`): its caller got no response, so the row must not say it
+completed.
 
 **`end_time`** moves with the status edge `transition_run_status` takes. Both inserts *seed* it to `start_time` up
 front (`seed_run_times`, `http/routes/execution.cpp`). A move to `running` clears it to
-`0`, so a live report measures up to now rather than to the seed. `update_run_end_time`
-stamps it mid-run when a load run finishes generating, and the terminal move that
-follows keeps any value later than `start_time`; otherwise (the seed, or `0`) the
-terminal move stamps now. A move to any other status leaves it alone.
+`0`, so a live report measures up to now rather than to the seed; a design send,
+inserted `running`, keeps the seed until its terminal move. `update_run_end_time` stamps
+it when a load run's load ends, before its cleanup and summary, and when a collection
+run's teardown is done, before its summary; the terminal move that follows keeps any
+value later than `start_time`; otherwise (the seed, or `0`) the terminal move stamps now. A
+move to any other status leaves it alone.
 
 A run killed by a daemon crash never reaches a terminal status:
 `reconcile_orphaned_runs` marks it failed (with a partial `summary` for a load run, see

@@ -529,9 +529,9 @@ Notes:
   bounds' early return is marked too) and leaves both keys out for a terminal
   run, so the key's presence is the whole signal. `get_run` is the cheap read for
   "is it done": `terminal` comes from the status, never from `endTime`. The
-  engine stores `end_time` as `startTime` on a row that has not finished (a seed
-  kept for a run a crash kills) but emits `endTime: null` for a `pending` or
-  `running` run (#2953), so `get_run`, `list_runs` and the report all agree; the
+  engine stores `end_time` as `startTime` on a row that has not started (a seed
+  kept for a run a crash kills) and as `0` on a running load or collection run
+  (#3340), but emits `endTime: null` for a `pending` or `running` run (#2953), so `get_run`, `list_runs` and the report all agree; the
   status is still the signal that survives an engine that predates that.
   A failed load run the engine could not fully record is a different statement,
   made inside `summary` and not to be read as the top-level `partial` (#2895):

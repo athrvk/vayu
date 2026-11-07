@@ -2848,6 +2848,35 @@ FailRunTest,
     return std::string (info.param.name);
 });
 
+// #3340: a finished run's end_time is the stamp the worker writes before its
+// cleanup, not the moment of its terminal status write. A `script.teardown`
+// holding the worker for TEARDOWN_MS runs between the two, so a healthy row
+// ends at least that long before the run is seen finished; a re-stamp at the
+// status write lands within a poll of it. Mutation check: have `end_time_after`
+// (db_runs.cpp) stamp now on every terminal move and the bound fails by about
+// TEARDOWN_MS.
+TEST_F (LoadRunToTerminalTest, AFinishedRunEndsAtItsPreCleanupStamp) {
+    constexpr int64_t TEARDOWN_MS     = 1000;
+    const std::string teardown_script = "const until = Date.now () + " +
+    std::to_string (TEARDOWN_MS) + "; while (Date.now () < until) {}";
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 2 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 },
+        { "lifecycleElements",
+        nlohmann::json::array ({ { { "id", "el_teardown" }, { "kind", "script.teardown" },
+        { "enabled", true }, { "config", { { "script", teardown_script } } } } }) } };
+
+    const auto row = run_to_terminal_row ("run-end-stamp-e2e", config);
+    const int64_t seen_finished = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                                  .count ();
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->status, vayu::RunStatus::Completed) << row->summary;
+    EXPECT_GT (row->end_time, row->start_time);
+    EXPECT_LE (row->end_time + TEARDOWN_MS, seen_finished)
+    << "end_time was stamped after the teardown, at the terminal write";
+}
+
 // #2892 end to end: an `assert.status` that holds on all 4 completions is the
 // exact population, and a deferred `pm.test` that always fails, replayed over
 // 1 in 2 responses, is the sampled one. Judged on the worse rate, 100%; the

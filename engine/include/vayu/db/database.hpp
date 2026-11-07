@@ -889,7 +889,7 @@ class Database {
     std::optional<Run> get_run_snapshot (const std::string& id);
     /**
      * @brief Move run @p id to @p to if its status is one of @p allowed_from
-     * (#3340). The one guarded run status write.
+     * (#3340). The only run status write after the insert.
      *
      * The read, the decision and the write share one DB mutex acquisition, so
      * a competing writer cannot land between them. Membership is the whole
@@ -906,15 +906,12 @@ class Database {
      * a run whose final status is lost stays `running`, which retention never
      * prunes, until the next start reconciles it. A graceful shutdown waits
      * for the worker doing that, and a killed daemon leaves the row to
-     * `reconcile_orphaned_runs`. Any other error throws.
+     * `reconcile_orphaned_runs`. Any other error throws. A refusal is logged
+     * and answered, never thrown.
      */
     RunStatusTransition transition_run_status (const std::string& id,
     std::initializer_list<RunStatus> allowed_from,
     RunStatus to);
-    // Any status from any status, stamping end_time each time: the unguarded
-    // write `transition_run_status` replaces once its callers move (#3340).
-    void update_run_status (const std::string& id, RunStatus status);
-    void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
     // Stamp end_time now without changing status. A later terminal
     // `transition_run_status` keeps this value.
     void update_run_end_time (const std::string& id);

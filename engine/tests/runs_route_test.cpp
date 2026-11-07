@@ -75,6 +75,8 @@ const std::string& body);
 vayu::db::RunFilter run_filter_from_query (const httplib::Request& req);
 // Defined in runs.cpp; DELETE /runs, returns {http_status, json_body}.
 std::pair<int, nlohmann::json> clear_runs_response (vayu::db::Database& db);
+// Defined in execution.cpp; stamps a new row's timestamps as both inserts do.
+void seed_run_times (vayu::db::Run& run, int64_t started_at);
 } // namespace vayu::http::routes
 
 namespace {
@@ -941,7 +943,8 @@ TEST_F (RunsRouteTest, HasWarningsReflectsCompletionDespiteTheCachedSummary) {
 
     db_->update_run_summary ("run_finishing",
     R"({"warnings":[{"code":"unresolved_tokens","message":"x"}]})");
-    db_->update_run_status_with_retry ("run_finishing", vayu::RunStatus::Completed);
+    db_->transition_run_status (
+    "run_finishing", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
 
     auto [second_status, second] =
     vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
@@ -2729,7 +2732,8 @@ TEST_F (RunsRouteTest, ReportOfARunStillRunningIsPartialUntilItCompletes) {
     nlohmann::json{ { "thresholds", { { "latencyP99Ms", 50 } } } }, inputs);
     db_->update_run_summary (
     "run_live", vayu::core::build_run_summary_payload (inputs).dump ());
-    db_->update_run_status ("run_live", vayu::RunStatus::Completed);
+    db_->transition_run_status (
+    "run_live", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
 
     auto [done_status, done] = vayu::http::routes::run_report_response (*db_, "run_live");
     ASSERT_EQ (done_status, 200);
@@ -2791,6 +2795,64 @@ TEST_F (RunsRouteTest, ALiveLoadRunsReportCountsFromItsCollectorAndReadsNoRow) {
     EXPECT_EQ (live["resultsCap"].get<size_t> (), 100u);
     // ~RunManager waits out its stop grace for a run still active.
     runs.unregister_run ("run_live");
+}
+
+// #3340: a live load run's rates are over the time it has been running. The
+// row is built the way production builds it: `seed_run_times` sets end_time
+// to start_time at the insert and the worker's move to Running clears it, so
+// the report measures up to now. When that move stamped end_time instead, the
+// report measured up to the moment the run started, a gap of a millisecond or
+// none, and 8 requests read as thousands a second or as 0. Mutation check:
+// have `end_time_after` (db_runs.cpp) stamp now for Running and the duration
+// and rate assertions fail.
+TEST_F (RunsRouteTest, ALiveLoadRunsRatesAreOverTheTimeItHasBeenRunning) {
+    const auto epoch_ms = [] () {
+        return std::chrono::duration_cast<std::chrono::milliseconds> (
+        std::chrono::system_clock::now ().time_since_epoch ())
+        .count ();
+    };
+    vayu::db::Run row;
+    row.id                   = "run_rates";
+    row.type                 = vayu::RunType::Load;
+    row.status               = vayu::RunStatus::Pending;
+    row.config_snapshot      = R"({"url":"https://x.test/","method":"GET"})";
+    const int64_t created_at = epoch_ms ();
+    vayu::http::routes::seed_run_times (row, created_at);
+    db_->create_run (row);
+    ASSERT_TRUE (db_
+    ->transition_run_status ("run_rates", { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
+    .applied);
+
+    constexpr size_t REQUESTS = 8;
+    vayu::core::RunManager runs;
+    auto context = std::make_shared<vayu::core::RunContext> (
+    "run_rates", nlohmann::json::object ());
+    for (size_t i = 0; i < REQUESTS; ++i) {
+        context->metrics_collector->record_success (200, 10.0, 0.0);
+    }
+    context->requests_sent = REQUESTS;
+    runs.register_run ("run_rates", context);
+
+    // A floor under the run's age, never a ceiling: a slow runner only ages
+    // it more, and the broken reading stays near 0 however long this takes.
+    constexpr int64_t AGE_MS = 500;
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return epoch_ms () - created_at >= AGE_MS; }));
+
+    auto [status, live] =
+    vayu::http::routes::run_report_response (*db_, "run_rates", &runs);
+    ASSERT_EQ (status, 200);
+    EXPECT_EQ (live["metadata"]["status"].get<std::string> (), "running");
+    const auto& summary   = live["summary"];
+    const double duration = summary["totalDurationSeconds"].get<double> ();
+    EXPECT_GE (duration, static_cast<double> (AGE_MS) / 1000.0)
+    << "the live report measured up to a stored end, not to now";
+    EXPECT_DOUBLE_EQ (summary["testDuration"].get<double> (), duration);
+    EXPECT_DOUBLE_EQ (
+    summary["avgRps"].get<double> (), static_cast<double> (REQUESTS) / duration);
+    EXPECT_DOUBLE_EQ (summary["sendRate"].get<double> (),
+    static_cast<double> (REQUESTS) / duration);
+    runs.unregister_run ("run_rates");
 }
 
 // Between the summary write and the status flip the report is the summary's,
@@ -3552,7 +3614,8 @@ TEST_F (RunsRouteTest, LoadRowGetsNoResultSummaryUntilItsStatusIsTerminal) {
     EXPECT_FALSE (row_of (second, "run_live").contains ("resultSummary"));
     EXPECT_EQ (summaries_.outcome_build_count (), 0u);
 
-    db_->update_run_status_with_retry ("run_live", vayu::RunStatus::Completed);
+    db_->transition_run_status (
+    "run_live", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
     auto [third_status, third] =
     vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
     ASSERT_EQ (third_status, 200);
@@ -3776,7 +3839,8 @@ TEST_F (RunsRouteTest, CollectionRowGetsNoResultSummaryUntilItsStatusIsTerminal)
     EXPECT_FALSE (row_of (first, "run_collecting").contains ("resultSummary"));
     EXPECT_EQ (summaries_.outcome_build_count (), 0u);
 
-    db_->update_run_status_with_retry ("run_collecting", vayu::RunStatus::Completed);
+    db_->transition_run_status (
+    "run_collecting", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
     auto [second_status, second] =
     vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
     ASSERT_EQ (second_status, 200);

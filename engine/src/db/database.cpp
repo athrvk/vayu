@@ -139,7 +139,7 @@ void Database::with_lock (const std::function<void ()>& fn) {
 }
 
 // ============================================================================
-// Busy-retry helper - shared by the four write paths above
+// Busy-retry helper - every retried write in the db_*.cpp files goes through it
 // ============================================================================
 
 namespace {

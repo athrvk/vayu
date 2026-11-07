@@ -89,25 +89,6 @@ TEST_F (DatabaseTest, CreatesAndRetrievesRun) {
     EXPECT_EQ (retrieved->status, vayu::RunStatus::Pending);
 }
 
-TEST_F (DatabaseTest, UpdatesRunStatus) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    vayu::db::Run run;
-    run.id              = "run_1";
-    run.type            = vayu::RunType::Load;
-    run.status          = vayu::RunStatus::Pending;
-    run.start_time      = 1000;
-    run.config_snapshot = "{}";
-
-    db.create_run (run);
-    db.update_run_status ("run_1", vayu::RunStatus::Completed);
-
-    auto retrieved = db.get_run ("run_1");
-    ASSERT_HAS_VALUE (retrieved);
-    EXPECT_EQ (retrieved->status, vayu::RunStatus::Completed);
-}
-
 TEST_F (DatabaseTest, RetrievesAllRuns) {
     Database db (TEST_DB_PATH);
     db.init ();
