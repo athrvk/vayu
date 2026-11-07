@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -71,7 +72,11 @@ inline constexpr std::string_view GATEWAY_ERROR_PAGE =
 /// same page as `text/plain` (#3201). `/token-hang` never answers on its own (#2833), and
 /// `/refresh-rejected-then-hang` rejects a refresh after
 /// `SLOW_REFRESH_REJECT_MS` and then hangs the fresh grant; a hung handler
-/// returns once the fixture is torn down.
+/// returns once the fixture is torn down. `/refresh-gated` holds each refresh
+/// until the test `release`s it by hit number, then rotates: it honours only
+/// the refresh token it issued last (`GATED_REFRESH_TOKEN` first), answering
+/// `AT-REFRESHED-<hit>` with refresh token `RT-<hit>`, and refuses any other
+/// with `invalid_grant` (#3344).
 class MockTokenServer {
     public:
     MockTokenServer () {
@@ -148,6 +153,10 @@ class MockTokenServer {
                 } else {
                     hang ();
                 }
+            } else if (req.path == "/refresh-gated" && grant == "refresh_token") {
+                hold_until_released (hit);
+                answer_rotating_refresh (hit,
+                form.count ("refresh_token") ? form.at ("refresh_token") : "", res);
             } else if (req.path == "/token-fail") {
                 res.status = 400;
                 res.set_content (R"({"error":"invalid_client","error_description":"bad secret"})",
@@ -182,6 +191,8 @@ class MockTokenServer {
 
     /// How long `/refresh-rejected-then-hang` takes to reject a refresh.
     static constexpr int SLOW_REFRESH_REJECT_MS = 2500;
+    /// The refresh token `/refresh-gated` honours first.
+    static constexpr std::string_view GATED_REFRESH_TOKEN = "RT0";
     std::string last_body () const {
         const std::lock_guard<std::mutex> lock (record_mutex_);
         return last_body_;
@@ -210,21 +221,56 @@ class MockTokenServer {
         return found == last_headers_.end () ? "" : found->second;
     }
 
+    /// Lets `/refresh-gated`'s request number @p hit answer.
+    void release (int hit) {
+        const std::lock_guard<std::mutex> lock (gate_mutex_);
+        released_hits_.insert (hit);
+    }
+
     private:
     /// Holds the handler until teardown, or a hard cap past any client's
     /// bound, so a leaked handler cannot wedge the test binary.
     void hang () const {
+        hold_until ([] { return false; });
+    }
+
+    void hold_until_released (int hit) const {
+        hold_until ([this, hit] {
+            const std::lock_guard<std::mutex> lock (gate_mutex_);
+            return released_hits_.contains (hit);
+        });
+    }
+
+    template <typename Released> void hold_until (Released released) const {
         const auto cap = std::chrono::steady_clock::now () + std::chrono::seconds (40);
-        while (!released_.load (std::memory_order_relaxed) &&
+        while (!released_.load (std::memory_order_relaxed) && !released () &&
         std::chrono::steady_clock::now () < cap) {
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
+    }
+
+    /// A provider that rotates: the refresh token it last issued buys one
+    /// token and a new refresh token, and any other is `invalid_grant`.
+    void answer_rotating_refresh (int hit, const std::string& presented, httplib::Response& res) {
+        const std::lock_guard<std::mutex> lock (gate_mutex_);
+        if (presented != valid_refresh_token_) {
+            res.status = 400;
+            res.set_content (R"({"error":"invalid_grant"})", "application/json");
+            return;
+        }
+        valid_refresh_token_ = "RT-" + std::to_string (hit);
+        res.set_content (R"({"access_token":"AT-REFRESHED-)" + std::to_string (hit) +
+        R"(","refresh_token":")" + valid_refresh_token_ + R"(","expires_in":3600})",
+        "application/json");
     }
 
     httplib::Server svr_;
     int port_ = 0;
     std::atomic<int> hits_{ 0 };
     std::atomic<bool> released_{ false };
+    mutable std::mutex gate_mutex_;
+    std::set<int> released_hits_;
+    std::string valid_refresh_token_ = std::string (GATED_REFRESH_TOKEN);
     mutable std::mutex record_mutex_;
     std::string last_path_, last_target_, last_body_, last_auth_, last_content_type_;
     httplib::Headers last_headers_;

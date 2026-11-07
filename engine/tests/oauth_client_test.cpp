@@ -6,7 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <future>
 #include <string>
 #include <variant>
 
@@ -17,17 +19,52 @@
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 namespace oauth = vayu::http::oauth;
 using vayu::tests::MockTokenServer;
 using vayu::tests::parse_form;
+using vayu::tests::WAIT_DEADLINE;
+using vayu::tests::wait_until;
 
 namespace {
+
+using TokenResult = std::variant<vayu::db::OAuthToken, oauth::TokenError>;
 
 /// The bound every token request here is given: the engine's own default, so
 /// none of these tests is about the timeout.
 constexpr int TOKEN_TIMEOUT_MS = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+
+/// Releases every request `/refresh-gated` may still hold, so a test that
+/// stops early unwinds instead of waiting out a held refresh. Declared after
+/// the futures it guards, so it runs first.
+class ReleaseGatedRefreshes {
+    public:
+    explicit ReleaseGatedRefreshes (MockTokenServer& idp) : idp_ (idp) {
+    }
+    ReleaseGatedRefreshes (const ReleaseGatedRefreshes&)            = delete;
+    ReleaseGatedRefreshes& operator= (const ReleaseGatedRefreshes&) = delete;
+    ReleaseGatedRefreshes (ReleaseGatedRefreshes&&)                 = delete;
+    ReleaseGatedRefreshes& operator= (ReleaseGatedRefreshes&&)      = delete;
+    ~ReleaseGatedRefreshes () {
+        for (int hit = 1; hit <= 4; ++hit) {
+            idp_.release (hit);
+        }
+    }
+
+    private:
+    MockTokenServer& idp_;
+};
+
+/// The result of @p call, or a failure naming a call that never returned.
+TokenResult finished (std::future<TokenResult>& call, const char* what) {
+    if (call.wait_for (WAIT_DEADLINE) != std::future_status::ready) {
+        ADD_FAILURE () << what << " never returned";
+        return oauth::TokenError{};
+    }
+    return call.get ();
+}
 
 int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -103,6 +140,30 @@ class OAuthClientTest : public ::testing::Test {
         EXPECT_EQ (stored->access_token, "AT-PLAIN");
         EXPECT_TRUE (stored->refresh_token.empty ())
         << "the old refresh token belongs to the refresh path only";
+    }
+
+    // The single-flight tests (#3344) refresh an expired row behind
+    // `/refresh-gated`. The grant is authorization_code, so a fall-through to
+    // a fresh grant is a 409 rather than another request at the provider.
+    static json gated_config (const MockTokenServer& idp) {
+        return json{ { "grantType", "authorization_code" },
+            { "accessTokenUrl", idp.url ("/refresh-gated") },
+            { "clientId", "cid" }, { "clientSecret", "sec" } };
+    }
+
+    void seed_expired (const json& config, const std::string& refresh_token) {
+        auto row          = seeded_row (config, 7'200'000);
+        row.refresh_token = refresh_token;
+        db_->save_oauth_token (row);
+    }
+
+    std::future<TokenResult> acquire_async (const json& config,
+    int timeout_ms                  = TOKEN_TIMEOUT_MS,
+    const std::atomic<bool>* cancel = nullptr) {
+        return std::async (std::launch::async, [this, config, timeout_ms, cancel] {
+            return oauth::acquire_token (
+            *db_, config, false, std::nullopt, timeout_ms, nullptr, cancel);
+        });
     }
 
     std::unique_ptr<vayu::db::Database> db_;
@@ -743,6 +804,155 @@ TEST_F (OAuthClientTest, ARejectedRefreshLeavesTheFreshGrantOnlyWhatRemains) {
     static_assert (MockTokenServer::SLOW_REFRESH_REJECT_MS == 2500,
     "the bound below assumes the refresh is rejected 2500 ms in");
     EXPECT_LT (elapsed, std::chrono::milliseconds (5500));
+}
+
+// ---------------------------------------------------------------------------
+// One refresh in flight per cache key (#3344)
+// ---------------------------------------------------------------------------
+
+std::string access_token_of (const TokenResult& result) {
+    const auto* token = std::get_if<vayu::db::OAuthToken> (&result);
+    return token == nullptr ? "error: " + std::get<oauth::TokenError> (result).message :
+                              token->access_token;
+}
+
+std::string error_code_of (const TokenResult& result) {
+    const auto* err = std::get_if<oauth::TokenError> (&result);
+    return err == nullptr ? "token" : err->code;
+}
+
+// Two sends of one expired token: the second waits on the first's refresh, so
+// a rotating provider sees one refresh and the row it answered survives.
+TEST_F (OAuthClientTest, ConcurrentRefreshesOfOneTokenPostOnce) {
+    MockTokenServer idp;
+    const auto config = gated_config (idp);
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, std::string (MockTokenServer::GATED_REFRESH_TOKEN));
+
+    std::future<TokenResult> leader;
+    std::future<TokenResult> follower;
+    const ReleaseGatedRefreshes release_on_exit (idp);
+    leader = acquire_async (config);
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 1; }))
+    << "the first call's refresh reaches the provider";
+    follower = acquire_async (config);
+    // Without single-flight the second call posts its own refresh instead.
+    ASSERT_TRUE (wait_until ([&] {
+        return oauth::refresh_followers_waiting (key) == 1 || idp.hits () == 2;
+    }));
+    idp.release (1);
+    idp.release (2); // so a second refresh, if one was sent, answers
+
+    const auto led      = finished (leader, "the leading call");
+    const auto followed = finished (follower, "the following call");
+    EXPECT_EQ (access_token_of (led), "AT-REFRESHED-1");
+    EXPECT_EQ (access_token_of (followed), "AT-REFRESHED-1");
+    EXPECT_EQ (idp.hits (), 1) << "one refresh for both calls";
+    const auto stored = db_->get_oauth_token (key);
+    ASSERT_HAS_VALUE (stored) << "the refreshed row survives";
+    EXPECT_EQ (stored->access_token, "AT-REFRESHED-1");
+    EXPECT_EQ (stored->refresh_token, "RT-1");
+}
+
+// The provider refuses the refresh token this call sent, but another
+// acquisition (an interactive exchange, say) replaced the row while the post
+// was out: the refusal must not delete the replacement, which answers instead.
+TEST_F (OAuthClientTest, AStaleRefusedRefreshKeepsTheRowThatReplacedIt) {
+    MockTokenServer idp;
+    const auto config = gated_config (idp);
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, "RT_SPENT_ELSEWHERE");
+
+    std::future<TokenResult> refresh;
+    const ReleaseGatedRefreshes release_on_exit (idp);
+    refresh = acquire_async (config);
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 1; }));
+    auto replacement          = seeded_row (config, 0);
+    replacement.access_token  = "REPLACED";
+    replacement.refresh_token = "RT_REPLACED";
+    db_->save_oauth_token (replacement);
+    idp.release (1);
+
+    const auto result = finished (refresh, "the refused refresh");
+    EXPECT_EQ (access_token_of (result), "REPLACED");
+    EXPECT_EQ (idp.hits (), 1);
+    const auto stored = db_->get_oauth_token (key);
+    ASSERT_HAS_VALUE (stored) << "the stale refusal deleted the replacement";
+    EXPECT_EQ (stored->refresh_token, "RT_REPLACED");
+}
+
+// A waiting call keeps its own deadline: it gives up while the refresh it is
+// waiting on is still held at the provider, and never posts one of its own.
+TEST_F (OAuthClientTest, AFollowerStopsAtItsOwnDeadline) {
+    MockTokenServer idp;
+    const auto config = gated_config (idp);
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, std::string (MockTokenServer::GATED_REFRESH_TOKEN));
+
+    std::future<TokenResult> leader;
+    std::future<TokenResult> follower;
+    const ReleaseGatedRefreshes release_on_exit (idp);
+    leader = acquire_async (config);
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 1; }));
+    follower = acquire_async (config, 200);
+
+    EXPECT_EQ (error_code_of (finished (follower, "the following call")), "oauth2_timeout");
+    EXPECT_EQ (idp.hits (), 1) << "the follower waited rather than posting";
+    EXPECT_EQ (oauth::refresh_followers_waiting (key), 0);
+    idp.release (1);
+    EXPECT_EQ (access_token_of (finished (leader, "the leading call")), "AT-REFRESHED-1");
+}
+
+TEST_F (OAuthClientTest, ACancelledFollowerStopsWithoutWaitingForItsLeader) {
+    MockTokenServer idp;
+    const auto config = gated_config (idp);
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, std::string (MockTokenServer::GATED_REFRESH_TOKEN));
+
+    std::atomic<bool> cancel{ false };
+    std::future<TokenResult> leader;
+    std::future<TokenResult> follower;
+    const ReleaseGatedRefreshes release_on_exit (idp);
+    leader = acquire_async (config);
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 1; }));
+    follower = acquire_async (config, TOKEN_TIMEOUT_MS, &cancel);
+    ASSERT_TRUE (
+    wait_until ([&] { return oauth::refresh_followers_waiting (key) == 1; }));
+    cancel.store (true);
+
+    EXPECT_EQ (error_code_of (finished (follower, "the cancelled call")), "oauth2_network_error");
+    EXPECT_EQ (idp.hits (), 1);
+    idp.release (1);
+    EXPECT_EQ (access_token_of (finished (leader, "the leading call")), "AT-REFRESHED-1");
+}
+
+// The leader's cancel is the leader's: the call waiting on it makes its own
+// refresh from the row the leader left, rather than reporting the cancel.
+TEST_F (OAuthClientTest, ALeadersErrorIsNotItsFollowersError) {
+    MockTokenServer idp;
+    const auto config = gated_config (idp);
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, std::string (MockTokenServer::GATED_REFRESH_TOKEN));
+
+    std::atomic<bool> leader_cancel{ false };
+    std::future<TokenResult> leader;
+    std::future<TokenResult> follower;
+    const ReleaseGatedRefreshes release_on_exit (idp);
+    leader = acquire_async (config, TOKEN_TIMEOUT_MS, &leader_cancel);
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 1; }));
+    follower = acquire_async (config);
+    ASSERT_TRUE (
+    wait_until ([&] { return oauth::refresh_followers_waiting (key) == 1; }));
+    leader_cancel.store (true);
+
+    EXPECT_EQ (error_code_of (finished (leader, "the cancelled leader")), "oauth2_network_error");
+    ASSERT_TRUE (wait_until ([&] { return idp.hits () == 2; }))
+    << "the follower refreshes for itself";
+    idp.release (2);
+    EXPECT_EQ (access_token_of (finished (follower, "the following call")), "AT-REFRESHED-2");
+    const auto stored = db_->get_oauth_token (key);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->refresh_token, "RT-2");
 }
 
 TEST_F (OAuthClientTest, AuthCodeWithoutInteractiveIs409) {
