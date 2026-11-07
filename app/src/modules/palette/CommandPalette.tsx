@@ -33,7 +33,7 @@
  * is gone from the editor the user was typing in. See `focusBefore` below.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui";
 import { useLayoutStore, useToastStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
@@ -45,6 +45,26 @@ import { PaletteResults } from "./PaletteResults";
 import { useCommandSurfaces } from "./useCommandSurfaces";
 import type { PaletteItem } from "./types";
 
+/**
+ * The highlight cmdk is handed while it must have none. A controlled `value`
+ * that matches no row leaves every row unselected, and it has to be non-empty:
+ * cmdk reads an empty one as "nothing chosen yet" and highlights the first row.
+ * `\u0001` survives the `.trim()` cmdk applies, and no row's text can start
+ * with it.
+ */
+const NO_HIGHLIGHT = "\u0001no-highlight";
+
+/**
+ * The keys cmdk answers by moving the highlight - not Enter, Escape or typing.
+ * Mirrors its own switch (arrows, Home, End, and the vim bindings Ctrl+N/J/P/K),
+ * minus a keystroke an IME owns, which cmdk ignores too.
+ */
+function movesHighlight(e: ReactKeyboardEvent): boolean {
+	if (e.nativeEvent.isComposing || e.defaultPrevented) return false;
+	if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return true;
+	return e.ctrlKey && ["n", "j", "p", "k"].includes(e.key);
+}
+
 /** Shown when the chord is refused because another dialog is open (#3320). */
 const PALETTE_BLOCKED_MESSAGE = "Close the dialog to use the command palette";
 
@@ -52,6 +72,20 @@ export function CommandPalette() {
 	const paletteOpen = useLayoutStore((s) => s.paletteOpen);
 	const setPaletteOpen = useLayoutStore((s) => s.setPaletteOpen);
 	const [query, setQuery] = useState("");
+	/** The query matched nothing, so the rows on screen are suggestions (#3321). */
+	const [nothingMatched, setNothingMatched] = useState(false);
+	/**
+	 * The user has moved the highlight since the query last changed. Until then a
+	 * suggestion is not chosen, and Enter must not run it.
+	 */
+	const [navigated, setNavigated] = useState(false);
+	/**
+	 * What cmdk last said it highlighted, and how many times it has said so. The
+	 * value is what a navigating user gets back; the count is what makes the
+	 * withheld highlight re-apply when cmdk re-highlights the same row for the
+	 * next query, which a bare value could not signal.
+	 */
+	const [highlight, setHighlight] = useState({ value: "", reports: 0 });
 	const { surfaces, pickerProps, runTarget, dismissRunDialog } = useCommandSurfaces();
 	const commandContext = useCommandContext(surfaces);
 	/** Where focus was when the palette opened, to give it back on close. */
@@ -81,6 +115,8 @@ export function CommandPalette() {
 				// than in `onOpenChange` so it holds for every opener, including the
 				// ones that flip the store flag directly.
 				setQuery("");
+				setNavigated(false);
+				setHighlight({ value: "", reports: 0 });
 			}),
 		[]
 	);
@@ -157,6 +193,11 @@ export function CommandPalette() {
 		return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
 	}, [setPaletteOpen]);
 
+	const changeQuery = (next: string) => {
+		setQuery(next);
+		setNavigated(false);
+	};
+
 	const pick = (item: PaletteItem) => {
 		item.perform();
 		setPaletteOpen(false);
@@ -176,6 +217,20 @@ export function CommandPalette() {
 				   authority over the same question - and the one that used to win,
 				   since a section it could not re-order outranked any score. */
 				shouldFilter={false}
+				/* Nothing matched, so cmdk would highlight the first suggestion and
+				   Enter would run it (#3321). The highlight is withheld until an
+				   arrow key or the pointer chooses a row. cmdk re-highlights the
+				   first row on every new search, and a controlled `value` only
+				   re-applies when it changes - so the withheld value carries the
+				   count of highlights cmdk has reported. `NO_HIGHLIGHT` names no row. */
+				value={
+					nothingMatched && !navigated
+						? `${NO_HIGHLIGHT}${highlight.reports}`
+						: highlight.value
+				}
+				onValueChange={(value) => setHighlight((h) => ({ value, reports: h.reports + 1 }))}
+				onKeyDown={(e) => movesHighlight(e) && setNavigated(true)}
+				onPointerMove={() => setNavigated(true)}
 			>
 				{/* No chord in the placeholder: the palette is already open by the
 				    time anyone reads it, so the one thing it would teach has
@@ -183,7 +238,7 @@ export function CommandPalette() {
 				    where it is still worth knowing. */}
 				<CommandInput
 					value={query}
-					onValueChange={setQuery}
+					onValueChange={changeQuery}
 					placeholder="Search tabs, requests, commands, settings…"
 				/>
 				{/*
@@ -192,7 +247,12 @@ export function CommandPalette() {
 				 * context bar applies to a collapsed section.
 				 */}
 				{paletteOpen && (
-					<PaletteResults query={query} onPick={pick} commandContext={commandContext} />
+					<PaletteResults
+						query={query}
+						onPick={pick}
+						commandContext={commandContext}
+						onNothingMatchedChange={setNothingMatched}
+					/>
 				)}
 				{/* Below the list rather than inside it: `CommandList` is the band
 				    that scrolls, and hints that scroll away are hints nobody

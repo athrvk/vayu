@@ -1390,7 +1390,13 @@ Three about the frame itself (#1177):
   `No matches for “…”. Try one of these:` above them. They are suggestions, not results: the
   announced total stays at zero, which is what "did what I typed narrow anything" asks. cmdk's
   own `CommandEmpty` is unused here for the same reason - it renders only when the list has no
-  rows at all, and the verbs are rows.
+  rows at all, and the verbs are rows. Being an offer, no verb is highlighted until an arrow key
+  (or Home, End, Ctrl+N/J/P/K) or the pointer chooses one, so Enter on a miss does nothing rather
+  than opening a new request (#3321). `CommandPalette` withholds the highlight by controlling
+  cmdk's `value` (`CommandDialog` forwards `value`, `onValueChange`, `onKeyDown` and
+  `onPointerMove` to its `Command`) and takes the miss from `PaletteResults`, which owns the
+  ranking. Typing takes the choice back, and a query that matches auto-highlights its first row
+  as before.
 
 Two invariants are tested rather than commented. **A variable's value is never indexed**, secret
 or not (`secret` is a masking hint, so trusting it would leak every token nobody flagged) - held

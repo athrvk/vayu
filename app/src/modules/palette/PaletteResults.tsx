@@ -27,7 +27,7 @@
  * the fixed sections.
  */
 
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, Kbd } from "@/components/ui";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { TimeValue } from "@/components/shared/TimeValue";
@@ -56,9 +56,20 @@ interface PaletteResultsProps {
 	 * palette, and this component with it.
 	 */
 	commandContext: CommandContext;
+	/**
+	 * Whether the query matched nothing, so the rows below are suggestions. The
+	 * palette uses it to keep Enter from running one nobody chose, and reads it
+	 * from here because this is where the ranking is.
+	 */
+	onNothingMatchedChange: (nothingMatched: boolean) => void;
 }
 
-export function PaletteResults({ query, onPick, commandContext }: PaletteResultsProps) {
+export function PaletteResults({
+	query,
+	onPick,
+	commandContext,
+	onNothingMatchedChange,
+}: PaletteResultsProps) {
 	const tabs = useTabItems();
 	const entities = useEntityItems();
 	const views = useViewItems();
@@ -113,8 +124,22 @@ export function PaletteResults({ query, onPick, commandContext }: PaletteResults
 	 * and overriding it to a tight left-aligned lead-in would leave nothing of
 	 * it but `text-sm text-muted-foreground`. This is not an empty state - the
 	 * list below it is full.
+	 *
+	 * The verbs are an offer, not an answer: `CommandPalette` keeps any of them
+	 * from being highlighted until the user moves to one, so Enter on a miss does
+	 * nothing (#3321). It learns of this state from `onNothingMatchedChange`.
 	 */
 	const nothingMatched = query.trim() !== "" && total === 0;
+
+	/*
+	 * A layout effect, so the palette withholds the highlight before the frame
+	 * that would show the first suggestion lit. The cleanup is what clears it when
+	 * the palette closes and this list unmounts.
+	 */
+	useLayoutEffect(() => {
+		onNothingMatchedChange(nothingMatched);
+		return () => onNothingMatchedChange(false);
+	}, [nothingMatched, onNothingMatchedChange]);
 
 	return (
 		<>
