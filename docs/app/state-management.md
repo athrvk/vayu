@@ -91,7 +91,12 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   one `set` and at most one recorded navigation visit, never a loop of single
   closes: closing tabs one at a time would focus and record a visit for every
   intermediate tab on the way to the last, leaving Back to walk the user
-  through places they never went.
+  through places they never went. `closeOtherTabs` and `closeTabsToRight` carry
+  `closeTab`'s #1489 guard (issue #3324): while `engineStatus` is not
+  `connected`, a dirty tab (`isTabDirty`) is left out of the set to close, the
+  clean ones still close, and one "Not saved - Vayu's engine is unreachable;
+  kept N unsaved tabs open" toast says how many stayed (none when nothing was
+  kept). `closeSavedTabs` never selects a dirty tab, so it needs no guard
 - Reorder (issue #2038): `moveTab(tabId, toIndex)` puts a tab at the index it
   occupies afterwards, clamped to the list, and returns without a `set` when
   the tab is unknown or already there. It writes `openTabs` and nothing else:
@@ -3343,7 +3348,8 @@ it logs the flush result at warn and proceeds (#1908). `useTabsStore.closeTab`
 asks the same
 question one tab early: closing a single dirty tab while the engine is not
 `connected` keeps the tab and toasts instead of letting the unmount flush fail
-into a pane that no longer exists.
+into a pane that no longer exists; `closeOtherTabs` and `closeTabsToRight` hold
+back their dirty tabs the same way (#3324).
 
 ### Variable Resolution Priority
 

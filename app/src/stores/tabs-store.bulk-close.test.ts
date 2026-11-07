@@ -19,6 +19,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTabsStore, type TabLocation } from "./tabs-store";
 import { useSaveStore, type SaveContext } from "./save-store";
+import { useEngineStore } from "./engine-store";
+import { useToastStore } from "./toast-store";
 
 beforeEach(() => {
 	useTabsStore.setState({
@@ -29,6 +31,8 @@ beforeEach(() => {
 		navIndex: -1,
 	});
 	useSaveStore.setState({ contexts: new Map() });
+	useEngineStore.setState({ engineStatus: "connected" });
+	useToastStore.setState({ toasts: [] });
 });
 
 const store = () => useTabsStore.getState();
@@ -196,6 +200,78 @@ describe("closeSavedTabs", () => {
 
 		expect(store().openTabs).toHaveLength(0);
 		expect(store().activeTabId).toBeNull();
+	});
+});
+
+/**
+ * A bulk close is a close of every tab it names, so it owes the same guard as
+ * `closeTab` (#1489): a dirty tab closed while the engine cannot take its save
+ * loses the edits (#3324). The clean tabs still close; the dirty ones stay, and
+ * one toast says how many.
+ */
+describe.each([
+	["closeOtherTabs", () => store().closeOtherTabs(tabId("a"))],
+	["closeTabsToRight", () => store().closeTabsToRight(tabId("a"))],
+] as const)("%s with the engine unreachable", (_name, close) => {
+	const toasts = () => useToastStore.getState().toasts;
+
+	it("closes the clean tabs, keeps the dirty one and toasts once", () => {
+		openRequests("a", "clean-1", "dirty", "clean-2");
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		close();
+
+		expect(openEntities()).toEqual(["a", "dirty"]);
+		expect(toasts().map((t) => [t.message, t.variant])).toEqual([
+			["Not saved - Vayu's engine is unreachable; kept 1 unsaved tab open", "error"],
+		]);
+	});
+
+	it("counts every dirty tab it kept in the one toast", () => {
+		openRequests("a", "dirty-1", "clean", "dirty-2");
+		markDirty("request-dirty-1");
+		markDirty("request-dirty-2");
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		close();
+
+		expect(openEntities()).toEqual(["a", "dirty-1", "dirty-2"]);
+		expect(toasts().map((t) => t.message)).toEqual([
+			"Not saved - Vayu's engine is unreachable; kept 2 unsaved tabs open",
+		]);
+	});
+
+	it("does not toast when nothing it closes is dirty", () => {
+		openRequests("a", "clean-1", "clean-2");
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		close();
+
+		expect(openEntities()).toEqual(["a"]);
+		expect(toasts()).toHaveLength(0);
+	});
+
+	it("does not toast for a dirty tab the close does not touch", () => {
+		openRequests("a", "clean");
+		markDirty("request-a");
+		useEngineStore.setState({ engineStatus: "unreachable" });
+
+		close();
+
+		expect(openEntities()).toEqual(["a"]);
+		expect(toasts()).toHaveLength(0);
+	});
+
+	it("closes the dirty tab too once the engine is connected", () => {
+		openRequests("a", "clean", "dirty");
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "connected" });
+
+		close();
+
+		expect(openEntities()).toEqual(["a"]);
+		expect(toasts()).toHaveLength(0);
 	});
 });
 
