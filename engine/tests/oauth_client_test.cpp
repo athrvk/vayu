@@ -836,6 +836,26 @@ TEST_F (OAuthClientTest, DbRoundTrip) {
     EXPECT_FALSE (db_->get_oauth_token ("k1").has_value ());
 }
 
+// A refused refresh may clear only the token it spent (#3344): the row another
+// acquisition wrote while it was in flight carries another refresh token.
+TEST_F (OAuthClientTest, ARefusedRefreshDeletesOnlyTheRowItSpent) {
+    vayu::db::OAuthToken rotated;
+    rotated.cache_key     = "k1";
+    rotated.access_token  = "NEW";
+    rotated.refresh_token = "RT_NEW";
+    db_->save_oauth_token (rotated);
+
+    EXPECT_FALSE (db_->delete_oauth_token_if_refresh_matches ("k1", "RT_OLD"));
+    const auto kept = db_->get_oauth_token ("k1");
+    ASSERT_HAS_VALUE (kept) << "a stale refresh token must not delete the row";
+    EXPECT_EQ (kept->access_token, "NEW");
+
+    EXPECT_TRUE (db_->delete_oauth_token_if_refresh_matches ("k1", "RT_NEW"));
+    EXPECT_FALSE (db_->get_oauth_token ("k1").has_value ());
+    EXPECT_FALSE (db_->delete_oauth_token_if_refresh_matches ("k1", "RT_NEW"))
+    << "nothing left to delete";
+}
+
 TEST_F (OAuthClientTest, SerializeTokenShape) {
     vayu::db::OAuthToken t;
     t.cache_key     = "k";

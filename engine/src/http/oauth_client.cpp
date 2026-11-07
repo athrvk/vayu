@@ -500,8 +500,10 @@ const std::atomic<bool>* cancel) {
             }
             const auto& err = std::get<TokenError> (refreshed);
             if (err.code == "oauth2_provider_error") {
-                // Rejected refresh token → clear and fall through to a fresh grant.
-                db.delete_oauth_token (key);
+                // Rejected refresh token → clear and fall through to a fresh
+                // grant, but only while the row still holds the token this
+                // attempt spent (#3344).
+                db.delete_oauth_token_if_refresh_matches (key, cached->refresh_token);
             } else {
                 return err; // network errors don't invalidate the cache
             }

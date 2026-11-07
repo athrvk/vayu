@@ -850,6 +850,16 @@ class Database {
     void save_oauth_token (const OAuthToken& t);
     std::optional<OAuthToken> get_oauth_token (const std::string& cache_key);
     void delete_oauth_token (const std::string& cache_key);
+    /**
+     * Removes @p cache_key's row only while it still holds @p refresh_token,
+     * reading and removing under one acquisition of the mutex (#3344). A
+     * refresh the provider refused clears the token it spent, never the row
+     * another acquisition wrote while it was in flight.
+     *
+     * @return whether a row was removed.
+     */
+    bool delete_oauth_token_if_refresh_matches (const std::string& cache_key,
+    const std::string& refresh_token);
 
     // Execution - runs and every run-scoped artifact below (metric ticks,
     // monitor samples, results, the webhook inbox) are defined in

@@ -2031,7 +2031,9 @@ Auto-created by `sync_schema()`.
 Expiry is `now > created_at + expires_in*1000 − skew`, with skew = min(45s, `expires_in`/2),
 so a token living less than 90s is still valid for the first half of its life. On refresh the
 `refresh_token` rotates when the provider issues a new one; a rejected refresh
-token clears the row and falls back to a fresh grant.
+token clears the row, only while the row still holds that refresh token
+(`Database::delete_oauth_token_if_refresh_matches`, one lock acquisition, #3344),
+and falls back to a fresh grant.
 
 A load run **does** refresh mid-run: a run whose auth resolves to a
 header-placed, expiring oauth2 token gets a watchdog thread (a collection load
