@@ -363,7 +363,26 @@ export function ClientCertificatesCard() {
 												Passphrase set
 											</Badge>
 										)}
+										{/* The engine drops an entry it cannot present from
+										    every send without a word, so this is the one
+										    place the user learns a registered row is inert.
+										    Fill and white label, as the connection test's
+										    outcome chip. */}
+										{!certificate.usable && (
+											<Badge
+												variant="chip"
+												className="bg-status-warning-fill text-white"
+											>
+												Not presented
+											</Badge>
+										)}
 									</div>
+									{!certificate.usable && (
+										<p className="text-xs text-status-warning-text">
+											Skipped on every send
+											{certificate.problem ? ` - ${certificate.problem}` : ""}
+										</p>
+									)}
 									{/* What this row reaches, spelled out - the pattern
 									    text alone is what a reader guesses wrong. */}
 									<p className="text-xs text-muted-foreground">

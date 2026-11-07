@@ -1193,6 +1193,15 @@ export interface ClientCertificate {
 	hasPassphrase: boolean;
 	createdAt: number;
 	updatedAt: number;
+	/**
+	 * Whether the engine would present this entry, judged against the files as
+	 * they are now (issue #3260). `false` for a row whose file moved or whose
+	 * format was edited around the routes: the engine leaves it out of every
+	 * send. Carried by the list only - a create or update refuses such a row.
+	 */
+	usable: boolean;
+	/** Why the entry is not presented; present only when `usable` is `false`. */
+	problem?: string;
 }
 
 /**
@@ -1258,7 +1267,11 @@ export interface ConnectionTestResult {
 		 */
 		source?: "environment";
 	};
-	/** The registry entry that answered for this host, `""` when none did. */
+	/**
+	 * The registry entry the probe offered, `""` when none matched or the URL
+	 * is `http://`, where nothing is presented (issue #3260). "Offered": the
+	 * handshake may still have refused it, which `outcome` reports.
+	 */
 	clientCertificate: string;
 	/** The status line, present only on `ok`. */
 	status?: number;
