@@ -16,7 +16,9 @@
 
 #include "database_impl.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <mutex>
@@ -137,43 +139,70 @@ void Database::with_lock (const std::function<void ()>& fn) {
 }
 
 // ============================================================================
-// Busy-retry helper - shared by the four write paths above
+// Busy-retry helper - every retried write in the db_*.cpp files goes through it
 // ============================================================================
+
+namespace {
+// Where an unbounded retry's backoff stops growing: base * 10, one second for
+// the 100ms base every caller passes.
+constexpr int64_t MAX_BACKOFF_STEPS = 10;
+
+// Only SQLite busy/locked errors are retried; sqlite_orm surfaces them as
+// std::system_error with these substrings in what().
+bool is_busy_error (const std::string& message) {
+    return message.find ("database is locked") != std::string::npos ||
+    message.find ("SQLITE_BUSY") != std::string::npos;
+}
+
+// Debug while a bounded retry or an unbounded one's backoff is still growing;
+// a warning per retry once an unbounded one has waited out the growth, since
+// a write still busy after that is one an operator should hear about.
+void log_busy_retry (const char* what,
+int64_t attempt,
+int attempts,
+std::chrono::milliseconds delay,
+bool unbounded) {
+    const std::string message = std::string ("Database locked during ") + what +
+    ", retrying in " + std::to_string (delay.count ()) + "ms (attempt " +
+    std::to_string (attempt) +
+    (unbounded ? ", until it lands)" : "/" + std::to_string (attempts) + ")");
+    if (unbounded && attempt >= MAX_BACKOFF_STEPS) {
+        vayu::utils::log_warning ("db", message);
+    } else {
+        vayu::utils::log_debug ("db", message);
+    }
+}
+} // namespace
 
 void Database::retry_on_busy (const char* what,
 int attempts,
 std::chrono::milliseconds base,
 const std::function<void ()>& fn) {
-    for (int attempt = 0; attempt < attempts; attempt++) {
+    const bool unbounded = attempts == RETRY_UNTIL_LANDED;
+    for (int64_t attempt = 1;; ++attempt) {
         try {
             std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
             fn ();
             return; // Success
         } catch (const std::system_error& e) {
-            std::string error_msg = e.what ();
-            // Only SQLite busy/locked errors are retried; sqlite_orm surfaces
-            // them as std::system_error with these substrings in what().
-            const bool busy = error_msg.find ("database is locked") != std::string::npos ||
-            error_msg.find ("SQLITE_BUSY") != std::string::npos;
-            if (!busy) {
+            const std::string error_msg = e.what ();
+            if (!is_busy_error (error_msg)) {
                 throw; // Different error, rethrow immediately
             }
-            if (attempt == attempts - 1) {
+            if (!unbounded && attempt >= attempts) {
                 // Busy persisted through every attempt - log and rethrow.
                 vayu::utils::log_error ("db",
                 std::string ("Failed to ") + what + " after " +
                 std::to_string (attempts) + " attempts: " + error_msg);
                 throw;
             }
-            vayu::utils::log_debug ("db",
-            std::string ("Database locked during ") + what + ", retrying in " +
-            std::to_string (base.count () * (attempt + 1)) + "ms (attempt " +
-            std::to_string (attempt + 1) + "/" + std::to_string (attempts) + ")");
         }
         // The lock_guard scope above has ended: we sleep *without* holding the
         // mutex so a busy retry never stalls other endpoints (/health, SSE,
         // the runs poll) that serialize on the same lock.
-        std::this_thread::sleep_for (base * (attempt + 1));
+        const auto delay = base * std::min (attempt, MAX_BACKOFF_STEPS);
+        log_busy_retry (what, attempt, attempts, delay, unbounded);
+        std::this_thread::sleep_for (delay);
     }
 }
 

@@ -12,6 +12,7 @@
 #include <exception>
 #include <expected>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -167,6 +168,16 @@ struct RunFilter {
 struct RunCursor {
     int64_t start_time = 0;
     std::string id;
+};
+
+/**
+ * What `Database::transition_run_status` did (#3340). `current` is the status
+ * the row holds once the call returns: the target when `applied`, the status
+ * that refused the move otherwise, and nothing when there is no such run.
+ */
+struct RunStatusTransition {
+    bool applied = false;
+    std::optional<RunStatus> current;
 };
 
 /**
@@ -876,9 +887,34 @@ class Database {
      * run writes; `get_run` stays the read a read-then-write composes with.
      */
     std::optional<Run> get_run_snapshot (const std::string& id);
-    void update_run_status (const std::string& id, RunStatus status);
-    void update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries = 3);
-    void update_run_end_time (const std::string& id); // Update end_time without changing status
+    /**
+     * @brief Move run @p id to @p to if its status is one of @p allowed_from
+     * (#3340). The only run status write after the insert.
+     *
+     * The read, the decision and the write share one DB mutex acquisition, so
+     * a competing writer cannot land between them. Membership is the whole
+     * rule: there is no wildcard and an empty @p allowed_from refuses every
+     * row, so a terminal status is left only by an edge the caller names.
+     *
+     * `end_time` moves with the edge. A terminal @p to keeps a stored value
+     * later than `start_time` (one `update_run_end_time` wrote) and stamps now
+     * over anything else, the `seed_run_times` seed included. @p to Running
+     * clears it to 0, so a live report measures up to now. Any other edge
+     * leaves it alone.
+     *
+     * A busy database is retried. A terminal write is retried until it lands:
+     * a run whose final status is lost stays `running`, which retention never
+     * prunes, until the next start reconciles it. A graceful shutdown waits
+     * for the worker doing that, and a killed daemon leaves the row to
+     * `reconcile_orphaned_runs`. Any other error throws. A refusal is logged
+     * and answered, never thrown.
+     */
+    RunStatusTransition transition_run_status (const std::string& id,
+    std::initializer_list<RunStatus> allowed_from,
+    RunStatus to);
+    // Stamp end_time now without changing status. A later terminal
+    // `transition_run_status` keeps this value.
+    void update_run_end_time (const std::string& id);
     std::vector<Run> get_all_runs ();
     // Paginated, filtered run list ordered start_time DESC, id DESC (newest
     // first, ties by id) - the only order the UI uses. count_runs returns the
@@ -980,6 +1016,10 @@ class Database {
      * one built from its last tick, marked `"partial": true` (#2895): only the
      * tick's cumulative figures, never its one-second windows. A run that
      * already has a summary keeps it; any other run is given none.
+     *
+     * `end_time` keeps what the run recorded, since the moment the process
+     * died is unknowable and the restart time would span the downtime. A row
+     * with none (0, which a move to Running leaves) is given its `start_time`.
      *
      * @return Number of rows reconciled.
      */
@@ -1558,8 +1598,11 @@ class Database {
      * backoff, @p base * (attempt+1)), then the call is retried - so a retry
      * never stalls other endpoints that need the same mutex. Non-busy
      * exceptions rethrow immediately; busy exhaustion after @p attempts logs
-     * and rethrows. @p what names the operation for log messages.
+     * and rethrows. @p attempts of @ref RETRY_UNTIL_LANDED never exhausts: the
+     * backoff stops growing at ten steps and each retry past that is a
+     * warning. @p what names the operation for log messages.
      */
+    static constexpr int RETRY_UNTIL_LANDED = 0;
     void retry_on_busy (const char* what, // database.cpp
     int attempts,
     std::chrono::milliseconds base,

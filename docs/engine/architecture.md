@@ -920,8 +920,10 @@ See [Database Schema](db-schema.md) for the full column list.
    process (a crash or a kill - a graceful shutdown stops and joins every worker, so
    it writes a terminal status) - nothing else would ever move them off those
    statuses, so `GET /runs` reported them as running forever. They are marked
-   `failed`; `end_time` is left as recorded, since when the process died is
-   unknowable at restart. A load run that stored no summary but wrote metric
+   `failed`; `end_time` keeps what the run recorded, or becomes `start_time`
+   when it recorded none (a run that died while `running`, which a move to
+   `running` leaves at `0`), since when the process died is unknowable at
+   restart and the restart time would span the downtime. A load run that stored no summary but wrote metric
    ticks is given one from its last tick in the same transaction, flagged
    `partial` (#2895), so its report shows the totals it reached rather than
    zeros (see [Database Schema](db-schema.md#runs)).

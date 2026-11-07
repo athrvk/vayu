@@ -1891,6 +1891,20 @@ vayu::RunType run_type,
 int grace_seconds);
 
 /**
+ * Testable core of `POST /runs/:id/stop` for a run whose context was not
+ * found: a buffered design send, which has none, or a load or collection run
+ * still `pending` before its worker registered (#3340). Moves the row to
+ * Stopped from Pending or Running only, answering the status that refused
+ * the move (200) or 404 for a missing row. A worker that registered in
+ * between is signalled too, so the stop reaches whichever side of the race
+ * it landed on: one still Pending is refused its move to Running and sends
+ * nothing. Defined in runs.cpp.
+ */
+std::pair<int, nlohmann::json> stop_unregistered_run_response (vayu::db::Database& db,
+vayu::core::RunManager& run_manager,
+const std::string& run_id);
+
+/**
  * Testable core of `GET /runs/:id/metrics`: one `{data, pagination}` page of
  * the run's ticks, 404 for a missing run. @p limit and @p offset arrive
  * clamped (at most `RUN_TIME_SERIES_PAGE_MAX` ticks a page). Defined in

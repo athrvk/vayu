@@ -259,7 +259,8 @@ TEST_F (DatabaseConcurrencyTest, RunSnapshotAnswersWhileTheMutexIsHeld) {
     std::promise<void> release;
     std::thread holder ([this, &holding, released = release.get_future ()] {
         db_->with_lock ([&] {
-            db_->update_run_status ("run_1", vayu::RunStatus::Completed);
+            db_->transition_run_status (
+            "run_1", { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
             holding.set_value ();
             released.wait ();
         });
@@ -287,7 +288,8 @@ TEST_F (DatabaseConcurrencyTest, RunSnapshotSeesEachCommitAndAMissingRun) {
     EXPECT_EQ (before->status, vayu::RunStatus::Running);
 
     db_->update_run_summary ("run_1", R"({"totalRequests":1})");
-    db_->update_run_status ("run_1", vayu::RunStatus::Failed);
+    db_->transition_run_status (
+    "run_1", { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
     const auto after = db_->get_run_snapshot ("run_1");
     ASSERT_HAS_VALUE (after);
     EXPECT_EQ (after->status, vayu::RunStatus::Failed);

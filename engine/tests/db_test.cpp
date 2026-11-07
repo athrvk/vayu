@@ -89,25 +89,6 @@ TEST_F (DatabaseTest, CreatesAndRetrievesRun) {
     EXPECT_EQ (retrieved->status, vayu::RunStatus::Pending);
 }
 
-TEST_F (DatabaseTest, UpdatesRunStatus) {
-    Database db (TEST_DB_PATH);
-    db.init ();
-
-    vayu::db::Run run;
-    run.id              = "run_1";
-    run.type            = vayu::RunType::Load;
-    run.status          = vayu::RunStatus::Pending;
-    run.start_time      = 1000;
-    run.config_snapshot = "{}";
-
-    db.create_run (run);
-    db.update_run_status ("run_1", vayu::RunStatus::Completed);
-
-    auto retrieved = db.get_run ("run_1");
-    ASSERT_HAS_VALUE (retrieved);
-    EXPECT_EQ (retrieved->status, vayu::RunStatus::Completed);
-}
-
 TEST_F (DatabaseTest, RetrievesAllRuns) {
     Database db (TEST_DB_PATH);
     db.init ();
@@ -2002,33 +1983,41 @@ TEST_F (DatabaseTest, ReconcileKeepsTheEndTimeTheRunAlreadyRecorded) {
     EXPECT_EQ (run->end_time, RECORDED_END);
 }
 
-TEST_F (DatabaseTest, ReconcileLeavesNoIndeterminateEndTimeOnAnUnseededRun) {
-    // The design-mode insert used to set start_time and nothing else. Reconcile
-    // keeps end_time as recorded, so whatever the insert left had to be a value
-    // readers can interpret - hence the field default. Constructed here the way
-    // an insert site that forgets seed_run_times would leave it.
-    const int64_t started = now_ms ();
+// A run that died while running has no end recorded, because the move to
+// Running cleared the seed (#3340). Reconcile ends it where it started rather
+// than at 0, which a report reads as "still going" and measures up to now.
+// Mutation check: drop the `end_time == 0` branch in `reconcile_orphaned_runs`
+// and end_time stays 0.
+TEST_F (DatabaseTest, ReconcileEndsARunThatRecordedNoEndWhereItStarted) {
+    const int64_t started = now_ms () - 60'000;
     {
         Database db (TEST_DB_PATH);
         db.init ();
         vayu::db::Run run;
-        run.id              = "unseeded";
-        run.type            = vayu::RunType::Design;
-        run.status          = vayu::RunStatus::Running;
+        run.id              = "died_running";
+        run.type            = vayu::RunType::Load;
+        run.status          = vayu::RunStatus::Pending;
         run.start_time      = started;
+        run.end_time        = started; // seed_run_times' seed
         run.config_snapshot = "{}";
         db.create_run (run);
+        ASSERT_TRUE (db
+        .transition_run_status (
+        "died_running", { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
+        .applied);
+        auto running = db.get_run ("died_running");
+        ASSERT_HAS_VALUE (running);
+        ASSERT_EQ (running->end_time, 0)
+        << "the move to Running clears the seed";
     }
 
     Database db (TEST_DB_PATH);
     db.init ();
 
-    auto run = db.get_run ("unseeded");
+    auto run = db.get_run ("died_running");
     ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Failed);
-    // 0 is the "no end recorded" sentinel every reader guards on; anything
-    // between 1 and start_time would be garbage posing as a real timestamp.
-    EXPECT_EQ (run->end_time, 0);
+    EXPECT_EQ (run->end_time, started);
 }
 
 namespace {

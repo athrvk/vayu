@@ -1539,22 +1539,54 @@ struct is `db::Run` in `engine/include/vayu/types.hpp`.
 | `origin`          | TEXT    | Who started the run: `"app"` / `"mcp"` / `"other"`. NOT NULL DEFAULT `'other'` |
 | `origin_client`   | TEXT    | The MCP client's name, `mcp` runs only (nullable)                            |
 
-**`end_time`** is stamped on every terminal status write (`update_run_status`), and refined
-mid-run by `update_run_end_time` when a load run finishes generating. Both inserts also *seed*
-it to `start_time` up front (`seed_run_times`, `http/routes/execution.cpp`), because a run
-killed by a daemon crash never reaches a terminal status: `reconcile_orphaned_runs` marks it
-failed (with a partial `summary` for a load run, see `summary` below) and leaves `end_time` as recorded (safe without an owner column because the engine holds
-the instance lock before the database opens, so no live engine owns the rows it meets - issue
-#2422), so an unseeded row would report a duration spanning
-however long the daemon was down. `db::Run::end_time` defaults to `0` as the backstop for a
-future insert site that forgets to seed - `0` is the "no end recorded" sentinel, and readers
-(`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
+**`status`** moves through `Database::transition_run_status` (#3340), which takes
+an edge only when the row's current status is one the caller names: there is no
+wildcard, so a run that is `completed`, `failed` or `stopped` stays that way unless a
+caller names that exact status as the one being left. The read, the decision and the
+write hold one DB mutex acquisition. A busy database is retried; a terminal write is
+retried until it lands, because a lost final status leaves the run `running`, which
+retention never prunes. A graceful shutdown waits for that worker, and a daemon killed
+before the write lands leaves the row to startup reconciliation (below). A refused move
+is logged (run id, the statuses named, the one found) and answered, never thrown.
+
+Every status write after the insert goes through it, each naming its real edge. A load
+or collection run is inserted `pending` and a design send `running`. A worker moves
+`pending` to `running` as it starts and `running` to its terminal status as it ends; a
+run that fails before its worker starts, or whose move to `running` threw, fails from
+`pending`. `POST /runs/:runId/stop` on a run no worker holds (a buffered design send, or a
+run whose worker has not registered yet) moves `pending` or `running` to `stopped`. A
+Stop in that window therefore stands: the worker's move to `running` is refused and it
+ends without sending, and a buffered send's result is stored under a row that stays
+`stopped`. A worker that registered and moved to `running` between the route's look-up
+and the move is signalled as well. The one move out of a terminal status is `completed`
+to `failed`, when a design send throws after its result was recorded
+(`guard_recorded_send`): its caller got no response, so the row must not say it
+completed.
+
+**`end_time`** moves with the status edge `transition_run_status` takes. Both inserts *seed* it to `start_time` up
+front (`seed_run_times`, `http/routes/execution.cpp`). A move to `running` clears it to
+`0`, so a live report measures up to now rather than to the seed; a design send,
+inserted `running`, keeps the seed until its terminal move. `update_run_end_time` stamps
+it when a load run's load ends, before its cleanup and summary, and when a collection
+run's teardown is done, before its summary; the terminal move that follows keeps any
+value later than `start_time`; otherwise (the seed, or `0`) the terminal move stamps now. A
+move to any other status leaves it alone.
+
+A run killed by a daemon crash never reaches a terminal status:
+`reconcile_orphaned_runs` marks it failed (with a partial `summary` for a load run, see
+`summary` below) and keeps the `end_time` it recorded, or gives it `start_time` when it
+recorded none (`0`, a run that died while `running`). The restart time would report a
+duration spanning however long the daemon was down. This is safe without an owner column
+because the engine holds the instance lock before the database opens, so no live engine
+owns the rows it meets (issue #2422). `db::Run::end_time` defaults to `0` as the
+backstop for a future insert site that forgets to seed - `0` is the "no end recorded"
+sentinel, and readers (`GET /runs/:runId/report`, the app's dashboard) guard on `> 0`.
 
 The stored seed is never what an API client reads for a live run: `GET /runs`, `GET
 /runs/:runId`, the report's `metadata.endTime` and the baseline row emit `endTime: null`
 while `status` is `pending` or `running` and the column once it is terminal, through
 `vayu::json::serialize_run_end_time` (#2953). A run a crash left behind is `failed` after
-reconciliation, so it reports the seed it kept.
+reconciliation, so it reports the end it kept, or its `start_time`.
 
 **`baseline`** is the pin set by
 [`PUT /runs/:runId/baseline`](api-reference.md#put-runsrunidbaseline): the

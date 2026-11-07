@@ -2,7 +2,7 @@
  * @file run_stop_test.cpp
  * @brief Stopping and deleting a run actually stops it (#124).
  *
- * Three behaviours are covered, each of which used to be missing:
+ * These behaviours are covered, each of which used to be missing:
  *   1. EventLoop::stop(false) cancels in-flight transfers instead of waiting
  *      for an upstream that may never answer.
  *   2. EventLoop::stop(true, t) bounds that wait, so the natural end of a run
@@ -11,6 +11,8 @@
  *      writing before removing the rows, or refuses with a 409.
  *   4. POST /runs/:id/stop answers a collection run's counts from its stored
  *      summary, never from the collector it does not feed (#2822).
+ *   5. A Stop that finds no context (a run still `pending`) stands: the
+ *      worker it raced sends nothing and writes no status over it (#3340).
  *
  * Every timing assertion is an upper bound measured against an upstream that
  * holds the connection open for 30s, so the margins are wide: a regression here
@@ -343,6 +345,48 @@ TEST_F (RunStopAccountingTest, StoppedRunReachesTerminalStatusPromptly) {
     << "a cancelled request was recorded as a request with no response";
 }
 
+// #3340: a Stop that lands while a load run is still `pending`, before its
+// worker registers, finds no context and writes the row itself. The worker's
+// move to Running is refused, so the run sends nothing and writes no status
+// over the Stop. Mutation check: ignore the refusal in `execute_load_test` and
+// the run sends and stores a summary.
+TEST_F (RunStopAccountingTest, AStopWhilePendingStandsAndTheRunSendsNothing) {
+    const std::string run_id = "run-stop-pending";
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                     .count ();
+    vayu::db::Run row;
+    row.id              = run_id;
+    row.type            = vayu::RunType::Load;
+    row.status          = vayu::RunStatus::Pending;
+    row.config_snapshot = "{}";
+    row.start_time      = now;
+    row.end_time        = now;
+    db->create_run (row);
+
+    vayu::core::RunManager manager;
+    const auto [status, body] =
+    vayu::http::routes::stop_unregistered_run_response (*db, manager, run_id);
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+
+    const nlohmann::json config = { { "mode", "iterations" },
+        { "iterations", 3 }, { "concurrency", 1 },
+        { "url", server->fast_url () }, { "method", "GET" }, { "workers", 1 } };
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&] () { return manager.get_run (run_id) == nullptr; }))
+    << "the refused worker never handed the run back";
+
+    const auto context = manager.get_run_or_retained (run_id);
+    ASSERT_NE (context, nullptr);
+    EXPECT_EQ (context->requests_sent.load (), 0u) << "a stopped run sent";
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
+    EXPECT_TRUE (stored->summary.empty ()) << stored->summary;
+}
+
 // ---------------------------------------------------------------------------
 // DELETE /runs/:id
 // ---------------------------------------------------------------------------
@@ -514,7 +558,8 @@ TEST_F (StopActiveRunTest, CollectionRunAnswersItsStoredCounts) {
         db->update_run_summary ("run_seq",
         R"({"total_requests":31,"status_codes":{"200":29,"500":2},)"
         R"("latency":{"count":31,"avg":12.5},"scenario":{"steps_executed":40}})");
-        db->update_run_status ("run_seq", vayu::RunStatus::Stopped);
+        db->transition_run_status (
+        "run_seq", { vayu::RunStatus::Running }, vayu::RunStatus::Stopped);
         context->is_running = false;
     });
 
@@ -553,6 +598,49 @@ TEST_F (StopActiveRunTest, CollectionRunWithNoStoredSummaryAnswersNone) {
     EXPECT_EQ (body["status"], "running");
     EXPECT_EQ (body["runId"], "run_slow");
     EXPECT_EQ (body["message"], "Stop signalled; read the report");
+}
+
+// The other side of the Pending-window race (#3340): the worker registered
+// and moved its row to Running after the route found no context. The row
+// still stops, and the run that is sending is told to, so its final move is
+// refused rather than its load left running under a `stopped` row. Mutation
+// check: drop the signal in `stop_unregistered_run_response`.
+TEST_F (StopActiveRunTest, AStopThatMissedTheContextStillSignalsTheRun) {
+    seed_running ("run_raced", vayu::RunType::Load);
+    vayu::core::RunManager manager;
+    auto context = make_context ("run_raced");
+    manager.register_run ("run_raced", context);
+
+    const auto [status, body] =
+    vayu::http::routes::stop_unregistered_run_response (*db, manager, "run_raced");
+
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+    EXPECT_TRUE (context->should_stop.load ())
+    << "the raced run was not signalled";
+    const auto stored = db->get_run ("run_raced");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
+    manager.unregister_run ("run_raced");
+}
+
+// A row that finished between the route's read and the move keeps its status
+// and is answered with it; one deleted in between is a 404.
+TEST_F (StopActiveRunTest, AStopWithNoContextLeavesAFinishedRunAlone) {
+    seed ("run_done", vayu::RunStatus::Completed);
+    vayu::core::RunManager manager;
+
+    const auto [status, body] =
+    vayu::http::routes::stop_unregistered_run_response (*db, manager, "run_done");
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.value ("status", ""), "completed") << body.dump ();
+    const auto stored = db->get_run ("run_done");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
+    EXPECT_EQ (stored->end_time, 2);
+
+    EXPECT_EQ (
+    vayu::http::routes::stop_unregistered_run_response (*db, manager, "nope").first, 404);
 }
 
 // A load run, a scenario load run included, still answers from its collector.

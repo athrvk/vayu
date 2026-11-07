@@ -11,10 +11,10 @@
  *
  * The design-mode insert used to stamp `start_time` and nothing else, leaving
  * `end_time` indeterminate (the field had no default). Normal completion hid
- * it - `update_run_status` stamps `end_time` on every terminal write - but a
- * run orphaned by a daemon crash is marked Failed with `end_time` *as
- * recorded*, so the garbage reached the report, where the reader's
- * `end_time > 0 ? end_time : now_ms()` guard rescued it only by luck.
+ * it - a terminal `transition_run_status` stamps an `end_time` that is not
+ * past `start_time` - but a run orphaned by a daemon crash is marked Failed
+ * with `end_time` *as recorded*, so the garbage reached the report, where the
+ * reader's `end_time > 0 ? end_time : now_ms()` guard rescued it only by luck.
  *
  * `seed_run_times` is the one place that stamps both, so testing it covers
  * both inserts (the suite has no in-process HTTP route harness); the field
@@ -69,8 +69,9 @@ TEST (SeedRunTimes, SeedsEndTimeAlongsideStartTime) {
     seed_run_times (run, 1'700'000'000'000);
 
     EXPECT_EQ (run.start_time, 1'700'000'000'000);
-    // Not left at 0: a crash-orphaned run keeps whatever is recorded here, and
-    // 0 would make the report substitute the (arbitrarily much later) read time.
+    // Not left at 0, which a report measures up to now: until the move to
+    // Running clears it, a run that has not started reads as taking no time,
+    // and a crash in that window keeps it.
     EXPECT_EQ (run.end_time, 1'700'000'000'000);
 }
 

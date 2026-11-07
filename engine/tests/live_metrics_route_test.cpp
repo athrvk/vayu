@@ -100,7 +100,8 @@ TEST_F (LiveMetricsRouteTest, WaitsForTheRunToSettleThenCompletesWithItsStatus) 
     EXPECT_FALSE (waiting.completion.has_value ());
 
     // The worker's tail: terminal status, then retain_run's settle.
-    db_->update_run_status (RUN_ID, vayu::RunStatus::Completed);
+    db_->transition_run_status (
+    RUN_ID, { vayu::RunStatus::Running }, vayu::RunStatus::Completed);
     context_->settled.store (true, std::memory_order_release);
 
     auto last = live_metrics_step (

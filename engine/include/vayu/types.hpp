@@ -1704,7 +1704,7 @@ inline const char* to_string (RunStatus status) {
 
 /// Whether the engine has finished with the run. A stopped run is a result
 /// (cut short), so it is terminal; pending and running ones are not.
-inline bool is_terminal (RunStatus status) {
+constexpr bool is_terminal (RunStatus status) {
     switch (status) {
     case RunStatus::Completed:
     case RunStatus::Failed:
@@ -1713,6 +1713,11 @@ inline bool is_terminal (RunStatus status) {
     case RunStatus::Running: return false;
     }
     return false;
+}
+
+/// Whether the engine still owns the run: the complement of @ref is_terminal.
+constexpr bool is_in_flight (RunStatus status) {
+    return !is_terminal (status);
 }
 
 inline std::optional<RunStatus> parse_run_status (const std::string& str) {
@@ -2201,11 +2206,13 @@ struct Run {
     int64_t start_time = 0;
     // 0 means "no end recorded"; readers guard on `> 0` (the report route
     // substitutes now_ms(), the app's dashboard falls back to its own clock).
-    // Defaulted rather than left bare so an insert site that forgets to stamp
-    // it cannot store an indeterminate value - a run orphaned by a daemon
-    // crash is marked Failed with `end_time` as recorded, so garbage here
-    // would survive into the report. Both route inserts seed it to start_time
-    // via seed_run_times (execution.cpp).
+    // Written by `Database::transition_run_status` (#3340): a move to Running
+    // clears it to 0, a terminal move keeps a value past start_time and
+    // stamps now otherwise. Defaulted rather than left bare so an insert site
+    // that forgets to stamp it cannot store an indeterminate value, which
+    // reconciliation of a crashed run would otherwise carry into the report.
+    // Both route inserts seed it to start_time via seed_run_times
+    // (execution.cpp).
     int64_t end_time = 0;
     // Whole-run results, written once when the run reaches a terminal status.
     // JSON object; `""` means "not written": the run is still pending/running

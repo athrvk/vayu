@@ -2502,18 +2502,18 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
         { { "runId", context->run_id } });
     }
 
-    // Update run status with retry logic to handle any remaining contention.
     // A stopped run keeps reporting Stopped regardless of verdict (issue
     // #1497's failRun judges only a run that reached its own natural end);
     // a completed run whose config asked `thresholds.failRun: true` and
-    // whose budgets it missed is judged too.
+    // whose budgets it missed is judged too. The move keeps the end_time
+    // stamped before cleanup.
     vayu::RunStatus final_status =
     context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
     if (!context->should_stop && summary_stored && inputs.thresholds &&
     inputs.thresholds->failed > 0 && thresholds_fail_run (context->config)) {
         final_status = vayu::RunStatus::Failed;
     }
-    db.update_run_status_with_retry (context->run_id, final_status);
+    db.transition_run_status (context->run_id, { vayu::RunStatus::Running }, final_status);
 
     // Terminal status reached - trim old runs per the retention knobs.
     // Best-effort: a prune failure must not fail the completed run.
@@ -2554,8 +2554,19 @@ RunManager& manager) {
     const auto& config = context->config;
 
     try {
-        // Update status to running
-        db.update_run_status (context->run_id, vayu::RunStatus::Running);
+        // Only from Pending (#3340): a Stop that reached the row before this
+        // run registered found no context and left the row Stopped, and a
+        // deleted row is gone. Either way the run ends here, sending nothing
+        // and writing no status over the one that refused it.
+        if (!db
+            .transition_run_status (context->run_id,
+            { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
+            .applied) {
+            context->is_running = false;
+            context->join_aux_threads ();
+            manager.retain_run (context->run_id);
+            return;
+        }
 
         // Get defaults from config (set via Settings UI)
         int default_max_concurrent = db.get_config_int (
@@ -2580,7 +2591,8 @@ RunManager& manager) {
 
         vayu::Request request;
         if (!build_load_request (db, db_ptr, config, context, timeout_ms, request)) {
-            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
             manager.retain_run (context->run_id);
@@ -2597,7 +2609,8 @@ RunManager& manager) {
             vayu::utils::log_error ("run", "script.setup failed",
             { { "runId", context->run_id },
             { "scriptError", vayu::utils::bounded_log_text (*setup_failure) } });
-            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
             manager.retain_run (context->run_id);
@@ -2625,7 +2638,8 @@ RunManager& manager) {
         } catch (const std::exception& e) {
             vayu::utils::log_error ("run", "Load test failed: " + std::string (e.what ()),
             { { "runId", context->run_id } });
-            db.update_run_status (context->run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
             manager.retain_run (context->run_id);
@@ -2672,8 +2686,8 @@ RunManager& manager) {
         std::chrono::duration<double> (send_end - test_start).count (),
         completed_at_send_end, total_duration_s);
 
-        // Update end_time in DB immediately to reflect actual test end
-        // (not after cleanup/metrics thread join)
+        // The run's end, before the join and the summary below; the terminal
+        // move in finish_load_test keeps it.
         db.update_run_end_time (context->run_id);
 
         // Stop background collection and wait for the threads to finish
@@ -2721,8 +2735,11 @@ RunManager& manager) {
             { { "runId", context->run_id } });
         }
 
+        // From Pending too: the throw may have come from the move to Running.
         try {
-            db.update_run_status_with_retry (context->run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Pending, vayu::RunStatus::Running },
+            vayu::RunStatus::Failed);
         } catch (const std::exception& ex) {
             vayu::utils::log_error ("run",
             "Failed to update run status: " + std::string (ex.what ()),

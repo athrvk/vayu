@@ -1690,6 +1690,31 @@ int grace_seconds) {
     return vayu::utils::MetricsHelper::create_stop_response (run_id, summary);
 }
 
+std::pair<int, nlohmann::json> stop_unregistered_run_response (vayu::db::Database& db,
+vayu::core::RunManager& run_manager,
+const std::string& run_id) {
+    vayu::utils::log_info (
+    "run", "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
+    const auto outcome = db.transition_run_status (run_id,
+    { vayu::RunStatus::Pending, vayu::RunStatus::Running }, vayu::RunStatus::Stopped);
+    if (!outcome.current) {
+        return { 404, error_body (404, "Run not found") };
+    }
+    if (!outcome.applied) {
+        return { 200,
+            vayu::utils::MetricsHelper::create_already_stopped_response (
+            run_id, to_string (*outcome.current)) };
+    }
+    // A run that registered after the caller looked for its context, and had
+    // moved its row to Running before the move above, is sending: signal it.
+    // One that had not is refused its move to Running and ends unsent.
+    if (const auto raced = run_manager.get_run (run_id)) {
+        raced->should_stop = true;
+        raced->notify_refill ();
+    }
+    return { 200, vayu::utils::MetricsHelper::create_inactive_response (run_id) };
+}
+
 /**
  * Testable core of DELETE /runs (#2429): "Clear run history", which keeps what
  * retention keeps - pinned baselines and runs still in flight. The deleted ids
@@ -2573,9 +2598,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             return;
         }
 
-        // Check if run is already completed or stopped
-        if (run->status == vayu::RunStatus::Completed ||
-        run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed) {
+        if (vayu::is_terminal (run->status)) {
             vayu::utils::log_info ("run", "Run already finished",
             { { "runId", run_id }, { "status", to_string (run->status) } });
             auto response = vayu::utils::MetricsHelper::create_already_stopped_response (
@@ -2631,13 +2654,10 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             stop_active_run_response (ctx.db, *context, run->type, STOP_GRACE_SECONDS);
             res.set_content (response.dump (), "application/json");
         } else {
-            // Run not active, just update DB
-            vayu::utils::log_info ("run",
-            "POST /runs/:id/stop - Run not active, updating DB: " + run_id);
-            ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Stopped);
-
-            auto response = vayu::utils::MetricsHelper::create_inactive_response (run_id);
-            res.set_content (response.dump (), "application/json");
+            auto [status, body] =
+            stop_unregistered_run_response (ctx.db, ctx.run_manager, run_id);
+            res.status = status;
+            res.set_content (body.dump (), "application/json");
         }
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",

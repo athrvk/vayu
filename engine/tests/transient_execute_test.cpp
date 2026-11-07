@@ -55,6 +55,7 @@
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/types.hpp"
@@ -383,6 +384,31 @@ TEST_F (RecordDesignResultTest, ARecordedFailureMarksTheRunFailed) {
     EXPECT_EQ (row->status, vayu::RunStatus::Failed);
     ASSERT_EQ (db_->get_results (id).size (), 1u);
     EXPECT_EQ (db_->get_results (id)[0].error, "connection refused");
+}
+
+// #3340: a buffered send has no run context, so `POST /runs/:id/stop` moves its
+// row to `stopped` itself while the exchange is still on the wire. The result
+// that lands afterwards is stored, the exchange having happened, and the row
+// stays `stopped`: the design route's answer carries the exchange, not the
+// run's status, so nothing it returns contradicts the row. Mutation check: let
+// `record_design_result`'s move leave Stopped as well and the row reads
+// `completed`.
+TEST_F (RecordDesignResultTest, AStopBeforeTheResultLandsLeavesTheRunStopped) {
+    const auto id = seed_running_run ("run_stopped_mid_send");
+    vayu::core::RunManager no_contexts;
+
+    const auto [status, body] =
+    vayu::http::routes::stop_unregistered_run_response (*db_, no_contexts, id);
+    EXPECT_EQ (status, 200);
+    EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+
+    record_design_result (*db_, id, sent_request (), ok_response ());
+
+    auto row = db_->get_run (id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->status, vayu::RunStatus::Stopped);
+    ASSERT_EQ (db_->get_results (id).size (), 1u)
+    << "the exchange was not stored";
 }
 
 } // namespace

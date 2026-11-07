@@ -1356,6 +1356,20 @@ scope_collection_ids (const ScenarioRequest& asked, const ScenarioPlan& plan) {
     return ids;
 }
 
+/// The run's terminal move, which keeps the end_time stamped before the
+/// summary. A row still Pending is one whose move to Running threw, which
+/// failed the run; every other ending leaves Running.
+void move_to_final_status (vayu::db::Database& db,
+const std::string& run_id,
+vayu::RunStatus final_status) {
+    if (final_status == vayu::RunStatus::Failed) {
+        db.transition_run_status (run_id,
+        { vayu::RunStatus::Pending, vayu::RunStatus::Running }, final_status);
+        return;
+    }
+    db.transition_run_status (run_id, { vayu::RunStatus::Running }, final_status);
+}
+
 } // namespace
 
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
@@ -1394,7 +1408,19 @@ RunManager& manager) {
     const auto schema_index = ResponseSchemaIndex::parse (execution->spec.response_schemas);
 
     try {
-        db.update_run_status (context->run_id, vayu::RunStatus::Running);
+        // Only from Pending (#3340): a Stop that reached the row before this
+        // run registered found no context and left the row Stopped, and a
+        // deleted row is gone. Either way the run ends here, running no step
+        // and writing no status over the one that refused it.
+        if (!db
+            .transition_run_status (context->run_id,
+            { vayu::RunStatus::Pending }, vayu::RunStatus::Running)
+            .applied) {
+            context->is_running = false;
+            context->closed.store (true, std::memory_order_release);
+            manager.retain_run (context->run_id);
+            return;
+        }
 
         // Which jar every step reads and writes: one per environment, so "log
         // in on step 1, reuse the session on step 2" is the jar's existing
@@ -1656,7 +1682,7 @@ RunManager& manager) {
     try {
         // Written after the summary, matching the load path: the terminal
         // status is what tells a polling client the report is ready.
-        db.update_run_status_with_retry (context->run_id, final_status);
+        move_to_final_status (db, context->run_id, final_status);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "Failed to update scenario run status: " + std::string (e.what ()),

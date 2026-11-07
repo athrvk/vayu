@@ -107,14 +107,14 @@ const std::optional<std::string>& request_id) {
 }
 
 // Stamp a freshly built run row's timestamps. `end_time` is seeded to
-// `start_time` rather than left at its default, because a run killed by a
-// daemon crash never reaches a terminal status: `reconcile_orphaned_runs`
-// marks it Failed and leaves `end_time` as recorded, and the report route
-// reads `end_time > 0 ? end_time : now_ms()` - so an unseeded row would
-// report a duration spanning however long the daemon was down. Seeded, a
-// crashed run reports a zero duration, which is honest about knowing nothing.
-// Both insert sites (design and load) go through here so the invariant has one
-// home; `Run::end_time` still defaults to 0 as the backstop for any future one.
+// `start_time`: a crashed run reports a zero duration, which is honest about
+// knowing nothing, where the restart time would span the downtime. A load or
+// collection run's move from Pending to Running clears the seed so a live
+// report measures up to now, and `reconcile_orphaned_runs` gives a row with no
+// end its `start_time` again (#3340); a design send, inserted Running, keeps it
+// until its terminal move stamps now. Both insert sites (design and load) go
+// through here so the invariant has one home; `Run::end_time` still defaults
+// to 0 as the backstop for any future one.
 void seed_run_times (vayu::db::Run& run, int64_t started_at) {
     run.start_time = started_at;
     run.end_time   = started_at;
@@ -1279,13 +1279,16 @@ std::optional<double> engine_ms) {
 
         // A stream names its own terminal status: one the user stopped is
         // `Stopped`, which neither the response nor the error flag can say.
+        // Only from Running: a buffered send has no context for
+        // `POST /runs/:id/stop` to signal, so a Stop there writes the row
+        // itself, and it stands over the exchange recorded above.
         vayu::RunStatus status = vayu::RunStatus::Completed;
         if (stream) {
             status = stream->status;
         } else if (has_error) {
             status = vayu::RunStatus::Failed;
         }
-        db.update_run_status_with_retry (*run_id, status);
+        db.transition_run_status (*run_id, { vayu::RunStatus::Running }, status);
 
         // A design run reached a terminal status - trim the run history so
         // per-request clicks do not accumulate forever (retention knobs, or 0
@@ -1301,7 +1304,8 @@ std::optional<double> engine_ms) {
         vayu::utils::log_error (
         "http", "Failed to save result: " + std::string (e.what ()));
         try {
-            db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (
+            *run_id, { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
         } catch (...) {
             vayu::utils::log_error ("http", "Failed to update run status after save error");
         }
@@ -1498,8 +1502,10 @@ const std::function<bool ()>& start) {
         refusal = { 500,
             error_body (500, "Run failed to start: " + std::string (e.what ())) };
     }
+    // Only from Pending: a worker that did start owns the row.
     try {
-        db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+        db.transition_run_status (
+        run_id, { vayu::RunStatus::Pending }, vayu::RunStatus::Failed);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run", "Failed to fail a run that never started",
         { { "runId", run_id }, { "error", e.what () } });
@@ -1513,7 +1519,9 @@ const std::function<bool ()>& start) {
  * this the exception reached httplib, which answers a bodiless 500, and the
  * row stayed `running` whenever the throw came before `record_design_result`.
  * The row is failed even when the result was already recorded: the caller
- * got no response, and a row saying `completed` would contradict that.
+ * got no response, and a row saying `completed` would contradict that. That
+ * Completed-to-Failed edge is the one move out of a terminal status (#3340);
+ * a row that is `stopped` or `failed` already says the send did not succeed.
  *
  * Non-static: execute_binary_body_test.cpp drives it with a send that throws,
  * because no payload reaches a throw past the fixes #2458 made. The catch is
@@ -1534,7 +1542,9 @@ const std::function<void ()>& send) {
     { { "runId", run_id.value_or ("none (transient)") }, { "error", reason } });
     if (run_id) {
         try {
-            db.update_run_status_with_retry (*run_id, vayu::RunStatus::Failed);
+            db.transition_run_status (*run_id,
+            { vayu::RunStatus::Running, vayu::RunStatus::Completed },
+            vayu::RunStatus::Failed);
         } catch (const std::exception& e) {
             vayu::utils::log_error ("http", "Failed to fail a send that threw",
             { { "runId", *run_id }, { "error", e.what () } });
@@ -2006,7 +2016,8 @@ std::string_view code = {}) {
     vayu::utils::log_warning ("http",
     "POST /execute - Stream refused for run: " + run_id + " - " + reason);
     try {
-        ctx.db.update_run_status_with_retry (run_id, vayu::RunStatus::Failed);
+        ctx.db.transition_run_status (
+        run_id, { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
     } catch (const std::exception& e) {
         vayu::utils::log_error ("http",
         "Failed to fail a refused stream run: " + std::string (e.what ()));
