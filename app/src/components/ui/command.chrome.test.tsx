@@ -27,8 +27,8 @@
  * below the fold with nothing on screen saying so.
  */
 
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import {
 	CommandDialog,
@@ -167,5 +167,58 @@ describe("a section label", () => {
 		);
 		const own = screen.getByTestId("own-heading");
 		expect(own.closest('[data-slot="eyebrow"]')).toBeNull();
+	});
+});
+
+describe("the highlight a caller controls", () => {
+	/*
+	 * `Dialog` would take these and ignore them, so a caller's `value` highlighted
+	 * nothing and its handlers never ran - the palette withholds its first row
+	 * through exactly this path (#3321).
+	 */
+	it("reaches the inner Command, which highlights the row it names", () => {
+		const onValueChange = vi.fn();
+		render(
+			<CommandDialog
+				open
+				title="Palette"
+				description="Search."
+				value="theme"
+				onValueChange={onValueChange}
+			>
+				<CommandList>
+					<CommandItem value="inbox">Inbox</CommandItem>
+					<CommandItem value="theme">Theme Mode</CommandItem>
+				</CommandList>
+			</CommandDialog>
+		);
+		const selected = document.querySelector("[cmdk-item][aria-selected='true']");
+		expect(selected?.textContent).toBe("Theme Mode");
+
+		fireEvent.pointerMove(screen.getByText("Inbox"));
+		expect(onValueChange).toHaveBeenCalledWith("inbox");
+	});
+
+	it("forwards the key and pointer handlers to the Command root", () => {
+		const onKeyDown = vi.fn();
+		const onPointerMove = vi.fn();
+		render(
+			<CommandDialog
+				open
+				title="Palette"
+				description="Search."
+				onKeyDown={onKeyDown}
+				onPointerMove={onPointerMove}
+			>
+				<CommandInput placeholder="Search…" />
+				<CommandList>
+					<CommandItem value="inbox">Inbox</CommandItem>
+				</CommandList>
+			</CommandDialog>
+		);
+		fireEvent.keyDown(screen.getByPlaceholderText("Search…"), { key: "ArrowDown" });
+		fireEvent.pointerMove(screen.getByText("Inbox"));
+		expect(onKeyDown).toHaveBeenCalledTimes(1);
+		expect(onPointerMove).toHaveBeenCalledTimes(1);
 	});
 });

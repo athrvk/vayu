@@ -176,6 +176,16 @@ interface CommandDialogProps extends DialogProps {
 	 * `SuggestionList` and `VariableAutocomplete` take on a bare `Command`.
 	 */
 	shouldFilter?: boolean;
+	/**
+	 * Forwarded to the inner `Command`, which would otherwise never see them:
+	 * the rest of the props go to `Dialog`. A caller that controls the highlight
+	 * (the palette withholds it until the user moves it) needs `value`, and the
+	 * handlers are how it learns that the user did.
+	 */
+	value?: string;
+	onValueChange?: (value: string) => void;
+	onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
+	onPointerMove?: React.PointerEventHandler<HTMLDivElement>;
 }
 
 const CommandDialog = ({
@@ -184,6 +194,10 @@ const CommandDialog = ({
 	description,
 	className,
 	shouldFilter,
+	value,
+	onValueChange,
+	onKeyDown,
+	onPointerMove,
 	...props
 }: CommandDialogProps) => {
 	return (
@@ -203,6 +217,10 @@ const CommandDialog = ({
 				<DialogDescription className="sr-only">{description}</DialogDescription>
 				<Command
 					shouldFilter={shouldFilter}
+					value={value}
+					onValueChange={onValueChange}
+					onKeyDown={onKeyDown}
+					onPointerMove={onPointerMove}
 					/*
 					 * No row overrides here at all any more (#1177). This
 					 * string used to force `px-2 py-3` and 20px icons onto every

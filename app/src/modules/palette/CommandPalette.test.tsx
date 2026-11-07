@@ -208,6 +208,17 @@ function pressEnter() {
 	fireEvent.keyDown(input(), { key: "Enter" });
 }
 
+function pressKey(key: string) {
+	fireEvent.keyDown(input(), { key });
+}
+
+/** The rows cmdk currently highlights, by their title. */
+function highlightedRows(): string[] {
+	return [...document.querySelectorAll("[cmdk-item][aria-selected='true']")].map(
+		(el) => el.querySelector("span.flex-1")?.textContent ?? ""
+	);
+}
+
 /** The rows under one heading, in visible order. */
 function rowsUnder(heading: string): string[] {
 	const group = screen.getByText(heading).closest("[cmdk-group]")!;
@@ -327,6 +338,114 @@ describe("searching", () => {
 		expect(screen.getByText(/searchable results?$/).textContent).toBe(
 			`0 searchable ${pluralize(0, "result")}`
 		);
+	});
+
+	/*
+	 * Enter on a miss (#3321). The verbs are an offer, and cmdk highlights the
+	 * first row of whatever it is given - so Enter on "zzzzz" opened a new
+	 * request. Drop the controlled `value` in `CommandPalette` and the first of
+	 * these fails with "New request" highlighted.
+	 */
+	describe("when nothing matched", () => {
+		it("highlights no suggestion, and Enter does nothing", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+
+			expect(highlightedRows()).toEqual([]);
+			pressEnter();
+
+			expect(useTabsStore.getState().openTabs).toHaveLength(0);
+			expect(useImportModalStore.getState().isOpen).toBe(false);
+			expect(useLayoutStore.getState().paletteOpen).toBe(true);
+		});
+
+		it("keeps no highlight as the query changes from one miss to another", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+			typeQuery("zzzzzz");
+
+			expect(highlightedRows()).toEqual([]);
+			pressEnter();
+			expect(useLayoutStore.getState().paletteOpen).toBe(true);
+		});
+
+		it("runs a suggestion once the arrow keys have chosen it", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+
+			pressKey("ArrowDown");
+			const [first] = highlightedRows();
+			expect(first).toBe(rowsUnder("Quick actions")[0]);
+
+			pressEnter();
+			expect(useLayoutStore.getState().paletteOpen).toBe(false);
+		});
+
+		it("highlights the row the pointer moves onto, and Enter runs it", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+			const row = screen.getByText("Import collection").closest("[cmdk-item]")!;
+
+			fireEvent.pointerMove(row);
+			expect(highlightedRows()).toEqual(["Import collection"]);
+
+			pressEnter();
+			expect(useImportModalStore.getState().isOpen).toBe(true);
+		});
+
+		it.each([
+			["Home", false],
+			["End", false],
+			["n", true],
+			["j", true],
+		])("chooses a suggestion on %s (ctrl %s), as cmdk moves the highlight", (key, ctrlKey) => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+
+			fireEvent.keyDown(input(), { key, ctrlKey });
+
+			expect(highlightedRows()).toHaveLength(1);
+		});
+
+		it("does not take a bare letter or a modifier for choosing", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+
+			pressKey("j");
+			pressKey("Shift");
+			expect(highlightedRows()).toEqual([]);
+		});
+
+		it("asks again after the query changes", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+			pressKey("ArrowDown");
+			expect(highlightedRows()).toHaveLength(1);
+
+			typeQuery("zzzzzy");
+
+			expect(highlightedRows()).toEqual([]);
+			pressEnter();
+			expect(useLayoutStore.getState().paletteOpen).toBe(true);
+		});
+
+		it("highlights the first row again once a query matches", () => {
+			renderPalette();
+			open();
+			typeQuery("zzzzz");
+			typeQuery("refu");
+
+			expect(highlightedRows()).toEqual([visibleRows()[0]]);
+			pressEnter();
+			expect(useTabsStore.getState().openTabs).toHaveLength(1);
+		});
 	});
 
 	/*
