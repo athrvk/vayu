@@ -12256,7 +12256,7 @@ a buffered design send, or a run still `pending` before its worker started
 stands. A worker that had not started yet finds the row `stopped` and ends
 without sending; one that started in the meantime is signalled too. A buffered
 send's exchange still completes and its result is stored, under a row that stays
-`stopped`.
+`stopped`. A run whose row is gone by the time the move is tried answers `404`.
 
 **A streaming design run** (`POST /execute` with `"stream": true`) is stopped
 here too: the endpoint asks its consumer worker to end the transfer, waits up to
