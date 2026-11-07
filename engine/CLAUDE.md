@@ -1149,8 +1149,12 @@ logged as a warning: it means a client skipped composition.
   hop matched is recorded on `Response::client_certificate` and travels both design funnels
   under `clientCertificate`, not the load path. **A certificate is matched for
   an `https` URL only** (`apply_client_certificate`, #3260): libcurl ignores
-  the options on a cleartext transfer, so an `http://` send records none.
-  **The row says what format its certificate is in** (`cert_format`, #833): the applier writes
+  the options on a cleartext transfer, so an `http://` send records none. **The
+  list says which rows the engine would present**: `GET /client-certificates`
+  adds `usable` (and `problem` when not) per row from the format parse and
+  `client_cert_rejection` the resolver runs, in the list handler alone
+  (`list_client_certificates_response`). **The row says what format its
+  certificate is in** (`cert_format`, #833): the applier writes
   `CURLOPT_SSLCERTTYPE` from it, a PKCS#12 row stores no `key_path`, one
   `passphrase` column serves both, and the format is stored (defaulted at write
   time from the file's first bytes, refused when they contradict it), never

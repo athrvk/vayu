@@ -63,6 +63,7 @@ const nlohmann::json& json,
 const std::function<void ()>& before_write);
 std::pair<int, nlohmann::json>
 delete_client_certificate_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json> list_client_certificates_response (vayu::db::Database& db);
 } // namespace vayu::http::routes
 
 namespace vayu::http {
@@ -1017,6 +1018,95 @@ TEST_F (ClientCertificateDbTest, ATrashedEntryNoLongerHoldsItsTarget) {
     EXPECT_EQ (routes::create_client_certificate_response (*db_, body ("api.example.com", 8443))
                .first,
     200);
+}
+
+// ---------------------------------------------------------------------------
+// The list says which rows the engine would present
+// ---------------------------------------------------------------------------
+
+// Mutation check: set `usable` to true unconditionally in
+// `list_client_certificates_response` and the missing-file rows below stay
+// "usable"; drop the key and this reds on `contains`.
+TEST_F (ClientCertificateDbTest, AHealthyRowIsListedUsableWithNoProblem) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 1u) << rows.dump ();
+    EXPECT_EQ (rows[0]["usable"], true);
+    EXPECT_FALSE (rows[0].contains ("problem")) << rows.dump ();
+    EXPECT_EQ (rows[0]["host"], "api.example.com")
+    << "the stored fields are still there";
+}
+
+// The resolver drops this row and the list is how the app learns of it.
+// Mutation check: have the list skip `client_cert_rejection` and `usable` reads
+// true here.
+TEST_F (ClientCertificateDbTest, ARowWhoseFileWentMissingIsListedUnusableWithTheReason) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+    ASSERT_EQ (routes::create_client_certificate_response (*db_, body ("other.example.com"))
+               .first,
+    200);
+    {
+        vayu::db::ClientCertificate broken =
+        *db_->client_certificate_for_target ("api.example.com", std::nullopt, "");
+        broken.cert_path = "/nope/gone.pem";
+        db_->save_client_certificate (broken);
+    }
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 2u) << rows.dump ();
+    for (const auto& row : rows) {
+        if (row["host"] == "api.example.com") {
+            EXPECT_EQ (row["usable"], false);
+            ASSERT_TRUE (row.contains ("problem")) << row.dump ();
+            EXPECT_NE (
+            row["problem"].get<std::string> ().find ("/nope/gone.pem"), std::string::npos)
+            << row["problem"];
+        } else {
+            EXPECT_EQ (row["usable"], true)
+            << "one broken row must not taint the rest";
+            EXPECT_FALSE (row.contains ("problem"));
+        }
+    }
+    // The list agrees with the resolver on which rows it presents: the one the
+    // list calls unusable is the one the policy drops.
+    const auto policy = resolve_transport_policy (*db_);
+    EXPECT_EQ (match_client_certificate (policy, "api.example.com", 443), nullptr);
+    EXPECT_NE (match_client_certificate (policy, "other.example.com", 443), nullptr);
+}
+
+// Mutation check: drop the `client_cert_format_from_string` branch from
+// `client_certificate_problem` and the row is judged as PEM, and listed usable.
+TEST_F (ClientCertificateDbTest, ARowDeclaringAFormatNobodyKnowsIsListedUnusableNamingIt) {
+    ASSERT_EQ (
+    routes::create_client_certificate_response (*db_, body ("api.example.com")).first, 200);
+    {
+        vayu::db::ClientCertificate row = db_->get_client_certificates ().front ();
+        row.cert_format = "pkcs12";
+        db_->save_client_certificate (row);
+    }
+
+    const auto [status, rows] = routes::list_client_certificates_response (*db_);
+    ASSERT_EQ (status, 200);
+    ASSERT_EQ (rows.size (), 1u) << rows.dump ();
+    EXPECT_EQ (rows[0]["usable"], false);
+    ASSERT_TRUE (rows[0].contains ("problem")) << rows.dump ();
+    EXPECT_NE (rows[0]["problem"].get<std::string> ().find ("'pkcs12'"), std::string::npos)
+    << rows[0]["problem"];
+}
+
+// `usable` and `problem` belong to the list: a create or update answers 400 for
+// an unusable row, so its success body has nothing to say about usability.
+TEST_F (ClientCertificateDbTest, OnlyTheListCarriesUsability) {
+    const auto [status, created] =
+    routes::create_client_certificate_response (*db_, body ("api.example.com"));
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_FALSE (created.contains ("usable"));
+    EXPECT_FALSE (created.contains ("problem"));
 }
 
 // ---------------------------------------------------------------------------

@@ -5831,13 +5831,36 @@ Every registered entry; a trashed one is not listed.
     "certFormat": "pem",
     "hasPassphrase": true,
     "createdAt": 1767225600000,
-    "updatedAt": 1767225600000
+    "updatedAt": 1767225600000,
+    "usable": true
+  },
+  {
+    "id": "cert_2b9d4e60",
+    "host": "internal.example.com",
+    "port": null,
+    "certPath": "/home/ada/certs/moved.pem",
+    "keyPath": "/home/ada/certs/moved.key",
+    "certFormat": "pem",
+    "hasPassphrase": false,
+    "createdAt": 1767225600000,
+    "updatedAt": 1767225600000,
+    "usable": false,
+    "problem": "certificate file '/home/ada/certs/moved.pem' is not a readable file"
   }
 ]
 ```
 
 `port` is `null` - not `0` and not omitted - for an entry that answers on every
 port. `keyPath` is `""` for a `p12` entry, which stores no key path at all.
+
+**`usable` is whether the engine would present the entry**, judged by the check
+a write runs (and the transport policy re-runs on every row it reads) against
+the files as they are now. A row can fail it after being written: a file moved
+or deleted, or a row edited around the routes. The engine then leaves that
+entry out of every send, and `problem` says why - the failed check's own
+sentence, or for a `certFormat` the engine does not know, a sentence naming it.
+`problem` is absent on a usable row. Only this list carries the two fields; the
+`POST` and `PUT` responses do not, since those refuse an unusable row.
 
 ### POST /client-certificates
 

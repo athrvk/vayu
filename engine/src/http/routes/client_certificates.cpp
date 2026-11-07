@@ -28,6 +28,11 @@
  *  2. **One entry per host+port.** Two rows claiming the same target would make
  *     the certificate presented depend on row order, so the second one is a 409
  *     naming the first rather than a silent shadowing.
+ *
+ * A row can stop being usable after it was written (its file moved, or the row
+ * was edited around the routes), and the resolver then drops it. The list says
+ * so per row (`usable`, `problem`) rather than leave the card showing an entry
+ * the engine no longer presents.
  */
 
 #include "vayu/http/routes.hpp"
@@ -228,7 +233,47 @@ bool is_create) {
     return {};
 }
 
+/**
+ * Why the resolver would drop @p row, or nullopt when it presents it.
+ *
+ * The same two checks `resolve_transport_policy` runs, in its order: the format
+ * must parse, then `client_cert_rejection` judges the paths and the bytes behind
+ * them.
+ */
+std::optional<std::string> client_certificate_problem (
+const vayu::db::ClientCertificate& row) {
+    const auto format = vayu::http::client_cert_format_from_string (row.cert_format);
+    if (!format) {
+        return "declares an unknown format '" + row.cert_format + "'";
+    }
+    return vayu::http::client_cert_rejection (
+    row.host, row.port, *format, row.cert_path, row.key_path);
+}
+
 } // namespace
+
+/**
+ * Testable core of GET /client-certificates, returning {http_status, json_body}:
+ * every live row as `serialize` writes it, plus `usable` and, when it is not,
+ * `problem`. Those two are the list's alone - a create or update answers 400
+ * for an unusable row, so its response never needs them.
+ *
+ * Reads the files each row names, so it runs outside the database lock: the
+ * rows are fetched first (that call takes its own lock) and checked after.
+ */
+std::pair<int, nlohmann::json> list_client_certificates_response (vayu::db::Database& db) {
+    nlohmann::json response = nlohmann::json::array ();
+    for (const auto& row : db.get_client_certificates ()) {
+        nlohmann::json item = vayu::json::serialize (row);
+        const auto problem  = client_certificate_problem (row);
+        item["usable"]      = !problem.has_value ();
+        if (problem) {
+            item["problem"] = *problem;
+        }
+        response.push_back (std::move (item));
+    }
+    return { 200, std::move (response) };
+}
 
 /**
  * The check-decide-write of POST /client-certificates, run under the caller's
@@ -397,18 +442,16 @@ void register_client_certificate_routes (RouteContext& ctx) {
     /**
      * GET /client-certificates
      * The registry, newest field values as stored. `passphrase` is never
-     * echoed - see serialize(ClientCertificate).
+     * echoed - see serialize(ClientCertificate). Each row also says whether the
+     * engine would present it (`usable`, and `problem` when not).
      */
     ctx.server.Get ("/client-certificates",
     [&ctx] (const httplib::Request&, httplib::Response& res) {
-        auto rows               = ctx.db.get_client_certificates ();
-        nlohmann::json response = nlohmann::json::array ();
-        for (const auto& row : rows) {
-            response.push_back (vayu::json::serialize (row));
-        }
+        const auto [status, body] = list_client_certificates_response (ctx.db);
         vayu::utils::log_debug (
-        "http", "Returning " + std::to_string (rows.size ()) + " entries");
-        res.set_content (response.dump (), "application/json");
+        "http", "Returning " + std::to_string (body.size ()) + " entries");
+        res.status = status;
+        res.set_content (body.dump (), "application/json");
     });
 
     /**
