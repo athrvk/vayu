@@ -819,6 +819,74 @@ TEST_F (WireAuthorityTransfer, AStreamMatchesTheCertificateOnThePortTheWireDials
 }
 
 // ============================================================================
+// A client certificate is only matched for an https URL (#3260)
+// ============================================================================
+//
+// libcurl ignores the certificate options on a cleartext transfer, so a match
+// there would only make the response claim a certificate that never left. The
+// applier is asked directly, on a handle nothing connects: the answer is the
+// match it made, which the drivers record on the response.
+// Mutation-check: drop the scheme test from `apply_client_certificate` and the
+// cleartext cases return the entry.
+
+class ClientCertificateScheme : public ::testing::Test {
+    protected:
+    void SetUp () override {
+        vayu::http::global_init ();
+        curl_ = curl_easy_init ();
+        ASSERT_NE (curl_, nullptr);
+        vayu::http::ClientCertRule rule;
+        rule.id        = "cert_host";
+        rule.host      = "api.example.com";
+        rule.cert_path = "unread-cert.pem";
+        rule.key_path  = "unread-key.pem";
+        policy_.client_certificates.push_back (rule);
+    }
+
+    void TearDown () override {
+        curl_easy_cleanup (curl_);
+        vayu::http::global_cleanup ();
+    }
+
+    const vayu::http::ClientCertRule* matched_for (const std::string& url) {
+        return vayu::http::detail::apply_transport_policy (curl_, policy_, true, url);
+    }
+
+    CURL* curl_ = nullptr;
+    vayu::http::TransportPolicy policy_;
+};
+
+TEST_F (ClientCertificateScheme, AnHttpsUrlMatchesTheHostsEntry) {
+    const auto* matched = matched_for ("https://api.example.com/x");
+    ASSERT_NE (matched, nullptr);
+    EXPECT_EQ (matched->id, "cert_host");
+}
+
+TEST_F (ClientCertificateScheme, AnHttpUrlToTheSameHostMatchesNothing) {
+    EXPECT_EQ (matched_for ("http://api.example.com/x"), nullptr);
+    EXPECT_EQ (matched_for ("http://api.example.com:443/x"), nullptr)
+    << "the port is not the scheme";
+}
+
+TEST_F (ClientCertificateScheme, TheSchemeIsComparedWithoutCase) {
+    EXPECT_NE (matched_for ("HTTPS://api.example.com/x"), nullptr);
+    EXPECT_EQ (matched_for ("HTTP://api.example.com/x"), nullptr);
+}
+
+// libcurl guesses `http` for a URL naming no scheme, so it is cleartext too.
+TEST_F (ClientCertificateScheme, AUrlNamingNoSchemeMatchesNothing) {
+    EXPECT_EQ (matched_for ("api.example.com/x"), nullptr);
+}
+
+// The same handle is reused across transfers: a cleartext hop after an https one
+// answers none rather than keeping the previous answer.
+TEST_F (ClientCertificateScheme, AReusedHandleAnswersForEachUrlAfresh) {
+    EXPECT_NE (matched_for ("https://api.example.com/x"), nullptr);
+    EXPECT_EQ (matched_for ("http://api.example.com/x"), nullptr);
+    EXPECT_NE (matched_for ("https://api.example.com/y"), nullptr);
+}
+
+// ============================================================================
 // configured_proxy: the proxy a policy names, as libcurl dials it (#2605)
 // ============================================================================
 

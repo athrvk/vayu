@@ -1007,7 +1007,9 @@ void apply_proxy_options (CURL* curl, const TransportPolicy& policy) {
 }
 
 /**
- * The client identity this URL's authority matches, if any (issue #707).
+ * The client identity this URL's authority matches, if any (issue #707); none
+ * for a URL whose scheme is not `https`, because a certificate is only ever
+ * presented in a TLS handshake.
  *
  * Every option is written in both directions, the rule the rest of this function
  * follows: a reused handle must not keep an identity the current policy never
@@ -1028,9 +1030,13 @@ const std::string& url) {
     // presented to a host that never registered one.
     //
     // The lookup is skipped entirely - URL parse included - when the registry
-    // is empty, which is every user who has not opted into mTLS.
+    // is empty, which is every user who has not opted into mTLS. It is skipped
+    // for a cleartext URL too (#3260): libcurl ignores the certificate options
+    // there, so a match would only make the response claim a certificate that
+    // never reached the wire.
     const ClientCertRule* matched = nullptr;
-    if (!policy.client_certificates.empty ()) {
+    if (!policy.client_certificates.empty () &&
+    vayu::utils::ascii_lower_equal (vayu::http::url_scheme (url), "https")) {
         const UrlAuthority authority = parse_authority (url);
         matched = match_client_certificate (policy, authority.host, authority.port);
     }

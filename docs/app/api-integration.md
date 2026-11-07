@@ -1950,7 +1950,8 @@ its response viewer. The title comes from the code and an unknown code gets a
 neutral one, since the engine adds codes without the app learning them first.
 
 `clientCertificate` names the client-certificate registry entry the exchange
-presented, as `host` or `host:port`, and `""` when none matched (issue #707).
+presented, as `host` or `host:port`, and `""` when none matched (issue #707) or
+the final hop was `http://`, where nothing is presented (#3260).
 It is the entry's own spelling, so a wildcard row reads as `*.example.com`
 rather than as the host that was dialled - which is the point: it says which
 row answered (issue #803).

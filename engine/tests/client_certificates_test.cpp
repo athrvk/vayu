@@ -7,11 +7,11 @@
  * split is deliberate: this file is about the *registry* - which row a target
  * picks, and what a row may say - so its material is the bytes
  * `not-a-real-certificate`, and nothing in it puts a certificate on a wire.
- * That keeps the lookup asserted at the boundary, the lookup's *outcome*
- * asserted end to end through the design and stream drivers (both record the
- * entry they matched), and the backend's willingness to take the three curl
- * options at all probed per platform the way `TlsBackend` probes
- * `CURLOPT_CAINFO` - while the question of whether the bytes behind those paths
+ * That keeps the lookup asserted at the boundary, the cleartext rule asserted
+ * end to end through the design and stream drivers (neither records an entry
+ * for an `http://` send; the https side is `mutual_tls_test.cpp`), and the
+ * backend's willingness to take the three curl options at all probed per
+ * platform the way `TlsBackend` probes `CURLOPT_CAINFO` - while the question of whether the bytes behind those paths
  * are accepted by a server demanding a certificate is asked where a server
  * exists to answer it.
  */
@@ -112,9 +112,8 @@ class ScratchFile {
     std::string path_;
 };
 
-/// Plain HTTP, because what is under test is *which entry was chosen*, not TLS:
-/// libcurl ignores the certificate options on a cleartext transfer, so the
-/// exchange still completes and the response still names the entry that matched.
+/// Plain HTTP: no handshake, so nothing here can present a certificate, and the
+/// drivers must report none even for a host the registry names (#3260).
 class MockUpstream {
     public:
     MockUpstream () {
@@ -1179,7 +1178,12 @@ TEST_F (ClientCertificateDbTest, TheStoredFormatReachesTheRuleTheApplierReads) {
 // Every driver applies the match
 // ---------------------------------------------------------------------------
 
-TEST (ClientCertificatePaths, ADesignSendRecordsTheEntryItMatched) {
+// The upstream is cleartext, so no certificate reaches the wire however the
+// registry matches, and the response must not claim one (#3260). The https
+// counterpart is `mutual_tls_test.cpp`, where a handshake can only complete with
+// the entry its response names. Mutation check: drop the https test from
+// `apply_client_certificate` and this reads "127.0.0.1:<port>".
+TEST (ClientCertificatePaths, ADesignSendOverCleartextRecordsNoEntry) {
     MockUpstream upstream;
     ScratchFile cert{ "paths_cert.pem" };
     ScratchFile key{ "paths_key.pem" };
@@ -1192,11 +1196,8 @@ TEST (ClientCertificatePaths, ADesignSendRecordsTheEntryItMatched) {
     const auto result = client.send (get_request (upstream.url ("/hello")));
     ASSERT_TRUE (result.is_ok ());
     EXPECT_EQ (result.value ().status_code, 200);
-    // The response carries which entry was used, which is what both funnels
-    // print and the only way "why here and not there" is answerable after the
-    // fact. Remove the applier's lookup and this is empty.
-    EXPECT_EQ (result.value ().client_certificate,
-    "127.0.0.1:" + std::to_string (upstream.port));
+    EXPECT_TRUE (result.value ().client_certificate.empty ())
+    << "claimed an entry over cleartext: " << result.value ().client_certificate;
 }
 
 TEST (ClientCertificatePaths, ADesignSendToAnUnregisteredHostRecordsNothing) {
@@ -1215,10 +1216,12 @@ TEST (ClientCertificatePaths, ADesignSendToAnUnregisteredHostRecordsNothing) {
     EXPECT_TRUE (result.value ().client_certificate.empty ());
 }
 
-TEST (ClientCertificatePaths, AnSseStreamRecordsTheEntryItMatched) {
+TEST (ClientCertificatePaths, AnSseStreamOverCleartextRecordsNoEntry) {
     // The path that had no proxy option at all before #705, and would have been
     // the one to miss certificates too if each driver configured its own
-    // transport. It reaches them through the same applier.
+    // transport. It reaches them through the same applier, so it shares the
+    // cleartext rule (#3260); `AnSseStreamPresentsTheCertificate` in
+    // `mutual_tls_test.cpp` is the https side.
     MockUpstream upstream;
     ScratchFile cert{ "paths_cert3.pem" };
     ScratchFile key{ "paths_key3.pem" };
@@ -1233,7 +1236,7 @@ TEST (ClientCertificatePaths, AnSseStreamRecordsTheEntryItMatched) {
     const auto response = consume_sse_stream (spec, context);
 
     EXPECT_EQ (response.status_code, 200);
-    EXPECT_EQ (response.client_certificate, "127.0.0.1");
+    EXPECT_TRUE (response.client_certificate.empty ()) << response.client_certificate;
 }
 
 TEST (ClientCertificatePaths, ALoadRunCarriesTheRegistryAndStillTransfers) {

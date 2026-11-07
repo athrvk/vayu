@@ -192,7 +192,8 @@ const std::atomic<bool>* cancel) {
     }
 
     const auto& resp = result.value ();
-    // The entry that answered for this host, "" when none did (issue #707).
+    // The entry that answered for this host, "" when none did or the URL is
+    // not https (issues #707, #3260).
     // Sent always, the same way `POST /execute` sends it: a caller can then
     // tell "no certificate was used" from "this engine cannot say", and the
     // card can name the registry row a handshake failure belongs to.
