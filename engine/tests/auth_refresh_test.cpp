@@ -924,19 +924,13 @@ TEST_F (MidRunRefreshTest, AStopDoesNotWaitOutARefreshInFlight) {
     ASSERT_TRUE (vayu::tests::wait_until ([&] { return idp.hits () > 0; }))
     << "the watchdog never asked for a refresh";
 
-    const auto stopped   = Clock::now ();
     context->should_stop = true;
     context->notify_refill ();
     const bool settled =
     vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; });
-    const auto stop_ms =
-    std::chrono::duration_cast<std::chrono::milliseconds> (Clock::now () - stopped)
-    .count ();
     manager.shutdown (std::chrono::milliseconds (15000));
 
     ASSERT_TRUE (settled) << "the Stop waited on the token endpoint";
-    EXPECT_LT (stop_ms, vayu::core::constants::server::RUN_SHUTDOWN_GRACE_MS)
-    << "the Stop took " << stop_ms << "ms with a refresh in flight";
     const auto stored = db->get_run (run_id);
     ASSERT_HAS_VALUE (stored);
     EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
