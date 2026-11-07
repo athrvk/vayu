@@ -7791,8 +7791,8 @@ completion longer than that, a timeout above `3600000` that ran out, is counted
 at one hour, so a percentile or `max` it reaches reads about `3600000` ms (within
 0.1%) rather than the true duration, and the sample is never left out.
 The same deadline bounds the OAuth 2.0 token request an `auth` block makes
-(issue #2833), a refresh and the fresh grant a rejected refresh falls back to
-counted together: a token endpoint that does not answer within it fails the
+(issue #2833), a refresh, the wait for another call's refresh of the same
+token, and the fresh grant a rejected refresh falls back to counted together: a token endpoint that does not answer within it fails the
 send as `AUTH_FAILED` with `authErrorCode` `oauth2_timeout`, and the request
 itself is never sent. It is also the default timeout of every `pm.sendRequest`
 the send's scripts make, buffered or streamed; a call's own `timeout` option

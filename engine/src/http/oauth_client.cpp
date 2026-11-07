@@ -482,7 +482,7 @@ void log_flight_failure () noexcept {
     try {
         vayu::utils::log_error ("oauth", "OAuth2: a refresh failed to release its followers");
     } catch (...) {
-        // @deliberate the logger failed while reporting from a destructor,
+        // @deliberate: the logger failed while reporting from a destructor,
         // which terminates if anything escapes it; there is nowhere left to
         // report to.
     }
