@@ -237,6 +237,7 @@ add_executable(vayu_tests
     reentrant_test.cpp
     ascii_case_test.cpp
     logger_test.cpp
+    shutdown_signal_test.cpp
     ../src/http/routes/import.cpp
     ../src/http/routes/diagnostics.cpp
     ../src/http/routes/compose.cpp

@@ -79,6 +79,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   (`format_local_time`, `format_utc_time`, `errno_message`). The daemon's
   force-shutdown branch is `std::_Exit`: it runs inside the signal handler,
   where `exit` would run every static destructor under live worker threads.
+  The handler takes no lock and logs nothing (#3346): it stores a
+  `ShutdownSignal` (`platform/shutdown_signal.hpp`) and the main loop logs
+  (`tests/shutdown_signal_test.cpp`).
   Guard: `tests/reentrant_test.cpp` scans `src` and `include` for the classic
   names and for `setenv`/`unsetenv`/`putenv`/`_putenv_s`, which would make the
   exempted `getenv` reads (`transport_policy.cpp`, `grant_secret.cpp`) unsafe.

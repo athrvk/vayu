@@ -33,14 +33,18 @@
 #include "vayu/http/loopback_guard.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/platform/platform.hpp"
+#include "vayu/platform/shutdown_signal.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
 namespace {
 std::atomic<bool> g_running{ true };
 
-// What the main loop waits on between checks of `g_running`. A signal handler
-// may only store the atomic - notifying a condition variable is not
+// Written by the signal handler and nothing else (`shutdown_signal.hpp`).
+std::atomic<vayu::platform::ShutdownSignal> g_signal{ vayu::platform::ShutdownSignal::none };
+
+// What the main loop waits on between checks of `g_running` and `g_signal`. A
+// signal handler may only store an atomic - notifying a condition variable is not
 // async-signal-safe - so a signal is still seen on the loop's next check, but
 // `POST /shutdown` (how the app stops the engine on every platform) runs on an
 // ordinary thread and wakes the loop at once instead of waiting out the check.
@@ -189,21 +193,18 @@ int run_daemon (std::span<char* const> args) {
     vayu::utils::Logger::instance ().set_verbosity (verbosity);
 
     // Setup signal handlers using platform abstraction
-    vayu::platform::setup_signal_handlers ([] (bool force) {
-        if (force) {
-            vayu::utils::log_warning ("shutdown", "Force shutdown requested, exiting immediately");
-            // `_Exit` and not `exit` (#945): this runs inside the signal
-            // handler, and `exit` would run every atexit handler and static
-            // destructor *while the worker threads are still using what they
-            // destroy* - the database, the curl globals, the logger this line
-            // just wrote through. A second Ctrl-C is asking for the process to
-            // stop now, so it stops now; the ordered teardown is the first
-            // Ctrl-C's job, below.
-            std::_Exit (1);
-        }
-        vayu::utils::log_info ("shutdown", "Shutting down...");
-        g_running.store (false);
-    });
+    vayu::platform::setup_signal_handlers (
+    vayu::platform::make_shutdown_handler (g_signal, [] () {
+        // `_Exit` and not `exit` (#945): this runs inside the signal
+        // handler, and `exit` would run every atexit handler and static
+        // destructor *while the worker threads are still using what they
+        // destroy* - the database, the curl globals, the logger. A second
+        // Ctrl-C is asking for the process to stop now, so it stops now; the
+        // ordered teardown is the first Ctrl-C's job, in the main loop. No
+        // logging here either (#3346): the logger's mutex may be held by the
+        // thread this signal interrupted.
+        std::_Exit (1);
+    }));
 
     // Initialize database
     std::string db_path = vayu::platform::path_join (db_dir, "vayu.db");
@@ -293,7 +294,8 @@ int run_daemon (std::span<char* const> args) {
     // check; `/shutdown` wakes the wait directly (see `request_stop`).
     {
         std::unique_lock<std::mutex> lock (g_wake_mutex);
-        while (g_running && server.is_running ()) {
+        while (g_running && server.is_running () &&
+        g_signal.load () == vayu::platform::ShutdownSignal::none) {
             g_wake.wait_for (lock, std::chrono::milliseconds (100));
         }
     }
@@ -302,6 +304,9 @@ int run_daemon (std::span<char* const> args) {
     // started when it asked for this; here is the engine's nearest measure of
     // that moment.
     const auto shutdown_began = std::chrono::steady_clock::now ();
+    if (g_signal.load () != vayu::platform::ShutdownSignal::none) {
+        vayu::utils::log_info ("shutdown", "Shutdown signal received");
+    }
     vayu::utils::log_info ("shutdown", "Shutting down gracefully...");
 
     // Stop the HTTP server first (with timeout)
