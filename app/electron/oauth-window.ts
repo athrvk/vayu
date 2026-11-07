@@ -38,6 +38,11 @@ export interface AuthWindowFlowParams {
 	authorizeUrl: string;
 	/** The registered callback URL, matched by prefix to capture the redirect. */
 	redirectUri: string;
+	/**
+	 * How long the window may stay open: the time left on the engine's attempt,
+	 * which owns the deadline. Fixed here would be a second clock for it.
+	 */
+	timeoutMs: number;
 }
 
 /** The partition prefix every embedded-login session must carry. */
@@ -65,26 +70,30 @@ function readNonEmptyString(value: unknown, what: string): string {
  * partition would put an IdP page inside it. A malformed `redirectUri` would
  * otherwise throw only after the window was constructed, leaking a hidden one.
  * Custom-scheme callbacks are legal, so `redirectUri` is checked for presence
- * only.
+ * only. A deadline that is not a positive finite number is refused: a timer
+ * armed with NaN fires at once, and one armed with Infinity never does.
  */
 export function readAuthWindowParams(value: unknown): OpenAuthWindowParams {
 	if (!value || typeof value !== "object") {
 		throw new Error("Refusing to open an auth window without parameters");
 	}
-	const { authorizeUrl, redirectUri, partition } = value as Record<string, unknown>;
+	const { authorizeUrl, redirectUri, timeoutMs, partition } = value as Record<string, unknown>;
 	if (typeof authorizeUrl !== "string" || !isBrowsableUrl(authorizeUrl)) {
 		throw new Error("Refusing to open a non-HTTP(S) authorize URL");
 	}
 	const callback = readNonEmptyString(redirectUri, "a redirect URI");
+	if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+		throw new Error("Refusing to open an auth window without a deadline");
+	}
 	if (partition === undefined) {
-		return { authorizeUrl, redirectUri: callback, partition: DEFAULT_PARTITION };
+		return { authorizeUrl, redirectUri: callback, timeoutMs, partition: DEFAULT_PARTITION };
 	}
 	if (typeof partition !== "string" || !partition.startsWith(PARTITION_PREFIX)) {
 		throw new Error(
 			`Refusing to open an auth window outside an "${PARTITION_PREFIX}" partition`
 		);
 	}
-	return { authorizeUrl, redirectUri: callback, partition };
+	return { authorizeUrl, redirectUri: callback, timeoutMs, partition };
 }
 
 /** The slice of the BrowserWindow this needs, so a test can pass a fake. */
@@ -113,13 +122,6 @@ export interface AuthWindowFlow {
 	/** Report that the window went away. */
 	onClosed: () => void;
 }
-
-/**
- * How long the window may stay open before the flow gives up. Matches the
- * loopback branch's patience (`POLL_TIMEOUT_MS` in the renderer) - the user is
- * doing the same thing, in a different window.
- */
-export const AUTH_WINDOW_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Chromium's `ERR_ABORTED`: a navigation that was superseded or cancelled, not
@@ -171,7 +173,7 @@ export function createAuthWindowFlow(
 		start: () => {
 			cancelDeadline = transport.schedule(
 				() => finish({ error: "Authorization timed out" }),
-				AUTH_WINDOW_TIMEOUT_MS
+				params.timeoutMs
 			);
 			void transport.loadUrl(params.authorizeUrl).catch((err: unknown) => {
 				if (loadErrorCode(err) === ERR_ABORTED) return;

@@ -88,6 +88,8 @@ export interface OAuth2AuthorizeStartResponse {
 	attemptId: string;
 	authorizeUrl: string;
 	redirectUri: string;
+	/** Epoch ms at which the engine fails the attempt: the one deadline both branches wait on. */
+	expiresAt: number;
 }
 
 export interface OAuth2AuthorizeStatusResponse {
