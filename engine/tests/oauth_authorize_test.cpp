@@ -12,6 +12,7 @@
 #include <httplib.h>
 
 #include <chrono>
+#include <future>
 #include <string>
 #include <thread>
 
@@ -22,6 +23,7 @@
 #include "temp_database.hpp"
 #include "vayu/http/oauth_authorize.hpp"
 #include "vayu/http/oauth_client.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::tests::MockTokenServer;
@@ -364,6 +366,58 @@ TEST_F (OAuthAuthorizeTest, CompleteDoesNotOverwriteASettledLoopbackAttempt) {
 TEST_F (OAuthAuthorizeTest, StatusNotFoundForUnknownAttempt) {
     vayu::http::OAuth2AuthorizeManager mgr;
     EXPECT_EQ (mgr.status ("nope").state, "not_found");
+}
+
+TEST_F (OAuthAuthorizeTest, ShutdownStopsEveryAttemptAndRefusesLaterStarts) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    const json config = { { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", "https://idp/token" }, { "clientId", "cid" } };
+    const auto start  = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok) << start.error_message;
+
+    mgr.shutdown ();
+    mgr.shutdown ();
+    EXPECT_EQ (mgr.status (start.attempt_id).state, "not_found");
+
+    httplib::Client cli (callback_origin (start));
+    cli.set_connection_timeout (1, 0);
+    EXPECT_EQ (cli.Get ("/callback"), nullptr)
+    << "the callback is still listening";
+
+    const auto refused = mgr.start (*db_, config, "loopback");
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+}
+
+// A cancel ends a loopback callback's token exchange instead of waiting it
+// out (#3345), and the callback still settles the attempt and answers its tab.
+// Healthy: the exchange sees the cancel at its next libcurl progress tick,
+// about a second. Broken: the cancel waits out the exchange's 30s timeout. Ten
+// seconds sits between them. Mutation check: drop the cancel from the
+// callback's `acquire_token` and the cancel takes 30s.
+TEST_F (OAuthAuthorizeTest, CancelEndsTheTokenExchangeACallbackIsHeldIn) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    MockTokenServer idp;
+    json config              = loopback_config (idp);
+    config["accessTokenUrl"] = idp.url ("/token-hang");
+    const auto start         = mgr.start (*db_, config, "loopback");
+    ASSERT_TRUE (start.ok) << start.error_message;
+
+    auto callback = std::async (std::launch::async, [&start] {
+        httplib::Client cli (callback_origin (start));
+        cli.set_read_timeout (40, 0);
+        const auto res = cli.Get ("/callback?code=AUTHCODE&state=" + state_of (start));
+        return res ? res->body : httplib::to_string (res.error ());
+    });
+    ASSERT_TRUE (vayu::tests::wait_until ([&idp] { return idp.hits () > 0; }))
+    << "the callback never reached the token endpoint";
+
+    const auto began = std::chrono::steady_clock::now ();
+    mgr.cancel (start.attempt_id);
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    const std::string page = callback.get ();
+    EXPECT_NE (page.find ("Token exchange failed"), std::string::npos) << page;
 }
 
 TEST_F (OAuthAuthorizeTest, CancelStopsAttempt) {

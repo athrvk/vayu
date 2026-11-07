@@ -60,10 +60,15 @@ class Server {
      *        join them.
      *
      * No handler outlives this call (#2683): the daemon tears down curl's
-     * global state and the database right after it. It is bounded because
+     * global state and the database right after it. That covers the
+     * listeners the managers own as well as this one's: after its own
+     * handlers, every mock server, inbox, mock issuer and OAuth callback is
+     * shut down, then every stream consumer (#3345). It is bounded because
      * each handler's outbound transfer is cancelled and each SSE relay ends
-     * first (`RouteContext::server_stopping`); work that waits on nothing
-     * outside the engine, a database write, is finished rather than cut.
+     * first (`RouteContext::server_stopping`), and a listener's handler waits
+     * on its entry's stop signal (a paced answer, a callback's token
+     * exchange); work that waits on nothing outside the engine, a database
+     * write, is finished rather than cut.
      */
     void stop ();
     bool is_running () const;
@@ -97,22 +102,22 @@ class Server {
     // outliving all of this - is still alive when their destructors run.
     //
     // That matters most for the four listener-owning managers: each holds one
-    // ManagedListener per attempt / issuer / inbox / mock server, and each
-    // destructor stops and joins those listener threads while a handler may
-    // still be writing to db_. The one rule they all run on lives on the helper
-    // - see managed_listener.hpp. The cookie jar is here for the first half of
-    // the reason alone: an in-flight /execute holds a reference to it, and it is
-    // process-lifetime by design (see cookie_jar.hpp).
+    // ManagedListener per attempt / issuer / inbox / mock server, whose
+    // handlers write to db_, and its shutdown stops and joins every one of them
+    // (listener_registry.hpp, managed_listener.hpp). The cookie jar is here for
+    // the first half of the reason alone: an in-flight /execute holds a
+    // reference to it, and it is process-lifetime by design (see cookie_jar.hpp).
     //
     // SseStreamManager owns curl transfers rather than listeners, and is here
     // for exactly the same reason: its workers write run rows through db_ and
     // read cookie_jar_, and its shutdown stops and joins every one of them.
     // Declared after the jar so it is destroyed before it.
     //
-    // The declaration order is the backstop, not the mechanism: `stop()` drains
-    // it explicitly, because `daemon.cpp` calls `curl_global_cleanup` between
-    // its `server.stop()` and this object's destruction, and a transfer still
-    // running then is the #125 defect (see sse_stream.hpp and #646).
+    // The declaration order is the backstop, not the mechanism: `stop()` shuts
+    // all five down explicitly, because `daemon.cpp` calls `curl_global_cleanup`
+    // between its `server.stop()` and this object's destruction, and a transfer
+    // still running then (a stream, an OAuth callback's token exchange) is the
+    // #125 defect (see sse_stream.hpp, #646 and #3345).
     OAuth2AuthorizeManager oauth_authorize_manager_;
     CookieJar cookie_jar_;
     MockIssuerManager mock_issuer_manager_;

@@ -966,9 +966,9 @@ constexpr int MIN_LIVE_CLAIM_STALE_MS = 100;
 /// the engine buffer, which is not the local user's preference to spend.
 constexpr size_t MAX_PAYLOAD_BYTES = size_t{ 8 } * 1024 * 1024;
 /// Upper bound on the canned response's artificial delay. It occupies a
-/// listener thread for its whole duration - and the teardown join waits for it
-/// - so it is bounded well below any client timeout. A rail for the same
-/// reason: it is how long a stop can be made to take, not a preference.
+/// listener thread for its whole duration, so it is bounded well below any
+/// client timeout; a stop ends it early (#3345). A rail for the same reason: it
+/// bounds a thread budget, not a preference.
 constexpr int MAX_RESPONSE_DELAY_MS = 30000;
 /// Page size of `GET /inbox/:id/requests` when the caller names none. Not a
 /// setting: the app always sends an explicit `limit`, so an engine-side default
@@ -1035,7 +1035,7 @@ constexpr size_t MAX_REFRESH_TOKENS = 256;
 /// oauth_authorize.cpp so the two halves of one flow expire together.
 constexpr int64_t CODE_TTL_MS = int64_t{ 5 } * 60 * 1000;
 /// Ceiling on the `slow` failure mode's delay. Past a minute the caller is
-/// testing its own timeout, and the sleep holds a cpp-httplib pool thread.
+/// testing its own timeout, and the wait holds a cpp-httplib pool thread.
 constexpr int64_t MAX_SLOW_MS = 60000;
 /// Ceiling on a minted token's lifetime (31 days).
 constexpr int64_t MAX_EXPIRES_IN_SECONDS = 31LL * 86400LL;
@@ -1331,9 +1331,8 @@ constexpr size_t MAX_SERVERS = 8;
 /// is refused rather than the tail silently dropped.
 constexpr size_t MAX_ROUTES = 2000;
 /// Ceiling on the injected per-response delay. It holds a cpp-httplib pool
-/// thread for its whole duration - and the teardown join waits for it - so it
-/// is bounded well below any client timeout, exactly as the inbox's canned
-/// delay is.
+/// thread for its whole duration, so it is bounded well below any client
+/// timeout, exactly as the inbox's canned delay is; a stop ends it early.
 constexpr int MAX_LATENCY_MS = 30000;
 
 /// Activity entries kept per mock (issue #481 phase 3). A running mock's

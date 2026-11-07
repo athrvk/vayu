@@ -16,9 +16,11 @@
 #include <httplib.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <latch>
 #include <memory>
 #include <optional>
 #include <set>
@@ -28,6 +30,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "held_request.hpp"
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
@@ -38,6 +41,7 @@
 #include "vayu/http/run_summary_cache.hpp"
 #include "vayu/http/server.hpp"
 #include "vayu/http/sse_stream.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::http::MockMissKind;
@@ -1875,6 +1879,33 @@ TEST_F (MockServerTest, TeardownWhileALatentResponseIsInFlightStillJoins) {
     EXPECT_FALSE (client.Get ("/pets"));
 }
 
+// A stop wakes a response inside its latency instead of waiting it out
+// (#3345), and that answer still goes out. Healthy: the stop returns in
+// milliseconds. Broken: it waits out the whole 30s latency. Ten seconds sits
+// between them. Mutation check: put `std::this_thread::sleep_for` back in
+// `serve_mock_request` and the stop takes 30s.
+TEST_F (MockServerTest, StoppingAMockWakesAResponseInsideItsLatency) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    request.latency_ms    = mock_constants::MAX_LATENCY_MS;
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    vayu::tests::HeldRequest held (started.info.port,
+    vayu::tests::preflight_opener ("/pets"),
+    vayu::tests::closing_request ("GET", "/pets"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the mock never answered the preflight";
+
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_TRUE (manager.stop (started.info.mock_id));
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held.held_status (), 200);
+}
+
 TEST_F (MockServerTest, TheServerBudgetIsEnforced) {
     seed_pet_store ();
     MockServerManager manager;
@@ -1887,6 +1918,66 @@ TEST_F (MockServerTest, TheServerBudgetIsEnforced) {
     EXPECT_FALSE (refused.ok);
     EXPECT_EQ (refused.http_status, 409);
     EXPECT_EQ (refused.error_code, "mock_limit_reached");
+}
+
+TEST_F (MockServerTest, ConcurrentStartsCannotExceedTheServerBudget) {
+    // Every start is released at once, so they all ask for a slot while none
+    // has finished building its table and binding. The cap used to be checked
+    // under one acquisition of the manager's lock and the mock inserted under
+    // another, and every start between the two passed the check. Mutation
+    // check: count only `entries_.size ()` in `ListenerRegistry::reserve` and
+    // more than MAX_SERVERS of these succeed.
+    seed_pet_store ();
+    constexpr auto cap = mock_constants::MAX_SERVERS;
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    std::latch go (static_cast<std::ptrdiff_t> (cap * 2));
+    std::atomic<std::size_t> started{ 0 };
+    std::atomic<std::size_t> refused_at_cap{ 0 };
+    std::vector<std::thread> starters;
+    starters.reserve (cap * 2);
+    for (std::size_t i = 0; i < cap * 2; ++i) {
+        starters.emplace_back ([&] {
+            go.arrive_and_wait ();
+            const auto result = manager.start (*db_, request);
+            if (result.ok) {
+                started.fetch_add (1);
+            } else if (result.error_code == "mock_limit_reached") {
+                refused_at_cap.fetch_add (1);
+            }
+        });
+    }
+    for (auto& starter : starters) {
+        starter.join ();
+    }
+    EXPECT_EQ (started.load (), cap);
+    EXPECT_EQ (refused_at_cap.load (), cap);
+    EXPECT_EQ (manager.list ().size (), cap);
+}
+
+TEST_F (MockServerTest, ShutdownStopsEveryMockAndRefusesLaterStarts) {
+    seed_pet_store ();
+    MockServerManager manager;
+    MockStartRequest request;
+    request.collection_id = "col_root";
+    const auto started    = manager.start (*db_, request);
+    ASSERT_TRUE (started.ok) << started.error_message;
+
+    manager.shutdown ();
+    manager.shutdown ();
+    EXPECT_TRUE (manager.list ().empty ());
+    EXPECT_FALSE (manager.get (started.info.mock_id).has_value ());
+
+    httplib::Client client ("127.0.0.1", started.info.port);
+    client.set_connection_timeout (1);
+    EXPECT_FALSE (client.Get ("/pets")) << "the mock is still listening";
+
+    const auto refused = manager.start (*db_, request);
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+    EXPECT_TRUE (manager.list ().empty ());
 }
 
 // ---------------------------------------------------------------------------

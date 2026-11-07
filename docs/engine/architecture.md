@@ -256,11 +256,23 @@ Each on-demand listener is owned by a manager that is a **member of `Server`, de
 `server_`** (`engine/include/vayu/http/server.hpp`). Members are destroyed in reverse order, so the
 route lambdas holding references to a manager are gone before its destructor stops and joins the
 listener threads - and the `Database` those threads write to, being external to `Server`, is still
-alive at that point. All four managers run that lifecycle - bind, wait for the accept loop, stop,
-join, release - through one shared `ManagedListener`
-(`engine/include/vayu/http/managed_listener.hpp`), so a fix to it reaches every listener rather than
-one of four copies; what stays per-manager is the route registration, the error each bind failure
-answers with, and the OAuth attempt TTL sweep. Since #1140 a manager may hand it the
+alive at that point. That order is the backstop: `Server::stop()` shuts every manager down itself,
+before the daemon's `curl_global_cleanup` (see [Thread Model](#thread-model)). A handler that paces
+its answer (a mock's `latencyMs`, an inbox's `delayMs`, an issuer's `slow` mode) waits on its entry's
+stop signal rather than sleeping, and an OAuth callback's token exchange is cancelled by it, so a
+stop, a delete, a cancel or a shutdown ends the wait at once instead of joining it out (#3345); the
+paced answer then goes out without the rest of its delay. All four managers run that lifecycle -
+bind, wait for the accept loop, stop, join, release - through one shared `ManagedListener`
+(`engine/include/vayu/http/managed_listener.hpp`), and keep their records in one shared
+`ListenerRegistry` (`engine/include/vayu/http/listener_registry.hpp`, #3345), so a fix to either
+reaches every listener rather than one of four copies. The registry counts starts still in progress
+against a manager's cap under the same lock as the running entries, so simultaneous starts cannot
+overshoot it; it tears an erased entry down outside that lock, so a handler still running holds up
+only the caller that stopped it; and its `shutdown()` is terminal, signalling every entry before it
+joins any. What stays per-manager is the route registration, the error each bind failure answers
+with, the OAuth attempt TTL sweep, and the two records that outlive their listener (a stopped inbox,
+a settled OAuth attempt), whose listener is torn down under the registry's lock because the record
+stays in it. Since #1140 a manager may hand the `ManagedListener` the
 `httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
 every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
 capture, and the other three take the plain server the listener builds for itself. The mock server
@@ -1654,7 +1666,10 @@ token request, an import fetch, a connection test - and ends each SSE relay
 listener and joins its accept loop's thread, which returns only once httplib
 has joined every handler, so each request in flight has answered first, also
 when the loop had already ended on its own, which is what the daemon's wait
-reads as a reason to shut down (#2667); then it calls
+reads as a reason to shut down (#2667); then it calls `shutdown()` on the
+four listener managers - mock servers, inboxes, mock issuers, OAuth callback
+attempts - each of which signals every entry, ending a paced answer's wait
+and cancelling a callback's token exchange, before joining any (#3345); then
 `SseStreamManager::shutdown()`, which signals every stream and joins its
 worker) → run workers signalled and joined (each joins its own metrics and
 monitor threads and stops its event loop first) → the start-of-session
@@ -1665,13 +1680,18 @@ once more, bounded by a deadline
 released. No thread is detached (#2683): a cancelled transfer ends at its
 next libcurl progress tick, about a second, and reports `Cancelled`.
 
-The stream drain belongs to `stop()` rather than to `~Server` because
-`curl_global_cleanup` runs *between* the two: a consumer joined only by the
-member destructor would still be inside a curl transfer while curl's global
-state was torn down, and still writing its run row through a `Database` that is
-about to be destroyed - the #125 defect in the one worker `RunManager` does not
-own (#646). Any other owner of an `SseStreamManager` owes the same order: drain
-before the `Database` and `CookieJar` its workers reach through go away.
+The stream drain and the listener shutdowns belong to `stop()` rather than to
+`~Server` because `curl_global_cleanup` runs *between* the two: a consumer
+joined only by the member destructor would still be inside a curl transfer
+while curl's global state was torn down, and still writing its run row through
+a `Database` that is about to be destroyed - the #125 defect in the one worker
+`RunManager` does not own (#646). An OAuth callback is in the same position
+during its token exchange, and every listener's handler writes through the
+`Database` (#3345). They run after the management API's own handlers are
+joined, so no route is left to start or stop a listener under them. Any other
+owner of an `SseStreamManager` or a listener manager owes the same order: shut
+it down before the `Database` and `CookieJar` its threads reach through go
+away.
 
 ## Performance Characteristics
 

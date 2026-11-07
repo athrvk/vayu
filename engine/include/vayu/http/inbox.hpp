@@ -9,14 +9,13 @@
 
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/listener_registry.hpp"
 #include "vayu/http/live_claim.hpp"
 
 #include <cstdint>
 #include <expected>
 #include <functional>
 #include <map>
-#include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -205,14 +204,14 @@ nlohmann::json inbox_capture_json (const vayu::db::InboxRequest& capture);
  * canned response - it serves no engine route, so a non-loopback bind exposes
  * capture-and-echo and nothing else.
  *
- * Thread-safe. The destructor stops and joins every listener, so the `Database`
+ * Thread-safe. The destructor shuts down (see `shutdown`), so the `Database`
  * passed to `start()` must outlive the manager (see the member order in
- * server.hpp). A capture handler never takes the manager's own lock, so a
- * teardown holding it can always join.
+ * server.hpp). A capture handler never takes the registry's lock, so the
+ * teardown `stop` and `remove` run under it can always join.
  */
 class InboxManager {
     public:
-    // Out-of-line because the map holds unique_ptr<Inbox> and Inbox is
+    // Out-of-line because the registry holds unique_ptr<Inbox> and Inbox is
     // incomplete here (same reason as OAuth2AuthorizeManager).
     //
     // @p local_addresses is where a wildcard bind looks up the addresses to
@@ -336,14 +335,19 @@ class InboxManager {
     /// or when the inbox is gone.
     void release_live (const std::string& inbox_id, LiveClaim claim);
 
+    /// Stop every inbox, drop every record, and refuse every later start with
+    /// a 503. The captures stay in the database, as a stop leaves them.
+    /// Terminal and idempotent; the destructor runs it too.
+    void shutdown ();
+
     private:
     struct Inbox;
-    std::mutex mutex_;
-    std::map<std::string, std::unique_ptr<Inbox>> inboxes_;
-    /// Never empty after construction; read under `mutex_` by `Inbox::info_locked`.
+    /// Never empty after construction; called only under the registry's lock
+    /// (`Inbox::info_locked`), which is what serializes an injected source.
     LocalAddressSource local_addresses_;
-
-    void teardown_locked (Inbox& inbox);
+    /// Last, so its destructor stops every listener before anything else here
+    /// goes.
+    ListenerRegistry<Inbox> inboxes_;
 };
 
 } // namespace vayu::http

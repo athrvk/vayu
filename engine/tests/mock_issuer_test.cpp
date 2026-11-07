@@ -16,12 +16,16 @@
 #include <gtest/gtest.h>
 #include <httplib.h>
 
+#include <atomic>
 #include <chrono>
+#include <latch>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include "held_request.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/http/mock_issuer.hpp"
@@ -29,6 +33,7 @@
 #include "vayu/http/pkce.hpp"
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/sha256.hpp"
+#include "wait_until.hpp"
 
 using nlohmann::json;
 using vayu::http::MockIssuerManager;
@@ -508,6 +513,33 @@ TEST_F (MockIssuerTest, SlowModeDelaysTheTokenEndpoint) {
     EXPECT_GE (elapsed_ms, 300); // bounded below only - no flaky upper bound
 }
 
+// A stop wakes a token request inside the slow mode's delay instead of
+// waiting it out (#3345), and the token still goes out. `/authorize` is not
+// slowed, so it opens the connection. Healthy: the stop returns in
+// milliseconds. Broken: it waits out the whole 30s delay. Ten seconds sits
+// between them. Mutation check: put `std::this_thread::sleep_for` back in
+// `handle_token` and the stop takes 30s.
+TEST_F (MockIssuerTest, StoppingAnIssuerWakesASlowTokenRequest) {
+    MockIssuerManager mgr;
+    const auto issuer =
+    mgr.start (json{ { "failureMode", "slow" }, { "slowMs", 30000 } });
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+    const int port = mgr.list ()["issuers"][0]["port"].get<int> ();
+
+    vayu::tests::HeldRequest held (port,
+    vayu::tests::opener_request (
+    "GET", "/authorize?client_id=cid&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcb"),
+    vayu::tests::closing_request ("POST", "/token", "grant_type=client_credentials&client_id=cid"));
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&held] { return held.opener_answered (); }))
+    << "the issuer never answered /authorize";
+
+    const auto began = std::chrono::steady_clock::now ();
+    EXPECT_TRUE (mgr.stop (issuer.issuer_id));
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (held.held_status (), 200);
+}
+
 TEST_F (MockIssuerTest, FailureModeFlipsOnALiveIssuer) {
     MockIssuerManager mgr;
     const auto issuer = mgr.start (json::object ());
@@ -597,6 +629,61 @@ TEST_F (MockIssuerTest, RefusesMoreIssuersThanTheBudget) {
     EXPECT_FALSE (refused.ok);
     EXPECT_EQ (refused.error_code, "mock_issuer_limit_reached");
     EXPECT_EQ (refused.http_status, 429);
+}
+
+TEST_F (MockIssuerTest, ConcurrentStartsCannotExceedTheBudget) {
+    // Every start is released at once, so they all ask for a slot while none
+    // has finished binding. The cap used to be checked under one acquisition
+    // of the manager's lock and the issuer inserted under another, and every
+    // start between the two passed the check. Mutation check: count only
+    // `entries_.size ()` in `ListenerRegistry::reserve` and more than
+    // MAX_ISSUERS of these succeed.
+    constexpr auto cap = vayu::core::constants::mock_issuer::MAX_ISSUERS;
+    MockIssuerManager mgr;
+    std::latch go (static_cast<std::ptrdiff_t> (cap * 2));
+    std::atomic<std::size_t> started{ 0 };
+    std::atomic<std::size_t> refused_at_cap{ 0 };
+    std::vector<std::thread> starters;
+    starters.reserve (cap * 2);
+    for (std::size_t i = 0; i < cap * 2; ++i) {
+        starters.emplace_back ([&] {
+            go.arrive_and_wait ();
+            const auto result = mgr.start (json::object ());
+            if (result.ok) {
+                started.fetch_add (1);
+            } else if (result.error_code == "mock_issuer_limit_reached") {
+                refused_at_cap.fetch_add (1);
+            }
+        });
+    }
+    for (auto& starter : starters) {
+        starter.join ();
+    }
+    EXPECT_EQ (started.load (), cap);
+    EXPECT_EQ (refused_at_cap.load (), cap);
+    EXPECT_EQ (mgr.list ()["issuers"].size (), cap);
+}
+
+TEST_F (MockIssuerTest, ShutdownStopsEveryIssuerAndRefusesLaterStarts) {
+    MockIssuerManager mgr;
+    const auto issuer = mgr.start (json::object ());
+    ASSERT_TRUE (issuer.ok) << issuer.error_message;
+
+    mgr.shutdown ();
+    mgr.shutdown ();
+    EXPECT_TRUE (mgr.list ()["issuers"].empty ());
+    EXPECT_FALSE (mgr.stop (issuer.issuer_id));
+
+    httplib::Client cli (issuer.issuer_url);
+    cli.set_connection_timeout (1, 0);
+    EXPECT_EQ (cli.Get ("/authorize"), nullptr)
+    << "the issuer is still listening";
+
+    const auto refused = mgr.start (json::object ());
+    EXPECT_FALSE (refused.ok);
+    EXPECT_EQ (refused.http_status, 503);
+    EXPECT_EQ (refused.error_code, "unavailable");
+    EXPECT_TRUE (mgr.list ()["issuers"].empty ());
 }
 
 TEST_F (MockIssuerTest, DestructorStopsALiveIssuer) {

@@ -31,6 +31,7 @@
 #include "vayu/utils/invariant.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/parse.hpp"
+#include "vayu/utils/stop_signal.hpp"
 
 #include <httplib.h>
 
@@ -45,7 +46,6 @@
 #include <map>
 #include <set>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 namespace vayu::http {
@@ -666,6 +666,9 @@ struct MockServerManager::MockServer {
     /// lock a listener thread ever takes here.
     MockActivityLog activity{ constants::mock_server::MAX_ACTIVITY_ENTRIES };
 
+    /// Requested when the mock stops, before its listener is joined.
+    vayu::utils::StopSignal stop_signal;
+
     /// Declared last so it is destroyed first: the handler reads everything
     /// above it while the accept loop is alive.
     ManagedListener listener;
@@ -688,17 +691,14 @@ struct MockServerManager::MockServer {
     }
 };
 
-MockServerManager::MockServerManager () = default;
+MockServerManager::MockServerManager ()
+: servers_ (constants::mock_server::MAX_SERVERS) {
+}
 
-MockServerManager::~MockServerManager () {
-    std::scoped_lock lock (mutex_);
-    for (auto& [id, server] : servers_) {
-        // A response inside its configured latency is still holding a listener
-        // thread, so the join inside stop() waits up to MAX_LATENCY_MS - which
-        // is why that bound exists.
-        server->listener.stop ();
-    }
-    servers_.clear ();
+MockServerManager::~MockServerManager () = default;
+
+void MockServerManager::shutdown () {
+    servers_.shutdown ();
 }
 
 /**
@@ -715,6 +715,8 @@ struct MockConfig {
     std::atomic<std::uint64_t>& example_roll;
     MockActivityLog& activity;
     const routes::CorsPolicy& cors;
+    /// Ends the latency wait when the mock stops.
+    const vayu::utils::StopSignal& stop_signal;
 };
 
 /**
@@ -744,8 +746,11 @@ httplib::Response& res) {
         return;
     }
 
+    // A stop cuts the wait short and the answer goes out without the rest of
+    // it: everything below reads the mock's own state, which the stop's join
+    // keeps alive until this returns.
     if (mock.latency_ms > 0) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (mock.latency_ms));
+        mock.stop_signal.wait_for (std::chrono::milliseconds (mock.latency_ms));
     }
 
     MockActivityEntry entry;
@@ -838,17 +843,18 @@ const MockStartRequest& request) {
         return out;
     }
 
-    {
-        std::scoped_lock lock (mutex_);
-        if (servers_.size () >= constants::mock_server::MAX_SERVERS) {
-            out.ok            = false;
-            out.http_status   = 409;
-            out.error_code    = "mock_limit_reached";
-            out.error_message = "Already running the maximum of " +
-            std::to_string (constants::mock_server::MAX_SERVERS) +
-            " mock servers; stop one first";
+    auto slot = servers_.reserve ();
+    if (!slot) {
+        if (slot.error () == RegistryRefusal::ShutDown) {
+            refuse_shut_down (out);
             return out;
         }
+        out.ok            = false;
+        out.http_status   = 409;
+        out.error_code    = "mock_limit_reached";
+        out.error_message = "Already running the maximum of " +
+        std::to_string (constants::mock_server::MAX_SERVERS) + " mock servers; stop one first";
+        return out;
     }
 
     auto server             = std::make_unique<MockServer> ();
@@ -911,8 +917,8 @@ const MockStartRequest& request) {
     // unaffected.
     svr.set_pre_routing_handler (
     [config = MockConfig{ server->latency_ms, server->error_rate_pct, raw->routes,
-     raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors }] (
-    const httplib::Request& req, httplib::Response& res) {
+     raw->served, raw->hits, raw->example_roll, raw->activity, raw->cors,
+     raw->stop_signal }] (const httplib::Request& req, httplib::Response& res) {
         serve_mock_request (config, req, res);
         return httplib::Server::HandlerResponse::Handled;
     });
@@ -933,10 +939,11 @@ const MockStartRequest& request) {
     }
     server->port = started.port;
 
-    {
-        std::scoped_lock lock (mutex_);
-        out.info             = server->info ();
-        servers_[server->id] = std::move (server);
+    out.info = server->info ();
+    if (!servers_.commit (std::move (*slot), out.info.mock_id, std::move (server))) {
+        out = StartResult{};
+        refuse_shut_down (out);
+        return out;
     }
     out.ok          = true;
     out.http_status = 200;
@@ -947,70 +954,51 @@ const MockStartRequest& request) {
 }
 
 bool MockServerManager::stop (const std::string& mock_id) {
-    std::scoped_lock lock (mutex_);
-    auto it = servers_.find (mock_id);
-    if (it == servers_.end ()) {
+    if (!servers_.remove (mock_id)) {
         return false;
     }
-    // Stop joins every in-flight handler before returning, so once this is done
-    // nothing is still reading the record being erased.
-    it->second->listener.stop ();
-    servers_.erase (it);
     vayu::utils::log_info ("mock", "Mock server stopped: " + mock_id);
     return true;
 }
 
 std::optional<MockServerInfo> MockServerManager::get (const std::string& mock_id) {
-    std::scoped_lock lock (mutex_);
-    auto it = servers_.find (mock_id);
-    if (it == servers_.end ()) {
-        return std::nullopt;
-    }
-    return it->second->info ();
+    return servers_.with_entry (
+    mock_id, [] (const MockServer& server) { return server.info (); });
 }
 
 std::vector<MockServerInfo> MockServerManager::list () {
-    std::scoped_lock lock (mutex_);
-    std::vector<MockServerInfo> out;
-    out.reserve (servers_.size ());
-    for (const auto& [id, server] : servers_) {
-        out.push_back (server->info ());
-    }
-    return out;
+    return servers_.with_entries ([] (const auto& entries) {
+        std::vector<MockServerInfo> out;
+        out.reserve (entries.size ());
+        for (const auto& [id, server] : entries) {
+            out.push_back (server->info ());
+        }
+        return out;
+    });
 }
 
 std::optional<std::vector<MockRoute>> MockServerManager::routes (const std::string& mock_id) {
-    std::scoped_lock lock (mutex_);
-    auto it = servers_.find (mock_id);
-    if (it == servers_.end ()) {
-        return std::nullopt;
-    }
-    return it->second->routes;
+    return servers_.with_entry (
+    mock_id, [] (const MockServer& server) { return server.routes; });
 }
 
 std::optional<std::vector<std::uint64_t>> MockServerManager::route_hits (
 const std::string& mock_id) {
-    std::scoped_lock lock (mutex_);
-    auto it = servers_.find (mock_id);
-    if (it == servers_.end ()) {
-        return std::nullopt;
-    }
-    std::vector<std::uint64_t> out;
-    out.reserve (it->second->hits.size ());
-    for (auto& counter : it->second->hits) {
-        out.push_back (counter.load (std::memory_order_relaxed));
-    }
-    return out;
+    return servers_.with_entry (mock_id, [] (const MockServer& server) {
+        std::vector<std::uint64_t> out;
+        out.reserve (server.hits.size ());
+        for (const auto& counter : server.hits) {
+            out.push_back (counter.load (std::memory_order_relaxed));
+        }
+        return out;
+    });
 }
 
 std::optional<std::vector<MockActivityEntry>>
 MockServerManager::activity (const std::string& mock_id, std::size_t limit) {
-    std::scoped_lock lock (mutex_);
-    auto it = servers_.find (mock_id);
-    if (it == servers_.end ()) {
-        return std::nullopt;
-    }
-    return it->second->activity.snapshot (limit);
+    return servers_.with_entry (mock_id, [limit] (const MockServer& server) {
+        return server.activity.snapshot (limit);
+    });
 }
 
 } // namespace vayu::http

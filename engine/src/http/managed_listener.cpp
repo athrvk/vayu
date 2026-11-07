@@ -8,10 +8,14 @@
 /**
  * @file managed_listener.cpp
  * @brief The one copy of the on-demand listener lifecycle (issue #505). The
- *        OAuth callback, mock issuer and webhook inbox managers all run on it.
+ *        OAuth callback, mock issuer, webhook inbox and mock server managers
+ *        all run on it, through `ListenerRegistry`.
  */
 
 #include "vayu/http/managed_listener.hpp"
+
+#include "vayu/http/listener_registry.hpp"
+#include "vayu/utils/logger.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -40,8 +44,9 @@ struct PortClaim {
 
 /// What every live listener in this process holds, so an explicitly requested
 /// port can be refused before the bind that would silently share it (#512).
-/// A handful of listeners run at once - the OAuth callback, at most eight mock
-/// issuers, the inboxes - so a linear scan is the whole data structure.
+/// A handful of listeners run at once - the OAuth callbacks, at most eight mock
+/// issuers and eight mock servers, the inboxes - so a linear scan is the whole
+/// data structure.
 struct ClaimRegistry {
     std::mutex mutex;
     std::vector<PortClaim> claims;
@@ -155,5 +160,20 @@ void ManagedListener::stop () {
 bool ManagedListener::is_listening () const {
     return listening_.load ();
 }
+
+namespace detail {
+
+void log_registry_shutdown_failure (std::string_view detail) noexcept {
+    try {
+        vayu::utils::log_error ("shutdown",
+        "Listener registry shutdown failed: " + std::string (detail));
+    } catch (...) {
+        // @deliberate the logger failed while reporting a failure from a
+        // destructor, which terminates if anything escapes it. There is nowhere
+        // left to report to.
+    }
+}
+
+} // namespace detail
 
 } // namespace vayu::http

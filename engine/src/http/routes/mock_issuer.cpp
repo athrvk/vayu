@@ -25,12 +25,14 @@
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/logger.hpp"
 #include "vayu/utils/sha256.hpp"
+#include "vayu/utils/stop_signal.hpp"
 
 #include <httplib.h>
 
 #include <chrono>
+#include <map>
+#include <mutex>
 #include <string_view>
-#include <thread>
 
 namespace vayu::http {
 
@@ -383,6 +385,9 @@ struct MockIssuerState {
     std::map<std::string, IssuedCode> codes;
     std::map<std::string, IssuedRefresh> refresh_tokens;
 
+    /// Requested when the issuer stops, before its listener is joined.
+    vayu::utils::StopSignal stop_signal;
+
     /// Declared last so it is destroyed first: `/token` and `/authorize` read
     /// every field above it while the accept loop is alive.
     ManagedListener listener;
@@ -554,8 +559,10 @@ const std::string& scope) {
 }
 
 void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Response& res) {
-    // The failure mode is read (and `slow` slept) before anything else, so a
-    // caller testing retry behaviour sees the same reply whatever it asked for.
+    // The failure mode is read (and `slow` waited out) before anything else, so
+    // a caller testing retry behaviour sees the same reply whatever it asked
+    // for. A stop cuts the wait short and the reply goes out without the rest
+    // of it; the stop's join keeps the issuer's state alive until then.
     std::string failure_mode;
     int64_t slow_ms = 0;
     {
@@ -572,7 +579,7 @@ void handle_token (Issuer& issuer, const httplib::Request& req, httplib::Respons
         return;
     }
     if (failure_mode == "slow" && slow_ms > 0) {
-        std::this_thread::sleep_for (std::chrono::milliseconds (slow_ms));
+        issuer.stop_signal.wait_for (std::chrono::milliseconds (slow_ms));
     }
 
     const std::string grant = req.get_param_value ("grant_type");
@@ -668,18 +675,13 @@ void handle_authorize (Issuer& issuer, const httplib::Request& req, httplib::Res
 
 } // namespace
 
-MockIssuerManager::MockIssuerManager () = default;
-
-MockIssuerManager::~MockIssuerManager () {
-    std::lock_guard<std::mutex> lock (mutex_);
-    for (auto& [id, issuer] : issuers_) {
-        teardown (*issuer);
-    }
-    issuers_.clear ();
+MockIssuerManager::MockIssuerManager () : issuers_ (mi::MAX_ISSUERS) {
 }
 
-void MockIssuerManager::teardown (Issuer& issuer) {
-    issuer.listener.stop ();
+MockIssuerManager::~MockIssuerManager () = default;
+
+void MockIssuerManager::shutdown () {
+    issuers_.shutdown ();
 }
 
 MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
@@ -693,16 +695,18 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
         return out;
     }
 
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        if (issuers_.size () >= mi::MAX_ISSUERS) {
-            out.ok            = false;
-            out.http_status   = 429;
-            out.error_code    = "mock_issuer_limit_reached";
-            out.error_message = "At most " + std::to_string (mi::MAX_ISSUERS) +
-            " mock issuers may run at once - stop one first";
+    auto slot = issuers_.reserve ();
+    if (!slot) {
+        if (slot.error () == RegistryRefusal::ShutDown) {
+            refuse_shut_down (out);
             return out;
         }
+        out.ok            = false;
+        out.http_status   = 429;
+        out.error_code    = "mock_issuer_limit_reached";
+        out.error_message = "At most " + std::to_string (mi::MAX_ISSUERS) +
+        " mock issuers may run at once - stop one first";
+        return out;
     }
 
     auto issuer        = std::make_unique<Issuer> ();
@@ -752,68 +756,63 @@ MockIssuerStart MockIssuerManager::start (const nlohmann::json& body) {
     out.authorize_url = issuer->authorize_url ();
     out.signing_key   = issuer->signing_key;
 
-    vayu::utils::log_info ("mock",
-    "Mock OAuth2 issuer started at " + issuer->issuer_url + " (" + issuer->id + ")");
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        issuers_[out.issuer_id] = std::move (issuer);
+    const std::string issuer_url = issuer->issuer_url;
+    if (!issuers_.commit (std::move (*slot), out.issuer_id, std::move (issuer))) {
+        out = MockIssuerStart{};
+        refuse_shut_down (out);
+        return out;
     }
+    vayu::utils::log_info ("mock",
+    "Mock OAuth2 issuer started at " + issuer_url + " (" + out.issuer_id + ")");
     return out;
 }
 
 bool MockIssuerManager::stop (const std::string& issuer_id) {
-    std::unique_ptr<Issuer> issuer;
-    {
-        std::lock_guard<std::mutex> lock (mutex_);
-        const auto it = issuers_.find (issuer_id);
-        if (it == issuers_.end ()) {
-            return false;
-        }
-        issuer = std::move (it->second);
-        issuers_.erase (it);
+    if (!issuers_.remove (issuer_id)) {
+        return false;
     }
-    // Torn down outside the manager lock: stop() joins the listener thread, and
-    // a handler still in flight there would otherwise block every other caller.
-    teardown (*issuer);
     vayu::utils::log_info ("mock", "Mock OAuth2 issuer stopped (" + issuer_id + ")");
     return true;
 }
 
 nlohmann::json MockIssuerManager::list () const {
-    std::lock_guard<std::mutex> lock (mutex_);
-    auto issuers = nlohmann::json::array ();
-    for (const auto& [id, issuer] : issuers_) {
-        issuers.push_back (issuer->describe ());
-    }
+    auto issuers = issuers_.with_entries ([] (const auto& entries) {
+        auto described = nlohmann::json::array ();
+        for (const auto& [id, issuer] : entries) {
+            described.push_back (issuer->describe ());
+        }
+        return described;
+    });
     return nlohmann::json{ { "issuers", std::move (issuers) } };
 }
 
 MockIssuerManager::UpdateResult
 MockIssuerManager::update (const std::string& issuer_id, const nlohmann::json& body) {
-    UpdateResult out;
-    std::lock_guard<std::mutex> lock (mutex_);
-    const auto it = issuers_.find (issuer_id);
-    if (it == issuers_.end ()) {
-        return out;
-    }
-    out.found      = true;
-    Issuer& issuer = *it->second;
-
-    MockIssuerConfig parsed;
-    {
-        std::lock_guard<std::mutex> state_lock (issuer.state_mutex);
-        parsed = apply_mock_issuer_patch (body, issuer.settings);
-        if (parsed.ok) {
-            issuer.settings = std::move (parsed.settings);
+    return issuers_.with_entries ([&] (const auto& entries) {
+        UpdateResult out;
+        const auto it = entries.find (issuer_id);
+        if (it == entries.end ()) {
+            return out;
         }
-    }
-    if (!parsed.ok) {
-        out.ok    = false;
-        out.error = parsed.error;
+        out.found      = true;
+        Issuer& issuer = *it->second;
+
+        MockIssuerConfig parsed;
+        {
+            std::lock_guard<std::mutex> state_lock (issuer.state_mutex);
+            parsed = apply_mock_issuer_patch (body, issuer.settings);
+            if (parsed.ok) {
+                issuer.settings = std::move (parsed.settings);
+            }
+        }
+        if (!parsed.ok) {
+            out.ok    = false;
+            out.error = parsed.error;
+            return out;
+        }
+        out.issuer = issuer.describe ();
         return out;
-    }
-    out.issuer = issuer.describe ();
-    return out;
+    });
 }
 
 namespace routes {

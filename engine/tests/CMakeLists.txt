@@ -166,6 +166,8 @@ add_executable(vayu_tests
     pkce_test.cpp
     debug_redact_test.cpp
     managed_listener_test.cpp
+    listener_registry_test.cpp
+    stop_signal_test.cpp
     oauth_authorize_test.cpp
     mock_issuer_test.cpp
     inbox_test.cpp

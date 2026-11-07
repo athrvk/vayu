@@ -949,7 +949,9 @@ The response is sent **before** shutdown begins, so the client always receives
 the `200`. The handler sets the body and then calls the shutdown callback
 inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
-The daemon then stops the server, stops and joins active runs, refreshes the
+The daemon then stops the server (and with it every mock server, inbox, mock
+issuer and OAuth callback listener, a paced answer going out at once and a
+callback's token exchange cancelled), stops and joins active runs, refreshes the
 recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
 what is left of the app's 5 s window; on a timeout the previous backup stands,
 see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the
@@ -6102,8 +6104,9 @@ Three are **not** settings, deliberately. A request over **8 MiB** is refused at
 the transport with a `413` and recorded nowhere: that bounds what an
 unauthenticated remote caller can make the engine buffer, which is not the local
 user's preference to spend. The canned response's **`delayMs` is capped at
-30000**: it holds a listener thread for its whole duration and a stop waits on
-that join, so it bounds how long a stop can be made to take. The **request
+30000**: it holds a listener thread for its whole duration. A stop, a delete or
+the engine shutting down ends the delay at once, and the canned answer then goes
+out without the rest of it. The **request
 target** - path and query together - is capped at **8192 bytes** by the
 transport, past which it answers `414`.
 
@@ -6521,8 +6524,8 @@ served or missed like any other verb.
 
 **Bounds** (rails, not settings): at most **8** mock servers at once (a listener
 thread each), at most **2000** routes in one table, and `latencyMs` capped at
-**30000** - it holds a listener thread for its whole duration and a stop waits
-on that join.
+**30000** - it holds a listener thread for its whole duration, until a stop
+ends it.
 
 ### POST /mock/start
 
@@ -6661,8 +6664,8 @@ there is nothing to read after that.
 ### POST /mock/:mockId/stop
 
 Stops the listener and drops the record: `{"mockId": "...", "stopped": true}`,
-or `404`. In-flight answers - including one inside its configured `latencyMs` -
-are joined before this returns.
+or `404`. In-flight answers are joined before this returns; one inside its
+configured `latencyMs` is answered at once, without the rest of the delay.
 
 ## Authentication
 
@@ -6964,7 +6967,9 @@ navigation has no body or headers); a row naming a parameter already in the URL
 is skipped.
 
 Attempts time out after 5 minutes; on success the token is written to the cache
-and `cacheKey` is returned. A completion (the loopback callback and `POST
+and `cacheKey` is returned. Cancelling a loopback attempt, or the engine
+shutting down, cancels a token exchange its callback is still making: the
+callback's tab is told the exchange failed. A completion (the loopback callback and `POST
 /oauth2/authorize/complete` alike) always exchanges its code and replaces any
 token already cached under that key.
 
@@ -7045,7 +7050,7 @@ flipped on a **running** issuer with the `PUT`:
 | Mode | `/token` answers |
 |------|------------------|
 | `none` | Normally |
-| `slow` | Normally, after `slowMs` |
+| `slow` | Normally, after `slowMs` (at once when the issuer stops first) |
 | `server_error` | `500 {"error": "temporarily_unavailable"}` |
 | `invalid_client` | `401 {"error": "invalid_client"}` |
 

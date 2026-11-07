@@ -7,10 +7,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "vayu/http/listener_registry.hpp"
+
 #include <cstdint>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -106,13 +105,14 @@ struct MockIssuerState;
  * and multi-tenant realms are deliberate non-goals - this is a dev-loop tool.
  *
  * State is in-memory only: a restart forgets every issuer. Thread-safe; the
- * destructor stops and joins every live listener, so the manager must outlive
- * nothing it captures (it captures only itself).
+ * destructor shuts down (see `shutdown`), so the manager must outlive nothing
+ * it captures (it captures only itself).
  */
 class MockIssuerManager {
     public:
-    // Defined out-of-line: the map holds unique_ptr<Issuer> and Issuer is an
-    // incomplete type here (it owns an httplib::Server, kept out of this header).
+    // Defined out-of-line: the registry holds unique_ptr<Issuer> and Issuer is
+    // an incomplete type here (it owns an httplib::Server, kept out of this
+    // header).
     MockIssuerManager ();
     ~MockIssuerManager ();
 
@@ -137,14 +137,13 @@ class MockIssuerManager {
     };
     UpdateResult update (const std::string& issuer_id, const nlohmann::json& body);
 
-    private:
-    mutable std::mutex mutex_;
-    std::map<std::string, std::unique_ptr<detail::MockIssuerState>> issuers_;
+    /// Stop every issuer and refuse every later start with a 503. Terminal and
+    /// idempotent; the destructor runs it too.
+    void shutdown ();
 
-    /// Stop and join one issuer's listener. Touches no manager state, so it is
-    /// called both under `mutex_` (the destructor) and outside it (`stop`,
-    /// where joining a listener thread must not block every other caller).
-    static void teardown (detail::MockIssuerState& issuer);
+    private:
+    /// Capped at `MAX_ISSUERS`.
+    ListenerRegistry<detail::MockIssuerState> issuers_;
 };
 
 } // namespace vayu::http

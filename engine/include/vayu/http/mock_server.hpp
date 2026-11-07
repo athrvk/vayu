@@ -8,14 +8,12 @@
  */
 
 #include "vayu/db/database.hpp"
+#include "vayu/http/listener_registry.hpp"
 #include "vayu/http/mock_activity.hpp"
 
 #include <atomic>
 #include <cstdint>
 #include <expected>
-#include <map>
-#include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -288,14 +286,13 @@ nlohmann::json mock_route_json (const MockRoute& route, std::uint64_t hits);
  * The route table is built once at start and never reloaded, so a mock serves a
  * consistent snapshot for its whole life - edit the collection and restart it.
  *
- * Thread-safe. The destructor stops and joins every listener; the handlers read
- * only the immutable route table and the manager's own lock is never taken from
- * one, so a teardown holding it can always join.
+ * Thread-safe. The destructor shuts down (see `shutdown`); the handlers read
+ * only the immutable route table and never take the registry's lock.
  */
 class MockServerManager {
     public:
-    // Out-of-line because the map holds unique_ptr<MockServer> and MockServer
-    // is incomplete here (same reason as InboxManager).
+    // Out-of-line because the registry holds unique_ptr<MockServer> and
+    // MockServer is incomplete here (same reason as InboxManager).
     MockServerManager ();
     ~MockServerManager ();
 
@@ -343,10 +340,14 @@ class MockServerManager {
     std::optional<std::vector<MockActivityEntry>>
     activity (const std::string& mock_id, std::size_t limit);
 
+    /// Stop every mock and refuse every later start with a 503. Terminal and
+    /// idempotent; the destructor runs it too.
+    void shutdown ();
+
     private:
     struct MockServer;
-    std::mutex mutex_;
-    std::map<std::string, std::unique_ptr<MockServer>> servers_;
+    /// Capped at `MAX_SERVERS`.
+    ListenerRegistry<MockServer> servers_;
 };
 
 } // namespace vayu::http
