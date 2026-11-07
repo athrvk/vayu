@@ -951,7 +951,10 @@ inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
 The daemon then stops the server (and with it every mock server, inbox, mock
 issuer and OAuth callback listener, a paced answer going out at once and a
-callback's token exchange cancelled), stops and joins active runs, refreshes the
+callback's token exchange cancelled), stops and joins active runs (a run still
+sending ends `stopped`; one in its natural-end drain has the drain cut short, its
+in-flight transfers counted as `cancelled`, and keeps its own end, as for
+[a Stop](#post-runsrunidstop), issue #3341), refreshes the
 recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
 what is left of the app's 5 s window; on a timeout the previous backup stands,
 see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the
@@ -9319,10 +9322,14 @@ load run.
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
 verdict says. The app says so on a stopped run, under the verdict's counts, with
-how long the run went against how long it was planned for. A **completed** run
-whose config set `thresholds.failRun: true` and whose budgets it missed ends `failed` instead of `completed`; without the
+how long the run went against how long it was planned for. A run that reached
+its **own end** whose config set `thresholds.failRun: true` and whose budgets it
+missed ends `failed` instead of `completed`; without the
 flag, or on a run that met every budget, a failing budget is reported but
-never changes the terminal status.
+never changes the terminal status. Only a Stop that decided the outcome (one
+before the strategy returned) makes a run `stopped`: a Stop that cuts the
+natural-end drain short leaves the run to its own end, so `failRun` still judges
+it (issue #3341, see [POST /runs/:runId/stop](#post-runsrunidstop)).
 
 Each check carries `evaluated`. A latency percentile needs a timed request
 to mean anything, so a run that recorded none (every request was refused
@@ -10950,7 +10957,9 @@ over the limit. It also stops when two step-ups buy under 5% more throughput
 (`plateau`; the report then names the level where throughput stopped growing as
 `saturation*`, which is lower than `maxHealthy*`, the last level tried), when
 `concurrency` is reached (`cap_reached`), when `duration` runs out
-(`deadline`), or when the operator stops the run (`stopped`).
+(`deadline`), or when the operator stops the run before the search has ended
+(`stopped`); a Stop that arrives only after the search ended on its own leaves
+the reason it had (issue #3341).
 
 An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
 60 seconds every other mode falls back to: this mode walks a level every
@@ -11050,7 +11059,8 @@ response came back, with an error status) and **No response**:
 | Report (`GET /runs/:runId/report`) | `summary.httpErrorRequests` | `summary.noResponseRequests` |
 
 A request `POST /runs/:runId/stop` cancels before it is answered is **not an
-error** (issue #2136). It got no outcome from the target, so it is counted on
+error** (issue #2136), whether the Stop landed while the run was sending or cut
+its natural-end drain short (issue #3341). It got no outcome from the target, so it is counted on
 its own, as **cancelled**, and is in no other count: not the total, not the
 status-code distribution, not either half above, not the error rate. A healthy
 target stopped mid-run therefore reads `errorRate` 0 however many requests
@@ -11066,7 +11076,8 @@ were in flight. The surfaces that carry it:
 So `totalRequests` is the requests that got an outcome,
 `successfulRequests + failedRequests`, and every request the run sent is in
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
-cancellation is exempt. When a run reaches its natural end, a request still in
+cancellation is exempt. When a run reaches its natural end and no Stop has been
+requested, a request still in
 flight after its effective timeout (the run's `timeout`, else the
 `defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
 streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
@@ -12221,25 +12232,46 @@ to 5s for its worker to settle, and answers with a summary of what the run
 actually did. A collection run's summary is optional; see
 [Stopping a collection run](#stopping-a-collection-run) below.
 
-**Stop discards, it does not drain.** The queued backlog is thrown away rather
-than sent, and transfers already in flight are cancelled (removed from curl and
-completed as a `CANCELLED` "Request cancelled"), so the target stops receiving
-traffic immediately and the stop's latency does not belong to the upstream. A
-cancelled request was submitted, so it is counted, but **not as an error**
-(issue #2136): it is `summary.cancelled`, outside `totalRequests`, `errors` and
-`errorRate` (see [What counts as an error](#what-counts-as-an-error)). Every
-request the run sent is in exactly one of `totalRequests` and `cancelled`.
+**What a Stop means depends on the phase it lands in** (issue #3341). A load
+run moves through `setup`, `sending`, `draining`, `summarising` and `settled`,
+in memory only, and the first Stop is latched with the phase it arrived in.
 
-A run that ends **naturally** still lets its in-flight requests finish, but only
-up to its effective timeout (its own `timeout`, else the `defaultTimeout`
-setting) plus a 2s grace, except a streaming run, whose bound is its
-`maxStreamDurationMs` plus grace (the 5s stream backstop plus the same 2s,
-issue #2834); anything still outstanding then is
-cancelled the same way - and, because nobody asked for that one to stop, it is
-an error with no response, not a cancellation. Without that bound an upstream
-that never answers would hold the run in `running` indefinitely.
+- **A Stop before the strategy returns (`setup` or `sending`) decides the
+  outcome, and the run ends `stopped`.** The queued backlog is thrown away
+  rather than sent, and transfers already in flight are cancelled (removed from
+  curl and completed as a `CANCELLED` "Request cancelled"), so the target stops
+  receiving traffic immediately and the stop's latency does not belong to the
+  upstream. A cancelled request was submitted, so it is counted, but **not as
+  an error** (issue #2136): it is `summary.cancelled`, outside `totalRequests`,
+  `errors` and `errorRate` (see [What counts as an
+  error](#what-counts-as-an-error)). Every request the run sent is in exactly
+  one of `totalRequests` and `cancelled`.
+- **A Stop after the strategy returned on its own (`draining`) decides
+  nothing about the run's end.** A run that ends **naturally** lets its
+  in-flight requests finish, but only up to its effective timeout (its own
+  `timeout`, else the `defaultTimeout` setting) plus a 2s grace, except a
+  streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
+  stream backstop plus the same 2s, issue #2834). A Stop in that drain cuts it
+  short at once: the transfers still in flight are cancelled and counted as
+  `cancelled`, not as errors, because the operator asked for it. The run keeps
+  its own end - `completed`, or `failed` when `thresholds.failRun` judges it
+  so - and its sending window is what it would have been without the Stop,
+  since the Stop ended no sending.
+- **A drain that hits its deadline with no Stop** cancels what is still
+  outstanding the same way, and because nobody asked for that one to stop, it
+  is an error with no response, not a cancellation. Without that bound an
+  upstream that never answers would hold the run in `running` indefinitely.
 
-**Response** (active run):
+[`POST /shutdown`](#post-shutdown) follows the same rules: it also cuts a
+natural-end drain short and leaves the run `completed`.
+
+**Response** (active run). `status` is the stored status once the worker has
+written a terminal one; before that it is `stopped` when the Stop decided the
+outcome, and `running` when it landed after the run's own end (the `draining`
+phase), where the worker has not yet written the `completed` or `failed` it will
+end with. `running` there is accurate rather than a failure to stop: the drain
+is already cancelled, and the terminal status follows once the worker writes
+it.
 ```json
 {
   "status": "stopped",
@@ -12315,7 +12347,8 @@ report: a step the plan skipped is a step and not a request. `errors`,
 distribution over those requests, and `avgLatencyMs` is the stored latency
 block's `avg` (`0` when no step sent). There is no `cancelled`: a collection
 run keeps no count of what its stop cancelled. `status` is the run's stored
-status.
+status. A sequential run has no drain, so a Stop always lands while it is
+sending and decides the outcome: the run ends `stopped`.
 
 **The summary is absent when the worker has not stored one** within the 5s,
 or could not store it. The answer is then
