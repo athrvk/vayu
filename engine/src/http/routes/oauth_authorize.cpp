@@ -127,7 +127,11 @@ void log_unrecoverable (std::string_view what, std::string_view detail) noexcept
     }
 }
 
-void refuse_at_capacity (AuthorizeStart& out) {
+void refuse_start (RegistryRefusal refusal, AuthorizeStart& out) {
+    if (refusal == RegistryRefusal::ShutDown) {
+        refuse_shut_down (out);
+        return;
+    }
     out.ok            = false;
     out.http_status   = 429;
     out.error_code    = "oauth2_authorize_limit_reached";
@@ -315,6 +319,42 @@ struct OAuth2AuthorizeManager::Attempt {
         return { "pending", "", "" };
     }
 
+    /// The loopback listener's `/callback`: the IdP's redirect, or any local
+    /// process that found the port.
+    void answer_callback (vayu::db::Database& db,
+    const std::string& attempt_id,
+    const httplib::Request& req,
+    httplib::Response& res) {
+        const auto query  = req.target.find ('?');
+        const auto params = parse_query (
+        query == std::string::npos ? std::string{} : req.target.substr (query + 1));
+        // Any local process can reach this port, so a callback without the
+        // attempt's state leaves it pending and the listener waiting.
+        if (!callback_state_matches (params, state)) {
+            vayu::utils::log_warning ("oauth",
+            "OAuth callback ignored, missing or wrong state: " + attempt_id);
+            res.status = 400;
+            res.set_content (callback_page ("State mismatch (possible CSRF)"), "text/html");
+            return;
+        }
+        // Past the deadline the attempt is already the timeout every reader
+        // reports, so a late redirect cannot turn it around.
+        if (expired (Clock::now ())) {
+            res.status = 410;
+            res.set_content (callback_page (TIMED_OUT), "text/html");
+            return;
+        }
+        if (!claim ()) {
+            res.status = 409;
+            res.set_content (callback_page ("Authorization already handled"), "text/html");
+            return;
+        }
+        const CallbackOutcome outcome = resolve_oauth_callback (
+        db, config, code_verifier, redirect_uri, params, &stop_signal.flag ());
+        publish (outcome.result_state, outcome.error, outcome.cache_key);
+        res.set_content (callback_page (outcome.heading), "text/html");
+    }
+
     /// Requested when the attempt's listener stops, before it is joined. The
     /// callback's token exchange is cancelled by it, and still publishes its
     /// failure, so the join waits one libcurl progress tick rather than the
@@ -427,11 +467,7 @@ const std::string& mode) {
 
     auto slot = attempts_.reserve ();
     if (!slot) {
-        if (slot.error () == RegistryRefusal::ShutDown) {
-            refuse_shut_down (out);
-        } else {
-            refuse_at_capacity (out);
-        }
+        refuse_start (slot.error (), out);
         return out;
     }
 
@@ -467,36 +503,7 @@ const std::string& mode) {
 
         attempt->listener.server ().Get ("/callback",
         [raw, &db, attempt_id] (const httplib::Request& req, httplib::Response& res) {
-            const auto params = parse_query (req.target.find ('?') != std::string::npos ?
-            req.target.substr (req.target.find ('?') + 1) :
-            std::string{});
-            // Any local process can reach this port, so a callback without the
-            // attempt's state leaves it pending and the listener waiting.
-            if (!callback_state_matches (params, raw->state)) {
-                vayu::utils::log_warning ("oauth",
-                "OAuth callback ignored, missing or wrong state: " + attempt_id);
-                res.status = 400;
-                res.set_content (
-                callback_page ("State mismatch (possible CSRF)"), "text/html");
-                return;
-            }
-            // Past the deadline the attempt is already the timeout every
-            // reader reports, so a late redirect cannot turn it around.
-            if (raw->expired (Clock::now ())) {
-                res.status = 410;
-                res.set_content (callback_page (TIMED_OUT), "text/html");
-                return;
-            }
-            if (!raw->claim ()) {
-                res.status = 409;
-                res.set_content (
-                callback_page ("Authorization already handled"), "text/html");
-                return;
-            }
-            const CallbackOutcome outcome = resolve_oauth_callback (db, raw->config,
-            raw->code_verifier, raw->redirect_uri, params, &raw->stop_signal.flag ());
-            raw->publish (outcome.result_state, outcome.error, outcome.cache_key);
-            res.set_content (callback_page (outcome.heading), "text/html");
+            raw->answer_callback (db, attempt_id, req, res);
         });
 
         // Ephemeral only, so the port guard never refuses this one; the label

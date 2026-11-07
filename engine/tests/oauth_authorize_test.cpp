@@ -452,13 +452,14 @@ json embedded_config () {
 // The start answer carries the deadline the engine enforces, so a client keeps
 // no clock of its own (#3347).
 TEST_F (OAuthAuthorizeTest, StartReportsTheAttemptsExpiry) {
-    vayu::http::OAuth2AuthorizeManager mgr (reaper_parked (std::chrono::minutes (7)));
+    constexpr std::chrono::milliseconds ttl = std::chrono::minutes (7);
+    vayu::http::OAuth2AuthorizeManager mgr (reaper_parked (ttl));
     const int64_t before = now_ms ();
     const auto start     = mgr.start (*db_, embedded_config (), "embedded");
     const int64_t after  = now_ms ();
     ASSERT_TRUE (start.ok) << start.error_message;
-    EXPECT_GE (start.expires_at, before + 7 * 60 * 1000);
-    EXPECT_LE (start.expires_at, after + 7 * 60 * 1000);
+    EXPECT_GE (start.expires_at, before + ttl.count ());
+    EXPECT_LE (start.expires_at, after + ttl.count ());
 }
 
 // An attempt nobody polls frees its port at its deadline, and a late poller
