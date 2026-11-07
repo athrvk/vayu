@@ -107,14 +107,13 @@ const std::optional<std::string>& request_id) {
 }
 
 // Stamp a freshly built run row's timestamps. `end_time` is seeded to
-// `start_time` rather than left at its default, because a run killed by a
-// daemon crash never reaches a terminal status: `reconcile_orphaned_runs`
-// marks it Failed and leaves `end_time` as recorded, and the report route
-// reads `end_time > 0 ? end_time : now_ms()` - so an unseeded row would
-// report a duration spanning however long the daemon was down. Seeded, a
-// crashed run reports a zero duration, which is honest about knowing nothing.
-// Both insert sites (design and load) go through here so the invariant has one
-// home; `Run::end_time` still defaults to 0 as the backstop for any future one.
+// `start_time`: a crashed run reports a zero duration, which is honest about
+// knowing nothing, where the restart time would span the downtime. A move to
+// Running clears the seed so a live report measures up to now, and
+// `reconcile_orphaned_runs` gives a row with no end its `start_time` again
+// (#3340). Both insert sites (design and load) go through here so the
+// invariant has one home; `Run::end_time` still defaults to 0 as the backstop
+// for any future one.
 void seed_run_times (vayu::db::Run& run, int64_t started_at) {
     run.start_time = started_at;
     run.end_time   = started_at;

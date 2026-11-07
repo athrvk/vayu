@@ -495,9 +495,7 @@ std::string live_completion_frame (vayu::db::Database& db, const std::string& ru
     completion_event["event"] = "complete";
     completion_event["runId"] = run_id;
     auto finished             = db.get_run (run_id);
-    if (finished &&
-    (finished->status == vayu::RunStatus::Completed || finished->status == vayu::RunStatus::Stopped ||
-    finished->status == vayu::RunStatus::Failed)) {
+    if (finished && vayu::is_terminal (finished->status)) {
         completion_event["status"] = to_string (finished->status);
     }
     return "event: complete\ndata: " + completion_event.dump () + "\n\n";

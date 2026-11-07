@@ -2573,9 +2573,7 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
             return;
         }
 
-        // Check if run is already completed or stopped
-        if (run->status == vayu::RunStatus::Completed ||
-        run->status == vayu::RunStatus::Stopped || run->status == vayu::RunStatus::Failed) {
+        if (vayu::is_terminal (run->status)) {
             vayu::utils::log_info ("run", "Run already finished",
             { { "runId", run_id }, { "status", to_string (run->status) } });
             auto response = vayu::utils::MetricsHelper::create_already_stopped_response (

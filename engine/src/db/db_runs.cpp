@@ -21,6 +21,7 @@
 #include <chrono>
 #include <expected>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <optional>
 #include <string>
@@ -92,10 +93,61 @@ void Database::update_run_end_time (const std::string& id) {
 }
 
 void Database::update_run_status_with_retry (const std::string& id, RunStatus status, int max_retries) {
-    // Public signature is unchanged (real callers in runs.cpp, execution.cpp,
-    // load_strategy.cpp); delegate to the shared busy-retry helper.
     retry_on_busy ("update run status", max_retries,
     std::chrono::milliseconds (100), [&] { update_run_status (id, status); });
+}
+
+namespace {
+// Attempts for a move into an in-flight status; a terminal move never runs out.
+constexpr int IN_FLIGHT_STATUS_ATTEMPTS = 3;
+
+int64_t now_epoch_ms () {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+    .count ();
+}
+
+// The end_time a row carries after moving to @p to; see transition_run_status.
+int64_t end_time_after (const Run& run, RunStatus to) {
+    if (to == RunStatus::Running) {
+        return 0;
+    }
+    if (!is_terminal (to)) {
+        return run.end_time;
+    }
+    return run.end_time > run.start_time ? run.end_time : now_epoch_ms ();
+}
+} // namespace
+
+RunStatusTransition Database::transition_run_status (const std::string& id,
+std::initializer_list<RunStatus> allowed_from,
+RunStatus to) {
+    RunStatusTransition outcome;
+    const int attempts = is_terminal (to) ? RETRY_UNTIL_LANDED : IN_FLIGHT_STATUS_ATTEMPTS;
+    // The whole read-decide-write is the retried callback, so a retry decides
+    // against the row as it is then, not as an earlier attempt read it.
+    retry_on_busy ("transition run status", attempts, std::chrono::milliseconds (100), [&] {
+        outcome  = RunStatusTransition{};
+        auto run = get_run (id);
+        if (!run) {
+            return;
+        }
+        outcome.current = run->status;
+        if (std::ranges::find (allowed_from, run->status) == allowed_from.end ()) {
+            return;
+        }
+        run->end_time = end_time_after (*run, to);
+        run->status   = to;
+        impl_->storage.update (*run);
+        outcome = RunStatusTransition{ .applied = true, .current = to };
+    });
+    vayu::utils::log_debug ("db", "Run status transition",
+    { { "id", id }, { "to", std::string (vayu::to_string (to)) },
+    { "applied", outcome.applied },
+    { "current",
+    outcome.current ? std::string (vayu::to_string (*outcome.current)) :
+                      std::string ("missing") } });
+    return outcome;
 }
 
 std::vector<Run> Database::get_all_runs () {
@@ -284,8 +336,7 @@ namespace {
 // in flight, and a run pinned as a baseline. Read at selection and again,
 // per row, under each delete batch's lock.
 bool exempt_from_retention (const Run& run) {
-    return run.baseline || run.status == RunStatus::Running ||
-    run.status == RunStatus::Pending;
+    return run.baseline || is_in_flight (run.status);
 }
 
 // One count cap and how many runs it has kept so far. Retention keeps one per
@@ -466,6 +517,12 @@ std::optional<std::string> partial_summary_from_tick (const std::string& payload
     return summary.dump ();
 }
 
+// `is_in_flight` spelled as values, for the SQL predicate that selects orphans
+// without loading every run into memory before /health answers.
+constexpr auto IN_FLIGHT_STATUSES =
+std::to_array ({ RunStatus::Pending, RunStatus::Running });
+static_assert (std::ranges::all_of (IN_FLIGHT_STATUSES, is_in_flight));
+
 // One last-tick read per orphaned load run, and none for any other: this runs
 // inside `init ()`, before /health answers.
 std::optional<std::string> orphan_summary (Database& db, const Run& run) {
@@ -483,22 +540,23 @@ std::optional<std::string> orphan_summary (Database& db, const Run& run) {
 size_t Database::reconcile_orphaned_runs () {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
 
-    auto orphans = impl_->storage.get_all<Run> (where (
-    c (&Run::status) == RunStatus::Running || c (&Run::status) == RunStatus::Pending));
+    auto orphans = impl_->storage.get_all<Run> (where (in (&Run::status,
+    std::vector<RunStatus> (IN_FLIGHT_STATUSES.begin (), IN_FLIGHT_STATUSES.end ()))));
     if (orphans.empty ()) {
         return 0;
     }
 
-    // end_time is deliberately left as recorded. When the process died is
-    // unknowable now, and stamping the restart time would invent a duration
-    // spanning however long the daemon was down. What is recorded is never
-    // indeterminate: `Run::end_time` defaults to 0 and both route inserts seed
-    // it to start_time (seed_run_times in execution.cpp), while
-    // update_run_end_time may since have refined it.
+    // Not the restart time: when the process died is unknowable now, and the
+    // restart would invent a duration spanning the downtime. A recorded
+    // end_time (update_run_end_time's) is kept; a row with none, which is what
+    // a move to Running leaves, ends where it started.
     size_t summarised = 0;
     impl_->storage.transaction ([&] {
         for (auto& run : orphans) {
             run.status = RunStatus::Failed;
+            if (run.end_time == 0) {
+                run.end_time = run.start_time;
+            }
             if (auto summary = orphan_summary (*this, run)) {
                 run.summary = std::move (*summary);
                 ++summarised;
