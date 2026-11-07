@@ -17,6 +17,8 @@
 
 import { describe, it, expect } from "vitest";
 import { scriptPartToElement, seedFromRun } from "./design-run-seed";
+import { execIdentity } from "@/modules/request-builder/utils/execute-mapping";
+import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import type { Run, Request } from "@/types";
 import {
 	DEFAULT_DISABLE_COOKIES,
@@ -708,6 +710,82 @@ describe("seedFromRun", () => {
 			} as Partial<Run>);
 
 			expect(seedFromRun(truncatedSnapshotOnly, liveRequest).requestBodyTruncated).toBe(true);
+		});
+	});
+
+	describe("the copy's name, which Send records on its run (#3327)", () => {
+		const snapshot = run().configSnapshot as Record<string, unknown>;
+		const named = (
+			configSnapshot: Record<string, unknown>,
+			overrides: Partial<Run> = {}
+		): Run =>
+			run({
+				configSnapshot: { ...snapshot, ...configSnapshot },
+				...overrides,
+			} as Partial<Run>);
+
+		it("is the snapshot's recorded request name, and Send sends it", () => {
+			const { request } = seedFromRun(named({ requestName: "Get user" }), liveRequest);
+
+			expect(request.name).toBe("Get user");
+			expect(execIdentity(request as Parameters<typeof execIdentity>[0])).toEqual({
+				requestName: "Get user",
+			});
+		});
+
+		it("is the list row's summary name when the snapshot has none", () => {
+			const summary = { requestName: " List users " } as Run["summary"];
+
+			expect(seedFromRun(named({}, { summary }), liveRequest).request.name).toBe(
+				"List users"
+			);
+		});
+
+		it("prefers the snapshot's name over the summary's", () => {
+			const summary = { requestName: "From summary" } as Run["summary"];
+			const seed = seedFromRun(
+				named({ requestName: "From snapshot" }, { summary }),
+				liveRequest
+			);
+
+			expect(seed.request.name).toBe("From snapshot");
+		});
+
+		it("is the URL path the tab strip shows when no name was recorded", () => {
+			expect(seedFromRun(named({}), liveRequest).request.name).toBe("/users");
+		});
+
+		it("is the URL path when the recorded name is blank or the placeholder", () => {
+			for (const requestName of ["", "   ", "New Request"]) {
+				expect(seedFromRun(named({ requestName }), liveRequest).request.name).toBe(
+					"/users"
+				);
+			}
+		});
+
+		it("never takes the title from a url the engine withheld", () => {
+			const seed = seedFromRun(
+				named({ url: "https://x.test/<redacted>/a?key=<redacted>" }),
+				liveRequest
+			);
+
+			expect(seed.withheld.url).toBe(true);
+			expect(seed.request.name).toBe(createDefaultRequestState().name);
+		});
+
+		it("still takes a recorded name when the url was withheld", () => {
+			const seed = seedFromRun(
+				named({ requestName: "Get user", url: "https://x.test/a?key=<redacted>" }),
+				liveRequest
+			);
+
+			expect(seed.request.name).toBe("Get user");
+		});
+
+		it("keeps the default name when the run recorded neither a name nor a url", () => {
+			const seed = seedFromRun(named({ url: "" }), liveRequest);
+
+			expect(seed.request.name).toBe(createDefaultRequestState().name);
 		});
 	});
 });

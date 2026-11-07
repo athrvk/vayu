@@ -38,7 +38,7 @@ import {
 import { loadedRunReference } from "@/lib/run-reference-input";
 import { shownService } from "@/lib/shown-service";
 import { useVariableResolver } from "@/hooks/useVariableResolver";
-import { DEFAULT_REQUEST_NAME } from "@/constants/request";
+import { hasOwnName, requestTabTitle } from "@/lib/request-title";
 import { boundRowFor, useBoundRowStore, useSessionStore, type Tab } from "@/stores";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import { dataFileDisplayName, dataFileFromSnapshot } from "@/lib/run-data-file";
@@ -49,26 +49,6 @@ import {
 	sendsResolver,
 } from "@/modules/request-builder/utils/sends-url";
 import { compositionOptions } from "./context-bar/code-composition";
-
-/**
- * Title for a request tab: the user-set name when there is one, otherwise the
- * request path. A blank or still-default placeholder name counts as "not set".
- */
-export function requestTabTitle(name: string, resolvedUrl: string): string {
-	const trimmed = name.trim();
-	if (hasOwnName(name)) return trimmed;
-	return pathLabel(resolvedUrl) || trimmed;
-}
-
-/**
- * Whether a request carries a name the user set. The one rule for when a tab
- * is titled by the request's own name and when it falls back to its URL, so
- * `fromUrl` below cannot disagree with the title it describes.
- */
-export function hasOwnName(name: string): boolean {
-	const trimmed = name.trim();
-	return trimmed !== "" && trimmed !== DEFAULT_REQUEST_NAME;
-}
 
 /**
  * What a tab draws, resolved from the store plus whatever queries name it.
