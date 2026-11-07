@@ -955,6 +955,88 @@ TEST_F (OAuthClientTest, ALeadersErrorIsNotItsFollowersError) {
     EXPECT_EQ (stored->refresh_token, "RT-2");
 }
 
+// ---------------------------------------------------------------------------
+// Which refresh failures clear the cached row (#3360)
+// ---------------------------------------------------------------------------
+
+// A token endpoint in an outage says nothing about the refresh token: a 503
+// gateway page and then a 429 each answer a network error naming the status,
+// keep the row, and the next refresh spends the same token. Mutation check:
+// clear the row on every `oauth2_provider_error` again (the pre-#3360
+// `refresh_once_per_key`, without `post_refresh`'s reclassification); the
+// 503 deletes the row and a fresh grant answers.
+TEST_F (OAuthClientTest, AnUnavailableTokenEndpointKeepsTheRowForTheNextRefresh) {
+    MockTokenServer idp;
+    const auto config = cc_config (idp, "/refresh-flaky");
+    const auto key    = oauth::cache_key (config);
+    seed_expired (config, "RT_LIVE");
+
+    for (const int status : { 503, 429 }) {
+        const auto r =
+        oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+        ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r))
+        << "HTTP " << status << " answered " << access_token_of (r);
+        const auto& err = std::get<oauth::TokenError> (r);
+        EXPECT_EQ (err.code, "oauth2_network_error");
+        EXPECT_EQ (err.http_status, 502);
+        EXPECT_EQ (err.provider_status, status);
+        EXPECT_EQ (err.message.rfind ("Token refresh failed: ", 0), 0u) << err.message;
+        EXPECT_NE (err.message.find ("(HTTP " + std::to_string (status) + ")"),
+        std::string::npos)
+        << err.message;
+        const auto stored = db_->get_oauth_token (key);
+        ASSERT_HAS_VALUE (stored) << "HTTP " << status << " deleted the row";
+        EXPECT_EQ (stored->refresh_token, "RT_LIVE");
+    }
+    EXPECT_EQ (idp.hits (), 2)
+    << "an unavailable endpoint fell through to a fresh grant";
+
+    const auto r =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    EXPECT_EQ (access_token_of (r), "AT-AFTER-OUTAGE");
+    const auto form = parse_form (idp.last_body ());
+    EXPECT_EQ (form.at ("grant_type"), "refresh_token");
+    EXPECT_EQ (form.at ("refresh_token"), "RT_LIVE");
+}
+
+// A provider that refuses something other than the refresh token (here the
+// scope) has not said the token is spent: its refusal answers unchanged and
+// the row stays. Mutation check: clear the row on any provider refusal.
+TEST_F (OAuthClientTest, ARefusalOfAnythingButTheRefreshTokenKeepsTheRow) {
+    MockTokenServer idp;
+    const auto config = cc_config (idp, "/refresh-scope-refused");
+    seed_expired (config, "RT_LIVE");
+
+    const auto r =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    ASSERT_TRUE (std::holds_alternative<oauth::TokenError> (r)) << access_token_of (r);
+    const auto& err = std::get<oauth::TokenError> (r);
+    EXPECT_EQ (err.code, "oauth2_provider_error");
+    EXPECT_EQ (err.http_status, 401);
+    EXPECT_EQ (err.provider_error, "invalid_scope");
+    EXPECT_EQ (idp.hits (), 1);
+    const auto stored = db_->get_oauth_token (oauth::cache_key (config));
+    ASSERT_HAS_VALUE (stored) << "a scope refusal deleted the row";
+    EXPECT_EQ (stored->refresh_token, "RT_LIVE");
+}
+
+// `invalid_client` on a 401 refuses the refresh as surely as `invalid_grant`
+// on a 400: the row goes and a fresh grant answers. Mutation check: drop
+// `invalid_client` from `refresh_token_refused`.
+TEST_F (OAuthClientTest, AnInvalidClientRefreshClearsTheRowForAFreshGrant) {
+    MockTokenServer idp;
+    const auto config = cc_config (idp, "/refresh-client-refused");
+    seed_expired (config, "RT_LIVE");
+
+    const auto r =
+    oauth::acquire_token (*db_, config, false, std::nullopt, TOKEN_TIMEOUT_MS);
+    EXPECT_EQ (access_token_of (r), "FRESH-GRANT");
+    EXPECT_EQ (idp.hits (), 2); // refused refresh + fresh grant
+    const auto stored = db_->get_oauth_token (oauth::cache_key (config));
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->access_token, "FRESH-GRANT");
+}
+
 TEST_F (OAuthClientTest, AuthCodeWithoutInteractiveIs409) {
     json config = { { "grantType", "authorization_code" },
         { "accessTokenUrl", "https://idp.example/token" }, { "clientId", "cid" } };

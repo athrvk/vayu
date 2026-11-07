@@ -243,6 +243,25 @@ TokenError provider_failure (int status, const nlohmann::json& body) {
     return err;
 }
 
+/// The token endpoint answered and refused the refresh token itself (RFC 6749
+/// section 5.2): the one refresh failure that clears the cached row (#3360).
+bool refresh_token_refused (const TokenError& err) {
+    const bool refusal_status = err.provider_status == 400 || err.provider_status == 401;
+    return refusal_status &&
+    (err.provider_error == "invalid_grant" || err.provider_error == "invalid_client");
+}
+
+/// The token endpoint answered but said nothing about the request: a 5xx, a
+/// 429, or a reply with no RFC 6749 `error` (an unparseable body included).
+/// `provider_status` is non-zero only when the endpoint answered at all.
+bool endpoint_unavailable (const TokenError& err) {
+    if (err.provider_status == 0) {
+        return false;
+    }
+    return err.provider_status >= 500 || err.provider_status == 429 ||
+    err.provider_error.empty ();
+}
+
 std::variant<vayu::db::OAuthToken, TokenError> post_token_request (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& url,
@@ -588,7 +607,13 @@ bool same_token (const vayu::db::OAuthToken& a, const vayu::db::OAuthToken& b) {
     a.refresh_token == b.refresh_token && a.created_at == b.created_at;
 }
 
-/// Posts @p spent's refresh token and, on success, stores the answer.
+/**
+ * Posts @p spent's refresh token and, on success, stores the answer.
+ *
+ * @return the stored token, or the failure. An endpoint that was unavailable
+ *         (`endpoint_unavailable`) is reported as the `oauth2_network_error`
+ *         it amounts to, keeping the provider's reply, so the row survives it.
+ */
 TokenResult post_refresh (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& key,
@@ -617,6 +642,13 @@ const std::atomic<bool>* cancel) {
             token->refresh_token = spent.refresh_token;
         }
         db.save_oauth_token (*token);
+        return refreshed;
+    }
+    auto& err = std::get<TokenError> (refreshed);
+    if (endpoint_unavailable (err)) {
+        err.http_status = 502;
+        err.code        = "oauth2_network_error";
+        err.message     = "Token refresh failed: " + err.message;
     }
     return refreshed;
 }
@@ -666,8 +698,8 @@ const std::atomic<bool>* cancel) {
         auto refreshed =
         post_refresh (db, config, key, token_url, seen, deadline, network_ms, cancel);
         const auto* err = std::get_if<TokenError> (&refreshed);
-        if (err == nullptr || err->code != "oauth2_provider_error") {
-            return refreshed; // network errors don't invalidate the cache
+        if (err == nullptr || !refresh_token_refused (*err)) {
+            return refreshed; // only a refused refresh token invalidates the cache
         }
         if (db.delete_oauth_token_if_refresh_matches (key, seen.refresh_token)) {
             return std::nullopt; // the refresh token is dead: a fresh grant
