@@ -1295,8 +1295,9 @@ std::string bound_spec_id (const std::string& openapi);
  * Whether a collection whose binding went from @p before to @p after has left
  * the document its declined operations (#3031) were decided against: it binds
  * nothing now, or bytes with a different `specHash`. Rebinding the same bytes
- * keeps them. Shared by `POST /specs/bind` and `PUT /collections/:id`, the two
- * writes that move a binding without syncing. Defined in spec_sync.cpp.
+ * keeps them. Shared by `POST /specs/bind` and `PUT /collections/:id` (which
+ * only unbinds, #3348), the two writes that move a binding without syncing.
+ * Defined in spec_sync.cpp.
  */
 bool binding_leaves_document (const std::string& before, const std::string& after);
 
@@ -1430,13 +1431,15 @@ const std::unordered_set<std::string>& pending);
  * binding that is unbound, complete, or names a document this database does not
  * hold is left exactly as it was.
  *
- * Called by every collection write path immediately after
- * `reject_unbindable_spec` and inside the same lock scope, because the two ask
- * about the same row and the stamp must not be taken from a document a
- * concurrent `DELETE /specs/:id` is about to remove. A client sends the
- * `specId` - the only half it can know without a round trip whose answer would
- * be stale by the time it wrote it - and the engine supplies the version, the
- * same division `spec_documents.hash` draws. Defined in specs.cpp.
+ * Called by `POST /collections` immediately after `reject_unbindable_spec` and
+ * inside the same lock scope, because the two ask about the same row and the
+ * stamp must not be taken from a document a concurrent `DELETE /specs/:id` is
+ * about to remove. A client sends the `specId` - the only half it can know
+ * without a round trip whose answer would be stale by the time it wrote it -
+ * and the engine supplies the version, the same division `spec_documents.hash`
+ * draws. `apply_collection_fields` has already dropped any version the client
+ * sent (#3348), so on that path both halves are always the store's. Defined in
+ * specs.cpp.
  */
 void stamp_binding_from_store (vayu::db::Database& db, std::string& openapi);
 

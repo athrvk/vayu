@@ -148,12 +148,12 @@ export interface UpdateCollectionRequest {
 	 */
 	dataSchema?: CollectionDataSchema | null;
 	/**
-	 * `CollectionOpenApiBinding | null`, for the same reason `dataSchema` above
-	 * is: the engine reads absent as "keep the binding" and an explicit JSON
-	 * `null` as "reset to unbound", so **Unbind** is only expressible as a null
-	 * that survives to the wire. There is no unbind verb of its own.
+	 * Unbind only: `null` (or `{}`) resets the binding to unbound, and absent
+	 * keeps it. The engine refuses any other value with a 400 (#3348); binding
+	 * restamps the collection's requests, which is `POST /specs/bind`
+	 * (`useBindSpecMutation`).
 	 */
-	openapi?: CollectionOpenApiBinding | null;
+	openapi?: Record<string, never> | null;
 	/**
 	 * The picked spec file and the data file, each `| null` for the reason
 	 * `openapi` is: absent keeps the stored location, `null` forgets it. The

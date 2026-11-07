@@ -179,6 +179,9 @@ static RouteResult validate_data_schema (const nlohmann::json& schema) {
  * the request route cores rather than in `apply_request_fields`. Resolution is
  * `reject_unbindable_spec`'s, called by each write path with whatever it knows
  * is about to exist.
+ *
+ * `specHash` and `syncedAt` are not judged: `binding_without_version` drops
+ * whatever the client sent for them.
  */
 static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
     if (binding.empty ()) {
@@ -190,13 +193,37 @@ static RouteResult validate_openapi_binding (const nlohmann::json& binding) {
         "Invalid 'openapi.specId': a binding must name a stored spec "
         "(send openapi: {} or null to unbind)");
     }
-    if (binding.contains ("specHash") && !binding["specHash"].is_string ()) {
-        return route_error (400, "Invalid 'openapi.specHash': must be a string");
-    }
-    if (binding.contains ("syncedAt") && !binding["syncedAt"].is_number ()) {
-        return route_error (400, "Invalid 'openapi.syncedAt': must be a number");
-    }
     return {};
+}
+
+/**
+ * A binding a client sent, as a write may store it: without `specHash` and
+ * `syncedAt` (#3348). Both say which version of the document the collection
+ * was bound to, which only the engine can know, so the stamp each write path
+ * runs next derives them from the stored document. A client's copy kept here
+ * would claim a version of a document the binding does not name, and coverage
+ * and drift would read that claim as true.
+ */
+static std::string binding_without_version (nlohmann::json binding) {
+    binding.erase ("specHash");
+    binding.erase ("syncedAt");
+    return binding.dump ();
+}
+
+/**
+ * Refuses a `PUT /collections/:id` that states a binding (#3348). Binding a
+ * collection restamps its requests both ways (#718), which `POST /specs/bind`
+ * does in one transaction; this verb may only unbind, with `{}` or `null`.
+ */
+static RouteResult reject_binding_on_update (const nlohmann::json& json) {
+    const auto binding = json.find ("openapi");
+    if (binding == json.end () || binding->is_null () ||
+    (binding->is_object () && binding->empty ())) {
+        return {};
+    }
+    return route_error (400,
+    "Invalid 'openapi': PUT /collections/:id only unbinds (send {} or null); "
+    "bind a collection to a document with POST /specs/bind");
 }
 
 using vayu::core::constants::file_binding::MAX_FILE_NAME_BYTES;
@@ -383,6 +410,9 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
+    if (const auto sent = json.find ("openapi"); sent != json.end () && sent->is_object ()) {
+        c.openapi = binding_without_version (*sent);
+    }
     // The files the Spec and Data tabs are bound to (issue #2765), the same
     // way: `{"specFile": null}` unbinds.
     if (auto outcome = apply_checked_object_field (json, "specFile", c.spec_file, is_create,
@@ -490,6 +520,9 @@ const std::function<void ()>& before_write) {
     if (auto held = check_if_match (if_match, existing->updated_at); !held) {
         return as_response (held.error ());
     }
+    if (auto outcome = reject_binding_on_update (json); !outcome) {
+        return as_response (outcome.error ());
+    }
 
     vayu::db::Collection c = *existing;
     if (auto outcome = apply_collection_fields (db, c, json, /*is_create=*/false); !outcome) {
@@ -497,22 +530,11 @@ const std::function<void ()>& before_write) {
     }
     c.updated_at = next_updated_at (existing->updated_at);
 
-    // The spec check runs only when the write states a binding: a collection
-    // bound to a spec that has since been deleted out of band must stay
-    // editable by a PUT that says nothing about `openapi`, rather than becoming
-    // unwritable - the same reading `reject_missing_collection` gets on a
-    // request move.
-    if (json.contains ("openapi")) {
-        if (auto outcome = reject_unbindable_spec (db, c.openapi, {}); !outcome) {
-            return as_response (outcome.error ());
-        }
-        stamp_binding_from_store (db, c.openapi);
-    }
     if (before_write) {
         before_write ();
     }
-    // Unbinding, or binding other bytes, forgets the operations deletes
-    // declined under the old document (#3031).
+    // Unbinding forgets the operations deletes declined under the old
+    // document (#3031).
     if (json.contains ("openapi") &&
     binding_leaves_document (existing->openapi, c.openapi)) {
         db.rebind_collection (c);

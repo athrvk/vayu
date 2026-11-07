@@ -29,8 +29,10 @@
  * from the document it just stored or already holds - the same division
  * `spec_documents.hash` itself draws, where the hash is computed engine-side
  * and refused when sent. This is that one rule, in one place, because three
- * callers apply it: the two collection write cores, `POST /import/apply`, and
- * the startup pass that repairs bindings written before the rule existed.
+ * callers apply it: `POST /collections`, `POST /import/apply`, and the startup
+ * pass that repairs bindings written before the rule existed. The first two
+ * receive a binding the shared applier has stripped of any client-sent
+ * version (#3348), so for them both halves always come from the store.
  */
 
 namespace vayu::core {

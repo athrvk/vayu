@@ -1094,8 +1094,8 @@ const std::vector<vayu::db::SpecDocument>& spec_rows) {
         }
         // Stamped here rather than in `resolve_spec_binding`, so that the
         // version a binding records is read under the same lock that proves
-        // the document exists - and so import shares the rule with the two
-        // collection write cores instead of keeping a second copy of it.
+        // the document exists - and so import shares the rule with
+        // `POST /collections` instead of keeping a second copy of it.
         if (auto stamped = vayu::core::stamp_spec_binding (collection_rows[i].openapi,
             [&] (const std::string& spec_id) -> std::optional<vayu::core::SpecStamp> {
                 auto pending = pending_hashes.find (spec_id);
