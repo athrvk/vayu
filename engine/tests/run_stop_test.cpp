@@ -13,6 +13,9 @@
  *      summary, never from the collector it does not feed (#2822).
  *   5. A Stop that finds no context (a run still `pending`) stands: the
  *      worker it raced sends nothing and writes no status over it (#3340).
+ *   6. EventLoop::cancel(), from another thread, turns a drain in progress
+ *      (or one asked for later) into a cancelling stop on every worker
+ *      (#3341).
  *
  * Every timing assertion is an upper bound measured against an upstream that
  * holds the connection open for 30s, so the margins are wide: a regression here
@@ -195,6 +198,173 @@ TEST_F (EventLoopStopTest, DrainingStopHonoursItsDeadline) {
     EXPECT_LT (stop_ms, STOP_BUDGET_MS)
     << "a bounded drain took " << stop_ms << "ms - the deadline is not being observed";
     EXPECT_EQ (completed.load (), TOTAL);
+}
+
+// ---------------------------------------------------------------------------
+// EventLoop::cancel (#3341)
+//
+// Every case drains with CANCEL_DRAIN_DEADLINE, short of the mock's 30s hold
+// on /hang, so a drain cancel() failed to cut short runs to that deadline: the
+// broken reading is ~20s per draining worker and the healthy one is the
+// cancel, a wake and a join (well under a second). STOP_BUDGET_MS sits between
+// them, and the broken side stays under the 60s CTest timeout, so it fails by
+// name rather than as a timeout.
+// ---------------------------------------------------------------------------
+
+constexpr auto CANCEL_DRAIN_DEADLINE = std::chrono::milliseconds (20000);
+
+// Counts every result a request reports, so a dropped one and a doubled one
+// both show as a total other than what was submitted.
+struct ResultTally {
+    std::atomic<size_t> completed{ 0 };
+    std::atomic<size_t> errored{ 0 };
+
+    vayu::http::RequestCallback callback () {
+        return [this] (size_t, const vayu::Result<vayu::Response>& result) {
+            if (result.is_error ()) {
+                errored++;
+            }
+            completed++;
+        };
+    }
+};
+
+// A drain against a hung upstream, blocked on its own thread, is cut short by
+// cancel() from this one.
+TEST_F (EventLoopStopTest, CancelCutsADrainInProgressShort) {
+    constexpr size_t TOTAL = 8;
+
+    vayu::http::EventLoop loop (single_worker ());
+    loop.start ();
+
+    ResultTally tally;
+    for (size_t i = 0; i < TOTAL; ++i) {
+        loop.submit (hang_request (), tally.callback ());
+    }
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return loop.active_count () == TOTAL; }))
+    << "the transfers never reached curl; the test cannot prove anything";
+
+    std::atomic<bool> stopping{ false };
+    std::thread drainer ([&] {
+        stopping.store (true);
+        loop.stop (true, CANCEL_DRAIN_DEADLINE);
+    });
+    // The verdict does not hang on landing after the drain began - a cancel
+    // that lands first must win too (CancelBeforeADrainingStopStands) - but
+    // this is the interleaving the case is for.
+    // EXPECT, not ASSERT: returning here would destroy a joinable thread.
+    EXPECT_TRUE (vayu::tests::wait_until ([&] { return stopping.load (); }));
+
+    const auto cancel_start = Clock::now ();
+    loop.cancel ();
+    drainer.join ();
+    const auto stop_ms = ms_since (cancel_start);
+
+    EXPECT_LT (stop_ms, STOP_BUDGET_MS)
+    << "the drain outlived cancel() by " << stop_ms
+    << "ms - it waited on the hung upstream instead of cancelling";
+    EXPECT_EQ (tally.completed.load (), TOTAL);
+    EXPECT_EQ (tally.errored.load (), TOTAL)
+    << "a cancelled transfer must surface as an error";
+}
+
+// A cancel() that lands before the drain is asked for stands: the stop(true)
+// cancels rather than drains, and the queued backlog behind the in-flight
+// transfers is completed once each, neither dropped nor delivered twice.
+TEST_F (EventLoopStopTest, CancelBeforeADrainingStopStands) {
+    constexpr size_t TOTAL = 64; // Far more than max_concurrent (16)
+
+    vayu::http::EventLoop loop (single_worker ());
+    loop.start ();
+
+    ResultTally tally;
+    for (size_t i = 0; i < TOTAL; ++i) {
+        loop.submit (hang_request (), tally.callback ());
+    }
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return loop.active_count () > 0; }))
+    << "no transfer reached curl; the test cannot prove anything";
+
+    loop.cancel ();
+    const auto stop_start = Clock::now ();
+    loop.stop (true, CANCEL_DRAIN_DEADLINE);
+    const auto stop_ms = ms_since (stop_start);
+
+    EXPECT_LT (stop_ms, STOP_BUDGET_MS)
+    << "stop(true) after cancel() took " << stop_ms
+    << "ms - the drain overwrote the cancel";
+    EXPECT_EQ (tally.completed.load (), TOTAL)
+    << "every request, in flight or queued, reports exactly one result";
+    EXPECT_EQ (tally.errored.load (), TOTAL);
+}
+
+// With no stop in progress cancel() changes nothing a caller relies on: the
+// loop still answers is_running, a second call is a no-op, a request submitted
+// afterwards still gets its one result, the stop that follows returns, and a
+// cancel() after that stop touches nothing.
+TEST_F (EventLoopStopTest, CancelWithNoStopIsHarmlessAndIdempotent) {
+    vayu::http::EventLoop loop (single_worker ());
+    loop.start ();
+
+    loop.cancel ();
+    loop.cancel ();
+    EXPECT_TRUE (loop.is_running ())
+    << "cancel() is not a stop; stop() is still owed";
+
+    ResultTally tally;
+    loop.submit (hang_request (), tally.callback ());
+
+    const auto stop_start = Clock::now ();
+    loop.stop (true, CANCEL_DRAIN_DEADLINE);
+    const auto stop_ms = ms_since (stop_start);
+
+    EXPECT_LT (stop_ms, STOP_BUDGET_MS)
+    << "stop(true) after cancel() took " << stop_ms << "ms";
+    EXPECT_FALSE (loop.is_running ());
+    EXPECT_EQ (tally.completed.load (), 1U)
+    << "a request submitted after cancel() is completed by the stop, once";
+    EXPECT_EQ (tally.errored.load (), 1U);
+
+    loop.cancel ();
+    EXPECT_EQ (tally.completed.load (), 1U);
+}
+
+// EventLoopImpl::stop drains its workers one after another, so a cancel()
+// finds one draining and the other not yet stopped; both must cancel.
+TEST_F (EventLoopStopTest, CancelReachesEveryWorkerOfADrain) {
+    constexpr size_t TOTAL = 8; // Round-robin: four on each worker
+
+    vayu::http::EventLoopConfig cfg = single_worker ();
+    cfg.num_workers                 = 2;
+    vayu::http::EventLoop loop (cfg);
+    loop.start ();
+
+    ResultTally tally;
+    for (size_t i = 0; i < TOTAL; ++i) {
+        loop.submit (hang_request (), tally.callback ());
+    }
+    ASSERT_TRUE (
+    vayu::tests::wait_until ([&] { return loop.active_count () == TOTAL; }))
+    << "the transfers never reached curl on both workers";
+
+    std::atomic<bool> stopping{ false };
+    std::thread drainer ([&] {
+        stopping.store (true);
+        loop.stop (true, CANCEL_DRAIN_DEADLINE);
+    });
+    // EXPECT, not ASSERT: returning here would destroy a joinable thread.
+    EXPECT_TRUE (vayu::tests::wait_until ([&] { return stopping.load (); }));
+
+    const auto cancel_start = Clock::now ();
+    loop.cancel ();
+    drainer.join ();
+    const auto stop_ms = ms_since (cancel_start);
+
+    EXPECT_LT (stop_ms, STOP_BUDGET_MS) << "the drain outlived cancel() by "
+                                        << stop_ms << "ms - a worker kept draining";
+    EXPECT_EQ (tally.completed.load (), TOTAL);
+    EXPECT_EQ (tally.errored.load (), TOTAL);
 }
 
 // ---------------------------------------------------------------------------

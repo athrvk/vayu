@@ -61,6 +61,16 @@ void EventLoopImpl::stop (bool wait_for_pending, std::chrono::milliseconds drain
     running = false;
 }
 
+void EventLoopImpl::cancel () {
+    // Every worker, whatever stop() has reached: one it already stopped
+    // ignores the mode until a restart resets it, the one draining cancels at
+    // once, and one not stopped yet exits now and keeps `cancel` through the
+    // stop(true) it is given later (WorkerMode moves only forward).
+    for (auto& worker : workers) {
+        worker->cancel ();
+    }
+}
+
 void EventLoopImpl::submit (std::unique_ptr<TransferData> data) {
     // Round-robin sharding across workers
     size_t worker_idx =
