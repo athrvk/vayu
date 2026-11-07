@@ -67,11 +67,7 @@ import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
 import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
-import {
-	createServiceStopGuard,
-	holdForConfirmation,
-	registerRunningServicesIpc,
-} from "./service-stop-guard.js";
+import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
 import {
@@ -93,12 +89,8 @@ import {
 	type ContextCommand,
 } from "./context-menu.js";
 import { showApplicationMenu } from "./app-menu.js";
-import {
-	createSaveFlusher,
-	createFlushFailureGate,
-	type FlushResult,
-	type FlushFailurePrompt,
-} from "./save-flush.js";
+import type { FlushFailurePrompt } from "./save-flush.js";
+import { createQuitFlow, FLUSH_REQUEST_CHANNEL, registerFlushAckIpc } from "./quit-flow.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
 import { createQuitShutdown } from "./quit-shutdown.js";
 import { stampInstalledVersion } from "./appimage-stamp.js";
@@ -432,7 +424,7 @@ async function askOnWindow(options: Electron.MessageBoxOptions): Promise<number>
 	return response;
 }
 
-// The dialog `flushFailureGate` shows when a flush did not land
+// The dialog the quit flow shows when a flush did not land
 // cleanly (#1489). "Proceed" is the default button, matching the running-
 // services confirm below - Enter takes the destructive option, Esc/close
 // keeps working, which is what leaves the draft exactly as it was.
@@ -445,34 +437,6 @@ const askFlushFailure = (prompt: FlushFailurePrompt): Promise<boolean> =>
 		defaultId: 0,
 		cancelId: 1,
 	}).then((choice) => choice === 0);
-
-const flushFailureGate = createFlushFailureGate({
-	ask: askFlushFailure,
-	log: (msg, fields) => appLogger().warn("main", msg, fields),
-});
-
-// Shared by the quit path and the window-close path - see save-flush.ts for why
-// there is only one of these.
-const saveFlusher = createSaveFlusher({
-	requestFlush: () => {
-		if (!mainWindow || mainWindow.webContents.isDestroyed()) return false;
-		// A dead renderer's WebContents object outlives the process it drove, so
-		// `isDestroyed()` above stays false and this would ask for an ACK that
-		// can never come - the whole 2s ceiling, on a window whose unsaved work
-		// died with the process. See renderer-recovery.ts.
-		if (rendererRecovery.isRendererGone()) return false;
-		mainWindow.webContents.send("before-quit");
-		return true;
-	},
-	onFlushed: (listener) => {
-		const handler = (_event: Electron.IpcMainEvent, result: FlushResult) => listener(result);
-		ipcMain.once("before-quit-flushed", handler);
-		return () => ipcMain.removeListener("before-quit-flushed", handler);
-	},
-	schedule: (listener, ms) => {
-		setTimeout(listener, ms);
-	},
-});
 
 // Reloading the window when its renderer dies, and asking when reloading is not
 // working. Module-level and reading `mainWindow` at use time for the reason the
@@ -516,9 +480,9 @@ const rendererRecovery = createRendererRecovery({
 	},
 	quit: () => app.quit(),
 	log: (msg, fields) => appLogger().error("window", msg, fields),
-	// The dead renderer's flush settled against nobody; the live one that
-	// replaced it has its own unsaved work and must be asked.
-	onRecovered: () => saveFlusher.reset(),
+	// The old renderer's flush settled against nobody; the one that replaced
+	// it has its own unsaved work and must be asked.
+	onRecovered: () => quitFlow.reset(),
 });
 
 // What a close is about to stop, said before it stops it (#1363). The renderer
@@ -540,6 +504,31 @@ const serviceStopGuard = createServiceStopGuard({
 	// says its services went with it.
 	rendererGone: () => rendererRecovery.isRendererGone(),
 	log: (msg, fields) => appLogger().warn("ipc", msg, fields),
+});
+
+// The one flow a quit and a window close both go through: the services
+// question, the save flush, the loss question (#1363, #1489, #3335). See
+// quit-flow.ts; `quitShutdown` below is its tail once a quit is let through.
+const quitFlow = createQuitFlow({
+	services: serviceStopGuard,
+	requestFlush: (flushId) => {
+		if (!mainWindow || mainWindow.webContents.isDestroyed()) return false;
+		// A dead renderer's WebContents object outlives the process it drove, so
+		// `isDestroyed()` above stays false and this would ask for an ACK that
+		// can never come - the whole 2s ceiling, on a window whose unsaved work
+		// died with the process. See renderer-recovery.ts.
+		if (rendererRecovery.isRendererGone()) return false;
+		mainWindow.webContents.send(FLUSH_REQUEST_CHANNEL, flushId);
+		return true;
+	},
+	schedule: (run, ms) => {
+		setTimeout(run, ms);
+	},
+	defer: (run) => {
+		setImmediate(run);
+	},
+	askLoss: askFlushFailure,
+	log: (msg, fields) => appLogger().warn("main", msg, fields),
 });
 
 /**
@@ -576,7 +565,7 @@ function createWindow() {
 	// recovery first, so a crash flag left over from the window this one
 	// replaces cannot make the new renderer look unreachable.
 	rendererRecovery.noteRendererAlive();
-	saveFlusher.reset();
+	quitFlow.reset();
 
 	// Load persisted window state
 	const windowState = loadWindowState({
@@ -714,37 +703,16 @@ function createWindow() {
 	});
 
 	// The X button destroys the renderer before `before-quit` can ask it for
-	// anything (and on macOS it never quits at all), so the flush has to happen
-	// here. Bound to this window rather than to `mainWindow`, which may point at
-	// a replacement by the time the flush lands.
-	//
-	// Gated on settled, not on requested: an X click landing while a quit's
-	// flush is still in flight must not destroy the renderer mid-write. In that
-	// state the flush below joins the round trip already out and closes the
-	// window when it settles.
+	// anything (and on macOS it never quits at all), so the close goes through
+	// the quit flow itself. Bound to this window rather than to `mainWindow`,
+	// which may point at a replacement by the time the flow resumes it; one
+	// stable resume per window, so repeated clicks queue one close.
 	const closingWindow = mainWindow;
+	const closeAgain = () => {
+		if (!closingWindow.isDestroyed()) closingWindow.close();
+	};
 	closingWindow.on("close", (event) => {
-		// Asked before the flush, because Cancel has to leave the window, the
-		// renderer and every running service exactly as they were - a flush that
-		// already happened would have told the renderer its work was ending. A
-		// confirmed close comes back through here with the guard cleared and falls
-		// into the flush below.
-		const mayClose = holdForConfirmation(serviceStopGuard, "window-close", event, () => {
-			if (!closingWindow.isDestroyed()) closingWindow.close();
-		});
-		if (!mayClose) return;
-
-		if (saveFlusher.hasSettled()) return;
-		event.preventDefault();
-		// Named rather than inline so the flush's own outcome decides whether the
-		// window actually closes (#1489): a failed or unanswered flush asks
-		// before discarding it, instead of closing unconditionally once settled.
-		const closeAfterFlush = (result: FlushResult | null) => {
-			void flushFailureGate.confirm("window-close", result).then((proceed) => {
-				if (proceed && !closingWindow.isDestroyed()) closingWindow.close();
-			});
-		};
-		saveFlusher.flush(closeAfterFlush);
+		quitFlow.gesture("window-close", event, closeAgain);
 	});
 
 	// The mouse's back/forward buttons as the OS reports them, and the macOS
@@ -775,8 +743,7 @@ function createWindow() {
 	// Windows logoff and shutdown never reach `before-quit`; see session-end.ts.
 	// Nobody can answer a dialog at logoff, so neither one is asked (#1363, #1908).
 	installQuitOnSessionEnd(mainWindow, () => {
-		serviceStopGuard.markQuitUnattended();
-		flushFailureGate.markQuitUnattended();
+		quitFlow.markQuitUnattended();
 		app.quit();
 	});
 }
@@ -1363,6 +1330,9 @@ function setupIpcHandlers() {
 	registerRunningServicesIpc(ipcMain, serviceStopGuard, (msg, fields) =>
 		appLogger().warn("ipc", msg, fields)
 	);
+
+	// The renderer's answer to the quit flow's flush, tied to it by flush id.
+	registerFlushAckIpc(ipcMain, quitFlow, (msg, fields) => appLogger().warn("ipc", msg, fields));
 
 	// Open one of the app's own documentation links in the system browser. Keyed
 	// rather than URL-taking on purpose - see app-links.ts.
@@ -2009,21 +1979,10 @@ app.on("window-all-closed", () => {
 	}
 });
 
-// One stable callback, not a fresh closure per quit: every quit gesture that
-// lands during the flush resumes the same quit, so a double Cmd-Q takes the
-// second pass once rather than starting two engine shutdowns.
+// One stable callback, not a fresh closure per quit: every quit gesture held
+// by the flow resumes the same quit, so a double Cmd-Q takes the second pass
+// once rather than starting two engine shutdowns.
 const resumeQuit = () => app.quit();
-
-// The flush settled; whether the quit actually resumes is the dialog's answer
-// when it did not land cleanly (#1489). Re-entering through `app.quit()` on a
-// yes is deliberate: the second pass finds the flush already settled and
-// falls straight through to `quitShutdown.handleQuit`, so the question is
-// never asked twice.
-const resumeQuitAfterFlush = (result: FlushResult | null) => {
-	void flushFailureGate.confirm("quit", result).then((proceed) => {
-		if (proceed) resumeQuit();
-	});
-};
 
 // Second pass of the quit: stop the children exactly once. See quit-shutdown.ts
 // for why "has a shutdown started" is the guard rather than "is the engine
@@ -2042,25 +2001,10 @@ const quitShutdown = createQuitShutdown({
 	log: (msg, fields) => appLogger().error("main", msg, fields),
 });
 
-// Ensure saves are flushed and engine is stopped when the app quits
+// A quit asks about running services and flushes the renderer's saves first
+// (`quitFlow`), then stops the engine and the MCP server (`quitShutdown`).
 app.on("before-quit", (event) => {
-	// Before any of it: a quit stops the running services on every platform,
-	// macOS included, so it asks the same question the X does. Cancelling here
-	// leaves the app up with everything still serving; confirming quits again,
-	// through the flush and the shutdown below.
-	if (!holdForConfirmation(serviceStopGuard, "quit", event, resumeQuit)) return;
-
-	// First pass: ask the renderer to flush pending saves. Quit resumes as
-	// soon as the renderer ACKs, with a 2s ceiling in case it is stuck. Only a
-	// flush that has *settled* falls through to the second pass - a second quit
-	// gesture arriving mid-flush joins the flush in flight instead, so the
-	// engine is never stopped out from under saves still being written.
-	if (!saveFlusher.hasSettled()) {
-		event.preventDefault();
-		saveFlusher.flush(resumeQuitAfterFlush);
-		return;
-	}
-
+	if (!quitFlow.gesture("quit", event, resumeQuit)) return;
 	quitShutdown.handleQuit(event);
 });
 
@@ -2084,7 +2028,6 @@ app.on("will-quit", () => {
 // and install.sh's AppImage replacement would wait with it (#1363). The same
 // holds for the flush-failure dialog (#1908).
 installQuitOnSignal(process, () => {
-	serviceStopGuard.markQuitUnattended();
-	flushFailureGate.markQuitUnattended();
+	quitFlow.markQuitUnattended();
 	app.quit();
 });

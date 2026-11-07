@@ -12,7 +12,9 @@
  *     idle -> confirmingServices -> flushing -> confirmingLoss -> proceeding
  *
  * Each step can be skipped: nothing running skips the services question, a
- * clean flush skips the loss question. Cancel on the first question and Keep
+ * clean flush skips the loss question. The services question comes first
+ * because Cancel has to leave the renderer exactly as it was, and a flush has
+ * already told it its work is ending. Cancel on the first question and Keep
  * working on the second are both edges back to `idle`, and `idle` forgets the
  * flush and the services answer together - the next gesture flushes again and
  * asks again. `quit-shutdown.ts` is the tail after `proceeding`: it stops the

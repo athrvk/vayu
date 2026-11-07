@@ -25,7 +25,7 @@
  * reason no platform detail reaches React.
  *
  * A snapshot rather than a question asked at close time: the round trip
- * `save-flush.ts` runs would put a second ceiling on the one gesture the user
+ * `quit-flow.ts` runs would put a second ceiling on the one gesture the user
  * is waiting on, and it would read the same TanStack cache this snapshot is
  * already published from - no fresher, strictly slower, and unanswerable in the
  * case that matters most, a renderer that is gone.
@@ -153,33 +153,14 @@ export interface ServiceStopGuard {
 	forget: () => void;
 	/** What the last snapshot said, as the prompt would name it. */
 	running: () => RunningService[];
-	/**
-	 * Whether `gesture` would stop something running right now, on this
-	 * platform. No memory of earlier answers: that belongs to the quit flow,
-	 * which knows when an answer stops counting.
-	 */
+	/** Whether `gesture` would stop something running right now, on this platform. */
 	wouldStop: (gesture: StopGesture) => boolean;
 	/**
-	 * Whether `gesture` may proceed without asking - nothing is running, the
-	 * gesture stops nothing on this platform, the user already said yes, or
-	 * nobody is at the keyboard to answer.
-	 */
-	isCleared: (gesture: StopGesture) => boolean;
-	/**
-	 * Ask, and answer whether the gesture may proceed. A yes latches, so the
-	 * quit that a confirmed window-close turns into does not ask a second time;
-	 * a no leaves everything as it was, including the snapshot.
-	 *
-	 * Two gestures landing together (an X on top of a Cmd-Q) share the one
-	 * dialog rather than stacking two.
+	 * Ask, and answer whether the gesture may proceed. A no, or a dialog that
+	 * could not be shown, is `false`; the promise never rejects. Whether an
+	 * answer still counts for the next gesture is `quit-flow.ts`'s to decide.
 	 */
 	confirm: (gesture: StopGesture) => Promise<boolean>;
-	/**
-	 * The next quit has nobody behind it - a signal, not a gesture. A dialog
-	 * there waits for an answer that is never coming, which is a hang rather
-	 * than a prompt: `install.sh` replaces a running AppImage that way.
-	 */
-	markQuitUnattended: () => void;
 }
 
 export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopGuard {
@@ -194,22 +175,12 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 	const closeStopsServices = platform !== "darwin";
 
 	let snapshot: RunningService[] = [];
-	let confirmed = false;
-	let unattendedQuit = false;
-	/** The dialog already in front of the user, joined rather than stacked. */
-	let asking: Promise<boolean> | null = null;
 
 	const running = (): RunningService[] => (rendererGone() ? [] : snapshot);
 
 	const wouldStop = (gesture: StopGesture): boolean => {
 		if (gesture === "window-close" && !closeStopsServices) return false;
 		return running().length > 0;
-	};
-
-	const isCleared = (gesture: StopGesture): boolean => {
-		if (confirmed) return true;
-		if (gesture === "quit" && unattendedQuit) return true;
-		return !wouldStop(gesture);
 	};
 
 	return {
@@ -225,73 +196,21 @@ export function createServiceStopGuard(deps: ServiceStopGuardDeps): ServiceStopG
 
 		wouldStop,
 
-		isCleared,
-
-		markQuitUnattended: () => {
-			unattendedQuit = true;
-		},
-
 		confirm: (gesture) => {
-			if (isCleared(gesture)) return Promise.resolve(true);
-			if (asking) return asking;
-			const prompt = buildStopPrompt(gesture, running());
-			asking = deps
-				.ask(prompt)
-				.then((proceed) => {
-					// Latched only on a yes: a cancelled close leaves the window, the
-					// renderer and every service exactly as they were, and the next
-					// gesture is a fresh question about a snapshot that may have moved.
-					if (proceed) confirmed = true;
-					return proceed;
-				})
-				.catch((error: unknown) => {
-					// A question that could not be asked is not a yes. In the case that
-					// actually raises this - a window destroyed while its own dialog was
-					// up - the close already happened and the answer is moot; in any
-					// other, refusing to stop the user's services on an error is the
-					// safe half, and a signal still quits without asking at all.
-					log("service-stop-guard: could not ask about running services", {
-						error: String(error),
-					});
-					return false;
-				})
-				.finally(() => {
-					asking = null;
+			if (!wouldStop(gesture)) return Promise.resolve(true);
+			return deps.ask(buildStopPrompt(gesture, running())).catch((error: unknown) => {
+				// A question that could not be asked is not a yes. In the case that
+				// actually raises this - a window destroyed while its own dialog was
+				// up - the close already happened and the answer is moot; in any
+				// other, refusing to stop the user's services on an error is the
+				// safe half, and a signal still quits without asking at all.
+				log("service-stop-guard: could not ask about running services", {
+					error: String(error),
 				});
-			return asking;
+				return false;
+			});
 		},
 	};
-}
-
-/** The slice of an Electron event this needs: the power to hold the gesture. */
-export interface HoldableEvent {
-	preventDefault: () => void;
-}
-
-/**
- * Put a gesture through the guard, and answer whether it may go ahead now.
- *
- * `false` means the gesture has been held for a dialog: `retry` runs when the
- * user says yes, and nothing at all when they say no - which is what leaves the
- * window, the renderer and every service exactly as they were. A `true` caller
- * carries on into whatever else its handler does, the save flush included.
- *
- * A decision, not a wiring detail, so it is tested rather than read: main.ts's
- * handlers hold two facts each, and the one that matters here (a no does
- * nothing) is invisible to a source scan.
- */
-export function holdForConfirmation(
-	guard: ServiceStopGuard,
-	gesture: StopGesture,
-	event: HoldableEvent,
-	retry: () => void
-): boolean {
-	if (guard.isCleared(gesture)) return true;
-	event.preventDefault();
-	void guard.confirm(gesture).then((proceed) => {
-		if (proceed) retry();
-	});
-	return false;
 }
 
 /** The slice of `ipcMain` this channel needs. */

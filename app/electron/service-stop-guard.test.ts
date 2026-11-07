@@ -16,9 +16,9 @@
  * main.ts.
  *
  * Mutation checks: make `closeStopsServices` true on every platform and the
- * macOS case reddens; drop the `confirmed` latch and the "asks once for the
- * close and the quit it becomes" case reddens; return the snapshot without the
- * `rendererGone` gate and the crashed-renderer case reddens.
+ * macOS case reddens; return the snapshot without the `rendererGone` gate and
+ * the crashed-renderer case reddens. Whether an answer carries over to the
+ * next gesture is `quit-flow.ts`'s, and is tested there.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -29,7 +29,6 @@ import {
 	buildStopPrompt,
 	createServiceStopGuard,
 	describeRunningService,
-	holdForConfirmation,
 	parseRunningServices,
 	registerRunningServicesIpc,
 	RUNNING_SERVICES_CHANNEL,
@@ -166,7 +165,7 @@ describe("createServiceStopGuard", () => {
 	it("lets a close through untouched when nothing is running", async () => {
 		const { guard, ask } = fakeGuard();
 
-		expect(guard.isCleared("window-close")).toBe(true);
+		expect(guard.wouldStop("window-close")).toBe(false);
 		await expect(guard.confirm("window-close")).resolves.toBe(true);
 		expect(ask).not.toHaveBeenCalled();
 	});
@@ -175,7 +174,7 @@ describe("createServiceStopGuard", () => {
 		const { guard, ask, prompts, answerDialog } = fakeGuard();
 		guard.publish([inbox]);
 
-		expect(guard.isCleared("window-close")).toBe(false);
+		expect(guard.wouldStop("window-close")).toBe(true);
 		const proceed = guard.confirm("window-close");
 		answerDialog(true);
 
@@ -195,46 +194,18 @@ describe("createServiceStopGuard", () => {
 		// Nothing was destroyed, so the snapshot still stands and the next X is a
 		// fresh question rather than a close that slips through.
 		expect(guard.running()).toEqual([inbox]);
-		expect(guard.isCleared("window-close")).toBe(false);
+		expect(guard.wouldStop("window-close")).toBe(true);
 		const second = guard.confirm("window-close");
 		answerDialog(true);
 		await expect(second).resolves.toBe(true);
 		expect(ask).toHaveBeenCalledTimes(2);
 	});
 
-	it("asks once for the close and the quit it becomes", async () => {
-		// On Windows and Linux the confirmed close fires `window-all-closed`,
-		// which quits: a second dialog on the way out would be the same question
-		// asked of a user who already answered it.
-		const { guard, ask, answerDialog } = fakeGuard();
-		guard.publish([inbox, mock]);
-
-		const proceed = guard.confirm("window-close");
-		answerDialog(true);
-		await proceed;
-
-		expect(guard.isCleared("quit")).toBe(true);
-		await expect(guard.confirm("quit")).resolves.toBe(true);
-		expect(ask).toHaveBeenCalledTimes(1);
-	});
-
-	it("shares one dialog between two gestures that land together", async () => {
-		const { guard, ask, answerDialog } = fakeGuard();
-		guard.publish([inbox]);
-
-		const close = guard.confirm("window-close");
-		const quit = guard.confirm("quit");
-		answerDialog(true);
-
-		await expect(Promise.all([close, quit])).resolves.toEqual([true, true]);
-		expect(ask).toHaveBeenCalledTimes(1);
-	});
-
 	it("does not ask about a close on macOS, where the services keep serving", async () => {
 		const { guard, ask } = fakeGuard({ platform: "darwin" });
 		guard.publish([inbox]);
 
-		expect(guard.isCleared("window-close")).toBe(true);
+		expect(guard.wouldStop("window-close")).toBe(false);
 		await expect(guard.confirm("window-close")).resolves.toBe(true);
 		expect(ask).not.toHaveBeenCalled();
 	});
@@ -243,7 +214,7 @@ describe("createServiceStopGuard", () => {
 		const { guard, ask, prompts, answerDialog } = fakeGuard({ platform: "darwin" });
 		guard.publish([inbox]);
 
-		expect(guard.isCleared("quit")).toBe(false);
+		expect(guard.wouldStop("quit")).toBe(true);
 		const proceed = guard.confirm("quit");
 		answerDialog(true);
 
@@ -252,30 +223,18 @@ describe("createServiceStopGuard", () => {
 		expect(prompts[0].message).toContain("Quit Vayu");
 	});
 
-	it("asks nothing of a quit nobody is behind", async () => {
-		// A signal is how install.sh replaces a running AppImage. A dialog there is
-		// a hang, not a prompt.
-		const { guard, ask } = fakeGuard();
-		guard.publish([inbox]);
-		guard.markQuitUnattended();
-
-		expect(guard.isCleared("quit")).toBe(true);
-		await expect(guard.confirm("quit")).resolves.toBe(true);
-		expect(ask).not.toHaveBeenCalled();
-	});
-
 	it("names nothing once the renderer that published it is gone", async () => {
 		// A crashed renderer never sends a closing "nothing is running", and its
 		// services died with the window it drove.
 		let gone = false;
 		const { guard, ask } = fakeGuard({ rendererGone: () => gone });
 		guard.publish([inbox]);
-		expect(guard.isCleared("window-close")).toBe(false);
+		expect(guard.wouldStop("window-close")).toBe(true);
 
 		gone = true;
 
 		expect(guard.running()).toEqual([]);
-		expect(guard.isCleared("window-close")).toBe(true);
+		expect(guard.wouldStop("window-close")).toBe(false);
 		await expect(guard.confirm("window-close")).resolves.toBe(true);
 		expect(ask).not.toHaveBeenCalled();
 	});
@@ -290,9 +249,6 @@ describe("createServiceStopGuard", () => {
 		guard.publish([inbox]);
 
 		await expect(guard.confirm("window-close")).resolves.toBe(false);
-		// Not latched either: the next gesture asks again rather than inheriting a
-		// consent nobody gave.
-		expect(guard.isCleared("quit")).toBe(false);
 		expect(log).toHaveBeenCalled();
 	});
 
@@ -324,7 +280,7 @@ describe("createServiceStopGuard", () => {
 		guard.forget();
 
 		expect(guard.running()).toEqual([]);
-		expect(guard.isCleared("window-close")).toBe(true);
+		expect(guard.wouldStop("window-close")).toBe(false);
 	});
 
 	it("takes the latest snapshot, including the one that says nothing is left", () => {
@@ -336,7 +292,7 @@ describe("createServiceStopGuard", () => {
 
 		guard.publish([]);
 
-		expect(guard.isCleared("window-close")).toBe(true);
+		expect(guard.wouldStop("window-close")).toBe(false);
 	});
 });
 
@@ -391,9 +347,7 @@ describe("registerRunningServicesIpc", () => {
 			},
 			running: () => snapshot,
 			wouldStop: () => snapshot.length > 0,
-			isCleared: () => snapshot.length === 0,
 			confirm: () => Promise.resolve(true),
-			markQuitUnattended: () => {},
 		};
 	}
 
@@ -445,130 +399,20 @@ describe("registerRunningServicesIpc", () => {
 	});
 });
 
-/*
- * What each of main.ts's two handlers does with the answer. The handlers
- * themselves cannot be imported, so the decision they turn on lives here: a
- * "no" has to do nothing at all, which no source scan can see.
- */
-describe("holdForConfirmation", () => {
-	/** The close event as far as a handler is concerned. */
-	function fakeEvent() {
-		return { preventDefault: vi.fn() };
-	}
-
-	/** Let the answered dialog's promise chain run out before asserting on it. */
-	const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-	it("lets a gesture through untouched when there is nothing to ask about", () => {
-		const { guard, ask } = fakeGuard();
-		const event = fakeEvent();
-		const retry = vi.fn();
-
-		expect(holdForConfirmation(guard, "window-close", event, retry)).toBe(true);
-		expect(event.preventDefault).not.toHaveBeenCalled();
-		expect(retry).not.toHaveBeenCalled();
-		expect(ask).not.toHaveBeenCalled();
-	});
-
-	it("holds the gesture while the dialog is up", () => {
-		const { guard, answerDialog } = fakeGuard();
-		guard.publish([inbox]);
-		const event = fakeEvent();
-		const retry = vi.fn();
-
-		expect(holdForConfirmation(guard, "window-close", event, retry)).toBe(false);
-		expect(event.preventDefault).toHaveBeenCalledTimes(1);
-		expect(retry).not.toHaveBeenCalled();
-
-		answerDialog(true);
-		expect(retry).not.toHaveBeenCalled(); // still on the promise's tick
-	});
-
-	it("does nothing at all on Cancel - the window stays, the services stay", async () => {
-		const { guard, answerDialog } = fakeGuard();
-		guard.publish([inbox]);
-		const event = fakeEvent();
-		const retry = vi.fn();
-
-		holdForConfirmation(guard, "window-close", event, retry);
-		answerDialog(false);
-		await settled();
-
-		expect(retry).not.toHaveBeenCalled();
-		expect(guard.running()).toEqual([inbox]);
-	});
-
-	it("retries the gesture on Close anyway, and the retry finds the guard cleared", async () => {
-		const { guard, answerDialog } = fakeGuard();
-		guard.publish([inbox]);
-		const retry = vi.fn();
-
-		holdForConfirmation(guard, "window-close", fakeEvent(), retry);
-		answerDialog(true);
-		await settled();
-
-		expect(retry).toHaveBeenCalledTimes(1);
-		// The second pass through the handler asks nothing and returns true, which
-		// is what carries main.ts's close into the save flush.
-		const second = fakeEvent();
-		expect(holdForConfirmation(guard, "window-close", second, vi.fn())).toBe(true);
-		expect(second.preventDefault).not.toHaveBeenCalled();
-	});
-
-	it("holds nothing on a quit nobody is behind", () => {
-		const { guard, ask } = fakeGuard();
-		guard.publish([inbox]);
-		guard.markQuitUnattended();
-		const event = fakeEvent();
-
-		expect(holdForConfirmation(guard, "quit", event, vi.fn())).toBe(true);
-		expect(event.preventDefault).not.toHaveBeenCalled();
-		expect(ask).not.toHaveBeenCalled();
-	});
-});
-
 describe("main.ts wiring", () => {
 	it("read the real main.ts", () => {
 		// A guard that scanned an empty string would pass every assertion below.
 		expect(main.length).toBeGreaterThan(1000);
-		expect(main).toContain('app.on("before-quit"');
-	});
-
-	it("asks before the close destroys anything", () => {
-		// Ordered: a flush that ran first would have told the renderer its work
-		// was ending, and Cancel has to leave everything as it was.
-		const closeHandler = main.slice(main.indexOf('.on("close"'));
-		const guardCheck = closeHandler.indexOf(
-			'holdForConfirmation(serviceStopGuard, "window-close"'
-		);
-		const flushCheck = closeHandler.indexOf("saveFlusher.hasSettled()");
-		expect(guardCheck).toBeGreaterThan(-1);
-		expect(flushCheck).toBeGreaterThan(guardCheck);
-		// The held close is resumed by closing the window again, which is what
-		// takes the confirmed path through the flush.
-		expect(closeHandler).toContain("closingWindow.close()");
-	});
-
-	it("asks the same question of a quit, before the flush", () => {
-		const quitHandler = main.slice(main.indexOf('app.on("before-quit"'));
-		const guardCheck = quitHandler.indexOf('holdForConfirmation(serviceStopGuard, "quit"');
-		const flushCheck = quitHandler.indexOf("saveFlusher.hasSettled()");
-		expect(guardCheck).toBeGreaterThan(-1);
-		expect(flushCheck).toBeGreaterThan(guardCheck);
-		// Resumed through the same one stable callback every other quit gesture
-		// takes, so a confirmed quit is not a second engine shutdown.
-		expect(quitHandler).toContain("resumeQuit)");
+		expect(main).toContain("createServiceStopGuard(");
 	});
 
 	it("takes the renderer's snapshot off the channel", () => {
 		expect(main).toContain("registerRunningServicesIpc(ipcMain, serviceStopGuard,");
 	});
 
-	it("asks nothing of a quit that came from a signal", () => {
-		// install.sh replaces a running AppImage with one, and a dialog would hold
-		// the upgrade open until someone clicked it.
-		const signalWiring = main.slice(main.indexOf("installQuitOnSignal("));
-		expect(signalWiring).toContain("serviceStopGuard.markQuitUnattended()");
+	it("asks through the quit flow, which both gestures drive", () => {
+		const flowWiring = main.slice(main.indexOf("createQuitFlow("));
+		expect(flowWiring).toContain("services: serviceStopGuard,");
 	});
 
 	it("reads the running list through the renderer's own liveness", () => {

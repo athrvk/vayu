@@ -20,8 +20,16 @@
  * `proceeding` without `servicesCleared` and the macOS joining case reddens.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
-import { createQuitFlow, FLUSH_ACK_CHANNEL, registerFlushAckIpc, type QuitFlow } from "./quit-flow";
+import { transformWithOxc } from "vite";
+import {
+	createQuitFlow,
+	FLUSH_ACK_CHANNEL,
+	FLUSH_REQUEST_CHANNEL,
+	registerFlushAckIpc,
+	type QuitFlow,
+} from "./quit-flow";
 import {
 	buildFlushFailurePrompt,
 	FLUSH_TIMEOUT_MS,
@@ -570,6 +578,16 @@ describe("a quit nobody is behind", () => {
 		expect(h.flow.phase()).toBe("flushing");
 	});
 
+	it("logs nothing when the flush it quit on landed clean", () => {
+		const h = harness();
+		h.flow.markQuitUnattended();
+
+		h.quit();
+		h.ack(CLEAN);
+
+		expect(h.log).not.toHaveBeenCalled();
+	});
+
 	it("still asks the window's own close about a failed flush", () => {
 		const h = harness();
 		h.flow.markQuitUnattended();
@@ -616,5 +634,135 @@ describe("registerFlushAckIpc", () => {
 
 		expect(flushed).toHaveBeenCalledWith(7, null);
 		expect(log).toHaveBeenCalledTimes(1);
+	});
+});
+
+/*
+ * main.ts creates windows and starts the engine at import time, so its half of
+ * the wiring can only be read. Every case above would still pass with a handler
+ * that skipped the flow, which is the bug the flow exists to close.
+ */
+describe("main.ts wiring", () => {
+	const main = readFileSync(new URL("./main.ts", import.meta.url), "utf8");
+	const closeHandler = main.slice(main.indexOf('closingWindow.on("close"'));
+	const quitHandler = main.slice(main.indexOf('app.on("before-quit"'));
+
+	it("read the real main.ts", () => {
+		// A guard that scanned an empty string would pass every assertion below.
+		expect(main.length).toBeGreaterThan(1000);
+		expect(main).toContain('closingWindow.on("close"');
+		expect(main).toContain('app.on("before-quit"');
+	});
+
+	it("puts the window's close through the flow, with one stable resume per window", () => {
+		expect(closeHandler).toMatch(
+			/^closingWindow\.on\("close", \(event\) => \{\s*quitFlow\.gesture\("window-close", event, closeAgain\);\s*\}\);/
+		);
+	});
+
+	it("puts before-quit through the same flow, and only then into the shutdown", () => {
+		const gesture = quitHandler.indexOf('quitFlow.gesture("quit", event, resumeQuit)');
+		const shutdown = quitHandler.indexOf("quitShutdown.handleQuit(event)");
+		expect(gesture).toBeGreaterThan(-1);
+		expect(shutdown).toBeGreaterThan(gesture);
+		expect(main).toContain("const resumeQuit = () => app.quit();");
+	});
+
+	it("tags each flush request with its id, and takes the ACK through the parser", () => {
+		expect(main).toContain("mainWindow.webContents.send(FLUSH_REQUEST_CHANNEL, flushId)");
+		expect(main).toContain("registerFlushAckIpc(ipcMain, quitFlow,");
+	});
+
+	it("resets the flow for a new window and a replaced renderer", () => {
+		const createWindow = main.slice(main.indexOf("function createWindow()"));
+		expect(createWindow.slice(0, createWindow.indexOf("loadWindowState("))).toContain(
+			"quitFlow.reset()"
+		);
+		expect(main).toContain("onRecovered: () => quitFlow.reset()");
+	});
+
+	it("marks a signal's quit unattended, so no dialog waits on nobody (#1908)", () => {
+		const signalWiring = main.slice(main.indexOf("installQuitOnSignal("));
+		expect(signalWiring).toContain("quitFlow.markQuitUnattended()");
+	});
+
+	it("keeps no second copy of the quit bookkeeping", () => {
+		for (const gone of [
+			"saveFlusher",
+			"flushFailureGate",
+			"holdForConfirmation",
+			"hasSettled",
+			"flushSent",
+		]) {
+			expect(main).not.toContain(gone);
+		}
+	});
+});
+
+describe("the preload's half of the ACK", () => {
+	const preload = readFileSync(new URL("./preload.ts", import.meta.url), "utf8");
+
+	/** Run the real preload against a fake `electron`, as `preload-grant-channel.test.ts` does. */
+	async function runPreload() {
+		const { code } = await transformWithOxc(preload, "preload.ts", { lang: "ts" });
+		let api: { onBeforeQuit: (cb: () => Promise<FlushResult>) => () => void } | undefined;
+		const ipcRenderer = {
+			send: vi.fn(),
+			sendSync: vi.fn(),
+			invoke: vi.fn(),
+			on: vi.fn(),
+			removeListener: vi.fn(),
+		};
+		const electron = {
+			contextBridge: {
+				exposeInMainWorld: (_name: string, value: typeof api) => {
+					api = value;
+				},
+			},
+			ipcRenderer,
+			webFrame: {},
+			webUtils: {},
+		};
+		new Function("require", "process", "window", code)(
+			() => electron,
+			{ argv: [], platform: "linux" },
+			{ addEventListener: () => {} }
+		);
+		if (!api) throw new Error("the preload exposed nothing");
+		return { api, ipcRenderer };
+	}
+
+	/** The listener the preload put on the request channel. */
+	function requestListener(ipcRenderer: Awaited<ReturnType<typeof runPreload>>["ipcRenderer"]) {
+		const call = ipcRenderer.on.mock.calls.find(
+			([channel]) => channel === FLUSH_REQUEST_CHANNEL
+		);
+		if (!call) throw new Error("the preload never listened for a flush request");
+		return call[1] as (event: unknown, flushId: unknown) => Promise<void>;
+	}
+
+	it("spells both channels the way main does", () => {
+		// The preload is CommonJS and cannot import the constants.
+		expect(preload.length).toBeGreaterThan(10_000);
+		expect(preload).toContain(`ipcRenderer.on("${FLUSH_REQUEST_CHANNEL}", handler)`);
+		expect(preload).toContain(`ipcRenderer.send("${FLUSH_ACK_CHANNEL}", flushId, result)`);
+	});
+
+	it("echoes the flush id main sent beside the result", async () => {
+		const { api, ipcRenderer } = await runPreload();
+		api.onBeforeQuit(() => Promise.resolve(CLEAN));
+
+		await requestListener(ipcRenderer)({}, 42);
+
+		expect(ipcRenderer.send).toHaveBeenCalledWith(FLUSH_ACK_CHANNEL, 42, CLEAN);
+	});
+
+	it("reports a flush that threw as a failure, still under its id", async () => {
+		const { api, ipcRenderer } = await runPreload();
+		api.onBeforeQuit(() => Promise.reject(new Error("store gone")));
+
+		await requestListener(ipcRenderer)({}, 43);
+
+		expect(ipcRenderer.send).toHaveBeenCalledWith(FLUSH_ACK_CHANNEL, 43, FAILED);
 	});
 });
