@@ -648,8 +648,9 @@ bool is_create) {
     apply_bool_field (json, "verifySSL", r.verify_ssl, true, is_create);
 
     apply_int_field (json, "maxRedirects", r.max_redirects, 10, is_create);
-    // Clamp to the range the UI offers; libcurl reads -1 as "unlimited", which
-    // is not a policy we want a stray value to select.
+    // Clamp to the range the UI offers; the redirect chain reads a negative
+    // limit as "unlimited" (`redirect_limit_reached`), which is not a policy we
+    // want a stray value to select.
     r.max_redirects = std::clamp (r.max_redirects, 0, 100);
 
     // The request's own timeout (issue #2937), refused rather than clamped

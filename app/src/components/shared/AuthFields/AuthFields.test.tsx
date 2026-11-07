@@ -145,7 +145,7 @@ describe("AuthFields host parameterisation", () => {
 	});
 
 	it("warns that a header API key follows a redirect to another host", () => {
-		// libcurl drops Authorization and Cookie on a cross-host redirect and
+		// The engine drops Authorization and Cookie on a cross-host redirect and
 		// nothing else, so an API key in a header travels on (issue #2476).
 		renderFields({ mode: "apikey", key: "X-Api-Key", value: "v", in: "header" });
 		expect(screen.getByText(/redirect leads to/i)).toBeInTheDocument();

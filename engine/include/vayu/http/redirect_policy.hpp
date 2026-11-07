@@ -42,7 +42,7 @@ namespace vayu::http {
 
 /**
  * @brief Whether a response with @p status is a redirect a following send acts
- *        on, given that it names a `Location`: any 3xx, as libcurl follows.
+ *        on, given that it names a `Location`: any 3xx.
  */
 [[nodiscard]] bool is_redirect_status (int status);
 
@@ -124,15 +124,6 @@ struct RedirectedRequest {
  *        in the words libcurl's own limit used (#2462).
  */
 [[nodiscard]] Error too_many_redirects_error (int max_redirects);
-
-/**
- * @brief The sentence that opens a redirect-limit failure, then @p detail.
- *
- * @p limit is the number of redirects followed when the limit was reached; the
- * sentence names no number when it is unknown rather than guess one.
- */
-[[nodiscard]] std::string
-too_many_redirects_message (std::optional<long> limit, std::string_view detail);
 
 // ---------------------------------------------------------------------------
 // The request a chain sends next

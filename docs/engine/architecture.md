@@ -1883,8 +1883,10 @@ record shape, the category list, the redaction rule and the file layout
   protocols, `file` among them, so the send gate (`validate_transferable`)
   refuses any other scheme on the URL every driver is about to hand a handle -
   after variables, the pre-request script and the residual pass - and
-  `apply_transport_policy` holds every handle to `http,https` for the URLs that
-  gate cannot see (a redirect's `Location`, a scheme libcurl guesses). One
+  `apply_transport_policy` holds every handle to `http,https` for the one URL
+  that gate cannot judge (a scheme libcurl guesses), while the engine's own
+  redirect loop refuses a `Location` naming another scheme before making the
+  hop (`resolve_redirect_target`). One
   rule for Send, runs, streams, `pm.sendRequest`, import fetch and OAuth. See
   [api-reference.md](api-reference.md#url-schemes).
 - **Request-body files: one trust rule.** The engine reads a file from this

@@ -2028,11 +2028,11 @@ A hop with `schemeDowngrade: true` is announced above both groups by a warning
 "301 Moved Permanently from https://api.example.com/start, to /plain" - the
 resolved `url` when the engine sent one, then the `Location` - whether or not
 the hop set a cookie, because the common downgrade is a bare `301`. The same
-"from <url>" labels the hop's cookie sub-heading. libcurl drops `Authorization`
+"from <url>" labels the hop's cookie sub-heading. the engine drops `Authorization`
 and `Cookie` across a scheme, host or port change; an API key sent as a header
 is not withheld, which is what the notice says.
-The rows say what the server sent and never that the jar stored it, because curl
-drops a hop's cookie when the redirect changes origin. `GET /cookies` and the
+The rows say what the server sent and never that the jar stored it, because the engine
+withholds a hop's cookie when the redirect changes origin. `GET /cookies` and the
 Settings cookie card are what the jar holds.
 
 The renderer keeps it strictly apart from `bodyTruncated`, which is

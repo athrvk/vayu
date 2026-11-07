@@ -464,9 +464,9 @@ TEST_F (HttpClientTest, RawRequestKeepsTheBodyAfterTheWireHeaders) {
 }
 
 // What the final hop sent is what the view shows (issue #2462). A 301, 302 or
-// 303 answer to a POST makes libcurl re-send as a body-less GET, so the view
-// ends at the header block; appending the composed body there showed a body no
-// hop had carried. Mutation-check: append the body unconditionally and the
+// 303 answer to a POST is re-sent by the redirect chain as a body-less GET, so
+// the view ends at the header block; appending the composed body there showed
+// a body no hop had carried. Mutation-check: append the body unconditionally and the
 // three body-less rows fail while 307 and 308 still pass.
 TEST_F (HttpClientTest, RawRequestOfAPostRedirectedToAGetEndsAtTheHeaderBlock) {
     for (const int code : { 301, 302, 303 }) {
@@ -537,8 +537,9 @@ TEST_F (HttpClientTest, RawRequestOfAGetWithABodyRedirectedByA302EndsAtTheHeader
 }
 
 // A redirect loop is the server's answer, not a connection that failed
-// (issue #2462). Mutation-check: put CURLE_TOO_MANY_REDIRECTS back under the
-// connection-failed group and the code reads CONNECTION_FAILED.
+// (issue #2462). Mutation-check: change `too_many_redirects_error`'s code to
+// ConnectionFailed and the code reads CONNECTION_FAILED; change the number its
+// text names and the message check fails.
 TEST_F (HttpClientTest, ARedirectLoopIsTooManyRedirectsAndNamesTheLimit) {
     for (const int limit : { 0, 2 }) {
         Request request;
@@ -559,8 +560,9 @@ TEST_F (HttpClientTest, ARedirectLoopIsTooManyRedirectsAndNamesTheLimit) {
                                             "redirected more than " +
         std::to_string (limit) + " times"))
         << limit << ": " << response.error_message;
-        // libcurl's own text follows the plain statement.
-        EXPECT_NE (response.error_message.find ("redirect"), std::string::npos);
+        EXPECT_TRUE (response.error_message.ends_with (
+        "Maximum (" + std::to_string (limit) + ") redirects followed"))
+        << limit << ": " << response.error_message;
     }
 }
 
@@ -992,7 +994,7 @@ TEST_F (HttpClientTest, ARedirectChainsQueueWaitDoesNotAbsorbItsEarlierHops) {
     << "wire " << timing.wire_ms << "ms of a " << timing.total_ms << "ms send";
 }
 
-// libcurl stops at max_redirects, and so does the record: a loop reports the
+// The chain stops at max_redirects, and so does the record: a loop reports the
 // hops it made and no more.
 TEST_F (HttpClientTest, ARedirectLoopRecordsAtMostMaxRedirectsHops) {
     for (const int limit : { 0, 1, 3 }) {

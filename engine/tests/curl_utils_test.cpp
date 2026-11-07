@@ -498,19 +498,6 @@ TEST (CurlToError, ATargetThatFailedTheExchangeIsNotAnInternalError) {
     }
 }
 
-// A redirect loop is the target answering every hop, not a connection that
-// failed (#2462). Mutation-check: put CURLE_TOO_MANY_REDIRECTS back in the
-// connection-failed group and this reads CONNECTION_FAILED.
-TEST (CurlToError, ARedirectLoopIsTooManyRedirects) {
-    const vayu::http::CurlErrorBuffer errors;
-    const vayu::Error error = curl_to_error (nullptr, CURLE_TOO_MANY_REDIRECTS, errors);
-    EXPECT_EQ (error.code, vayu::ErrorCode::TooManyRedirects);
-    EXPECT_TRUE (error.message.starts_with ("Too many redirects: "));
-    EXPECT_NE (error.message.find (curl_easy_strerror (CURLE_TOO_MANY_REDIRECTS)),
-    std::string::npos)
-    << "libcurl's own text must travel with the plain statement: " << error.message;
-}
-
 // A body its Content-Encoding cannot decode, likewise (#2462). Mutation-check:
 // put CURLE_BAD_CONTENT_ENCODING back in the connection-failed group.
 TEST (CurlToError, AnUndecodableBodyIsBadContentEncoding) {
@@ -534,9 +521,10 @@ TEST (CurlToError, TheNewCodesKeepTheirWireSpelling) {
     EXPECT_STREQ (vayu::error_type_name (vayu::ErrorCode::ProtocolMismatch), "protocol_mismatch");
 }
 
-// A scheme the handle's allowlist refuses - a redirect's, or one libcurl
-// guessed - is the same fault the URL check reports for a typed one, under the
-// same code. With no handle, or one that reached no peer, nothing says a peer
+// A scheme the handle's allowlist refuses - only one libcurl guessed for a URL
+// naming none reaches it, a redirect's being refused by the engine first - is
+// the same fault the URL check reports for a typed one, under the same code.
+// With no handle, or one that reached no peer, nothing says a peer
 // answered, so the code keeps that reading (#3306). Mutation-check: drop the
 // case and this reads INTERNAL_ERROR; map it to ProtocolMismatch
 // unconditionally and it reads PROTOCOL_MISMATCH.

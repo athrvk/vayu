@@ -2828,7 +2828,7 @@ there is no editor-local vocabulary and nothing to translate at the boundary.
   statements under one empty state. An API key sent in a **header** carries a
   one-sentence note that a redirect takes the key to whichever host it leads to
   and that turning off Follow redirects on the request prevents it (issue
-  #2476): libcurl drops `Authorization` and `Cookie` across a scheme, host or
+  #2476): the engine drops `Authorization` and `Cookie` across a scheme, host or
   port change and nothing else, so the API key header is the exception, kept on
   purpose (#2949; the Cookies tab flags an https-to-http hop). A query
   key and the `Authorization` modes do not get it, and

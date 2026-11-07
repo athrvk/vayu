@@ -69,8 +69,7 @@ TEST (RedirectTarget, TheFragmentIsDroppedAndASpaceIsEncoded) {
     EXPECT_EQ (resolve_redirect_target ("http://a.test/x", "/a b"), "http://a.test/a%20b");
 }
 
-// The scheme rule `CURLOPT_REDIR_PROTOCOLS_STR` held while libcurl followed,
-// in the words it used. Mutation-check: drop the scheme check and the ftp
+// The refusal is worded as libcurl worded it. Mutation-check: drop the scheme check and the ftp
 // target resolves.
 TEST (RedirectTarget, ASchemeOtherThanHttpIsRefusedAsAnInvalidUrl) {
     for (const auto& [location, scheme] : std::vector<std::pair<std::string, std::string>>{
@@ -154,9 +153,6 @@ TEST (RedirectLimit, TheErrorNamesTheLimitAsLibcurlsDid) {
     EXPECT_EQ (error.message,
     "Too many redirects: the server redirected more than 2 times (see Maximum "
     "redirects). Maximum (2) redirects followed");
-    EXPECT_EQ (too_many_redirects_message (std::nullopt, "detail"),
-    "Too many redirects: the server redirected more than the allowed number of "
-    "times (see Maximum redirects). detail");
 }
 
 // ---------------------------------------------------------------------------

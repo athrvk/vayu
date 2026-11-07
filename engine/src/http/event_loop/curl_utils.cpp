@@ -174,8 +174,8 @@ std::optional<Error> validate_transferable (const Request& request) {
     const std::string url = vayu::http::wire_url (request);
     // First, because nothing else about a request matters if it is not HTTP.
     // `apply_transport_policy`'s protocol allowlist is the backstop for what
-    // this cannot see: a redirect, and a scheme libcurl guesses for a URL that
-    // names none.
+    // this cannot see: a scheme libcurl guesses for a URL that names none. A
+    // redirect's `Location` is judged by `resolve_redirect_target`.
     if (auto problem = vayu::http::unsendable_scheme (url)) {
         return Error{ ErrorCode::InvalidUrl, "Cannot send this request: " + *problem };
     }
@@ -260,7 +260,8 @@ size_t read_approved (char* buffer, size_t size, size_t nitems, void* arg) {
     return *got;
 }
 
-/// libcurl rewinds the body for a redirect or an auth retry. It passes only
+/// libcurl rewinds a form part's body at the start of each transfer, and for
+/// an auth retry. It passes only
 /// `SEEK_SET` (as of 8.23, to an upload's and a part's callback alike), so any
 /// other origin is answered as unseekable rather than guessed at.
 int seek_approved (void* arg, curl_off_t offset, int origin) {
@@ -336,9 +337,9 @@ bool attach_binary (CURL* curl, const Request& request, BodySource& source) {
     curl, static_cast<curl_off_t> (file.approved->size ()));
     set_opt<CURLOPT_READFUNCTION> (curl, &read_approved);
     set_opt<CURLOPT_READDATA> (curl, &source.stream);
-    // Mandatory, not an optimisation: a redirect and the second leg of Digest
-    // or NTLM rewind the body, and without a seek callback libcurl fails that
-    // leg instead of resending.
+    // Mandatory, not an optimisation: the second leg of Digest or NTLM (and a
+    // form part's resend on a redirect hop) rewinds the body, and without a
+    // seek callback libcurl fails that leg instead of resending.
     set_opt<CURLOPT_SEEKFUNCTION> (curl, &seek_approved);
     set_opt<CURLOPT_SEEKDATA> (curl, &source.stream);
     return true;
@@ -1225,24 +1226,6 @@ bool tls_connection_never_answered (CURL* curl) {
     return response_code == 0;
 }
 
-/**
- * The sentence that opens a redirect-limit failure of a transfer libcurl
- * followed itself, ahead of libcurl's own text.
- *
- * The limit is read off the handle (`CURLINFO_REDIRECT_COUNT`) rather than the
- * request, which this function never sees: libcurl raises
- * `CURLE_TOO_MANY_REDIRECTS` exactly when the hops followed reach
- * `CURLOPT_MAXREDIRS`, so the count at failure is the limit.
- */
-std::string too_many_redirects_message (CURL* curl, const std::string& curl_text) {
-    long followed = -1;
-    if (!curl || get_info<CURLINFO_REDIRECT_COUNT> (curl, &followed) != CURLE_OK ||
-    followed < 0) {
-        return vayu::http::too_many_redirects_message (std::nullopt, curl_text);
-    }
-    return vayu::http::too_many_redirects_message (followed, curl_text);
-}
-
 /// The `Content-Encoding` value of the last response libcurl received, or
 /// empty. Only the last request's headers: a redirect hop's are not the body
 /// that failed to decode.
@@ -1316,8 +1299,7 @@ bool proxy_certificate_rejected (CURL* curl, CURLcode code) {
 
 /// libcurl clears the primary address when a transfer starts and sets it once
 /// a connection, new or reused, is up at the IP level, even when the TLS
-/// handshake above it then fails. A redirect's earlier hop leaves it set for a
-/// later hop's refusal.
+/// handshake above it then fails.
 bool reached_a_peer (CURL* curl) {
     char* ip = nullptr;
     return curl != nullptr && get_info<CURLINFO_PRIMARY_IP> (curl, &ip) == CURLE_OK &&
@@ -1326,9 +1308,10 @@ bool reached_a_peer (CURL* curl) {
 
 /// Whether a `CURLE_UNSUPPORTED_PROTOCOL` is the peer's reply ("Received
 /// HTTP/0.9 when not allowed", an unknown HTTP version) rather than a scheme
-/// the handle refused. A reached peer alone does not decide it: a redirect to
-/// `ftp://` that libcurl follows itself is refused with the earlier hop's
-/// address still set, so the URL the handle stopped at must be sendable too.
+/// the handle refused. The scheme half is defensive: the URL the handle stopped
+/// at is the current hop's, whose redirect `resolve_redirect_target` already
+/// vetted, so an unsendable scheme there is a guessed one on hop 1, which has
+/// reached no peer.
 bool peer_spoke_another_protocol (CURL* curl, std::string_view stopped_at) {
     return reached_a_peer (curl) && !vayu::http::url_scheme (stopped_at).empty () &&
     !vayu::http::unsendable_scheme (stopped_at);
@@ -1443,14 +1426,9 @@ const ConnectedPeerCheck* peer_check) {
         error.code = tls_connection_never_answered (curl) ? ErrorCode::SslError :
                                                             ErrorCode::ConnectionFailed;
         break;
-    // The two below are the target's answer being unusable, not a connection
-    // that failed: every hop was answered. Their own codes, because reading
-    // "couldn't connect" sent users to the network for a redirect loop or a
+    // The target's answer being unusable, not a connection that failed: its own
+    // code, because reading "couldn't connect" sent users to the network for a
     // mislabelled body (issue #2462).
-    case CURLE_TOO_MANY_REDIRECTS:
-        error.code    = ErrorCode::TooManyRedirects;
-        error.message = too_many_redirects_message (curl, error.message);
-        break;
     case CURLE_BAD_CONTENT_ENCODING:
         error.code    = ErrorCode::BadContentEncoding;
         error.message = bad_content_encoding_message (curl, error.message);
@@ -1471,8 +1449,8 @@ const ConnectedPeerCheck* peer_check) {
             }
         }
         break;
-    // A scheme the handle's allowlist refuses (a redirect's, or one libcurl
-    // guessed for a URL naming none), in libcurl's words; or a peer that
+    // A scheme the handle's allowlist refuses (one libcurl guessed for a URL
+    // naming none), in libcurl's words; or a peer that
     // answered in another protocol, which is no fault of the URL (#3306).
     case CURLE_UNSUPPORTED_PROTOCOL: {
         const std::string stopped_at = effective_url (curl);
@@ -1514,8 +1492,8 @@ namespace {
 
 /// The codes libcurl raises while checking the request it was handed, before
 /// it resolves a name or opens a socket: a URL it cannot parse, a scheme the
-/// handle's allowlist refuses. Each also has a source after the wire (a
-/// redirect's `Location`, a status line naming an unknown HTTP version), which
+/// handle's allowlist refuses. `CURLE_UNSUPPORTED_PROTOCOL` also has a source
+/// after the wire (a status line naming an unknown HTTP version), which
 /// `reached_a_peer` tells apart. Every other code is raised by work on the
 /// network: a TLS file libcurl cannot read (`CURLE_SSL_CERTPROBLEM`,
 /// `CURLE_SSL_CACERT_BADFILE`, `CURLE_SSL_CRL_BADFILE`) is read during the
@@ -1547,7 +1525,6 @@ bool verify_ssl,
 const std::string& url,
 ConnectedPeerCheck* peer_check) {
     set_opt<CURLOPT_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
-    set_opt<CURLOPT_REDIR_PROTOCOLS_STR> (curl, vayu::http::SENDABLE_PROTOCOLS);
     set_opt<CURLOPT_SSL_VERIFYPEER> (curl, verify_ssl ? 1L : 0L);
     set_opt<CURLOPT_SSL_VERIFYHOST> (curl, verify_ssl ? 2L : 0L);
     // The same switch for an https:// proxy's own handshake (#2469): libcurl

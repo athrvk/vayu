@@ -10,18 +10,18 @@
  * @brief Which credentials a followed redirect carries to the next host
  *        (issue #2476).
  *
- * libcurl drops `Authorization` (and `Cookie`) when a redirect leaves the host
- * it was first sent to; every other header, an API key sent as `X-Api-Key`
- * included, follows. The engine does not change that, and `SECURITY.md`, the
+ * The engine's redirect chain drops `Authorization` (and `Cookie`) when a
+ * redirect leaves the origin it was first sent to (`is_origin_bound_header`
+ * and `same_origin`, which compare scheme, host and port); every other
+ * header, an API key sent as `X-Api-Key` included, follows. `SECURITY.md`, the
  * API reference and the API Key editor all say so. These cases are what keep
  * the three statements true: an `apikey` auth is a header like any other, and
- * a libcurl or option change that started dropping it, or stopped dropping
- * `Authorization`, fails here rather than in a user's traffic.
+ * a change that started dropping it, or stopped dropping `Authorization`,
+ * fails here rather than in a user's traffic.
  *
- * Two loopback ports are two hosts to libcurl (it compares host and port), so
- * the "other host" is a second in-process server. Both drivers that follow
- * redirects for a single request are exercised: they set the options
- * independently.
+ * Two loopback ports are two origins (`same_origin` compares the port), so the
+ * "other host" is a second in-process server. Both drivers that follow
+ * redirects for a single request are exercised: each runs its own chain.
  */
 
 #ifndef NOMINMAX

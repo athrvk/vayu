@@ -55,11 +55,12 @@ class DnsCache;
  *             May be null where no handle is available; the mapping then
  *             falls back to the code alone.
  *
- * A redirect loop and an undecodable body get their own codes
- * (`TooManyRedirects`, `BadContentEncoding`, issue #2462) and a message that
- * opens with a plain statement of the cause, then libcurl's text. The redirect
- * limit and the `Content-Encoding` are read off @p curl, so without a handle
- * the sentence names neither.
+ * An undecodable body gets its own code (`BadContentEncoding`, issue #2462)
+ * and a message that opens with a plain statement of the cause, then libcurl's
+ * text. The `Content-Encoding` is read off @p curl, so without a handle the
+ * sentence names none. A redirect loop is not a libcurl code: no handle
+ * follows redirects, so `CURLE_TOO_MANY_REDIRECTS` is never raised, and the
+ * `TooManyRedirects` a chain ends with comes from `too_many_redirects_error`.
  *
  * `CURLE_UNSUPPORTED_PROTOCOL` is `InvalidUrl` (a scheme the handle refused,
  * libcurl's text unchanged) unless @p curl reached a peer and stopped at an
@@ -99,7 +100,7 @@ const ConnectedPeerCheck* peer_check = nullptr);
 
 /**
  * @brief libcurl's current request URL on @p curl (`CURLINFO_EFFECTIVE_URL`):
- *        the last hop's when libcurl followed a redirect itself.
+ *        the current hop's, since a redirect chain reuses the one handle.
  *
  * Copied because libcurl's buffer is only valid until the next call into the
  * handle. Empty for a null handle and when libcurl reports none.
@@ -126,9 +127,11 @@ const ConnectedPeerCheck* peer_check = nullptr);
  *        which is what `Response::transfer_attempted` records (#2412).
  *
  * False only for a URL libcurl could not parse or a scheme the handle refuses,
- * and then only while @p curl never reached a peer: a redirect whose target
- * is refused, and a reply libcurl cannot read, arrive as the same codes after
- * real hops. Every other code, a resolve failure and an unreadable client
+ * and then only while @p curl never reached a peer: a reply libcurl cannot
+ * read arrives as the same code after a real hop. A redirect the engine
+ * refuses (`resolve_redirect_target`, the limit) is not a libcurl code: the
+ * hop that asked for it finished with `CURLE_OK`, so it is an attempt. Every
+ * other code, a resolve failure and an unreadable client
  * certificate included, is an attempt. Read before anything else reuses the
  * handle. A null handle reads as one that reached no peer.
  */
@@ -163,12 +166,12 @@ const ConnectedPeerCheck* peer_check = nullptr);
  * request libcurl re-sent on a new connection is seen at all (#2799,
  * `connection_replays`).
  *
- * `CURLOPT_PROTOCOLS_STR` and `CURLOPT_REDIR_PROTOCOLS_STR` are `http,https`
- * on every handle: the backstop behind `validate_transferable`'s scheme rule
- * for the two URLs it never sees - a redirect's `Location` where libcurl
- * follows (the load path; a `RedirectChain` driver refuses one itself, in
- * `resolve_redirect_target`), and the scheme libcurl guesses for a URL that
- * names none (`ftp.example.com/x` is FTP).
+ * `CURLOPT_PROTOCOLS_STR` is `http,https` on every handle: the backstop behind
+ * `validate_transferable`'s scheme rule for the one URL it cannot judge, the
+ * scheme libcurl guesses for a URL that names none (`ftp.example.com/x` is
+ * FTP). A redirect's `Location` is never handed to it: `RedirectChain` refuses
+ * a scheme other than `http` or `https` in `resolve_redirect_target`, as an
+ * `InvalidUrl` worded `Protocol "ftp" is disabled (in redirect)`.
  *
  * @param verify_ssl The request's own `verifySSL`. Per-request today; phase 2
  *                   of #704 adds the policy-level CA fields beside it.
@@ -294,8 +297,11 @@ Response error_response (const Error& error);
  * larger one streams from the file the plan opened (`FileRef::approved`,
  * #2678), never from `src`: `CURLOPT_UPLOAD` with `INFILESIZE_LARGE` the size
  * that open saw, a read callback at this transfer's own offset, and a **seek
- * callback**, which libcurl needs to rewind the body for a redirect or the
- * second leg of Digest/NTLM - without it that leg fails rather than resending.
+ * callback**, which libcurl needs to rewind the body for the second leg of
+ * Digest/NTLM - without it that leg fails rather than resending. A redirect
+ * that resends the body is rewound by the engine for a streamed upload
+ * (`RedirectChain::apply_method` through `rewind_body_source`); a form part
+ * is rewound by libcurl through this callback.
  * `UPLOAD` means PUT to libcurl, so the method is re-asserted with
  * `CURLOPT_CUSTOMREQUEST` afterwards.
  *
@@ -567,9 +573,8 @@ CurlPhaseTimes read_phase_times (CURL* curl);
 /**
  * @brief Add one hop's timers to a chain's, field by field (#3300).
  *
- * What libcurl's own counters did across the redirects it followed, each timer
- * summed over the requests: a chain the engine follows one transfer per hop
- * reads each hop's timers and sums them here, so its wire time covers every
+ * Each timer summed over the requests of a chain: the engine follows one
+ * transfer per hop, reads each hop's timers and sums them here, so its wire time covers every
  * hop and the queue wait does not absorb the earlier ones.
  */
 void add_phase_times (CurlPhaseTimes& total, const CurlPhaseTimes& hop);

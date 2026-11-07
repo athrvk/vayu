@@ -77,7 +77,7 @@ interface HopCookies {
 
 /**
  * "302 Found, to /home": what answered and where it sent the client. `url` is
- * the request the hop answered, resolved by libcurl; the `Location` beside it
+ * the request the hop answered, resolved by the engine; the `Location` beside it
  * may be relative. A hop from an engine before #2949 has no `url`.
  */
 function hopLabel(hop: RedirectHop): string {
