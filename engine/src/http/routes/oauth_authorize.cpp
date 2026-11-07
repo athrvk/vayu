@@ -263,6 +263,21 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string error;
     std::string cache_key;
 
+    /// What an embedded completion's exchange watches. That exchange runs
+    /// outside the registry's lock, and a cancel or a shutdown can destroy this
+    /// record under it, so the flag is shared and raised by the destructor.
+    std::shared_ptr<std::atomic<bool>> completion_cancel =
+    std::make_shared<std::atomic<bool>> (false);
+
+    Attempt () = default;
+    ~Attempt () {
+        completion_cancel->store (true, std::memory_order_release);
+    }
+    Attempt (const Attempt&)            = delete;
+    Attempt& operator= (const Attempt&) = delete;
+    Attempt (Attempt&&)                 = delete;
+    Attempt& operator= (Attempt&&)      = delete;
+
     [[nodiscard]] bool expired (Clock::time_point now) const {
         return now >= deadline;
     }
@@ -515,13 +530,13 @@ const std::string& mode) {
 
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
 const std::string& attempt_id,
-const std::string& callback_url,
-const std::atomic<bool>* cancel) {
+const std::string& callback_url) {
     // Snapshot what the exchange needs under the lock, then release it: the token
     // exchange is a network round-trip and must not stall status() polls for
     // other attempts (the manager is shared across all in-flight authorizations).
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
+    std::shared_ptr<const std::atomic<bool>> cancel;
     const auto now      = Clock::now ();
     const auto answered = attempts_.with_entry (
     attempt_id, [&] (Attempt& attempt) -> std::optional<AuthorizeStatus> {
@@ -534,6 +549,7 @@ const std::atomic<bool>* cancel) {
         code_verifier = attempt.code_verifier;
         redirect_uri  = attempt.redirect_uri;
         config        = attempt.config;
+        cancel        = attempt.completion_cancel;
         return std::nullopt;
     });
     if (!answered) {
@@ -552,7 +568,7 @@ const std::atomic<bool>* cancel) {
     CallbackOutcome outcome;
     if (redirect_refusal (params) || callback_state_matches (params, state)) {
         outcome = resolve_oauth_callback (
-        db, config, code_verifier, redirect_uri, params, cancel);
+        db, config, code_verifier, redirect_uri, params, cancel.get ());
     } else {
         outcome.error = "State mismatch (possible CSRF)";
     }

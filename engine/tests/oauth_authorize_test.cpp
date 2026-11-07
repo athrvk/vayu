@@ -15,6 +15,7 @@
 #include <future>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -592,6 +593,56 @@ TEST_F (OAuthAuthorizeTest, SettledAttemptLeavesTheCap) {
     [&] { return mgr.start (*db_, embedded_config (), "embedded").ok; }))
     << "a settled attempt still holds a slot";
     EXPECT_EQ (mgr.status (started.front ().attempt_id).error, failed.error);
+}
+
+// Starts an embedded completion held at a token endpoint that never answers,
+// ends it with @p stop, and returns how long @p stop took to end it and what
+// the completion answered.
+template <typename Stop>
+std::pair<std::chrono::steady_clock::duration, vayu::http::AuthorizeStatus>
+stop_a_held_embedded_completion (vayu::db::Database& db,
+vayu::http::OAuth2AuthorizeManager& mgr,
+Stop&& stop) {
+    MockTokenServer idp;
+    json config              = embedded_config ();
+    config["grantType"]      = "authorization_code";
+    config["accessTokenUrl"] = idp.url ("/token-hang");
+    const auto start         = mgr.start (db, config, "embedded");
+    EXPECT_TRUE (start.ok) << start.error_message;
+
+    auto completion = std::async (std::launch::async, [&] {
+        return mgr.complete (db, start.attempt_id,
+        "https://app/callback?code=AUTHCODE&state=" + state_of (start));
+    });
+    EXPECT_TRUE (vayu::tests::wait_until ([&idp] { return idp.hits () > 0; }))
+    << "the completion never reached the token endpoint";
+
+    const auto began = std::chrono::steady_clock::now ();
+    stop (start.attempt_id);
+    auto status = completion.get ();
+    return { std::chrono::steady_clock::now () - began, std::move (status) };
+}
+
+// A cancel ends an embedded completion's token exchange too (#3347).
+// Healthy: about a second, one libcurl progress tick. Broken: the exchange's
+// 30s timeout. Ten seconds sits between them. Mutation check: give the
+// completion's `acquire_token` no cancel, and the cancel takes 30s.
+TEST_F (OAuthAuthorizeTest, CancelEndsAnEmbeddedCompletionsTokenExchange) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    const auto [took, status] = stop_a_held_embedded_completion (
+    *db_, mgr, [&mgr] (const std::string& id) { mgr.cancel (id); });
+    EXPECT_LT (took, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (status.state, "not_found");
+}
+
+// The same bound for a shutdown, which `Server::stop` runs before it joins the
+// handler making the exchange.
+TEST_F (OAuthAuthorizeTest, ShutdownEndsAnEmbeddedCompletionsTokenExchange) {
+    vayu::http::OAuth2AuthorizeManager mgr;
+    const auto [took, status] = stop_a_held_embedded_completion (
+    *db_, mgr, [&mgr] (const std::string&) { mgr.shutdown (); });
+    EXPECT_LT (took, vayu::tests::WAIT_DEADLINE / 2);
+    EXPECT_EQ (status.state, "not_found");
 }
 
 TEST_F (OAuthAuthorizeTest, CancelStopsAttempt) {

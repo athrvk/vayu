@@ -6998,9 +6998,10 @@ At most 16 attempts may be unsettled at once, embedded ones included; the next
 start is refused with `429` `oauth2_authorize_limit_reached`. A settled attempt
 holds no listener and leaves the count.
 
-Cancelling a loopback attempt, or the engine shutting down, cancels a token
-exchange its callback is still making: the callback's tab is told the exchange
-failed. A completion (the loopback callback and `POST
+Cancelling an attempt (`DELETE`), or the engine shutting down, cancels a token
+exchange still in flight for it, the loopback callback's and an embedded `POST
+/oauth2/authorize/complete`'s alike: the callback's tab is told the exchange
+failed, and the completion answers `404`. A completion (the loopback callback and `POST
 /oauth2/authorize/complete` alike) always exchanges its code and replaces any
 token already cached under that key.
 

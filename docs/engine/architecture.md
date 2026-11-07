@@ -276,7 +276,9 @@ attempt's result moves out of the registry instead: the authorize manager owns a
 (#3347) that fails each attempt still pending at its deadline, copies every settled result aside for
 the 10-minute polling window and retires the listener outside the lock, so an attempt nobody polls
 frees its port, the cap counts only unsettled attempts, and `GET /oauth2/authorize/:id` reads
-without writing. Since #1140 a manager may hand the `ManagedListener` the
+without writing. `Server::stop()` shuts the authorize manager down *before* joining the management
+API's handlers, the one manager it does, because an embedded completion's token exchange runs on
+one of those handlers and watches its attempt's cancel. Since #1140 a manager may hand the `ManagedListener` the
 `httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
 every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
 capture, and the other three take the plain server the listener builds for itself. The mock server
@@ -1669,14 +1671,17 @@ consumers drained** (`Server::stop()` sets the flag every handler reads as
 `RouteContext::server_stopping`, which cancels each outbound transfer a
 handler is making - the `/execute` send and its `pm.sendRequest`s, an OAuth
 token request, an import fetch, a connection test - and ends each SSE relay
-(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it then closes the
-listener and joins its accept loop's thread, which returns only once httplib
-has joined every handler, so each request in flight has answered first, also
-when the loop had already ended on its own, which is what the daemon's wait
-reads as a reason to shut down (#2667); then it calls `shutdown()` on the
-four listener managers - mock servers, inboxes, mock issuers, OAuth callback
-attempts - each of which signals every entry, ending a paced answer's wait
-and cancelling a callback's token exchange, before joining any (#3345); then
+(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it shuts the OAuth
+authorization manager down, which cancels an embedded completion's token
+exchange, made on a management handler, through its attempt (#3347); it then
+closes the listener and joins its accept loop's thread, which returns only
+once httplib has joined every handler, so each request in flight has answered
+first, also when the loop had already ended on its own, which is what the
+daemon's wait reads as a reason to shut down (#2667); then it calls
+`shutdown()` on the other three listener managers - mock servers, inboxes,
+mock issuers - each of which, like the OAuth one, signals every entry, ending
+a paced answer's wait and cancelling a callback's token exchange, before
+joining any (#3345); then
 `SseStreamManager::shutdown()`, which signals every stream and joins its
 worker) → run workers signalled and joined (each joins its own metrics and
 monitor threads and stops its event loop first) → the start-of-session
@@ -1694,8 +1699,10 @@ while curl's global state was torn down, and still writing its run row through
 a `Database` that is about to be destroyed - the #125 defect in the one worker
 `RunManager` does not own (#646). An OAuth callback is in the same position
 during its token exchange, and every listener's handler writes through the
-`Database` (#3345). They run after the management API's own handlers are
-joined, so no route is left to start or stop a listener under them. Any other
+`Database` (#3345). The three that can run after the management API's own
+handlers are joined do, so no route is left to start or stop a listener under
+them; the OAuth manager's shutdown is terminal, so a route that still reaches
+it is only refused. Any other
 owner of an `SseStreamManager` or a listener manager owes the same order: shut
 it down before the `Database` and `CookieJar` its threads reach through go
 away.

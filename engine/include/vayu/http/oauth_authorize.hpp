@@ -12,7 +12,6 @@
 #include "vayu/http/listener_registry.hpp"
 #include "vayu/utils/stop_signal.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <map>
@@ -96,21 +95,21 @@ class OAuth2AuthorizeManager {
     AuthorizeStart
     start (vayu::db::Database& db, const nlohmann::json& config, const std::string& mode);
 
-    // Embedded mode: complete the attempt from the captured callback URL.
-    // `cancel` ends its token exchange early (`oauth::acquire_token`, #2683).
+    // Embedded mode: complete the attempt from the captured callback URL. Its
+    // token exchange ends early when the attempt is cancelled or the manager
+    // shuts down.
     AuthorizeStatus complete (vayu::db::Database& db,
     const std::string& attempt_id,
-    const std::string& callback_url,
-    const std::atomic<bool>* cancel = nullptr);
+    const std::string& callback_url);
 
     /// Reads only: an attempt past its deadline the reaper has not reached yet
     /// is reported as the timeout the reaper will record.
     AuthorizeStatus status (const std::string& attempt_id);
     void cancel (const std::string& attempt_id);
 
-    /// Stop the reaper and every loopback listener, drop every attempt, and
-    /// refuse every later start with a 503. Terminal and idempotent; the
-    /// destructor runs it too.
+    /// Stop the reaper and every loopback listener, cancel every token
+    /// exchange, drop every attempt, and refuse every later start with a 503.
+    /// Terminal and idempotent; the destructor runs it too.
     void shutdown ();
 
     private:

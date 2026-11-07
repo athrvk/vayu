@@ -61,9 +61,11 @@ class Server {
      *
      * No handler outlives this call (#2683): the daemon tears down curl's
      * global state and the database right after it. That covers the
-     * listeners the managers own as well as this one's: after its own
-     * handlers, every mock server, inbox, mock issuer and OAuth callback is
-     * shut down, then every stream consumer (#3345). It is bounded because
+     * listeners the managers own as well as this one's: the OAuth
+     * authorization manager first, because an embedded completion's token
+     * exchange runs on one of its own handlers (#3347); after those handlers,
+     * every mock server, inbox and mock issuer is shut down, then every
+     * stream consumer (#3345). It is bounded because
      * each handler's outbound transfer is cancelled and each SSE relay ends
      * first (`RouteContext::server_stopping`), and a listener's handler waits
      * on its entry's stop signal (a paced answer, a callback's token

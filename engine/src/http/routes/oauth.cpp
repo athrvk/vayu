@@ -185,9 +185,12 @@ void register_oauth_routes (RouteContext& ctx) {
             refuse_request_body (res, "POST /oauth2/authorize/complete", body.error ());
             return;
         }
+        // The attempt's own cancel ends the exchange: a DELETE of the attempt,
+        // or `Server::stop`, which shuts the manager down before joining this
+        // handler.
         const auto st = ctx.authorize_manager.complete (ctx.db,
         body->value ("attemptId", std::string{}),
-        body->value ("callbackUrl", std::string{}), &ctx.server_stopping);
+        body->value ("callbackUrl", std::string{}));
         res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (-1, ' ', false,
                          nlohmann::json::error_handler_t::replace),
