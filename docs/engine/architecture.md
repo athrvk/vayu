@@ -612,17 +612,22 @@ makes a session survive from one design-mode request to the next.
   one line, so a request never carries two `Cookie` headers. The one exception
   is a line libcurl cuts at 8190 bytes, which drops the typed rows with it:
   `request_headers` records them before the transfer, so `apply_cookie_notices`
-  (`client.cpp`) removes them afterwards and the response carries a
-  `cookie_not_sent` warning, as it carries `cookie_limit_reached` past 150 jar
-  cookies. Both come from libcurl's `CURLINFO_TEXT` notices (issue #3307), read
-  before the verbosity gate because they are the response's, not the log's.
-  The incoming side has no notice to read: libcurl discards a `Set-Cookie` line
-  over 5000 bytes, a cookie whose name and value pass 4096 and every cookie
-  past the 50th of a response without a word, so `header_callback` counts the
-  lines (`IncomingCookieWatch`, `client.cpp`) when the send has a jar, and the
-  response carries `cookie_dropped_oversized` / `cookie_dropped_too_many`.
-  A `disableCookies` send has no jar, libcurl's engine is off and nothing is
-  reported. The streaming path (`sse_stream.cpp`) does not count them (#3315). The
+  removes them afterwards and the response carries a `cookie_not_sent`
+  warning, as it carries `cookie_limit_reached` past 150 jar cookies. Both come
+  from libcurl's `CURLINFO_TEXT` notices (issue #3307), read before the
+  verbosity gate because they are the response's, not the log's. The incoming
+  side has no notice to read: libcurl discards a `Set-Cookie` line over 5000
+  bytes, a cookie whose name and value pass 4096 and every cookie past the 50th
+  of a response without a word, so the header callback counts the lines
+  (`IncomingCookieWatch`) when the send has a jar, and the response carries
+  `cookie_dropped_oversized` / `cookie_dropped_too_many`. A `disableCookies`
+  send has no jar, libcurl's engine is off and nothing is reported. Both design
+  drivers report all four from one copy, `http/cookie_warnings.hpp`:
+  `Client::send` and the streaming consumer (`sse_stream.cpp`, #3315), which
+  turns libcurl's debug stream on for the notices alone and keeps no frame. A
+  stream's warnings land on its stored trace, never on the `202` or a relay
+  frame: the app reads them from `GET /runs/:runId/report` once the relay's
+  `complete` arrives. The incoming
   rules are one copy, `SetCookieLimits` (`http/set_cookie_limits.hpp`), which
   the event loop's `header_callback` also runs, allocation-free, on a transfer
   that tracks cookies (a scenario load run's step): it counts what was dropped

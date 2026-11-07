@@ -52,6 +52,7 @@
 #include "vayu/types.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/logger.hpp"
+#include "verbosity_restorer.hpp"
 #include "wait_until.hpp"
 
 #include <nlohmann/json.hpp>
@@ -789,25 +790,6 @@ warnings_with_code (const vayu::Response& response, const std::string& code) {
     return found;
 }
 
-/// Puts the console verbosity back, so a test that raises it cannot leak the
-/// level into the next one.
-class VerbosityRestorer {
-    public:
-    VerbosityRestorer ()
-    : saved_ (vayu::utils::Logger::instance ().get_verbosity ()) {
-    }
-    ~VerbosityRestorer () {
-        vayu::utils::Logger::instance ().set_verbosity (saved_);
-    }
-    VerbosityRestorer (const VerbosityRestorer&)            = delete;
-    VerbosityRestorer& operator= (const VerbosityRestorer&) = delete;
-    VerbosityRestorer (VerbosityRestorer&&)                 = delete;
-    VerbosityRestorer& operator= (VerbosityRestorer&&)      = delete;
-
-    private:
-    int saved_;
-};
-
 } // namespace
 
 // Three ~3000-byte jar cookies pass libcurl's 8190-byte Cookie line at the
@@ -819,7 +801,7 @@ class VerbosityRestorer {
 // pass finds none; drop `apply_cookie_notices`' erase and the typed row stays
 // in the record.
 TEST (CookieJarWarnings, ACookiePastTheHeaderLimitIsNamedAndTakesTheTypedRowWithIt) {
-    VerbosityRestorer restore;
+    const vayu::tests::VerbosityRestorer restore;
     for (const int verbosity : { 0, 2 }) {
         vayu::utils::Logger::instance ().set_verbosity (verbosity);
         CookieServer server;
@@ -833,7 +815,7 @@ TEST (CookieJarWarnings, ACookiePastTheHeaderLimitIsNamedAndTakesTheTypedRowWith
         const auto found = warnings_with_code (response, "cookie_not_sent");
         ASSERT_EQ (found.size (), 1U)
         << "verbosity "
-        << verbosity << ": no warning, or libcurl reworded its header-size notice (client.cpp)";
+        << verbosity << ": no warning, or libcurl reworded its header-size notice (cookie_warnings.cpp)";
         EXPECT_NE (found.front ().message.find ("Cookie big"), std::string::npos)
         << found.front ().message;
         EXPECT_NE (found.front ().message.find ("8190"), std::string::npos)
@@ -866,7 +848,8 @@ TEST (CookieJarWarnings, TheCookieCountCapIsReportedAndLeavesTheTypedRowSent) {
     ASSERT_EQ (response.status_code, 200);
     const auto found = warnings_with_code (response, "cookie_limit_reached");
     ASSERT_EQ (found.size (), 1U)
-    << "no warning, or libcurl reworded its cookie-count notice (client.cpp)";
+    << "no warning, or libcurl reworded its cookie-count notice "
+       "(cookie_warnings.cpp)";
     EXPECT_NE (found.front ().message.find ("150"), std::string::npos)
     << found.front ().message;
     EXPECT_TRUE (warnings_with_code (response, "cookie_not_sent").empty ());
@@ -946,7 +929,7 @@ TEST (CookieJarWarnings, AWithheldCookieWithAVeryLongNameIsStillReportedAndCutSh
     ASSERT_EQ (response.status_code, 200);
     const auto found = warnings_with_code (response, "cookie_not_sent");
     ASSERT_EQ (found.size (), 1U)
-    << "no warning for a notice libcurl cut short (client.cpp)";
+    << "no warning for a notice libcurl cut short (cookie_warnings.cpp)";
     EXPECT_NE (found.front ().message.find ("Cookie " + std::string (64, 'n') + "... was not sent"),
     std::string::npos)
     << found.front ().message;

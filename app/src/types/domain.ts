@@ -2524,8 +2524,8 @@ export interface HttpResponse {
 	 * (issue #3307): a jar cookie left off the `Cookie` line, or a `Set-Cookie`
 	 * libcurl discarded unread. Never fails the send. **Always present** on a live
 	 * `/execute` body, `[]` when there is nothing to say, so an absent key is an
-	 * engine too old to warn. A streaming send is answered before the exchange
-	 * runs and carries none.
+	 * engine too old to warn. A streaming send's `202` carries none: its stored
+	 * trace does, and the pane takes them from it when the stream ends (#3315).
 	 */
 	warnings?: ExchangeWarning[];
 	/**

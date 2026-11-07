@@ -526,6 +526,7 @@ add_library(vayu_core STATIC
     src/http/script_parts.cpp
     src/http/request_exchange.cpp
     src/http/set_cookie.cpp
+    src/http/cookie_warnings.cpp
     src/http/sse_parser.cpp
     src/http/sse_stream.cpp
     src/http/transport_policy.cpp

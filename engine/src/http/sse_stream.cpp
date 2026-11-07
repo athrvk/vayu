@@ -24,6 +24,7 @@
 
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/sample_capture.hpp"
+#include "vayu/http/cookie_warnings.hpp"
 #include "vayu/http/curl_error_buffer.hpp"
 #include "vayu/http/curl_options.hpp"
 #include "vayu/http/curl_version_map.hpp"
@@ -362,6 +363,9 @@ struct TransferState {
     /// Whether the current hop's bytes are also kept as `Response::body`.
     /// Decided at the hop's first body byte, from its own `Content-Type`.
     std::optional<bool> keeps_body;
+    /// Where a `Set-Cookie` line is counted, or null for a stream with no jar:
+    /// libcurl's cookie engine is off then and drops nothing.
+    IncomingCookieWatch* incoming_cookies = nullptr;
 };
 
 /// Whether @p headers announce an event stream, whose bytes are its events
@@ -496,10 +500,25 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
         // Every block starts the record over, so the final hop's headers and
         // body are what the run reports.
         begin_response_hop (*state);
+        if (state->incoming_cookies != nullptr) {
+            state->incoming_cookies->limits.start_response ();
+        }
         return total_size;
     }
     vayu::http::detail::ingest_header_line (line, response->headers, &response->header_lines);
+    watch_set_cookie (state->incoming_cookies, line, total_size);
     return total_size;
+}
+
+/// Collects libcurl's cookie notices into the `CookieNotices` at @p userptr,
+/// at any log verbosity: a warning is the response's, not the log's. Every
+/// other frame is dropped, a stream's data above all, and nothing is logged.
+int stream_debug_callback (CURL*, curl_infotype type, char* data, size_t size, void* userptr) {
+    if (type == CURLINFO_TEXT) {
+        note_cookie_notice (
+        *static_cast<CookieNotices*> (userptr), std::string_view (data, size));
+    }
+    return 0;
 }
 
 /// Whether the hop in flight has written its request on a made connection,
@@ -755,15 +774,30 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     // silently skipped streams.
     set_opt<CURLOPT_HTTP_VERSION> (
     curl, vayu::http::to_curl_http_version (request.request.http_version));
+
+    // libcurl names a jar cookie it withheld only on its debug channel, so
+    // every stream runs verbose; `stream_debug_callback` keeps nothing else.
+    // The notices outlive `curl_easy_cleanup`, which can still call it.
+    CookieNotices cookie_notices;
+    set_opt<CURLOPT_VERBOSE> (curl, 1L);
+    set_opt<CURLOPT_DEBUGFUNCTION> (curl, stream_debug_callback);
+    set_opt<CURLOPT_DEBUGDATA> (curl, &cookie_notices);
+
     std::vector<std::string> jar_seeded_from;
+    IncomingCookieWatch incoming_cookies;
     if (request.cookie_jar) {
         jar_seeded_from = detail::apply_jar_cookies (
         curl, *request.cookie_jar, request.cookie_scope, request.cookie_writes);
+        state.incoming_cookies = &incoming_cookies;
     }
 
     const auto submitted_at = std::chrono::steady_clock::now ();
     const StreamChainOutcome outcome = run_stream_chain (curl, state, chain, errors);
     const auto completion = std::chrono::steady_clock::now ();
+    // Onto the response the stored trace is built from (`build_result_trace`):
+    // the route answered `202` long ago, and no relay frame carries them.
+    apply_cookie_notices (cookie_notices, response);
+    apply_incoming_cookies (incoming_cookies, response);
 
     if (request.cookie_jar) {
         detail::capture_jar_cookies (
