@@ -13,6 +13,7 @@ import { useResponseStore } from "./response-store";
 import { useTabSelectionStore } from "./tab-selection-store";
 import { useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
+import { pluralize } from "@/modules/dashboard/utils/format";
 
 export type TabType =
 	| "welcome"
@@ -350,11 +351,10 @@ function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<str
 		openTabs.filter((t) => closing.has(t.id) && isTabDirty(t, contexts)).map((t) => t.id)
 	);
 	if (kept.size === 0) return closing;
-	const noun = kept.size === 1 ? "tab" : "tabs";
 	useToastStore
 		.getState()
 		.showToast(
-			`Not saved - Vayu's engine is unreachable; kept ${kept.size} unsaved ${noun} open`,
+			`Not saved - Vayu's engine is unreachable; kept ${kept.size} unsaved ${pluralize(kept.size, "tab")} open`,
 			"error"
 		);
 	return new Set([...closing].filter((id) => !kept.has(id)));
