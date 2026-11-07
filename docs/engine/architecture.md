@@ -772,7 +772,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   the same reverse-member-order rule as the authorize manager.
 
 **Listener inventory.** Both auth listeners are spawned, loopback-bound and
-short-lived - the interactive-auth callback (one per attempt, 5-minute TTL) and
+short-lived - the interactive-auth callback (one per attempt, 5-minute TTL, at most 16 at once) and
 mock issuers (at most 8, until stopped) - and neither may ever bind wider than
 `127.0.0.1`, because one carries an authorization code and the other hands out
 bearer tokens. The full inventory, including the one listener that *may* bind
