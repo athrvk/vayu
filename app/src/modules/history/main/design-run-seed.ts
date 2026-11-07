@@ -41,6 +41,7 @@ import { holdsWithheld, isWithheld } from "@/lib/withheld-value";
 import { isBlankScriptElement } from "@/lib/elements";
 import { noFile } from "@/lib/file-trust";
 import { sentBodyFileOf, type SentBodyFile } from "@/lib/sent-body-file";
+import { hasOwnName, requestTabTitle } from "@/lib/request-title";
 import { createDefaultRequestState } from "@/modules/request-builder/utils/request-state";
 import { isLegacyManagedHeader } from "@/modules/request-builder/utils/system-headers";
 import {
@@ -318,6 +319,19 @@ export function scriptPartToElement(
 	return isBlankScriptElement(element) ? null : element;
 }
 
+/**
+ * The name the copy starts with, which Send records on its run
+ * (`execIdentity`): the run's recorded request name when it is one the user set
+ * (the same rule the tab strip uses), else the URL path the strip would show.
+ * A url the engine withheld names nothing. `undefined` leaves the default
+ * state's name in place.
+ */
+function copyName(run: Run, snapshot: DesignSnapshot, withheldUrl: boolean): string | undefined {
+	const recorded = run.configSnapshot?.requestName ?? run.summary?.requestName ?? "";
+	const title = requestTabTitle(recorded, withheldUrl ? "" : (snapshot.url ?? ""));
+	return hasOwnName(title) ? title : undefined;
+}
+
 export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSeed {
 	const snapshot = (run.configSnapshot ?? {}) as DesignSnapshot;
 	const trace = run.result?.trace;
@@ -337,12 +351,15 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 
 	const body = snapshot.body;
 	const bodyMode = (body?.mode ?? "none") as RequestState["bodyMode"];
+	const withheld = withheldParts(snapshot, recordedHeaders);
+	const name = copyName(run, snapshot, withheld.url);
 
 	return {
 		request: {
 			...createDefaultRequestState(),
 			id: null,
 			collectionId: null,
+			...(name ? { name } : {}),
 			method: (snapshot.method ?? "GET") as RequestState["method"],
 			url: snapshot.url ?? "",
 			params: paramsFromSnapshot(snapshot),
@@ -415,6 +432,6 @@ export function seedFromRun(run: Run, liveRequest?: Request | null): DesignRunSe
 		requestBodyTruncated:
 			trace?.request?.bodyTruncated || body?.bodyTruncated ? true : undefined,
 		requestBodyFile: sentBodyFileOf(trace?.request?.bodyFile),
-		withheld: withheldParts(snapshot, recordedHeaders),
+		withheld,
 	};
 }
