@@ -271,10 +271,11 @@ export default function Shell() {
 			 * the tab underneath it, ⌘1-9 switched away from it - so the dialog's
 			 * owner unmounted mid-interaction and the dialog went with it.
 			 *
-			 * Escape closes the dialog first; then the chords are live again. The
-			 * command palette is itself a dialog, so its own ⌘K listener keeps
-			 * working (it is bound in `CommandPalette`, not here) while nothing
-			 * else does - which is what a palette on top of the window should do.
+			 * Escape closes the dialog first; then the chords are live again. ⌘K is
+			 * not in this map: `CommandPalette` binds it and asks `isModalOpen()`
+			 * itself, so it too refuses to open over another dialog. Its toggle-closed
+			 * still works with the palette up, because that guard applies only while
+			 * the palette is closed.
 			 */
 			if (isModalOpen()) return;
 
