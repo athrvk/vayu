@@ -1946,14 +1946,21 @@ dirty, the row-init effect recomputes the same diff against `baselineRef` on
 every `dataVariables` change purely to call `findVariableConflicts`, which
 reports a key only when the fresh map *and* the user's edit both moved it away
 from the baseline to different values. The table renders one `Callout` per
-conflicting key naming it, with a "Take theirs" action; the user's value is
-what saves by default (it is already the value `planSave` sends for that
-key) until they explicitly take the other side's. `baselineRef` itself only
-advances on a full reseed, on this editor's own successful save (to the map
-that save just wrote, so a later write is never compared against this save's
-own history), and when a conflict is resolved - never merely because the table
-was dirty when a fresh write arrived, since a key nobody has touched needs no
-conflict bookkeeping at all.
+conflicting key naming it, with "Keep mine" and "Take theirs" actions, and **a
+save leaves a conflicted key out until the user picks one** (#3353): the other
+writer's value stays on disk, the user's stays on screen, and the editor stays
+dirty, so the Dock says "Unsaved changes". Saving the user's value by default
+would be choosing for them. Both actions set the key's baseline to the other
+writer's value and save at once: "Keep mine" then reads the row as the user's
+change over it, "Take theirs" first replaces the row with it. Deleting a
+conflicted row is "Keep mine" for that key. `baselineRef` itself only advances
+on a full reseed, on this editor's own successful save (to the map that save
+wrote, so a later write is never compared against this save's own history -
+except a key the save held back, which keeps its baseline so its conflict stays
+open; conflicts are then recomputed against the new baseline, never cleared),
+and when the user picks a side - never merely because the table was dirty when
+a fresh write arrived, since a key nobody has touched needs no conflict
+bookkeeping at all.
 
 #### `modules/settings/settings-store.ts` - Settings Category Selection
 

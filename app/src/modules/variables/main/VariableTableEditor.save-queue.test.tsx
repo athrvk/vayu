@@ -11,7 +11,8 @@
 /**
  * How the editor's saves follow one another (#3353), against the real save
  * store: one in flight at a time so the baseline is always the last saved
- * map, and a save for an entity that is gone ending as a failure.
+ * map, a save for an entity that is gone ending as a failure, and a conflicted
+ * key left out of every save until the user picks a side.
  *
  * The harness is `VariableTableEditor.status-stomp.test.tsx`'s.
  */
@@ -227,5 +228,58 @@ describe("a save for an environment that is gone", () => {
 
 		expect(updateEnvironment).toHaveBeenCalledTimes(1);
 		expect(store().status).toBe("saving");
+	});
+});
+
+describe("a conflict open while the user saves something else", () => {
+	function openConflict() {
+		const view = mount(
+			collectionOf({ host: variable("example.com", 1000), token: variable("abc", 2000) })
+		);
+		fireEvent.change(valueFields()[0], { target: { value: "mine" } });
+		view.rerenderWith(
+			collectionOf({ host: variable("theirs", 1000), token: variable("abc", 2000) })
+		);
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeInTheDocument();
+		return view;
+	}
+
+	/*
+	 * Mutation check, two of them: keep the conflicted key in the payload (drop
+	 * the `delete changes[key]` loop in `planSave`) and the payload carries
+	 * "mine"; clear the conflicts on success (`setConflicts([])` in `landSave`)
+	 * and the callout goes with the save. Either reds here.
+	 */
+	it("survives the save, and the conflicted key is not in it", () => {
+		const { rerenderWith } = openConflict();
+
+		typeAndLeave(valueFields()[1], "xyz");
+		expect(sent).toHaveLength(1);
+		expect(lastSent().variables.host.value).toBe("theirs");
+		expect(lastSent().variables.token.value).toBe("xyz");
+
+		landNewestFirst();
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeInTheDocument();
+		expect(valueFields()[0].value).toBe("mine");
+		// The held edit is not on disk, and the Dock says so.
+		expect(store().status).toBe("pending");
+
+		// The cache echo of that save does not close it either.
+		rerenderWith(collectionOf(lastSent().variables));
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeInTheDocument();
+		expect(valueFields()[0].value).toBe("mine");
+	});
+
+	it("is closed by the user's choice, which the next save then carries", () => {
+		openConflict();
+		typeAndLeave(valueFields()[1], "xyz");
+		landNewestFirst();
+
+		fireEvent.click(screen.getByRole("button", { name: "Keep mine" }));
+
+		expect(sent).toHaveLength(2);
+		expect(lastSent().variables.host.value).toBe("mine");
+		expect(lastSent().variables.token.value).toBe("xyz");
+		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
 	});
 });

@@ -265,12 +265,22 @@ function conflictsOf({ rows, baseline, fresh }: EditorSnapshot): VariableConflic
 	return findVariableConflicts(baseline, computeUserChanges(rows, baseline), fresh);
 }
 
+/** `map` with `key` taken from `source`: copied, or dropped where `source` has none. */
+function withKeyFrom(map: VariableMap, key: string, source: VariableMap): VariableMap {
+	const next = { ...map };
+	if (Object.prototype.hasOwnProperty.call(source, key)) next[key] = source[key];
+	else delete next[key];
+	return next;
+}
+
 interface SavePlan {
 	/** The rows the save is for, names trimmed. */
 	rows: VariableRowData[];
 	problems: ReturnType<typeof nameProblems>;
-	/** The keys the save sends. */
+	/** The keys the save sends, conflicted keys left out. */
 	changes: VariableChanges;
+	/** Held out of `changes` until the user picks a side. */
+	conflicts: VariableConflict[];
 	/** The whole map the PUT carries, in `createdAt` order. */
 	payload: VariableMap;
 }
@@ -278,21 +288,35 @@ interface SavePlan {
 /**
  * The user's own changes merged onto the freshest map, never the editor's whole
  * copy, which would carry a key an MCP agent wrote after this editor last
- * reseeded back to its pre-agent value (#1439). Payload order is by
- * `createdAt` so the round trip preserves display order.
+ * reseeded back to its pre-agent value (#1439). A key both sides moved is left
+ * out until the user chooses (#3353): saving it would be choosing for them.
+ * Payload order is by `createdAt` so the round trip preserves display order.
  */
 function planSave(snapshot: EditorSnapshot): SavePlan {
 	// Names are trimmed on commit, not per keystroke: a trailing space typed
 	// mid-name has to survive until the user leaves the field (#3251).
 	const rows = withTrimmedNames(snapshot.rows);
 	const changes = computeUserChanges(rows, snapshot.baseline);
+	const conflicts = findVariableConflicts(snapshot.baseline, changes, snapshot.fresh);
+	for (const { key } of conflicts) delete changes[key];
 	const merged = mergeVariableChanges(snapshot.fresh, changes);
 	return {
 		rows,
 		problems: nameProblems(rows),
 		changes,
+		conflicts,
 		payload: Object.fromEntries(sortVariableEntriesByCreatedAt(Object.entries(merged))),
 	};
+}
+
+/**
+ * The baseline once `plan` has landed: the map it wrote, so the save's own
+ * history is never mistaken for a later external change. A conflicted key it
+ * held back keeps the baseline it had, or the conflict would vanish as if the
+ * user had chosen.
+ */
+function baselineAfter(plan: SavePlan, current: VariableMap): VariableMap {
+	return plan.conflicts.reduce((next, { key }) => withKeyFrom(next, key, current), plan.payload);
 }
 
 interface SaveHandlers {
@@ -427,9 +451,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	/**
 	 * The map the user's edits are diffed against - the state a save last
 	 * agreed with the server on. Advanced on every full reseed, on a
-	 * successful save (to the map that save wrote), and per key when a conflict
-	 * is resolved. Saves run one at a time, so the save that advances it last
-	 * is the one that carried the latest rows.
+	 * successful save (`baselineAfter`), and per key when the user picks a
+	 * side of a conflict. Saves run one at a time, so the save that advances
+	 * it last is the one that carried the latest rows.
 	 */
 	const baselineRef = useRef<VariableMap>({});
 	/**
@@ -520,11 +544,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * they never reached the engine. Staying dirty leaves the normal paths (blur,
 	 * Cmd+S, the quit flush) to write them.
 	 *
-	 * A row the save held back (`heldBack`, a name problem) is the same case: its
-	 * edit is on screen and in no payload, and a clean editor would reseed the row
-	 * away on the next cache echo (#3251). The Dock then says "Unsaved changes"
-	 * rather than "Saved", which the held row would make untrue, and so it does
-	 * for an edit typed while the save was in flight.
+	 * A row the save held back (`heldBack`, a name problem or an open conflict)
+	 * is the same case: its edit is on screen and in no payload, and a clean
+	 * editor would reseed the row away on the next cache echo (#3251, #3353).
+	 * The Dock then says "Unsaved changes" rather than "Saved", which the held
+	 * row would make untrue, and so it does for an edit typed while the save was
+	 * in flight.
 	 */
 	const finishSave = useCallback(
 		(id: string, snapshot: VariableRowData[], heldBack: boolean): SaveOutcome => {
@@ -606,14 +631,14 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				return "saved";
 			}
 			freshMapRef.current = mergeVariableChanges(freshMapRef.current, plan.changes);
-			// The map just written, so a later external write is never compared
-			// against this save's own pre-image and misread as a conflict with it.
-			baselineRef.current = plan.payload;
-			setConflicts([]);
+			baselineRef.current = baselineAfter(plan, baselineRef.current);
 			recordStoredNames(plan.rows, plan.problems);
-			return finishSave(id, plan.rows, plan.problems.size > 0);
+			// Recomputed against the new baseline rather than cleared: a conflict
+			// this save held back is still open, and only the user closes it.
+			setConflicts(conflictsOf(readLive()));
+			return finishSave(id, plan.rows, plan.problems.size > 0 || plan.conflicts.length > 0);
 		},
-		[reportSaved, recordStoredNames, finishSave]
+		[reportSaved, recordStoredNames, readLive, finishSave]
 	);
 
 	/**
@@ -632,9 +657,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			}
 			const live = id === seededContextRef.current;
 			const plan = planSave(live ? readLive() : target.snapshot);
-			if (live && plan.rows !== variablesRef.current) {
-				variablesRef.current = plan.rows;
-				setVariables(plan.rows);
+			if (live) {
+				if (plan.rows !== variablesRef.current) {
+					variablesRef.current = plan.rows;
+					setVariables(plan.rows);
+				}
+				setConflicts(plan.conflicts);
 			}
 			reportSaving(id);
 			sendTo(plan.payload, {
@@ -868,7 +896,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const removeVariable = useCallback(
 		(id: string) => {
 			const currentVariables = variablesRef.current;
-			const removedKey = currentVariables.find((v) => v.id === id)?.key;
+			const removed = currentVariables.find((v) => v.id === id);
 			const newVariables = currentVariables.filter((v) => v.id !== id);
 			if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
 				newVariables.push(blankRow());
@@ -876,14 +904,23 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			setVariables(newVariables);
 			variablesRef.current = newVariables;
 			markDirty();
-			// A conflict named this row before it was deleted: with the row gone,
-			// "Take theirs" would find nothing to update and then immediately
-			// re-delete the key on save, since `computeUserChanges` reads its
-			// absence from the rows as the user's own deletion either way.
-			if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
+			// Deleting a conflicted row is the user's choice for that key: with the
+			// row gone, "Take theirs" would find nothing to update and the save
+			// would re-delete the key anyway, so the delete is taken as "keep mine".
+			const names = new Set(removed ? [removed.baseKey, trimVariableName(removed.key)] : []);
+			for (const { key } of conflictsOf(readLive())) {
+				if (names.has(key)) {
+					baselineRef.current = withKeyFrom(
+						baselineRef.current,
+						key,
+						freshMapRef.current
+					);
+				}
+			}
+			setConflicts((prev) => prev.filter((c) => !names.has(c.key)));
 			void performSaveRef.current();
 		},
-		[markDirty]
+		[markDirty, readLive]
 	);
 
 	// Wraps the ref-held save so a row can trigger an immediate save
@@ -895,16 +932,23 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	}, []);
 
 	/**
-	 * The explicit half of "the user's value is kept until they choose": drop
-	 * the local edit for one conflicting key and take whatever the fresh map
-	 * holds instead, then save immediately - the same "toggle acts now"
-	 * pattern the enabled checkbox and the secret button already use.
+	 * The user's side of a conflict. A save leaves a conflicted key out until
+	 * this runs, and this saves at once - the same "toggle acts now" pattern the
+	 * enabled checkbox and the secret button use. Either way the key's baseline
+	 * becomes the other writer's value: "keep mine" then reads the row as the
+	 * user's change over it, "take theirs" first replaces the row with it.
 	 */
-	const resolveConflict = useCallback(
+	const keepMine = useCallback((key: string) => {
+		baselineRef.current = withKeyFrom(baselineRef.current, key, freshMapRef.current);
+		setConflicts((prev) => prev.filter((c) => c.key !== key));
+		void performSaveRef.current();
+	}, []);
+
+	const takeTheirs = useCallback(
 		(key: string) => {
-			const theirs = dataVariables[key];
+			const theirs = freshMapRef.current[key];
 			// Computed synchronously and assigned to the ref directly, not inside
-			// the `setVariables` updater: `performSaveRef.current()` below reads
+			// the `setVariables` updater: the save `keepMine` starts reads
 			// `variablesRef.current` before this render commits, and a functional
 			// updater's body does not run until then. Mirrors `updateVariable` /
 			// `removeVariable`.
@@ -915,15 +959,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				: variablesRef.current.filter((row) => row.isNew || row.key !== key);
 			setVariables(next);
 			variablesRef.current = next;
-			baselineRef.current = theirs
-				? { ...baselineRef.current, [key]: theirs }
-				: Object.fromEntries(
-						Object.entries(baselineRef.current).filter(([k]) => k !== key)
-					);
-			setConflicts((prev) => prev.filter((c) => c.key !== key));
-			void performSaveRef.current();
+			keepMine(key);
 		},
-		[dataVariables]
+		[keepMine]
 	);
 
 	// Environment-specific handlers
@@ -1061,16 +1099,25 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							severity="warning"
 							title={`Changed elsewhere: ${conflict.key}`}
 							action={
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => resolveConflict(conflict.key)}
-								>
-									Take theirs
-								</Button>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => keepMine(conflict.key)}
+									>
+										Keep mine
+									</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => takeTheirs(conflict.key)}
+									>
+										Take theirs
+									</Button>
+								</div>
 							}
 						>
-							Your edit is kept until you choose.
+							Your edit stays here, unsaved, until you choose.
 						</Callout>
 					))}
 				</div>

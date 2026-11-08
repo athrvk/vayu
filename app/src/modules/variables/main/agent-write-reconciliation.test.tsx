@@ -225,7 +225,7 @@ describe("variables editor - a write that lands while the table is dirty", () =>
 		expect(pendingSave.payload.variables.stale).toBeUndefined();
 	});
 
-	it("surfaces a conflict when an agent changes the key the user is editing, and keeps the user's value until they choose", () => {
+	it("surfaces a conflict when an agent changes the key the user is editing, and saves neither side until they choose", () => {
 		const initial = makeCollection({
 			host: {
 				value: "example.com",
@@ -269,13 +269,63 @@ describe("variables editor - a write that lands while the table is dirty", () =>
 		expect(valueInputs()[0].value).toBe("mine");
 		expect(screen.getByText(/changed elsewhere: host/i)).toBeTruthy();
 
-		// A save now (blur) still keeps the user's value - it is not silently
-		// discarded just because a conflict exists.
+		// A save now (blur) sends the agent's value for the key, untouched, and
+		// keeps the user's on screen: saving "mine" would be choosing for them
+		// (#3353).
 		fireEvent.blur(valueInputs()[0]);
-		expect(pendingSave.payload.variables.host.value).toBe("mine");
+		expect(pendingSave.payload.variables.host.value).toBe("theirs");
 
-		// The callout clears once its own save lands.
+		// The callout outlives that save; only the user's choice closes it.
 		act(() => pendingSave.opts.onSuccess());
+		expect(valueInputs()[0].value).toBe("mine");
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeTruthy();
+	});
+
+	it("lets the user explicitly keep their own value for a conflicting key", () => {
+		const initial = makeCollection({
+			host: {
+				value: "example.com",
+				enabled: true,
+				secret: false,
+				type: "string",
+				createdAt: 1000,
+			},
+		});
+
+		const { rerender } = render(
+			<TooltipProvider>
+				<VariableTableEditor config={{ type: "collection", collection: initial }} />
+			</TooltipProvider>
+		);
+
+		fireEvent.change(valueInputs()[0], { target: { value: "mine" } });
+
+		rerender(
+			<TooltipProvider>
+				<VariableTableEditor
+					config={{
+						type: "collection",
+						collection: makeCollection({
+							host: {
+								value: "theirs",
+								enabled: true,
+								secret: false,
+								type: "string",
+								createdAt: 1000,
+							},
+						}),
+					}}
+				/>
+			</TooltipProvider>
+		);
+
+		act(() => {
+			fireEvent.click(screen.getByRole("button", { name: /keep mine/i }));
+		});
+
+		expect(valueInputs()[0].value).toBe("mine");
+		expect(updateCollection).toHaveBeenCalledTimes(1);
+		expect(pendingSave.payload.variables.host.value).toBe("mine");
 		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
 	});
 
