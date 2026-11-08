@@ -116,7 +116,7 @@ export default function LoadTestDashboard() {
 						if (isRunTerminal(status)) {
 							// Run finished while we were away - update state
 							setFinalReport(currentRunId, report);
-							loadTestService.stopMonitoring();
+							loadTestService.settleOnStoredReport(currentRunId, report);
 						} else {
 							reattachOnMount(currentRunId);
 						}

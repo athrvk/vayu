@@ -801,6 +801,49 @@ describe("LoadTestService", () => {
 			);
 		});
 
+		it("posts a run found terminal on mount as how it ended, once, never as stopped (issue #3380)", () => {
+			loadTestService.startMonitoring("run_13");
+
+			loadTestService.settleOnStoredReport("run_13", {
+				metadata: { status: "completed" },
+				summary: { totalRequests: 40, errorRate: 0 },
+				latency: { p95: 12 },
+			} as never);
+			// A late close for the same run must not post a second one.
+			loadTestService.stopMonitoring();
+
+			expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
+			);
+			expect(sseClient.disconnect).toHaveBeenCalled();
+			expect(loadTestService.getActiveRunId()).toBeNull();
+		});
+
+		it("posts a failed run found terminal on mount as failed (issue #3380)", () => {
+			loadTestService.startMonitoring("run_14");
+
+			loadTestService.settleOnStoredReport("run_14", {
+				metadata: { status: "failed" },
+			} as never);
+
+			expect(mockNotifyPost).toHaveBeenCalledTimes(1);
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFailed })
+			);
+		});
+
+		it("does nothing for a run it is not attached to (issue #3380)", () => {
+			loadTestService.startMonitoring("run_15");
+
+			loadTestService.settleOnStoredReport("run_other", {
+				metadata: { status: "completed" },
+			} as never);
+
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+			expect(loadTestService.getActiveRunId()).toBe("run_15");
+		});
+
 		it("posts a stop as a stop", () => {
 			loadTestService.startMonitoring("run_12");
 

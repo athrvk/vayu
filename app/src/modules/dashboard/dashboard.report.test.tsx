@@ -23,12 +23,13 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
 import { useDashboardStore, type DashboardPhase } from "@/stores";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import type { RunReport } from "@/types";
+import { apiService, loadTestService } from "@/services";
 import LoadTestDashboard from "./index";
 
 const headerProps = vi.hoisted(() => [] as Record<string, unknown>[]);
@@ -46,6 +47,7 @@ vi.mock("@/services", () => ({
 		isMonitoring: () => true,
 		startMonitoring: vi.fn(),
 		stopMonitoring: vi.fn(),
+		settleOnStoredReport: vi.fn(),
 	},
 }));
 
@@ -125,6 +127,18 @@ describe("the dashboard's finished run", () => {
 
 		expect(screen.queryByText("Lost the live metrics stream")).toBeNull();
 		expect(screen.getByRole("tab", { name: "Sampled requests" })).toBeInTheDocument();
+	});
+
+	it("settles the service on a terminal report instead of stopping it (issue #3380)", async () => {
+		const report = reportFor("completed");
+		vi.mocked(apiService.getRunReport).mockResolvedValueOnce(report);
+
+		renderDashboard(STREAMING);
+
+		await waitFor(() =>
+			expect(loadTestService.settleOnStoredReport).toHaveBeenCalledWith("run_1", report)
+		);
+		expect(loadTestService.stopMonitoring).not.toHaveBeenCalled();
 	});
 
 	it("keeps the live metrics, and no tab bar, for a running run", () => {

@@ -47,6 +47,7 @@ vi.mock("@/services", () => ({
 		isMonitoring: () => true,
 		startMonitoring: vi.fn(),
 		stopMonitoring: vi.fn(),
+		settleOnStoredReport: vi.fn(),
 	},
 }));
 
