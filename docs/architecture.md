@@ -341,8 +341,38 @@ The Engine runs as a separate process managed by the Electron main process:
 1. **Engine Startup**: Electron spawns the `vayu-engine` binary on app launch,
    alongside creating the window rather than before it - first paint does not
    wait on the engine
-2. **Health Monitoring**: Manager polls `/health` endpoint to verify connectivity
+2. **Health Monitoring**: The renderer polls `/health` to verify connectivity,
+   and the sidecar watches the child process it spawned
 3. **Graceful Shutdown**: Engine is stopped when Electron app quits
+
+### Lifecycle and operations
+
+The sidecar (`electron/sidecar.ts`) keeps the engine's life as one value, an
+`EngineLifecycle` (issue #3336), changed in one place and published to
+listeners on every change:
+
+| State | Meaning |
+|-------|---------|
+| `idle` | Nothing started yet, or a start failed before it had a child |
+| `choosingPort` | A start is picking its port |
+| `replacing` | Stopping an engine so this session's can take its place: one found running at start, or this session's own during a restart |
+| `spawning` | The child is spawned and the readiness poll is running |
+| `ready` | `/health` answered |
+| `slow` | The 45-second readiness budget is spent but the child is alive; it is still watched |
+| `crashed` | The current child left without being asked to: its exit code, signal, last stderr lines, or the message of a child `error` |
+| `stopping`, `stopped` | An intentional stop; once the app is quitting nothing but `stopped` follows `stopping` |
+
+A child leaving while the state is `replacing` or `stopping` left because it
+was asked to, and a previous child's late exit during a restart is not the
+current child's: neither is `crashed`.
+
+`start`, `stop`, `restart` and `shutdown` run through one queue, so no two of
+them drive the child at once. A restart requested while one is queued or
+running joins it and gets the same result, so two clicks never spawn two
+engines (each spawn mints a grant secret, and a second spawn would leave the
+secret with one child while the other survived). A restart requested during the
+first start's health poll waits for that start rather than killing the child
+the poll is waiting on.
 
 ### Ownership model
 
@@ -407,7 +437,23 @@ which case the app picks a fallback (below).
 - **A quit during a restart wins.** Once the app is quitting, the sidecar
   refuses to start an engine, and a restart already in flight is waited out
   rather than raced - otherwise a freshly spawned engine outlives the process
-  that was supposed to kill it.
+  that was supposed to kill it. A first start that fails because of the quit,
+  or with a restart queued behind it, is overtaken rather than failed: the
+  launch path logs it and neither shows the "Couldn't start Vayu's engine"
+  box nor quits, since the quit is already happening and the restart answers
+  `engine:restart` itself.
+- **An engine that dies after startup is shown, with a way back** (issue
+  #3336). The main process pushes every lifecycle change to the window on
+  `engine:lifecycle` (and answers an invoke on the same channel with the current
+  state, for a window that loaded or reloaded after the last push). The renderer
+  keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
+  how the engine left (signal, exit code or error, with the last lines it
+  printed) and offers **Restart**, which a crash never did. The lifecycle is
+  facts only: the light itself is still the renderer's `/health` poll, so the
+  Restart button can appear a poll before the light turns "Engine disconnected".
+  A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
+  held port with Retry), which takes precedence over a crash. One restart runs
+  at a time across the Dock button and the Settings banner.
 - **A dirty editor flushes itself the moment the engine comes back**, on an
   automatic reconnect (`useHealthQuery`) or a manual restart
   (`useEngineRestart`) alike - both invalidate every query and then flush
@@ -483,10 +529,13 @@ which case the app picks a fallback (below).
   child as well as the port: an engine that exits first - a missing shared
   library, a lock it could not acquire - fails the launch at once, naming the
   exit code or signal and the engine's last stderr lines. An engine still alive
-  when that budget runs out is not killed for it: the launch path logs
-  `EngineNotReadyError` and leaves it to the renderer's health poll, which
-  adopts it the moment it answers. Quitting there used to end launches that
-  were seconds from succeeding.
+  when that budget runs out is not killed for it: the sidecar moves it to `slow`
+  and keeps probing, the launch path logs `EngineNotReadyError`, and the
+  renderer's health poll adopts it the moment it answers. When the sidecar's own
+  probe sees the answer first it moves to `ready` and the main process runs the
+  file-grant sync the slow path skipped (not the log floor, which is applied
+  once per launch and already was, at `debug`). Quitting there used to end
+  launches that were seconds from succeeding.
 - **The window is created alongside the engine, not after it.** First paint must
   not wait on a process whose own startup housekeeping is allowed to run for 45
   seconds - `db.init()` does orphan reconciliation, inbox cleanup and a

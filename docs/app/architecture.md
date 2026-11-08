@@ -93,7 +93,7 @@ The main process is responsible for:
 
 **Key Responsibilities:**
 - Spawns the engine binary as a child process
-- Monitors engine health and restarts if needed
+- Watches the engine child process and publishes its lifecycle to the window (`engine:lifecycle`); restarts only when asked (`engine:restart`), never on its own
 - Ensures graceful shutdown (stops engine before quitting)
 
 ### Engine Sidecar (`electron/sidecar.ts`)
@@ -110,6 +110,21 @@ The `EngineSidecar` class manages the C++ engine process:
   failure carries the exit code/signal and the engine's last stderr lines. A
   child still alive when the budget runs out raises `EngineNotReadyError`
   instead, which the launch path treats as "not yet" rather than as fatal
+- **Lifecycle** (#3336): One `EngineLifecycle` value - `idle`, `choosingPort`,
+  `replacing`, `spawning`, `ready`, `slow`, `crashed`, `stopping`, `stopped` -
+  written only by `transition()`, which publishes each change to
+  `onLifecycle()` listeners and is readable through `getLifecycle()`. `slow` is a
+  spawned child past the readiness budget and still probed; when it answers it
+  becomes `ready` and the `onReadyAfterSlow()` hooks run. `crashed` carries the
+  exit code, signal, stderr tail or `error` message of the *current* child
+  leaving without being asked: a child leaving during `replacing` or
+  `stopping`, or a previous child's late exit, is not a crash. Once the app is
+  quitting, nothing but `stopped` follows `stopping`
+- **Operation queue**: `start`, `stop`, `restart` and `shutdown` run one after
+  another, so two never drive the child at once. A `restart` requested while
+  another is queued or running joins it and returns the same promise
+  (`hasRestartPending()`); one requested during the first start waits for that
+  start instead of killing the child its health poll is watching
 - **Build guidance**: A missing binary names `python build.py -e` and
   `docs/building.md` - the single build entry point, not per-platform scripts
 - **Port Management**: Walks `ENGINE_PORT_CANDIDATES` (9876, then 9880-9889). A candidate answering `/health` is stopped and replaced, a free one is taken, a held one is skipped (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced). The first start fixes the choice for the app's lifetime (`electron/engine-endpoint.ts`), and the window is created after it, with the port on its command line. With every candidate held it raises `EnginePortInUseError`: the app stays up on the disconnected state with the reason, and Retry runs `engine:restart` again (issue #2118)
@@ -341,7 +356,7 @@ cross-language conformance fixture. See `variable-resolution.md`.
 
 The preload script (`electron/preload.ts`) exposes a minimal, context-isolated API bridge via `window.electronAPI`:
 
-- **Engine Management**: `restartEngine()` for engine lifecycle control; `enginePort`, the port the sidecar settled on (9876 or a fallback), a constant read from the renderer's command line that `config/network.ts` resolves once into `ENGINE_BASE_URL` (issue #2118); `getEngineStartFailure()` over `engine:startFailure`, the main process's own sentence when a start failed in a way the user can fix (every engine port held), or `null`, which the health poll reads on a failed poll. Engine liveness is *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`), so there is one answer rather than two
+- **Engine Management**: `restartEngine()` for engine lifecycle control; `getEngineLifecycle()` over `engine:lifecycle` and `onEngineLifecycle(callback)` (returns the unsubscribe), the sidecar's `EngineLifecyclePayload` (`electron/engine-lifecycle.ts`, mirrored in `preload.ts` and `src/types/electron.d.ts`): the `invoke` answers the current state for a window that loaded or reloaded after the last push, and the push carries every change after it. For `crashed` it adds the exit `code`, `signal`, `stderrTail` and `error`; `useEngineLifecycle` (mounted once in `App`) writes that into `engine-store`'s `engineCrash`, which the Dock explains and offers Restart for (#3336); `enginePort`, the port the sidecar settled on (9876 or a fallback), a constant read from the renderer's command line that `config/network.ts` resolves once into `ENGINE_BASE_URL` (issue #2118); `getEngineStartFailure()` over `engine:startFailure`, the main process's own sentence when a start failed in a way the user can fix (every engine port held), or `null`, which the health poll reads on a failed poll. The lifecycle carries facts only, so engine liveness is still *not* on this bridge - the renderer polls `GET /health` directly (`src/queries/health.ts`) and that poll alone classifies `engineStatus`, so there is one answer rather than two
 - **Theme Management**: `getTheme()`, `setTheme()`, `onThemeChanged()` for OS theme synchronization
 - **Window Controls**: `windowMinimize()`, `windowMaximize()`, `windowClose()`, `windowIsMaximized()`, `onWindowMaximized()` for custom titlebar
 - **Auto-update**: Listeners for `onUpdateAvailable()`, `onUpdateDownloaded()`, `onDownloadProgress()` and `onUpdateVerificationFailed()` (sent instead of `update:downloaded` when the installer's build-provenance attestation does not verify, so nothing is installed; issue #2372; `useAppUpdate` keeps the failure in `update-verification-store` so Settings > Updates can show it too), plus `restartToInstallUpdate()`, `openReleasePage()`; the four `update:*` invoke channels (restartToInstall, openReleasePage, check, quitForUpdate) are registered in `setupIpcHandlers` ahead of the engine wait and forward into the lazily loaded updater
