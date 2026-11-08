@@ -74,7 +74,11 @@ vi.mock("@/queries", () => ({
 	// (`useDataFileLimits`); empty entries leave it on the seeds.
 	useConfigQuery: () => ({ data: { entries: [] } }),
 	queryKeys: {
-		runs: { lists: () => ["runs"], recentDesign: (id: string) => ["runs", "recent", id] },
+		runs: {
+			lists: () => ["runs"],
+			recentDesign: (id: string) => ["runs", "recent", id],
+			lastDesign: (id: string) => ["runs", "last", id],
+		},
 	},
 }));
 
@@ -270,6 +274,8 @@ describe("the streaming send branch", () => {
 		// stores (see response-store.ts).
 		const stored = useResponseStore.getState().getResponse("A") as ResponseState | null;
 		expect(stored?.totalEvents).toBe(9);
+		// The cold-start restore reads this query, so a finished run must reach it.
+		expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["runs", "last", "A"] });
 	});
 
 	it("draws the warnings on the stored trace when the stream ends, and not before (#3315)", async () => {
@@ -507,6 +513,115 @@ describe("the streaming send branch", () => {
 				await ctx().executeRequest();
 			});
 			expect(replaced()).toEqual({});
+		});
+	});
+
+	describe("a stream that ends while another request is on screen (#3382)", () => {
+		const startedAs = (runId: string) => async (): Promise<StreamStartResult> => ({
+			ok: true,
+			runId,
+			eventsUrl: `/runs/${runId}/events`,
+		});
+		const bodyOf = (id: string) =>
+			(useResponseStore.getState().getResponse(id) as ResponseState | null)?.body;
+		const lastDesignInvalidated = (id: string) =>
+			invalidateQueries.mock.calls.some(
+				([filter]) =>
+					JSON.stringify(filter) === JSON.stringify({ queryKey: ["runs", "last", id] })
+			);
+
+		it("stores the run under its own request, leaves the one on screen alone and tells the query", async () => {
+			getRunReport.mockResolvedValue(reportWithEvents("A stored"));
+			const bResponse: ResponseState = {
+				status: 200,
+				statusText: "OK",
+				headers: {},
+				body: "B own",
+				size: 5,
+				time: 1,
+			};
+			useResponseStore.getState().setResponse("B", bResponse);
+			const { rerender } = render(renderFor("A", started));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("B", started));
+			expect(ctx().response?.body).toBe("B own");
+
+			// Mutation check: select the stream through the on-screen request again
+			// (`s.requestId === requestId`) and this never runs for A.
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+			await waitFor(() => expect(bodyOf("A")).toBe("A stored"));
+			await waitFor(() => expect(lastDesignInvalidated("A")).toBe(true));
+			expect(ctx().response?.body).toBe("B own");
+			expect(bodyOf("B")).toBe("B own");
+
+			// Back on A, the response is the stream's, fetched once.
+			rerender(renderFor("A", started));
+			expect(ctx().response?.body).toBe("A stored");
+			expect(getRunReport).toHaveBeenCalledTimes(1);
+		});
+
+		it("still lands when another request's stream empties the store mid-fetch", async () => {
+			let release!: (report: ReturnType<typeof reportWithEvents>) => void;
+			getRunReport.mockReturnValue(new Promise((r) => (release = r)));
+			const { rerender } = render(renderFor("A", startedAs("run_A")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_A", "completed", 9);
+			});
+			await waitFor(() => expect(getRunReport).toHaveBeenCalledWith("run_A"));
+
+			rerender(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(useExecutionEventsStore.getState().runId).toBe("run_B");
+
+			// Mutation check: return a cleanup that sets a `cancelled` flag from the
+			// effect and the handOver above drops the report on the floor.
+			await act(async () => {
+				release(reportWithEvents("A stored"));
+			});
+			await waitFor(() => expect(bodyOf("A")).toBe("A stored"));
+			expect(lastDesignInvalidated("A")).toBe(true);
+			// B's own stream is untouched.
+			expect(ctx().isStreaming).toBe(true);
+			expect(bodyOf("B")).toBeUndefined();
+		});
+
+		it("does not write the ended run over a newer send of the same request", async () => {
+			let release!: (report: ReturnType<typeof reportWithEvents>) => void;
+			getRunReport.mockReturnValue(new Promise((r) => (release = r)));
+			let next = "run_1";
+			render(renderFor("A", async () => startedAs(next)()));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+			await waitFor(() => expect(getRunReport).toHaveBeenCalledWith("run_1"));
+
+			// A sends again and its stream has not opened yet: the store is empty,
+			// so only the send itself says the ended run is no longer current.
+			next = "run_2";
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+
+			// Mutation check: drop the `sendCountRef` comparison and the old run's
+			// report lands over the response the new send cleared.
+			await act(async () => {
+				release(reportWithEvents("old run"));
+			});
+			await waitFor(() => expect(lastDesignInvalidated("A")).toBe(true));
+			expect(bodyOf("A")).toBeUndefined();
+			expect(ctx().response).toBeNull();
 		});
 	});
 

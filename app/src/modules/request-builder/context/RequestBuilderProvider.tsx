@@ -1053,25 +1053,30 @@ export default function RequestBuilderProvider({
 	const isStreaming = useExecutionEventsStore(
 		(s) => s.isStreaming && !!s.requestId && s.requestId === requestId
 	);
-	const streamEndReason = useExecutionEventsStore((s) =>
-		s.requestId && s.requestId === requestId ? s.endReason : null
-	);
+	// Not gated on the request on screen: the end-of-stream effect below is
+	// addressed to the request that streamed, whichever one is showing.
+	const streamOwnerId = useExecutionEventsStore((s) => s.requestId);
+	const endedRunId = useExecutionEventsStore((s) => (s.endReason ? s.runId : null));
 
 	// One subscription, owned here: the store names which stream, and the
 	// provider is the component that outlives every panel that reads it.
 	useExecutionEvents();
 
 	/*
-	 * The Send snapshot of the stream this builder started (issue #1763),
-	 * keyed by its run. The stream's response only exists once the run is
-	 * stored, so the snapshot waits here for the stream-end swap below, which
-	 * attaches it only to the report of that same run - never to a response
-	 * some other send produced.
+	 * The Send snapshot of each stream this builder started (issue #1763), keyed
+	 * by run. The stream's response only exists once the run is stored, so the
+	 * snapshot waits here for the stream-end swap below, which attaches it only
+	 * to the report of that same run - never to a response some other send
+	 * produced. Another request's Send must not overwrite it, hence a map.
 	 */
-	const streamSentRef = useRef<{ runId: string; sent: ExampleSentRequest } | null>(null);
+	const streamSentRef = useRef(new Map<string, ExampleSentRequest>());
+	/** Runs whose stored response the stream-end swap has already taken on. */
+	const finalizedStreamsRef = useRef(new Set<string>());
+	/** Sends begun per request, so a swap can tell a newer send of its request overtook it. */
+	const sendCountRef = useRef(new Map<string, number>());
 
 	/*
-	 * When the stream ends, replace the live rows with what the run stored.
+	 * When a stream ends, replace the live rows with what the run stored.
 	 *
 	 * The two-sources-one-list handoff `ScenarioRunView` makes, at the moment
 	 * the source changes: while the stream is open the Events tab reads the
@@ -1082,54 +1087,62 @@ export default function RequestBuilderProvider({
 	 * and a switch to another request and back would show nothing at all, since
 	 * the durable copy of a response is the response store.
 	 *
+	 * Addressed to the request that streamed, not the one on screen (#3382): a
+	 * stream that ends while the user is on another request still lands in its
+	 * own request's stored response, and the last-design-run query is told. This
+	 * relies on the provider being one instance that stays mounted for every
+	 * request tab; a per-tab provider would lose the effect with its tab.
+	 *
+	 * Not cancelled on cleanup: another request's Send empties the store
+	 * (`handOver`) while the report is still being fetched, and the run has
+	 * finished regardless. `finalizedStreamsRef` is what keeps a re-render or a
+	 * StrictMode double-invoke from fetching twice.
+	 *
 	 * The report is fetched directly rather than through the last-design-run
 	 * query the cold-start restore uses: that query is keyed by request and its
 	 * restore is gated on having answered once, so waiting for it to refetch
 	 * would race the cache. Here the run id is already known.
 	 */
 	useEffect(() => {
-		if (!streamRunId || !streamEndReason) return;
+		const ownerId = streamOwnerId;
+		const runId = endedRunId;
+		if (!ownerId || !runId || finalizedStreamsRef.current.has(runId)) return;
+		finalizedStreamsRef.current.add(runId);
 		// The run's own report cannot say what the app left out of the payload.
 		const { leftOut } = useExecutionEventsStore.getState();
-		let cancelled = false;
+		const sent = streamSentRef.current.get(runId);
+		streamSentRef.current.delete(runId);
+		const sendsAtEnd = sendCountRef.current.get(ownerId);
 		void (async () => {
 			try {
-				const report = await apiService.getRunReport(streamRunId);
-				const stored = responseFromRunResult(report?.results?.[0], streamRunId);
-				if (cancelled || !stored) return;
-				const snapshot = streamSentRef.current;
-				const withSent =
-					snapshot && snapshot.runId === streamRunId
-						? { ...stored, sentRequest: snapshot.sent }
-						: stored;
-				const restored =
-					leftOut.length > 0 ? { ...withSent, leftOutElements: leftOut } : withSent;
-				// Keyed by the request that streamed, exactly like the execute
-				// path: `storeSetResponse` is safe even if the builder has since
-				// moved on, and the live pane is only touched when it has not.
-				if (requestId) storeSetResponse(requestId, restored);
-				if (currentRequestIdRef.current === requestId) setLocalResponse(restored);
+				const report = await apiService.getRunReport(runId);
+				const stored = responseFromRunResult(report?.results?.[0], runId);
+				// A newer send of this request owns its response now.
+				const overtaken = sendCountRef.current.get(ownerId) !== sendsAtEnd;
+				if (stored && !overtaken) {
+					const withSent = sent ? { ...stored, sentRequest: sent } : stored;
+					const restored =
+						leftOut.length > 0 ? { ...withSent, leftOutElements: leftOut } : withSent;
+					// Keyed by the request that streamed, exactly like the execute
+					// path: `storeSetResponse` is safe even if the builder has since
+					// moved on, and the live pane is only touched when it has not.
+					storeSetResponse(ownerId, restored);
+					if (currentRequestIdRef.current === ownerId) setLocalResponse(restored);
+				}
 			} catch {
 				// The rows already on screen came from the stream itself and are
 				// still true; failing to fetch the stored copy does not make them
 				// false, so nothing is torn down. The stream's own end reason is
 				// what the tab reports either way.
 			}
-			if (cancelled) return;
-			// A stream that ended is a finished design run: History and the
-			// context bar's Recent sends both list it, and neither is told by
-			// anything else.
+			// A stream that ended is a finished design run: History, the context
+			// bar's Recent sends and the cold-start restore all read it, and
+			// nothing else tells them.
 			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-			if (requestId) {
-				void queryClient.invalidateQueries({
-					queryKey: queryKeys.runs.recentDesign(requestId),
-				});
-			}
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.recentDesign(ownerId) });
+			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lastDesign(ownerId) });
 		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [streamRunId, streamEndReason, requestId, storeSetResponse]);
+	}, [streamOwnerId, endedRunId, storeSetResponse]);
 
 	/** Stop the stream this builder started, at the engine. */
 	const stopStream = useCallback(async () => {
@@ -1181,6 +1194,12 @@ export default function RequestBuilderProvider({
 			// while reading the response stay out of it; only a saved request
 			// can hold an example, so an unsaved one takes none.
 			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
+			if (executingId) {
+				sendCountRef.current.set(
+					executingId,
+					(sendCountRef.current.get(executingId) ?? 0) + 1
+				);
+			}
 			// This Send supersedes the note that another request took this one's
 			// live feed over.
 			if (executingId) useExecutionEventsStore.getState().forgetReplaced(executingId);
@@ -1214,7 +1233,10 @@ export default function RequestBuilderProvider({
 				// so a stream that never opens does not leave the last one on screen.
 				// Another request's live stream keeps running at the engine, and the
 				// store notes it for that request's pane.
-				useExecutionEventsStore.getState().handOver(executingId);
+				const held = useExecutionEventsStore.getState();
+				// A feed handed over before it ended never reaches the swap.
+				if (held.isStreaming && held.runId) streamSentRef.current.delete(held.runId);
+				held.handOver(executingId);
 				try {
 					const started = await onExecuteStream(executingRequest, dataRow);
 					if (!started) return;
@@ -1225,7 +1247,7 @@ export default function RequestBuilderProvider({
 					// An overtaken send's stream is not followed: the feed is the
 					// newer send's to open.
 					if (!send.isCurrent()) return;
-					streamSentRef.current = sent ? { runId: started.runId, sent } : null;
+					if (sent) streamSentRef.current.set(started.runId, sent);
 					useExecutionEventsStore.getState().startStream({
 						requestId: executingId,
 						runId: started.runId,
