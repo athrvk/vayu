@@ -909,7 +909,8 @@ TEST_F (StopActiveRunTest, CollectionRunAnswersItsStoredCounts) {
 
 // The grace period ran out before the worker stored anything: no counts are
 // known, so the answer carries no summary rather than a summary of zeros, and
-// its status is the row's, not a `stopped` the run has not reached.
+// its status is the row's, not a `stopped` the run has not reached. The
+// message names the expired grace (#3342).
 TEST_F (StopActiveRunTest, CollectionRunWithNoStoredSummaryAnswersNone) {
     seed_running ("run_slow", vayu::RunType::Scenario);
     auto context        = make_context ("run_slow");
@@ -923,7 +924,9 @@ TEST_F (StopActiveRunTest, CollectionRunWithNoStoredSummaryAnswersNone) {
     EXPECT_FALSE (body.contains ("summary")) << body.dump ();
     EXPECT_EQ (body["status"], "running");
     EXPECT_EQ (body["runId"], "run_slow");
-    EXPECT_EQ (body["message"], "Stop signalled; read the report");
+    EXPECT_EQ (body["message"],
+    "Stop signalled; the run had not settled within the 0s grace period; read "
+    "the report");
 }
 
 // The other side of the Pending-window race (#3340): the worker registered
@@ -993,6 +996,8 @@ TEST_F (StopActiveRunTest, LoadRunAnswersFromItsCollector) {
     EXPECT_EQ (body["summary"]["noResponse"], 1);
     EXPECT_EQ (body["summary"]["cancelled"], 0);
     EXPECT_FALSE (body["summary"].contains ("stepsExecuted"));
+    EXPECT_FALSE (body.contains ("message"))
+    << "a settled run was answered as unsettled";
 }
 
 // A load run stopped in its drain ends by its own verdict (#3341), so the
@@ -1023,7 +1028,9 @@ TEST_F (StopActiveRunTest, LoadRunStoppedInItsDrainAnswersItsStoredStatus) {
 }
 
 // The same Stop before the worker has written anything: the run is still
-// running, not `stopped`, which it will never be.
+// running, not `stopped`, which it will never be, and the message says the
+// grace ran out (#3342). Mutation check: drop the `!settled` message in
+// `stop_active_run_response` and the message reads null.
 TEST_F (StopActiveRunTest, LoadRunStoppedInItsDrainIsNotAnsweredStopped) {
     seed_running ("run_draining", vayu::RunType::Load);
     auto context = make_context ("run_draining");
@@ -1034,6 +1041,9 @@ TEST_F (StopActiveRunTest, LoadRunStoppedInItsDrainIsNotAnsweredStopped) {
     *db, *context, vayu::RunType::Load, 0);
 
     EXPECT_EQ (body["status"], "running") << body.dump ();
+    EXPECT_EQ (body["message"],
+    "Stop signalled; the run had not settled within the 0s grace period; read "
+    "the report");
 }
 
 } // namespace

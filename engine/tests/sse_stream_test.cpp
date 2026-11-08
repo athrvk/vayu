@@ -155,6 +155,9 @@ class StreamServer {
         // test reads back off `/scripted`.
         svr_.Get ("/aside", [this] (const httplib::Request&, httplib::Response& res) {
             aside_count_.fetch_add (1);
+            while (aside_held_.load () && !stopping_.load ()) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (5));
+            }
             res.set_content (R"({"ok":true})", "application/json");
         });
 
@@ -259,6 +262,16 @@ class StreamServer {
     /// proof that a refusal was a refusal rather than a swallowed answer.
     int aside_requests () const {
         return aside_count_.load ();
+    }
+
+    /// Hold every `/aside` answer until `release_aside ()`, so a script that
+    /// sends one is parked at a point the test chooses. Counted on arrival.
+    void hold_aside () {
+        aside_held_.store (true);
+    }
+
+    void release_aside () {
+        aside_held_.store (false);
     }
 
     /// Make `/token` take @p ms to answer. Set before the request.
@@ -376,6 +389,7 @@ class StreamServer {
     std::atomic<int> hop_count_{ 0 };
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
+    std::atomic<bool> aside_held_{ false };
     std::atomic<int> token_delay_ms_{ 0 };
     std::atomic<int> token_count_{ 0 };
 };
@@ -1627,6 +1641,7 @@ class StreamExecuteTest : public ::testing::Test {
         mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         vayu::http::routes::register_event_stream_routes (*ctx_);
+        vayu::http::routes::register_run_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -1662,11 +1677,14 @@ class StreamExecuteTest : public ::testing::Test {
         origin_->pace (2);
     }
 
-    /// Send @p payload as a streaming execute of @p path on the origin and
-    /// return the run id it created.
+    /// Send @p payload as a streaming execute of @p path on the origin, or of
+    /// the payload's own `url` when it names one, and return the run id it
+    /// created.
     std::string start (json payload, const std::string& path = "/scripted") {
         payload["method"] = "GET";
-        payload["url"]    = origin_->url (path);
+        if (!payload.contains ("url")) {
+            payload["url"] = origin_->url (path);
+        }
         payload["stream"] = true;
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
@@ -1689,6 +1707,19 @@ class StreamExecuteTest : public ::testing::Test {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
         auto response = client.Post ("/execute", payload.dump (), "application/json");
+        EXPECT_TRUE (response);
+        if (!response) {
+            return json::object ();
+        }
+        EXPECT_EQ (response->status, 200) << response->body;
+        return json::parse (response->body);
+    }
+
+    /// `POST /runs/:runId/stop`'s answer for @p run_id.
+    json stop (const std::string& run_id) const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/runs/" + run_id + "/stop", "", "application/json");
         EXPECT_TRUE (response);
         if (!response) {
             return json::object ();
@@ -2719,6 +2750,94 @@ TEST_F (StreamExecuteTest, TheCompleteFrameMeansTheReportIsStored) {
     ASSERT_TRUE (trace.contains ("scripts")) << trace.dump (2);
     ASSERT_FALSE (trace["scripts"]["consoleLogs"].empty ()) << trace.dump (2);
     EXPECT_EQ (trace["scripts"]["consoleLogs"][0]["message"], "stored");
+}
+
+// ---------------------------------------------------------------------------
+// Stopping a stream that has already ended (#3342)
+//
+// The transfer reads the stop flag only while it runs, so a stream the server
+// closed or that failed is past it when a Stop arrives during its post-request
+// script. Each script here is parked in a `pm.sendRequest` to the held `/aside`
+// until the route has signalled the stop, which puts the Stop between the
+// transfer's end and the row write every time. Mutation check: answer
+// `stopped` for every settled stream in `stream_stop_response` again and both
+// tests fail.
+// ---------------------------------------------------------------------------
+
+class StreamStopTest : public StreamExecuteTest {
+    protected:
+    /// Stop @p run_id while its post-request script is parked, then let the
+    /// script go, and return the answer.
+    json stop_while_the_script_is_parked (const std::string& run_id) {
+        if (!vayu::tests::wait_until (
+            [this] () { return origin_->aside_requests () == 1; })) {
+            ADD_FAILURE () << "the post-request script never reached /aside";
+            origin_->release_aside ();
+            return json::object ();
+        }
+        auto answer = std::async (
+        std::launch::async, [this, run_id] () { return stop (run_id); });
+        const auto stream = manager_->get (run_id);
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&stream] () { return stream && stream->should_stop.load (); }))
+        << "the route never signalled the stop";
+        origin_->release_aside ();
+        return answer.get ();
+    }
+
+    /// A payload whose post-request script sends to the held `/aside`.
+    json parked_script_payload () const {
+        const std::string script =
+        "pm.sendRequest('" + origin_->url ("/aside") + "', function () {});";
+        return { { "elements", script_elements ("", script) },
+            { "allowScriptRequests", true } };
+    }
+};
+
+TEST_F (StreamStopTest, AStopAfterTheServerEndedTheStreamAnswersCompleted) {
+    serve (2);
+    origin_->hold_aside ();
+    const auto run_id = start (parked_script_payload ());
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto body = stop_while_the_script_is_parked (run_id);
+    EXPECT_EQ (body.value ("status", ""), "completed") << body.dump ();
+    EXPECT_EQ (body.value ("message", ""), "The stream had already ended")
+    << body.dump ();
+    EXPECT_EQ (body.value ("totalEvents", -1), 2) << body.dump ();
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Completed);
+}
+
+TEST_F (StreamStopTest, AStopAfterTheStreamFailedAnswersFailed) {
+    serve (0);
+    origin_->hold_aside ();
+    json payload      = parked_script_payload ();
+    payload["url"]    = "http://127.0.0.1:1/nothing";
+    const auto run_id = start (payload);
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto body = stop_while_the_script_is_parked (run_id);
+    EXPECT_EQ (body.value ("status", ""), "failed") << body.dump ();
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+}
+
+// The Stop the transfer does read still answers what it decided.
+TEST_F (StreamStopTest, AStopOfALiveStreamAnswersStopped) {
+    origin_           = std::make_unique<StreamServer> ();
+    const auto run_id = start (json::object (), "/endless");
+    ASSERT_FALSE (run_id.empty ());
+    const auto stream = manager_->get (run_id);
+    ASSERT_NE (stream, nullptr);
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&stream] () { return stream->total_events () >= 1; }));
+
+    const auto body = stop (run_id);
+    EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+    EXPECT_EQ (body.value ("message", ""), "Stream stopped") << body.dump ();
 }
 
 // ---------------------------------------------------------------------------

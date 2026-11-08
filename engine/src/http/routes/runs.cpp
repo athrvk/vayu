@@ -1674,6 +1674,13 @@ const vayu::core::RunContext& context) {
                                              vayu::RunStatus::Running;
 }
 
+/// The `message` of a Stop answer whose wait ran out before the run settled
+/// (#3342), so a `running` status reads as "not yet", never as "not stopped".
+std::string grace_expired_message (int grace_seconds) {
+    return "Stop signalled; the run had not settled within the " +
+    std::to_string (grace_seconds) + "s grace period; read the report";
+}
+
 } // namespace
 
 nlohmann::json stop_active_run_response (vayu::db::Database& db,
@@ -1684,22 +1691,27 @@ int grace_seconds) {
     vayu::utils::log_info (
     "run", "POST /runs/:id/stop - Signaling stop for active run: " + run_id);
     context.request_stop ();
+    const bool settled =
     vayu::utils::MetricsHelper::wait_for_graceful_stop (context, grace_seconds);
 
+    nlohmann::json response;
     if (run_type == vayu::RunType::Scenario) {
-        auto response = scenario_stop_response (db, run_id);
+        response = scenario_stop_response (db, run_id);
         vayu::utils::log_info ("run", "Collection run stopped",
         { { "runId", run_id }, { "status", response["status"] },
         { "summaryStored", response.contains ("summary") } });
-        return response;
+    } else {
+        const auto summary = vayu::utils::MetricsHelper::calculate_summary (context);
+        vayu::utils::log_info ("run", "Run stopped",
+        { { "runId", run_id }, { "totalRequests", summary.total_requests },
+        { "errors", summary.errors }, { "cancelled", summary.cancelled } });
+        response = vayu::utils::MetricsHelper::create_stop_response (
+        run_id, summary, to_string (load_stop_status (db, context)));
     }
-
-    const auto summary = vayu::utils::MetricsHelper::calculate_summary (context);
-    vayu::utils::log_info ("run", "Run stopped",
-    { { "runId", run_id }, { "totalRequests", summary.total_requests },
-    { "errors", summary.errors }, { "cancelled", summary.cancelled } });
-    return vayu::utils::MetricsHelper::create_stop_response (
-    run_id, summary, to_string (load_stop_status (db, context)));
+    if (!settled) {
+        response["message"] = grace_expired_message (grace_seconds);
+    }
+    return response;
 }
 
 std::pair<int, nlohmann::json> stop_unregistered_run_response (vayu::db::Database& db,
@@ -2599,6 +2611,62 @@ void handle_set_baseline (RouteContext& ctx, const httplib::Request& req, httpli
     }
 }
 
+/// The message a settled stream's Stop answer carries for the status its worker
+/// stored.
+const char* stream_stop_message (vayu::RunStatus status) {
+    switch (status) {
+    case vayu::RunStatus::Stopped: return "Stream stopped";
+    case vayu::RunStatus::Completed: return "The stream had already ended";
+    case vayu::RunStatus::Failed:
+        return "The stream failed before the stop took effect";
+    // The completion callback threw before its write; the startup sweep
+    // settles the row.
+    case vayu::RunStatus::Pending:
+    case vayu::RunStatus::Running:
+        return "Stop signalled; the stream ended without storing its result";
+    }
+    return "Stop signalled";
+}
+
+/**
+ * The answer to a Stop already signalled to @p stream (#3342): the run row's
+ * stored status once the stream has closed, because the server or a cap can
+ * end it before the transfer reads the flag. `closed ()` is released only after
+ * the worker's completion callback has written the row, so the read after it
+ * is the terminal one. A wait that runs out answers `running`: a row read then
+ * may be mid-write.
+ */
+nlohmann::json stream_stop_response (vayu::db::Database& db,
+const std::shared_ptr<vayu::http::SseStreamContext>& stream,
+const std::string& run_id,
+int grace_seconds) {
+    // A transfer notices within one progress callback; `closed()` then waits
+    // for the post-request script and the row write too (#3239), so a slow
+    // script can outlast the grace.
+    const auto deadline =
+    std::chrono::steady_clock::now () + std::chrono::seconds (grace_seconds);
+    while (stream && !stream->closed () && std::chrono::steady_clock::now () < deadline) {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    nlohmann::json response;
+    response["runId"] = run_id;
+    if (stream) {
+        response["totalEvents"] = stream->total_events ();
+    }
+    // A null stream was swept, which only a closed one is.
+    if (stream && !stream->closed ()) {
+        response["status"]  = to_string (vayu::RunStatus::Running);
+        response["message"] = grace_expired_message (grace_seconds);
+        return response;
+    }
+    const auto run      = db.get_run (run_id);
+    const auto status   = run ? run->status : vayu::RunStatus::Running;
+    response["status"]  = to_string (status);
+    response["message"] = stream_stop_message (status);
+    return response;
+}
+
 void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::Response& res) {
     std::string run_id = req.matches[1];
     try {
@@ -2626,34 +2694,16 @@ void handle_stop_run (RouteContext& ctx, const httplib::Request& req, httplib::R
         // finished that is still holding a socket.
         //
         // The worker owns the terminal write, so the row is left alone
-        // here: `record_design_result` sets `Stopped` when it settles,
+        // here: `record_design_result` stores the status when it settles,
         // which is also when the trace and the true event count land.
         if (ctx.sse_manager.request_stop (run_id)) {
             vayu::utils::log_info (
             "run", "POST /runs/:id/stop - Signaling stop for stream: " + run_id);
             // Waited on rather than answered immediately, so the caller is
             // told what actually happened - the same budget the load path
-            // gives a graceful stop. A transfer notices within one progress
-            // callback; `closed()` then waits for the post-request script
-            // and the row write too (#3239), so a slow script can outlast it.
-            auto stream = ctx.sse_manager.get (run_id);
-            const auto deadline =
-            std::chrono::steady_clock::now () + std::chrono::seconds (5);
-            while (stream && !stream->closed () &&
-            std::chrono::steady_clock::now () < deadline) {
-                std::this_thread::sleep_for (std::chrono::milliseconds (10));
-            }
-            const bool settled = !stream || stream->closed ();
-
-            nlohmann::json response;
-            response["runId"] = run_id;
-            response["status"] =
-            to_string (settled ? vayu::RunStatus::Stopped : vayu::RunStatus::Running);
-            response["message"] =
-            settled ? "Stream stopped" : "Stop signalled; the stream has not settled yet";
-            if (stream) {
-                response["totalEvents"] = stream->total_events ();
-            }
+            // gives a graceful stop.
+            const auto response = stream_stop_response (
+            ctx.db, ctx.sse_manager.get (run_id), run_id, STOP_GRACE_SECONDS);
             res.set_content (response.dump (), "application/json");
             return;
         }

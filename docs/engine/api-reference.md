@@ -12348,7 +12348,9 @@ outcome, and `running` when it landed after the run's own end (the `draining`
 phase), where the worker has not yet written the `completed` or `failed` it will
 end with. `running` there is accurate rather than a failure to stop: the drain
 is already cancelled, and the terminal status follows once the worker writes
-it.
+it. When the worker has not settled within the 5s, the answer also carries
+`message`: `"Stop signalled; the run had not settled within the 5s grace
+period; read the report"` (#3342); a run that settled carries none.
 ```json
 {
   "status": "stopped",
@@ -12389,12 +12391,20 @@ send's exchange still completes and its result is stored, under a row that stays
 
 **A streaming design run** (`POST /execute` with `"stream": true`) is stopped
 here too: the endpoint asks its consumer worker to end the transfer, waits up to
-the same 5s, and answers `{"runId": ..., "status": "stopped", "message":
-"Stream stopped", "totalEvents": N}`. The worker owns the terminal write, so the
-run reaches `stopped` with its trace and its true event count together; the
-stream's `complete` event carries `"reason": "stopped"`. A stream that had
-already terminated keeps the reason it recorded rather than being rewritten as a
-user stop.
+the same 5s, and answers `{"runId": ..., "status": ..., "message": ...,
+"totalEvents": N}`. The worker owns the terminal write, so the run reaches its
+status with its trace and its true event count together, and `status` is the
+one it stored (#3342):
+
+| `status` | `message` | When |
+|----------|-----------|------|
+| `stopped` | `Stream stopped` | The transfer read the stop; the stream's `complete` event carries `"reason": "stopped"` |
+| `completed` | `The stream had already ended` | The server had closed the stream, or a cap had ended it, before the transfer read the stop (its post-request script was still running) |
+| `failed` | `The stream failed before the stop took effect` | The transfer had already failed |
+| `running` | `Stop signalled; the run had not settled within the 5s grace period; read the report` | The worker had not stored a result within the 5s, usually a slow post-request script; the stop still stands |
+
+A stream that had already terminated keeps the reason it recorded rather than
+being rewritten as a user stop.
 
 #### Stopping a collection run
 
@@ -12430,7 +12440,8 @@ sending and decides the outcome: the run ends `stopped`.
 **The summary is absent when the worker has not stored one** within the 5s,
 or could not store it. The answer is then
 `{"status": "<stored status>", "runId": ..., "message": "Stop signalled; read
-the report"}`, usually with `status` `running`. The stop still stands: read the
+the report"}`, usually with `status` `running`; when the 5s ran out, `message`
+says so, as for a load run above. The stop still stands: read the
 run's report once it reports a terminal status. A scenario **load** run is a
 `load` run and answers from its collector as above.
 
