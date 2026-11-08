@@ -39,6 +39,16 @@ vi.mock("@/services/api", () => ({
 	},
 }));
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason: Error) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
 const DEV = { id: "env_dev", name: "Dev", isActive: false };
 const PROD = { id: "env_prod", name: "Prod", isActive: false };
 
@@ -116,6 +126,105 @@ describe("switching the active environment", () => {
 		// Not env_prod: the UI must not show a selection the next launch will
 		// contradict.
 		expect(useSessionStore.getState().activeEnvironmentId).toBe("env_dev");
+	});
+});
+
+describe("switching again before the first switch settles", () => {
+	const A = "env_a";
+	const B = "env_b";
+	const C = "env_c";
+
+	it("does not let a superseded switch's rollback overwrite the newer one (#3355)", async () => {
+		// Mutation check: drop the `context.seq` guard in `onError` and B's
+		// rollback writes A over C.
+		const putB = deferred<unknown>();
+		const putC = deferred<unknown>();
+		updateEnvironment.mockImplementation(({ id }: { id: string }) =>
+			id === B ? putB.promise : putC.promise
+		);
+		listEnvironments.mockResolvedValue([]);
+		useSessionStore.setState({ activeEnvironmentId: A });
+		const { result } = renderHook(() => useSetActiveEnvironmentMutation(), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		let switchToB!: Promise<void>;
+		let switchToC!: Promise<void>;
+		act(() => {
+			switchToB = result.current.mutateAsync({ id: B, previousId: A }).catch(() => undefined);
+			switchToC = result.current.mutateAsync({ id: C, previousId: B }).catch(() => undefined);
+		});
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(C);
+
+		await act(async () => {
+			putB.reject(new Error("engine unreachable"));
+			await switchToB;
+		});
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(C);
+
+		// B's refusal released C's PUT; the engine ends holding C.
+		await waitFor(() =>
+			expect(updateEnvironment).toHaveBeenCalledWith({ id: C, isActive: true })
+		);
+		await act(async () => {
+			putC.resolve({ id: C, isActive: true });
+			await switchToC;
+		});
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(C);
+	});
+
+	it("sends the PUTs one at a time, in the order the switches were made", async () => {
+		// Mutation check: drop `scope` from the mutation and both PUTs start at once.
+		const putB = deferred<unknown>();
+		updateEnvironment.mockImplementation(({ id }: { id: string }) =>
+			id === B ? putB.promise : Promise.resolve({ id, isActive: true })
+		);
+		listEnvironments.mockResolvedValue([]);
+		useSessionStore.setState({ activeEnvironmentId: A });
+		const { result } = renderHook(() => useSetActiveEnvironmentMutation(), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		let switchToC!: Promise<void>;
+		act(() => {
+			void result.current.mutateAsync({ id: B, previousId: A });
+			switchToC = result.current.mutateAsync({ id: C, previousId: B });
+		});
+		await waitFor(() => expect(updateEnvironment).toHaveBeenCalledTimes(1));
+		expect(updateEnvironment).toHaveBeenLastCalledWith({ id: B, isActive: true });
+
+		await act(async () => {
+			putB.resolve({ id: B, isActive: true });
+			await switchToC;
+		});
+		expect(updateEnvironment).toHaveBeenCalledTimes(2);
+		expect(updateEnvironment).toHaveBeenLastCalledWith({ id: C, isActive: true });
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(C);
+	});
+
+	it("still rolls back when the refused switch is the latest one", async () => {
+		const putC = deferred<unknown>();
+		updateEnvironment.mockImplementation(({ id }: { id: string }) =>
+			id === C ? putC.promise : Promise.resolve({ id, isActive: true })
+		);
+		listEnvironments.mockResolvedValue([]);
+		useSessionStore.setState({ activeEnvironmentId: A });
+		const { result } = renderHook(() => useSetActiveEnvironmentMutation(), {
+			wrapper: wrapper(makeClient()),
+		});
+
+		let switchToC!: Promise<void>;
+		await act(async () => {
+			await result.current.mutateAsync({ id: B, previousId: A });
+			switchToC = result.current.mutateAsync({ id: C, previousId: B }).catch(() => undefined);
+		});
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(C);
+
+		await act(async () => {
+			putC.reject(new Error("engine unreachable"));
+			await switchToC;
+		});
+		expect(useSessionStore.getState().activeEnvironmentId).toBe(B);
 	});
 });
 

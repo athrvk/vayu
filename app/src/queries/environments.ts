@@ -82,6 +82,14 @@ export function useUpdateEnvironmentMutation() {
 export const setActiveEnvironmentMutationKey = ["environments", "set-active"] as const;
 
 /**
+ * Counts the switches started, so a failing one can tell whether a newer
+ * switch has taken over the store since (#3355). Module-level because the
+ * mutation is a hook: two components mounting it share one engine and one
+ * store, so they share one count.
+ */
+let latestSwitchSeq = 0;
+
+/**
  * Switch the active environment, or clear it (`null`).
  *
  * One PUT does the whole switch: the engine deactivates the previous
@@ -95,13 +103,20 @@ export const setActiveEnvironmentMutationKey = ["environments", "set-active"] as
  * The session store is written optimistically because the switcher, the
  * resolver and every composed payload read it, and rolled back if the engine
  * refuses - a selection the engine did not accept must not survive in the UI,
- * or the next launch would silently disagree with the one before it.
+ * or the next launch would silently disagree with the one before it. A
+ * refusal rolls back only while it is still the latest switch: a newer one has
+ * already replaced the optimistic value, and restoring this switch's "before"
+ * would overwrite a selection the engine is about to hold. The `scope` makes
+ * the PUTs run one at a time in the order issued, so the engine ends holding
+ * the last switch started, which is the one the store shows. The optimistic
+ * write in `onMutate` is not queued, so the switcher still answers at once.
  */
 export function useSetActiveEnvironmentMutation() {
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationKey: setActiveEnvironmentMutationKey,
+		scope: { id: setActiveEnvironmentMutationKey.join(":") },
 		mutationFn: async ({
 			id,
 			previousId,
@@ -118,12 +133,11 @@ export function useSetActiveEnvironmentMutation() {
 		onMutate: ({ id }) => {
 			const rolledBackTo = useSessionStore.getState().activeEnvironmentId;
 			useSessionStore.getState().setActiveEnvironmentId(id);
-			return { rolledBackTo };
+			return { rolledBackTo, seq: ++latestSwitchSeq };
 		},
 		onError: (_error, _variables, context) => {
-			if (context) {
-				useSessionStore.getState().setActiveEnvironmentId(context.rolledBackTo);
-			}
+			if (!context || context.seq !== latestSwitchSeq) return;
+			useSessionStore.getState().setActiveEnvironmentId(context.rolledBackTo);
 		},
 		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: queryKeys.environments.list() });

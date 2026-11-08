@@ -351,7 +351,12 @@ and two pieces of wiring keep the two in step:
   not survive in the UI, or the next launch silently disagrees with this one. It
   invalidates the environments list rather than patching the response into it,
   because the *deactivated* row changed server-side without appearing in any
-  response body.
+  response body. Switches made before an earlier one settles are numbered and
+  their PUTs run one at a time (a mutation `scope`), so the engine ends holding
+  the last switch started; a refusal rolls the store back only while it is
+  still the latest switch, since a newer one has already replaced the optimistic
+  value and restoring the older "before" would show an environment the engine
+  does not hold (#3355).
 - `useActiveEnvironmentRestore` (`hooks/`, mounted in `App.tsx`) reconciles on
   launch: adopt the engine's active environment if it has one, otherwise push a
   persisted id that names an environment that still exists - once per session,
