@@ -15,7 +15,12 @@
  * lets the Dock offer Restart.
  *
  * Pushes arrive in the order the sidecar made them, so each one simply
- * replaces the last. The snapshot is the only reply that can be older than
+ * replaces the last, with one exception: a crash is only ended by an engine
+ * that is up or was stopped on purpose (`ready`, `slow`, `stopping`,
+ * `stopped`). A restart from a crash pushes `replacing`, `choosingPort` and
+ * `spawning`, and one that fails before a child exists lands on `idle`; if
+ * those cleared the crash the Dock would lose both its sentence and its
+ * Restart button, leaving "Engine disconnected" and no way back. The snapshot is the only reply that can be older than
  * what the window already knows, and it yields to both signs of that: a push
  * that landed while it was in flight, and a restart that opened a new start
  * window (the same guard `adoptEngineStartFailure` applies in
@@ -27,14 +32,23 @@ import { useEffect } from "react";
 import { useEngineStore } from "@/stores";
 import type { EngineLifecyclePayload } from "@/types/electron";
 
+/** Kinds that leave a recorded crash standing: the engine is between processes. */
+const CRASH_SURVIVES: ReadonlySet<EngineLifecyclePayload["kind"]> = new Set([
+	"idle",
+	"choosingPort",
+	"replacing",
+	"spawning",
+]);
+
 function applyEngineLifecycle(lifecycle: EngineLifecyclePayload): void {
 	const { setEngineCrash } = useEngineStore.getState();
-	if (lifecycle.kind !== "crashed") {
-		setEngineCrash(null);
+	if (lifecycle.kind === "crashed") {
+		const { code, signal, stderrTail, error } = lifecycle;
+		setEngineCrash({ code, signal, stderrTail, error });
 		return;
 	}
-	const { code, signal, stderrTail, error } = lifecycle;
-	setEngineCrash({ code, signal, stderrTail, error });
+	if (CRASH_SURVIVES.has(lifecycle.kind)) return;
+	setEngineCrash(null);
 }
 
 export function useEngineLifecycle(): void {

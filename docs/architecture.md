@@ -451,6 +451,10 @@ which case the app picks a fallback (below).
   printed) and offers **Restart**, which a crash never did. The lifecycle is
   facts only: the light itself is still the renderer's `/health` poll, so the
   Restart button can appear a poll before the light turns "Engine disconnected".
+  A crash stays recorded through a restart's transient states (`replacing`,
+  `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
+  cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
+  fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
   held port with Retry), which takes precedence over a crash. One restart runs
   at a time across the Dock button and the Settings banner.

@@ -14,6 +14,10 @@
  * The snapshot is the one reply that can be older than what the window already
  * knows, so the cases that matter are the two ways it goes stale: a push that
  * overtook it, and a restart that opened a new start window while it was out.
+ *
+ * A crash outlives the transient kinds (`idle`, `choosingPort`, `replacing`,
+ * `spawning`) and ends only on `ready`, `slow`, `stopping` or `stopped`, so a
+ * restart that fails before it spawns still leaves the Dock its Restart button.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -29,6 +33,8 @@ const CRASHED: EngineLifecyclePayload = {
 	stderrTail: ["segfault"],
 	error: null,
 };
+
+const CRASH_FACTS = { code: 139, signal: null, stderrTail: ["segfault"], error: null };
 
 interface Bridge {
 	push: (lifecycle: EngineLifecyclePayload) => void;
@@ -93,15 +99,76 @@ describe("useEngineLifecycle", () => {
 		});
 	});
 
-	it("sets the crash on a pushed crashed and clears it on any other kind", async () => {
+	it("sets the crash on a pushed crashed", async () => {
 		const bridge = stubBridge();
 		renderHook(() => useEngineLifecycle());
 		await bridge.answerSnapshot({ kind: "ready" });
 
 		bridge.push(CRASHED);
-		expect(useEngineStore.getState().engineCrash?.code).toBe(139);
 
-		bridge.push({ kind: "spawning" });
+		expect(useEngineStore.getState().engineCrash?.code).toBe(139);
+	});
+
+	// A restart from a crash walks these, and one that fails before a child
+	// exists ends on idle: the Dock must still have its Restart button.
+	it.each(["choosingPort", "replacing", "spawning", "idle"] as const)(
+		"keeps the crash through %s",
+		async (kind) => {
+			const bridge = stubBridge();
+			renderHook(() => useEngineLifecycle());
+			await bridge.answerSnapshot({ kind: "ready" });
+			bridge.push(CRASHED);
+
+			bridge.push({ kind });
+
+			expect(useEngineStore.getState().engineCrash?.code).toBe(139);
+		}
+	);
+
+	it("keeps the crash through a restart that fails before it spawns", async () => {
+		const bridge = stubBridge();
+		renderHook(() => useEngineLifecycle());
+		await bridge.answerSnapshot({ kind: "ready" });
+		bridge.push(CRASHED);
+
+		bridge.push({ kind: "replacing" });
+		bridge.push({ kind: "choosingPort" });
+		bridge.push({ kind: "idle" });
+
+		expect(useEngineStore.getState().engineCrash?.code).toBe(139);
+	});
+
+	it.each(["ready", "slow", "stopping", "stopped"] as const)(
+		"clears the crash on %s",
+		async (kind) => {
+			const bridge = stubBridge();
+			renderHook(() => useEngineLifecycle());
+			await bridge.answerSnapshot({ kind: "ready" });
+			bridge.push(CRASHED);
+
+			bridge.push({ kind });
+
+			expect(useEngineStore.getState().engineCrash).toBeNull();
+		}
+	);
+
+	it("keeps a crash that the snapshot reports through a restart's transient state", async () => {
+		useEngineStore.setState({ engineCrash: CRASH_FACTS });
+		const bridge = stubBridge();
+		renderHook(() => useEngineLifecycle());
+
+		await bridge.answerSnapshot({ kind: "idle" });
+
+		expect(useEngineStore.getState().engineCrash).toEqual(CRASH_FACTS);
+	});
+
+	it("clears the crash when the snapshot reports an engine that is up", async () => {
+		useEngineStore.setState({ engineCrash: CRASH_FACTS });
+		const bridge = stubBridge();
+		renderHook(() => useEngineLifecycle());
+
+		await bridge.answerSnapshot({ kind: "ready" });
+
 		expect(useEngineStore.getState().engineCrash).toBeNull();
 	});
 

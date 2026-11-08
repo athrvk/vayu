@@ -692,9 +692,13 @@ Retry.
 when nobody asked it to (issue #3336): the exit `code`, `signal`, `stderrTail`
 and `error` of the sidecar's `crashed` lifecycle state, as `engine:lifecycle`
 carries them. `useEngineLifecycle` (mounted once in `App`, after
-`useHealthQuery`) writes it: a `crashed` push sets it and every other push
-clears it, so it clears when the sidecar moves on (a restart's `replacing` or
-`spawning`), not when Restart is pressed. The one-time read of the current state
+`useHealthQuery`) writes it: a `crashed` push sets it, and only `ready`, `slow`,
+`stopping` and `stopped` clear it (an engine that is up, alive but slow, or
+stopped on purpose). The transient kinds `idle`, `choosingPort`, `replacing` and
+`spawning` leave it standing, so a restart that fails before it spawns a child
+(the sidecar ends on `idle`) still leaves the Dock its sentence and its Restart
+button, and while the restart runs the button reads Restarting... through
+`engineRestarting`. The one-time read of the current state
 yields to a push that landed while it was in flight and to a restart that
 opened a new start window, so a late reply cannot put a crash back over the
 engine replacing it. **It is a fact, not a status: `useHealthQuery` stays the
