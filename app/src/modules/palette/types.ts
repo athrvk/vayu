@@ -107,6 +107,12 @@ export interface PaletteItem {
 	 */
 	recencyAt?: number;
 	/**
+	 * The entity this row opens, as `request:<id>`, when two rows can open the
+	 * same one - a request's own row and its open tab's. Recents lists such an
+	 * entity once (`recentsOf`); nothing else reads it.
+	 */
+	entityKey?: string;
+	/**
 	 * Set by a deep source: this row was matched against text the palette's own
 	 * scorer cannot see, so no relevance floor applies to it.
 	 *

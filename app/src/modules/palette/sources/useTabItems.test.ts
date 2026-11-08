@@ -61,4 +61,15 @@ describe("useTabItems subtitles", () => {
 		expect(result.current[2].subtitle).toBe("Send: POST /login");
 		expect(result.current[3].subtitle).toBeUndefined();
 	});
+
+	it("names the request a request tab opens, so Recents can list it once", () => {
+		const { result } = renderHook(() => useTabItems());
+
+		expect(result.current.map((item) => item.entityKey)).toEqual([
+			"request:r1",
+			"request:r2",
+			undefined,
+			undefined,
+		]);
+	});
 });

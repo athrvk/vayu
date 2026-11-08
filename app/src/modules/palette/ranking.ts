@@ -282,6 +282,12 @@ function verbsOf(items: PaletteItem[]): PaletteItem[] {
  * Recents only once something is typed - and then it is a search result rather
  * than a recent, which is the distinction the empty query is drawing.
  *
+ * A request that is both sent and open is two dated rows - its own and its
+ * tab's - for one thing the user was doing, and would spend two of the
+ * `RECENT_LIMIT` slots. The tab row stays (it focuses what is already open) and
+ * the request row is dropped from Recents only; it keeps its place in Requests,
+ * since it is not lifted.
+ *
  * How far back it reaches follows the data. Tab focus times are session-scoped
  * by `tabs-store`'s documented design, so after a restart Recents is the
  * requests the run history remembers, and fills with tabs again as they are
@@ -290,7 +296,13 @@ function verbsOf(items: PaletteItem[]): PaletteItem[] {
  */
 function recentsOf(items: PaletteItem[]): PaletteItem[] {
 	const dated = items.filter((item) => item.recencyAt !== undefined && !item.escape);
-	return rankForEmptyQuery(dated).slice(0, RECENT_LIMIT);
+	const openEntities = new Set(
+		dated.flatMap((item) => (item.kind === "tab" && item.entityKey ? [item.entityKey] : []))
+	);
+	const distinct = dated.filter(
+		(item) => !(item.kind === "request" && item.entityKey && openEntities.has(item.entityKey))
+	);
+	return rankForEmptyQuery(distinct).slice(0, RECENT_LIMIT);
 }
 
 /**

@@ -100,6 +100,7 @@ export function useEntityItems(): PaletteItem[] {
 					keywords: [request.method],
 					substringKeywords: [request.url],
 					method: request.method,
+					entityKey: `request:${request.id}`,
 					...(lastSent.has(request.id) ? { recencyAt: lastSent.get(request.id) } : {}),
 					perform: () => openTab({ type: "request", entityId: request.id }),
 				});

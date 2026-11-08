@@ -249,6 +249,45 @@ describe("the empty query's lead sections", () => {
 		expect(ranked.groups.flatMap((g) => g.items.map((i) => i.id))).toEqual(["undated"]);
 	});
 
+	it("lists a request that is sent and open once, as its tab", () => {
+		const items = [
+			item({ id: "tab:t1", kind: "tab", recencyAt: 2000, entityKey: "request:r1" }),
+			item({ id: "request:r1", kind: "request", recencyAt: 3000, entityKey: "request:r1" }),
+			item({ id: "request:r2", kind: "request", recencyAt: 1000, entityKey: "request:r2" }),
+		];
+		const ranked = rankPalette(items, "");
+		expect(ranked.recents.map((i) => i.id)).toEqual(["tab:t1", "request:r2"]);
+		// Only Recents drops it: the Requests group still lists the request.
+		expect(ranked.groups.flatMap((g) => g.items.map((i) => i.id))).toEqual(["request:r1"]);
+	});
+
+	it("spends the slot a duplicate would have taken on the next recent", () => {
+		const items = [
+			...Array.from({ length: RECENT_LIMIT - 1 }, (_, i) =>
+				item({
+					id: `tab:r${i}`,
+					kind: "tab",
+					recencyAt: 2000 + i,
+					entityKey: `request:r${i}`,
+				})
+			),
+			item({ id: "request:r0", kind: "request", recencyAt: 9000, entityKey: "request:r0" }),
+			item({ id: "request:old", kind: "request", recencyAt: 1000, entityKey: "request:old" }),
+		];
+		const ids = rankPalette(items, "").recents.map((i) => i.id);
+		expect(ids).not.toContain("request:r0");
+		expect(ids).toContain("request:old");
+		expect(ids).toHaveLength(RECENT_LIMIT);
+	});
+
+	it("keeps a sent request whose tab is not open", () => {
+		const items = [
+			item({ id: "tab:t1", kind: "tab", recencyAt: 2000, entityKey: "request:r1" }),
+			item({ id: "request:r2", kind: "request", recencyAt: 3000, entityKey: "request:r2" }),
+		];
+		expect(rankPalette(items, "").recents.map((i) => i.id)).toEqual(["request:r2", "tab:t1"]);
+	});
+
 	it("keeps the newest when there are more dated rows than the cap", () => {
 		const items = Array.from({ length: RECENT_LIMIT + 1 }, (_, i) =>
 			item({ id: `t${i}`, kind: "tab", recencyAt: 1000 + i })

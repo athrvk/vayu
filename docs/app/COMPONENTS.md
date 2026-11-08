@@ -1256,7 +1256,10 @@ it (#1176), and both are built here rather than by a source of their own:
   glance at what you were just doing). The cap stayed at six when the list grew taller (#1177):
   the extra height went to the sections *under* Recents, which were the ones nobody could see, and
   a longer list of recents would take it straight back. It reads the same `recencyAt` the within-section
-  order reads, so nothing re-derives a recency and the two cannot disagree. In practice that is
+  order reads, so nothing re-derives a recency and the two cannot disagree. A request that is sent
+  and open has two dated rows, its own and its tab's, so the request row is dropped from Recents
+  (matched on `PaletteItem.entityKey`, `request:<id>`, which both sources stamp) and keeps its
+  place in Requests, instead of taking two of the six slots (#3323). In practice that is
   open tabs and requests that have been sent: the deep sources contribute nothing to an empty
   query at all, so a past run reaches the list only once something is typed - where it is a
   search result rather than a recent, which is the distinction being drawn. How far back it

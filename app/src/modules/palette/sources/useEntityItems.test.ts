@@ -141,6 +141,13 @@ describe("useEntityItems", () => {
 		});
 	});
 
+	it("names the request a row opens, matching what its open tab carries", () => {
+		const { result } = renderHook(() => useEntityItems());
+		const keys = Object.fromEntries(result.current.map((item) => [item.id, item.entityKey]));
+		expect(keys["request:r1"]).toBe("request:r1");
+		expect(keys["collection:c1"]).toBeUndefined();
+	});
+
 	it("titles a request as its tab does: its own name, else its URL path", () => {
 		const { result } = renderHook(() => useEntityItems());
 		const titles = Object.fromEntries(result.current.map((item) => [item.id, item.title]));

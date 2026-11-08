@@ -37,6 +37,9 @@ export function useTabItems(): PaletteItem[] {
 			// Tabs with no path keep the strip's tooltip ("Send: POST /login").
 			subtitle: d.path ?? (d.title === d.label ? undefined : d.title),
 			keywords: [tab.type],
+			...(tab.type === "request" && tab.entityId
+				? { entityKey: `request:${tab.entityId}` }
+				: {}),
 			...(d.icon ? { icon: d.icon } : {}),
 			...(d.method ? { method: d.method } : {}),
 			...(tabFocusedAt[tab.id] !== undefined ? { recencyAt: tabFocusedAt[tab.id] } : {}),
