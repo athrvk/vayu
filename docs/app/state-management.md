@@ -1427,6 +1427,8 @@ Two pure derivations are exported beside it, and every reader asks them rather t
 
 **`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. A report that lands settles the run as `finished`, with the engine's status as its kind (`failed` stays failed, #1932) unless the user stopped it, which stays `stopped`. Any of the three renders History's `LoadTestDetail` over the report (#2136, #2220); until one lands the live view stays, carrying the report Retry. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect. Its counterpart `isRunTerminal` (completed, stopped or failed) is the one spelling of the settled set; an unrecognised status is neither.
 
+**A view of a stored run asks `useRunLiveness(runId, status)`** (`hooks/useRunLiveness.ts`, #3351) whether that run is live: `ScenarioRunView` (Stop, the live progress line, the waiting empty state), `HistoryDetail` (the in-progress pane in place of a load run's report) and `HistoryList` (whether the delete confirm says it stops the run first). It joins the status the caller already holds, from `useRunQuery` or a runs list, with whichever live surface in this window holds the run: the dashboard, by `isDashboardRunLive`, or a collection run's stream. The rule is `isRunLive` in `lib/run-status.ts`: a terminal stored status is final whatever a stream that has not caught up says, an in-progress one keeps the run live through a lost stream, and only a status not read yet, or not recognised, defers to the streams. The caller passes the status rather than the hook reading the run's query, because a second observer of `runDetailOptions` would be a second poll of the same run. The dashboard's own surfaces (the header pill, the keep-awake prompt, the URL bar) ask `isDashboardRunLive` directly, since the run they describe is whichever the dashboard holds.
+
 The load-test dialog seeds its scrape cadence and bounds its metric list from
 the engine's `monitorIntervalMs` / `monitorMaxSeries` settings, through
 `useMonitorSettings` - the same read-the-engine's-copy arrangement
@@ -1569,7 +1571,7 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 }
 ```
 
-`streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `isStreaming || run.status is running|pending`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
+`streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `useRunLiveness(run.id, run.status)`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
 
 **A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared. That mechanism - buffer, leading edge, trailing timer, and the `liveRefreshMs` read behind it - is one implementation, `services/throttled-batcher.ts` (issue #1206), and now has a third caller: `useExecutionEvents` buffers a design-mode request's streamed events through it the same way (issue #1158). When to flush and when to discard stay each caller's own, because the lifecycles genuinely differ - the design-mode hook flushes on teardown rather than discarding, because a teardown there is as often the builder unmounting mid-stream as it is a replacement, and the store's run guard is what drops the leftovers in the second case.
 
@@ -2794,9 +2796,11 @@ const {
 
 ### Live Metrics Streaming - `loadTestService` + `sseClient`
 
-There is **no React hook for the metrics stream**, on purpose. The stream has to
+There is **no React hook that owns the metrics stream**, on purpose. The stream has to
 outlive whichever view is mounted (navigate away from the dashboard mid-run and
-the run keeps streaming), so it is a module singleton:
+the run keeps streaming), so it is a module singleton, and the hooks that ask
+about a run (`useRunLiveness`, `useCanStartLoadRun`) only read the stores it
+writes:
 `services/load-test-service.ts` holds the state machine and
 `services/sse-client.ts` the `EventSource`.
 

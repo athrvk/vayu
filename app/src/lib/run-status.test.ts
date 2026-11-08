@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { isRunInProgress, isRunTerminal } from "./run-status";
+import { isRunInProgress, isRunLive, isRunTerminal } from "./run-status";
 
 const STATUSES: ReadonlyArray<{
 	status: string | null | undefined;
@@ -39,5 +39,19 @@ describe("run status predicates", () => {
 
 	it.each(STATUSES)("isRunTerminal($status) is $terminal", ({ status, terminal }) => {
 		expect(isRunTerminal(status)).toBe(terminal);
+	});
+});
+
+describe("isRunLive", () => {
+	// Mutation check: drop the terminal early return and a stream that has not
+	// caught up keeps a finished run on "still running" in History.
+	it.each(STATUSES)("$status with a live stream", ({ status, terminal }) => {
+		expect(isRunLive(status, true)).toBe(!terminal);
+	});
+
+	// Mutation check: answer from the stream alone and a tab reopened onto a
+	// run still executing, with no stream in this window, offers no Stop.
+	it.each(STATUSES)("$status with no stream", ({ status, inProgress }) => {
+		expect(isRunLive(status, false)).toBe(inProgress);
 	});
 });
