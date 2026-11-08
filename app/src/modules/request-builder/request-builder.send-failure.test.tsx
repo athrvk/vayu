@@ -182,6 +182,29 @@ describe("a send the engine never answered", () => {
 	});
 });
 
+/** A cancelled send is not a failure: the builder's Cancel has to reach the engine call (#3352). */
+describe("a send's Cancel", () => {
+	it("hands the provider's signal to the engine's execute", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.test/u" });
+		executeRequest.mockResolvedValue(null);
+		renderBuilder();
+		const cancel = new AbortController();
+
+		await act(async () => {
+			await (
+				providerProps.onExecute as (
+					r: RequestState,
+					dataRow: undefined,
+					signal: AbortSignal
+				) => Promise<ResponseState | null>
+			)(seededState(), undefined, cancel.signal);
+		});
+
+		expect(executeRequest).toHaveBeenCalledTimes(1);
+		expect(executeRequest.mock.calls[0][2]).toBe(cancel.signal);
+	});
+});
+
 describe("a load test that doesn't start", () => {
 	it("says what failed before the engine's own words", async () => {
 		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.test/u" });

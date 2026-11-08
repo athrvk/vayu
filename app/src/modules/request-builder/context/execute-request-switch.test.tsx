@@ -18,18 +18,22 @@
  * spinner to the switched-to request nor takes it from the one still sending,
  * and of two sends of one request only the newer one's finish and answer count.
  * `executeRequest` guards the shared view with the id that is on screen *now*
- * while still persisting the result under the id that ran.
+ * while still persisting the result under the id that ran. A buffered send can
+ * be cancelled, and a cancelled send's answer is dropped like an overtaken one's.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
-import { render, act, waitFor, screen, fireEvent } from "@testing-library/react";
+import { render, renderHook, act, waitFor, screen, fireEvent } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import UrlBar from "../components/UrlBar";
 import { TooltipProvider } from "@/components/ui";
 import { useResponseStore } from "@/stores";
+// The module itself, past the `@/hooks` stub below: the cancel's whole chain
+// to `fetch` is what one case here walks.
+import { useEngine } from "@/hooks/useEngine";
 import type { RequestBuilderContextValue, RequestState, ResponseState } from "../types";
 
 // The provider is wired to variable resolution, the save manager and several
@@ -96,7 +100,13 @@ function Capture() {
 	return null;
 }
 
-function renderFor(id: string, onExecute: (r: RequestState) => Promise<ResponseState | null>) {
+type OnExecute = (
+	r: RequestState,
+	dataRow?: Record<string, unknown>,
+	signal?: AbortSignal
+) => Promise<ResponseState | null>;
+
+function renderFor(id: string, onExecute: OnExecute) {
 	return (
 		<TestQueryClient>
 			<TooltipProvider>
@@ -115,7 +125,10 @@ function renderFor(id: string, onExecute: (r: RequestState) => Promise<ResponseS
 /** An onExecute whose calls the test resolves by hand, each on its own. */
 function deferredExecute() {
 	const pending: Array<(r: ResponseState | null) => void> = [];
-	const fn = vi.fn(() => new Promise<ResponseState | null>((r) => pending.push(r)));
+	const fn = vi.fn(
+		(_r: RequestState, _row?: Record<string, unknown>, _signal?: AbortSignal) =>
+			new Promise<ResponseState | null>((r) => pending.push(r))
+	);
 	return {
 		fn,
 		/** Resolve the `call`-th send (0 is the first). */
@@ -279,6 +292,138 @@ describe("the send lifecycle is held per request (#3352)", () => {
 			exec.resolveCall(1, makeResponse("NEWER"));
 		});
 		await waitFor(() => expect(ctx().response?.body).toBe("NEWER"));
+		expect(ctx().isExecuting).toBe(false);
+	});
+});
+
+describe("Cancel on a buffered send (#3352)", () => {
+	beforeEach(() => {
+		useResponseStore.getState().clearAll();
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	const cancelButton = () => screen.getByRole("button", { name: /^cancel$/i });
+
+	it("aborts the send's signal and returns the request to idle at once", async () => {
+		const exec = deferredExecute();
+		render(renderFor("A", exec.fn));
+
+		await act(async () => {
+			fireEvent.click(sendButton());
+		});
+		const signal = exec.fn.mock.calls[0][2];
+		expect(signal?.aborted).toBe(false);
+
+		fireEvent.click(cancelButton());
+
+		expect(signal?.aborted).toBe(true);
+		expect(ctx().isExecuting).toBe(false);
+		expect(sendButton()).toBeEnabled();
+		expect(screen.queryByRole("button", { name: /^cancel$/i })).toBeNull();
+	});
+
+	it("drops the cancelled send's late answer and keeps the previous response", async () => {
+		const exec = deferredExecute();
+		render(renderFor("A", exec.fn));
+
+		await act(async () => {
+			void ctx().executeRequest();
+		});
+		await act(async () => {
+			exec.resolveCall(0, makeResponse("PREVIOUS"));
+		});
+		await waitFor(() => expect(ctx().response?.body).toBe("PREVIOUS"));
+
+		await act(async () => {
+			fireEvent.click(sendButton());
+		});
+		fireEvent.click(cancelButton());
+		await act(async () => {
+			exec.resolveCall(1, makeResponse("CANCELLED"));
+		});
+
+		expect(ctx().response?.body).toBe("PREVIOUS");
+		expect(useResponseStore.getState().getResponse("A")?.body).toBe("PREVIOUS");
+		expect(ctx().isExecuting).toBe(false);
+	});
+
+	it("is not offered while a stream's start is in flight", async () => {
+		const stream = vi.fn(() => new Promise<null>(() => {}));
+		render(
+			<TestQueryClient>
+				<TooltipProvider>
+					<RequestBuilderProvider
+						initialRequest={{
+							id: "S",
+							name: "S",
+							url: "https://api.test/S",
+							stream: true,
+						}}
+						onExecute={vi.fn()}
+						onExecuteStream={stream}
+					>
+						<Capture />
+						<UrlBar />
+					</RequestBuilderProvider>
+				</TooltipProvider>
+			</TestQueryClient>
+		);
+
+		await act(async () => {
+			void ctx().executeRequest();
+		});
+
+		expect(ctx().isExecuting).toBe(true);
+		expect(ctx().canCancelSend).toBe(false);
+		expect(screen.queryByRole("button", { name: /^cancel$/i })).toBeNull();
+		ctx().cancelSend();
+		expect(ctx().isExecuting).toBe(true);
+	});
+
+	it("reaches the engine call: the fetch is aborted and no error response lands", async () => {
+		const fetchSignals: AbortSignal[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn((_url: string, init: RequestInit) => {
+				const signal = init.signal as AbortSignal;
+				fetchSignals.push(signal);
+				return new Promise<Response>((_resolve, reject) => {
+					signal.addEventListener("abort", () =>
+						reject(new DOMException("Aborted", "AbortError"))
+					);
+				});
+			})
+		);
+		const engine = renderHook(() => useEngine()).result;
+		// What the engine call answered, which the provider would drop anyway:
+		// a cancel must not be synthesised into a `status: 0` failure on the way.
+		const answers: unknown[] = [];
+		const onExecute: OnExecute = async (r, _row, signal) => {
+			const result = await engine.current.executeRequest(
+				{ method: r.method, url: r.url },
+				undefined,
+				signal
+			);
+			answers.push(result);
+			return result ? makeResponse(`status ${result.status}`) : null;
+		};
+		render(renderFor("A", onExecute));
+
+		await act(async () => {
+			fireEvent.click(sendButton());
+		});
+		await waitFor(() => expect(fetchSignals).toHaveLength(1));
+
+		await act(async () => {
+			fireEvent.click(cancelButton());
+		});
+
+		expect(fetchSignals[0].aborted).toBe(true);
+		await waitFor(() => expect(answers).toEqual([null]));
+		expect(ctx().response).toBeNull();
+		expect(useResponseStore.getState().getResponse("A")).toBeNull();
 		expect(ctx().isExecuting).toBe(false);
 	});
 });

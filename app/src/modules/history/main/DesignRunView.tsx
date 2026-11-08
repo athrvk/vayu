@@ -217,7 +217,11 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 	);
 
 	const handleExecute = useCallback(
-		async (request: RequestState): Promise<ResponseState | null> => {
+		async (
+			request: RequestState,
+			_dataRow?: Record<string, unknown>,
+			signal?: AbortSignal
+		): Promise<ResponseState | null> => {
 			try {
 				/*
 				 * The same builder as the builder's own Send (issue #2638), raw:
@@ -269,7 +273,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 						// switched off in the copy's own Headers tab.
 						...disabledDefaults(request),
 					},
-					activeEnvironmentId || undefined
+					activeEnvironmentId || undefined,
+					signal
 				);
 
 				if (!result) return null;

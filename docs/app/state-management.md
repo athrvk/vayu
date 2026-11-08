@@ -2744,7 +2744,7 @@ that per request (`RequestBuilderProvider`'s `isExecuting`, #3352).
 ```typescript
 const {
   composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>
-  executeRequest: (params: ExecuteRequestRequest, environmentId?: string) => Promise<SanityResult | null>
+  executeRequest: (params: ExecuteRequestRequest, environmentId?: string, signal?: AbortSignal) => Promise<SanityResult | null>  // null once `signal` cancelled it
   stopLoadTest: (runId: string) => Promise<boolean>
   error: string | null
 } = useEngine();

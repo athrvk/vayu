@@ -68,4 +68,43 @@ describe("createSendTracker", () => {
 		send.finish();
 		expect(onChange).toHaveBeenCalledTimes(2);
 	});
+
+	it("cancel aborts a cancellable send and idles its request at once", () => {
+		const { tracker, latest } = tracked();
+		const send = tracker.begin("A", { cancellable: true });
+		expect(latest()?.get("A")?.cancellable).toBe(true);
+
+		tracker.cancel("A");
+		expect(send.signal.aborted).toBe(true);
+		expect(send.isCurrent()).toBe(false);
+		expect(latest()?.has("A")).toBe(false);
+	});
+
+	it("leaves the cancelled send's own finish nothing to do", () => {
+		const { tracker, onChange } = tracked();
+		const send = tracker.begin("A", { cancellable: true });
+		tracker.cancel("A");
+		const changes = onChange.mock.calls.length;
+
+		send.finish();
+		expect(onChange.mock.calls.length).toBe(changes);
+	});
+
+	it("does not cancel a send that was not begun cancellable", () => {
+		const { tracker, latest } = tracked();
+		const send = tracker.begin("A");
+		tracker.cancel("A");
+		expect(send.signal.aborted).toBe(false);
+		expect(latest()?.has("A")).toBe(true);
+	});
+
+	it("cancels only the named request's send", () => {
+		const { tracker, latest } = tracked();
+		const a = tracker.begin("A", { cancellable: true });
+		const b = tracker.begin("B", { cancellable: true });
+		tracker.cancel("A");
+		expect(a.signal.aborted).toBe(true);
+		expect(b.signal.aborted).toBe(false);
+		expect(latest()?.has("B")).toBe(true);
+	});
 });

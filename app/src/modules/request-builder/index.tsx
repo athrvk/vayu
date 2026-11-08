@@ -515,7 +515,8 @@ export default function RequestBuilder() {
 	const handleExecute = useCallback(
 		async (
 			request: RequestState,
-			dataRow?: Record<string, unknown>
+			dataRow?: Record<string, unknown>,
+			signal?: AbortSignal
 		): Promise<ResponseState | null> => {
 			if (!fetchedRequest) return null;
 
@@ -554,7 +555,8 @@ export default function RequestBuilder() {
 						// engine binds them here.
 						...(dataRow ? { data: dataRow } : {}),
 					},
-					activeEnvironmentId || undefined
+					activeEnvironmentId || undefined,
+					signal
 				);
 
 				if (!result) return null;

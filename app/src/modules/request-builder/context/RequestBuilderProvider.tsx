@@ -157,10 +157,14 @@ interface RequestBuilderProviderProps {
 	 * `dataRow` is the one row a Send-with-row binds (issue #601) - the URL,
 	 * headers and body substitute against it and both scripts read it as
 	 * `pm.iterationData`. Undefined is the ordinary Send.
+	 *
+	 * `signal` is the send's Cancel (#3352). A handler that ignores it still
+	 * has its answer dropped, but the engine finishes a send nobody reads.
 	 */
 	onExecute?: (
 		request: RequestState,
-		dataRow?: Record<string, unknown>
+		dataRow?: Record<string, unknown>,
+		signal?: AbortSignal
 	) => Promise<ResponseState | null>;
 	/**
 	 * Send a stream-flagged request (issue #574). Separate from `onExecute`
@@ -1150,6 +1154,8 @@ export default function RequestBuilderProvider({
 	const [inFlightSends, setInFlightSends] = useState<InFlightSends>(NO_SENDS);
 	const [sendTracker] = useState(() => createSendTracker(setInFlightSends));
 	const isExecuting = inFlightSends.has(memoryKey);
+	const canCancelSend = inFlightSends.get(memoryKey)?.cancellable ?? false;
+	const cancelSend = useCallback(() => sendTracker.cancel(memoryKey), [sendTracker, memoryKey]);
 
 	/**
 	 * Execute the request.
@@ -1181,7 +1187,8 @@ export default function RequestBuilderProvider({
 			 * provider has moved on. The live view is touched only while that request
 			 * is on screen - the ref is current, unlike this closure's `executingId`.
 			 * An answer from a send that a newer send of the same request overtook
-			 * is dropped, so it can never land over the newer one's.
+			 * is dropped, so it can never land over the newer one's; so is a
+			 * cancelled send's.
 			 */
 			const land = (send: SendTicket, result: ResponseState) => {
 				if (!send.isCurrent()) return;
@@ -1252,7 +1259,8 @@ export default function RequestBuilderProvider({
 			 * resolves to a response that replaces it (a failure comes back as
 			 * a `status: 0` one - see `handleExecute` in `request-builder/`),
 			 * so there is no case where the old one is left standing as if it
-			 * were the answer to this send.
+			 * were the answer to this send. Cancel leaves it standing as what it
+			 * was, the last answer, because the request is idle again at once.
 			 *
 			 * The streaming path above still clears, and must: its pane is fed
 			 * by a placeholder built from the relay's `open` frame, and that
@@ -1261,14 +1269,14 @@ export default function RequestBuilderProvider({
 			 * mount initialiser and the request-switch reset read the store
 			 * back, so a stale entry would resurface on the next switch.
 			 */
-			const send = sendTracker.begin(memoryKey);
+			const send = sendTracker.begin(memoryKey, { cancellable: true });
 
 			try {
-				const executed = await onExecute(executingRequest, dataRow);
+				const executed = await onExecute(executingRequest, dataRow, send.signal);
 				const result = executed && sent ? { ...executed, sentRequest: sent } : executed;
 				if (result) land(send, result);
 			} catch (error) {
-				console.error("Request execution failed:", error);
+				if (!send.signal.aborted) console.error("Request execution failed:", error);
 			} finally {
 				send.finish();
 			}
@@ -1314,6 +1322,8 @@ export default function RequestBuilderProvider({
 			activeTab,
 			setActiveTab,
 			isExecuting,
+			canCancelSend,
+			cancelSend,
 			isStreaming,
 			stopStream,
 			isSaving,
@@ -1359,6 +1369,8 @@ export default function RequestBuilderProvider({
 			activeTab,
 			setActiveTab,
 			isExecuting,
+			canCancelSend,
+			cancelSend,
 			isStreaming,
 			stopStream,
 			isSaving,

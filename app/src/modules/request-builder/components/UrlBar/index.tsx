@@ -55,6 +55,7 @@ import { useEffect, useState } from "react";
 import { useRequestBuilderContext } from "../../context";
 import { useDashboardStore, useTabsStore } from "@/stores";
 import {
+	DialogCancelButton,
 	Tooltip,
 	TooltipContent,
 	TooltipShortcutLabel,
@@ -105,6 +106,8 @@ export default function UrlBar() {
 	const {
 		request,
 		isExecuting,
+		canCancelSend,
+		cancelSend,
 		isStreaming,
 		stopStream,
 		executeRequest,
@@ -203,6 +206,20 @@ export default function UrlBar() {
 				<span aria-hidden="true" className="h-5 w-0 shrink-0 border-l border-rule" />
 				<UrlInput className="flex-1 min-w-0 h-full border-0 bg-transparent px-3 text-sm font-mono shadow-none rounded-none focus-within:ring-0" />
 			</div>
+
+			{/*
+			    Cancel for a buffered send in flight (#3352), beside the disabled
+			    Send rather than in its place: the pair keeps its position, so a
+			    second press aimed at Send cannot land on Cancel. Click-only, like
+			    Stop. `DialogCancelButton` because it is the one control that draws
+			    the word (`dialog-cancel.test.ts`), at the pair's type size.
+			 */}
+			{canCancelSend && (
+				<DialogCancelButton
+					onClick={cancelSend}
+					className="shrink-0 text-xs font-semibold"
+				/>
+			)}
 
 			{/* Send + Load Test, attached. The corner rules are spelled per member
 			    rather than on the group, because the group has a one-member state

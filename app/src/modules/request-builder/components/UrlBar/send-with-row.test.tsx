@@ -87,6 +87,8 @@ function ctx(
 		activeTab: "params",
 		setActiveTab: vi.fn(),
 		isExecuting: false,
+		canCancelSend: false,
+		cancelSend: vi.fn(),
 		isStreaming: false,
 		stopStream: vi.fn(async () => {}),
 		isSaving: false,

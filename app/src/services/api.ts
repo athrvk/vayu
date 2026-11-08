@@ -854,12 +854,15 @@ export const apiService = {
 	 * body would only be held on its heap and shipped over loopback for nothing
 	 * (issue #2544). The MCP server does not send it - its tool result exposes
 	 * the parsed `body`.
+	 *
+	 * @param signal the builder's Cancel (#3352). An abort rejects with an
+	 * `AbortError`, so the caller can tell its own cancel from a failed send.
 	 */
-	async executeRequest(data: ExecuteRequestRequest): Promise<SanityResult> {
+	async executeRequest(data: ExecuteRequestRequest, signal?: AbortSignal): Promise<SanityResult> {
 		return await httpClient.post<SanityResult>(
 			API_ENDPOINTS.EXECUTE_REQUEST,
 			{ ...data, allowScriptRequests: true, origin: APP_ORIGIN, includeParsedBody: false },
-			{ timeout: proxiedRequestTimeoutMs(data) }
+			{ timeout: proxiedRequestTimeoutMs(data), signal }
 		);
 	},
 

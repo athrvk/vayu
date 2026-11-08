@@ -647,6 +647,17 @@ export interface RequestBuilderContextValue {
 	 */
 	isExecuting: boolean;
 	/**
+	 * The send in flight is a buffered one, which `cancelSend` can abort. A
+	 * stream's start is not: the engine has the run by the time it answers, and
+	 * Stop is what ends it.
+	 */
+	canCancelSend: boolean;
+	/**
+	 * Abort the on-screen request's buffered send (#3352). Its answer is dropped
+	 * and the request is idle again at once, the previous response kept.
+	 */
+	cancelSend: () => void;
+	/**
 	 * A stream this builder started is still open (issue #574).
 	 *
 	 * Distinct from `isExecuting`, which the streaming send clears the moment
