@@ -445,10 +445,12 @@ Manages the lifecycle of load test runs:
 - **The run's own thread carries `should_stop`** (#3371): every
   `pm.sendRequest` its scripts make (`script.setup` / `script.teardown`, the
   inline step scripts, the deferred replay, and a sequential collection run's
-  setup and teardown) takes it through `ScriptSendInputs::cancel`, because
-  Stop and shutdown both raise it and both wait on that thread. The auxiliary
-  threads keep `aux_cancel`: a replay or teardown after a natural end must
-  still send. A call it cancels is the run ending, never a failure: a
+  setup and teardown) takes it through `ScriptSendInputs::cancel`, and a
+  single-request run's start-of-run token request takes it through
+  `build_request`, because Stop and shutdown both raise it and both wait on
+  that thread. The auxiliary threads keep `aux_cancel`: a replay or teardown
+  after a natural end must still send. A call it cancels is the run ending,
+  never a failure: a cancelled token request ends the run `Stopped`, a
   lifecycle script whose send it cancelled is `skipped` (so a cut-short setup
   does not fail the run), and the replay leaves such a sample untallied
   (`ScriptResult::send_cancelled`). A Stop latched before the replay leaves the

@@ -791,9 +791,10 @@ logged as a warning: it means a client skipped composition.
   auxiliary-thread transfer (the monitor scrape, a watchdog's token refresh)
   carries `RunContext::aux_cancel` (#3343), which `join_aux_threads` sets
   before it joins, so Stop, shutdown and a natural end never wait out its
-  timeout; a script's `pm.sendRequest` on the run's own thread carries
-  `should_stop` instead, through `ScriptSendInputs::cancel` (#3371), and
-  what it cancels is the run ending, never a failure. A buffered `POST /execute` carries `server_stopping` through a
+  timeout; a transfer the run's own thread makes (a script's
+  `pm.sendRequest`, the start-of-run token request) carries `should_stop`
+  instead, through `ScriptSendInputs::cancel` and `build_request` (#3371),
+  and what it cancels is the run ending, never a failure. A buffered `POST /execute` carries `server_stopping` through a
   **`DisconnectWatch`** (`http/disconnect_watch.hpp`, #3383): its one flag
   also rises when the caller hangs up (`Request::is_connection_closed`, polled
   every `POLL_INTERVAL`), and such a send is moved to `Stopped` before its

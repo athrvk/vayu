@@ -941,6 +941,44 @@ TEST_F (MidRunRefreshTest, AStopDoesNotWaitOutARefreshInFlight) {
     << "a refresh the Stop cancelled was recorded as a failure: " << stored->summary;
 }
 
+// A Stop while the run's own first token request hangs, before load starts,
+// ends the run Stopped rather than waiting out the request (#3371). The request
+// is bounded by the run's 30 s timeout: healthy, the run settles about a
+// second after the Stop (one libcurl progress tick); broken, it is still
+// registered at `wait_until`'s 20 s deadline. Mutation checks: drop
+// `&context->should_stop` from `build_load_request`'s `build_request` and the
+// run never settles; drop the `stop_decides_outcome ()` choice after it and the
+// cancelled request fails the run.
+TEST_F (MidRunRefreshTest, AStopDoesNotWaitOutTheFirstTokenRequest) {
+    MockTarget target;
+    const vayu::tests::MockTokenServer idp;
+    const json oauth2 = oauth2_config (idp.url ("/token-hang"));
+
+    const std::string run_id = "run-auth-first-token-stop";
+    create_run_row (run_id);
+    json config        = run_config (target.api_url (), oauth2);
+    config["duration"] = "60s";
+    config["timeout"]  = 30000;
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (vayu::tests::wait_until ([&] { return idp.hits () > 0; }))
+    << "the run never asked for its token";
+
+    context->request_stop ();
+    context->notify_refill ();
+    const bool settled =
+    vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; });
+    manager.shutdown (std::chrono::milliseconds (15000));
+
+    ASSERT_TRUE (settled) << "the Stop waited on the token endpoint";
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Stopped);
+    EXPECT_EQ (target.credentials_seen ().size (), 0u) << "the run sent load";
+}
+
 // A token endpoint that stops answering must not fail the run: the target's own
 // status codes plus this section are the honest report.
 TEST_F (MidRunRefreshTest, AFailedRefreshIsRecordedAndTheRunStillCompletes) {

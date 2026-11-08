@@ -1744,7 +1744,8 @@ std::vector<vayu::http::AuthRefreshPlan> credentials) {
  * payload's absent method and url. What it arms here is the refresh of the
  * OAuth 2.0 tokens its steps were planned with.
  *
- * @return false when the payload cannot be built - the caller fails the run.
+ * @return false when the payload cannot be built - the caller ends the run,
+ *         Stopped when a Stop decided it and Failed otherwise.
  */
 bool build_load_request (vayu::db::Database& db,
 vayu::db::Database* db_ptr,
@@ -1780,11 +1781,19 @@ vayu::Request& request) {
     // here so no caller of the run reaches one the policy refuses (#2521).
     const auto& target_policy       = context->target_policy;
     const bool credentials_at_start = credentials_resolve_at_start (*context);
+    // A Stop or shutdown ends a token request in flight here (#3371).
     auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
     credentials_at_start ? vayu::http::AuthResolution::Defer :
                            context->load_auth.auth_resolution (),
-    target_policy ? &*target_policy : nullptr);
+    target_policy ? &*target_policy : nullptr, &context->should_stop);
     if (!built.ok) {
+        // The cancelled request answers as an auth failure; the Stop is what
+        // ended it, so the caller ends the run Stopped and nothing failed.
+        if (context->stop_decides_outcome ()) {
+            vayu::utils::log_info ("run", "Load test stopped before its request was built",
+            { { "runId", context->run_id } });
+            return false;
+        }
         vayu::utils::log_error ("run",
         built.parse_failed ? std::string ("Load test: invalid request format") :
                              "Load test auth resolution failed: " + built.error_message,
@@ -2618,8 +2627,9 @@ RunManager& manager) {
 
         vayu::Request request;
         if (!build_load_request (db, db_ptr, config, context, timeout_ms, request)) {
-            db.transition_run_status (context->run_id,
-            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id, { vayu::RunStatus::Running },
+            context->stop_decides_outcome () ? vayu::RunStatus::Stopped :
+                                               vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
             manager.retain_run (context->run_id);
