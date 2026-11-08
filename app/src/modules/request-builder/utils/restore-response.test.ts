@@ -515,6 +515,13 @@ describe("eventsFromTrace", () => {
 		expect(restored?.streamEndReason).toBe("maxStreamEvents");
 	});
 
+	it("restores a daemon shutdown as its own end reason", () => {
+		const restored = eventsFromTrace({
+			events: { items: [], totalEvents: 5, eventsTruncated: false, endReason: "shutdown" },
+		});
+		expect(restored.streamEndReason).toBe("shutdown");
+	});
+
 	it("keeps the engine's total rather than counting the rows", () => {
 		// Mutation check: recompute `totalEvents` from `items.length` here and
 		// this is the assertion that reddens.
