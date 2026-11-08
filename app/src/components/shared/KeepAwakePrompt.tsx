@@ -16,7 +16,7 @@
  * ten minutes or more, with the standing preference off.
  *
  * Mounted once, at the app root, rather than at any of the three places a load
- * run can start: the question is about the run that is streaming, and the
+ * run can start: the question is about the run that is live, and the
  * dashboard store is where that fact lives. One mount also means one dialog -
  * a prompt per start site could stack.
  *
@@ -27,13 +27,13 @@
 
 import { useState } from "react";
 import { DeleteConfirmDialog } from "@/components/ui";
-import { useClientSettingsStore, useDashboardStore } from "@/stores";
+import { isDashboardRunLive, useClientSettingsStore, useDashboardStore } from "@/stores";
 import { wakeLock, WAKE_LOCK_KEYS } from "@/services/wake-lock";
 import { formatRunLength, isLongRun, runLengthSeconds } from "@/modules/dashboard/utils/keepAwake";
 
 export default function KeepAwakePrompt() {
 	const runId = useDashboardStore((s) => s.currentRunId);
-	const isStreaming = useDashboardStore((s) => s.isStreaming);
+	const isLive = useDashboardStore((s) => isDashboardRunLive(s.phase));
 	const config = useDashboardStore((s) => s.loadTestConfig);
 	const keepAwakeAlways = useClientSettingsStore((s) => s.keepAwakeDuringRuns);
 
@@ -44,14 +44,14 @@ export default function KeepAwakePrompt() {
 	 * that was answered.
 	 *
 	 * State rather than an effect: whether to ask is a function of what is
-	 * streaming and what the user has said, so it is derived during render. An
+	 * live and what the user has said, so it is derived during render. An
 	 * effect that opened the dialog would be a second copy of that answer, one
 	 * render behind.
 	 */
 	const [decided, setDecided] = useState<string | null>(null);
 
 	const asking =
-		runId !== null && isStreaming && !keepAwakeAlways && decided !== runId && isLongRun(config);
+		runId !== null && isLive && !keepAwakeAlways && decided !== runId && isLongRun(config);
 
 	const length = runLengthSeconds(config);
 

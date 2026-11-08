@@ -53,7 +53,7 @@
 import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
-import { useDashboardStore, useTabsStore } from "@/stores";
+import { runningRunTab, useCanStartLoadRun, useTabsStore, type RunningRun } from "@/stores";
 import {
 	DialogCancelButton,
 	Tooltip,
@@ -102,6 +102,11 @@ export function Hint({
 	);
 }
 
+/** The running-run shortcut's label: the dashboard's run, or a collection run's tab. */
+function viewRunningRunLabel(running: RunningRun): string {
+	return running.kind === "load" ? "View load test" : "View collection run";
+}
+
 export default function UrlBar() {
 	const {
 		request,
@@ -117,7 +122,10 @@ export default function UrlBar() {
 		lastRowIndex,
 		rememberRowIndex,
 	} = useRequestBuilderContext();
-	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
+	// The builder's Load test asks this same gate, so the button never offers a
+	// start the click would refuse.
+	const loadRunGate = useCanStartLoadRun();
+	const runningRun = loadRunGate.ok ? null : loadRunGate.running;
 	const openTab = useTabsStore((s) => s.openTab);
 
 	/*
@@ -151,7 +159,6 @@ export default function UrlBar() {
 	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget, rememberRowIndex]);
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
-	const viewRunningTest = () => openTab({ type: "dashboard", entityId: null });
 
 	/*
 	 * Send owns both outer corners when it is alone in the group.
@@ -331,14 +338,14 @@ export default function UrlBar() {
 				    of a past design run has no load-test handler, so showing the
 				    button (or a disabled one) would only mislead. */}
 				{canStartLoadTest &&
-					(isLoadTestRunning ? (
-						/* While a run is live this becomes a shortcut to the running
-						   dashboard (single-active-run policy), on the status tokens
+					(runningRun ? (
+						/* While a run holds the stream this becomes a shortcut to it
+						   (the gate is `canStartLoadRun`), on the status tokens
 						   rather than the accent - it is reporting a state, not
 						   offering the same action, and the colour is what says so
 						   now that the icon is gone. */
 						<button
-							onClick={viewRunningTest}
+							onClick={() => openTab(runningRunTab(runningRun))}
 							className={cn(
 								"h-control px-3.5 inline-flex items-center gap-1.5 shrink-0",
 								"text-xs font-semibold font-[inherit] transition-colors",
@@ -353,7 +360,7 @@ export default function UrlBar() {
 								aria-hidden="true"
 								className="size-1.5 rounded-full bg-status-success animate-pulse"
 							/>
-							View load test
+							{viewRunningRunLabel(runningRun)}
 						</button>
 					) : (
 						<Hint chord={LOAD_TEST_CHORD} label="Start a load test">

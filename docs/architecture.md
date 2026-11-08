@@ -253,16 +253,20 @@ from the moment the main process reports it (`startedRun` on
 `mcp:data-changed`, issue #1419), so it paints the same fill, and opening its
 dashboard tab later attaches nothing new - `startMonitoring` is idempotent for a
 run already being watched. One indicator is all the OS gives an application, and
-one run is all the renderer watches: the SSE client is a singleton, so starting a
-second run closes the first one's stream - and tells its service so, which hands
-the displaced run's wake lock back and gives up its bar rather than leaving both
-standing (issue #1417). The lock is the half with a visible outcome: the incoming
+one run is all the renderer watches: the SSE client is a singleton. A load run
+is refused before it starts while another run holds the stream, and an agent's
+load run is not adopted while another run is live (the single-run gate,
+`canStartLoadRun` in `app/src/stores/run-gate.ts`, #3351). The one start left
+ungated is a collection run over a live load run: it closes the load run's
+stream - and tells its service so, which hands the displaced run's wake lock
+back and gives up its bar rather than leaving both standing (issue #1417). The lock is the half with a visible outcome: the incoming
 run claims the indicator before it connects, so the bar is transferred rather
 than cleared, and the displaced run's release - named by the run it speaks for -
 finds nothing of its own left to wipe. The
-superseded run is not stopped and says nothing to the user: it is still running
-in the engine, and its row reaches a terminal status on the next list read
-rather than through a notification for a run nobody is watching. The indicator
+superseded run is not stopped and posts no notification: it is still running in
+the engine, so the dashboard keeps it live under its lost-stream callout, and
+its row reaches a terminal status on the next list read rather than through a
+notification for a run nobody is watching. The indicator
 follows the run being watched: a run claims it by id when
 the renderer starts watching it, and a run that no longer holds that claim is
 ignored whether it reports, fails or stops - including a run of the same kind as
@@ -325,6 +329,10 @@ in are Shift-dragging the file onto the taskbar button or Open with > Choose ano
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
+They are held again whenever a window is created (the macOS Dock rebuilding a
+closed one) or the main frame starts loading a new document (a reload after a crash or an
+unresponsive renderer; a subframe or same-document navigation does not count), so an intent offered before the new page mounts waits for its
+`did-finish-load` instead of going to a page with no subscriber (#3339).
 Main carries the path and never reads the file, but it does record the path as
 one the user opened (`electron/file-grants.ts`, #2357); the renderer reads it
 back through the gated `specFile:read` channel the import batch already uses,
@@ -763,9 +771,9 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the public-good trusted root (refreshed over TUF by
   `electron/sigstore-trusted-root.ts`), and found
   the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
-  SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
-  and the quit-time install all wait for it; a failure sends
-  `update:verificationFailed` instead and the file is never installed. Any
+  SLSA v1 subject naming that digest. The `verified` download state, restart-to-install
+  and the quit-time install all wait for it; a failure moves the state to
+  `refused` and the file is never installed. Any
   failure, including a network one, refuses: there is no path that accepts after
   an error. Both requests, the attestation lookup and the TUF refresh, go
   through the one injected `fetch` (Electron's `net.fetch`), so both follow the

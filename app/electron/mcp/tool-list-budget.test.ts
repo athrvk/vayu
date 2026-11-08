@@ -177,6 +177,11 @@
  * taking them to 150,172 / 147,576 / 220,581 / 216,314 B; the two caps
  * that no longer held (writes off with reveal off, writes on with reveal on)
  * went to 150,200 / 216,400, the other two stay.
+ *
+ * #3339's `unknownStatus` (a sentence each in `get_run` and `get_run_report`,
+ * and the key in both output schemas) added 270 B to every row, taking them to
+ * 150,442 / 147,846 / 220,851 / 216,584 B; the four caps went to 150,500 /
+ * 147,900 / 220,900 / 216,600.
  */
 
 import { describe, it, expect } from "vitest";
@@ -196,10 +201,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_200 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_600 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 220_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_400 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_500 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_900 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 220_900 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -36,8 +36,8 @@ vi.mock("@/modules/history/main/components/RunExportMenu", () => ({ default: () 
 const onStop = async () => {};
 const configuration = { mode: "constant_rps", targetRps: 10 };
 const base: DashboardHeaderProps = {
-	mode: "running",
-	isStreaming: true,
+	live: true,
+	endedAs: null,
 	isStopping: false,
 	onStop,
 	requestUrl: "https://example.test",
@@ -75,7 +75,7 @@ describe("DashboardHeader render count", () => {
 	it("re-renders when any other prop changes", () => {
 		const h = mount();
 		const before = h.count();
-		h.rerender({ mode: "completed", isStreaming: false });
+		h.rerender({ live: false, endedAs: "completed" });
 		expect(h.count()).toBe(before + 1);
 	});
 

@@ -22,7 +22,7 @@ import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
-import { useDashboardStore, useLayoutStore } from "@/stores";
+import { useDashboardStore, useLayoutStore, type DashboardPhase } from "@/stores";
 import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
 
@@ -61,13 +61,18 @@ function reportFor(status: "completed" | "failed" | "stopped"): RunReport {
 	};
 }
 
+/** A streaming run, a run whose report landed, or a stopped one awaiting its report. */
 function seed(mode: "running" | "completed" | "failed" | "stopped", withReport: boolean) {
-	useDashboardStore.setState({
-		currentRunId: "run_1",
-		mode,
-		isStreaming: mode === "running",
-		finalReport: withReport && mode !== "running" ? reportFor(mode) : null,
-	});
+	useDashboardStore.setState({ currentRunId: "run_1", phase: phaseFor(mode, withReport) });
+}
+
+function phaseFor(
+	mode: "running" | "completed" | "failed" | "stopped",
+	withReport: boolean
+): DashboardPhase {
+	if (mode === "running") return { phase: "streaming" };
+	if (!withReport) return { phase: "awaitingReport", stopped: mode === "stopped" };
+	return { phase: "finished", kind: mode, report: reportFor(mode) };
 }
 
 const renderDashboard = () => render(withQueryClient(<LoadTestDashboard />));

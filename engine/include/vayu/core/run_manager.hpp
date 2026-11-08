@@ -421,6 +421,12 @@ struct RunContext {
     /// never what the run's outcome is: that is @ref stop_decides_outcome.
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
+    /// The `ClientConfig::cancel` of every transfer an auxiliary thread makes
+    /// (the scrape, each watchdog's refresh), set by `join_aux_threads` before
+    /// it joins (#3343), so a join never waits out a network timeout. Not
+    /// `should_stop`: a natural end never sets that, and its join must not
+    /// wait either. A transfer it ends is the run ending, never a failure.
+    std::atomic<bool> aux_cancel{ false };
 
     /**
      * @brief Ask the run to stop, from any thread (#3341).
@@ -1881,8 +1887,10 @@ void collect_metrics (std::shared_ptr<RunContext> context, vayu::db::Database* d
  *
  * A failed scrape is a **gap**: it is counted, it never throws outward, and it
  * never fails the run. After `FAILURES_BEFORE_BACKOFF` consecutive failures it
- * logs once and keeps trying on a doubled interval, so an endpoint that went
- * away for the whole run costs one log line rather than one per scrape.
+ * logs once and keeps trying on a doubled interval (`MonitorBackoff`), so an
+ * endpoint that went away for the whole run costs one log line rather than one
+ * per scrape. A scrape still in flight when the run ends is cancelled through
+ * `RunContext::aux_cancel` and counted as nothing.
  *
  * Declared here so a test can drive the loop against a mock endpoint without an
  * HTTP server in front of it; the production caller is `RunManager::start_run`.
@@ -1907,7 +1915,9 @@ const MonitorConfig& config);
  * once when the watchdog arms (`read_auth_refresh_tuning`).
  *
  * Returns as soon as the run stops, or once the published token no longer
- * expires. Inert (returns immediately) for a null @p state.
+ * expires. A refresh still in flight when the run ends is cancelled through
+ * `RunContext::aux_cancel` and recorded as nothing. Inert (returns
+ * immediately) for a null @p state.
  */
 void run_auth_refresh (const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<AuthRefreshState>& state,

@@ -21,7 +21,7 @@ interface UpdateVerificationState {
 /**
  * Held in a store rather than in `useAppUpdate`'s state because two surfaces
  * read it and only one of them is there when the event arrives: the update
- * banner is mounted for the whole session and receives `update:verificationFailed`,
+ * banner is mounted for the whole session and receives the `refused` download state,
  * while Settings > Updates mounts later, when the user opens it, and a
  * per-instance hook would find nothing to show.
  */

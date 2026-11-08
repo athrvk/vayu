@@ -20,7 +20,14 @@ ways; until then the live view stays, with the report fetch's Retry.
   baseline lookup, all primitives and handed over only once the report is on screen). A collection
   load run has no URL, so the live header
   shows its collection name and step count there (`collectionName` / `stepCount`, primitives for
-  the same memo reason).
+  the same memo reason). The pill and Stop come from two primitives, `live` and
+  `endedAs`, which `index.tsx` derives from the store's `phase` through `isDashboardRunLive` and
+  `dashboardRunEnding` (#3351): Running with Stop while the run may still be executing - a lost
+  stream included, beside its Reconnect callout - and the run's ending after. A report
+  fetch that keeps finding the run still running gives up to that same callout rather than
+  to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
+  and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
+  run streams they leave its stream alone, Reconnect opening that run with a toast instead.
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions
@@ -168,7 +175,7 @@ consumes it.
   "not measured"; a `|| 0` there would draw "0 events/sec" on every ordinary
   load run. `MetricsView` shows `LiveStreamPanel` (Row 1.6) when the newest frame
   carries `stream_events` (`utils/liveStream.ts`) - not a run-config field, and
-  not the store's `isStreaming`, which only means the SSE connection is
+  not the store's `streaming` phase, which only means the SSE connection is
   attached. The cumulative tiles read that frame (the history buffer is trimmed
   by the live window); the first-event tile reads the latest frame carrying
   `stream_time_to_first_event`, as the sequence panel does, and is omitted until

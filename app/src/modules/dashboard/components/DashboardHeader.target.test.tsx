@@ -37,8 +37,8 @@ vi.mock("@/stores", () => ({
 function mount(patch: Partial<DashboardHeaderProps>) {
 	return render(
 		<DashboardHeader
-			mode="running"
-			isStreaming
+			live
+			endedAs={null}
 			isStopping={false}
 			onStop={async () => {}}
 			{...patch}

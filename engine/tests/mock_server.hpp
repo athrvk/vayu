@@ -116,6 +116,7 @@ class SlowMockServer {
         // for. The handler only returns once the fixture is torn down (or after
         // a hard cap, so a leaked handler cannot wedge the test binary).
         svr.Get ("/hang", [this] (const httplib::Request&, httplib::Response& res) {
+            ++hangs;
             hold_until_released ();
             res.set_content ("{}", "application/json");
         });
@@ -312,6 +313,11 @@ class SlowMockServer {
         return scrapes.load ();
     }
 
+    /// How many requests `/hang` has received: the sign one is in flight.
+    int hang_count () const {
+        return hangs.load ();
+    }
+
     /// Connections the server is holding open right now - one per task in
     /// flight (see `counting_task_queue`). A client that keeps its connections
     /// alive after its last request, as libcurl's connection cache does, is
@@ -336,6 +342,7 @@ class SlowMockServer {
     int port = 0;
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
+    std::atomic<int> hangs{ 0 };
     std::atomic<int> stall_hits{ 0 };
     std::atomic<int> hang_every_hits{ 0 };
     std::atomic<int> sse_held_first_hits{ 0 };

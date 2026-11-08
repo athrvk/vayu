@@ -107,7 +107,15 @@ import {
 	useFullCollectionRequests,
 	useStartScenarioRunMutation,
 } from "@/queries";
-import { useClientSettingsStore, useDashboardStore, useSessionStore, useTabsStore } from "@/stores";
+import {
+	runningRunSentence,
+	runningRunTab,
+	useCanStartLoadRun,
+	useClientSettingsStore,
+	useDashboardStore,
+	useSessionStore,
+	useTabsStore,
+} from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
@@ -451,7 +459,11 @@ export default function RunCollectionDialog({
 	const settingsValid = loadTest
 		? !profileError && !streamCapsError && !dataFileError && !budgetsError
 		: iterationsValid && !streamCapsError && !dataFileError && !budgetsError;
-	const canRun = settingsValid && !oauthGated;
+	// A load run waits for the run that holds the live stream (`canStartLoadRun`,
+	// #3351); a sequence takes the stream openly and is not held.
+	const loadRunGate = useCanStartLoadRun();
+	const heldBy = loadTest && !loadRunGate.ok ? loadRunGate.running : null;
+	const canRun = settingsValid && !oauthGated && !heldBy;
 
 	/*
 	 * The chosen file against the contract in scope (issue #599), and against
@@ -1017,6 +1029,27 @@ export default function RunCollectionDialog({
 								onGateChange={reportGate}
 							/>
 						))}
+
+					{heldBy && (
+						<Callout
+							severity="blocking"
+							title={runningRunSentence(heldBy)}
+							action={
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										openTab(runningRunTab(heldBy));
+										onOpenChange(false);
+									}}
+								>
+									View run
+								</Button>
+							}
+						>
+							Stop it or let it finish before starting a load test.
+						</Callout>
+					)}
 
 					{error && (
 						<Callout severity="blocking" title="Couldn't start the run">

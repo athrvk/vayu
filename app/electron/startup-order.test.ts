@@ -90,7 +90,7 @@ describe("startup ordering", () => {
 
 	/*
 	 * Mutation check: move `setupIpcHandlers();` below `await engineStartup;`, or
-	 * the updater's four `ipcMain.handle` calls out of `setupIpcHandlers` into
+	 * the updater's `ipcMain.handle` calls out of `setupIpcHandlers` into
 	 * something that runs after it, and this reddens. The renderer's update
 	 * invokes rejected with "No handler registered" for as long as the engine
 	 * took to come up, when the channels were registered by `initAutoUpdater`.
@@ -101,6 +101,7 @@ describe("startup ordering", () => {
 			"update:openReleasePage",
 			"update:check",
 			"update:quitForUpdate",
+			"update:getState",
 		];
 		const setupAt = main.indexOf("\nfunction setupIpcHandlers()");
 		const setupEnd = main.indexOf("\n}\n", setupAt);
@@ -142,6 +143,21 @@ describe("startup ordering", () => {
 		expect(main.split('click: () => void checkForUpdates("menu")')).toHaveLength(3);
 		expect(main).toContain('ipcMain.handle("update:check", () => checkForUpdates("renderer"))');
 		expect(fnBody).toContain("checkForUpdatesNow(source)");
+	});
+
+	/*
+	 * Mutation check: route `update:getState` through `checkForUpdates`, or
+	 * await `loadUpdater()` / `updaterArmed` in it, and this reddens. A renderer
+	 * mounting during engine startup would wait out the engine for an answer the
+	 * unloaded updater already has: nothing downloaded.
+	 */
+	it("answers the download state without waiting for the updater", () => {
+		const handlerAt = main.indexOf('ipcMain.handle("update:getState"');
+		const handler = main.slice(handlerAt, main.indexOf("\n", handlerAt));
+
+		expect(handlerAt).toBeGreaterThan(-1);
+		expect(handler).toContain("updaterModule?.getUpdateState()");
+		expect(handler).not.toMatch(/await|async|loadUpdater|updaterArmed/);
 	});
 
 	it("listens for activate before it waits on the engine", () => {
@@ -314,5 +330,36 @@ describe("startup ordering", () => {
 
 		expect(argvAt).toBeGreaterThan(-1);
 		expect(argvAt).toBeGreaterThan(windowAt);
+	});
+
+	it("holds open intents again for every window and every page load (#3339)", () => {
+		// `ready` is set by `did-finish-load` and nothing else clears it, so a new
+		// window or a reload would send an intent to a page with no subscriber.
+		// The reload hold is main-frame only: `did-start-loading` also fires for the
+		// response preview's iframe, which never reaches `did-finish-load`.
+		// Mutation check: delete either `notReady` call, swap the event back to
+		// `did-start-loading`, or drop the `startsMainFramePage` call and this reddens.
+		const bodyAt = main.indexOf("\nfunction createWindow() {");
+		const bodyEnd = main.indexOf("\n}\n", bodyAt);
+		expect(bodyAt).toBeGreaterThan(-1);
+		expect(bodyEnd).toBeGreaterThan(bodyAt);
+		const body = main.slice(bodyAt, bodyEnd);
+
+		const loadAt = body.indexOf("mainWindow.loadURL(");
+		const startNavigationAt = body.indexOf('webContents.on("did-start-navigation"');
+		const readyAt = body.indexOf("openIntents.ready();");
+
+		// Before the first line that can start a page, so the first load is seen.
+		expect(body).toContain("openIntents.notReady();");
+		expect(body.indexOf("openIntents.notReady();")).toBeLessThan(
+			body.indexOf("new BrowserWindow(")
+		);
+		expect(startNavigationAt).toBeGreaterThan(-1);
+		expect(startNavigationAt).toBeLessThan(loadAt);
+		const handler = body.slice(startNavigationAt, loadAt);
+		expect(handler).toContain("openIntents.notReady();");
+		expect(handler).toContain("startsMainFramePage(details)");
+		expect(body).not.toContain('"did-start-loading"');
+		expect(readyAt).toBeGreaterThan(loadAt);
 	});
 });

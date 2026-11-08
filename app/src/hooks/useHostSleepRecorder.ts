@@ -32,8 +32,10 @@ interface SuspendAnchor {
 
 /** The run streaming right now, and its elapsed position - or null if none is. */
 function streamingAnchor(): SuspendAnchor | null {
-	const { currentRunId, isStreaming, currentMetrics } = useDashboardStore.getState();
-	if (!currentRunId || !isStreaming) return null;
+	// Streaming, not merely live: a lost stream's last tick is not where the
+	// run had got to.
+	const { currentRunId, phase, currentMetrics } = useDashboardStore.getState();
+	if (!currentRunId || phase.phase !== "streaming") return null;
 	return { runId: currentRunId, startSeconds: currentMetrics?.elapsed_seconds ?? 0 };
 }
 

@@ -34,7 +34,7 @@ import { queryKeys } from "@/queries/keys";
 import { invalidateCompositions } from "@/queries/compose-invalidation";
 import { useScenarioRunStore } from "@/stores/scenario-run-store";
 import { useClientSettingsStore } from "@/stores";
-import { createThrottledBatcher } from "./throttled-batcher";
+import { createThrottledBatcher, type ThrottledBatcher } from "./throttled-batcher";
 import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
@@ -79,14 +79,25 @@ class ScenarioRunService {
 	private stepsExpected: number | null = null;
 	/** Steps committed to the store so far - the numerator over the above. */
 	private stepsCompleted = 0;
-	private stepBatcher = createThrottledBatcher<ScenarioStepEvent>((batch) => {
-		useScenarioRunStore.getState().addSteps(batch);
-		// The OS indicator rides the commit rather than the event, the way
-		// `LoadTestService` rides its flush: this is already the cadence the run
-		// tab repaints at, and a taskbar has no use for a finer one.
-		this.stepsCompleted += batch.length;
-		this.reportProgress();
-	});
+	/**
+	 * The watched run's step buffer, built per run and addressed to it, the
+	 * shape `useExecutionEvents` uses: `handleClose` flushes after it has let go
+	 * of `activeRunId`, so the commit cannot read the run from there, and a
+	 * flush addressed to a run the store no longer holds is dropped by it.
+	 * Null while no run is watched.
+	 */
+	private stepBatcher: ThrottledBatcher<ScenarioStepEvent> | null = null;
+
+	private createStepBatcher(runId: string): ThrottledBatcher<ScenarioStepEvent> {
+		return createThrottledBatcher<ScenarioStepEvent>((batch) => {
+			useScenarioRunStore.getState().addSteps(runId, batch);
+			// The OS indicator rides the commit rather than the event, the way
+			// `LoadTestService` rides its flush: this is already the cadence the
+			// run tab repaints at, and a taskbar has no use for a finer one.
+			this.stepsCompleted += batch.length;
+			this.reportProgress();
+		});
+	}
 
 	/** Attach to a scenario run's stream and push its steps into the store. */
 	startMonitoring(runId: string): void {
@@ -124,6 +135,7 @@ class ScenarioRunService {
 		// of it. A second discard on this line could only be a copy of that rule
 		// that drifts.
 		this.activeRunId = runId;
+		this.stepBatcher = this.createStepBatcher(runId);
 		this.stepsExpected = null;
 		this.stepsCompleted = 0;
 		useScenarioRunStore.getState().startRun(runId);
@@ -172,7 +184,7 @@ class ScenarioRunService {
 		this.stepsExpected = plan.stepsExpected;
 		// The whole frame, not just the length: the run tab's header reads the
 		// iteration count from it while the run is live.
-		useScenarioRunStore.getState().setPlan(plan);
+		if (this.activeRunId) useScenarioRunStore.getState().setPlan(this.activeRunId, plan);
 		this.reportProgress();
 	}
 
@@ -211,12 +223,7 @@ class ScenarioRunService {
 	 * cannot commit per event.
 	 */
 	private handleStep(step: ScenarioStepEvent): void {
-		this.stepBatcher.push(step);
-	}
-
-	/** Drop the buffer and its pending commit, for steps nothing will show. */
-	private discardPending(): void {
-		this.stepBatcher.discard();
+		this.stepBatcher?.push(step);
 	}
 
 	/**
@@ -231,8 +238,12 @@ class ScenarioRunService {
 	 */
 	private releaseRun(runId: string | null): void {
 		this.activeRunId = null;
-		this.discardPending();
-		useScenarioRunStore.getState().setStreaming(false);
+		// The buffer and its pending commit go with the run: nothing will show
+		// those steps.
+		this.stepBatcher?.discard();
+		this.stepBatcher = null;
+		// Addressed, so a release can never lower a successor's flag.
+		if (runId) useScenarioRunStore.getState().setStreaming(runId, false);
 		// Before any awaited fetch a caller makes: the run is no longer this
 		// service's the moment it gets here, and the machine must not stay
 		// pinned awake through a round trip taken on its behalf.
@@ -330,13 +341,14 @@ class ScenarioRunService {
 
 	private handleError(error: Error): void {
 		console.error("[ScenarioRunService] SSE error:", error);
+		const runId = this.activeRunId;
 		wakeLock.release(WAKE_LOCK_KEYS.collectionRun);
-		this.failProgress(this.activeRunId);
+		this.failProgress(runId);
 		// The stream dropped, not the run - it keeps executing on the engine
 		// (same fact `ScenarioRunView`'s "Live updates stopped" callout states),
 		// so the notification says that instead of claiming the run failed.
 		this.notifyTerminal(
-			this.activeRunId,
+			runId,
 			NOTIFY_KINDS.collectionRunFailed,
 			`${error.message} The run itself is unaffected.`,
 			{ title: "Lost live updates for this run" }
@@ -344,9 +356,11 @@ class ScenarioRunService {
 		// Before the error, so the steps that did arrive are on screen under the
 		// notice explaining why no more will be. A buffered batch stranded here
 		// would be the run's last steps, silently missing from a list the reader
-		// is now being told is incomplete.
-		this.stepBatcher.flush();
-		useScenarioRunStore.getState().setError(error.message);
+		// is now being told is incomplete. Lowering the streaming flag with the
+		// error hands "is it live" to the run's stored status, rather than
+		// leaving a Running spinner beside "Live updates stopped".
+		this.stepBatcher?.flush();
+		if (runId) useScenarioRunStore.getState().streamLost(runId, error.message);
 	}
 
 	/**
@@ -370,7 +384,7 @@ class ScenarioRunService {
 		// case where the live rows are all the reader will ever have. This is
 		// the one path that flushes rather than discards, which is why it is
 		// here and not in `releaseRun`.
-		this.stepBatcher.flush();
+		this.stepBatcher?.flush();
 		// Before the release, whose clear would otherwise wipe the bar: until
 		// #1415 `runProgress.fail` was reachable only from `handleError`, which
 		// the engine's own failures never reach, so a real failure cleared the

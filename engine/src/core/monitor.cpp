@@ -13,6 +13,7 @@
 #include <set>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include "vayu/db/database.hpp"
 #include "vayu/utils/ascii_case.hpp"
@@ -422,6 +423,30 @@ std::optional<std::string> scrape_failure_cause (const vayu::Result<vayu::Respon
         return "HTTP " + std::to_string (response.status_code);
     }
     return std::nullopt;
+}
+
+bool scrape_cancelled (const vayu::Result<vayu::Response>& sent) {
+    const auto code = sent.is_ok () ? sent.value ().error_code : sent.error ().code;
+    return code == vayu::ErrorCode::Cancelled;
+}
+
+MonitorBackoff after_scrape_failure (const MonitorBackoff& state) {
+    if (std::holds_alternative<MonitorBackedOff> (state)) {
+        return state;
+    }
+    const auto* failing   = std::get_if<MonitorFailing> (&state);
+    const int consecutive = (failing != nullptr ? failing->consecutive : 0) + 1;
+    if (consecutive >= monitor_limits::FAILURES_BEFORE_BACKOFF) {
+        return MonitorBackedOff{};
+    }
+    return MonitorFailing{ consecutive };
+}
+
+int scrape_interval_ms (const MonitorBackoff& state, int interval_ms) {
+    if (!std::holds_alternative<MonitorBackedOff> (state)) {
+        return interval_ms;
+    }
+    return std::min (interval_ms * 2, monitor_limits::MAX_INTERVAL_MS);
 }
 
 nlohmann::json build_monitor_sample_payload (int64_t timestamp,

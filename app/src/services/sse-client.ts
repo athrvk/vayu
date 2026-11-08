@@ -9,6 +9,7 @@
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { STEP_OUTCOMES } from "@/types";
+import { isRunTerminal, type TerminalRunStatus } from "@/lib/run-status";
 import type {
 	LiveCapacityState,
 	LiveLatencyDistribution,
@@ -282,7 +283,7 @@ export type SSEErrorHandler = (error: Error) => void;
  * {@link SSECloseInfo.frame} tells apart. The caller converges on the stored
  * report either way, and a null here means "ask it", never "it finished".
  */
-export type SSETerminalStatus = "completed" | "stopped" | "failed" | null;
+export type SSETerminalStatus = TerminalRunStatus | null;
 
 /**
  * What ended the stream, beside what the engine said about the run.
@@ -314,8 +315,7 @@ export function parseTerminalStatus(raw: string): SSETerminalStatus {
 		// outcome rather than a crash-only rarity, which is what made this
 		// case mismatch worth closing: capitalized comparisons here never
 		// matched a real frame).
-		if (status === "completed" || status === "stopped" || status === "failed") return status;
-		return null;
+		return typeof status === "string" && isRunTerminal(status) ? status : null;
 	} catch {
 		return null;
 	}

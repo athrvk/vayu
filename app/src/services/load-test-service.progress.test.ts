@@ -25,8 +25,9 @@ vi.mock("@/stores", () => ({
 		getState: () => ({
 			currentRunId: null,
 			loadTestConfig: config,
-			setStreaming: vi.fn(),
-			setError: vi.fn(),
+			streamOpened: vi.fn(),
+			streamLost: vi.fn(),
+			streamClosed: vi.fn(),
 			setFinalReport: vi.fn(),
 			addMetricsBatch: vi.fn(),
 			addMonitorSamples: vi.fn(),

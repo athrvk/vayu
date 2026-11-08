@@ -31,7 +31,7 @@
 
 import { Check, Copy, History } from "lucide-react";
 import { useCollectionsQuery, useRunQuery, useRunReportQuery, isRunNotFound } from "@/queries";
-import { isRunInProgress } from "@/lib/run-status";
+import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { loadedRunReference } from "@/lib/run-reference-input";
 import { useCopy } from "@/hooks/useCopy";
 import { useTabsStore } from "@/stores";
@@ -126,7 +126,7 @@ export default function HistoryDetail() {
 	 * ends; `runDetailOptions` polls the run's status, so this flips to the
 	 * report without the tab being closed.
 	 */
-	const isLoadRunInProgress = isLoadRun && isRunInProgress(run.status);
+	const isLoadRunInProgress = useRunLiveness(selectedRunId, run?.status) && isLoadRun;
 	const showsReport = isLoadRun && !isLoadRunInProgress;
 	const {
 		data: report,

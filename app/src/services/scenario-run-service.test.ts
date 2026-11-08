@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockSetStreaming = vi.fn();
-const mockSetError = vi.fn();
+const mockStreamLost = vi.fn();
 const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
 const mockSetPlan = vi.fn();
@@ -39,7 +39,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			addSteps: mockAddSteps,
 			setPlan: mockSetPlan,
 			setStreaming: mockSetStreaming,
-			setError: mockSetError,
+			streamLost: mockStreamLost,
 			summary: { counts: stepCounts, iterationSteps: 0, dataBoundSteps: 0 },
 		}),
 	},
@@ -197,17 +197,18 @@ function lastReportedFraction(): number | null {
 
 /** Every step of every batch committed so far, in order. */
 function committedSteps(): ScenarioStepEvent[] {
-	return mockAddSteps.mock.calls.flatMap((call) => call[0] as ScenarioStepEvent[]);
+	return mockAddSteps.mock.calls.flatMap((call) => call[1] as ScenarioStepEvent[]);
 }
 
 /** Reset the service's private stream state between cases. */
 function resetService(): void {
 	const internals = scenarioRunService as unknown as {
 		activeRunId: string | null;
-		discardPending: () => void;
+		stepBatcher: { discard: () => void } | null;
 	};
 	internals.activeRunId = null;
-	internals.discardPending();
+	internals.stepBatcher?.discard();
+	internals.stepBatcher = null;
 }
 
 const emptyReport = { results: [], scenario: { stepsExecuted: 2, stepsStored: 0 } };
@@ -265,7 +266,7 @@ describe("ScenarioRunService", () => {
 		scenarioRunService.startMonitoring("run_plan");
 		deliverPlan(6, 40);
 
-		expect(mockSetPlan).toHaveBeenCalledExactlyOnceWith({
+		expect(mockSetPlan).toHaveBeenCalledExactlyOnceWith("run_plan", {
 			stepsPerIteration: 6,
 			iterations: 40,
 			stepsExpected: 240,
@@ -299,7 +300,7 @@ describe("ScenarioRunService", () => {
 		scenarioRunService.startMonitoring("run_3");
 		await closeStream();
 
-		expect(mockSetStreaming).toHaveBeenCalledWith(false);
+		expect(mockSetStreaming).toHaveBeenCalledWith("run_3", false);
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail("run_3") });
 		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.lists() });
 		// Its own family, outside `lists()`, and not polled - so the section
@@ -356,7 +357,7 @@ describe("ScenarioRunService", () => {
 
 			vi.advanceTimersByTime(FLUSH_MS);
 			expect(mockAddSteps).toHaveBeenCalledTimes(2);
-			expect(mockAddSteps.mock.calls[1][0]).toHaveLength(8);
+			expect(mockAddSteps.mock.calls[1][1]).toHaveLength(8);
 
 			// Nothing is dropped in exchange for the commits saved.
 			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -388,7 +389,10 @@ describe("ScenarioRunService", () => {
 			failStream("engine gone");
 
 			expect(committedSteps().map((s) => s.stepIndex)).toEqual([0, 1]);
-			expect(mockSetError).toHaveBeenCalledWith("engine gone");
+			// Mutation check: drop the `streamLost` call from `handleError` and the
+			// run tab keeps its Running spinner beside "Live updates stopped".
+			expect(mockStreamLost).toHaveBeenCalledWith("run_7", "engine gone");
+			expect(mockAddSteps.mock.calls.every(([runId]) => runId === "run_7")).toBe(true);
 		});
 
 		it("drops what a replaced run left buffered rather than committing it into the next", () => {
@@ -414,7 +418,7 @@ describe("ScenarioRunService", () => {
 		// A rejected refetch must not reject `handleClose` - the SSE client
 		// awaits it, and the stream's own teardown is not the report's business.
 		await expect(closeStream()).resolves.toBeUndefined();
-		expect(mockSetStreaming).toHaveBeenCalledWith(false);
+		expect(mockSetStreaming).toHaveBeenCalledWith("run_4", false);
 	});
 
 	describe("wake lock (issue #1357)", () => {

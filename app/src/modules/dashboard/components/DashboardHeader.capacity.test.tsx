@@ -29,8 +29,8 @@ vi.mock("@/stores", () => ({
 function mount(mode: string) {
 	return render(
 		<DashboardHeader
-			mode="idle"
-			isStreaming
+			live
+			endedAs={null}
 			isStopping={false}
 			onStop={async () => {}}
 			configuration={{ mode, concurrency: 100 }}

@@ -18,24 +18,13 @@ import { memo } from "react";
 import { ArrowLeft } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui";
 import { useTabsStore, useDashboardStore } from "@/stores";
-import type { Run } from "@/types";
-import type { DashboardHeaderProps, DashboardMode } from "../types";
+import type { DashboardHeaderProps } from "../types";
 import { MethodBadge, RunComment, RunStatusPill, StopRunButton } from "@/components/shared";
 import { loadTestModeLabel, formatConcurrency } from "@/constants/load-test-modes";
 import { formatClock, pluralize } from "../utils/format";
 import { formatNumber } from "@/lib/format-number";
 import { dataFileDisplayName } from "@/lib/run-data-file";
 import RunExportMenu from "@/modules/history/main/components/RunExportMenu";
-
-/**
- * What the status pill says. Streaming wins over the mode. Idle, and a run that
- * is neither streaming nor settled, draw no pill.
- */
-function pillStatus(mode: DashboardMode, isStreaming: boolean): Run["status"] | null {
-	if (isStreaming) return "running";
-	if (mode === "completed" || mode === "stopped" || mode === "failed") return mode;
-	return null;
-}
 
 // memo'd (#1714): LoadTestDashboard re-renders on every metrics tick during a
 // run (up to 10 Hz), and this header's own props barely ever change. The
@@ -45,8 +34,8 @@ function pillStatus(mode: DashboardMode, isStreaming: boolean): Run["status"] | 
 // tick, but the header draws only MM:SS, so the comparator below ignores
 // sub-second movement.
 function DashboardHeader({
-	mode,
-	isStreaming,
+	live,
+	endedAs,
 	isStopping,
 	onStop,
 	requestUrl,
@@ -78,15 +67,12 @@ function DashboardHeader({
 		}
 	};
 
-	// Elapsed time is driven entirely by `elapsedDuration`, which is the engine's
-	// authoritative elapsed while running (last SSE tick's elapsed_seconds) and
-	// the final report's testDuration once completed. Both are monotonic, so the
-	// timer never double-counts or jumps backward. (A previous client-side 1s
-	// liveTick was ADDED on top of elapsedDuration - since both advanced on
-	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
+	// Elapsed time is `elapsedDuration` only, so there is one clock.
 	const displayMs = elapsedDuration;
 
-	const status = pillStatus(mode, isStreaming);
+	// Running for as long as the engine may still be executing the run, a lost
+	// stream included; then how it ended, or nothing before anyone knows.
+	const status = live ? "running" : endedAs;
 
 	// Config summary line
 	const configParts: string[] = [];
@@ -174,7 +160,7 @@ function DashboardHeader({
 			)}
 
 			{/* Stop button */}
-			{mode === "running" && <StopRunButton onStop={onStop} isStopping={isStopping} />}
+			{live && <StopRunButton onStop={onStop} isStopping={isStopping} />}
 		</div>
 	);
 }

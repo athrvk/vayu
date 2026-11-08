@@ -7,12 +7,14 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const mockSetStreaming = vi.fn();
-const mockSetError = vi.fn();
+const mockStreamOpened = vi.fn();
+const mockStreamLost = vi.fn();
+const mockStreamClosed = vi.fn();
 const mockSetFinalReport = vi.fn();
 const mockAddMetricsBatch = vi.fn();
-// Which run the dashboard is showing *right now* - re-read after every await,
-// which is the whole point of the guard under test.
+// Which run the dashboard is showing *right now*. Every writer names its run
+// and the real store drops one for a run it is not holding
+// (`dashboard-store.test.ts`), so what this suite pins is the run named.
 const dashboard = { currentRunId: null as string | null };
 // The user's standing answer to "keep this machine awake" (#1357), which the
 // service reads at start. Off is the shipped default, so it is the default here.
@@ -22,8 +24,9 @@ vi.mock("@/stores", () => ({
 		getState: () => ({
 			currentRunId: dashboard.currentRunId,
 			loadTestConfig: null,
-			setStreaming: mockSetStreaming,
-			setError: mockSetError,
+			streamOpened: mockStreamOpened,
+			streamLost: mockStreamLost,
+			streamClosed: mockStreamClosed,
 			setFinalReport: mockSetFinalReport,
 			addMetricsBatch: mockAddMetricsBatch,
 		}),
@@ -160,7 +163,7 @@ describe("LoadTestService", () => {
 		await closeStream("completed");
 
 		expect(apiService.getRunReport).toHaveBeenCalledWith("run_cached");
-		expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+		expect(mockSetFinalReport.mock.calls[0]?.[1]).toMatchObject({
 			metadata: { status: "completed" },
 		});
 	});
@@ -198,10 +201,11 @@ describe("LoadTestService", () => {
 	 * Finish run A, start run B before A's report comes back. The fetch is one
 	 * local round trip, so the window is small and entirely reachable: A's
 	 * report landed on B's dashboard, flipping a running test to "completed"
-	 * with A's percentiles. The store is therefore re-read *after* the await,
-	 * not captured before it.
+	 * with A's percentiles. The report is addressed to A, and the store drops
+	 * a write for a run it is not holding (`run-supersession.test.ts` drives
+	 * that against the real store).
 	 */
-	it("drops a finished run's report when the dashboard has moved to another run", async () => {
+	it("addresses a finished run's report to that run, not the one now shown", async () => {
 		dashboard.currentRunId = "run_A";
 		loadTestService.startMonitoring("run_A");
 
@@ -220,7 +224,8 @@ describe("LoadTestService", () => {
 		await closed;
 
 		expect(apiService.getRunReport).toHaveBeenCalledWith("run_A");
-		expect(mockSetFinalReport).not.toHaveBeenCalled();
+		expect(mockSetFinalReport).toHaveBeenCalledWith("run_A", expect.anything());
+		expect(mockSetFinalReport).not.toHaveBeenCalledWith("run_B", expect.anything());
 	});
 
 	/*
@@ -245,7 +250,10 @@ describe("LoadTestService", () => {
 
 			await closeStream(null);
 
-			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(mockStreamLost).toHaveBeenLastCalledWith(
+				expect.any(String),
+				expect.stringContaining("still running")
+			);
 			expect(mockSetFinalReport).not.toHaveBeenCalled();
 			expect(mockNotifyPost).not.toHaveBeenCalled();
 		});
@@ -282,7 +290,7 @@ describe("LoadTestService", () => {
 			await closeStream("completed");
 
 			expect(mockSetFinalReport).toHaveBeenCalledTimes(1);
-			expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+			expect(mockSetFinalReport.mock.calls[0]?.[1]).toMatchObject({
 				metadata: { status: "completed" },
 			});
 		});
@@ -313,11 +321,11 @@ describe("LoadTestService", () => {
 			vi.mocked(apiService.getRunReport).mockResolvedValueOnce(reportWith("running"));
 			dashboard.currentRunId = "run_drop_4";
 			loadTestService.startMonitoring("run_drop_4");
-			mockSetError.mockClear();
+			mockStreamLost.mockClear();
 
 			await closeStream("completed", { frame: true });
 
-			expect(mockSetError).not.toHaveBeenCalled();
+			expect(mockStreamLost).not.toHaveBeenCalled();
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
 			);
@@ -363,7 +371,7 @@ describe("LoadTestService", () => {
 		/** The report now says completed: a wait still alive would finish the run. */
 		async function letReportComplete(closed: Promise<void>): Promise<void> {
 			getRunReport.mockResolvedValue(reportWith("completed"));
-			mockSetError.mockClear();
+			mockStreamLost.mockClear();
 			mockSetFinalReport.mockClear();
 			mockNotifyPost.mockClear();
 			getRunReport.mockClear();
@@ -385,7 +393,7 @@ describe("LoadTestService", () => {
 				.mockResolvedValueOnce(reportWith("running"))
 				.mockResolvedValueOnce(reportWith("completed"));
 			loadTestService.startMonitoring("run_settle_1");
-			mockSetError.mockClear();
+			mockStreamLost.mockClear();
 
 			const closed = closeStream(null, { frame: true });
 			await vi.advanceTimersByTimeAsync(INTERVAL_MS);
@@ -396,13 +404,13 @@ describe("LoadTestService", () => {
 			await closed;
 
 			expect(getRunReport).toHaveBeenCalledTimes(3);
-			expect(mockSetFinalReport.mock.calls[0]?.[0]).toMatchObject({
+			expect(mockSetFinalReport.mock.calls[0]?.[1]).toMatchObject({
 				metadata: { status: "completed" },
 			});
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ kind: NOTIFY_KINDS.loadRunFinished })
 			);
-			expect(mockSetError).not.toHaveBeenCalled();
+			expect(mockStreamLost).not.toHaveBeenCalled();
 			expect(loadTestService.getActiveRunId()).toBeNull();
 		});
 
@@ -432,14 +440,14 @@ describe("LoadTestService", () => {
 				.mockRejectedValueOnce(new ApiError(404, "NOT_FOUND", "no such run"))
 				.mockResolvedValueOnce(reportWith("completed"));
 			loadTestService.startMonitoring("run_settle_3");
-			mockSetError.mockClear();
+			mockStreamLost.mockClear();
 
 			const closed = closeStream(null, { frame: true });
 			await vi.advanceTimersByTimeAsync(INTERVAL_MS * 2);
 			await closed;
 
 			expect(mockSetFinalReport).toHaveBeenCalledTimes(1);
-			expect(mockSetError).not.toHaveBeenCalled();
+			expect(mockStreamLost).not.toHaveBeenCalled();
 		});
 
 		/*
@@ -456,14 +464,18 @@ describe("LoadTestService", () => {
 			// Once for the close itself, then one per interval.
 			expect(getRunReport).toHaveBeenCalledTimes(4);
 			await vi.advanceTimersByTimeAsync(MAX_MS - INTERVAL_MS * 3 - 1);
-			expect(mockSetError).not.toHaveBeenLastCalledWith(
+			expect(mockStreamLost).not.toHaveBeenLastCalledWith(
+				expect.any(String),
 				expect.stringContaining("still running")
 			);
 
 			await vi.advanceTimersByTimeAsync(1);
 			await closed;
 
-			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(mockStreamLost).toHaveBeenLastCalledWith(
+				expect.any(String),
+				expect.stringContaining("still running")
+			);
 			expect(mockSetFinalReport).not.toHaveBeenCalled();
 			expect(mockNotifyPost).not.toHaveBeenCalled();
 			expect(loadTestService.getActiveRunId()).toBeNull();
@@ -477,7 +489,10 @@ describe("LoadTestService", () => {
 			// No timer is advanced: a close that waited would never resolve.
 			await closeStream(null, { frame: false });
 
-			expect(mockSetError).toHaveBeenLastCalledWith(expect.stringContaining("still running"));
+			expect(mockStreamLost).toHaveBeenLastCalledWith(
+				expect.any(String),
+				expect.stringContaining("still running")
+			);
 			expect(getRunReport).toHaveBeenCalledTimes(1);
 		});
 
@@ -508,7 +523,7 @@ describe("LoadTestService", () => {
 
 				expect(mockSetFinalReport).not.toHaveBeenCalled();
 				expect(mockNotifyPost).not.toHaveBeenCalled();
-				expect(mockSetError).not.toHaveBeenCalled();
+				expect(mockStreamLost).not.toHaveBeenCalled();
 			});
 
 			it("does nothing after Reconnect watches the same run again", async () => {
@@ -545,7 +560,7 @@ describe("LoadTestService", () => {
 
 				expect(mockSetFinalReport).not.toHaveBeenCalled();
 				expect(mockNotifyPost).not.toHaveBeenCalled();
-				expect(mockSetError).not.toHaveBeenCalled();
+				expect(mockStreamLost).not.toHaveBeenCalled();
 			});
 
 			it("does nothing after another stream takes the client", async () => {
@@ -556,7 +571,7 @@ describe("LoadTestService", () => {
 
 				expect(mockSetFinalReport).not.toHaveBeenCalled();
 				expect(mockNotifyPost).not.toHaveBeenCalled();
-				expect(mockSetError).not.toHaveBeenCalled();
+				expect(mockStreamLost).not.toHaveBeenCalled();
 			});
 		});
 	});
@@ -568,8 +583,8 @@ describe("LoadTestService", () => {
 	// still worth pinning is the positive form: start only opens the stream.
 	it("only opens the stream on start, touching no run state the caller registered", () => {
 		loadTestService.startMonitoring("run_3");
-		expect(mockSetStreaming).toHaveBeenCalledWith(true);
-		expect(mockSetError).toHaveBeenCalledWith(null);
+		expect(mockStreamOpened).toHaveBeenCalledWith("run_3");
+		expect(mockStreamLost).not.toHaveBeenCalled();
 		expect(mockSetFinalReport).not.toHaveBeenCalled();
 		expect(mockAddMetricsBatch).not.toHaveBeenCalled();
 	});

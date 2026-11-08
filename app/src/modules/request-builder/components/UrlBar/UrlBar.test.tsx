@@ -20,7 +20,7 @@
  * variable-highlighting input and are not what this guards.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { RequestBuilderContext } from "../../context";
 import type { RequestBuilderContextValue } from "../../types";
@@ -29,6 +29,7 @@ import { emptyDrafts } from "../../utils/body-drafts";
 import { TooltipProvider } from "@/components/ui";
 import { formatChord } from "@/lib/platform";
 import { SEND_CHORD, LOAD_TEST_CHORD } from "@/constants/shortcuts";
+import { useDashboardStore, useScenarioRunStore, useTabsStore } from "@/stores";
 import UrlBar from "./index";
 
 vi.mock("./MethodSelector", () => ({ default: () => null }));
@@ -436,5 +437,52 @@ describe("Cancel while a send is in flight", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
 
 		expect(cancelSend).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * While a run holds the live stream, Load test is a shortcut to that run, by
+ * the same gate the click asks (`canStartLoadRun`, #3351). Reading only the
+ * dashboard left a plain "Load test" beside a streaming collection run, and
+ * the click was then refused. Mutation check: read `isDashboardRunLive` alone
+ * again and the collection case finds "Load test".
+ */
+describe("Load test while a run holds the stream", () => {
+	afterEach(() => {
+		useDashboardStore.setState({ currentRunId: null, phase: { phase: "idle" } });
+		useScenarioRunStore.setState({ runId: null, isStreaming: false });
+	});
+
+	const activeTab = () => {
+		const { openTabs, activeTabId } = useTabsStore.getState();
+		return openTabs.find((t) => t.id === activeTabId);
+	};
+
+	it("opens the dashboard while its load run is live", () => {
+		useDashboardStore.getState().startRun("run_1");
+		renderBar(true);
+
+		fireEvent.click(screen.getByRole("button", { name: "View load test" }));
+
+		expect(screen.queryByRole("button", { name: "Load test" })).toBeNull();
+		expect(activeTab()).toMatchObject({ type: "dashboard" });
+	});
+
+	it("opens the collection run while one streams", () => {
+		useScenarioRunStore.getState().startRun("coll_1");
+		renderBar(true);
+
+		fireEvent.click(screen.getByRole("button", { name: "View collection run" }));
+
+		expect(screen.queryByRole("button", { name: "Load test" })).toBeNull();
+		expect(activeTab()).toMatchObject({ type: "run", entityId: "coll_1" });
+	});
+
+	it("offers Load test again once neither run holds the stream", () => {
+		useScenarioRunStore.getState().startRun("coll_1");
+		useScenarioRunStore.getState().setStreaming("coll_1", false);
+		renderBar(true);
+
+		expect(screen.getByRole("button", { name: "Load test" })).toBeTruthy();
 	});
 });
