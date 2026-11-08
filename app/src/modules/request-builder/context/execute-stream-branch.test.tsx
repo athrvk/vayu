@@ -32,7 +32,7 @@
  * directly, exactly as the relay would.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
 import { render, act, waitFor, screen } from "@testing-library/react";
@@ -56,7 +56,11 @@ vi.mock("@/hooks", () => ({
 }));
 
 const invalidateQueries = vi.fn();
-vi.mock("@/lib/query-client", () => ({ queryClient: { invalidateQueries } }));
+vi.mock("@/lib/query-client", () => ({
+	queryClient: { invalidateQueries },
+	// `runDetailOptions`' retry asks it; the watched run here never fails.
+	isEngineStartFailure: () => false,
+}));
 
 vi.mock("@/queries", () => ({
 	// RequestBuilderProvider now reads the catalogue itself (issue #1635); an
@@ -83,12 +87,19 @@ vi.mock("@/queries", () => ({
 }));
 
 const getRunReport = vi.fn();
+const getRun = vi.fn();
 const stopRun = vi.fn(async () => ({}));
-vi.mock("@/services", () => ({ apiService: { getRunReport, stopRun } }));
+vi.mock("@/services", () => ({
+	apiService: { getRunReport, stopRun },
+	ApiError: class ApiError extends Error {},
+}));
+// The real `runDetailOptions` watches a replaced feed, and reads the run here.
+vi.mock("@/services/api", () => ({ apiService: { getRun } }));
 
 // The relay is driven by hand below; the hook only owns the socket.
 vi.mock("../hooks/useExecutionEvents", () => ({ useExecutionEvents: () => {} }));
 
+const { RUN_IN_PROGRESS_POLL_MS } = await import("@/queries/runs");
 const { default: RequestBuilderProvider } = await import("./RequestBuilderProvider");
 const { useRequestBuilderContext } = await import("./RequestBuilderContext");
 
@@ -165,7 +176,11 @@ describe("the streaming send branch", () => {
 		useExecutionEventsStore.getState().clear();
 		invalidateQueries.mockClear();
 		getRunReport.mockReset();
+		getRun.mockReset();
 		stopRun.mockClear();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it("stays sending until the engine answers, across a switch away and back", async () => {
@@ -401,7 +416,13 @@ describe("the streaming send branch", () => {
 			runId,
 			eventsUrl: `/runs/${runId}/events`,
 		});
-		const replaced = () => useExecutionEventsStore.getState().replacedFeeds;
+		/** Each replaced request's run, which is what the pane names. */
+		const replaced = () =>
+			Object.fromEntries(
+				Object.entries(useExecutionEventsStore.getState().replacedFeeds).map(
+					([requestId, feed]) => [requestId, feed.runId]
+				)
+			);
 
 		it("records the run it replaced against the request that started it", async () => {
 			const { rerender } = render(renderFor("B", startedAs("run_B")));
@@ -479,7 +500,7 @@ describe("the streaming send branch", () => {
 			});
 			rerender(renderFor("B", startedAs("run_B2")));
 
-			// Mutation check: drop the provider's `forgetReplaced` call and B's
+			// Mutation check: drop the provider's `beginSend` call and B's
 			// own new stream still carries the note about the old one.
 			await act(async () => {
 				await ctx().executeRequest();
@@ -488,7 +509,9 @@ describe("the streaming send branch", () => {
 		});
 
 		it("forgets the record when that request sends without a stream", async () => {
-			useExecutionEventsStore.setState({ replacedFeeds: { B: "run_B" } });
+			useExecutionEventsStore.setState({
+				replacedFeeds: { B: { runId: "run_B", sent: null, leftOut: [], finalized: false } },
+			});
 			const answered: ResponseState = {
 				status: 200,
 				statusText: "OK",
@@ -614,7 +637,8 @@ describe("the streaming send branch", () => {
 				await ctx().executeRequest();
 			});
 
-			// Mutation check: drop the `sendCountRef` comparison and the old run's
+			// Mutation check: drop the `sendCounts` comparison in
+			// `finalizeStreamRun` and the old run's
 			// report lands over the response the new send cleared.
 			await act(async () => {
 				release(reportWithEvents("old run"));
@@ -622,6 +646,155 @@ describe("the streaming send branch", () => {
 			await waitFor(() => expect(lastDesignInvalidated("A")).toBe(true));
 			expect(bodyOf("A")).toBeUndefined();
 			expect(ctx().response).toBeNull();
+		});
+
+		it("lands a run whose feed another request took over, once the engine ends it", async () => {
+			// The poll is the code's own delay, so the clock is the test's.
+			vi.useFakeTimers();
+			getRun
+				.mockResolvedValueOnce({ id: "run_B", status: "running" })
+				.mockResolvedValue({ id: "run_B", status: "completed" });
+			getRunReport.mockResolvedValue(reportWithEvents("B stored"));
+			const { rerender } = render(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("A", startedAs("run_A")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore
+					.getState()
+					.addEvents("run_A", [{ event: "token", data: "a" }]);
+			});
+
+			// Still running at the engine: watched, not finalized.
+			await act(() => vi.advanceTimersByTimeAsync(0));
+			expect(getRun).toHaveBeenCalledWith("run_B");
+			expect(getRunReport).not.toHaveBeenCalled();
+
+			// Mutation check: watch no replaced feed in `useStreamFinalization`
+			// and B's run never reaches B's stored response.
+			await act(() => vi.advanceTimersByTimeAsync(RUN_IN_PROGRESS_POLL_MS));
+			await vi.waitFor(() => expect(bodyOf("B")).toBe("B stored"));
+			expect(getRunReport).toHaveBeenCalledWith("run_B");
+			expect(lastDesignInvalidated("B")).toBe(true);
+			// Mutation check: drop `sent` from `displacedByHandOver` and B's Send
+			// snapshot is lost at the hand-over.
+			const storedB = useResponseStore.getState().getResponse("B") as ResponseState | null;
+			expect(storedB?.sentRequest?.url).toBeDefined();
+			// A's live feed is untouched, and so is the pane on screen.
+			expect(useExecutionEventsStore.getState()).toMatchObject({
+				requestId: "A",
+				runId: "run_A",
+				isStreaming: true,
+			});
+			expect(useExecutionEventsStore.getState().events).toEqual([
+				{ event: "token", data: "a" },
+			]);
+			expect(ctx().response).toBeNull();
+			expect(bodyOf("A")).toBeUndefined();
+		});
+
+		it("does not finalize again after the builder remounts", async () => {
+			// `Shell.tsx` unmounts the builder on every tab that is not a request.
+			getRunReport.mockResolvedValue(reportWithEvents("A stored"));
+			const first = render(renderFor("A", started));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+			await waitFor(() => expect(bodyOf("A")).toBe("A stored"));
+			first.unmount();
+
+			const newer: ResponseState = {
+				status: 201,
+				statusText: "Created",
+				headers: {},
+				body: "newer",
+				size: 5,
+				time: 1,
+			};
+			useResponseStore.getState().setResponse("A", newer);
+
+			// Mutation check: drop the `finalized` test in `claimableRun` (the
+			// marker a provider ref used to hold) and the remount fetches the
+			// ended run again and writes it over the newer response.
+			render(renderFor("A", started));
+			await act(async () => {});
+			expect(getRunReport).toHaveBeenCalledTimes(1);
+			expect(bodyOf("A")).toBe("newer");
+			expect(ctx().response?.body).toBe("newer");
+		});
+
+		it("fetches again on the next mount when the report could not be read", async () => {
+			getRunReport
+				.mockRejectedValueOnce(new Error("engine went away"))
+				.mockResolvedValue(reportWithEvents("A stored"));
+			const first = render(renderFor("A", started));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			act(() => {
+				useExecutionEventsStore.getState().endStream("run_1", "completed", 9);
+			});
+			// The invalidations fire either way.
+			await waitFor(() => expect(lastDesignInvalidated("A")).toBe(true));
+			expect(bodyOf("A")).toBeUndefined();
+			first.unmount();
+
+			// Mutation check: make `releaseFinalization` a no-op and the failed
+			// fetch is the last one ever made for this run.
+			render(renderFor("A", started));
+			await waitFor(() => expect(bodyOf("A")).toBe("A stored"));
+			expect(getRunReport).toHaveBeenCalledTimes(2);
+			expect(ctx().response?.body).toBe("A stored");
+		});
+
+		it("is not done by the History run view's provider", async () => {
+			// DesignRunView's shape: a detached copy with no id and no stream
+			// handler, filed under its run id.
+			getRun.mockResolvedValue({ id: "run_B", status: "completed" });
+			getRunReport.mockResolvedValue(reportWithEvents("stored"));
+			act(() => {
+				const events = useExecutionEventsStore.getState();
+				events.startStream({
+					requestId: "B",
+					runId: "run_B",
+					eventsUrl: "/runs/run_B/events",
+				});
+				events.handOver("A");
+				events.startStream({
+					requestId: "A",
+					runId: "run_A",
+					eventsUrl: "/runs/run_A/events",
+				});
+				events.endStream("run_A", "completed", 1);
+			});
+
+			// Mutation check: enable `useStreamFinalization` unconditionally and
+			// this provider fetches and invalidates for requests it never sent.
+			render(
+				<TestQueryClient>
+					<RequestBuilderProvider
+						initialRequest={{ id: null, name: "copy" } as Partial<RequestState>}
+						memoryKey="run_history"
+						collectionId={null}
+						onExecute={async () => null}
+					>
+						<Capture />
+					</RequestBuilderProvider>
+				</TestQueryClient>
+			);
+			await act(async () => {});
+
+			expect(getRunReport).not.toHaveBeenCalled();
+			expect(getRun).not.toHaveBeenCalled();
+			expect(invalidateQueries).not.toHaveBeenCalled();
+			expect(useExecutionEventsStore.getState().finalized).toBe(false);
 		});
 	});
 

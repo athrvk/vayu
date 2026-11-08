@@ -292,7 +292,7 @@ export default function ResponseViewer() {
 	 * the pane shows that run's own stored record.
 	 */
 	const replacedRunId = useExecutionEventsStore((s) =>
-		requestId ? s.replacedFeeds[requestId] : undefined
+		requestId ? s.replacedFeeds[requestId]?.runId : undefined
 	);
 	const feedNotice = !!replacedRunId && shown?.restoredFrom?.runId !== replacedRunId && (
 		<div className="px-4 pt-3 shrink-0">

@@ -36,7 +36,7 @@ import type { MonitorSeriesResponse, TimeSeriesResponse } from "@/modules/histor
 const RUNS_POLL_MS = 5000;
 
 /** How often a run that is still executing is re-read, for its status and report. */
-const RUN_IN_PROGRESS_POLL_MS = 3000;
+export const RUN_IN_PROGRESS_POLL_MS = 3000;
 
 /**
  * A run's stored data is final only once the engine says the run is. The
