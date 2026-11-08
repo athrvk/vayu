@@ -560,8 +560,8 @@ which case the app picks a fallback (below).
   including the ones where MCP is switched off, since the barrel also carried the
   preference that decides. `main.ts` now imports the three self-contained modules
   it needs at startup (`mcp/config`, `mcp/store`, `mcp/connect`) and pulls the
-  barrel through a cached dynamic `import()` inside `startMcp()`, behind the
-  enabled check. `startup-import-graph.test.ts` holds the graph to that.
+  barrel through a cached dynamic `import()` inside the MCP lifecycle's service
+  factory, behind the enabled check. `startup-import-graph.test.ts` holds the graph to that.
 
 **Development vs Production:**
 - **Development**: Engine binary at `engine/build/vayu-engine`

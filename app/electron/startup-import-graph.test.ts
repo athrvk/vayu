@@ -116,6 +116,7 @@ describe("main process startup import graph", () => {
 				path.join("mcp", "config.ts"),
 				path.join("mcp", "connect.ts"),
 				path.join("mcp", "gates.ts"),
+				path.join("mcp", "lifecycle.ts"),
 				path.join("mcp", "listener.ts"),
 				path.join("mcp", "status.ts"),
 				path.join("mcp", "store.ts"),
@@ -143,18 +144,26 @@ describe("main process startup import graph", () => {
 		expect(relative).toContain(path.join("mcp", "connect.ts"));
 	});
 
-	it("reads the enabled preference before loading the MCP barrel", () => {
+	/*
+	 * The lifecycle reads the preference before it makes a listener, and the
+	 * service factory is reached only from a listener's first request
+	 * (lifecycle.test.ts). What a scan can hold is that the barrel is loaded
+	 * inside that factory and nowhere earlier in the wiring.
+	 */
+	it("loads the MCP barrel only inside the lifecycle's service factory", () => {
 		const main = readFileSync(entry, "utf8");
-		const start = main.indexOf("async function startMcp()");
-		const end = main.indexOf("async function stopMcp()", start);
+		const start = main.indexOf("createMcpLifecycle<");
+		const end = main.indexOf("function currentMcpStatus(", start);
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
-		const body = main.slice(start, end);
+		const wiring = main.slice(start, end);
 
-		const gate = body.indexOf("loadMcpEnabled()");
-		const load = body.indexOf("await loadMcp()");
+		const gate = wiring.indexOf("isEnabled: loadMcpEnabled,");
+		const factory = wiring.indexOf("loadServiceFactory:");
+		const load = wiring.indexOf("await loadMcp()");
 		expect(gate).toBeGreaterThan(-1);
-		expect(load).toBeGreaterThan(-1);
-		expect(gate).toBeLessThan(load);
+		expect(factory).toBeGreaterThan(-1);
+		expect(load).toBeGreaterThan(factory);
+		expect(wiring.indexOf("loadMcp(")).toBe(load + "await ".length);
 	});
 });

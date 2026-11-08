@@ -60,9 +60,9 @@ function errnoCode(err: unknown): string | undefined {
 }
 
 /**
- * Sort a failed start into what the user can act on. `startMcp`'s catch also
- * sees a store or SDK-load failure, so only a bind error carrying the errno
- * gets the port wording; everything else is `"other"` with the error's own text.
+ * Sort a failed start into what the user can act on. The lifecycle's start
+ * also sees a store failure, so only a bind error carrying the errno gets the
+ * port wording; everything else is `"other"` with the error's own text.
  */
 export function classifyStartError(
 	err: unknown,

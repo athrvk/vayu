@@ -139,12 +139,8 @@ import {
 } from "./mcp/store.js";
 import type { McpConnectClient } from "./mcp/connect.js";
 import { McpListener } from "./mcp/listener.js";
-import {
-	buildMcpStatus,
-	classifyStartError,
-	connectWhileRunning,
-	type McpStartError,
-} from "./mcp/status.js";
+import { buildMcpStatus, connectWhileRunning } from "./mcp/status.js";
+import { createMcpLifecycle } from "./mcp/lifecycle.js";
 import type { McpDataChangedEvent } from "./mcp/tools.js";
 import type { VayuMcpService } from "./mcp/index.js";
 import {
@@ -236,15 +232,6 @@ let engineStartup: Promise<void> | null = null;
  * or restart succeeds.
  */
 let engineStartFailure: string | null = null;
-// The MCP port, bound while the server is enabled. See mcp/listener.ts.
-let mcpListener: McpListener | null = null;
-// Why the last start failed, for `mcp:status`; null once a start succeeds, the
-// server is stopped, or the preference turns it off (#2368).
-let mcpStartError: McpStartError | null = null;
-// The MCP service behind it (Streamable HTTP, exposing the engine to agents; see
-// mcp/index.ts), built by the first request the listener receives - null until
-// then, and read as "not loaded yet" by the Settings IPC below.
-let mcpService: VayuMcpService | null = null;
 /**
  * The renderer's remembered data-file paths, published over
  * `dataFile:locations` so MCP can name them (#1742). Module-level because the
@@ -1121,8 +1108,9 @@ async function checkForUpdates(source: Parameters<UpdaterModule["checkForUpdates
  * starting the server while Settings asks for the catalog) share one evaluation.
  * A rejection is cached with it: the module is a file inside the asar, so a
  * failure to load it is a broken install rather than something a retry fixes.
- * `startMcp` logs one and continues without MCP; the two IPC handlers let it
- * reject, which reaches Settings as the failed call it is.
+ * A request that needed it is answered 500 and the cause logged (the listener's
+ * `answerInternalError`); the two IPC handlers let it reject, which reaches
+ * Settings as the failed call it is.
  */
 type McpModule = typeof import("./mcp/index.js");
 let mcpModulePromise: Promise<McpModule> | null = null;
@@ -1132,76 +1120,49 @@ function loadMcp(): Promise<McpModule> {
 	return mcpModulePromise;
 }
 
-// One start at a time: Retry clicked twice would otherwise bind a second
-// listener against the first one's port and record Vayu's own bind as a conflict.
-let mcpStarting: Promise<void> | null = null;
-
-async function startMcp() {
-	mcpStarting ??= runStartMcp().finally(() => {
-		mcpStarting = null;
-	});
-	return mcpStarting;
-}
-
-async function runStartMcp() {
-	mcpStartError = null;
-	try {
-		// Inside the try, not ahead of it: this is the first thing in the whole app
-		// to touch the persisted MCP config, so it is where a store failure lands.
-		if (!loadMcpEnabled()) {
-			appLogger().info("mcp", "MCP server disabled by preference; not starting.");
-			return;
-		}
-		// Only the port is paid for here. The SDK, the tool registry and the
-		// service are loaded by the first request that reaches it, so a launch no
-		// agent connects to never evaluates them (5-7 MB resident, measured).
-		const listener = new McpListener({
-			host: MCP_HOST,
-			port: MCP_PORT,
-			log: mcpLogger(),
-			loadHandler: async () => {
-				const { VayuMcpService } = await loadMcp();
-				const service = new VayuMcpService({
-					engineBaseUrl: engineOrigin(),
-					host: MCP_HOST,
-					port: MCP_PORT,
-					version: app.getVersion(),
-					safety: loadPersistedSafety(),
-					onDataChanged: sendMcpDataChanged,
-					dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
-					currentDataFileHash: (filePath) =>
-						hashDataFile(
-							filePath,
-							createDataFileSystem((p) => fileGrants.isGranted(p))
-						),
-					appFocus: () => appFocus.get(),
-					log: mcpLogger(),
-				});
-				mcpService = service;
-				return (req, res) => service.handleRequest(req, res);
-			},
-		});
-		await listener.start();
-		mcpListener = listener;
-		appLogger().info("mcp", "MCP server listening", { url: listener.url });
-	} catch (error) {
-		// The MCP server is a non-critical convenience - a bind failure (e.g. port
-		// in use) must not take down the app. Log it, keep it for `mcp:status` so
-		// Settings can say why nothing is listening, and continue.
-		mcpStartError = classifyStartError(error, { host: MCP_HOST, port: MCP_PORT });
-		appLogger().error("mcp", "Failed to start MCP server (continuing without it)", {
-			error: String(error),
-			code: mcpStartError.code,
-		});
-		mcpListener = null;
-	}
-}
+/**
+ * The MCP server: the port, the service behind it, and why the last start
+ * failed, owned by one state machine (#3337). A start or stop never throws; a
+ * bind failure is a non-critical convenience lost, kept for `mcp:status` so
+ * Settings can say why nothing is listening.
+ *
+ * Only the port is paid for at start. The SDK, the tool registry and the
+ * service are loaded by the first request that reaches it, so a launch no agent
+ * connects to never evaluates them (5-7 MB resident, measured).
+ */
+const mcpLifecycle = createMcpLifecycle<VayuMcpService>({
+	isEnabled: loadMcpEnabled,
+	endpoint: { host: MCP_HOST, port: MCP_PORT },
+	makeListener: (loadHandler) =>
+		new McpListener({ host: MCP_HOST, port: MCP_PORT, log: mcpLogger(), loadHandler }),
+	loadServiceFactory: async () => {
+		const { VayuMcpService } = await loadMcp();
+		return () =>
+			new VayuMcpService({
+				engineBaseUrl: engineOrigin(),
+				host: MCP_HOST,
+				port: MCP_PORT,
+				version: app.getVersion(),
+				safety: loadPersistedSafety(),
+				onDataChanged: sendMcpDataChanged,
+				dataFileLocation: (collectionId) => dataFileLocations.get(collectionId),
+				currentDataFileHash: (filePath) =>
+					hashDataFile(
+						filePath,
+						createDataFileSystem((p) => fileGrants.isGranted(p))
+					),
+				appFocus: () => appFocus.get(),
+				log: mcpLogger(),
+			});
+	},
+	log: (level, msg, fields) => appLogger()[level]("mcp", msg, fields),
+});
 
 function currentMcpStatus(enabled: boolean) {
 	return buildMcpStatus({
-		listener: mcpListener,
+		listener: mcpLifecycle.listener(),
 		enabled,
-		error: mcpStartError,
+		error: mcpLifecycle.startError(),
 		corruptCopy: mcpConfigCorruptCopy(),
 	});
 }
@@ -1221,28 +1182,6 @@ function sendMcpDataChanged(event: McpDataChangedEvent): void {
 	const contents = mainWindow?.webContents;
 	if (!contents || contents.isDestroyed()) return;
 	contents.send("mcp:data-changed", event);
-}
-
-async function stopMcp() {
-	const listener = mcpListener;
-	const service = mcpService;
-	mcpListener = null;
-	// The service binds no socket of its own (the listener's carries its
-	// requests), but it holds the exchanges a 2026-07-28 client keeps open, which
-	// the listener's close would otherwise wait on. A later start builds a fresh
-	// service on first request.
-	mcpService = null;
-	// Before the early return: a server that never bound has no listener to stop
-	// but may still hold the failure from its last attempt.
-	mcpStartError = null;
-	if (!listener) return;
-	try {
-		await service?.stop();
-		await listener.stop();
-		appLogger().info("mcp", "MCP server stopped");
-	} catch (error) {
-		appLogger().error("mcp", "Error stopping MCP server", { error: String(error) });
-	}
 }
 
 async function stopEngine() {
@@ -1385,27 +1324,24 @@ function setupIpcHandlers() {
 		if (client !== "claude" && client !== "vscode") {
 			return { ok: false, reason: "unsupported", message: "Unsupported client" };
 		}
-		return connectWhileRunning(client as McpConnectClient, mcpListener);
+		return connectWhileRunning(client as McpConnectClient, mcpLifecycle.listener());
 	});
 
-	// Toggle the MCP server on/off from Settings. Persists the preference and
-	// starts/stops the server live. Returns the resulting status.
+	// Toggle the MCP server on/off from Settings. Persists the preference first,
+	// since a start reads it, then starts/stops the server live and returns the
+	// status that results. A start joins one in flight and does nothing while
+	// listening; a stop also drops a failed start's error.
 	ipcMain.handle("mcp:setEnabled", async (_event, enabled: unknown) => {
 		const on = enabled === true;
 		saveMcpEnabled(on);
-		if (on && !mcpListener) {
-			await startMcp();
-		} else if (!on) {
-			// Also when nothing is listening: it is what drops a failed start's error.
-			await stopMcp();
-		}
+		await (on ? mcpLifecycle.start() : mcpLifecycle.stop());
 		return currentMcpStatus(on);
 	});
 
 	// Current MCP safety config (allowlist / caps / writes) for the Settings panel.
 	// Falls back to the persisted config, never the defaults - see effectiveSafety.
 	ipcMain.handle("mcp:getSafety", (): McpSafetyConfig => {
-		return effectiveSafety(mcpService);
+		return effectiveSafety(mcpLifecycle.service());
 	});
 
 	// The tool catalog (name/description/category) for the Settings tool list.
@@ -1436,14 +1372,17 @@ function setupIpcHandlers() {
 				const known = new Set((await loadMcp()).toolCatalog().map((t) => t.name));
 				clean.disabledTools = clean.disabledTools.filter((name) => known.has(name));
 			}
-			if (mcpService) {
-				mcpService.updateSafety(clean);
-				const resolved = mcpService.getSafety();
+			// Read after the await above, not before it: a stop or a first request
+			// may have replaced the service meanwhile.
+			const service = mcpLifecycle.service();
+			if (service) {
+				service.updateSafety(clean);
+				const resolved = service.getSafety();
 				savePersistedSafety(resolved);
 				return resolved;
 			}
-			// MCP server never came up (e.g. port in use) - still persist so the
-			// change takes effect on the next launch.
+			// No service yet (off, starting, or no request has built it): persist,
+			// and the service the next first request builds reads it.
 			const resolved = resolveSafetyConfig({ ...loadPersistedSafety(), ...clean });
 			savePersistedSafety(resolved);
 			return resolved;
@@ -1977,7 +1916,7 @@ app.whenReady().then(async () => {
 	// Start the MCP server last (best-effort; it never blocks app startup). It
 	// swallows its own failures, and starting it here means even one that escaped
 	// that guard would cost the user nothing but MCP.
-	await startMcp();
+	await mcpLifecycle.start();
 
 	// Last of all, and not awaited: it asks Windows to reopen the app after a
 	// restart, which the window and the engine do not depend on and which must
@@ -2013,9 +1952,9 @@ const resumeQuit = () => app.quit();
 // still running" - the latter only clears after the awaits, so a quit landing
 // mid-shutdown started a second one on top of it.
 const quitShutdown = createQuitShutdown({
-	hasWork: () => Boolean((engineSidecar && engineSidecar.isRunning()) || mcpListener),
+	hasWork: () => Boolean(engineSidecar?.isRunning() || mcpLifecycle.isActive()),
 	stop: async () => {
-		await stopMcp();
+		await mcpLifecycle.stop();
 		await stopEngine();
 	},
 	quit: () => app.quit(),

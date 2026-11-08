@@ -109,7 +109,7 @@ describe("buildMcpStatus", () => {
 	});
 
 	it("carries no error key once a later start succeeded and the error was cleared", () => {
-		// `startMcp` resets the error before it tries; this is the state it leaves.
+		// A listening lifecycle reports no start error; this is the state it leaves.
 		const status = buildMcpStatus({
 			listener: listening(),
 			enabled: true,
