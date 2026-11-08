@@ -1969,8 +1969,11 @@ writer's value stays on disk, the user's stays on screen, and the editor stays
 dirty, so the Dock says "Unsaved changes". Saving the user's value by default
 would be choosing for them. Both actions set the key's baseline to the other
 writer's value and save at once: "Keep mine" then reads the row as the user's
-change over it, "Take theirs" first replaces the row with it. Deleting a
-conflicted row is "Keep mine" for that key. `baselineRef` itself only advances
+change over it, "Take theirs" first replaces the row with it. That is the row
+standing for the stored key (`rowIndexFor`): one the user renamed away from it
+is renamed back, and a name is compared trimmed, as it is saved - matched by its
+raw name, a renamed row was missed and the save still sent the user's delete.
+Deleting a conflicted row is "Keep mine" for that key. `baselineRef` itself only advances
 on a full reseed, on this editor's own successful save (to the map that save
 wrote, so a later write is never compared against this save's own history -
 except a key the save held back, which keeps its baseline so its conflict stays

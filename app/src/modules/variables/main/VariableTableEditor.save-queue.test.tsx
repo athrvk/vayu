@@ -373,6 +373,48 @@ describe("a conflict open while the user saves something else", () => {
 	});
 });
 
+describe("Take theirs on a row whose name the user changed", () => {
+	const nameFields = () => screen.getAllByLabelText("Variable name") as HTMLInputElement[];
+
+	/** Edit row 0 as `edit` does, then let another writer change `host`. */
+	function conflictAfter(edit: () => void) {
+		const view = mount(collectionOf({ host: variable("example.com", 1000) }));
+		edit();
+		view.rerenderWith(collectionOf({ host: variable("agent.example", 1000) }));
+		expect(screen.getByText(/changed elsewhere: host/i)).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Take theirs" }));
+		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
+		return lastSent().variables;
+	}
+
+	/*
+	 * Mutation check: match the row by its raw `key` alone (the old
+	 * `row.key === key`) and both of these red - the renamed row is not found
+	 * and the save still deletes `host`; the padded one is not found and the
+	 * save still sends the user's value.
+	 */
+	it("takes the other writer's value for the stored name, undoing the rename", () => {
+		const sentVariables = conflictAfter(() =>
+			fireEvent.change(nameFields()[0], { target: { value: "hostname" } })
+		);
+
+		expect(sentVariables.host?.value).toBe("agent.example");
+		expect(sentVariables.hostname).toBeUndefined();
+		expect(nameFields()[0].value).toBe("host");
+		expect(valueFields()[0].value).toBe("agent.example");
+	});
+
+	it("finds the row while its name still carries the padding being typed", () => {
+		const sentVariables = conflictAfter(() => {
+			fireEvent.change(nameFields()[0], { target: { value: "host " } });
+			fireEvent.change(valueFields()[0], { target: { value: "mine" } });
+		});
+
+		expect(sentVariables.host?.value).toBe("agent.example");
+		expect(valueFields()[0].value).toBe("agent.example");
+	});
+});
+
 describe("a failed save", () => {
 	const delayMs = () => useClientSettingsStore.getState().autoSave.delayMs;
 

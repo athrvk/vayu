@@ -273,6 +273,42 @@ function withKeyFrom(map: VariableMap, key: string, source: VariableMap): Variab
 	return next;
 }
 
+/**
+ * The row that stands for stored variable `key`, or -1: the one still stored
+ * under it, else the one named it (a name is compared trimmed, as it is saved),
+ * else the one renamed away from it.
+ */
+function rowIndexFor(rows: VariableRowData[], key: string): number {
+	const standsFor = [
+		(row: VariableRowData) => row.baseKey === key && trimVariableName(row.key) === key,
+		(row: VariableRowData) => trimVariableName(row.key) === key,
+		(row: VariableRowData) => row.baseKey === key,
+	];
+	for (const matches of standsFor) {
+		const index = rows.findIndex((row) => !row.isNew && matches(row));
+		if (index !== -1) return index;
+	}
+	return -1;
+}
+
+/**
+ * `rows` with stored variable `key` set to the other writer's value: the row
+ * standing for it replaced (a rename of it undone), or a row added before the
+ * blank one; with no value there, that row removed.
+ */
+function withTheirs(
+	rows: VariableRowData[],
+	key: string,
+	theirs: VariableValue | undefined
+): VariableRowData[] {
+	const index = rowIndexFor(rows, key);
+	if (!theirs) return index === -1 ? rows : rows.filter((_, i) => i !== index);
+	const row = rowFromValue(key, theirs, index === -1 ? undefined : rows[index].id);
+	if (index !== -1) return rows.map((current, i) => (i === index ? row : current));
+	const blank = rows.findIndex((current) => current.isNew);
+	return blank === -1 ? [...rows, row] : [...rows.slice(0, blank), row, ...rows.slice(blank)];
+}
+
 interface SavePlan {
 	/** The rows the save is for, names trimmed. */
 	rows: VariableRowData[];
@@ -1028,17 +1064,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	const takeTheirs = useCallback(
 		(key: string) => {
-			const theirs = freshMapRef.current[key];
 			// Computed synchronously and assigned to the ref directly, not inside
 			// the `setVariables` updater: the save `keepMine` starts reads
 			// `variablesRef.current` before this render commits, and a functional
 			// updater's body does not run until then. Mirrors `updateVariable` /
 			// `removeVariable`.
-			const next = theirs
-				? variablesRef.current.map((row) =>
-						row.key === key && !row.isNew ? rowFromValue(key, theirs, row.id) : row
-					)
-				: variablesRef.current.filter((row) => row.isNew || row.key !== key);
+			const next = withTheirs(variablesRef.current, key, freshMapRef.current[key]);
 			setVariables(next);
 			variablesRef.current = next;
 			keepMine(key);
