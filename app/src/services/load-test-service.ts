@@ -138,9 +138,13 @@ class LoadTestService {
 			return;
 		}
 
-		// If monitoring a different run, stop it first
+		// A run this one displaces has not ended, so it is let go of without the
+		// "stopped" notification a user's Stop posts, as `handleSuperseded` does.
+		// The disconnect drops this service's hand-off registration, so the
+		// `supersede()` inside `connect` below has nobody to tell.
 		if (this.activeRunId && this.activeRunId !== runId) {
-			this.stopMonitoring();
+			this.releaseRun(this.activeRunId);
+			sseClient.disconnect();
 		}
 
 		// Only on the user's standing say-so (#1357). With the setting off, a run
@@ -213,11 +217,12 @@ class LoadTestService {
 	 * Let go of everything this service holds on `runId`'s behalf, and say
 	 * nothing about how the run ended.
 	 *
-	 * The one place that does it, because two paths need it - the user stopping
-	 * the run, and another run taking the shared client away (#1417) - and a
-	 * second copy is a release that drifts out of step with the first. What
-	 * ended the run is the caller's to say: `stopMonitoring` has a notification
-	 * for it and a superseded run has nothing to report, because it has not
+	 * The one place that does it, because three paths need it - the user
+	 * stopping the run, another run taking the shared client away (#1417), and
+	 * `startMonitoring` moving on to another load run - and a second copy is a
+	 * release that drifts out of step with the first. What ended the run is the
+	 * caller's to say: `stopMonitoring` has a notification for it and a
+	 * superseded or displaced run has nothing to report, because it has not
 	 * ended at all.
 	 *
 	 * `handleClose` keeps a sequence of its own rather than calling this, and

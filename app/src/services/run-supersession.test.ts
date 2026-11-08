@@ -281,33 +281,34 @@ describe("a run superseded by the other service's run", () => {
 	});
 
 	/*
-	 * The same-service case was already handled and must stay that way: the
-	 * load service stops itself before reconnecting, which both says what ended
-	 * the run and disconnects the client, so the new hand-off has nobody to
-	 * tell. Mutation check: drop the `stopMonitoring()` call from
-	 * `startMonitoring` and the notification asserted below never happens.
+	 * A load run displaced by another load run has not ended either: the engine
+	 * still runs it, so "The run was stopped before it finished" would be the
+	 * same lie the superseded case above refuses (#3351). A user's Stop still
+	 * says it (`load-test-service.test.ts`). Mutation check: put the
+	 * `stopMonitoring()` call back in `startMonitoring` and the notification
+	 * count below reddens.
 	 *
 	 * What this does *not* pin is that `disconnect()` drops the registration -
-	 * `stopMonitoring` nulls `activeRunId` before disconnecting, so this
-	 * service's own `handleSuperseded` would early-return either way. That rule
-	 * is pinned where it lives, on the client (`sse-client.test.ts`).
+	 * `releaseRun` nulls `activeRunId` before disconnecting, so this service's
+	 * own `handleSuperseded` would early-return either way. That rule is pinned
+	 * where it lives, on the client (`sse-client.test.ts`).
 	 */
-	it("does not double up on a run superseded by its own service", () => {
+	it("says nothing about a load run displaced by another load run", () => {
 		const { load } = runIds();
 		const next = runIds().load;
 		loadTestService.startMonitoring(load);
 		mockNotifyPost.mockClear();
 		mockDashboardStreamLost.mockClear();
+		mockProgressClear.mockClear();
 
 		loadTestService.startMonitoring(next);
 
-		// The one thing `stopMonitoring` has always said, and only it.
-		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
-		expect(mockNotifyPost.mock.calls[0]?.[0]).toMatchObject({
-			kind: "load-run-stopped",
-			target: { view: "run", runId: load },
-		});
+		expect(mockNotifyPost).not.toHaveBeenCalled();
+		expect(mockIconFinished).not.toHaveBeenCalled();
 		expect(mockDashboardStreamLost).not.toHaveBeenCalled();
+		// It still gives up what it held, named by run (#1405).
+		expect(mockProgressClear).toHaveBeenCalledWith(LOAD_KEY, load);
+		expect(sockets()[0]?.readyState).toBe(MockEventSource.CLOSED);
 	});
 
 	/*
