@@ -21,6 +21,7 @@ export {
 export { useScenarioRunStore } from "./scenario-run-store";
 export {
 	canStartLoadRun,
+	canReattachLoadRun,
 	useCanStartLoadRun,
 	runningRunSentence,
 	runningRunTab,

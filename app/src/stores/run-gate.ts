@@ -68,6 +68,16 @@ export function loadRunGateOf(dashboard: DashboardRun, scenario: ScenarioRun): L
 			},
 		};
 	}
+	return reattachGateOf(scenario);
+}
+
+/**
+ * Whether the dashboard may re-attach the stream to its own run (Reconnect,
+ * or the re-attach on mount): refused only while a collection run streams,
+ * since attaching would take that run's stream. The dashboard's run being
+ * live is the reason to re-attach, so it is not asked.
+ */
+export function reattachGateOf(scenario: ScenarioRun): LoadRunGate {
 	if (scenario.runId && scenario.isStreaming) {
 		return { ok: false, running: { kind: "collection", runId: scenario.runId, label: null } };
 	}
@@ -77,6 +87,11 @@ export function loadRunGateOf(dashboard: DashboardRun, scenario: ScenarioRun): L
 /** The gate as the stores stand now, for an event handler or a service. */
 export function canStartLoadRun(): LoadRunGate {
 	return loadRunGateOf(useDashboardStore.getState(), useScenarioRunStore.getState());
+}
+
+/** {@link reattachGateOf} as the store stands now. */
+export function canReattachLoadRun(): LoadRunGate {
+	return reattachGateOf(useScenarioRunStore.getState());
 }
 
 /** The gate for a component that renders its answer and follows it as runs end. */

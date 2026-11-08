@@ -20,10 +20,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+	canReattachLoadRun,
 	dashboardRunEnding,
 	isDashboardRunLive,
+	runningRunSentence,
+	runningRunTab,
 	useDashboardStore,
 	useLayoutStore,
+	useTabsStore,
 	useToastStore,
 } from "@/stores";
 import { apiService, loadTestService } from "@/services";
@@ -54,8 +58,20 @@ function giveUpOnLiveReport(runId: string): void {
 	else reportFailed(runId, "Vayu's engine still reports this run as running.");
 }
 
+/**
+ * Re-attach the stream to the dashboard's run, unless it is attached already
+ * or a collection run holds it (`canReattachLoadRun`, #3351): taking the
+ * stream would leave that run with no live view. Unasked, so no toast; the run
+ * stays on the lost-stream callout, whose Reconnect says why.
+ */
+function reattachOnMount(runId: string): void {
+	if (loadTestService.isMonitoring(runId) || !canReattachLoadRun().ok) return;
+	loadTestService.startMonitoring(runId);
+}
+
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
+	const openTab = useTabsStore((state) => state.openTab);
 	const currentRunId = useDashboardStore((s) => s.currentRunId);
 	// Changes identity only on a transition, never on a tick.
 	const phase = useDashboardStore((s) => s.phase);
@@ -101,18 +117,15 @@ export default function LoadTestDashboard() {
 							// Run finished while we were away - update state
 							setFinalReport(currentRunId, report);
 							loadTestService.stopMonitoring();
-						} else if (!loadTestService.isMonitoring(currentRunId)) {
-							// Run is still running but service is not connected - reconnect
-							loadTestService.startMonitoring(currentRunId);
+						} else {
+							reattachOnMount(currentRunId);
 						}
 					}
 				})
 				.catch((err) => {
 					console.error("Failed to check run status:", err);
-					// Try to reconnect anyway if not monitoring
-					if (!loadTestService.isMonitoring(currentRunId)) {
-						loadTestService.startMonitoring(currentRunId);
-					}
+					// Try to reconnect anyway
+					reattachOnMount(currentRunId);
 				});
 		}
 
@@ -240,6 +253,19 @@ export default function LoadTestDashboard() {
 		[currentRunId, setStopping, stopRun, showToast]
 	);
 
+	// While a collection run streams, Reconnect would take its stream, so it
+	// opens that run and says why instead, as the builder's Load test does.
+	const handleReconnect = useCallback(() => {
+		if (!currentRunId) return;
+		const gate = canReattachLoadRun();
+		if (!gate.ok) {
+			openTab(runningRunTab(gate.running));
+			showToast(runningRunSentence(gate.running), "warning");
+			return;
+		}
+		loadTestService.startMonitoring(currentRunId);
+	}, [currentRunId, openTab, showToast]);
+
 	// A finished run - completed, failed or stopped - is shown as History's own
 	// report once its report is here, so the run reads the same now and later
 	// (#1932, #2136, #2220). Until then (a stopped run's report still on its way,
@@ -302,11 +328,7 @@ export default function LoadTestDashboard() {
 					severity="blocking"
 					title="Lost the live metrics stream"
 					action={
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => loadTestService.startMonitoring(currentRunId)}
-						>
+						<Button variant="outline" size="sm" onClick={handleReconnect}>
 							Reconnect
 						</Button>
 					}

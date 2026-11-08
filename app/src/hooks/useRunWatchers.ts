@@ -46,15 +46,20 @@ import { loadConfigFromSnapshot, requestInfoFromSnapshot } from "@/lib/run-confi
  * Best effort: the run is already being watched, and a row that cannot be read
  * leaves the dashboard as it was. It must not reach `streamLost`, which raises the
  * lost-stream callout for a stream that is fine. A response that arrives after
- * another run took the dashboard is dropped rather than written over it.
+ * another run took the dashboard is dropped by the store rather than written
+ * over it.
  */
 async function configureFromRunRow(runId: string): Promise<void> {
 	try {
 		const snapshot = (await apiService.getRun(runId)).configSnapshot;
-		if (!snapshot || useDashboardStore.getState().currentRunId !== runId) return;
+		if (!snapshot) return;
 		useDashboardStore
 			.getState()
-			.setRunConfig(loadConfigFromSnapshot(snapshot), requestInfoFromSnapshot(snapshot));
+			.setRunConfig(
+				runId,
+				loadConfigFromSnapshot(snapshot),
+				requestInfoFromSnapshot(snapshot)
+			);
 	} catch {
 		// Swallowed on purpose: the dashboard without a config is how this run
 		// looked before the row was read, and nothing else depends on it.

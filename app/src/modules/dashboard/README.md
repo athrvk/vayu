@@ -25,7 +25,9 @@ ways; until then the live view stays, with the report fetch's Retry.
   `dashboardRunEnding` (#3351): Running with Stop while the run may still be executing - a lost
   stream included, beside its Reconnect callout - and the run's ending after. A report
   fetch that keeps finding the run still running gives up to that same callout rather than
-  to the report's Retry, so the pill and Stop stay while the engine generates load.
+  to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
+  and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
+  run streams they leave its stream alone, Reconnect opening that run with a toast instead.
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions

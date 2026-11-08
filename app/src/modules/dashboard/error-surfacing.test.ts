@@ -23,28 +23,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { isDashboardRunLive, useDashboardStore } from "@/stores";
+import {
+	isDashboardRunLive,
+	useDashboardStore,
+	useScenarioRunStore,
+	useTabsStore,
+	useToastStore,
+} from "@/stores";
 import { TIMING } from "@/config/timing";
 import type { RunReport } from "@/types";
 
-const { mockGetRunReport, mockStartMonitoring, mockStopRun, headerProps } = vi.hoisted(() => ({
-	mockGetRunReport: vi.fn(),
-	mockStartMonitoring: vi.fn(),
-	mockStopRun: vi.fn(),
-	headerProps: [] as Record<string, unknown>[],
-}));
+const { mockGetRunReport, mockStartMonitoring, mockIsMonitoring, mockStopRun, headerProps } =
+	vi.hoisted(() => ({
+		mockGetRunReport: vi.fn(),
+		mockStartMonitoring: vi.fn(),
+		mockIsMonitoring: vi.fn(),
+		mockStopRun: vi.fn(),
+		headerProps: [] as Record<string, unknown>[],
+	}));
 // What the real service reaches the engine through.
 vi.mock("@/services/api", () => ({ apiService: { getRunReport: mockGetRunReport } }));
 vi.mock("@/services/sse-client", () => ({
 	sseClient: { connect: vi.fn(), disconnect: vi.fn() },
 }));
 // What the dashboard reaches the service through: Reconnect is asserted on the
-// call it makes, and `isMonitoring` keeps the mount check from reconnecting
-// on its own.
+// call it makes, and `isMonitoring` (true unless a case says otherwise) keeps
+// the mount check from reconnecting on its own.
 vi.mock("@/services", () => ({
 	apiService: { getRunReport: mockGetRunReport, stopRun: mockStopRun },
 	loadTestService: {
-		isMonitoring: () => true,
+		isMonitoring: mockIsMonitoring,
 		startMonitoring: mockStartMonitoring,
 		stopMonitoring: vi.fn(),
 	},
@@ -118,6 +126,7 @@ describe("dashboard error surfacing", () => {
 		vi.useFakeTimers();
 		mockGetRunReport.mockReset();
 		mockStartMonitoring.mockReset();
+		mockIsMonitoring.mockReset().mockReturnValue(true);
 		mockStopRun.mockReset().mockResolvedValue(undefined);
 		headerProps.length = 0;
 		vi.spyOn(console, "error").mockImplementation(() => {});
@@ -127,6 +136,7 @@ describe("dashboard error surfacing", () => {
 		cleanup();
 		vi.useRealTimers();
 		vi.restoreAllMocks();
+		useScenarioRunStore.setState({ runId: null, isStreaming: false });
 	});
 
 	/*
@@ -303,5 +313,73 @@ describe("dashboard error surfacing", () => {
 			phase: "awaitingReport",
 			stopped: true,
 		});
+	});
+
+	/*
+	 * `sseClient` holds one stream, so re-attaching the dashboard's run while a
+	 * collection run streams would take that run's live view (#3351).
+	 * Mutation check: drop the `canReattachLoadRun` check from Reconnect and the
+	 * first case calls `startMonitoring`; drop it from `reattachOnMount` and the
+	 * mount case does.
+	 */
+	describe("beside a streaming collection run", () => {
+		function loseStreamToCollectionRun(runId: string): void {
+			// Answers the mount check, which asks whether the run is still going.
+			mockGetRunReport.mockResolvedValue(reportWith("running"));
+			useDashboardStore.getState().startRun(runId);
+			useDashboardStore
+				.getState()
+				.streamLost(runId, "A collection run took over the live stream.");
+			useScenarioRunStore.getState().startRun("coll_1");
+		}
+
+		it("refuses Reconnect, opening the collection run and saying why", () => {
+			loseStreamToCollectionRun("run_held");
+			render(createElement(LoadTestDashboard));
+
+			fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+			expect(mockStartMonitoring).not.toHaveBeenCalled();
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts[toasts.length - 1]).toMatchObject({
+				message: "A collection run is already running.",
+				variant: "warning",
+			});
+			const { openTabs, activeTabId } = useTabsStore.getState();
+			expect(openTabs.find((t) => t.id === activeTabId)).toMatchObject({
+				type: "run",
+				entityId: "coll_1",
+			});
+			// The dashboard's run is untouched: still live, still on its callout.
+			expect(useDashboardStore.getState().phase.phase).toBe("streamLost");
+		});
+
+		it("reconnects once the collection run's stream has ended", () => {
+			loseStreamToCollectionRun("run_freed");
+			useScenarioRunStore.getState().setStreaming("coll_1", false);
+			render(createElement(LoadTestDashboard));
+
+			fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+
+			expect(mockStartMonitoring).toHaveBeenCalledWith("run_freed");
+		});
+
+		it.each([
+			["holds", true, 0],
+			["has let go of", false, 1],
+		])(
+			"re-attaches on mount only when no collection run %s the stream",
+			async (_name, collectionStreaming, attaches) => {
+				mockIsMonitoring.mockReturnValue(false);
+				loseStreamToCollectionRun("run_mount");
+				useScenarioRunStore.getState().setStreaming("coll_1", collectionStreaming);
+				render(createElement(LoadTestDashboard));
+
+				await advance(ROUND_TRIP_MS);
+
+				expect(mockGetRunReport).toHaveBeenCalledWith("run_mount");
+				expect(mockStartMonitoring).toHaveBeenCalledTimes(attaches);
+			}
+		);
 	});
 });

@@ -296,7 +296,11 @@ interface DashboardState {
 	 * Touches those two fields and nothing else: the run is already streaming,
 	 * and {@link startRun} would clear the metrics it has gathered.
 	 */
-	setRunConfig: (config: LoadTestRunConfig, requestInfo: LoadTestRequestInfo | null) => void;
+	setRunConfig: (
+		runId: string,
+		config: LoadTestRunConfig,
+		requestInfo: LoadTestRequestInfo | null
+	) => void;
 	/** The engine accepted the user's Stop: the run awaits its report as stopped. */
 	stopRun: (runId: string) => void;
 	/** The stream attached (or re-attached, which is Reconnect) to a live run. */
@@ -334,6 +338,36 @@ function forRun(
 	return state.currentRunId === runId ? next(state) : state;
 }
 
+/**
+ * The held run with the config and request it was started without, its
+ * breakpoint re-judged where the config moves the line.
+ */
+function withRunConfig(
+	state: DashboardState,
+	config: LoadTestRunConfig,
+	requestInfo: LoadTestRequestInfo | null
+): Partial<DashboardState> {
+	const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
+	// A run started elsewhere (an MCP agent's) streams ticks before its config
+	// is read, so they were judged against the Settings threshold. A capacity
+	// run's own line replaces that verdict, from the ticks still retained.
+	const judge = sloJudgeFor(config);
+	const { breakpoint } = state;
+	if (judge.sloMs !== breakpoint.sloMs) {
+		if (capacitySloMs(config) === undefined) return patch;
+		const rejudged = computeBreakpoint(
+			state.historicalMetrics,
+			judge.sloMs,
+			runOwnSloMs(config)
+		);
+		return { ...patch, breakpoint: rejudged };
+	}
+	// The same number can be the run's budget or only the Settings default, and
+	// the config says which; the verdict itself does not move.
+	if (judge.sloSource === breakpoint.sloSource) return patch;
+	return { ...patch, breakpoint: { ...breakpoint, sloSource: judge.sloSource } };
+}
+
 export const useDashboardStore = create<DashboardState>((set) => ({
 	currentRunId: null,
 	phase: IDLE,
@@ -368,28 +402,8 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			dispatchLagSinceSeconds: null,
 		}),
 
-	setRunConfig: (config, requestInfo) =>
-		set((state) => {
-			const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
-			// A run started elsewhere (an MCP agent's) streams ticks before its config
-			// is read, so they were judged against the Settings threshold. A capacity
-			// run's own line replaces that verdict, from the ticks still retained.
-			const judge = sloJudgeFor(config);
-			const { breakpoint } = state;
-			if (judge.sloMs !== breakpoint.sloMs) {
-				if (capacitySloMs(config) === undefined) return patch;
-				const rejudged = computeBreakpoint(
-					state.historicalMetrics,
-					judge.sloMs,
-					runOwnSloMs(config)
-				);
-				return { ...patch, breakpoint: rejudged };
-			}
-			// The same number can be the run's budget or only the Settings default, and
-			// the config says which; the verdict itself does not move.
-			if (judge.sloSource === breakpoint.sloSource) return patch;
-			return { ...patch, breakpoint: { ...breakpoint, sloSource: judge.sloSource } };
-		}),
+	setRunConfig: (runId, config, requestInfo) =>
+		set((state) => forRun(state, runId, (s) => withRunConfig(s, config, requestInfo))),
 
 	// From a lost stream too: the callout is about a run still going, and this
 	// one was stopped (#1925). A run already settled has nothing left to stop.

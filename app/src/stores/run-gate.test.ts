@@ -18,8 +18,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { useDashboardStore, type DashboardPhase } from "./dashboard-store";
 import { useScenarioRunStore } from "./scenario-run-store";
 import {
+	canReattachLoadRun,
 	canStartLoadRun,
 	loadRunGateOf,
+	reattachGateOf,
 	runningRunSentence,
 	runningRunTab,
 	type RunningRun,
@@ -90,6 +92,25 @@ describe("loadRunGateOf", () => {
 			isStreaming: false,
 		});
 		expect(gate).toEqual({ ok: true });
+	});
+});
+
+describe("reattachGateOf", () => {
+	// Mutation check: answer it with `loadRunGateOf` and Reconnect is refused
+	// for the very run it exists to re-attach - the dashboard's own, live.
+	it("never asks about the dashboard's own run", () => {
+		useDashboardStore.getState().startRun("run_1");
+		useDashboardStore.getState().streamLost("run_1", "socket closed");
+		expect(canReattachLoadRun()).toEqual({ ok: true });
+	});
+
+	it("refuses while a collection run streams, naming it", () => {
+		expect(reattachGateOf({ runId: "coll_1", isStreaming: true })).toEqual({
+			ok: false,
+			running: { kind: "collection", runId: "coll_1", label: null },
+		});
+		expect(reattachGateOf({ runId: "coll_1", isStreaming: false })).toEqual({ ok: true });
+		expect(reattachGateOf(NO_SCENARIO)).toEqual({ ok: true });
 	});
 });
 

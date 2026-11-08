@@ -150,8 +150,8 @@ describe("useRunWatchers", () => {
 		});
 
 		it("drops a response that arrives after another run took the dashboard", async () => {
-			// Mutation check: remove the `currentRunId` comparison and run A's row
-			// overwrites run B's config.
+			// Mutation check: drop the `forRun` address from the store's
+			// `setRunConfig` and run A's row overwrites run B's config.
 			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
 			let resolveA: (run: Run) => void = () => {};
 			vi.spyOn(apiService, "getRun").mockImplementation((id) =>

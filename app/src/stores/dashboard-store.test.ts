@@ -220,7 +220,7 @@ describe("dashboard-store breakpoint SLO", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
 		s.addMetricsBatch("r", [tick(1, 250)]);
-		s.setRunConfig({ mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
+		s.setRunConfig("r", { mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			timeSeconds: 1,
@@ -315,7 +315,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 			s.addMetricsBatch("r", [tick(1, 10), tick(2, 60)]);
 			expect(useDashboardStore.getState().breakpoint.crossed).toBe(false);
 
-			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			s.setRunConfig("r", { mode: "capacity", sloMs: 50 }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: true,
 				sloMs: 50,
@@ -326,7 +326,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 		it("moves an uncrossed breakpoint onto the run's SLO before the next tick", () => {
 			const s = useDashboardStore.getState();
 			s.startRun("r");
-			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			s.setRunConfig("r", { mode: "capacity", sloMs: 50 }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: false,
 				sloMs: 50,
@@ -339,7 +339,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 			s.startRun("r");
 			s.addMetricsBatch("r", [tick(1, 150)]);
 			useClientSettingsStore.setState({ sloThresholdMs: 900 });
-			s.setRunConfig({ mode: "ramp_up" }, null);
+			s.setRunConfig("r", { mode: "ramp_up" }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: true,
 				sloMs: 100,
@@ -376,7 +376,7 @@ describe("dashboard-store run's own SLO (issue #2939)", () => {
 	it("follows a config that arrives after the run started (setRunConfig)", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
-		s.setRunConfig({ mode: "constant_rps", latencyP99Ms: 120 }, null);
+		s.setRunConfig("r", { mode: "constant_rps", latencyP99Ms: 120 }, null);
 		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBe(120);
 	});
 
@@ -700,6 +700,7 @@ describe("dashboard-store writes addressed to a run", () => {
 			STREAMING,
 			(s) => s.addMonitorSamples("old", [{ timestamp: 1, series: {} }]),
 		],
+		["setRunConfig", STREAMING, (s) => s.setRunConfig("old", { mode: "iterations" }, null)],
 		["setFinalReport", AWAITING, (s) => s.setFinalReport("old", reportWith("completed"))],
 		["reportFailed", AWAITING, (s) => s.reportFailed("old", "Couldn't reach Vayu's engine.")],
 		["retryReport", FAILED_FETCH, (s) => s.retryReport("old")],
@@ -721,6 +722,7 @@ describe("dashboard-store setRunConfig", () => {
 		s.startRun("r");
 		s.addMetricsBatch("r", [tick(1), tick(2)]);
 		s.setRunConfig(
+			"r",
 			{ mode: "ramp_up", duration: "30m" },
 			{ method: "GET", url: "https://x.test" }
 		);
@@ -737,7 +739,7 @@ describe("dashboard-store setRunConfig", () => {
 	it("keeps the request it already has when the row names none", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r", undefined, { method: "GET", url: "https://x.test" });
-		s.setRunConfig({ mode: "iterations" }, null);
+		s.setRunConfig("r", { mode: "iterations" }, null);
 		expect(useDashboardStore.getState().requestInfo).toEqual({
 			method: "GET",
 			url: "https://x.test",
