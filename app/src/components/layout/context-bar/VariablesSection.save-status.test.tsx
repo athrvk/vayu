@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { TIMING } from "@/config/timing";
@@ -34,12 +34,7 @@ import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import type { ResolvedVariable } from "@/types";
 
-const globalsMutate = vi.fn(
-	(_payload: unknown, opts: { onSuccess?: () => void; onSettled: () => void }) => {
-		opts.onSuccess?.();
-		opts.onSettled();
-	}
-);
+const globalsMutate = vi.fn(() => Promise.resolve());
 
 // The request references the resolved name (#1308), so `host` renders as a row at
 // the top of the section - the row this suite edits.
@@ -59,9 +54,9 @@ vi.mock("@/queries", () => ({
 		},
 	}),
 	useCollectionAncestors: () => [],
-	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: globalsMutate }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 }));
 
 const resolved: Record<string, ResolvedVariable> = {
@@ -105,7 +100,7 @@ function renderSection() {
 }
 
 /** Commit an edit to the one variable on screen. */
-function commitOnce() {
+async function commitOnce() {
 	renderSection();
 	const input = screen.getByDisplayValue("example.com") as HTMLInputElement;
 	act(() => {
@@ -113,7 +108,7 @@ function commitOnce() {
 		fireEvent.blur(input);
 	});
 	expect(globalsMutate).toHaveBeenCalledTimes(1);
-	expect(useSaveStore.getState().status).toBe("saved");
+	await waitFor(() => expect(useSaveStore.getState().status).toBe("saved"));
 }
 
 describe("the status a variables-section commit publishes", () => {
@@ -129,7 +124,7 @@ describe("the status a variables-section commit publishes", () => {
 	});
 
 	it("returns the Dock to idle instead of leaving 'Saved' up indefinitely", async () => {
-		commitOnce();
+		await commitOnce();
 
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
@@ -139,7 +134,7 @@ describe("the status a variables-section commit publishes", () => {
 	});
 
 	it("leaves a failure that arrived meanwhile on screen", async () => {
-		commitOnce();
+		await commitOnce();
 
 		act(() =>
 			useSaveStore.getState().reportFailed("settings", "Couldn't save settings - busy")
@@ -155,7 +150,7 @@ describe("the status a variables-section commit publishes", () => {
 	 * Mutation check: report the commits under the failed surface's id and this
 	 * reds - the commit's "Saved" settles a failure it has nothing to do with.
 	 */
-	it("does not settle a failure another surface reported before it", () => {
+	it("does not settle a failure another surface reported before it", async () => {
 		act(() =>
 			useSaveStore.getState().reportFailed("settings", "Couldn't save settings - busy")
 		);
@@ -167,6 +162,7 @@ describe("the status a variables-section commit publishes", () => {
 		});
 
 		expect(globalsMutate).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(useSaveStore.getState().unsaved.size).toBe(1));
 		expect(useSaveStore.getState().status).toBe("error");
 		expect(useSaveStore.getState().lastErrorMessage).toBe("Couldn't save settings - busy");
 	});

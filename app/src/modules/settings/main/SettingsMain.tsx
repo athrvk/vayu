@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useEngineStore, useToastStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
+import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useConfigQuery, useUpdateConfigMutation } from "@/queries";
 import type { ConfigEntry } from "@/types";
@@ -221,9 +221,9 @@ export default function SettingsMain() {
 
 	// Refs for the save function and the live edits, so the category-switch
 	// cleanup below can flush without either becoming one of its dependencies.
-	const handleSaveRef = useRef<(() => Promise<void>) | undefined>(undefined);
+	const handleSaveRef = useRef<(() => Promise<SaveOutcome | void>) | undefined>(undefined);
 	const saveEntriesRef = useRef<
-		((entries: Record<string, EditedValue>) => Promise<void>) | undefined
+		((entries: Record<string, EditedValue>, flush: boolean) => Promise<void>) | undefined
 	>(undefined);
 	const editedValuesRef = useRef(editedValues);
 
@@ -289,9 +289,12 @@ export default function SettingsMain() {
 	 * flush has no screen left to show that error on, so it saves what it can -
 	 * and says so, because a value that was typed and then vanished with no
 	 * explanation is the silent discard this replaces.
+	 *
+	 * `flush` is that path: its edits are no longer staged, so a failure leaves
+	 * nothing for "Not saved" to describe and nothing to retry it, and is a toast.
 	 */
 	const saveEntries = useCallback(
-		async (entries: Record<string, EditedValue>) => {
+		async (entries: Record<string, EditedValue>, flush: boolean) => {
 			const updates: Record<string, string> = {};
 			const restartKeys: string[] = [];
 			let discarded = 0;
@@ -353,13 +356,19 @@ export default function SettingsMain() {
 				}
 			} catch (err) {
 				console.error("Failed to save settings:", err);
-				reportFailed(
-					SAVE_CONTEXT_ID,
+				const message =
 					err instanceof Error
 						? `Couldn't save settings - ${err.message}`
-						: "Couldn't save settings",
-					err
-				);
+						: "Couldn't save settings";
+				if (!flush) {
+					reportFailed(SAVE_CONTEXT_ID, message, err);
+					return;
+				}
+				showToast(message, "error");
+				// The write's "saving" belongs to the outgoing edits; an edit
+				// staged since in the new category is still unsaved.
+				if (Object.keys(editedValuesRef.current).length > 0) reportPending(SAVE_CONTEXT_ID);
+				else discard(SAVE_CONTEXT_ID);
 			}
 		},
 		[
@@ -375,10 +384,13 @@ export default function SettingsMain() {
 		]
 	);
 
-	// Save changes - MUST be defined before early returns (Rules of Hooks)
-	const handleSave = useCallback(async () => {
-		if (hasInvalidValues || !hasChanges) return;
-		await saveEntries(editedValues);
+	// Save changes - MUST be defined before early returns (Rules of Hooks).
+	// An invalid batch is held back, not failed: it resolves `pending` so a
+	// Ctrl/Cmd+S through the store does not read the refusal as a save.
+	const handleSave = useCallback(async (): Promise<SaveOutcome | void> => {
+		if (hasInvalidValues) return "pending";
+		if (!hasChanges) return;
+		await saveEntries(editedValues, false);
 	}, [hasInvalidValues, hasChanges, editedValues, saveEntries]);
 
 	useEffect(() => {
@@ -415,7 +427,7 @@ export default function SettingsMain() {
 			// No longer the panel's, and `saveEntries` reads the ref for edits
 			// staged after its write; an unmount would leave it holding these.
 			editedValuesRef.current = {};
-			if (Object.keys(pending).length > 0) void saveEntriesRef.current?.(pending);
+			if (Object.keys(pending).length > 0) void saveEntriesRef.current?.(pending, true);
 		};
 	}, [selectedCategory]);
 

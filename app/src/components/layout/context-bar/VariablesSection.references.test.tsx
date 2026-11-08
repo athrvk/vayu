@@ -39,9 +39,9 @@ vi.mock("@/queries", () => ({
 		},
 	}),
 	useCollectionAncestors: () => [],
-	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 }));
 
 /** Everything in scope for this render. `getVariable` answers from the same map. */

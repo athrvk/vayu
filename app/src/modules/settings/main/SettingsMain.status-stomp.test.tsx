@@ -200,4 +200,24 @@ describe("the status a settings write leaves", () => {
 
 		expect(store().status).toBe("pending");
 	});
+
+	/*
+	 * Ctrl/Cmd+S on an invalid edit: `handleSave` declined and resolved, and the
+	 * store read the silence as a success - "Saved", and the entry gone, with the
+	 * invalid value still on screen. Mutation check (confirmed): resolve nothing
+	 * for an invalid batch again and this reds on "saved".
+	 */
+	it("keeps Unsaved changes when Ctrl+S meets an invalid staged edit", async () => {
+		render(<Panel />);
+		fireEvent.change(maxConnections(), { target: { value: "9999" } });
+		expect(store().status).toBe("pending");
+
+		await act(async () => {
+			await store().triggerSave();
+		});
+
+		expect(mutateAsync).not.toHaveBeenCalled();
+		expect(store().status).toBe("pending");
+		expect(store().unsaved.get("settings")?.kind).toBe("pending");
+	});
 });

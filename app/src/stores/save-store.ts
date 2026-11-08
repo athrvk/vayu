@@ -127,10 +127,16 @@ interface SaveState {
 	reportSaved: (id: string) => void;
 	/**
 	 * `id`'s save failed. Raises the failure toast; `cause` is the error behind
-	 * `message` when there is one, so a 507 is recorded as disk-full.
+	 * `message` when there is one, so a 507 is recorded as disk-full. For an id
+	 * discarded while this save was out, the toast is all it raises.
 	 */
 	reportFailed: (id: string, message: string, cause?: unknown) => void;
-	/** `id`'s edit was thrown away, not written: nothing to report as saved. */
+	/**
+	 * `id`'s edit was thrown away, not written: nothing to report as saved.
+	 * Only for an edit that is gone (reverted, reset, or dropped with the editor
+	 * that held it), because it also abandons a save still out for it - see
+	 * `abandoned`.
+	 */
 	discard: (id: string) => void;
 
 	// Context management
@@ -194,6 +200,21 @@ const INITIAL = {
 // belongs to the most recent save.
 let justSaved = false;
 let savedWindowGeneration = 0;
+
+// Ids discarded since a save last started for them or a context last
+// registered under them. A save that was out when its editor dropped the edit
+// (an id switch, an unmount, a Reset) still settles, and its report describes
+// an edit nobody holds: recorded, nothing could ever clear it. So until the id
+// is taken back, a failure for it is a toast only, and a pending report counts
+// only from a registered owner - that is a new edit; from anyone else it is the
+// late save's "still unsaved".
+const abandoned = new Set<string>();
+
+// How many failures each id has reported, toast-only ones included: `runSave`
+// compares it across a save to tell whether the context already published its
+// rejection, which an entry cannot show once the id was abandoned mid-save.
+const failureReports = new Map<string, number>();
+const failuresOf = (id: string) => failureReports.get(id) ?? 0;
 
 export const useSaveStore = create<SaveState>((set, get) => {
 	type SavedWindow = "open" | "close" | "keep";
@@ -264,20 +285,19 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		return "saved";
 	};
 
-	// A rejection is published here unless the context already reported it,
-	// which is the double toast a "report, then reject" context used to cost.
-	const settleRejection = (
-		id: string,
-		before: UnsavedEdit | undefined,
-		error: unknown
-	): SaveOutcome => {
-		const reported = reportedDuringSave(id, before);
-		if (reported?.kind === "failed") return verdictOf(reported);
-		get().reportFailed(
-			id,
-			error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
-			error
-		);
+	// A rejection is published here unless the context already reported a
+	// failure during the save, which is the double toast a "report, then
+	// reject" context used to cost.
+	const settleRejection = (id: string, failuresBefore: number, error: unknown): SaveOutcome => {
+		if (failuresOf(id) === failuresBefore) {
+			get().reportFailed(
+				id,
+				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
+				error
+			);
+		}
+		const now = get().unsaved.get(id);
+		if (now?.kind === "failed") return verdictOf(now);
 		return isDiskFullError(error) ? "disk-full" : "failed";
 	};
 
@@ -285,13 +305,14 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// in-progress guard if needed.
 	const runSave = async (context: SaveContext): Promise<SaveOutcome> => {
 		const before = get().unsaved.get(context.id);
+		const failuresBefore = failuresOf(context.id);
 		try {
 			const verdict = await context.save();
 			return verdict
 				? settleVerdict(context.id, before, verdict)
 				: settleSilence(context.id, before);
 		} catch (error) {
-			return settleRejection(context.id, before, error);
+			return settleRejection(context.id, failuresBefore, error);
 		}
 	};
 
@@ -299,26 +320,36 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		...INITIAL,
 
 		reportPending: (id) => {
+			if (abandoned.has(id) && !get().contexts.has(id)) return;
+			abandoned.delete(id);
 			if (get().unsaved.get(id)?.kind === "failed") return;
 			apply(put(id, { kind: "pending" }));
 		},
 
-		reportSaving: (id) => apply(put(id, { kind: "saving" })),
+		reportSaving: (id) => {
+			abandoned.delete(id);
+			apply(put(id, { kind: "saving" }));
+		},
 
 		reportSaved: (id) => apply((unsaved) => unsaved.delete(id), "open"),
 
 		reportFailed: (id, message, cause) => {
-			apply(put(id, { kind: "failed", message, diskFull: isDiskFullError(cause) }));
+			failureReports.set(id, failuresOf(id) + 1);
+			if (!abandoned.has(id)) {
+				apply(put(id, { kind: "failed", message, diskFull: isDiskFullError(cause) }));
+			}
 			useToastStore.getState().showToast(message, "error");
 		},
 
 		discard: (id) => {
 			if (!get().unsaved.has(id)) return;
+			abandoned.add(id);
 			apply((unsaved) => unsaved.delete(id), "keep");
 		},
 
 		// Context management
 		registerContext: (context) => {
+			abandoned.delete(context.id);
 			const newContexts = new Map(get().contexts);
 			newContexts.set(context.id, context);
 			set({ contexts: newContexts });
@@ -399,6 +430,8 @@ export const useSaveStore = create<SaveState>((set, get) => {
 export function resetSaveStoreForTests(): void {
 	justSaved = false;
 	savedWindowGeneration++;
+	abandoned.clear();
+	failureReports.clear();
 	useSaveStore.setState({
 		...INITIAL,
 		unsaved: new Map(),

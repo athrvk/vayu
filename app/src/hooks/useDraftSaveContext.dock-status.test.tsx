@@ -308,6 +308,32 @@ describe("useDraftSaveContext's save verdict", () => {
 
 		await expect(registeredSave("a")()).resolves.toBe("saved");
 	});
+
+	it("is a toast, not 'Not saved', when it fails after the editor unmounted", async () => {
+		// The unmount dropped the draft, so the failure describes an edit nobody
+		// holds. Mutation check (confirmed): with the store recording a failure for
+		// an id discarded mid-save, this sits on "Not saved" with nothing to
+		// clear it.
+		let fail: (error: Error) => void = () => {};
+		const { unmount } = mount(
+			{ id: "a", isDirty: true },
+			() =>
+				new Promise<void>((_resolve, reject) => {
+					fail = reject;
+				})
+		);
+		const saving = useSaveStore.getState().triggerSave();
+		unmount();
+
+		await act(async () => {
+			fail(new Error("boom"));
+			await saving;
+		});
+
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+		expect(useSaveStore.getState().unsaved.has("a")).toBe(false);
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
 });
 
 describe("how a draft save's rejection is reported (#2423)", () => {

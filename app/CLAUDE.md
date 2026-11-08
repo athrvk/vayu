@@ -97,9 +97,9 @@ everything.
   own edit stands under its own id (`reportPending`, `reportSaving`,
   `reportSaved`, `reportFailed`, `discard`) and the Dock's status is derived
   from all of them, so no surface can clear another's failure (#3350); a
-  failure that leaves no unsaved edit (a rolled-back rename or commit) is a
-  plain toast instead. Each context reports
-  its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
+  failure that leaves no unsaved edit (a rolled-back rename or commit, a write
+  that lands after its editor discarded the id) is a plain toast instead. Each
+  context reports its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
   store reading back the one shared status. A 507 reaches that verdict three
   ways: a save that rejects with the `ApiError` (`useSaveManager`,
   `useDraftSaveContext`'s collection editors, the store's own catch), a save

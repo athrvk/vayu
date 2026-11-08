@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
@@ -56,9 +56,9 @@ vi.mock("@/queries", () => ({
 		},
 	}),
 	useCollectionAncestors: () => [],
-	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: globalsMutate }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 }));
 
 const resolved: Record<string, ResolvedVariable> = {
@@ -117,12 +117,9 @@ describe("VariablesSection - a rejected variable edit", () => {
 		resetSaveStoreForTests();
 	});
 
-	it("toasts the engine's reason and puts the stored value back", () => {
-		globalsMutate.mockImplementation(
-			(_payload: unknown, opts: { onError: (e: Error) => void; onSettled: () => void }) => {
-				opts.onError(new Error("value must not be empty"));
-				opts.onSettled();
-			}
+	it("toasts the engine's reason and puts the stored value back", async () => {
+		globalsMutate.mockImplementation(() =>
+			Promise.reject(new Error("value must not be empty"))
 		);
 
 		renderSection();
@@ -134,8 +131,8 @@ describe("VariablesSection - a rejected variable edit", () => {
 		});
 
 		expect(globalsMutate).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
 		const toasts = useToastStore.getState().toasts;
-		expect(toasts).toHaveLength(1);
 		expect(toasts[0].message).toBe("Couldn't save {{host}} - value must not be empty");
 		expect(toasts[0].variant).toBe("error");
 		expect(input.value).toBe("example.com");
@@ -178,10 +175,13 @@ describe("VariablesSection - a variable edit the engine answered 507 at quit (#2
 
 	/** Edit and blur with the write held in flight, then start the quit-time flush. */
 	async function flushWhileInFlight(rejectWith: Error) {
-		let handlers: { onError: (e: Error) => void; onSettled: () => void } | null = null;
-		globalsMutate.mockImplementation((_payload: unknown, h: NonNullable<typeof handlers>) => {
-			handlers = h;
-		});
+		let reject: ((error: Error) => void) | null = null;
+		globalsMutate.mockImplementation(
+			() =>
+				new Promise<never>((_resolve, fail) => {
+					reject = fail;
+				})
+		);
 		renderSection();
 		const input = valueInput();
 		act(() => {
@@ -190,8 +190,7 @@ describe("VariablesSection - a variable edit the engine answered 507 at quit (#2
 		});
 		const flush = useSaveStore.getState().flushAll();
 		await act(async () => {
-			handlers?.onError(rejectWith);
-			handlers?.onSettled();
+			reject?.(rejectWith);
 			await flush;
 		});
 		return flush;

@@ -22,6 +22,8 @@ import {
 	useSaveStore,
 	type SaveContext,
 	type SaveOutcome,
+	type SaveStatus,
+	type UnsavedEdit,
 } from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
@@ -98,12 +100,24 @@ interface UseSaveManagerOptions {
 	enabled?: boolean;
 }
 
+/** Where this entity's own edit stands; never `saved`, which no id records. */
+export type EditStatus = Exclude<SaveStatus, "saved">;
+
+const EDIT_STATUS: Record<UnsavedEdit["kind"], EditStatus> = {
+	pending: "pending",
+	saving: "saving",
+	failed: "error",
+};
+
 interface UseSaveManagerReturn {
 	/** Trigger an immediate save */
 	forceSave: () => Promise<void>;
-	/** Current save status */
-	status: "idle" | "pending" | "saving" | "saved" | "error";
-	/** Whether currently saving */
+	/**
+	 * This entity's own edit, read from its entry under its own id - never the
+	 * Dock's `status`, which is every surface's at once (#3350).
+	 */
+	status: EditStatus;
+	/** Whether this entity's save is in flight */
 	isSaving: boolean;
 }
 
@@ -115,11 +129,14 @@ export function useSaveManager({
 	changeToken,
 	enabled = true,
 }: UseSaveManagerOptions): UseSaveManagerReturn {
-	const status = useSaveStore((s) => s.status);
+	const ownEdit = useSaveStore((s) =>
+		entityId ? s.unsaved.get(saveContextId(entityId)) : undefined
+	);
 	const reportPending = useSaveStore((s) => s.reportPending);
 	const reportSaving = useSaveStore((s) => s.reportSaving);
 	const reportSaved = useSaveStore((s) => s.reportSaved);
 	const reportFailed = useSaveStore((s) => s.reportFailed);
+	const discard = useSaveStore((s) => s.discard);
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
@@ -317,7 +334,9 @@ export function useSaveManager({
 			retryAttemptRef.current = 0;
 			return;
 		}
-		if (!enabledRef.current) return;
+		// An edit reverted or a request deleted while this save was out leaves
+		// nothing to retry; the effect that discards it clears any retry too.
+		if (!enabledRef.current || !hasChangesRef.current) return;
 
 		// Doubling from the user's own delay, capped so a save that keeps
 		// failing settles into a fixed cadence instead of backing off forever.
@@ -401,6 +420,18 @@ export function useSaveManager({
 		};
 	}, [entityId, performSave, clearRetry, contextName]);
 
+	// An edit that is gone - reverted, or its request deleted elsewhere - leaves
+	// this id's report describing nothing, and nothing to retry. A save in
+	// flight is left to report its own outcome; that report changes `ownEdit`
+	// and brings this back. Keyed on the pane's current entity, so the edit a
+	// goodbye flush carried off under the previous id is not touched.
+	useEffect(() => {
+		if (!entityId || (enabled && hasChanges)) return;
+		clearRetry();
+		if (!ownEdit || ownEdit.kind === "saving") return;
+		discard(saveContextId(entityId));
+	}, [entityId, enabled, hasChanges, ownEdit, clearRetry, discard]);
+
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {
 		// Cancel any pending auto-save
@@ -470,6 +501,7 @@ export function useSaveManager({
 		clearRetry,
 	]);
 
+	const status = ownEdit ? EDIT_STATUS[ownEdit.kind] : "idle";
 	return {
 		forceSave,
 		status,

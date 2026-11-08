@@ -258,4 +258,65 @@ describe("SettingsMain - leaving a category", () => {
 		expect(mutateAsync.mock.calls[0][0]).toEqual({ entries: { max_connections: "42" } });
 		expect(useSaveStore.getState().status).toBe("saved");
 	});
+
+	/*
+	 * A flush's edits are no longer staged once it starts, so a failed one left
+	 * "Not saved" describing nothing, with no Save to retry it and nothing that
+	 * would ever clear it. It is a toast instead. Mutation check (confirmed):
+	 * report the flush's failure through `reportFailed`, as the Save button's is,
+	 * and the first two cases red on "error"; discard on every failure and the
+	 * third reds on "idle".
+	 */
+	describe("a flush that fails", () => {
+		const offline = () => Promise.reject(new Error("engine unreachable"));
+
+		it("toasts and clears the Dock when it leaves for another category", async () => {
+			mutateAsync.mockImplementationOnce(offline);
+			const { rerender } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+			selectedCategory = "general_engine";
+			await act(async () => {
+				rerender(<Panel />);
+			});
+
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't save settings - engine unreachable",
+				"error"
+			);
+			expect(useSaveStore.getState().unsaved.has("settings")).toBe(false);
+			expect(useSaveStore.getState().status).toBe("idle");
+		});
+
+		it("toasts and clears the Dock when the panel unmounts", async () => {
+			mutateAsync.mockImplementationOnce(offline);
+			const { unmount } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+			await act(async () => {
+				unmount();
+			});
+
+			expect(showToast).toHaveBeenCalledTimes(1);
+			expect(useSaveStore.getState().status).toBe("idle");
+		});
+
+		it("keeps an edit staged in the next category while it was out unsaved", async () => {
+			let fail!: () => void;
+			mutateAsync.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (fail = () => reject(new Error("busy"))))
+			);
+			const { rerender } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+			selectedCategory = "general_engine";
+			await act(async () => {
+				rerender(<Panel />);
+			});
+			fireEvent.change(screen.getByLabelText("Worker threads"), { target: { value: "8" } });
+
+			await act(async () => fail());
+
+			expect(useSaveStore.getState().status).toBe("pending");
+		});
+	});
 });

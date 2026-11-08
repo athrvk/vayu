@@ -99,12 +99,16 @@ const collection: Collection = {
 	updatedAt: new Date(0).toISOString(),
 };
 
+const otherCollection: Collection = { ...collection, id: "col_2", name: "other" };
+
+const editorFor = (source: Collection) => (
+	<TooltipProvider>
+		<VariableTableEditor config={{ type: "collection", collection: source }} />
+	</TooltipProvider>
+);
+
 function renderEditor() {
-	return render(
-		<TooltipProvider>
-			<VariableTableEditor config={{ type: "collection", collection }} />
-		</TooltipProvider>
-	);
+	return render(editorFor(collection));
 }
 
 const hostValue = () => (screen.getAllByPlaceholderText("value") as HTMLInputElement[])[0];
@@ -209,5 +213,59 @@ describe("the status timer a variable save arms", () => {
 		unmount();
 
 		expect(store().status).toBe("idle");
+	});
+
+	/*
+	 * Selecting another collection reseeds the rows and discards the old id, and
+	 * the save the blur started is still out. Mutation check (confirmed): with
+	 * the store recording reports for an abandoned id, the first case sits on
+	 * "Not saved" and the second on "Unsaved changes", both for `collection-col_1`
+	 * rows nobody holds.
+	 */
+	describe("a save that lands after the editor switched collections", () => {
+		function switchAway(view: ReturnType<typeof renderEditor>) {
+			view.rerender(editorFor(otherCollection));
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+		}
+
+		// Through the store's flush rather than a blur, whose save nothing awaits:
+		// this is also the case that would toast twice, once from the editor and
+		// once from `runSave`, if the store judged "already reported" by an entry
+		// the discard has taken.
+		it("is one toast, not 'Not saved', when it fails", async () => {
+			const showToast = vi.spyOn(useToastStore.getState(), "showToast");
+			// The toast store's state object outlives `restoreAllMocks` (zustand
+			// merges it), so `spyOn` can hand back the earlier case's spy, calls and all.
+			showToast.mockClear();
+			const view = renderEditor();
+			fireEvent.change(hostValue(), { target: { value: "example.org" } });
+			let flushed!: ReturnType<ReturnType<typeof store>["flushAll"]>;
+			act(() => {
+				flushed = store().flushAll();
+			});
+			switchAway(view);
+
+			await act(async () => {
+				pendingSave.opts.onError(new Error("database is locked"));
+				await flushed;
+			});
+
+			expect(await flushed).toEqual({ saved: 0, failed: 1, pending: 0 });
+			expect(showToast).toHaveBeenCalledTimes(1);
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+			expect(store().status).toBe("idle");
+		});
+
+		it("leaves no 'Unsaved changes' when it succeeds", () => {
+			const view = renderEditor();
+			fireEvent.change(hostValue(), { target: { value: "example.org" } });
+			fireEvent.blur(hostValue());
+			switchAway(view);
+
+			act(() => pendingSave.opts.onSuccess());
+
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+			expect(store().status).not.toBe("pending");
+		});
 	});
 });

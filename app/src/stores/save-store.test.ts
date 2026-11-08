@@ -206,6 +206,111 @@ describe("discard", () => {
 	});
 });
 
+/*
+ * An editor that drops its edit (an id switch, an unmount, a Reset) discards
+ * its id, and a save that was out for that edit settles afterwards. Recorded,
+ * its report would describe an edit nobody holds, under an id nothing would
+ * ever report again.
+ *
+ * Mutation check (confirmed): recording `reportFailed` and `reportPending`
+ * regardless of `abandoned` reds the first three cases and the last.
+ */
+describe("a save that settles after its edit was discarded", () => {
+	it("is a toast, not 'Not saved', when it fails after its editor left", () => {
+		registerContext("environment-a", true);
+		store().reportSaving("environment-a");
+		store().unregisterContext("environment-a");
+		store().discard("environment-a");
+
+		store().reportFailed("environment-a", "Couldn't save - offline");
+
+		expect(toasts()).toHaveLength(1);
+		expect(status()).toBe("idle");
+		expect(store().unsaved.has("environment-a")).toBe(false);
+	});
+
+	it("does not bring 'Unsaved changes' back when it reports its edit unsent", () => {
+		store().reportPending("environment-a");
+		store().discard("environment-a");
+
+		store().reportPending("environment-a");
+
+		expect(status()).toBe("idle");
+	});
+
+	it("is a toast when it fails after a Reset, while the editor stays registered", () => {
+		registerContext("collection-a-auth", true);
+		store().reportPending("collection-a-auth");
+		store().discard("collection-a-auth");
+
+		store().reportFailed("collection-a-auth", "Couldn't save auth - offline");
+
+		expect(status()).toBe("idle");
+	});
+
+	it("records a registered editor's next edit, and that edit's failure", () => {
+		registerContext("collection-a-auth", true);
+		store().reportPending("collection-a-auth");
+		store().discard("collection-a-auth");
+
+		store().reportPending("collection-a-auth");
+		expect(status()).toBe("pending");
+		store().reportFailed("collection-a-auth", "Couldn't save auth - offline");
+		expect(status()).toBe("error");
+	});
+
+	it("records a save that starts after the discard", () => {
+		// A rename id is never registered: each rename's `saving` takes it back.
+		store().reportSaving("rename-request-1");
+		store().discard("rename-request-1");
+
+		store().reportSaving("rename-request-1");
+		expect(status()).toBe("saving");
+		store().reportFailed("rename-request-1", "Couldn't rename");
+		expect(status()).toBe("error");
+	});
+
+	it("records reports again once a context registers under the id", () => {
+		store().reportPending("environment-a");
+		store().discard("environment-a");
+		registerContext("environment-a", false);
+
+		store().reportFailed("environment-a", "Couldn't save - offline");
+
+		expect(status()).toBe("error");
+	});
+
+	it("leaves an id that unregistered without a discard reporting, as a goodbye flush does", () => {
+		registerContext("request-a", true);
+		store().reportSaving("request-a");
+		store().unregisterContext("request-a");
+
+		store().reportFailed("request-a", "Couldn't save - offline");
+
+		expect(status()).toBe("error");
+	});
+
+	it("is toasted once when the store ran the save the context reported and rejected", async () => {
+		// Mutation check (confirmed): judging "already reported" by the entry
+		// again, as before, raises a second toast - the discard took the entry.
+		registerContext("environment-a", true, async () => {
+			store().reportSaving("environment-a");
+			await Promise.resolve();
+			store().unregisterContext("environment-a");
+			store().discard("environment-a");
+			// Worded unlike `runSave`'s own, which the toast store would fold in.
+			store().reportFailed("environment-a", "Couldn't save the environment - offline");
+			throw new Error("offline");
+		});
+
+		const tally = await store().flushAll();
+
+		expect(tally).toEqual({ saved: 0, failed: 1, pending: 0 });
+		expect(toasts()).toHaveLength(1);
+		expect(status()).toBe("idle");
+	});
+});
+
 describe("runSave, through triggerSave", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();

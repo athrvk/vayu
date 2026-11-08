@@ -29,16 +29,16 @@ import { queryKeys } from "@/queries/keys";
 import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import type { Collection, VariableValue } from "@/types";
 
-const collectionMutate = vi.fn();
+const collectionMutate = vi.fn((_payload: unknown) => new Promise<never>(() => {}));
 
 let collections: Collection[] = [];
 let collectionsLoading = false;
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ data: collections, isLoading: collectionsLoading }),
-	useUpdateGlobalsMutation: () => ({ mutate: vi.fn() }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: collectionMutate }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: collectionMutate }),
 }));
 
 // Only the save store is read by the commit path; the real one is kept so the

@@ -52,11 +52,14 @@ interface CommitScope {
 	read: () => VariableMap | undefined;
 	/** Patch the cache so a later commit's `read` already sees this one. */
 	write: (next: VariableMap) => void;
-	/** Send the map to the engine. */
-	mutate: (
-		next: VariableMap,
-		handlers: { onError: (e: unknown) => void; onSettled: () => void }
-	) => void;
+	/**
+	 * Send the map to the engine. The mutation's own promise, never `mutate`'s
+	 * per-call callbacks: an observer holds one set of those, replaced by the
+	 * next `mutate` and never called once its host unmounts (query-core's
+	 * `MutationObserver`), so a commit whose callbacks were dropped never
+	 * settled and the Dock said "Saving…" until restart.
+	 */
+	mutate: (next: VariableMap) => Promise<unknown>;
 }
 
 /**
@@ -96,8 +99,8 @@ function verdictOf(outcomes: SaveOutcome[]): SaveOutcome {
  * caller's toast, never "Not saved" (`save-store.ts`).
  *
  * Returns a function that opens a commit and hands back its `settle` callback,
- * for the mutation's `onSettled`. Commits are held as promises rather than
- * counted so `save()` can await the requests themselves.
+ * for when the mutation's promise settles. Commits are held as promises rather
+ * than counted so `save()` can await the requests themselves.
  */
 function usePendingCommits(): () => (outcome: SaveOutcome) => void {
 	const registerContext = useSaveStore((s) => s.registerContext);
@@ -192,8 +195,7 @@ export function useVariableCommit(): (
 					queryClient.setQueryData<GlobalVariables>(queryKeys.globals.all, (old) =>
 						old ? { ...old, variables: next } : old
 					),
-				mutate: (next, handlers) =>
-					updateGlobalsMutation.mutate({ variables: next }, handlers),
+				mutate: (next) => updateGlobalsMutation.mutateAsync({ variables: next }),
 			};
 		}
 
@@ -217,8 +219,8 @@ export function useVariableCommit(): (
 					queryClient.setQueryData<Environment[]>(key, (old) =>
 						old?.map((e) => (e.id === sourceId ? { ...e, variables: next } : e))
 					),
-				mutate: (next, handlers) =>
-					updateEnvironmentMutation.mutate({ id: sourceId, variables: next }, handlers),
+				mutate: (next) =>
+					updateEnvironmentMutation.mutateAsync({ id: sourceId, variables: next }),
 			};
 		}
 
@@ -233,8 +235,8 @@ export function useVariableCommit(): (
 				queryClient.setQueryData<Collection[]>(key, (old) =>
 					old?.map((c) => (c.id === sourceId ? { ...c, variables: next } : c))
 				),
-			mutate: (next, handlers) =>
-				updateCollectionMutation.mutate({ id: sourceId, variables: next }, handlers),
+			mutate: (next) =>
+				updateCollectionMutation.mutateAsync({ id: sourceId, variables: next }),
 		};
 	};
 
@@ -268,10 +270,9 @@ export function useVariableCommit(): (
 		scope.write(next);
 
 		const settle = beginCommit();
-		let outcome: SaveOutcome = "saved";
-		scope.mutate(next, {
-			onError: (error: unknown) => {
-				outcome = isDiskFullError(error) ? "disk-full" : "failed";
+		scope.mutate(next).then(
+			() => settle("saved"),
+			(error: unknown) => {
 				// Restore this name alone rather than the whole snapshot: another
 				// variable's commit may have patched the map in the meantime, and
 				// replacing it wholesale would revert that one too - the very
@@ -280,8 +281,8 @@ export function useVariableCommit(): (
 				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
 				const fallback = `Couldn't save {{${name}}}`;
 				rollBack(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-			},
-			onSettled: () => settle(outcome),
-		});
+				settle(isDiskFullError(error) ? "disk-full" : "failed");
+			}
+		);
 	};
 }
