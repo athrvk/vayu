@@ -429,6 +429,20 @@ const RUN_EXPORT_COMMANDS: readonly Command[] = runExportActions().map((action):
 }));
 
 /**
+ * A settings section's description as the literal-match corpus (#3322).
+ *
+ * The whole sentence, never split into words: each word would join the fuzzy
+ * `keywords`, where "theme" reaches Observability's description by finding its
+ * letters in five different words. As one substring entry it behaves like the
+ * settings sidebar's own search, which finds a section by a phrase it prints.
+ * An empty description yields no entry rather than a blank one.
+ */
+function descriptionSubstringKeywords(description: string): readonly string[] {
+	const sentence = description.trim();
+	return sentence === "" ? [] : [sentence];
+}
+
+/**
  * One command per settings section, generated from the registries the sidebar
  * renders - so the palette cannot offer a section name the screen never shows,
  * nor miss one that was added there.
@@ -437,9 +451,8 @@ const SETTINGS_COMMANDS: readonly Command[] = [
 	...APP_SETTINGS_PANELS.map((panel): Command => ({
 		id: `settings:${panel.id}`,
 		title: panel.label,
-		// The panel's own description, split into words: it is the sentence
-		// the screen prints, so it is also what a user is likely to type.
-		keywords: [panel.id, "settings", "preferences", ...panel.description.split(/\s+/)],
+		keywords: [panel.id, "settings", "preferences"],
+		substringKeywords: descriptionSubstringKeywords(panel.description),
 		group: "settings",
 		icon: panel.icon,
 		subtitle: "Settings",
@@ -448,13 +461,8 @@ const SETTINGS_COMMANDS: readonly Command[] = [
 	...ENGINE_SETTINGS_CATEGORIES.map((category): Command => ({
 		id: `settings:${category.id}`,
 		title: category.label,
-		keywords: [
-			category.id,
-			"settings",
-			"engine",
-			"preferences",
-			...category.description.split(/\s+/),
-		],
+		keywords: [category.id, "settings", "engine", "preferences"],
+		substringKeywords: descriptionSubstringKeywords(category.description),
 		group: "settings",
 		icon: category.icon,
 		subtitle: "Engine settings",

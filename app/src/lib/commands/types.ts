@@ -116,8 +116,20 @@ export interface Command {
 	 * leaves you to guess which one.
 	 */
 	title: string | ((ctx: CommandContext) => string);
-	/** Extra match terms that do not belong on screen. Never empty. */
+	/**
+	 * Short terms a person types on purpose - an id, an alias - that do not
+	 * belong on screen. Matched fuzzily with the title, so prose does not go
+	 * here (see `substringKeywords`). Never empty.
+	 */
 	keywords: readonly string[];
+	/**
+	 * Longer text matched as a literal substring, at low weight: a hit finds the
+	 * row but cannot outrank one whose title says what was typed. A settings
+	 * section's description is the case: a whole sentence is character soup to
+	 * the fuzzy matcher. Same meaning as `PaletteItem.substringKeywords`
+	 * (`modules/palette/types.ts`), which this is forwarded to.
+	 */
+	substringKeywords?: readonly string[];
 	group: CommandGroup;
 	icon: LucideIcon;
 	/** Where the row says this action already lives, when that is not obvious. */
