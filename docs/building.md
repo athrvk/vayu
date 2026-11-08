@@ -356,7 +356,10 @@ The app does not need it freed: it runs the engine on the first free port of
 it chose. If every one of those is held too, the app stays open on "Engine
 disconnected" with "Another program is using port 9876, and the fallback ports
 are held too. Free port 9876 and press Retry." - Retry looks at 9876 alone, so
-quit the program holding 9876 and press Retry in the Dock.
+quit the program holding 9876 and press Retry in the Dock. When what holds 9876
+is a Vayu engine serving another data directory (a `vayu-engine` started from a
+terminal, another app profile), the sentence starts "Another Vayu engine is
+using port 9876" instead: the app never stops an engine that is not its own.
 
 A `vayu-engine` started by hand reports the same condition as
 `Could not bind 127.0.0.1:<port> - ...` and exits with code 1; it does not pick

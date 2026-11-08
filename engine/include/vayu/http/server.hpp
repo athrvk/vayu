@@ -29,11 +29,13 @@ namespace vayu::http {
 class Server {
     public:
     /// @p grant_secret gates every write to file trust (`grant_secret.hpp`);
-    /// without one those writes are refused.
+    /// without one those writes are refused. @p data_dir is what `/health`
+    /// reports as `dataDir` (`RouteContext::data_dir`).
     Server (vayu::db::Database& db,
     vayu::core::RunManager& run_manager,
     int port,
-    GrantSecret grant_secret = {});
+    GrantSecret grant_secret = {},
+    std::string data_dir     = {});
     ~Server ();
     Server (const Server&)            = delete;
     Server& operator= (const Server&) = delete;
@@ -97,6 +99,7 @@ class Server {
     vayu::core::RunManager& run_manager_;
     int port_;
     GrantSecret grant_secret_;
+    std::string data_dir_;
     std::string bind_error_;
     // Everything from here down to server_ is declared *before* it so it is
     // destroyed *after* it (reverse member order): the httplib lambdas that

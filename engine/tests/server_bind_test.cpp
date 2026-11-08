@@ -304,6 +304,34 @@ TEST_F (ServerBindTest, EveryResponseCarriesNoStoreCacheControl) {
     server.stop ();
 }
 
+// The wiring half of #3328, which `health_route_test.cpp` cannot see: the
+// directory handed to `Server` has to reach the handler through `RouteContext`.
+TEST_F (ServerBindTest, HealthReportsTheDataDirectoryTheServerWasGiven) {
+    int port = 0;
+    {
+        PortHolder holder;
+        port = holder.port ();
+    }
+    ASSERT_GT (port, 0);
+
+    const std::string data_dir =
+    (std::filesystem::temp_directory_path () / "vayu-health-data").string ();
+    vayu::http::Server server (*db_, run_manager_, port, {}, data_dir);
+    ASSERT_TRUE (server.start ());
+
+    httplib::Client client ("127.0.0.1", port);
+    auto response = client.Get ("/health");
+    ASSERT_TRUE (response) << httplib::to_string (response.error ());
+    ASSERT_EQ (response->status, 200) << response->body;
+
+    // Mutation check: leaving `data_dir_` out of the `RouteContext` Server
+    // builds reports "" here.
+    const auto body = nlohmann::json::parse (response->body);
+    EXPECT_EQ (body.value ("dataDir", "<absent>"), data_dir);
+
+    server.stop ();
+}
+
 // The API listens on loopback only, where compressing a response is CPU spent
 // for no bandwidth anyone saves - and cpp-httplib's brotli ran at its default
 // quality, 11: measured on a 300-collection workspace, `/collections` went

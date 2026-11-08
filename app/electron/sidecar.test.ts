@@ -12,7 +12,8 @@
  * file and the health probe. An engine found running lacks this session's
  * grant secret, so both stop and replace it (#2356), and a quit landing during
  * the replacement still stops it (#270). A build for another version is
- * replaced the same way (#1492).
+ * replaced the same way (#1492). Only an engine serving this app's data
+ * directory is ever stopped; another's holds its port (#3328).
  *
  * The lifecycle is driven through a fake `SidecarSystem` rather than real
  * processes and ports: replacement, shutdown and the restart/quit race are
@@ -70,6 +71,9 @@ import {
 	EngineNotReadyError,
 	EnginePortInUseError,
 	defaultSidecarSystem,
+	engineDataDirectory,
+	isSameDataDirectory,
+	type EngineHealthAnswer,
 	type EngineLifecycle,
 	type SidecarSystem,
 } from "./sidecar";
@@ -85,6 +89,19 @@ import {
 
 const TEST_PORT = 39876;
 const ADOPTED_PID = 4242;
+
+/** What this app's own engine answers on `/health`: the data directory it was given. */
+function ourEngine(): EngineHealthAnswer {
+	return { dataDir: engineDataDirectory() };
+}
+
+/** A Vayu engine serving someone else's data, a daemon started from a terminal (#3328). */
+const FOREIGN_ENGINE: EngineHealthAnswer = { dataDir: join(tmpdir(), "someone-elses-vayu") };
+
+/** A probe that finds this app's engine wherever `answering` says one is. */
+function oursWhen(answering: (port: number) => boolean) {
+	return vi.fn(async (port: number) => (answering(port) ? ourEngine() : null));
+}
 
 /** Just enough of a piped stdio stream for the sidecar's drain to attach to. */
 class FakeStream extends EventEmitter {
@@ -170,7 +187,7 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 			if (killed) state.healthy = false;
 			return killed;
 		}),
-		probeHealth: vi.fn(async () => state.healthy),
+		probeHealth: oursWhen(() => state.healthy),
 		requestShutdown: vi.fn(async () => true),
 		isPortFree: vi.fn(async () => !state.healthy),
 		sleep: vi.fn(
@@ -291,7 +308,7 @@ describe("EngineSidecar - an engine already running at start", () => {
 	describe("a live lock PID that does not answer /health", () => {
 		/** Healthy only once this test's own engine has been spawned. */
 		function answersOnlyAfterSpawn(state: { spawned: FakeChild[] }) {
-			return vi.fn(async () => state.spawned.length > 0);
+			return oursWhen(() => state.spawned.length > 0);
 		}
 
 		it("is waited for, then killed and replaced", async () => {
@@ -319,7 +336,7 @@ describe("EngineSidecar - an engine already running at start", () => {
 			engineAlreadyRunning(state);
 			shutsDownWhenAsked(system, state);
 			let probes = 0;
-			system.probeHealth = vi.fn(async () => state.spawned.length > 0 || ++probes > 3);
+			system.probeHealth = oursWhen(() => state.spawned.length > 0 || ++probes > 3);
 			const sidecar = new EngineSidecar([TEST_PORT], system);
 
 			await sidecar.start();
@@ -577,17 +594,29 @@ describe("EngineSidecar - choosing a port", () => {
 
 	/**
 	 * Ports as the OS sees them: `foreign` are held by a program that is not a
-	 * Vayu engine, `vayu` answer /health. A spawned engine takes the port its
-	 * `--port` names and lets it go when it exits.
+	 * Vayu engine, `vayu` answer /health as this app's engine, `otherEngine` as
+	 * a Vayu engine serving another data directory, and `legacy` as an engine
+	 * too old to report one. A spawned engine takes the port its `--port` names,
+	 * answers with the data directory of the sidecar that spawned it, and lets
+	 * the port go when it exits.
 	 */
 	function ports(
 		system: SidecarSystem,
 		state: { spawned: FakeChild[] },
-		{ foreign = [], vayu = [] }: { foreign?: number[]; vayu?: number[] }
+		{
+			foreign = [],
+			vayu = [],
+			otherEngine = [],
+			legacy = [],
+		}: { foreign?: number[]; vayu?: number[]; otherEngine?: number[]; legacy?: number[] }
 	) {
-		const answering = new Set(vayu);
-		const held = new Set([...foreign, ...vayu]);
-		system.probeHealth = vi.fn(async (port: number) => answering.has(port));
+		const answering = new Map<number, EngineHealthAnswer>([
+			...vayu.map((port) => [port, ourEngine()] as const),
+			...otherEngine.map((port) => [port, FOREIGN_ENGINE] as const),
+			...legacy.map((port) => [port, { dataDir: null }] as const),
+		]);
+		const held = new Set([...foreign, ...answering.keys()]);
+		system.probeHealth = vi.fn(async (port: number) => answering.get(port) ?? null);
 		system.isPortFree = vi.fn(async (port: number) => !held.has(port));
 		system.spawnEngine = vi.fn((_binary: string, args: string[]) => {
 			const port = Number(args[args.indexOf("--port") + 1]);
@@ -597,11 +626,16 @@ describe("EngineSidecar - choosing a port", () => {
 				held.delete(port);
 			});
 			state.spawned.push(child);
-			answering.add(port);
+			answering.set(port, ourEngine());
 			held.add(port);
 			return child as unknown as ChildProcess;
 		});
 		return { held };
+	}
+
+	/** The ports `POST /shutdown` was sent to. */
+	function shutdownPorts(system: SidecarSystem): number[] {
+		return vi.mocked(system.requestShutdown).mock.calls.map(([port]) => port);
 	}
 
 	function spawnedPorts(system: SidecarSystem): number[] {
@@ -721,6 +755,201 @@ describe("EngineSidecar - choosing a port", () => {
 		held.delete(TEST_PORT);
 		await sidecar.restart(0);
 		expect(spawnedPorts(system)).toEqual([TEST_PORT]);
+	});
+
+	/*
+	 * #3328: only an engine serving this app's data directory is taken over. A
+	 * Vayu engine serving another's (a daemon run from a terminal, a second app
+	 * instance on another profile) holds its port like any other program.
+	 * Mutation check: have `identify` answer "ours" for every engine, the old
+	 * takeover on any answer, and each case here reds on a `/shutdown` sent to
+	 * the other engine's port.
+	 */
+	describe("a Vayu engine serving another data directory", () => {
+		it("is skipped, never sent /shutdown, and the next free candidate is used", async () => {
+			const { system, state } = fakeSystem();
+			ports(system, state, { otherEngine: [TEST_PORT] });
+			const onPortFixed = vi.fn();
+			const sidecar = new EngineSidecar(CANDIDATES, system, onPortFixed);
+
+			await sidecar.start();
+
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.killEngineProcess).not.toHaveBeenCalled();
+			expect(spawnedPorts(system)).toEqual([FALLBACK]);
+			expect(onPortFixed.mock.calls).toEqual([[FALLBACK]]);
+		});
+
+		it("does not shadow our crash orphan on a later candidate", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			const { held } = ports(system, state, { otherEngine: [TEST_PORT], vayu: [FALLBACK] });
+			leavesWhenAsked(system, state, held, FALLBACK);
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			await sidecar.start();
+
+			expect(shutdownPorts(system)).toEqual([FALLBACK]);
+			expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		});
+
+		it("is not where our silent locked engine is waited for", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			ports(system, state, { otherEngine: [TEST_PORT] });
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			await sidecar.start();
+
+			// Ours never answered: it was waited out on the first free candidate
+			// and killed by its lock PID, and the other engine was left alone.
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
+			expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		});
+
+		it("ends the wait for our locked engine only when ours answers", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			// Free when the port is chosen; another profile's engine takes it
+			// during the wait for ours.
+			const { held } = ports(system, state, {});
+			let chosen = false;
+			system.probeHealth = vi.fn(async () => {
+				if (!chosen) {
+					chosen = true;
+					return null;
+				}
+				held.add(TEST_PORT);
+				return FOREIGN_ENGINE;
+			});
+			const sidecar = new EngineSidecar([TEST_PORT], system);
+
+			await expect(sidecar.start()).rejects.toThrow(
+				`Another Vayu engine is using port ${TEST_PORT}. Quit it and press Retry.`
+			);
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.spawnEngine).not.toHaveBeenCalled();
+		});
+
+		it("on every candidate is named in the error, and Retry names it alone", async () => {
+			const { system, state } = fakeSystem();
+			ports(system, state, { otherEngine: CANDIDATES });
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			const failure = await sidecar.start().catch((error: unknown) => error);
+			const retry = await sidecar.restart(0).catch((error: unknown) => error);
+
+			expect(failure).toBeInstanceOf(EnginePortInUseError);
+			expect((failure as Error).message).toBe(
+				`Another Vayu engine is using port ${TEST_PORT}, and the fallback ports are held too. Free port ${TEST_PORT} and press Retry.`
+			);
+			expect(retry).toBeInstanceOf(EnginePortInUseError);
+			expect((retry as Error).message).toBe(
+				`Another Vayu engine is using port ${TEST_PORT}. Quit it and press Retry.`
+			);
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.spawnEngine).not.toHaveBeenCalled();
+		});
+
+		it("on every candidate is named in the error with a live lock too", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			ports(system, state, { otherEngine: CANDIDATES });
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			await expect(sidecar.start()).rejects.toThrow(/^Another Vayu engine is using port/);
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.killEngineProcess).not.toHaveBeenCalled();
+		});
+
+		// The error names the port the user is told to free, so it names what
+		// holds that one, whatever holds the fallbacks.
+		it.each([
+			["Another program", { foreign: [TEST_PORT], otherEngine: [FALLBACK, FALLBACK + 1] }],
+			[
+				"Another Vayu engine",
+				{ otherEngine: [TEST_PORT], foreign: [FALLBACK, FALLBACK + 1] },
+			],
+		])("says %s when that holds the first of several held candidates", async (holder, held) => {
+			const { system, state } = fakeSystem();
+			ports(system, state, held);
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			const failure = await sidecar.start().catch((error: unknown) => error);
+
+			expect((failure as Error).message).toMatch(
+				new RegExp(`^${holder} is using port ${TEST_PORT},`)
+			);
+			expect(shutdownPorts(system)).toEqual([]);
+		});
+
+		it("lets two instances with separate data directories run side by side", async () => {
+			const { system, state } = fakeSystem();
+			ports(system, state, {});
+			const first = new EngineSidecar(CANDIDATES, system);
+			await first.start();
+			// The second instance's profile, inside the first's so the cleanup
+			// removes both.
+			fake.userData = join(fake.userData, "second-profile");
+			const second = new EngineSidecar(CANDIDATES, system);
+
+			await second.start();
+
+			expect(spawnedPorts(system)).toEqual([TEST_PORT, FALLBACK]);
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(first.isRunning()).toBe(true);
+			expect(second.isRunning()).toBe(true);
+		});
+	});
+
+	/*
+	 * An engine older than #3328 reports no data directory, and nothing ties it
+	 * to this app: a live lock proves our engine exists, not that this one is
+	 * it. Mutation check: read a missing `dataDir` as ours (`health.dataDir ===
+	 * null || isSameDataDirectory(...)`) and each case reds on a `/shutdown`
+	 * sent to the legacy engine's port.
+	 */
+	describe("an engine that reports no data directory", () => {
+		it("is left alone when no live lock names our engine", async () => {
+			const { system, state } = fakeSystem();
+			ports(system, state, { legacy: [TEST_PORT] });
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			await sidecar.start();
+
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.killEngineProcess).not.toHaveBeenCalled();
+			expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		});
+
+		it("is left alone when a live lock names our engine, which is waited for instead", async () => {
+			const { system, state } = fakeSystem();
+			engineAlreadyRunning(state);
+			ports(system, state, { legacy: [TEST_PORT] });
+			const sidecar = new EngineSidecar(CANDIDATES, system);
+
+			await sidecar.start();
+
+			// Ours never answered: it was waited out on the first free candidate and
+			// killed by its lock PID, and the legacy engine was never asked to leave.
+			expect(shutdownPorts(system)).toEqual([]);
+			expect(system.killEngineProcess).toHaveBeenCalledWith(ADOPTED_PID);
+			expect(spawnedPorts(system)).toEqual([FALLBACK]);
+		});
+
+		it("on every candidate is named in the error, with and without a live lock", async () => {
+			for (const locked of [false, true]) {
+				const { system, state } = fakeSystem();
+				if (locked) engineAlreadyRunning(state);
+				ports(system, state, { legacy: CANDIDATES });
+				const sidecar = new EngineSidecar(CANDIDATES, system);
+
+				await expect(sidecar.start()).rejects.toThrow(/^Another Vayu engine is using port/);
+				expect(shutdownPorts(system)).toEqual([]);
+				expect(system.spawnEngine).not.toHaveBeenCalled();
+			}
+		});
 	});
 
 	it("refuses an empty candidate list", () => {
@@ -1110,9 +1339,9 @@ describe("EngineSidecar - lifecycle", () => {
 		vi.mocked(system.probeHealth).mockImplementation(async () => {
 			if (state.spawned.length === 1 && !missedOnce) {
 				missedOnce = true;
-				return false;
+				return null;
 			}
-			return state.healthy;
+			return state.healthy ? ourEngine() : null;
 		});
 		// A real engine leaves once it has accepted POST /shutdown.
 		vi.mocked(system.requestShutdown).mockImplementation(async () => {
@@ -1142,7 +1371,7 @@ describe("EngineSidecar - lifecycle", () => {
 	it("runs the ready-after-slow hook when a slow engine answers", async () => {
 		const { system } = fakeSystem();
 		let answering = false;
-		system.probeHealth = vi.fn(async () => answering);
+		system.probeHealth = oursWhen(() => answering);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		const onReadyAfterSlow = vi.fn();
 		sidecar.onReadyAfterSlow(onReadyAfterSlow);
@@ -1194,7 +1423,7 @@ describe("EngineSidecar - lifecycle", () => {
 
 	it("publishes a crash for a slow engine that dies, and stops watching it", async () => {
 		const { system, state } = fakeSystem();
-		system.probeHealth = vi.fn(async () => false);
+		system.probeHealth = vi.fn(async () => null);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		const onReadyAfterSlow = vi.fn();
 		sidecar.onReadyAfterSlow(onReadyAfterSlow);
@@ -1208,7 +1437,7 @@ describe("EngineSidecar - lifecycle", () => {
 
 	it("publishes a crash for an engine that dies before it answers", async () => {
 		const { system, state } = fakeSystem();
-		system.probeHealth = vi.fn(async () => false);
+		system.probeHealth = vi.fn(async () => null);
 		vi.mocked(system.spawnEngine).mockImplementation(() => {
 			const child = new FakeChild();
 			state.spawned.push(child);
@@ -1284,7 +1513,7 @@ describe("EngineSidecar - lifecycle", () => {
 		let quitting: Promise<void> | undefined;
 		vi.mocked(system.probeHealth).mockImplementation(async () => {
 			if (state.spawned.length > 0) quitting ??= sidecar.shutdown();
-			return state.healthy;
+			return state.healthy ? ourEngine() : null;
 		});
 
 		await sidecar.start();
@@ -1322,7 +1551,7 @@ describe("EngineSidecar - whether a failed start is the last word", () => {
 		let quitting: Promise<void> | undefined;
 		system.probeHealth = vi.fn(async () => {
 			if (state.spawned.length > 0) quitting ??= sidecar.shutdown();
-			return false;
+			return null;
 		});
 
 		const outcome = await startOutcome(sidecar);
@@ -1340,12 +1569,12 @@ describe("EngineSidecar - whether a failed start is the last word", () => {
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 		let restarting: Promise<void> | undefined;
 		system.probeHealth = vi.fn(async () => {
-			if (state.spawned.length !== 1) return state.healthy;
+			if (state.spawned.length !== 1) return state.healthy ? ourEngine() : null;
 			if (!restarting) {
 				restarting = sidecar.restart(0);
 				state.spawned[0].exit(127);
 			}
-			return false;
+			return null;
 		});
 
 		const outcome = await startOutcome(sidecar);
@@ -1366,7 +1595,7 @@ describe("EngineSidecar - whether a failed start is the last word", () => {
 			child.exit(127);
 			return child as unknown as ChildProcess;
 		});
-		system.probeHealth = vi.fn(async () => false);
+		system.probeHealth = vi.fn(async () => null);
 		const sidecar = new EngineSidecar([TEST_PORT], system);
 
 		const outcome = await startOutcome(sidecar);
@@ -1411,24 +1640,36 @@ describe("defaultSidecarSystem - recognising a Vayu engine", () => {
 	])("does not take a reply with %s for an engine", async (_name, body) => {
 		const port = await serveHealth(body);
 
-		expect(await defaultSidecarSystem.probeHealth(port)).toBe(false);
+		expect(await defaultSidecarSystem.probeHealth(port)).toBeNull();
 	});
 
 	it("takes status, a string version and a numeric workers for an engine", async () => {
 		const port = await serveHealth(VAYU_HEALTH);
 
-		expect(await defaultSidecarSystem.probeHealth(port)).toBe(true);
+		// No `dataDir`: an engine older than #3328, which the sidecar asks the
+		// lock file about.
+		expect(await defaultSidecarSystem.probeHealth(port)).toEqual({ dataDir: null });
+	});
+
+	it("reads the data directory the engine reports, and only a string one", async () => {
+		const reporting = await serveHealth({ ...VAYU_HEALTH, dataDir: "/srv/vayu" });
+		const garbled = await serveHealth({ ...VAYU_HEALTH, dataDir: 7 });
+
+		expect(await defaultSidecarSystem.probeHealth(reporting)).toEqual({ dataDir: "/srv/vayu" });
+		expect(await defaultSidecarSystem.probeHealth(garbled)).toEqual({ dataDir: null });
 	});
 
 	it("skips a marker-less listener as held and replaces the Vayu engine on the next candidate", async () => {
 		const foreignPort = await serveHealth({ status: "ok" });
-		const enginePort = await serveHealth(VAYU_HEALTH);
+		const enginePort = await serveHealth({ ...VAYU_HEALTH, dataDir: engineDataDirectory() });
 		const engineServer = servers[servers.length - 1];
 		const { system, state } = fakeSystem({
 			// The real probe until this test's own engine exists, which has no
 			// socket to answer on.
 			probeHealth: async (port: number) =>
-				state.spawned.length > 0 || (await defaultSidecarSystem.probeHealth(port)),
+				state.spawned.length > 0
+					? ourEngine()
+					: await defaultSidecarSystem.probeHealth(port),
 			isPortFree: defaultSidecarSystem.isPortFree,
 			requestShutdown: vi.fn(async () => {
 				engineServer.closeAllConnections();
@@ -1457,5 +1698,64 @@ describe("defaultSidecarSystem - recognising a Vayu engine", () => {
 
 		expect(system.requestShutdown).not.toHaveBeenCalled();
 		expect(system.spawnEngine).not.toHaveBeenCalled();
+	});
+
+	// #3328, over a real socket: the fakes above would "pass" a probe that
+	// dropped `dataDir` on the way to the sidecar.
+	it("never shuts down a Vayu engine serving another data directory", async () => {
+		const otherPort = await serveHealth({ ...VAYU_HEALTH, ...FOREIGN_ENGINE });
+		const { system } = fakeSystem({
+			probeHealth: defaultSidecarSystem.probeHealth,
+			isPortFree: defaultSidecarSystem.isPortFree,
+		});
+		const sidecar = new EngineSidecar([otherPort], system);
+
+		await expect(sidecar.start()).rejects.toThrow(
+			`Another Vayu engine is using port ${otherPort}. Quit it and press Retry.`
+		);
+
+		expect(system.requestShutdown).not.toHaveBeenCalled();
+		expect(system.spawnEngine).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * #3328: the data directory an engine reports is compared after resolving
+ * both sides, with case folded on Windows only. The platform is stubbed, so
+ * both branches run on every runner. Mutation check: fold case on every
+ * platform and the posix case reds; drop the fold and the win32 case reds.
+ */
+describe("isSameDataDirectory", () => {
+	const realPlatform = process.platform;
+	afterEach(() => stubPlatform(realPlatform));
+
+	it("ignores case and separator style on win32", () => {
+		stubPlatform("win32");
+
+		expect(
+			isSameDataDirectory(
+				"c:\\Users\\Me\\AppData\\Roaming\\Vayu",
+				"C:/users/me/appdata/roaming/vayu/"
+			)
+		).toBe(true);
+		expect(isSameDataDirectory("C:\\Users\\Me\\Vayu", "C:\\Users\\Me\\Vayu-test")).toBe(false);
+	});
+
+	it("keeps case on posix, and ignores a trailing separator and dot segments", () => {
+		stubPlatform("linux");
+
+		expect(isSameDataDirectory("/home/me/.config/Vayu", "/home/me/.config/./Vayu/")).toBe(true);
+		expect(isSameDataDirectory("/home/me/.config/vayu", "/home/me/.config/Vayu")).toBe(false);
+	});
+
+	it("keeps case on darwin", () => {
+		stubPlatform("darwin");
+
+		expect(
+			isSameDataDirectory(
+				"/Users/me/Library/Application Support/vayu",
+				"/Users/me/Library/Application Support/Vayu"
+			)
+		).toBe(false);
 	});
 });

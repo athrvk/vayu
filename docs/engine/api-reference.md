@@ -900,7 +900,8 @@ Check engine status and version.
 {
   "status": "ok",
   "version": "0.3.0",
-  "workers": 8
+  "workers": 8,
+  "dataDir": "/home/someone/.config/Vayu"
 }
 ```
 
@@ -910,6 +911,20 @@ run's `EventLoop` will use, not the machine's raw core count regardless of
 configuration. It is never `0`: a host whose core count cannot be detected
 reports `4`, the fallback the event loop applies too.
 
+`dataDir` (issue #3328) is the data directory this engine keeps its database,
+logs and lock file in, the `--data-dir` it was started with, so a client can
+tell an engine serving its own data from one serving another's. It is resolved
+once at startup and always present:
+
+- absolute: a relative `--data-dir` (or the default `./data`) is resolved
+  against the directory the engine was started in;
+- lexically normalised: `.` and `..` segments and a trailing separator are
+  removed, and on Windows every separator is `\`;
+- not canonical: a symlink is reported as written, not resolved, so the value
+  compares equal to the path a client passed;
+- UTF-8. A name that is not valid UTF-8 (a POSIX directory name is bytes) has
+  the offending bytes replaced with U+FFFD rather than failing the response.
+
 **`recovery` (optional, issue #922)** - present only when this engine startup had
 to recover the database, and **absent** on a clean start rather than `null`:
 
@@ -918,11 +933,12 @@ to recover the database, and **absent** on a clean start rather than `null`:
   "status": "ok",
   "version": "0.3.0",
   "workers": 8,
+  "dataDir": "/home/someone/.config/Vayu",
   "recovery": {
     "outcome": "started_fresh_quarantined",
     "at": 1755870000000,
-    "databasePath": "/home/someone/.local/share/vayu/vayu.db",
-    "quarantinedPath": "/home/someone/.local/share/vayu/vayu.db.corrupt-1755870000000"
+    "databasePath": "/home/someone/.config/Vayu/db/vayu.db",
+    "quarantinedPath": "/home/someone/.config/Vayu/db/vayu.db.corrupt-1755870000000"
   }
 }
 ```

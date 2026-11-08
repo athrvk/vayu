@@ -16,6 +16,8 @@
 #include "vayu/utils/logger.hpp"
 #include "vayu/version.hpp"
 
+#include <string>
+
 namespace vayu::http::routes {
 
 /**
@@ -30,14 +32,19 @@ namespace vayu::http::routes {
  * engine's usual absent-not-null rule: a client that has never seen the key has
  * nothing to render, and the app's notice keys off its presence.
  *
+ * `dataDir` is @p data_dir as given: the daemon resolves it once at startup
+ * (`core::absolute_data_dir`), because a relative path is relative to a
+ * current directory only the engine knows.
+ *
  * Not `const`: `resolve_worker_count` reads the `workers` config entry, and
  * `Database::get_config_int` is not itself `const`.
  */
-nlohmann::json build_health_response (vayu::db::Database& db) {
+nlohmann::json build_health_response (vayu::db::Database& db, const std::string& data_dir) {
     nlohmann::json response;
     response["status"]  = "ok";
     response["version"] = vayu::Version::string;
     response["workers"] = vayu::core::resolve_worker_count (db);
+    response["dataDir"] = data_dir;
 
     if (const auto& recovery = db.recovery ()) {
         nlohmann::json node;
@@ -62,12 +69,16 @@ nlohmann::json build_health_response (vayu::db::Database& db) {
 void register_health_routes (RouteContext& ctx) {
     /**
      * GET /health
-     * Returns server health status, version, available worker threads, and -
-     * only when this startup had to recover the database - what it did about it
-     * (issue #922).
+     * Returns server health status, version, available worker threads, the
+     * data directory (#3328), and - only when this startup had to recover the
+     * database - what it did about it (issue #922).
      */
     ctx.server.Get ("/health", [&ctx] (const httplib::Request&, httplib::Response& res) {
-        res.set_content (build_health_response (ctx.db).dump (), "application/json");
+        // Replace, not throw: a directory name that is not UTF-8 (POSIX names
+        // are bytes) must not turn the liveness probe into a 500.
+        res.set_content (build_health_response (ctx.db, ctx.data_dir)
+                         .dump (-1, ' ', false, nlohmann::json::error_handler_t::replace),
+        "application/json");
     });
 
     /**

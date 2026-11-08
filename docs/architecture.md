@@ -406,36 +406,55 @@ which case the app picks a fallback (below).
   The main process holds it in `file-trust-client.ts`, the only module that
   sends it; the renderer and the MCP server never see it. A restart spawns a
   new engine and a new secret.
-- **An engine already running at startup is replaced, never adopted.** If an
-  engine answers on one of the app's ports at startup - an orphan left by a
-  crashed session, or in development one started by hand - it was given another
-  launch's secret or none, and nothing can hand it this one, so adopting it
-  would leave every allowed-folder and picked-file write refused for the
-  session. The app asks it to `POST /shutdown`, waits for it by the PID in the
-  lock file (`vayu.lock` in the data directory), kills it by that PID if it
-  outstays the grace period, and spawns its own on the same port. The same
-  stop covers an engine built for another Vayu version (issue #1492), which no
-  longer needs a check of its own. What identifies an engine is its `/health`
-  body (issue #2153): `status: "ok"` plus a string `version` and a numeric
-  `workers`. Another program answering only `{"status":"ok"}` is a held port -
-  never sent `/shutdown`. A lock PID that is a live Vayu engine but never
-  answers `/health` is waited for on the same budget a spawned engine gets,
-  asked to shut down if it answers, and otherwise killed by PID and replaced
-  (issue #1905); a port the lock does not explain is held by another program,
-  and the app moves on to its next port (next bullet). See
-  `docs/lock-file-handling.md`.
+- **An engine of this app's already running at startup is replaced, never
+  adopted.** If an engine serving the app's data directory answers on one of
+  its ports at startup - an orphan left by a crashed session, or one started by
+  hand on that directory - it was given another launch's secret or none, and
+  nothing can hand it this one, so adopting it would leave every allowed-folder
+  and picked-file write refused for the session. The app asks it to
+  `POST /shutdown`, waits for it by the PID in the lock file (`vayu.lock` in the
+  data directory), kills it by that PID if it outstays the grace period, and
+  spawns its own on the same port. The same stop covers an engine built for
+  another Vayu version (issue #1492), which no longer needs a check of its own.
+  What identifies an engine is its `/health` body (issue #2153): `status: "ok"`
+  plus a string `version` and a numeric `workers`. Another program answering
+  only `{"status":"ok"}` is a held port - never sent `/shutdown`. A lock PID
+  that is a live Vayu engine but never answers `/health` is waited for on the
+  same budget a spawned engine gets, asked to shut down if it answers, and
+  otherwise killed by PID and replaced (issue #1905); a port the lock does not
+  explain is held by another program, and the app moves on to its next port
+  (next bullet). See `docs/lock-file-handling.md`.
+- **Opening the app never stops an engine it does not own** (issue #3328).
+  What makes an engine the app's is the `dataDir` its `/health` reports
+  ([API reference](engine/api-reference.md#get-health)): the app compares it
+  with its own data directory, both resolved and without a trailing separator,
+  ignoring case on Windows only. A Vayu engine serving another directory - a
+  `vayu-engine` run from a terminal for `vayu-cli`, or a second app instance on
+  another profile, which the single-instance lock does not cover - holds its
+  port like any other program: it is never sent `/shutdown` or killed, and the
+  app takes its next port, so two instances with separate data directories run
+  side by side. An engine too old to report `dataDir` is never the app's, with
+  or without a live lock: the lock proves the app's engine exists, not that this
+  answering one is it, and stopping a stranger costs more than a fallback port.
+  After upgrading across this change, an orphan of the old release holds its
+  port until it is quit by hand (the port-in-use error names it). The same
+  applies to a standalone daemon: it is left alone only when its `--data-dir`
+  differs from the app's, and the app's is `<repo>/engine/data` in a development
+  build, so a daemon run from `engine/` with its defaults serves the same
+  directory and is replaced. Give a standalone daemon its own `--data-dir`.
 - **Another program on 9876 moves the engine, it does not stop the app** (issue
   #2118). The sidecar walks an ordered list: 9876, then 9880-9889 (a fixed list
   rather than an OS-assigned port, because the renderer's CSP names its
   `connect-src` origins at build time, and clear of the MCP port 9877). A port
-  answering `/health` has its engine replaced there (above), a free one is
-  taken, a held one is skipped. The first start fixes the choice for the life of
-  the app: the main process passes it to the renderer once, as
+  where the app's own engine answers `/health` has it replaced there (above), a
+  free one is taken, a held one is skipped. The first start fixes the choice for
+  the life of the app: the main process passes it to the renderer once, as
   `electronAPI.enginePort`, and the renderer's `ENGINE_BASE_URL`, the `Origin`
   bridge and the MCP server's engine URL all follow it. The Dock's engine status
   shows the address while connected. With every port held the app stays up on
-  the disconnected state, the Dock says to free 9876 and offers Retry (the
-  renderer was told one port, so Retry looks at 9876 alone), and nothing quits. Tools outside the app assume 9876: `vayu-cli --daemon`
+  the disconnected state, the Dock says what holds 9876 ("Another program" or
+  "Another Vayu engine") and to free it, and offers Retry (the renderer was told
+  one port, so Retry looks at 9876 alone), and nothing quits. Tools outside the app assume 9876: `vayu-cli --daemon`
   and the stdio MCP launcher's `VAYU_ENGINE_URL` need the address the Dock shows
   when the app fell back.
 - **Quit leaves nothing behind.** Shutdown is `POST /shutdown` first, then a

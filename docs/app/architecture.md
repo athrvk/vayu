@@ -127,13 +127,13 @@ The `EngineSidecar` class manages the C++ engine process:
   start instead of killing the child its health poll is watching
 - **Build guidance**: A missing binary names `python build.py -e` and
   `docs/building.md` - the single build entry point, not per-platform scripts
-- **Port Management**: Walks `ENGINE_PORT_CANDIDATES` (9876, then 9880-9889). A candidate answering `/health` is stopped and replaced, a free one is taken, a held one is skipped (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced). The first start fixes the choice for the app's lifetime (`electron/engine-endpoint.ts`), and the window is created after it, with the port on its command line. With every candidate held it raises `EnginePortInUseError`: the app stays up on the disconnected state with the reason, and Retry runs `engine:restart` again (issue #2118)
+- **Port Management**: Walks `ENGINE_PORT_CANDIDATES` (9876, then 9880-9889). A candidate where an engine serving this app's data directory answers `/health` is stopped and replaced, a free one is taken, a held one is skipped (a live lock PID that is silent on `/health` is waited for on the same budget, then replaced). A Vayu engine reporting another `dataDir`, or none, counts as held and is never stopped (issue #3328). The first start fixes the choice for the app's lifetime (`electron/engine-endpoint.ts`), and the window is created after it, with the port on its command line. With every candidate held it raises `EnginePortInUseError`, naming what holds the first (another program or another Vayu engine): the app stays up on the disconnected state with the reason, and Retry runs `engine:restart` again (issue #2118)
 - **Ownership**: The engine this session talks to is always one it *spawned*,
   because only that one holds the session's grant secret (#2356). An engine
-  found running at startup is asked to shut down (`POST /shutdown`), waited
-  for, and killed by its lock-file PID if it lingers; it is held as *adopted*
-  only while it is being stopped, so a quit landing mid-replacement still
-  stops it. See [Ownership model](../architecture.md#ownership-model)
+  serving this app's data directory found running at startup is asked to shut
+  down (`POST /shutdown`), waited for, and killed by its lock-file PID if it
+  lingers; it is held as *adopted* only while it is being stopped, so a quit
+  landing mid-replacement still stops it. See [Ownership model](../architecture.md#ownership-model)
 - **System seam**: The process/port/clock calls sit behind a `SidecarSystem`
   interface (`defaultSidecarSystem` in production), so `sidecar.test.ts` can
   drive replacement, shutdown and the restart-versus-quit race without real

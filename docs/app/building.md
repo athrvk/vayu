@@ -582,6 +582,8 @@ instead; the Dock's "Engine connected" tooltip shows the address it chose. When
 every one of those is held, the Dock reads "Another program is using port 9876,
 and the fallback ports are held too. Free port 9876 and press Retry." Retry looks
 at 9876 alone, because the window was told one port: free 9876 specifically.
+When 9876 is held by a Vayu engine serving another data directory, which the app
+never stops, the sentence starts "Another Vayu engine is using port 9876".
 A `vayu-engine` run by hand does not fall back: it prints
 `Could not bind 127.0.0.1:<port> - ...` and exits 1.
 ```bash

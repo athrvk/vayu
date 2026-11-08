@@ -1036,10 +1036,10 @@ async function startEngine() {
 			return;
 		}
 
-		// Another program holds every port the engine may use. That is the
-		// user's to fix, not a reason to leave: the window stays on the
-		// disconnected state with this sentence, and Retry (`engine:restart`)
-		// tries again.
+		// Another program, or a Vayu engine serving another data directory,
+		// holds every port the engine may use. That is the user's to fix, not
+		// a reason to leave: the window stays on the disconnected state with
+		// this sentence, and Retry (`engine:restart`) tries again.
 		if (error instanceof EnginePortInUseError) {
 			appLogger().warn("main", "No engine port is free; waiting for the user to retry", {
 				error: error.message,
