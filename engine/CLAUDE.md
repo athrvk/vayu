@@ -787,7 +787,11 @@ logged as a warning: it means a client skipped composition.
   not carry it is an embedded OAuth completion (`POST
   /oauth2/authorize/complete`, #3347): it watches its attempt's cancel, which
   a `DELETE` of the attempt raises too, so `Server::stop()` shuts the
-  authorize manager down before joining the handlers.
+  authorize manager down before joining the handlers. Likewise a run's
+  auxiliary-thread transfer (the monitor scrape, a watchdog's token refresh)
+  carries `RunContext::aux_cancel` (#3343), which `join_aux_threads` sets
+  before it joins, so Stop, shutdown and a natural end never wait out its
+  timeout.
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,

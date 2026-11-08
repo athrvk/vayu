@@ -250,9 +250,13 @@ const AuthRefreshTuning& tuning) {
         }
 
         auto result = vayu::http::oauth::acquire_token (db, state->config (),
-        /*force_refresh=*/true, std::nullopt, state->timeout_ms ());
+        /*force_refresh=*/true, std::nullopt, state->timeout_ms (), nullptr,
+        &context->aux_cancel);
 
         if (const auto* err = std::get_if<vayu::http::oauth::TokenError> (&result)) {
+            if (context->aux_cancel.load (std::memory_order_acquire)) {
+                return; // The run ended under it; the token endpoint did not fail.
+            }
             // Reported, never fatal: the run keeps sending the credential it
             // has, and the report's auth section plus the target's own 401s
             // say what happened.

@@ -429,13 +429,19 @@ Manages the lifecycle of load test runs:
 - **Finished workers are reaped on the next `start_run`**: a thread cannot join itself, so
   its handle outlives it until another thread collects it.
 - **Per-run auxiliary threads**: a load run has a metrics thread
-  (`collect_metrics`) and, for each header-placed expiring oauth2 token it
+  (`collect_metrics`), a scrape thread when it declares a `monitor` block
+  (`collect_monitor`) and, for each header-placed expiring oauth2 token it
   sends, an auth-refresh watchdog (`run_auth_refresh`, see below): at most one
   for a single request, one per distinct token-cache key for a collection.
   All watch `is_running` and are joined together through
   `RunContext::join_aux_threads` - the worker has several exit paths, and a
   thread joined at only some of them outlives the `Database` it writes
-  through.
+  through. The join first sets `RunContext::aux_cancel`, the
+  `ClientConfig::cancel` of the scrape's and every refresh's transfer, so
+  neither holds the summary, the terminal status or a shutdown for its network
+  timeout (#3343): a cancelled transfer ends at its next libcurl progress tick,
+  about a second, and counts as neither a failed scrape nor a failed refresh.
+  `should_stop` is not that flag because a natural end never sets it.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the
@@ -1722,8 +1728,9 @@ mock issuers - each of which, like the OAuth one, signals every entry, ending
 a paced answer's wait and cancelling a callback's token exchange, before
 joining any (#3345); then
 `SseStreamManager::shutdown()`, which signals every stream and joins its
-worker) → run workers signalled and joined (each joins its own metrics and
-monitor threads and stops its event loop first) → the start-of-session
+worker) → run workers signalled and joined (each stops its event loop first,
+then joins its metrics, monitor and auth-refresh threads, cancelling a scrape
+or a token refresh still in flight, #3343) → the start-of-session
 recovery backup refresh interrupted and joined → the recovery backup refreshed
 once more, bounded by a deadline
 (`Database::refresh_recovery_backup_on_shutdown`, #2421) → `curl_global_cleanup`
