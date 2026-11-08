@@ -2222,24 +2222,30 @@ is a different event.
 
 ## Update Banner (`components/shared/UpdateBanner.tsx`)
 
-One line (`h-banner`) driven by `useAppUpdate`, which subscribes to the main
-process's `update:*` events. On the silent platforms (Windows, Linux AppImage)
-it walks `Vayu X is available.` (notify path only) -> `Downloading Vayu X… 42%`
+One line (`h-banner`) driven by `useAppUpdate`, which reads the main process's
+download state (`update:state`, and `update:getState` on mount). On the silent
+platforms (Windows, Linux AppImage) it walks `Vayu X is available.` (notify path only) -> `Downloading Vayu X… 42%`
 -> `Verifying Vayu X…` -> `Vayu X is ready to install.` with **Restart &
 install**. The Verifying line replaces the percentage once the download reaches
-100%: the main process sends `update:downloaded` only after the installer's
+100%: the state reaches `verified` only after the installer's
 build-provenance attestation checks out, which takes seconds, and a bar parked
 at 100% reads as a hang.
 
-When the attestation does not verify (issue #2372) the main process sends
-`update:verificationFailed` instead, and the banner reads `Couldn't verify Vayu
+When the attestation does not verify (issue #2372) the state is `refused`
+instead, and the banner reads `Couldn't verify Vayu
 X. <reason>` with **View release** in place of Restart; the whole line is also
 the `title`, since `truncate` would clip the reason. No system notification is
 posted for it - the `updateReady` kind says "ready". The failure lives in
 `stores/update-verification-store.ts` rather than in the hook, because
 Settings > Updates (`UpdatesCard`) shows the same sentence ahead of its last
-check answer and mounts long after the event; the next `update:available` or
-`update:downloaded` clears it.
+check answer and mounts long after the event; the next download state that is
+not `refused` clears it.
+
+A download that fails (issue #3338) reads `Couldn't download Vayu X - <cause>`
+with **Retry**, which asks for a new check. The retried download is shown from
+its first state, as `Downloading Vayu X…` on an indeterminate bar, rather than
+vanishing until the first progress tick; a first download, with no failure
+before it, still waits for that tick.
 
 ## Non-Loopback Badge (`components/shared/NonLoopbackBadge.tsx`)
 

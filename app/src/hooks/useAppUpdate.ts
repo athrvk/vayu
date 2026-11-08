@@ -36,6 +36,13 @@ interface AppUpdateState {
 	 */
 	downloadProgress: number | null;
 	/**
+	 * Silent path only: a download is in flight and the banner should say so. True
+	 * wherever `downloadProgress` is known, and also - after a failure - for a
+	 * retried download that has not reported a tick yet, when the progress is
+	 * still null. A first download stays hidden until it has a tick to show.
+	 */
+	downloading: boolean;
+	/**
 	 * Silent path only: the downloaded installer's build-provenance attestation
 	 * did not verify (issue #2372), so it will not be installed. Replaces
 	 * `readyToInstall` for that version; cleared by the next announcement or
@@ -101,6 +108,9 @@ export function useAppUpdate(): AppUpdateState {
 	const [available, setAvailable] = useState<AvailableUpdate | null>(null);
 	const [download, setDownload] = useState<UpdateDownloadState>(NO_DOWNLOAD);
 	const [dismissed, setDismissed] = useState(false);
+	// A download failed and has not reached an outcome since: the user has seen
+	// the failure, so the retry that follows keeps the banner up.
+	const [afterFailure, setAfterFailure] = useState(false);
 	const verificationFailure = useUpdateVerificationStore((s) => s.failure);
 
 	useEffect(() => {
@@ -115,6 +125,10 @@ export function useAppUpdate(): AppUpdateState {
 			const wasVerified = previous.kind === "verified";
 			previous = next;
 			setDownload(next);
+			if (next.kind === "failed") setAfterFailure(true);
+			if (next.kind === "none" || next.kind === "verified" || next.kind === "refused") {
+				setAfterFailure(false);
+			}
 			if (next.kind === "refused") {
 				verification.setFailure({ version: next.version, reason: next.reason });
 			} else {
@@ -165,6 +179,8 @@ export function useAppUpdate(): AppUpdateState {
 	const update = currentUpdate(available, download);
 	const readyToInstall = download.kind === "verified";
 	const downloadProgress = progressOf(download);
+	const downloading =
+		downloadProgress !== null || (afterFailure && download.kind === "downloading");
 	const downloadFailure =
 		download.kind === "failed" ? { version: download.version, error: download.error } : null;
 
@@ -190,7 +206,7 @@ export function useAppUpdate(): AppUpdateState {
 		update !== null &&
 		(update.strategy === "notify" ||
 			readyToInstall ||
-			downloadProgress !== null ||
+			downloading ||
 			verificationFailure !== null ||
 			downloadFailure !== null);
 
@@ -198,6 +214,7 @@ export function useAppUpdate(): AppUpdateState {
 		update: shouldShow ? update : null,
 		readyToInstall,
 		downloadProgress,
+		downloading,
 		verificationFailure,
 		downloadFailure,
 		dismiss,

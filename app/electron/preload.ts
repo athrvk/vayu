@@ -297,33 +297,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:available", handler);
 		return () => ipcRenderer.removeListener("update:available", handler);
 	},
-	onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
-		const handler = (_event: unknown, info: { version: string }) => callback(info);
-		ipcRenderer.on("update:downloaded", handler);
-		return () => ipcRenderer.removeListener("update:downloaded", handler);
-	},
-	// Sent instead of `update:downloaded` when the installer's attestation does
-	// not verify; shape mirrors `UpdateVerificationFailure` in updater.ts.
-	onUpdateVerificationFailed: (callback: (info: { version: string; reason: string }) => void) => {
-		const handler = (_event: unknown, info: { version: string; reason: string }) =>
-			callback(info);
-		ipcRenderer.on("update:verificationFailed", handler);
-		return () => ipcRenderer.removeListener("update:verificationFailed", handler);
-	},
-	// Silent strategies only (Windows, Linux AppImage) - see updater.ts.
-	onDownloadProgress: (
-		callback: (progress: {
-			percent: number;
-			bytesPerSecond: number;
-			transferred: number;
-			total: number;
-		}) => void
-	) => {
-		const handler = (_event: unknown, progress: unknown) =>
-			callback(progress as Parameters<typeof callback>[0]);
-		ipcRenderer.on("update:downloadProgress", handler);
-		return () => ipcRenderer.removeListener("update:downloadProgress", handler);
-	},
 	// Pushed on every change to the download; `getUpdateState` answers the same
 	// value on demand, for a renderer that mounts after the push.
 	onUpdateState: (callback: (state: UpdateDownloadStateShape) => void) => {

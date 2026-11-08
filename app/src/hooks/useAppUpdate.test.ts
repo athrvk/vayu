@@ -377,6 +377,42 @@ describe("useAppUpdate", () => {
 			expect(result.current.downloadFailure).toBeNull();
 		});
 
+		test("a retried download is shown before its first tick, a first download is not", () => {
+			const { result } = renderHook(() => useAppUpdate());
+			announce();
+			push(downloading());
+			expect(result.current.downloading).toBe(false);
+			expect(result.current.update).toBeNull();
+
+			push(failed());
+			push(downloading());
+			expect(result.current.downloading).toBe(true);
+			expect(result.current.downloadProgress).toBeNull();
+			expect(result.current.update?.version).toBe("1.2.3");
+
+			push(progress(10));
+			expect(result.current.downloading).toBe(true);
+			expect(result.current.downloadProgress).toBeCloseTo(0.1);
+		});
+
+		test.each([
+			["verified", verified()],
+			["refused", refused()],
+		])(
+			"a retried download that ends %s no longer holds the banner for the next one",
+			(_n, end) => {
+				const { result } = renderHook(() => useAppUpdate());
+				announce();
+				push(failed());
+				push(downloading());
+				push(end);
+
+				push(downloading("1.3.0"));
+				expect(result.current.downloading).toBe(false);
+				expect(result.current.update).toBeNull();
+			}
+		);
+
 		test("is still shown after a reload, named from the snapshot", async () => {
 			snapshot = Promise.resolve(failed("2.0.0"));
 			const { result } = renderHook(() => useAppUpdate());

@@ -171,6 +171,14 @@ function lastSent(channel: string): unknown {
 	return payloads[payloads.length - 1];
 }
 
+/** The state a download verified for 1.0.0 leaves behind. */
+const VERIFIED = { kind: "verified", version: "1.0.0" };
+
+/** Every push of the download state that carried `kind`, in order. */
+function sentState(kind: string): unknown[] {
+	return sent("update:state").filter((state) => (state as { kind: string }).kind === kind);
+}
+
 /** A verification the test answers when it chooses. */
 function holdVerification(): (result: unknown) => void {
 	let answer!: (result: unknown) => void;
@@ -311,11 +319,7 @@ describe("restartToInstall", () => {
 		const { initAutoUpdater, restartToInstall } = await loadUpdater();
 		initAutoUpdater(getWindow);
 		finishDownload("1.0.0");
-		await vi.waitFor(() =>
-			expect(currentWindow!.webContents.send).toHaveBeenCalledWith("update:downloaded", {
-				version: "1.0.0",
-			})
-		);
+		await vi.waitFor(() => expect(lastSent("update:state")).toEqual(VERIFIED));
 		restartToInstall();
 		expect(quitAndInstall).toHaveBeenCalledTimes(1);
 	});
@@ -801,33 +805,57 @@ describe("which window the update events reach", () => {
 describe("download progress", () => {
 	/**
 	 * `download-progress` only exists so the silent path's banner can render a
-	 * bar while the download is in flight (issue #1662). Mutation check:
-	 * removing the listener in `updater.ts` reds this - `listeners.get` would
-	 * find nothing to call and `send` is asserted, not merely "did not throw".
+	 * bar while the download is in flight (issue #1662); it reaches the window as
+	 * the `downloading` state's `progress`. Mutation check: removing the listener
+	 * in `updater.ts` reds this - `listeners.get` would find nothing to call and
+	 * the state is asserted, not merely "did not throw".
 	 */
-	it("forwards electron-updater's own progress fields, unchanged", async () => {
-		const { initAutoUpdater } = await loadUpdater("win32");
+	it("carries electron-updater's own progress fields, unchanged, in the download state", async () => {
+		const { initAutoUpdater, getUpdateState } = await loadUpdater("win32");
 		initAutoUpdater(getWindow);
-		const win = currentWindow!;
+		listeners.get("update-available")?.({ version: "1.0.0" });
 
 		listeners.get("download-progress")?.({
 			percent: 42,
 			bytesPerSecond: 512_000,
 			transferred: 4_200_000,
 			total: 10_000_000,
+			delta: 4_200_000,
 		});
 
-		expect(win.webContents.send).toHaveBeenCalledWith("update:downloadProgress", {
-			percent: 42,
-			bytesPerSecond: 512_000,
-			transferred: 4_200_000,
-			total: 10_000_000,
+		const downloading = {
+			kind: "downloading",
+			version: "1.0.0",
+			progress: {
+				percent: 42,
+				bytesPerSecond: 512_000,
+				transferred: 4_200_000,
+				total: 10_000_000,
+			},
+		};
+		expect(lastSent("update:state")).toEqual(downloading);
+		expect(getUpdateState()).toEqual(downloading);
+	});
+
+	it("moves nothing for a tick that arrives outside a download", async () => {
+		const { initAutoUpdater, getUpdateState } = await loadUpdater("win32");
+		initAutoUpdater(getWindow);
+
+		listeners.get("download-progress")?.({
+			percent: 10,
+			bytesPerSecond: 1,
+			transferred: 1,
+			total: 10,
 		});
+
+		expect(getUpdateState()).toEqual({ kind: "none" });
+		expect(sent("update:state")).toEqual([]);
 	});
 
 	it("drops the event rather than sending into a destroyed window", async () => {
 		const { initAutoUpdater } = await loadUpdater("win32");
 		initAutoUpdater(getWindow);
+		listeners.get("update-available")?.({ version: "1.0.0" });
 		const win = currentWindow!;
 		win.destroyed = true;
 
@@ -838,7 +866,7 @@ describe("download progress", () => {
 			total: 10,
 		});
 
-		expect(win.webContents.send).not.toHaveBeenCalled();
+		expect(sent("update:state")).toHaveLength(1);
 	});
 });
 
@@ -871,16 +899,14 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 			const { restartToInstall } = await arm(platform, appImage);
 
 			finishDownload("1.0.0", "/cache/pending/Vayu-1.0.0.bin");
-			await vi.waitFor(() =>
-				expect(sent("update:downloaded")).toEqual([{ version: "1.0.0" }])
-			);
+			await vi.waitFor(() => expect(lastSent("update:state")).toEqual(VERIFIED));
 
 			expect(verifyInstallerAttestation).toHaveBeenCalledWith({
 				file: "/cache/pending/Vayu-1.0.0.bin",
 				version: "1.0.0",
 				sigstoreCacheDir: path.join(USER_DATA, "sigstore"),
 			});
-			expect(sent("update:verificationFailed")).toEqual([]);
+			expect(sentState("refused")).toEqual([]);
 			expect(wouldInstallOnQuit()).toBe(true);
 			restartToInstall();
 			expect(quitAndInstall).toHaveBeenCalledTimes(1);
@@ -898,15 +924,16 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 
 			finishDownload("1.0.0");
 			await vi.waitFor(() =>
-				expect(sent("update:verificationFailed")).toEqual([
+				expect(sentState("refused")).toEqual([
 					{
+						kind: "refused",
 						version: "1.0.0",
 						reason: "GitHub has no attestation for this installer (HTTP 404).",
 					},
 				])
 			);
 
-			expect(sent("update:downloaded")).toEqual([]);
+			expect(sentState("verified")).toEqual([]);
 			expect(logError).toHaveBeenCalledWith(
 				"updater",
 				expect.any(String),
@@ -944,7 +971,7 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 	it("does not install a newer download on the strength of an older one's verification", async () => {
 		const { restartToInstall } = await arm("win32", undefined);
 		finishDownload("1.0.0");
-		await vi.waitFor(() => expect(sent("update:downloaded")).toHaveLength(1));
+		await vi.waitFor(() => expect(sentState("verified")).toHaveLength(1));
 
 		// electron-updater now holds 1.1.0's file, and that is what it would install.
 		const answer = holdVerification();
@@ -956,7 +983,7 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 		expect(quitAndInstall).not.toHaveBeenCalled();
 
 		answer({ ok: false, reason: "The attestation was not signed by release.yml at v1.1.0." });
-		await vi.waitFor(() => expect(sent("update:verificationFailed")).toHaveLength(1));
+		await vi.waitFor(() => expect(sentState("refused")).toHaveLength(1));
 		expect(wouldInstallOnQuit()).toBe(false);
 		restartToInstall();
 		expect(quitAndInstall).not.toHaveBeenCalled();
@@ -973,9 +1000,9 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 
 		answerOlder({ ok: true });
 		answerNewer({ ok: false, reason: "The attestation does not verify (bad signature)." });
-		await vi.waitFor(() => expect(sent("update:verificationFailed")).toHaveLength(1));
+		await vi.waitFor(() => expect(sentState("refused")).toHaveLength(1));
 
-		expect(sent("update:downloaded")).toEqual([]);
+		expect(sentState("verified")).toEqual([]);
 		expect(wouldInstallOnQuit()).toBe(false);
 		restartToInstall();
 		expect(quitAndInstall).not.toHaveBeenCalled();
@@ -989,7 +1016,7 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 			// the new, unverified file on the strength of the old verification.
 			const { restartToInstall } = await arm(platform, appImage);
 			finishDownload("1.0.0");
-			await vi.waitFor(() => expect(sent("update:downloaded")).toHaveLength(1));
+			await vi.waitFor(() => expect(sentState("verified")).toHaveLength(1));
 
 			listeners.get("update-available")?.({ version: "1.1.0" });
 
@@ -1015,7 +1042,7 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 			// has run by the time this await returns.
 			await olderVerification;
 
-			expect(sent("update:downloaded")).toEqual([]);
+			expect(sentState("verified")).toEqual([]);
 			expect(wouldInstallOnQuit()).toBe(false);
 			restartToInstall();
 			expect(quitAndInstall).not.toHaveBeenCalled();
@@ -1023,32 +1050,74 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 			// The announced release still installs once its own download verifies.
 			finishDownload("1.1.0");
 			await vi.waitFor(() =>
-				expect(sent("update:downloaded")).toEqual([{ version: "1.1.0" }])
+				expect(sentState("verified")).toEqual([{ kind: "verified", version: "1.1.0" }])
 			);
 		}
 	);
 
 	it.each(silentPlatforms)(
-		"on %s, refuses the download when telling the window it is ready throws",
+		"on %s, refuses the download when the verification itself throws",
 		async (_name, platform, appImage) => {
-			const { restartToInstall } = await arm(platform, appImage);
-			currentWindow!.webContents.send.mockImplementation((channel: string) => {
-				if (channel === "update:downloaded") throw new Error("Render frame was disposed");
-			});
+			verifyInstallerAttestation.mockRejectedValue(new Error("TUF root unreachable"));
+			const { restartToInstall, getUpdateState } = await arm(platform, appImage);
 
 			finishDownload("1.0.0");
+			const reason = "Couldn't verify the update (TUF root unreachable).";
 			await vi.waitFor(() =>
-				expect(sent("update:verificationFailed")).toEqual([
-					{
-						version: "1.0.0",
-						reason: "Couldn't verify the update (Render frame was disposed).",
-					},
-				])
+				expect(lastSent("update:state")).toEqual({
+					kind: "refused",
+					version: "1.0.0",
+					reason,
+				})
 			);
 
+			expect(getUpdateState()).toMatchObject({ kind: "refused", reason });
 			expect(wouldInstallOnQuit()).toBe(false);
 			restartToInstall();
 			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, still ends refused when the push of the refusal throws",
+		async (_name, platform, appImage) => {
+			verifyInstallerAttestation.mockResolvedValue({ ok: false, reason: "No attestation." });
+			const { restartToInstall, getUpdateState } = await arm(platform, appImage);
+			currentWindow!.webContents.send.mockImplementation(() => {
+				throw new Error("Render frame was disposed");
+			});
+
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(getUpdateState().kind).toBe("refused"));
+
+			expect(logError).toHaveBeenCalledWith(
+				"updater",
+				"Couldn't send the update state to the window",
+				{ error: "Render frame was disposed" }
+			);
+			expect(wouldInstallOnQuit()).toBe(false);
+			restartToInstall();
+			expect(quitAndInstall).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(silentPlatforms)(
+		"on %s, keeps a verified download when the push of it throws: the window asks for the state",
+		async (_name, platform, appImage) => {
+			// The state is the record. A window that missed the push (a disposed
+			// frame, a reload) reads it from `update:getState`, so the download is
+			// neither refused nor lost.
+			const { restartToInstall, getUpdateState } = await arm(platform, appImage);
+			currentWindow!.webContents.send.mockImplementation(() => {
+				throw new Error("Render frame was disposed");
+			});
+
+			finishDownload("1.0.0");
+			await vi.waitFor(() => expect(getUpdateState()).toEqual(VERIFIED));
+
+			expect(wouldInstallOnQuit()).toBe(true);
+			restartToInstall();
+			expect(quitAndInstall).toHaveBeenCalledTimes(1);
 		}
 	);
 

@@ -58,7 +58,7 @@ export interface UpdateAvailablePayload {
 /**
  * electron-updater's own `ProgressInfo`, narrowed to the fields the banner
  * renders - only the silent strategies set `autoDownload`, so this only ever
- * fires on Windows and the Linux AppImage build.
+ * appears on Windows and the Linux AppImage build.
  */
 export interface UpdateDownloadProgress {
 	/** 0-100. */
@@ -66,16 +66,6 @@ export interface UpdateDownloadProgress {
 	bytesPerSecond: number;
 	transferred: number;
 	total: number;
-}
-
-/**
- * `update:verificationFailed`: the download finished but its installer is not
- * one `release.yml` attested for this release, so it will not be installed.
- * Sent instead of `update:downloaded`, silent strategies only.
- */
-export interface UpdateVerificationFailure {
-	version: string;
-	reason: string;
 }
 
 /**
@@ -93,6 +83,7 @@ export type UpdateDownloadState =
 	| { kind: "downloading"; version: string; progress: UpdateDownloadProgress | null }
 	| { kind: "verifying"; version: string }
 	| { kind: "verified"; version: string }
+	/** The installer is not one `release.yml` attested for this release; it is not installed. */
 	| { kind: "refused"; version: string; reason: string }
 	| { kind: "failed"; version: string; error: string };
 
@@ -410,20 +401,18 @@ export function initAutoUpdater(getWindow: WindowAccessor): void {
 	});
 
 	// Silent strategies only: `autoDownload` above is what makes this fire at
-	// all. Sent as its own channel rather than folded into `update:available`
-	// - the banner needs to redraw on every tick, and a payload built once at
-	// "available" has nothing left to update.
+	// all. Every tick is a new state, because the banner redraws on each one.
 	autoUpdater.on("download-progress", (progress) => {
-		const payload: UpdateDownloadProgress = {
-			percent: progress.percent,
-			bytesPerSecond: progress.bytesPerSecond,
-			transferred: progress.transferred,
-			total: progress.total,
-		};
-		if (downloadState.kind === "downloading") {
-			setDownload({ ...downloadState, progress: payload });
-		}
-		send("update:downloadProgress", payload);
+		if (downloadState.kind !== "downloading") return;
+		setDownload({
+			...downloadState,
+			progress: {
+				percent: progress.percent,
+				bytesPerSecond: progress.bytesPerSecond,
+				transferred: progress.transferred,
+				total: progress.total,
+			},
+		});
 	});
 
 	// `autoDownload` is off on the notify path, so only the silent one downloads.
@@ -519,23 +508,17 @@ async function verifyDownload(
 			reason: result.reason,
 		});
 		setDownload({ kind: "refused", version: info.version, reason: result.reason });
-		const failure: UpdateVerificationFailure = { version: info.version, reason: result.reason };
-		send("update:verificationFailed", failure);
 		return;
 	}
 
 	appLogger().info("updater", "Downloaded update verified", { version: info.version });
-	// Sent while the state is still `verifying`, so a send into a window going
-	// away leaves this verification current for `refuseUnverifiedDownload`.
-	send("update:downloaded", { version: info.version });
 	setDownload({ kind: "verified", version: info.version });
 }
 
 /**
- * `verifyDownload` threw instead of answering (`app.getPath`, or a send into a
- * window going away). The renderer cannot be told the update is ready, so the
- * download is refused like any other failure, and nothing here may throw: this
- * is the last handler on that promise.
+ * `verifyDownload` threw instead of answering (`app.getPath`, or the
+ * verification itself), so the download is refused like any other failure.
+ * Nothing here may throw: this is the last handler on that promise.
  */
 function refuseUnverifiedDownload(
 	info: UpdateDownloadedEvent,
@@ -550,14 +533,6 @@ function refuseUnverifiedDownload(
 		reason,
 	});
 	setDownload({ kind: "refused", version: info.version, reason });
-	const failure: UpdateVerificationFailure = { version: info.version, reason };
-	try {
-		send("update:verificationFailed", failure);
-	} catch (sendErr) {
-		appLogger().error("updater", "Couldn't report the refused update to the window", {
-			error: describeError(sendErr),
-		});
-	}
 }
 
 /**

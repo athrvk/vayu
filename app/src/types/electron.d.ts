@@ -171,7 +171,7 @@ interface UpdateDownloadProgress {
 	total: number;
 }
 
-/** Mirrors `UpdateVerificationFailure` in `electron/updater.ts`. */
+/** A `refused` download as the renderer keeps it (`update-verification-store`). */
 export interface UpdateVerificationFailure {
 	version: string;
 	/** Why the attestation was refused, as `update-attestation.ts` words it. */
@@ -322,15 +322,6 @@ interface ElectronAPI {
 
 	// Auto-update
 	onUpdateAvailable: (callback: (info: UpdateAvailableInfo) => void) => () => void;
-	onUpdateDownloaded: (callback: (info: { version: string }) => void) => () => void;
-	/**
-	 * Silent strategies only: sent instead of `onUpdateDownloaded` when the
-	 * installer's build-provenance attestation does not verify, and the update
-	 * will not be installed.
-	 */
-	onUpdateVerificationFailed: (callback: (info: UpdateVerificationFailure) => void) => () => void;
-	/** Silent strategies only (Windows, Linux AppImage) - see updater.ts. */
-	onDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
 	/** Silent strategies only: every change to the download, on `update:state`. */
 	onUpdateState: (callback: (state: UpdateDownloadState) => void) => () => void;
 	/**

@@ -32,11 +32,13 @@ function bannerMessage(
 	state: {
 		readyToInstall: boolean;
 		downloadProgress: number | null;
+		downloading: boolean;
 		verificationFailure: UpdateVerificationFailure | null;
 		downloadFailure: { version: string; error: string } | null;
 	}
 ): string {
-	const { readyToInstall, downloadProgress, verificationFailure, downloadFailure } = state;
+	const { readyToInstall, downloadProgress, downloading, verificationFailure, downloadFailure } =
+		state;
 	if (verificationFailure) {
 		return `Couldn't verify Vayu ${verificationFailure.version}. ${verificationFailure.reason}`;
 	}
@@ -44,7 +46,12 @@ function bannerMessage(
 		return `Couldn't download Vayu ${downloadFailure.version} - ${downloadFailure.error}`;
 	}
 	if (readyToInstall) return `Vayu ${update.version} is ready to install.`;
-	if (downloadProgress === null) return `Vayu ${update.version} is available.`;
+	if (downloadProgress === null) {
+		// A retried download that has not reported a tick: no figure to print yet.
+		return downloading
+			? `Downloading Vayu ${update.version}…`
+			: `Vayu ${update.version} is available.`;
+	}
 	const percent = Math.round(downloadProgress * 100);
 	// The bytes are in but `verified` waits on the attestation check,
 	// which takes seconds: a bar parked at 100% reads as a hang.
@@ -70,6 +77,7 @@ function UpdateBanner() {
 		update,
 		readyToInstall,
 		downloadProgress,
+		downloading,
 		verificationFailure,
 		downloadFailure,
 		dismiss,
@@ -81,10 +89,10 @@ function UpdateBanner() {
 
 	if (!update) return null;
 
-	const downloading = !readyToInstall && downloadProgress !== null;
 	const message = bannerMessage(update, {
 		readyToInstall,
 		downloadProgress,
+		downloading,
 		verificationFailure,
 		downloadFailure,
 	});

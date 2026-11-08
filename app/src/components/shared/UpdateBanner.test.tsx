@@ -69,6 +69,7 @@ const announce = () =>
 		available?.({ version: "1.2.3", strategy: "silent", releaseUrl: "u" });
 	});
 const push = (state: UpdateDownloadState) => act(() => downloadState?.(state));
+const noTickYet: UpdateDownloadState = { kind: "downloading", version: "1.2.3", progress: null };
 const downloading = (percent: number): UpdateDownloadState => ({
 	kind: "downloading",
 	version: "1.2.3",
@@ -172,6 +173,27 @@ describe("UpdateBanner", () => {
 			push(downloading(5));
 			expect(await screen.findByText(/Downloading Vayu 1\.2\.3… 5%/)).toBeInTheDocument();
 			expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+		});
+
+		it("stays up on an indeterminate bar between Retry and the first tick", async () => {
+			render(<UpdateBanner />);
+			announce();
+			push(failed);
+			expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+			push(noTickYet);
+			expect(await screen.findByText("Downloading Vayu 1.2.3…")).toBeInTheDocument();
+			const bar = screen.getByRole("progressbar");
+			expect(bar).not.toHaveAttribute("aria-valuenow");
+			expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+			expect(screen.queryByText(/Couldn't download/)).toBeNull();
+		});
+
+		it("leaves a first download hidden until it reports a tick", () => {
+			const { container } = render(<UpdateBanner />);
+			announce();
+			push(noTickYet);
+			expect(container).toBeEmptyDOMElement();
 		});
 	});
 });
