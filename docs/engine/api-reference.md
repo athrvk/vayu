@@ -13029,11 +13029,13 @@ only when that phase ran at least one element (`ElementOutcome`'s usual shape:
 `id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
-other than `"ok"` already means the run never sent anything - `status` is
+other than `"ok"` or `"skipped"` already means the run never sent anything - `status` is
 `Failed` and every other section above is absent or zeroed - so a reader who
 finds one here knows why the rest of the report is empty. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
-teardown failure is reported, not fatal.
+teardown failure is reported, not fatal. A script whose `pm.sendRequest` the run's
+Stop cancelled is `"skipped"` (#3371), with a `message` saying so: the run ended
+under it, nothing failed, and the app shows the row muted rather than as a failure.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 

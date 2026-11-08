@@ -31,6 +31,20 @@ export interface ScriptLifecycleSummaryProps {
 	className?: string;
 }
 
+/**
+ * `skipped` is the run's Stop cancelling the script's `pm.sendRequest`: the
+ * run ended under it, so it is neither a pass nor a failure (#3371).
+ */
+function isFailure(outcome: ElementOutcome): boolean {
+	return outcome.outcome !== "ok" && outcome.outcome !== "skipped";
+}
+
+const ROW_TONES: Record<"ran" | "skipped" | "failed", { className: string; fallback: string }> = {
+	ran: { className: "text-status-success-text", fallback: "Ran" },
+	skipped: { className: "text-muted-foreground", fallback: "Skipped" },
+	failed: { className: "text-destructive-text", fallback: "Failed" },
+};
+
 function LifecycleRow({
 	phase,
 	outcome,
@@ -38,18 +52,14 @@ function LifecycleRow({
 	phase: "setup" | "teardown";
 	outcome: ElementOutcome;
 }) {
-	const failed = outcome.outcome !== "ok";
+	const ran = outcome.outcome === "ok";
+	const tone = ROW_TONES[ran ? "ran" : isFailure(outcome) ? "failed" : "skipped"];
+	// A passing script has nothing to say; the other two carry the engine's reason.
+	const label = ran ? tone.fallback : (outcome.message ?? tone.fallback);
 	return (
 		<li className="flex items-baseline justify-between gap-3 text-sm">
 			<span className="text-muted-foreground">{PHASE_LABELS[phase]}</span>
-			<span
-				className={cn(
-					"font-medium",
-					failed ? "text-destructive-text" : "text-status-success-text"
-				)}
-			>
-				{failed ? (outcome.message ?? "Failed") : "Ran"}
-			</span>
+			<span className={cn("font-medium", tone.className)}>{label}</span>
 		</li>
 	);
 }
@@ -57,9 +67,7 @@ function LifecycleRow({
 export function ScriptLifecycleSummary({ lifecycle, className }: ScriptLifecycleSummaryProps) {
 	if (!lifecycle || (!lifecycle.setup?.length && !lifecycle.teardown?.length)) return null;
 
-	const anyFailed =
-		lifecycle.setup?.some((o) => o.outcome !== "ok") ||
-		lifecycle.teardown?.some((o) => o.outcome !== "ok");
+	const anyFailed = lifecycle.setup?.some(isFailure) || lifecycle.teardown?.some(isFailure);
 
 	return (
 		<Card className={className}>
