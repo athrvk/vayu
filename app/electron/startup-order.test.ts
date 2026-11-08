@@ -80,9 +80,9 @@ describe("startup ordering", () => {
 		// headless engine and no window at all. Overlapping the engine with the
 		// window does not license overlapping this too.
 		const windowAt = main.indexOf("\n\tcreateWindow();");
-		// One tab again: `startMcp` is also called by the MCP enable/disable IPC
-		// handler, which says nothing about startup ordering.
-		const mcpAt = main.indexOf("\n\tawait startMcp();");
+		// One tab again: the MCP enable/disable IPC handler also starts it, which
+		// says nothing about startup ordering.
+		const mcpAt = main.indexOf("\n\tawait mcpLifecycle.start();");
 
 		expect(mcpAt).toBeGreaterThan(-1);
 		expect(mcpAt).toBeGreaterThan(windowAt);

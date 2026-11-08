@@ -8,13 +8,14 @@
 /**
  * The barrel `main.ts` loads on demand still answers with what it takes from it.
  *
- * `main.ts` no longer imports `mcp/index.js` statically (#1145): `startMcp()`
- * destructures `VayuMcpService` from it, and the `mcp:getTools` and
- * `mcp:updateSafety` handlers call its `toolCatalog()`, all through one cached
- * `await import("./mcp/index.js")`. Nothing type-checks that seam - a dynamic
- * import resolves at runtime, and `main.ts` cannot be imported to exercise it -
- * so a symbol dropped from the barrel's export surface, or a barrel that fails
- * to load at all, would type-check, ship, and fail in a user's Settings panel.
+ * `main.ts` no longer imports `mcp/index.js` statically (#1145): the MCP
+ * lifecycle's service factory destructures `VayuMcpService` from it, and the
+ * `mcp:getTools` and `mcp:updateSafety` handlers call its `toolCatalog()`, all
+ * through one cached `await import("./mcp/index.js")`. Nothing type-checks that
+ * seam - a dynamic import resolves at runtime, and `main.ts` cannot be imported
+ * to exercise it - so a symbol dropped from the barrel's export surface, or a
+ * barrel that fails to load at all, would type-check, ship, and fail in a
+ * user's Settings panel.
  *
  * These drive the same specifier the same way and assert the answer. The
  * catalog is asserted non-empty rather than merely defined, so a registry that
@@ -55,7 +56,7 @@ describe("the on-demand MCP barrel", () => {
 		expect(mcp).toBeDefined();
 	});
 
-	it("serves the service startMcp constructs", async () => {
+	it("serves the service the lifecycle's factory constructs", async () => {
 		const { VayuMcpService } = await import("./index.js");
 		expect(typeof VayuMcpService).toBe("function");
 	});

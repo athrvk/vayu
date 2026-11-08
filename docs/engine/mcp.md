@@ -136,7 +136,11 @@ own fixed "Internal server error"), and `http.ts` logs the cause at `error`.
 Stopping the server ends what a 2026-07-28 client holds open first - a
 `subscriptions/listen` stream lasts as long as the client likes, and the socket's
 close would wait on it - then closes the socket gracefully, so a request still
-arriving is answered rather than cut off. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
+arriving is answered rather than cut off. One owner, `lifecycle.ts`, orders
+starts and stops (#3337): a stop that lands while the port is still binding
+waits for the bind and closes it, a re-enable binds only once the previous
+close has finished, and a service whose lazy load outlives its listener is
+never built. The per-request rebuild means Settings changes (allowlist, caps, disabled tools)
 take effect on the next request with no extra bookkeeping. The one thing carried
 from one request to the next is a 2025-era client's name from its handshake,
 under an `Mcp-Session-Id` the host issues - see
@@ -2632,7 +2636,9 @@ configurable in **Settings → MCP** and persisted (in the stdio CLI, through th
   in `disabledTools`. Settings states this on both cards, because a user who
   flips one switch and sees no change has nothing else to go on.
 - **Server on/off** - the whole server can be disabled; while off the endpoint
-  does not accept connections. Persists across restarts.
+  does not accept connections. Persists across restarts. Off holds even when it
+  lands mid-start: the bind in flight is closed rather than published
+  (`lifecycle.ts`).
 - **Transport hardening** - loopback bind, Host- and Origin-header
   (DNS-rebinding) validation, `POST`-only, 4 MB body cap.
 
@@ -2911,20 +2917,24 @@ Everything lives under `app/electron/mcp/` and is managed by `main.ts` alongside
 | `cli.ts`           | Standalone stdio server over `serveStdio` (env-configured).                 |
 | `connect.ts`       | One-click connect: resolves and runs the `claude` / `code` CLIs.            |
 | `store.ts`         | Persist safety config + enabled preference (`../json-store.ts`).            |
+| `lifecycle.ts`     | The server's one state (`off`, `starting`, `listening`, `failed`) and the generation every start and stop takes; `main.ts` reads the listener, service and start error from it. |
 | `index.ts`         | `VayuMcpService` facade consumed by `main.ts`, loaded on demand.            |
 
 ### Lifecycle & IPC
 
 `main.ts` starts the server in `app.whenReady()` (skipped if disabled), stops it
-on quit, and exposes IPC the Settings panel uses.
+on quit, and exposes IPC the Settings panel uses. Every one of those goes
+through `lifecycle.ts`, which owns the listener, the service and the last start
+error as one state; a safety change applies to the service it reports, or is
+persisted for the service the next first request builds.
 
 **`main.ts` imports this directory by weight.** `config.ts`, `store.ts` and
 `connect.ts` are self-contained (`node:fs` and `node:child_process` are
 their heaviest dependencies), so they are ordinary static imports. Everything
 reachable from `index.ts` - the SDK, zod, the registry and its 80 schemas built at
-module scope - is loaded by a cached dynamic `import()` instead, inside
-`startMcp()` after the enabled check and inside the two IPC handlers that need
-the tool catalog. The main process is unbundled, so a static import here is
+module scope - is loaded by a cached dynamic `import()` instead, inside the
+lifecycle's service factory (reached only by a listener's first request, after
+the enabled check) and inside the two IPC handlers that need the tool catalog. The main process is unbundled, so a static import here is
 evaluated before `app.whenReady` and cost every launch ~250-300 ms ahead of the
 window, MCP switched off or not (#1145). A disabled launch now evaluates none of
 it; opening the Settings tool list is what pays for the registry. `graphql` is

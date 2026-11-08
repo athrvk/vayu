@@ -28,7 +28,7 @@ let store: JsonStore<McpStoreShape> | null = null;
 
 // Lazily created so the store is only touched once Electron's `app` is ready and
 // `userData` resolves - mirrors how window-state is persisted. First read during
-// startup (main.ts's startMcp), which is why a corrupt
+// startup (the MCP lifecycle's start), which is why a corrupt
 // mcp-config.json has to be an empty store rather than a throw: a throw here
 // left the user with an engine running headless and no window at all, on every
 // launch until they found and deleted a hidden file. Both readers below resolve
