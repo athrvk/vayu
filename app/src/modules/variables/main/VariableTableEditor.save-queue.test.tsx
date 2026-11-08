@@ -11,16 +11,20 @@
 /**
  * How the editor's saves follow one another (#3353), against the real save
  * store: one in flight at a time so the baseline is always the last saved
- * map, a save for an entity that is gone ending as a failure, and a conflicted
- * key left out of every save until the user picks a side.
+ * map, a save for an entity that is gone ending as a failure, a conflicted key
+ * left out of every save until the user picks a side, and a failed save
+ * retried on `useSaveManager`'s backoff.
  *
  * The harness is `VariableTableEditor.status-stomp.test.tsx`'s.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 
+import { TIMING } from "@/config/timing";
 import { TooltipProvider } from "@/components/ui";
+import { ApiError } from "@/services/http-client";
+import { useClientSettingsStore } from "@/stores/client-settings-store";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import VariableTableEditor from "./VariableTableEditor";
@@ -74,9 +78,13 @@ vi.mock("@/stores", async () => {
 		await vi.importActual<typeof import("@/stores/save-store")>("@/stores/save-store");
 	const toastStore =
 		await vi.importActual<typeof import("@/stores/toast-store")>("@/stores/toast-store");
+	const settingsStore = await vi.importActual<typeof import("@/stores/client-settings-store")>(
+		"@/stores/client-settings-store"
+	);
 	return {
 		useSaveStore: saveStore.useSaveStore,
 		useToastStore: toastStore.useToastStore,
+		useClientSettingsStore: settingsStore.useClientSettingsStore,
 		useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
 	};
 });
@@ -281,5 +289,95 @@ describe("a conflict open while the user saves something else", () => {
 		expect(lastSent().variables.host.value).toBe("mine");
 		expect(lastSent().variables.token.value).toBe("xyz");
 		expect(screen.queryByText(/changed elsewhere/i)).toBeNull();
+	});
+});
+
+describe("a failed save", () => {
+	const delayMs = () => useClientSettingsStore.getState().autoSave.delayMs;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	async function advance(ms: number) {
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(ms);
+		});
+	}
+
+	function failLast(error: Error = new Error("database is locked")) {
+		settle(lastSent(), (opts) => opts.onError(error));
+	}
+
+	function editAndFail(error?: Error) {
+		const view = mount(collectionOf({ host: variable("example.com", 1000) }));
+		typeAndLeave(valueFields()[0], "example.org");
+		failLast(error);
+		expect(store().status).toBe("error");
+		return view;
+	}
+
+	/*
+	 * Mutation check: return before arming the timer in `scheduleRetry` and the
+	 * second save never goes out.
+	 */
+	it("retries on the auto-save backoff, doubling, until one lands", async () => {
+		editAndFail();
+
+		await advance(delayMs() - 1);
+		expect(sent).toHaveLength(1);
+		await advance(1);
+		expect(sent).toHaveLength(2);
+		expect(lastSent().variables.host.value).toBe("example.org");
+
+		failLast();
+		await advance(2 * delayMs() - 1);
+		expect(sent).toHaveLength(2);
+		await advance(1);
+		expect(sent).toHaveLength(3);
+
+		settle(lastSent(), (opts) => opts.onSuccess());
+		expect(store().status).toBe("saved");
+		await advance(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+		expect(sent).toHaveLength(3);
+	});
+
+	/*
+	 * Mutation check: retry a `final` outcome like any other failure and this
+	 * reds - the 400 goes out again, and toasts again.
+	 */
+	it("is not retried when the engine refused the payload", async () => {
+		editAndFail(new ApiError(400, "bad_request", "invalid variable name"));
+
+		await advance(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+
+		expect(sent).toHaveLength(1);
+		expect(store().status).toBe("error");
+	});
+
+	/*
+	 * Mutation check: drop the `clearRetry()` from the switch/unmount cleanup
+	 * and the rows the editor let go of are sent again.
+	 */
+	it("stops retrying once the editor switches to another collection", async () => {
+		const { rerenderWith } = editAndFail();
+
+		rerenderWith(collectionOf({ region: variable("eu-west-1", 1000) }, "col_2"));
+		await advance(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+
+		expect(sent).toHaveLength(1);
+	});
+
+	it("stops retrying once the editor unmounts", async () => {
+		const { unmount } = editAndFail();
+
+		unmount();
+		await advance(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+
+		expect(sent).toHaveLength(1);
 	});
 });

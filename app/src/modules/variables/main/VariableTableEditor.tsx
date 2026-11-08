@@ -52,7 +52,7 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useSessionStore, useToastStore } from "@/stores";
+import { useClientSettingsStore, useSaveStore, useSessionStore, useToastStore } from "@/stores";
 import type { SaveOutcome } from "@/stores/save-store";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { useVariablesStore } from "@/modules/variables/variables-store";
@@ -67,7 +67,7 @@ import {
 import { Callout, DetailSkeleton, ErrorState } from "@/components/shared";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
-import { saveFailureOutcome } from "@/lib/save-failure";
+import { saveFailureOutcome, saveRetryDelayMs } from "@/lib/save-failure";
 import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import type { VariableType } from "@/lib/variable-cast";
 import {
@@ -473,6 +473,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// One save in flight, and the saves waiting for it in order (one per id).
 	const saveInFlightRef = useRef(false);
 	const waitingSavesRef = useRef<WaitingSave[]>([]);
+	// A failed save's retry, and the consecutive failures behind its backoff,
+	// as `useSaveManager.attemptAutoSave` keeps them.
+	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const retryAttemptRef = useRef(0);
 	// The dirty flag, readable from an effect without being one of its
 	// dependencies - the row-init effect has to know whether the user has
 	// uncommitted edits *at the moment the cache changes under it*, and taking
@@ -682,10 +686,46 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[readLive, reportSaving, reportFailed, landSave]
 	);
 
+	const clearRetry = useCallback(() => {
+		if (retryTimerRef.current) {
+			clearTimeout(retryTimerRef.current);
+			retryTimerRef.current = null;
+		}
+	}, []);
+
+	/**
+	 * `useSaveManager`'s backoff for a failed save: not for a `final` one, which
+	 * the engine would refuse again, nor once the edit is gone or the editor has
+	 * moved on. The delay is read when the failure lands, so a settings change
+	 * applies to the next retry.
+	 */
+	const scheduleRetry = useCallback(
+		(id: string, outcome: SaveOutcome) => {
+			if (outcome !== "failed" && outcome !== "disk-full") {
+				retryAttemptRef.current = 0;
+				return;
+			}
+			if (id !== seededContextRef.current || !hasPendingChangesRef.current) return;
+			const attempt = retryAttemptRef.current;
+			retryAttemptRef.current = attempt + 1;
+			const { delayMs } = useClientSettingsStore.getState().autoSave;
+			clearRetry();
+			retryTimerRef.current = setTimeout(
+				() => {
+					retryTimerRef.current = null;
+					void performSaveRef.current();
+				},
+				saveRetryDelayMs(delayMs, attempt)
+			);
+		},
+		[clearRetry]
+	);
+
 	/**
 	 * Runs `first`, then each save that queued behind it, one at a time. The
 	 * promise never rejects: the verdict is the result, so an un-awaited call
-	 * (blur, a toggle) has no rejection to leave unhandled.
+	 * (blur, a toggle) has no rejection to leave unhandled. Only the last save
+	 * of a run arms a retry; one queued behind a failure is that retry already.
 	 */
 	const runSaves = useCallback(
 		(first: SaveTarget): Promise<SaveOutcome> => {
@@ -697,11 +737,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						saveInFlightRef.current = false;
 						const next = waitingSavesRef.current.shift();
 						if (next) next.resolve(run(next.target));
+						else scheduleRetry(target.contextId, outcome);
 					});
 				});
 			return run(first);
 		},
-		[startSave]
+		[startSave, scheduleRetry]
 	);
 
 	/**
@@ -713,6 +754,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * waiting joins it, and that save reads the latest rows when it starts.
 	 */
 	const requestSave = useCallback((): Promise<SaveOutcome> => {
+		// A save starting now supersedes a retry; its own verdict re-arms one.
+		clearRetry();
 		const target: SaveTarget = { contextId, scope: type, send, snapshot: readLive() };
 		if (!saveInFlightRef.current) return runSaves(target);
 		const waiting = waitingSavesRef.current;
@@ -727,19 +770,21 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		});
 		waiting.push({ target, promise, resolve });
 		return promise;
-	}, [contextId, type, send, readLive, runSaves]);
+	}, [contextId, type, send, readLive, runSaves, clearRetry]);
 
 	useEffect(() => {
 		performSaveRef.current = requestSave;
 	}, [requestSave]);
 
-	// A switch or an unmount lets go of the rows: a save still out for them
-	// must not land in the next scope's.
+	// A switch or an unmount lets go of the rows: nothing is left for a retry
+	// to save, and a save still out for them must not land in the next scope's.
 	useEffect(
 		() => () => {
+			clearRetry();
+			retryAttemptRef.current = 0;
 			seededContextRef.current = null;
 		},
-		[contextId]
+		[contextId, clearRetry]
 	);
 
 	// Register save context on mount

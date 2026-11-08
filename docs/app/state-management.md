@@ -920,23 +920,30 @@ than a second way of saying "hover for the reason." It stays until the failed
 id is reported saved or discarded, so it outlives the toast for exactly as long
 as the edit stays unsaved.
 
-**A failed auto-save now retries itself.** `useSaveManager`'s debounced timer
-is the only caller that does: on a failure it re-arms with the auto-save
-delay, doubling on each further failure and capped at
-`TIMING.SAVE_RETRY_MAX_DELAY_MS` (one minute), cancelled on unmount, on an
-entity switch, and by the next ordinary edit. A 4xx is final (#1889): the engine
-rejected the payload itself (a 400, a 413), so `performSave` reports it as
-`"final"` (`isFinalError`, the predicate the query and mutation retry rules
-share) and no retry is armed. The status stays `error` - the Dock keeps saying
-"Not saved" - and the next edit re-arms the debounce. A 5xx, a timeout or an
-unreachable engine keeps retrying. So does a 507, the engine's answer to a
-write the data folder's volume has no room for (#2423): `performSave` reports
+**A failed save retries itself.** Two surfaces do, on one backoff:
+`saveRetryDelayMs` (`lib/save-failure.ts`) re-arms with the auto-save delay,
+doubling on each further failure and capped at `TIMING.SAVE_RETRY_MAX_DELAY_MS`
+(one minute). `useSaveManager`'s debounced timer is the only one of its callers
+that retries, cancelled on unmount, on an entity switch, and by the next
+ordinary edit. `VariableTableEditor` retries any failed save of its own (its
+saves are all blur, toggle or flush commits, with no debounce to re-arm), while
+it is still dirty; the retry is cancelled on unmount and on an entity switch,
+superseded by any save that starts, and armed only by the last of a run of
+queued saves, since one queued behind a failure is already its retry. A 4xx is
+final (#1889): the engine rejected the payload itself (a 400, a 413), so both
+report it as `"final"` (`saveFailureOutcome`, which asks `isFinalError`, the
+predicate the query and mutation retry rules share) and no retry is armed. The
+status stays `error` - the Dock keeps saying "Not saved" - and the next edit
+re-arms the debounce (the editor's next blur or toggle saves again). A 5xx, a
+timeout or an unreachable engine keeps retrying. So does a 507, the engine's
+answer to a write the data folder's volume has no room for (#2423): both report
 it as `"disk-full"`; the toast is the generic "Couldn't save - <engine message>",
-because the engine's sentence already names the cause and the action, and the backoff above carries on until space returns. The
-retry is the app's own timer; nothing here reads the 503's `Retry-After`. Cmd/Ctrl+S and the
-entity-switch/quit goodbye flush still call `performSave` directly and report
-their own outcome once - retrying either would save into a pane the user has
-already left, or double a save they just asked for by hand.
+because the engine's sentence already names the cause and the action, and the
+backoff above carries on until space returns. The retry is the app's own timer;
+nothing here reads the 503's `Retry-After`. In `useSaveManager`, Cmd/Ctrl+S and
+the entity-switch/quit goodbye flush still call `performSave` directly and
+report their own outcome once - retrying either would save into a pane the user
+has already left, or double a save they just asked for by hand.
 
 **A reconnect flushes every dirty context, not just the one that failed.**
 `useHealthQuery`'s automatic-reconnect branch and `useEngineRestart`'s manual

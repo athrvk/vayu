@@ -68,9 +68,14 @@ vi.mock("@/stores", async () => {
 	// `VariableRow`'s "Copy for agent" button reads the toast store through `useCopy`.
 	const toastStore =
 		await vi.importActual<typeof import("@/stores/toast-store")>("@/stores/toast-store");
+	// A failed save reads the auto-save delay its retry backs off from.
+	const settingsStore = await vi.importActual<typeof import("@/stores/client-settings-store")>(
+		"@/stores/client-settings-store"
+	);
 	return {
 		useSaveStore: saveStore.useSaveStore,
 		useToastStore: toastStore.useToastStore,
+		useClientSettingsStore: settingsStore.useClientSettingsStore,
 		useSessionStore: Object.assign(() => sessionStore, { getState: () => sessionStore }),
 	};
 });
