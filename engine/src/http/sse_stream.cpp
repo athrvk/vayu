@@ -53,6 +53,7 @@ const char* to_string (SseEndReason reason) {
     switch (reason) {
     case SseEndReason::Completed: return "completed";
     case SseEndReason::Stopped: return "stopped";
+    case SseEndReason::Shutdown: return "shutdown";
     case SseEndReason::MaxEvents: return "maxStreamEvents";
     case SseEndReason::MaxDuration: return "maxStreamDurationMs";
     case SseEndReason::Idle: return "idleTimeout";
@@ -194,8 +195,36 @@ void SseStreamContext::close (SseEndReason reason) {
 }
 
 SseEndReason SseStreamContext::end_reason () const {
+    std::optional<SseEndReason> recorded;
+    {
+        std::lock_guard<std::mutex> lock (mutex_);
+        recorded = end_reason_;
+    }
+    if (recorded) {
+        return *recorded;
+    }
+    vayu::utils::log_warning ("http",
+    "SSE stream end read before one was recorded", { { "runId", run_id } });
+    return SseEndReason::Error;
+}
+
+void SseStreamContext::request_stop () {
     std::lock_guard<std::mutex> lock (mutex_);
-    return end_reason_.value_or (SseEndReason::Completed);
+    if (!requested_end_) {
+        requested_end_ = SseEndReason::Stopped;
+    }
+}
+
+void SseStreamContext::request_shutdown () {
+    std::lock_guard<std::mutex> lock (mutex_);
+    if (!requested_end_) {
+        requested_end_ = SseEndReason::Shutdown;
+    }
+}
+
+std::optional<SseEndReason> SseStreamContext::requested_end () const {
+    std::lock_guard<std::mutex> lock (mutex_);
+    return requested_end_;
 }
 
 std::vector<nlohmann::json> SseStreamContext::stored_events () const {
@@ -548,12 +577,13 @@ bool idle_window_elapsed (TransferState& state) {
     return silent_for.count () >= state.idle_timeout_ms;
 }
 
-/// Whether a stop or the duration cap ends the stream now, recording which.
-/// Asked by the progress callback during a transfer and by the chain before a
-/// redirected hop's, so neither rule loses its hold between two hops.
+/// Whether a stop, a shutdown or the duration cap ends the stream now,
+/// recording which. Asked by the progress callback during a transfer and by the
+/// chain before a redirected hop's, so neither rule loses its hold between two
+/// hops.
 bool stopped_or_out_of_time (TransferState& state) {
-    if (state.context->should_stop.load (std::memory_order_acquire)) {
-        state.abort_reason = SseEndReason::Stopped;
+    if (const auto requested = state.context->requested_end ()) {
+        state.abort_reason = requested;
         return true;
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -949,7 +979,7 @@ void SseStreamManager::shutdown () {
     // Signalled first, joined second: asking all of them to stop before waiting
     // on any one means teardown costs one stream's stop latency, not the sum.
     for (auto& [id, stream] : draining) {
-        stream.context->should_stop.store (true, std::memory_order_release);
+        stream.context->request_shutdown ();
     }
     for (auto& [id, stream] : draining) {
         if (stream.worker.joinable ()) {
@@ -1025,7 +1055,7 @@ bool SseStreamManager::request_stop (const std::string& run_id) {
     if (context->closed ()) {
         return false;
     }
-    context->should_stop.store (true, std::memory_order_release);
+    context->request_stop ();
     return true;
 }
 

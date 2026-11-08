@@ -967,7 +967,9 @@ inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
 The daemon then stops the server (and with it every mock server, inbox, mock
 issuer and OAuth callback listener, a paced answer going out at once and a
-callback's token exchange cancelled), stops and joins active runs (a run still
+callback's token exchange cancelled), ends and joins every streaming design run
+(the run ends `stopped` and its trace's `endReason` is `shutdown`, never a
+user's `stopped`, #3342), stops and joins active runs (a run still
 sending ends `stopped`; one in its natural-end drain has the drain cut short, its
 in-flight transfers counted as `cancelled`, and keeps its own end, as for
 [a Stop](#post-runsrunidstop), issue #3341), refreshes the
@@ -7978,16 +7980,18 @@ EventSource specification requires (issue #1917); without that the first line's
 field name would carry the mark and the first event would be lost. One mark is
 dropped, however its three bytes are split across reads, and only at the start.
 
-**Every stream ends, and the run says why.** Five terminations, never "the
+**Every stream ends, and the run says why.** Seven terminations, never "the
 timeout happened to fire":
 
 | Reason | What happened |
 |--------|---------------|
 | `completed` | The server closed the stream |
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
+| `shutdown` | The engine shut down under the stream ([`POST /shutdown`](#post-shutdown) or a signal), which no user asked for (#3342). The run ends `stopped`, as a load run still sending does; this reason is what tells it from a user's Stop |
 | `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
 | `maxStreamDurationMs` | The duration cap elapsed, counted from the first hop of a redirect chain |
 | `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` on a made connection; a header line counts as arriving, and each redirect hop's own connect is bounded by the connect deadline below, not counted as silence. The stream ends within a couple of seconds of the setting (the engine checks about once a second) |
+| `error` | The transfer failed (a refused or timed-out connect, TLS, a protocol error, a redirect the chain refused); the run ends `failed` with the error fields set. Also what an end nobody recorded reads as, which the engine logs, since it is not known to be a completion |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
 would kill a healthy one mid-flight. Two deadlines apply instead: connecting
@@ -11871,8 +11875,8 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
   `sseMaxEventBytes` is stored as a prefix and says so in band, with
   `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
-- `complete`'s `reason` is one of `completed`, `stopped`, `maxStreamEvents`,
-  `maxStreamDurationMs`, `idleTimeout`, `error`; see
+- `complete`'s `reason` is one of `completed`, `stopped`, `shutdown`,
+  `maxStreamEvents`, `maxStreamDurationMs`, `idleTimeout`, `error`; see
   [POST /execute](#post-execute). No frame carries the exchange's `warnings`
   (issue #3315): they are on the stored trace, which the report already holds
   when `complete` arrives.

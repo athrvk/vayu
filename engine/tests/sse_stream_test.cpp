@@ -693,7 +693,7 @@ TEST (SseConsumer, StopsMidStreamWhenAsked) {
         while (context.total_events () < 2) {
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
         }
-        context.should_stop.store (true);
+        context.request_stop ();
     });
     vayu::http::consume_sse_stream (
     spec_for (server.url ("/endless"), brisk_limits ()), context);
@@ -1120,6 +1120,28 @@ TEST (SseRing, ARecordedEndIsReadBeforeTheCloseAndWinsOverIt) {
     << "the close's fallback replaced the end the stream recorded";
 }
 
+// An end nobody recorded is not known to be a completion (#3342). Mutation
+// check: default `end_reason ()` to `Completed` again and this fails.
+TEST (SseRing, AnUnrecordedEndReadsAsAnError) {
+    SseStreamContext context ("run_test", vayu::http::SseLimits{});
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+}
+
+// A shutdown after a Stop the transfer has not read yet leaves the user's
+// reason standing, and the other order leaves the shutdown's.
+TEST (SseRing, TheFirstStopRequestWins) {
+    SseStreamContext stopped ("run_test", vayu::http::SseLimits{});
+    EXPECT_FALSE (stopped.requested_end ().has_value ());
+    stopped.request_stop ();
+    stopped.request_shutdown ();
+    EXPECT_EQ (stopped.requested_end (), SseEndReason::Stopped);
+
+    SseStreamContext drained ("run_test", vayu::http::SseLimits{});
+    drained.request_shutdown ();
+    drained.request_stop ();
+    EXPECT_EQ (drained.requested_end (), SseEndReason::Shutdown);
+}
+
 TEST (SseRing, DisclosesATruncatedEventInBand) {
     SseStreamContext context ("run_test", vayu::http::SseLimits{});
     vayu::http::SseEvent event;
@@ -1272,7 +1294,9 @@ TEST (SseStreamManagerTest, ShutdownJoinsEveryWorkerAndIsTerminalAndIdempotent) 
     EXPECT_TRUE (completed.load ()) << "shutdown returned while the worker was "
                                        "still in its completion callback";
     EXPECT_EQ (manager.size (), 0u);
-    EXPECT_EQ (context->end_reason (), SseEndReason::Stopped);
+    // A drain is no user's Stop (#3342). Mutation check: signal the drain
+    // with `request_stop ()` again and this reads Stopped.
+    EXPECT_EQ (context->end_reason (), SseEndReason::Shutdown);
 
     // Terminal, like RunManager's: a drain happens because the state the
     // workers write through is going away, so a stream started afterwards
@@ -1304,8 +1328,8 @@ TEST (SseStreamManagerTest, SweepsOnlyFinishedStreamsPastTheirRetention) {
 
 // The context closes only once `on_complete` has returned, so a relay cannot
 // write `event: complete` before the run row exists, and the callback already
-// reads the true end reason (#3239). Stopped rather than a server close,
-// because `Completed` is also what an unrecorded end reads as. Mutation check:
+// reads the true end reason (#3239). Stopped rather than a server close, so
+// the reason read inside is one only the transfer could have recorded. Mutation check:
 // close the context in `consume_sse_stream` again and `closed()` is true while
 // the callback is held.
 TEST (SseStreamManagerTest, ClosesOnlyAfterTheCompletionCallbackReturns) {
@@ -2779,7 +2803,7 @@ class StreamStopTest : public StreamExecuteTest {
         std::launch::async, [this, run_id] () { return stop (run_id); });
         const auto stream = manager_->get (run_id);
         EXPECT_TRUE (vayu::tests::wait_until (
-        [&stream] () { return stream && stream->should_stop.load (); }))
+        [&stream] () { return stream && stream->requested_end ().has_value (); }))
         << "the route never signalled the stop";
         origin_->release_aside ();
         return answer.get ();
@@ -3064,8 +3088,17 @@ TEST (SseServerShutdownTest, StoppingTheServerDrainsALiveStream) {
         // joined rather than left running - and left running is what would put
         // it inside curl while `curl_global_cleanup` ran, and inside `db`
         // while the daemon destroyed it.
-        EXPECT_FALSE (db->get_results (run_id).empty ())
+        const auto results = db->get_results (run_id);
+        ASSERT_FALSE (results.empty ())
         << "server.stop() returned with the stream's worker still running";
+
+        // Recorded as the engine's end, not a user's Stop (#3342), on a row
+        // that ends `stopped` as a load run still sending does.
+        const auto trace = json::parse (results[0].trace_data);
+        EXPECT_EQ (trace["events"]["endReason"], "shutdown") << trace.dump (2);
+        const auto run = db->get_run (run_id);
+        ASSERT_HAS_VALUE (run);
+        EXPECT_EQ (run->status, vayu::RunStatus::Stopped);
     }
 
     db.reset ();
