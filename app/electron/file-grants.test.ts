@@ -147,6 +147,82 @@ describe("createFileGrants", () => {
 	});
 });
 
+describe("a read in flight when the copy goes stale", () => {
+	type Listed = EngineWrite<FileTrustRow[]>;
+
+	/** Hold the next `listFileGrants` answer until the test releases it. */
+	function holdNextList(client: ReturnType<typeof fakeEngine>["client"]) {
+		let release!: (rows: string[]) => void;
+		const held = new Promise<Listed>((resolve) => {
+			release = (rows) => resolve({ outcome: "done", value: rows.map(row) });
+		});
+		client.listFileGrants.mockImplementationOnce(() => held);
+		return release;
+	}
+
+	it("is not made fresh by the read, so the next question reads again", async () => {
+		const { grants, client, table } = fakeEngine();
+		const release = holdNextList(client);
+
+		const first = grants.sync();
+		await vi.waitFor(() => expect(client.listFileGrants).toHaveBeenCalledOnce());
+		grants.invalidate();
+		table.add("/data/new.bin");
+		release([]);
+		await first;
+
+		await expect(grants.isGranted("/data/new.bin")).resolves.toBe(true);
+		expect(client.listFileGrants).toHaveBeenCalledTimes(2);
+	});
+
+	it("is not joined by a sync asked after the invalidate", async () => {
+		const { grants, client } = fakeEngine();
+		const release = holdNextList(client);
+
+		const first = grants.sync();
+		await vi.waitFor(() => expect(client.listFileGrants).toHaveBeenCalledOnce());
+		grants.invalidate();
+		await grants.sync();
+
+		expect(client.listFileGrants).toHaveBeenCalledTimes(2);
+		release([]);
+		await first;
+	});
+
+	it("is not cleared by the old read when a newer sync is already running", async () => {
+		const { grants, client } = fakeEngine();
+		const releaseOld = holdNextList(client);
+		const releaseNew = holdNextList(client);
+
+		const old = grants.sync();
+		await vi.waitFor(() => expect(client.listFileGrants).toHaveBeenCalledOnce());
+		grants.invalidate();
+		const newer = grants.sync();
+		await vi.waitFor(() => expect(client.listFileGrants).toHaveBeenCalledTimes(2));
+		releaseOld([]);
+		await old;
+		const joined = grants.sync();
+		releaseNew([]);
+		await Promise.all([newer, joined]);
+
+		expect(client.listFileGrants).toHaveBeenCalledTimes(2);
+	});
+
+	it("stays stale when the engine answers 409 while it is in flight", async () => {
+		const { grants, client } = fakeEngine(["/real/body.bin"]);
+		const release = holdNextList(client);
+
+		const first = grants.sync();
+		await vi.waitFor(() => expect(client.listFileGrants).toHaveBeenCalledOnce());
+		await expect(grants.record("/link/body.bin")).resolves.toBe(true);
+		release([]);
+		await first;
+
+		await expect(grants.isGranted("/link/body.bin")).resolves.toBe(true);
+		expect(client.listFileGrants).toHaveBeenCalledTimes(2);
+	});
+});
+
 describe("isRecordablePath", () => {
 	it("follows the host's absolute-path rule, whichever host it is", () => {
 		expect(isRecordablePath("C:\\data\\a.bin", windowsAbsolute)).toBe(true);
