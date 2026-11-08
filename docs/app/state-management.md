@@ -1947,7 +1947,11 @@ queued behind it still goes out. A throw before the request is sent settles the
 save as a failure, so the queue is never left waiting on nothing. If the editor
 switches entity
 before a waiting save starts, the save computes from the snapshot taken when it
-was asked for and, when it lands, touches nothing of the scope now on screen. A
+was asked for and, when it lands, touches nothing of the scope now on screen. It
+reports nothing under the id the editor discarded either: a `reportSaving` would
+take the abandoned id back, and its failure would then sit on the Dock as "Not
+saved" for rows no editor holds. Its failure is a plain toast, the rule for any
+write that lands after its editor let go. A
 save for an environment or collection that is no longer there reports
 `Couldn't save - this environment no longer exists` (or collection) and resolves
 `"final"` rather than sitting on "saving" until the quit flush's ceiling. Every

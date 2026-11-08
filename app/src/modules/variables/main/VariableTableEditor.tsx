@@ -672,28 +672,35 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const startSave = useCallback(
 		(target: SaveTarget, settle: (outcome: SaveOutcome) => void) => {
 			const { contextId: id, send: sendTo } = target;
+			// A save whose turn comes after the editor let go of its id (a switch, an
+			// unmount) reports nothing under that id: the id was discarded with the
+			// rows, and a report would revive it as an entry no editor owns - a
+			// "Not saved" nothing could ever clear. Its failure is still told, as
+			// the plain toast any write that lands after its editor left gets.
+			const live = id === seededContextRef.current;
 			let settled = false;
 			const finish = (outcome: SaveOutcome) => {
 				if (settled) return;
 				settled = true;
 				settle(outcome);
 			};
-			const fail = (error: unknown) => {
+			const fail = (error: unknown, outcome: SaveOutcome, message: string) => {
 				if (settled) return;
-				reportFailed(
-					id,
-					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
-					error
-				);
-				finish(saveFailureOutcome(error));
+				if (live) reportFailed(id, message, error);
+				else showToast(message, "error");
+				finish(outcome);
 			};
 			if (!sendTo) {
-				reportFailed(id, `Couldn't save - this ${target.scope} no longer exists`);
-				finish("final");
+				fail(undefined, "final", `Couldn't save - this ${target.scope} no longer exists`);
 				return;
 			}
+			const failWith = (error: unknown) =>
+				fail(
+					error,
+					saveFailureOutcome(error),
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				);
 			try {
-				const live = id === seededContextRef.current;
 				const plan = planSave(live ? readLive() : target.snapshot);
 				if (live) {
 					if (plan.rows !== variablesRef.current) {
@@ -701,19 +708,19 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 						setVariables(plan.rows);
 					}
 					setConflicts(plan.conflicts);
+					reportSaving(id);
 				}
-				reportSaving(id);
 				sendTo(plan.payload, {
 					onSuccess: () => {
 						if (!settled) finish(landSave(id, plan));
 					},
-					onError: fail,
+					onError: failWith,
 				});
 			} catch (error) {
-				fail(error);
+				failWith(error);
 			}
 		},
-		[readLive, reportSaving, reportFailed, landSave]
+		[readLive, reportSaving, reportFailed, showToast, landSave]
 	);
 
 	const clearRetry = useCallback(() => {

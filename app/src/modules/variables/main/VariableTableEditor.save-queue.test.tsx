@@ -195,6 +195,55 @@ describe("two saves asked for back to back", () => {
 	});
 });
 
+describe("a save queued for a collection the editor has left", () => {
+	/*
+	 * Mutation check: report `saving` for it as for a live save and this reds -
+	 * that report takes the discarded id back, and the failure then sits on the
+	 * Dock as "Not saved" for rows no editor holds.
+	 */
+	it("is still sent, and its failure is a toast, not an ownerless 'Not saved'", () => {
+		const { rerenderWith } = mount(collectionOf({ host: variable("example.com", 1000) }));
+		typeAndLeave(valueFields()[0], "example.org");
+		fireEvent.click(screen.getByRole("checkbox", { name: "Enable host" }));
+		rerenderWith(collectionOf({ region: variable("eu-west-1", 1000) }, "col_2"));
+		expect(store().unsaved.has("collection-col_1")).toBe(false);
+
+		settle(sent[0], (opts) => opts.onSuccess());
+		expect(sent).toHaveLength(2);
+		expect(lastSent().variables.host).toMatchObject({ value: "example.org", enabled: false });
+		settle(lastSent(), (opts) => opts.onError(new Error("database is locked")));
+
+		expect(store().unsaved.has("collection-col_1")).toBe(false);
+		expect(store().status).not.toBe("error");
+		expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+			"Couldn't save - database is locked",
+		]);
+	});
+
+	/*
+	 * An id the editor left with nothing unsaved was never abandoned, so the
+	 * store would record a failure reported under it. Mutation check: report a
+	 * left id's failure through `reportFailed` and this reds.
+	 */
+	it("leaves no entry for an id that had nothing unsaved", () => {
+		const { rerenderWith } = mount(collectionOf({ host: variable("example.com", 1000) }));
+		typeAndLeave(valueFields()[0], "example.org");
+		rerenderWith(collectionOf({ region: variable("eu-west-1", 1000) }, "col_2"));
+		// Cmd+S on the clean second collection, queued behind the first's save.
+		act(() => {
+			void store().triggerSave();
+		});
+		rerenderWith(collectionOf({ zone: variable("a", 1000) }, "col_3"));
+
+		settle(sent[0], (opts) => opts.onSuccess());
+		expect(sent).toHaveLength(2);
+		settle(lastSent(), (opts) => opts.onError(new Error("database is locked")));
+
+		expect(store().unsaved.has("collection-col_2")).toBe(false);
+		expect(store().status).not.toBe("error");
+	});
+});
+
 describe("a save that throws before it is sent", () => {
 	/*
 	 * Mutation check: drop the try/catch in `startSave` and this reds - the
