@@ -5,9 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
+import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff, X } from "lucide-react";
 import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { ApiError } from "@/services/http-client";
@@ -23,6 +23,7 @@ import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { useToastStore } from "@/stores";
+import { oauthSignin, useIsSigningIn } from "@/stores/oauth-signin-store";
 import { useNow } from "@/hooks/useNow";
 import type { OAuth2Config } from "@/types";
 import {
@@ -82,12 +83,16 @@ export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenS
 function useTokenActions(resolvedConfig: OAuth2Config) {
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
-	const [authorizing, setAuthorizing] = useState(false);
 
 	const cacheKey = useMemo(() => {
 		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
 		return computeOAuth2CacheKey(resolvedConfig);
 	}, [resolvedConfig]);
+
+	// The sign-in belongs to the config, so two rows for one config share it;
+	// the last row to leave stops it.
+	const authorizing = useIsSigningIn(cacheKey);
+	useEffect(() => (cacheKey ? oauthSignin.acquire(cacheKey) : undefined), [cacheKey]);
 
 	const fetchMutation = useFetchOAuth2TokenMutation();
 	const clearMutation = useClearOAuth2TokenMutation();
@@ -113,36 +118,40 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 	}, [interactive, resolvedConfig]);
 	const incomplete = missingFields.length > 0;
 
+	// Engine-hosted loopback + PKCE; opens the system browser (or the embedded
+	// window when the config opts in).
+	const signIn = async (key: string) => {
+		const signal = oauthSignin.begin(key);
+		if (!signal) return;
+		try {
+			await runInteractiveAuthorization(resolvedConfig, signal);
+			// A cancelled sign-in has nothing to report: whoever cancelled knows.
+			if (signal.aborted) return;
+			queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(key) });
+			showToast("Authorized", "success");
+			// The loopback flow puts the user in their browser by design, so
+			// this is the one success they are guaranteed not to be looking at
+			// (#1358). The click brings them back to the request they left.
+			systemNotify.post({
+				kind: NOTIFY_KINDS.signedIn,
+				title: "Signed in",
+				body: "Back to Vayu to continue.",
+			});
+		} catch (err) {
+			if (signal.aborted) return;
+			showToast(
+				err instanceof Error ? humanizeOAuth2Error(err.message) : "Authorization failed",
+				"error"
+			);
+		} finally {
+			oauthSignin.end(key, signal);
+		}
+	};
+
 	const getToken = async () => {
 		if (incomplete) return;
-		if (interactive) {
-			// Engine-hosted loopback + PKCE; opens the system browser (or the
-			// embedded window when the config opts in).
-			setAuthorizing(true);
-			try {
-				await runInteractiveAuthorization(resolvedConfig);
-				if (cacheKey) {
-					queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(cacheKey) });
-				}
-				showToast("Authorized", "success");
-				// The loopback flow puts the user in their browser by design, so
-				// this is the one success they are guaranteed not to be looking at
-				// (#1358). The click brings them back to the request they left.
-				systemNotify.post({
-					kind: NOTIFY_KINDS.signedIn,
-					title: "Signed in",
-					body: "Back to Vayu to continue.",
-				});
-			} catch (err) {
-				showToast(
-					err instanceof Error
-						? humanizeOAuth2Error(err.message)
-						: "Authorization failed",
-					"error"
-				);
-			} finally {
-				setAuthorizing(false);
-			}
+		if (interactive && cacheKey) {
+			await signIn(cacheKey);
 			return;
 		}
 		fetchMutation.mutate(
@@ -159,12 +168,26 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 		);
 	};
 
+	const cancelSignIn = () => {
+		if (cacheKey) oauthSignin.cancel(cacheKey);
+	};
+
 	const clear = () => {
 		if (!cacheKey) return;
 		clearMutation.mutate(cacheKey);
 	};
 
-	return { cacheKey, missingFields, incomplete, busy, fetching, getToken, clear };
+	return {
+		cacheKey,
+		missingFields,
+		incomplete,
+		busy,
+		fetching,
+		authorizing,
+		getToken,
+		cancelSignIn,
+		clear,
+	};
 }
 
 type TokenActions = ReturnType<typeof useTokenActions>;
@@ -214,6 +237,22 @@ function ClearTokenButton({ actions }: { actions: TokenActions }) {
 			onClick={actions.clear}
 			disabled={actions.busy}
 			icon={<Trash2 className="size-icon-sm" />}
+		/>
+	);
+}
+
+/**
+ * Stops the sign-in running for this config. It mounts before the token action,
+ * which has to stay the rail's last child. The browser tab or window the
+ * sign-in opened is the user's to close.
+ */
+function CancelSignInButton({ actions }: { actions: TokenActions }) {
+	return (
+		<TooltipIconButton
+			size="sm"
+			label="Cancel sign-in"
+			onClick={actions.cancelSignIn}
+			icon={<X className="size-icon-sm" />}
 		/>
 	);
 }
@@ -277,6 +316,7 @@ function DeferredTokenRow({
 			rail={
 				<>
 					<ClearTokenButton actions={actions} />
+					{actions.authorizing && <CancelSignInButton actions={actions} />}
 					<GetTokenButton actions={actions} label="Get token" renews={false} />
 				</>
 			}
@@ -396,6 +436,7 @@ function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 						/>
 					)}
 					{token && <ClearTokenButton actions={actions} />}
+					{actions.authorizing && <CancelSignInButton actions={actions} />}
 					<GetTokenButton
 						actions={actions}
 						label={phase.actionLabel}

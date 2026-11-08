@@ -21,13 +21,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
 import type { OAuth2Config } from "@/types";
 import TokenStatusRow from "./TokenStatusRow";
 import { NOTIFY_KINDS } from "@/services/notify";
+import { oauthSignin, useOAuthSigninStore } from "@/stores/oauth-signin-store";
 
 const fetchMutation = { mutate: vi.fn(), isPending: false };
 const clearMutation = { mutate: vi.fn(), isPending: false };
@@ -82,6 +83,7 @@ function renderRow(cfg: OAuth2Config, deferredNames?: readonly string[]) {
 const getTokenButton = () => screen.getByRole("button", { name: /get token/i });
 
 beforeEach(() => {
+	for (const key of useOAuthSigninStore.getState().active) oauthSignin.cancel(key);
 	fetchMutation.mutate.mockReset();
 	clearMutation.mutate.mockReset();
 	showToast.mockReset();
@@ -397,7 +399,7 @@ describe("TokenStatusRow when a pre-request script may change a name in the conf
 		fireEvent.click(getTokenButton());
 
 		await waitFor(() => expect(showToast).toHaveBeenCalledWith("Authorized", "success"));
-		expect(authorize).toHaveBeenCalledWith(interactive);
+		expect(authorize).toHaveBeenCalledWith(interactive, expect.any(AbortSignal));
 		expect(fetchMutation.mutate).not.toHaveBeenCalled();
 	});
 
@@ -560,5 +562,191 @@ describe("TokenStatusRow's token phase (#3354)", () => {
 
 			expect(screen.getByText("No token cached")).toBeInTheDocument();
 		});
+	});
+});
+
+describe("TokenStatusRow's interactive sign-in is the config's, not the row's (#3354)", () => {
+	const interactive = config({
+		grantType: "authorization_code",
+		authorizationUrl: "https://idp.example.com/authorize",
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "abc",
+	});
+
+	/** A sign-in that stays open until its signal aborts, as the real poll does. */
+	function signInUntilAborted() {
+		authorize.mockImplementation(
+			(_config: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(new Error("Sign-in cancelled.")));
+				})
+		);
+	}
+
+	const signalOfRun = (call = 0) => authorize.mock.calls[call]?.[1] as AbortSignal;
+	const cancelButtons = () => screen.queryAllByRole("button", { name: "Cancel sign-in" });
+
+	it("shows the pending state on every row for the config, and starts one sign-in", () => {
+		signInUntilAborted();
+		renderRow(interactive);
+		renderRow(interactive);
+
+		fireEvent.click(screen.getAllByRole("button", { name: /get token/i })[0]!);
+
+		expect(authorize).toHaveBeenCalledTimes(1);
+		expect(cancelButtons()).toHaveLength(2);
+		for (const button of screen.getAllByRole("button", { name: /get token/i })) {
+			expect(button).toBeDisabled();
+		}
+	});
+
+	it("starts nothing when a second Get token lands before the row has re-rendered", () => {
+		signInUntilAborted();
+		renderRow(interactive);
+		const button = getTokenButton();
+
+		act(() => {
+			button.click();
+			button.click();
+		});
+
+		expect(authorize).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps another config's row idle", () => {
+		signInUntilAborted();
+		renderRow(interactive);
+		const other = renderRow({ ...interactive, clientId: "other" });
+
+		fireEvent.click(screen.getAllByRole("button", { name: /get token/i })[0]!);
+
+		expect(
+			within(other.container).queryByRole("button", { name: "Cancel sign-in" })
+		).toBeNull();
+		expect(within(other.container).getByRole("button", { name: /get token/i })).toBeEnabled();
+	});
+
+	describe("Cancel", () => {
+		it("aborts the sign-in, clears the pending state on every row, and says nothing", async () => {
+			signInUntilAborted();
+			renderRow(interactive);
+			renderRow(interactive);
+			fireEvent.click(screen.getAllByRole("button", { name: /get token/i })[0]!);
+
+			fireEvent.click(cancelButtons()[1]!);
+			await act(async () => {
+				await Promise.resolve();
+			});
+
+			expect(signalOfRun().aborted).toBe(true);
+			expect(cancelButtons()).toHaveLength(0);
+			for (const button of screen.getAllByRole("button", { name: /get token/i })) {
+				expect(button).toBeEnabled();
+			}
+			expect(showToast).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		it("drops a success that arrives after the cancel", async () => {
+			let finish: (cacheKey: string) => void = () => undefined;
+			authorize.mockImplementation(
+				() => new Promise<string>((resolve) => (finish = resolve))
+			);
+			renderRow(interactive);
+			fireEvent.click(getTokenButton());
+			fireEvent.click(cancelButtons()[0]!);
+
+			await act(async () => {
+				finish("late");
+				await Promise.resolve();
+			});
+
+			expect(showToast).not.toHaveBeenCalled();
+			expect(mockNotifyPost).not.toHaveBeenCalled();
+		});
+
+		it("lets the next Get token start a fresh sign-in", () => {
+			signInUntilAborted();
+			renderRow(interactive);
+			fireEvent.click(getTokenButton());
+			fireEvent.click(cancelButtons()[0]!);
+
+			fireEvent.click(getTokenButton());
+
+			expect(authorize).toHaveBeenCalledTimes(2);
+			expect(signalOfRun(1).aborted).toBe(false);
+		});
+
+		it("is not offered while no sign-in is running", () => {
+			renderRow(interactive);
+
+			expect(cancelButtons()).toHaveLength(0);
+		});
+
+		it.each([
+			[
+				"a row with a cached token",
+				undefined,
+				{
+					found: true,
+					expired: false,
+					token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
+				},
+			],
+			["a row a script may change", ["clientId"], undefined],
+		])("keeps the token action the rail's last child on %s", (_name, deferredNames, data) => {
+			signInUntilAborted();
+			statusQuery.data = data;
+			renderRow(interactive, deferredNames);
+
+			const action = screen.getByRole("button", { name: /get token|renew/i });
+			fireEvent.click(action);
+
+			const cancel = cancelButtons()[0]!;
+			const rail = action.parentElement!;
+			expect(cancel.parentElement).toBe(rail);
+			expect(rail.lastElementChild).toBe(action);
+		});
+	});
+
+	describe("when a row leaves", () => {
+		it("keeps the sign-in running while another row for the config is still on screen", () => {
+			signInUntilAborted();
+			const first = renderRow(interactive);
+			const second = renderRow(interactive);
+			fireEvent.click(within(first.container).getByRole("button", { name: /get token/i }));
+
+			second.unmount();
+
+			expect(signalOfRun().aborted).toBe(false);
+			expect(cancelButtons()).toHaveLength(1);
+		});
+
+		it("stops it, silently, when the last row leaves", async () => {
+			signInUntilAborted();
+			const first = renderRow(interactive);
+			const second = renderRow(interactive);
+			fireEvent.click(within(first.container).getByRole("button", { name: /get token/i }));
+
+			second.unmount();
+			first.unmount();
+			await act(async () => {
+				await Promise.resolve();
+			});
+
+			expect(signalOfRun().aborted).toBe(true);
+			expect(useOAuthSigninStore.getState().active.size).toBe(0);
+			expect(showToast).not.toHaveBeenCalled();
+		});
+	});
+
+	it("still reports a failure that was not a cancel", async () => {
+		authorize.mockRejectedValue(new Error("state mismatch"));
+		renderRow(interactive);
+
+		fireEvent.click(getTokenButton());
+
+		await waitFor(() => expect(showToast).toHaveBeenCalled());
+		expect(getTokenButton()).toBeEnabled();
 	});
 });

@@ -1698,6 +1698,33 @@ useImportReportStore.getState().dismiss(collectionId);  // drops the file's repo
 **Non-persisted** (in memory, like `import-modal-store`): a report is about the
 import just made, and a reload has nothing to compare it with.
 
+#### `oauth-signin-store.ts` - Which Configs Are Signing In
+
+The interactive OAuth 2.0 sign-in running per token cache key (#3354). A sign-in
+belongs to the config rather than to the `TokenStatusRow` that started it: the
+Auth tab, the context bar and the collection editor can each show a row for one
+config, and they must share one pending state and one browser tab. Modelled on
+`request-builder/context/send-tracker.ts`: the store holds only what renders, and
+the `AbortController`s and owner counts sit in module maps beside it.
+
+**State:**
+```typescript
+{
+  active: ReadonlySet<string>   // cache keys with a sign-in running
+}
+```
+
+**Key Methods:**
+```typescript
+oauthSignin.begin(key)             // AbortSignal, or null if one is already running
+oauthSignin.end(key, signal)       // flow over; no-op for a signal that is no longer the key's
+oauthSignin.cancel(key)            // abort and clear at once
+const release = oauthSignin.acquire(key)  // a row showing the key; the last release cancels
+useIsSigningIn(key)                // reactive; false for a null key
+```
+
+**Non-persisted.** A sign-in cannot outlive the window that is waiting on it.
+
 #### `toast-store.ts` - Transient Notifications
 
 The queue behind the toasts. It holds *what* to show; the Radix primitive in
