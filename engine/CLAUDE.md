@@ -791,7 +791,13 @@ logged as a warning: it means a client skipped composition.
   auxiliary-thread transfer (the monitor scrape, a watchdog's token refresh)
   carries `RunContext::aux_cancel` (#3343), which `join_aux_threads` sets
   before it joins, so Stop, shutdown and a natural end never wait out its
-  timeout.
+  timeout. A buffered `POST /execute` carries `server_stopping` through a
+  **`DisconnectWatch`** (`http/disconnect_watch.hpp`, #3383): its one flag
+  also rises when the caller hangs up (`Request::is_connection_closed`, polled
+  every `POLL_INTERVAL`), and such a send is moved to `Stopped` before its
+  result is recorded. A stream is not watched: it outlives its caller. A
+  handler a test calls directly sets `is_connection_closed`, whose default
+  answers "closed" (`tests/execute_disconnect_test.cpp`).
 - **An OpenAPI document is stored once and *bound* by collections, never owned
   by one** (#637). `spec_documents` holds the text verbatim plus an
   engine-computed `hash`; `collections.openapi` (`{specId, specHash, syncedAt}`,

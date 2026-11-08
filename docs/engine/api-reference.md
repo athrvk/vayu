@@ -1291,6 +1291,20 @@ waited on (issue #2683), and so is a `pm.sendRequest` one of its scripts is
 making: the send answers, and its trace records, `CANCELLED` with
 `errorMessage` `Request cancelled`, about a second after the shutdown began.
 
+A buffered send whose caller hangs up before the answer is cancelled the same
+way (issue #3383), together with an OAuth 2.0 token it is fetching and a
+`pm.sendRequest` one of its scripts is making: the engine reads the connection
+every 100ms and the transfer ends at its next progress tick, about a second
+later. The run is recorded **`stopped`**, never `completed`; its result row
+holds what the exchange reached, `CANCELLED` for a transfer that was cut. A
+transient send records nothing, as always. "Hangs up" is the connection reading
+end-of-stream, and TCP cannot tell that from a caller that only shut down its
+sending side, so a client that half-closes after its request is treated as
+gone: keep the connection open until the answer is read. A streaming send
+(`stream: true`) is not watched: it is handed off at its `202` and outlives the
+call that started it, and [`POST /runs/:runId/stop`](#post-runsrunidstop) is
+what ends it.
+
 Cookies are unaffected by any of this: libcurl owns the wire cookies and
 matches them on the **origin** host, never the proxy hop.
 
