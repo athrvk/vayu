@@ -1357,6 +1357,14 @@ arrives first, and the embedded window is handed the time remaining
 (`timeoutMs` on `oauthOpenWindow`, which the main process refuses unless it is a
 positive finite number).
 
+`runInteractiveAuthorization(config, signal?)` stops on an `AbortSignal`: the poll delay
+and the embedded-window wait both end at once, every engine call is preceded by a
+check, and it rejects with `InteractiveAuthCancelledError` (a subclass of
+`InteractiveAuthError` that callers skip reporting). The renderer cannot close the
+embedded window or the system browser tab, so an abort stops waiting and ignores
+whatever the window answers later. `TokenStatusRow` passes the signal from
+`stores/oauth-signin-store.ts`, which keys one sign-in per token cache key.
+
 > **`HttpClient.delete`** takes an optional `params` argument so the token-clear
 > call can pass `?key=`.
 

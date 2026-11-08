@@ -5,9 +5,9 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
+import { KeyRound, RefreshCw, Trash2, Loader2, Eye, EyeOff, X } from "lucide-react";
 import { Button, IconSwap, LabelSwap, TooltipIconButton } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { ApiError } from "@/services/http-client";
@@ -23,7 +23,16 @@ import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { useToastStore } from "@/stores";
+import { oauthSignin, useIsSigningIn } from "@/stores/oauth-signin-store";
+import { useNow } from "@/hooks/useNow";
 import type { OAuth2Config } from "@/types";
+import {
+	TOKEN_ACTION_LABELS,
+	lapseInstant,
+	tokenPhase,
+	type TokenExpiryText,
+	type TokenPhase,
+} from "./token-phase";
 
 interface TokenStatusRowProps {
 	/** The config with {{variables}} already resolved (used for the token request). */
@@ -40,8 +49,6 @@ interface TokenStatusRowProps {
 	deferredNames?: readonly string[];
 }
 
-const TOKEN_ACTION_LABELS = ["Get token", "Renew", "Refresh"] as const;
-
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
 	return `${token.slice(0, 4)}…${token.slice(-4)}`;
@@ -52,18 +59,11 @@ function listPhrase(items: string[]): string {
 	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** The engine's `expired` flag, or the local clock if it has not caught up yet. */
-function hasLapsed(expiresAt: number, expired: boolean): boolean {
-	return expired || expiresAt <= Date.now();
-}
-
-function TokenExpiry({ expiresAt, expired }: { expiresAt: number | null; expired: boolean }) {
-	if (expiresAt === null) return <>{expired ? "expired" : "does not expire"}</>;
-	const lapsed = hasLapsed(expiresAt, expired);
+function TokenExpiry({ expiry }: { expiry: TokenExpiryText }) {
+	if (expiry.at === null) return <>{expiry.word}</>;
 	return (
 		<>
-			{lapsed ? "expired " : "expires "}
-			<TimeValue value={expiresAt} style="relative" />
+			{expiry.word} <TimeValue value={expiry.at} style="relative" />
 		</>
 	);
 }
@@ -83,12 +83,16 @@ export default function TokenStatusRow({ resolvedConfig, deferredNames }: TokenS
 function useTokenActions(resolvedConfig: OAuth2Config) {
 	const showToast = useToastStore((s) => s.showToast);
 	const queryClient = useQueryClient();
-	const [authorizing, setAuthorizing] = useState(false);
 
 	const cacheKey = useMemo(() => {
 		if (!resolvedConfig.accessTokenUrl || !resolvedConfig.clientId) return null;
 		return computeOAuth2CacheKey(resolvedConfig);
 	}, [resolvedConfig]);
+
+	// The sign-in belongs to the config, so two rows for one config share it;
+	// the last row to leave stops it.
+	const authorizing = useIsSigningIn(cacheKey);
+	useEffect(() => (cacheKey ? oauthSignin.acquire(cacheKey) : undefined), [cacheKey]);
 
 	const fetchMutation = useFetchOAuth2TokenMutation();
 	const clearMutation = useClearOAuth2TokenMutation();
@@ -114,36 +118,40 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 	}, [interactive, resolvedConfig]);
 	const incomplete = missingFields.length > 0;
 
+	// Engine-hosted loopback + PKCE; opens the system browser (or the embedded
+	// window when the config opts in).
+	const signIn = async (key: string) => {
+		const signal = oauthSignin.begin(key);
+		if (!signal) return;
+		try {
+			await runInteractiveAuthorization(resolvedConfig, signal);
+			// A cancelled sign-in has nothing to report: whoever cancelled knows.
+			if (signal.aborted) return;
+			queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(key) });
+			showToast("Authorized", "success");
+			// The loopback flow puts the user in their browser by design, so
+			// this is the one success they are guaranteed not to be looking at
+			// (#1358). The click brings them back to the request they left.
+			systemNotify.post({
+				kind: NOTIFY_KINDS.signedIn,
+				title: "Signed in",
+				body: "Back to Vayu to continue.",
+			});
+		} catch (err) {
+			if (signal.aborted) return;
+			showToast(
+				err instanceof Error ? humanizeOAuth2Error(err.message) : "Authorization failed",
+				"error"
+			);
+		} finally {
+			oauthSignin.end(key, signal);
+		}
+	};
+
 	const getToken = async () => {
 		if (incomplete) return;
-		if (interactive) {
-			// Engine-hosted loopback + PKCE; opens the system browser (or the
-			// embedded window when the config opts in).
-			setAuthorizing(true);
-			try {
-				await runInteractiveAuthorization(resolvedConfig);
-				if (cacheKey) {
-					queryClient.invalidateQueries({ queryKey: queryKeys.oauth.token(cacheKey) });
-				}
-				showToast("Authorized", "success");
-				// The loopback flow puts the user in their browser by design, so
-				// this is the one success they are guaranteed not to be looking at
-				// (#1358). The click brings them back to the request they left.
-				systemNotify.post({
-					kind: NOTIFY_KINDS.signedIn,
-					title: "Signed in",
-					body: "Back to Vayu to continue.",
-				});
-			} catch (err) {
-				showToast(
-					err instanceof Error
-						? humanizeOAuth2Error(err.message)
-						: "Authorization failed",
-					"error"
-				);
-			} finally {
-				setAuthorizing(false);
-			}
+		if (interactive && cacheKey) {
+			await signIn(cacheKey);
 			return;
 		}
 		fetchMutation.mutate(
@@ -160,12 +168,26 @@ function useTokenActions(resolvedConfig: OAuth2Config) {
 		);
 	};
 
+	const cancelSignIn = () => {
+		if (cacheKey) oauthSignin.cancel(cacheKey);
+	};
+
 	const clear = () => {
 		if (!cacheKey) return;
 		clearMutation.mutate(cacheKey);
 	};
 
-	return { cacheKey, missingFields, incomplete, busy, fetching, getToken, clear };
+	return {
+		cacheKey,
+		missingFields,
+		incomplete,
+		busy,
+		fetching,
+		authorizing,
+		getToken,
+		cancelSignIn,
+		clear,
+	};
 }
 
 type TokenActions = ReturnType<typeof useTokenActions>;
@@ -219,13 +241,29 @@ function ClearTokenButton({ actions }: { actions: TokenActions }) {
 	);
 }
 
+/**
+ * Stops the sign-in running for this config. It mounts before the token action,
+ * which has to stay the rail's last child. The browser tab or window the
+ * sign-in opened is the user's to close.
+ */
+function CancelSignInButton({ actions }: { actions: TokenActions }) {
+	return (
+		<TooltipIconButton
+			size="sm"
+			label="Cancel sign-in"
+			onClick={actions.cancelSignIn}
+			icon={<X className="size-icon-sm" />}
+		/>
+	);
+}
+
 function GetTokenButton({
 	actions,
 	label,
 	renews,
 }: {
 	actions: TokenActions;
-	label: (typeof TOKEN_ACTION_LABELS)[number];
+	label: TokenPhase["actionLabel"];
 	/** The glyph for a token that is current: renew, not fetch. */
 	renews: boolean;
 }) {
@@ -278,6 +316,7 @@ function DeferredTokenRow({
 			rail={
 				<>
 					<ClearTokenButton actions={actions} />
+					{actions.authorizing && <CancelSignInButton actions={actions} />}
 					<GetTokenButton actions={actions} label="Get token" renews={false} />
 				</>
 			}
@@ -298,6 +337,49 @@ function MissingFieldsNote({ missingFields }: { missingFields: string[] }) {
 	);
 }
 
+type NoTokenState = "missing-fields" | "checking" | "check-failed" | "none-cached";
+
+/**
+ * Why no token is on screen. A missing field is the most actionable and wins;
+ * otherwise "none-cached" is only true once the engine has answered, so a
+ * pending or failed check must not read as one (#3354).
+ */
+function noTokenState(incomplete: boolean, query: { isLoading: boolean; isError: boolean }) {
+	if (incomplete) return "missing-fields";
+	if (query.isLoading) return "checking";
+	if (query.isError) return "check-failed";
+	return "none-cached";
+}
+
+function NoTokenSummary({
+	state,
+	missingFields,
+}: {
+	state: NoTokenState;
+	missingFields: string[];
+}) {
+	switch (state) {
+		case "missing-fields":
+			return (
+				<span className="text-xs text-muted-foreground">
+					Enter the {listPhrase(missingFields)} to fetch a token
+				</span>
+			);
+		case "checking":
+			return (
+				<span className="text-xs text-muted-foreground">Checking for a cached token…</span>
+			);
+		case "check-failed":
+			return (
+				<span className="text-xs text-status-error-text">
+					Couldn't check for a cached token
+				</span>
+			);
+		case "none-cached":
+			return <span className="text-xs text-muted-foreground">No token cached</span>;
+	}
+}
+
 function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 	const actions = useTokenActions(resolvedConfig);
 	const { cacheKey, missingFields, incomplete } = actions;
@@ -314,26 +396,24 @@ function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
 	const status = statusQuery.data;
 	const token = status?.found ? status.token : undefined;
-	const expired = status?.expired ?? false;
+	// The flip at `expiresAt` is the clock's, not a refetch's: the engine's flag
+	// only catches up with it on the next poll.
+	const now = useNow(lapseInstant(status));
+	const phase = tokenPhase(status, now);
+	const noToken = noTokenState(incomplete, statusQuery);
 
 	return (
 		<TokenRowShell
-			dotClass={
-				token ? (expired ? "bg-warning" : "bg-status-success") : "bg-muted-foreground/40"
-			}
+			dotClass={!token && noToken === "check-failed" ? "bg-status-error" : phase.dotClass}
 			summary={
-				token ? (
+				token && phase.expiry ? (
 					<span className="text-xs text-muted-foreground">
 						<code className="text-foreground">{maskToken(token.accessToken)}</code>
 						{" · "}
-						<TokenExpiry expiresAt={token.expiresAt} expired={expired} />
-					</span>
-				) : incomplete ? (
-					<span className="text-xs text-muted-foreground">
-						Enter the {listPhrase(missingFields)} to fetch a token
+						<TokenExpiry expiry={phase.expiry} />
 					</span>
 				) : (
-					<span className="text-xs text-muted-foreground">No token cached</span>
+					<NoTokenSummary state={noToken} missingFields={missingFields} />
 				)
 			}
 			rail={
@@ -356,10 +436,11 @@ function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 						/>
 					)}
 					{token && <ClearTokenButton actions={actions} />}
+					{actions.authorizing && <CancelSignInButton actions={actions} />}
 					<GetTokenButton
 						actions={actions}
-						label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
-						renews={!!token && !expired}
+						label={phase.actionLabel}
+						renews={phase.renews}
 					/>
 				</>
 			}

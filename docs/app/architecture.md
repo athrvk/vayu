@@ -187,7 +187,8 @@ src/
 │   ├── save-store.ts        # Auto-save orchestration
 │   ├── import-modal-store.ts # Import dialog state
 │   ├── env-switcher-store.ts # Whether the title bar environment menu is open
-│   └── import-report-store.ts # What an applied import left undone
+│   ├── import-report-store.ts # What an applied import left undone
+│   └── oauth-signin-store.ts # Which OAuth 2.0 configs have a sign-in running
 ├── queries/            # TanStack Query hooks (server state)
 ├── hooks/              # Custom React hooks
 ├── services/           # API client, SSE client, HTTP client
@@ -212,6 +213,7 @@ The app uses a dual-state management approach:
    - `import-modal-store.ts`: Import dialog visibility and state
    - `env-switcher-store.ts`: Whether the title bar's environment menu is open, so a toast action can open it
    - `import-report-store.ts`: The loss report of each applied import, by root collection id, until dismissed
+   - `oauth-signin-store.ts`: Which OAuth 2.0 configs have an interactive sign-in running, by token cache key, with its abort handle and the rows showing it
    - `lib/graphql/schema-cache.ts`: Introspected GraphQL schemas, keyed by resolved endpoint URL + collection + environment + a digest of the **resolved** credentials (so an upstream auth or variable edit is a different entry, not a stale hit). LRU-bounded, and a failed refresh keeps the last good schema
    - `lib/graphql/explorer-store.ts`: The schema explorer's view - whether the pane is open, and per schema identity the search text, expanded rows, scroll position and whether descriptions are shown in full. Read-only over the schema cache: the explorer renders whatever that store holds and triggers no introspection of its own beyond its Refresh button
    - Module-local stores (e.g., `modules/collections/collections-store.ts`) co-locate with their feature

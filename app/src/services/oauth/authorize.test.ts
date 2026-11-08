@@ -21,7 +21,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { runInteractiveAuthorization, InteractiveAuthError, EXPIRY_GRACE_MS } from "./authorize";
+import {
+	runInteractiveAuthorization,
+	InteractiveAuthError,
+	InteractiveAuthCancelledError,
+	EXPIRY_GRACE_MS,
+} from "./authorize";
 import type { OAuth2Config } from "@/types";
 
 const startOAuth2Authorize = vi.fn();
@@ -319,4 +324,120 @@ describe("an engine that reports no usable expiry", () => {
 			expect(getOAuth2AuthorizeStatus).not.toHaveBeenCalled();
 		}
 	);
+});
+
+describe("a signal cancels the flow", () => {
+	const LOOPBACK = { ...CONFIG, useEmbeddedBrowser: false };
+	const POLL_INTERVAL_MS = 1000;
+	let openExternalUrl: ReturnType<typeof vi.fn>;
+
+	beforeEach(() => {
+		openExternalUrl = vi.fn(() => Promise.resolve());
+		vi.stubGlobal("electronAPI", {
+			openExternalUrl,
+			oauthOpenWindow: () => new Promise(() => undefined),
+		});
+		getOAuth2AuthorizeStatus.mockResolvedValue({ state: "pending" });
+	});
+
+	it("stops polling and rejects with the cancel error when aborted between polls", async () => {
+		const controller = new AbortController();
+		const flow = runInteractiveAuthorization(LOOPBACK, controller.signal);
+		const settled = expect(flow).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2 + 1);
+		const polls = getOAuth2AuthorizeStatus.mock.calls.length;
+		expect(polls).toBeGreaterThan(0);
+
+		controller.abort();
+		await settled;
+
+		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 10);
+		expect(getOAuth2AuthorizeStatus).toHaveBeenCalledTimes(polls);
+	});
+
+	it("drops the answer of a poll that was already out when it aborted", async () => {
+		const controller = new AbortController();
+		let answer: (status: unknown) => void = () => undefined;
+		getOAuth2AuthorizeStatus.mockImplementation(
+			() => new Promise((resolve) => (answer = resolve))
+		);
+		const flow = runInteractiveAuthorization(LOOPBACK, controller.signal);
+		const settled = expect(flow).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 1);
+		expect(getOAuth2AuthorizeStatus).toHaveBeenCalledTimes(1);
+
+		controller.abort();
+		answer({ state: "completed", cacheKey: "too-late" });
+
+		await settled;
+		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 10);
+		expect(getOAuth2AuthorizeStatus).toHaveBeenCalledTimes(1);
+	});
+
+	it("starts nothing when the signal is already aborted", async () => {
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(
+			runInteractiveAuthorization(LOOPBACK, controller.signal)
+		).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+
+		expect(startOAuth2Authorize).not.toHaveBeenCalled();
+	});
+
+	it("opens no browser when aborted while the engine was starting the attempt", async () => {
+		const controller = new AbortController();
+		startOAuth2Authorize.mockImplementation(() => {
+			controller.abort();
+			return Promise.resolve(started());
+		});
+
+		await expect(
+			runInteractiveAuthorization(LOOPBACK, controller.signal)
+		).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+
+		expect(openExternalUrl).not.toHaveBeenCalled();
+		expect(getOAuth2AuthorizeStatus).not.toHaveBeenCalled();
+	});
+
+	it("stops waiting on the embedded window and ignores what it answers later", async () => {
+		const controller = new AbortController();
+		let closeWindow: (result: unknown) => void = () => undefined;
+		bridge(() => new Promise((resolve) => (closeWindow = resolve)));
+		const flow = runInteractiveAuthorization(CONFIG, controller.signal);
+		const settled = expect(flow).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+		await vi.advanceTimersByTimeAsync(0);
+
+		controller.abort();
+		await settled;
+		closeWindow({ callbackUrl: "https://app.example.com/callback?code=late" });
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(completeOAuth2Authorize).not.toHaveBeenCalled();
+	});
+
+	it("is still the cancel error, not a timeout, when the abort lands before the ceiling", async () => {
+		const controller = new AbortController();
+		bridge(() => new Promise(() => undefined));
+		const flow = runInteractiveAuthorization(CONFIG, controller.signal);
+		const settled = expect(flow).rejects.toBeInstanceOf(InteractiveAuthCancelledError);
+		await vi.advanceTimersByTimeAsync(0);
+
+		await vi.advanceTimersByTimeAsync(60 * 1000);
+		controller.abort();
+
+		await settled;
+		// The ceiling's own timer must not outlive the wait it guarded.
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("runs to completion when a signal is given and never aborted", async () => {
+		const controller = new AbortController();
+		getOAuth2AuthorizeStatus.mockResolvedValue({ state: "completed", cacheKey: "k" });
+
+		const flow = runInteractiveAuthorization(LOOPBACK, controller.signal);
+		await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 1);
+
+		await expect(flow).resolves.toBe("k");
+	});
 });
