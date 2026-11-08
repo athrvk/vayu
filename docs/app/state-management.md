@@ -138,11 +138,11 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   the same render, and any later `openTab`, `focusTab`, `focusAdjacentTab`,
   `goBack` or `goForward` replaces or clears it, as does closing the tab it
   names (a single close, a bulk close or `closeTabsForEntities`). An intent
-  whose screen never rendered therefore cannot fire on a later visit. Session-
-  scoped like `tabFocusedAt` (absent from `partialize`): a persisted copy would
-  jump the user to Spec, a data row or a comparison for a choice made in a
-  previous launch, and a data row points into a file whose rows are deliberately
-  never persisted
+  whose screen never rendered therefore cannot fire on a later visit.
+  Session-scoped like `tabFocusedAt` (absent from `partialize`): a persisted
+  copy would jump the user to Spec, a data row or a comparison for a choice made
+  in a previous launch, and a data row points into a file whose rows are
+  deliberately never persisted
 - Navigation history (issue #1245): `navHistory` is a `TabLocation` per visit
   (a `Tab` without its instance id, so a closed tab's place survives it), with
   `navIndex` as the cursor - `-1` before anything is visited. `openTab` and
@@ -351,10 +351,14 @@ and two pieces of wiring keep the two in step:
   because the *deactivated* row changed server-side without appearing in any
   response body. Switches made before an earlier one settles are numbered and
   their PUTs run one at a time (a mutation `scope`), so the engine ends holding
-  the last switch started; a refusal rolls the store back only while it is
-  still the latest switch, since a newer one has already replaced the optimistic
-  value and restoring the older "before" would show an environment the engine
-  does not hold (#3355).
+  the last switch that landed. The hook also keeps the environment the engine is
+  known to hold (`settledActiveId`: the store's value when no switch is in
+  flight, then each PUT that succeeded). A refusal rolls the store back to
+  that, and only while it is still the latest switch: a newer one has already
+  replaced the optimistic value, and the store's value at the time the refused
+  switch started may be an earlier switch the engine also refused. A clear
+  deactivates the same environment, not the one the store was showing when the
+  clear was issued (#3355).
 - `useActiveEnvironmentRestore` (`hooks/`, mounted in `App.tsx`) reconciles on
   launch: adopt the engine's active environment if it has one, otherwise push a
   persisted id that names an environment that still exists - once per session,

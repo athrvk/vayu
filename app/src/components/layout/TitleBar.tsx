@@ -377,7 +377,7 @@ function EnvSwitcher() {
 		 */
 		const name = id ? environments.find((e) => e.id === id)?.name : null;
 		setActiveEnvironment.mutate(
-			{ id, previousId: activeEnvironmentId },
+			{ id },
 			{
 				onSuccess: () =>
 					showToast({
