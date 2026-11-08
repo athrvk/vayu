@@ -29,7 +29,7 @@ import { DashboardHeader, MetricsView } from "./components";
 import { useCollectionRunTarget } from "./hooks/useCollectionRunTarget";
 import { TIMING } from "@/config/timing";
 import { durationSeconds } from "@/constants/load-test";
-import { isRunInProgress } from "@/lib/run-status";
+import { isRunInProgress, isRunTerminal } from "@/lib/run-status";
 import type { DisplayMetrics } from "./types";
 
 export default function LoadTestDashboard() {
@@ -83,7 +83,7 @@ export default function LoadTestDashboard() {
 				.then((report) => {
 					if (report?.metadata?.status) {
 						const status = report.metadata.status;
-						if (status === "completed" || status === "stopped" || status === "failed") {
+						if (isRunTerminal(status)) {
 							// Run finished while we were away - update state
 							setFinalReport(report);
 							loadTestService.stopMonitoring();

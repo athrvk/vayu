@@ -1406,7 +1406,7 @@ const {
 } = useDashboardStore();
 ```
 
-**`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect.
+**`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect. Its counterpart `isRunTerminal` (completed, stopped or failed) is the one spelling of the settled set; an unrecognised status is neither.
 
 The load-test dialog seeds its scrape cadence and bounds its metric list from
 the engine's `monitorIntervalMs` / `monitorMaxSeries` settings, through
