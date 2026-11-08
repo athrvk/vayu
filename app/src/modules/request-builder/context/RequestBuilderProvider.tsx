@@ -45,9 +45,7 @@ import {
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { useRevealStore, type OperationRevealCommand } from "@/lib/graphql/reveal-store";
 import { apiService } from "@/services";
-import { queryClient } from "@/lib/query-client";
-import { queryKeys } from "@/queries";
-import type { ExampleSentRequest, ResolvedElement } from "@/types";
+import type { ResolvedElement } from "@/types";
 import type {
 	RequestState,
 	ResponseState,
@@ -65,6 +63,7 @@ import { createDefaultRequestState } from "../utils/request-state";
 import { responseFromRunResult } from "../utils/restore-response";
 import { sentRequestOf } from "../utils/execute-mapping";
 import { useExecutionEvents } from "../hooks/useExecutionEvents";
+import { useStreamFinalization } from "./stream-finalization";
 import { useSendWithRow } from "../hooks/useSendWithRow";
 import { useRequestModelLifecycle } from "../hooks/useRequestModelLifecycle";
 import { EditorVariableTokensProvider } from "@/components/shared/EditorVariableTokens";
@@ -1053,83 +1052,25 @@ export default function RequestBuilderProvider({
 	const isStreaming = useExecutionEventsStore(
 		(s) => s.isStreaming && !!s.requestId && s.requestId === requestId
 	);
-	const streamEndReason = useExecutionEventsStore((s) =>
-		s.requestId && s.requestId === requestId ? s.endReason : null
-	);
-
 	// One subscription, owned here: the store names which stream, and the
 	// provider is the component that outlives every panel that reads it.
 	useExecutionEvents();
 
 	/*
-	 * The Send snapshot of the stream this builder started (issue #1763),
-	 * keyed by its run. The stream's response only exists once the run is
-	 * stored, so the snapshot waits here for the stream-end swap below, which
-	 * attaches it only to the report of that same run - never to a response
-	 * some other send produced.
+	 * Every finished stream run lands in its own request's stored response,
+	 * whichever request is on screen (#3382). The live pane is touched only when
+	 * that request is the one showing. Only a builder that can start a stream
+	 * finalizes one: the History run view's detached copy has no stream handler,
+	 * and its provider must not race this one for the global store.
 	 */
-	const streamSentRef = useRef<{ runId: string; sent: ExampleSentRequest } | null>(null);
-
-	/*
-	 * When the stream ends, replace the live rows with what the run stored.
-	 *
-	 * The two-sources-one-list handoff `ScenarioRunView` makes, at the moment
-	 * the source changes: while the stream is open the Events tab reads the
-	 * store, and the completed run's trace is the record - bounded by
-	 * `sseMaxStoredEvents` and carrying the truthful `totalEvents` /
-	 * `eventsTruncated` markers, which the live list has no way to know. Without
-	 * this the tab would keep showing whatever happened to arrive on the socket,
-	 * and a switch to another request and back would show nothing at all, since
-	 * the durable copy of a response is the response store.
-	 *
-	 * The report is fetched directly rather than through the last-design-run
-	 * query the cold-start restore uses: that query is keyed by request and its
-	 * restore is gated on having answered once, so waiting for it to refetch
-	 * would race the cache. Here the run id is already known.
-	 */
-	useEffect(() => {
-		if (!streamRunId || !streamEndReason) return;
-		// The run's own report cannot say what the app left out of the payload.
-		const { leftOut } = useExecutionEventsStore.getState();
-		let cancelled = false;
-		void (async () => {
-			try {
-				const report = await apiService.getRunReport(streamRunId);
-				const stored = responseFromRunResult(report?.results?.[0], streamRunId);
-				if (cancelled || !stored) return;
-				const snapshot = streamSentRef.current;
-				const withSent =
-					snapshot && snapshot.runId === streamRunId
-						? { ...stored, sentRequest: snapshot.sent }
-						: stored;
-				const restored =
-					leftOut.length > 0 ? { ...withSent, leftOutElements: leftOut } : withSent;
-				// Keyed by the request that streamed, exactly like the execute
-				// path: `storeSetResponse` is safe even if the builder has since
-				// moved on, and the live pane is only touched when it has not.
-				if (requestId) storeSetResponse(requestId, restored);
-				if (currentRequestIdRef.current === requestId) setLocalResponse(restored);
-			} catch {
-				// The rows already on screen came from the stream itself and are
-				// still true; failing to fetch the stored copy does not make them
-				// false, so nothing is torn down. The stream's own end reason is
-				// what the tab reports either way.
-			}
-			if (cancelled) return;
-			// A stream that ended is a finished design run: History and the
-			// context bar's Recent sends both list it, and neither is told by
-			// anything else.
-			void queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
-			if (requestId) {
-				void queryClient.invalidateQueries({
-					queryKey: queryKeys.runs.recentDesign(requestId),
-				});
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [streamRunId, streamEndReason, requestId, storeSetResponse]);
+	const landStreamResponse = useCallback(
+		(ownerId: string, restored: ResponseState) => {
+			storeSetResponse(ownerId, restored);
+			if (currentRequestIdRef.current === ownerId) setLocalResponse(restored);
+		},
+		[storeSetResponse]
+	);
+	useStreamFinalization(!!onExecuteStream, landStreamResponse);
 
 	/** Stop the stream this builder started, at the engine. */
 	const stopStream = useCallback(async () => {
@@ -1182,8 +1123,8 @@ export default function RequestBuilderProvider({
 			// can hold an example, so an unsaved one takes none.
 			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
 			// This Send supersedes the note that another request took this one's
-			// live feed over.
-			if (executingId) useExecutionEventsStore.getState().forgetReplaced(executingId);
+			// live feed over, and any finalisation of its earlier stream.
+			if (executingId) useExecutionEventsStore.getState().beginSend(executingId);
 			/*
 			 * Persist under the request that ran, so returning to it shows its own
 			 * response; `storeSetResponse` is keyed by id and safe even if this
@@ -1225,12 +1166,12 @@ export default function RequestBuilderProvider({
 					// An overtaken send's stream is not followed: the feed is the
 					// newer send's to open.
 					if (!send.isCurrent()) return;
-					streamSentRef.current = sent ? { runId: started.runId, sent } : null;
 					useExecutionEventsStore.getState().startStream({
 						requestId: executingId,
 						runId: started.runId,
 						eventsUrl: started.eventsUrl,
 						leftOut: started.leftOut,
+						sent,
 					});
 				} catch (error) {
 					console.error("Request execution failed:", error);

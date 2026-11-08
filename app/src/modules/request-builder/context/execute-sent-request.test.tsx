@@ -60,7 +60,11 @@ vi.mock("@/queries", () => ({
 	useLastDesignRunQuery: () => ({ run: undefined, report: undefined, isLoading: false }),
 	useConfigQuery: () => ({ data: { entries: [] } }),
 	queryKeys: {
-		runs: { lists: () => ["runs"], recentDesign: (id: string) => ["runs", "recent", id] },
+		runs: {
+			lists: () => ["runs"],
+			recentDesign: (id: string) => ["runs", "recent", id],
+			lastDesign: (id: string) => ["runs", "last", id],
+		},
 	},
 }));
 

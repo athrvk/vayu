@@ -20,9 +20,24 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useExecutionEventsStore } from "./execution-events-store";
 import type { LeftOutElement } from "@/lib/elements";
-import type { StreamEvent } from "@/types";
+import type { ExampleSentRequest, StreamEvent } from "@/types";
 
 const event = (data: string): StreamEvent => ({ event: "message", data });
+
+const sentTo = (url: string): ExampleSentRequest => ({
+	method: "GET",
+	url,
+	params: [],
+	headers: [],
+	body: { mode: "none" },
+});
+
+const LEFT_OUT: LeftOutElement[] = [
+	{
+		element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
+		needs: { missing: ["accepted codes or a range"], invalid: {} },
+	},
+];
 
 const start = (runId: string, requestId = "req_1") =>
 	useExecutionEventsStore.getState().startStream({
@@ -114,19 +129,13 @@ describe("execution events store", () => {
 	});
 
 	it("holds the elements the Send left out for the stream's response, and forgets them with it (#3066)", () => {
-		const leftOut: LeftOutElement[] = [
-			{
-				element: { id: "el_1", kind: "assert.status", enabled: true, config: {} },
-				needs: { missing: ["accepted codes or a range"], invalid: {} },
-			},
-		];
 		useExecutionEventsStore.getState().startStream({
 			requestId: "req_1",
 			runId: "run_1",
 			eventsUrl: "/runs/run_1/events",
-			leftOut,
+			leftOut: LEFT_OUT,
 		});
-		expect(useExecutionEventsStore.getState().leftOut).toEqual(leftOut);
+		expect(useExecutionEventsStore.getState().leftOut).toEqual(LEFT_OUT);
 
 		// The next stream is another Send, with its own payload.
 		start("run_2");
@@ -156,7 +165,13 @@ describe("execution events store", () => {
 	});
 
 	describe("handing the feed to another request's stream (#3352)", () => {
-		const replaced = () => useExecutionEventsStore.getState().replacedFeeds;
+		/** Each replaced request's run, which is what the pane names. */
+		const replaced = () =>
+			Object.fromEntries(
+				Object.entries(useExecutionEventsStore.getState().replacedFeeds).map(
+					([requestId, feed]) => [requestId, feed.runId]
+				)
+			);
 
 		it("empties the feed at hand-over and records the run once the stream starts", () => {
 			start("run_B", "req_B");
@@ -217,8 +232,32 @@ describe("execution events store", () => {
 			start("run_C", "req_C");
 			expect(replaced()).toEqual({ req_B: "run_B", req_A: "run_A" });
 
-			useExecutionEventsStore.getState().forgetReplaced("req_B");
+			useExecutionEventsStore.getState().beginSend("req_B");
 			expect(replaced()).toEqual({ req_A: "run_A" });
+		});
+
+		it("carries the Send snapshot from the live stream to the replaced feed (#3382)", () => {
+			const sent = sentTo("https://b.example.test");
+			useExecutionEventsStore.getState().startStream({
+				requestId: "req_B",
+				runId: "run_B",
+				eventsUrl: "/runs/run_B/events",
+				leftOut: LEFT_OUT,
+				sent,
+			});
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_A", "req_A");
+
+			// Mutation check: build the displaced feed from the ids alone and the
+			// run's stored response loses what its Send knew.
+			expect(useExecutionEventsStore.getState().replacedFeeds.req_B).toEqual({
+				runId: "run_B",
+				sent,
+				leftOut: LEFT_OUT,
+				finalized: false,
+			});
+			// The new stream starts with a snapshot of its own, or none.
+			expect(useExecutionEventsStore.getState().sent).toBeNull();
 		});
 
 		it("clear() forgets a displaced feed too", () => {
@@ -227,6 +266,81 @@ describe("execution events store", () => {
 			useExecutionEventsStore.getState().clear();
 			start("run_A", "req_A");
 			expect(replaced()).toEqual({});
+		});
+	});
+
+	describe("claiming a run for its finalisation (#3382)", () => {
+		const claim = (runId: string) =>
+			useExecutionEventsStore.getState().claimFinalization(runId);
+		/** B streams, then A's stream takes the feed over: run_B is a replaced feed. */
+		const replaceB = () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_A", "req_A");
+		};
+
+		it("hands an ended stream over once, with its owner and snapshot", () => {
+			const sent = sentTo("https://a.example.test");
+			useExecutionEventsStore.getState().startStream({
+				requestId: "req_1",
+				runId: "run_1",
+				eventsUrl: "/runs/run_1/events",
+				leftOut: LEFT_OUT,
+				sent,
+			});
+			useExecutionEventsStore.getState().beginSend("req_1");
+			expect(claim("run_1")).toBeNull();
+
+			useExecutionEventsStore.getState().endStream("run_1", "completed", 0);
+			expect(claim("run_1")).toEqual({
+				requestId: "req_1",
+				runId: "run_1",
+				sent,
+				leftOut: LEFT_OUT,
+				sends: 1,
+			});
+			// Mutation check: drop the `finalized` test in `claimableRun` and a
+			// remounted builder fetches the same run again.
+			expect(claim("run_1")).toBeNull();
+			expect(claim("run_unknown")).toBeNull();
+		});
+
+		it("hands a replaced feed over once, and again after a release", () => {
+			replaceB();
+			expect(claim("run_B")).toMatchObject({ requestId: "req_B", runId: "run_B" });
+			expect(claim("run_B")).toBeNull();
+
+			// Mutation check: make `releaseFinalization` a no-op and a report that
+			// failed to fetch is never asked for again.
+			useExecutionEventsStore.getState().releaseFinalization("run_B");
+			expect(claim("run_B")).toMatchObject({ requestId: "req_B", runId: "run_B" });
+		});
+
+		it("resets the held stream's claim with the stream itself", () => {
+			start("run_1");
+			useExecutionEventsStore.getState().endStream("run_1", "completed", 0);
+			claim("run_1");
+			expect(useExecutionEventsStore.getState().finalized).toBe(true);
+
+			start("run_2");
+			expect(useExecutionEventsStore.getState().finalized).toBe(false);
+			useExecutionEventsStore.getState().endStream("run_2", "completed", 0);
+			claim("run_2");
+			useExecutionEventsStore.getState().handOver("req_other");
+			expect(useExecutionEventsStore.getState().finalized).toBe(false);
+		});
+
+		it("counts a request's sends, and forgets its replaced feed on the next one", () => {
+			replaceB();
+			useExecutionEventsStore.getState().beginSend("req_B");
+			useExecutionEventsStore.getState().beginSend("req_B");
+
+			expect(useExecutionEventsStore.getState().sendCounts).toEqual({ req_B: 2 });
+			expect(useExecutionEventsStore.getState().replacedFeeds).toEqual({});
+			expect(claim("run_B")).toBeNull();
+
+			useExecutionEventsStore.getState().clear();
+			expect(useExecutionEventsStore.getState().sendCounts).toEqual({});
 		});
 	});
 });

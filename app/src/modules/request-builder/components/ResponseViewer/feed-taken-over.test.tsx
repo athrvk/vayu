@@ -116,7 +116,7 @@ describe("a live feed another request's stream took over", () => {
 	});
 
 	it("is not named when the request's own re-send replaced it", () => {
-		// Mutation check: drop the own-request test in `feedsAfterHandOver` and
+		// Mutation check: drop the own-request test in `displacedByHandOver` and
 		// a re-send reports its own previous stream as taken over.
 		act(() => {
 			stream("req_B", "run_B");
@@ -139,7 +139,7 @@ describe("a live feed another request's stream took over", () => {
 		showPaneFor("req_B");
 		expect(screen.getByText(NOTICE)).toBeInTheDocument();
 
-		act(() => useExecutionEventsStore.getState().forgetReplaced("req_B"));
+		act(() => useExecutionEventsStore.getState().beginSend("req_B"));
 
 		expect(screen.queryByText(NOTICE)).toBeNull();
 	});
