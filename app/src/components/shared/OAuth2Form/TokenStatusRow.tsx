@@ -23,7 +23,15 @@ import { runInteractiveAuthorization } from "@/services/oauth/authorize";
 import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { OAUTH2_FIELD_LABELS, humanizeOAuth2Error } from "@/constants/oauth2-fields";
 import { useToastStore } from "@/stores";
+import { useNow } from "@/hooks/useNow";
 import type { OAuth2Config } from "@/types";
+import {
+	TOKEN_ACTION_LABELS,
+	lapseInstant,
+	tokenPhase,
+	type TokenExpiryText,
+	type TokenPhase,
+} from "./token-phase";
 
 interface TokenStatusRowProps {
 	/** The config with {{variables}} already resolved (used for the token request). */
@@ -40,8 +48,6 @@ interface TokenStatusRowProps {
 	deferredNames?: readonly string[];
 }
 
-const TOKEN_ACTION_LABELS = ["Get token", "Renew", "Refresh"] as const;
-
 function maskToken(token: string): string {
 	if (token.length <= 10) return "••••";
 	return `${token.slice(0, 4)}…${token.slice(-4)}`;
@@ -52,18 +58,11 @@ function listPhrase(items: string[]): string {
 	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** The engine's `expired` flag, or the local clock if it has not caught up yet. */
-function hasLapsed(expiresAt: number, expired: boolean): boolean {
-	return expired || expiresAt <= Date.now();
-}
-
-function TokenExpiry({ expiresAt, expired }: { expiresAt: number | null; expired: boolean }) {
-	if (expiresAt === null) return <>{expired ? "expired" : "does not expire"}</>;
-	const lapsed = hasLapsed(expiresAt, expired);
+function TokenExpiry({ expiry }: { expiry: TokenExpiryText }) {
+	if (expiry.at === null) return <>{expiry.word}</>;
 	return (
 		<>
-			{lapsed ? "expired " : "expires "}
-			<TimeValue value={expiresAt} style="relative" />
+			{expiry.word} <TimeValue value={expiry.at} style="relative" />
 		</>
 	);
 }
@@ -225,7 +224,7 @@ function GetTokenButton({
 	renews,
 }: {
 	actions: TokenActions;
-	label: (typeof TOKEN_ACTION_LABELS)[number];
+	label: TokenPhase["actionLabel"];
 	/** The glyph for a token that is current: renew, not fetch. */
 	renews: boolean;
 }) {
@@ -298,6 +297,49 @@ function MissingFieldsNote({ missingFields }: { missingFields: string[] }) {
 	);
 }
 
+type NoTokenState = "missing-fields" | "checking" | "check-failed" | "none-cached";
+
+/**
+ * Why no token is on screen. A missing field is the most actionable and wins;
+ * otherwise "none-cached" is only true once the engine has answered, so a
+ * pending or failed check must not read as one (#3354).
+ */
+function noTokenState(incomplete: boolean, query: { isLoading: boolean; isError: boolean }) {
+	if (incomplete) return "missing-fields";
+	if (query.isLoading) return "checking";
+	if (query.isError) return "check-failed";
+	return "none-cached";
+}
+
+function NoTokenSummary({
+	state,
+	missingFields,
+}: {
+	state: NoTokenState;
+	missingFields: string[];
+}) {
+	switch (state) {
+		case "missing-fields":
+			return (
+				<span className="text-xs text-muted-foreground">
+					Enter the {listPhrase(missingFields)} to fetch a token
+				</span>
+			);
+		case "checking":
+			return (
+				<span className="text-xs text-muted-foreground">Checking for a cached token…</span>
+			);
+		case "check-failed":
+			return (
+				<span className="text-xs text-status-error-text">
+					Couldn't check for a cached token
+				</span>
+			);
+		case "none-cached":
+			return <span className="text-xs text-muted-foreground">No token cached</span>;
+	}
+}
+
 function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 	const actions = useTokenActions(resolvedConfig);
 	const { cacheKey, missingFields, incomplete } = actions;
@@ -314,26 +356,24 @@ function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
 	const status = statusQuery.data;
 	const token = status?.found ? status.token : undefined;
-	const expired = status?.expired ?? false;
+	// The flip at `expiresAt` is the clock's, not a refetch's: the engine's flag
+	// only catches up with it on the next poll.
+	const now = useNow(lapseInstant(status));
+	const phase = tokenPhase(status, now);
+	const noToken = noTokenState(incomplete, statusQuery);
 
 	return (
 		<TokenRowShell
-			dotClass={
-				token ? (expired ? "bg-warning" : "bg-status-success") : "bg-muted-foreground/40"
-			}
+			dotClass={!token && noToken === "check-failed" ? "bg-status-error" : phase.dotClass}
 			summary={
-				token ? (
+				token && phase.expiry ? (
 					<span className="text-xs text-muted-foreground">
 						<code className="text-foreground">{maskToken(token.accessToken)}</code>
 						{" · "}
-						<TokenExpiry expiresAt={token.expiresAt} expired={expired} />
-					</span>
-				) : incomplete ? (
-					<span className="text-xs text-muted-foreground">
-						Enter the {listPhrase(missingFields)} to fetch a token
+						<TokenExpiry expiry={phase.expiry} />
 					</span>
 				) : (
-					<span className="text-xs text-muted-foreground">No token cached</span>
+					<NoTokenSummary state={noToken} missingFields={missingFields} />
 				)
 			}
 			rail={
@@ -358,8 +398,8 @@ function CachedTokenRow({ resolvedConfig }: { resolvedConfig: OAuth2Config }) {
 					{token && <ClearTokenButton actions={actions} />}
 					<GetTokenButton
 						actions={actions}
-						label={token ? (expired ? "Refresh" : "Renew") : "Get token"}
-						renews={!!token && !expired}
+						label={phase.actionLabel}
+						renews={phase.renews}
 					/>
 				</>
 			}

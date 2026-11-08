@@ -20,8 +20,8 @@
  * in the row's own text - that is what these tests assert, not a title.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { ApiError } from "@/services/http-client";
@@ -31,7 +31,7 @@ import { NOTIFY_KINDS } from "@/services/notify";
 
 const fetchMutation = { mutate: vi.fn(), isPending: false };
 const clearMutation = { mutate: vi.fn(), isPending: false };
-const statusQuery = { data: undefined as unknown };
+const statusQuery = { data: undefined as unknown, isLoading: false, isError: false };
 const showToast = vi.fn();
 
 vi.mock("@/queries/oauth", () => ({
@@ -88,6 +88,8 @@ beforeEach(() => {
 	authorize.mockReset();
 	mockNotifyPost.mockReset();
 	statusQuery.data = undefined;
+	statusQuery.isLoading = false;
+	statusQuery.isError = false;
 });
 
 describe("TokenStatusRow with an incomplete config", () => {
@@ -422,5 +424,141 @@ describe("TokenStatusRow when a pre-request script may change a name in the conf
 		expect(screen.getByText("ya29…ijkl")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /renew/i })).toBeEnabled();
 		expect(screen.queryByText(/pre-request script/)).not.toBeInTheDocument();
+	});
+});
+
+describe("TokenStatusRow's token phase (#3354)", () => {
+	const complete = config({
+		accessTokenUrl: "https://idp.example.com/token",
+		clientId: "abc",
+	});
+	const START = Date.UTC(2026, 0, 1);
+	const TTL_MS = 60_000;
+	const dot = () => document.querySelector("span.rounded-full");
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	describe("at the instant a token stops being good", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+			vi.setSystemTime(START);
+			// The engine's flag is what a 30s poll last said: still current.
+			statusQuery.data = {
+				found: true,
+				expired: false,
+				token: { accessToken: "ya29.abcdefghijkl", expiresAt: START + TTL_MS },
+			};
+		});
+
+		it("is current until the last millisecond", () => {
+			renderRow(complete);
+			act(() => {
+				vi.advanceTimersByTime(TTL_MS - 1);
+			});
+
+			expect(dot()).toHaveClass("bg-status-success");
+			expect(screen.getByRole("button", { name: /renew/i })).toBeInTheDocument();
+			expect(screen.getByText(/expires/)).toBeInTheDocument();
+		});
+
+		it("flips the dot, the action and the text together, with the flag still stale", () => {
+			renderRow(complete);
+			act(() => {
+				vi.advanceTimersByTime(TTL_MS);
+			});
+
+			expect(dot()).toHaveClass("bg-warning");
+			expect(dot()).not.toHaveClass("bg-status-success");
+			expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument();
+			expect(screen.queryByRole("button", { name: /renew/i })).toBeNull();
+			expect(screen.getByText(/expired/)).toBeInTheDocument();
+			expect(screen.queryByText(/expires/)).toBeNull();
+		});
+	});
+
+	it("reads a token already past its expiry as lapsed on the first paint", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(START);
+		statusQuery.data = {
+			found: true,
+			expired: false,
+			token: { accessToken: "ya29.abcdefghijkl", expiresAt: START - 1 },
+		};
+
+		renderRow(complete);
+
+		expect(dot()).toHaveClass("bg-warning");
+		expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument();
+	});
+
+	it("takes the engine's word for a token that has no expiry", () => {
+		statusQuery.data = {
+			found: true,
+			expired: true,
+			token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
+		};
+
+		renderRow(complete);
+
+		expect(dot()).toHaveClass("bg-warning");
+		expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument();
+		expect(screen.getByText(/expired$/)).toBeInTheDocument();
+	});
+
+	describe("when there is no answer to show yet", () => {
+		it("says the check is pending rather than that no token is cached", () => {
+			statusQuery.isLoading = true;
+
+			renderRow(complete);
+
+			expect(screen.getByText("Checking for a cached token…")).toBeInTheDocument();
+			expect(screen.queryByText(/No token cached/i)).toBeNull();
+			expect(getTokenButton()).toBeEnabled();
+		});
+
+		it("says the engine could not be asked rather than that no token is cached", () => {
+			statusQuery.isError = true;
+
+			renderRow(complete);
+
+			const message = screen.getByText("Couldn't check for a cached token");
+			expect(message).toHaveClass("text-status-error-text");
+			expect(dot()).toHaveClass("bg-status-error");
+			expect(screen.queryByText(/No token cached/i)).toBeNull();
+			expect(getTokenButton()).toBeEnabled();
+		});
+
+		it("keeps the last answer on screen when a refetch fails", () => {
+			statusQuery.isError = true;
+			statusQuery.data = {
+				found: true,
+				expired: false,
+				token: { accessToken: "ya29.abcdefghijkl", expiresAt: null },
+			};
+
+			renderRow(complete);
+
+			expect(screen.getByText("ya29…ijkl")).toBeInTheDocument();
+			expect(screen.queryByText(/Couldn't check/)).toBeNull();
+		});
+
+		it("names the missing field ahead of either", () => {
+			statusQuery.isError = true;
+
+			renderRow(config());
+
+			expect(screen.getByText(/Access token URL and Client ID/)).toBeInTheDocument();
+			expect(screen.queryByText(/Couldn't check/)).toBeNull();
+		});
+
+		it("still says no token is cached once the engine answered with none", () => {
+			statusQuery.data = { found: false };
+
+			renderRow(complete);
+
+			expect(screen.getByText("No token cached")).toBeInTheDocument();
+		});
 	});
 });
