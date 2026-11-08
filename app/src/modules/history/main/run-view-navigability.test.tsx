@@ -130,7 +130,7 @@ beforeEach(() => {
 		openTabs: [],
 		activeTabId: null,
 		tabFocusedAt: {},
-		dataRowTarget: null,
+		navIntent: null,
 	});
 });
 
@@ -149,12 +149,12 @@ describe("a step's way back to its request", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /row 501 selected/i }));
 
-		const { openTabs, dataRowTarget } = useTabsStore.getState();
+		const { openTabs, navIntent } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(1);
 		expect(openTabs[0]).toMatchObject({ type: "request", entityId: "req_checkout" });
 		// The row travels with the navigation - reproducing "row 501 failed"
 		// against row 1 would be a different send entirely.
-		expect(dataRowTarget).toEqual({ requestId: "req_checkout", rowIndex: 500 });
+		expect(navIntent).toEqual({ kind: "dataRow", target: "req_checkout", rowIndex: 500 });
 	});
 
 	it("names the row on the control, since that is the number being reproduced", () => {
@@ -174,9 +174,9 @@ describe("a step's way back to its request", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /open the request/i }));
 
-		// No target at all rather than row 0: a collection with no data set has
+		// No intent at all rather than row 0: a collection with no data set has
 		// no row to select, and row 1 of a file it never read is a fiction.
-		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 		expect(useTabsStore.getState().openTabs[0]).toMatchObject({ entityId: "req_0" });
 	});
 
@@ -212,9 +212,9 @@ describe("a step's way back to its request", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: /row 12 selected/i }));
 
-		const { openTabs, dataRowTarget } = useTabsStore.getState();
+		const { openTabs, navIntent } = useTabsStore.getState();
 		expect(openTabs[0]).toMatchObject({ type: "request", entityId: "req_checkout" });
-		expect(dataRowTarget).toEqual({ requestId: "req_checkout", rowIndex: 11 });
+		expect(navIntent).toEqual({ kind: "dataRow", target: "req_checkout", rowIndex: 11 });
 	});
 
 	it("offers no link on a live row whose frame names no request", () => {

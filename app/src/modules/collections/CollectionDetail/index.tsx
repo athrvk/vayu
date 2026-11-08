@@ -71,8 +71,7 @@ const withVisited = (visited: ReadonlySet<CollectionTab>, tab: CollectionTab) =>
 export default function CollectionDetail() {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
-	const specTabTarget = useTabsStore((s) => s.specTabTarget);
-	const clearSpecTabTarget = useTabsStore((s) => s.clearSpecTabTarget);
+	const takeNavIntent = useTabsStore((s) => s.takeNavIntent);
 	const openTab = useTabsStore((s) => s.openTab);
 
 	// Get selected collection ID from active tab
@@ -217,20 +216,24 @@ export default function CollectionDetail() {
 	 * because `openTab` can only name a collection, and which sub-tab is showing
 	 * is state that lives here.
 	 *
-	 * Cleared once acted on, so a later visit to the same collection opens on
-	 * Info the way every other one does. The write cannot be derived away: the
-	 * target has to survive this tab mounting for the first time, and the tab it
-	 * selects then has to stay put when the target is consumed - so the state is
-	 * genuinely handed over rather than mirrored, and it happens once per
-	 * navigation rather than per render.
+	 * Taken once acted on, so a later visit to the same collection opens on Info
+	 * the way every other one does; the store drops it itself when the next
+	 * navigation is not this one. The write cannot be derived away: the intent
+	 * has to survive this tab mounting for the first time, and the tab it selects
+	 * then has to stay put when the intent is taken - so the state is genuinely
+	 * handed over rather than mirrored, and it happens once per navigation rather
+	 * than per render.
 	 */
+	const specRequested = useTabsStore(
+		(s) => s.navIntent?.kind === "spec" && s.navIntent.target === selectedCollectionId
+	);
 	useEffect(() => {
-		if (!specTabTarget || specTabTarget !== selectedCollectionId) return;
+		if (!specRequested || !selectedCollectionId) return;
+		if (!takeNavIntent("spec", selectedCollectionId)) return;
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		setTab("spec");
 		setVisited((prev) => withVisited(prev, "spec"));
-		clearSpecTabTarget();
-	}, [specTabTarget, selectedCollectionId, clearSpecTabTarget, setTab]);
+	}, [specRequested, selectedCollectionId, takeNavIntent, setTab]);
 
 	// Loading and missing are different answers. `collections` defaults to `[]`,
 	// so a collection tab restored from a previous session resolves to nothing

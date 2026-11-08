@@ -747,7 +747,7 @@ export function ImportModal() {
 						queryFn: () => apiService.listEnvironments(),
 						staleTime: 0,
 					}),
-				activate: (id) => setActiveEnvironment.mutateAsync({ id, previousId: null }),
+				activate: (id) => setActiveEnvironment.mutateAsync({ id }),
 			});
 			handleClose();
 			announceImport(reports, environment ?? undefined);

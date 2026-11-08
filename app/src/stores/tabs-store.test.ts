@@ -692,19 +692,19 @@ describe("opening a singleton that is already open", () => {
 
 describe("openRequestWithDataRow", () => {
 	beforeEach(() => {
-		useTabsStore.setState({ dataRowTarget: null });
+		useTabsStore.setState({ navIntent: null });
 	});
 
 	it("opens the request and hands the builder the row to select", () => {
 		useTabsStore.getState().openRequestWithDataRow("req_a", 500);
 
-		const { openTabs, activeTabId, dataRowTarget } = useTabsStore.getState();
+		const { openTabs, activeTabId, navIntent } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(1);
 		expect(openTabs[0]).toMatchObject({ type: "request", entityId: "req_a" });
 		expect(activeTabId).toBe(openTabs[0].id);
 		// The row is the half `openTab` cannot carry - without it the repro
 		// lands on the request and the reader is back to hunting for row 501.
-		expect(dataRowTarget).toEqual({ requestId: "req_a", rowIndex: 500 });
+		expect(navIntent).toEqual({ kind: "dataRow", target: "req_a", rowIndex: 500 });
 	});
 
 	it("focuses a request tab that is already open, still carrying the row", () => {
@@ -713,10 +713,10 @@ describe("openRequestWithDataRow", () => {
 
 		useTabsStore.getState().openRequestWithDataRow("req_a", 3);
 
-		const { openTabs, activeTabId, dataRowTarget } = useTabsStore.getState();
+		const { openTabs, activeTabId, navIntent } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(2);
 		expect(openTabs.find((t) => t.id === activeTabId)?.entityId).toBe("req_a");
-		expect(dataRowTarget).toEqual({ requestId: "req_a", rowIndex: 3 });
+		expect(navIntent).toEqual({ kind: "dataRow", target: "req_a", rowIndex: 3 });
 	});
 
 	it("refuses a row index that is not a row, rather than storing it", () => {
@@ -729,14 +729,180 @@ describe("openRequestWithDataRow", () => {
 			RangeError
 		);
 
-		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 		expect(useTabsStore.getState().openTabs).toHaveLength(0);
 	});
+});
 
-	it("is consumed once, so a later visit does not re-open on an old choice", () => {
-		useTabsStore.getState().openRequestWithDataRow("req_a", 2);
-		useTabsStore.getState().clearDataRowTarget();
+describe("navIntent", () => {
+	beforeEach(() => {
+		useTabsStore.setState({ navIntent: null, navHistory: [], navIndex: -1 });
+	});
 
-		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+	const issuers = [
+		["spec", "collection", () => useTabsStore.getState().openCollectionSpecTab("x")],
+		["dataRow", "request", () => useTabsStore.getState().openRequestWithDataRow("x", 4)],
+		["compare", "run", () => useTabsStore.getState().openRunComparison("x")],
+	] as const;
+
+	it.each(issuers)("a %s intent is issued with the tab it names active", (kind, type, issue) => {
+		issue();
+
+		const { openTabs, activeTabId, navIntent } = useTabsStore.getState();
+		expect(navIntent).toMatchObject({ kind, target: "x" });
+		expect(openTabs.find((t) => t.id === activeTabId)).toMatchObject({ type, entityId: "x" });
+	});
+
+	describe("takeNavIntent", () => {
+		it("hands the intent over once and clears it", () => {
+			useTabsStore.getState().openRunComparison("run_a");
+
+			expect(useTabsStore.getState().takeNavIntent("compare", "run_a")).toEqual({
+				kind: "compare",
+				target: "run_a",
+			});
+			expect(useTabsStore.getState().navIntent).toBeNull();
+			expect(useTabsStore.getState().takeNavIntent("compare", "run_a")).toBeNull();
+		});
+
+		it("returns the row a dataRow intent carries", () => {
+			useTabsStore.getState().openRequestWithDataRow("req_a", 7);
+
+			expect(useTabsStore.getState().takeNavIntent("dataRow", "req_a")?.rowIndex).toBe(7);
+		});
+
+		it("gives nothing, and keeps the intent, to a consumer of another target", () => {
+			useTabsStore.getState().openRunComparison("run_a");
+
+			expect(useTabsStore.getState().takeNavIntent("compare", "run_b")).toBeNull();
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "compare", target: "run_a" });
+		});
+
+		it("gives nothing, and keeps the intent, to a consumer of another kind", () => {
+			// The same id under three kinds: ids do not collide across families in
+			// practice, so only the kind separates a consumer's intent from another's.
+			useTabsStore.getState().openRunComparison("x");
+
+			expect(useTabsStore.getState().takeNavIntent("spec", "x")).toBeNull();
+			expect(useTabsStore.getState().takeNavIntent("dataRow", "x")).toBeNull();
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "compare", target: "x" });
+		});
+	});
+
+	describe("ends with the navigation it belongs to", () => {
+		function pendingCompareOn(runId: string) {
+			useTabsStore.getState().openTab({ type: "run", entityId: "run_other" });
+			useTabsStore.getState().openRunComparison(runId);
+			expect(useTabsStore.getState().navIntent).not.toBeNull();
+		}
+
+		it("is cleared by the next openTab", () => {
+			pendingCompareOn("run_a");
+
+			useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is cleared by reopening the very tab it named", () => {
+			pendingCompareOn("run_a");
+
+			useTabsStore.getState().openTab({ type: "run", entityId: "run_a" });
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is cleared by focusTab", () => {
+			pendingCompareOn("run_a");
+			const other = useTabsStore.getState().openTabs.find((t) => t.entityId === "run_other")!;
+
+			useTabsStore.getState().focusTab(other.id);
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is cleared by focusAdjacentTab", () => {
+			pendingCompareOn("run_a");
+
+			useTabsStore.getState().focusAdjacentTab(-1);
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it.each([["goBack"], ["goForward"]] as const)("is cleared by %s", (step) => {
+			pendingCompareOn("run_a");
+			if (step === "goForward") useTabsStore.getState().goBack();
+			useTabsStore.setState({ navIntent: { kind: "compare", target: "run_a" } });
+
+			useTabsStore.getState()[step]();
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is replaced by a later intent, not merged with it", () => {
+			pendingCompareOn("run_a");
+
+			useTabsStore.getState().openCollectionSpecTab("col_a");
+
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "spec", target: "col_a" });
+		});
+
+		it("is not cleared by a tab move, which navigates nowhere", () => {
+			pendingCompareOn("run_a");
+			const named = useTabsStore.getState().openTabs.find((t) => t.entityId === "run_a")!;
+
+			useTabsStore.getState().moveTab(named.id, 0);
+
+			expect(useTabsStore.getState().navIntent).not.toBeNull();
+		});
+	});
+
+	describe("goes with the tab it names", () => {
+		it("is cleared by closing that tab", () => {
+			useTabsStore.getState().openRunComparison("run_a");
+			const named = useTabsStore.getState().openTabs[0];
+
+			useTabsStore.getState().closeTab(named.id);
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is cleared when a bulk close takes that tab", () => {
+			useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+			useTabsStore.getState().openRunComparison("run_a");
+			const keep = useTabsStore.getState().openTabs.find((t) => t.entityId === "req_a")!;
+
+			useTabsStore.getState().closeOtherTabs(keep.id);
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is cleared when the entity it names is deleted", () => {
+			useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+			useTabsStore.getState().openRequestWithDataRow("req_b", 2);
+
+			useTabsStore.getState().closeTabsForEntities(["req_b"]);
+
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("is kept when a different tab closes", () => {
+			useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+			useTabsStore.getState().openRunComparison("run_a");
+			const other = useTabsStore.getState().openTabs.find((t) => t.entityId === "req_a")!;
+
+			useTabsStore.getState().closeTab(other.id);
+
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "compare", target: "run_a" });
+		});
+
+		it("is kept when a different entity is deleted", () => {
+			useTabsStore.getState().openTab({ type: "request", entityId: "req_a" });
+			useTabsStore.getState().openRunComparison("run_a");
+
+			useTabsStore.getState().closeTabsForEntities(["req_a"]);
+
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "compare", target: "run_a" });
+		});
 	});
 });

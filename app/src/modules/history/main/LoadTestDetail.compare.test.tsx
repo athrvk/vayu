@@ -85,7 +85,7 @@ const compareButton = () => screen.queryByRole("button", { name: "Compare" });
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useTabsStore.setState({ compareRunTarget: null });
+	useTabsStore.setState({ navIntent: null });
 	mocked.getRun.mockResolvedValue(run());
 	mocked.listRuns.mockResolvedValue(emptyPage);
 	mocked.getRunTimeSeries.mockResolvedValue(emptyPage as never);
@@ -122,11 +122,11 @@ describe("LoadTestDetail's compare entry", () => {
 	});
 
 	it("opens on the comparison when a History row asked for it, once", async () => {
-		useTabsStore.setState({ compareRunTarget: "run_open" });
+		useTabsStore.setState({ navIntent: { kind: "compare", target: "run_open" } });
 		renderDetail();
 
 		expect(await screen.findByRole("heading", { name: "Compare runs" })).toBeInTheDocument();
-		expect(useTabsStore.getState().compareRunTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 
 		fireEvent.click(screen.getByRole("button", { name: "Back to report" }));
 		expect(screen.getByRole("tab", { name: /overview/i })).toBeInTheDocument();
@@ -139,15 +139,47 @@ describe("LoadTestDetail's compare entry", () => {
 		act(() => useTabsStore.getState().openRunComparison("run_open"));
 
 		expect(await screen.findByRole("heading", { name: "Compare runs" })).toBeInTheDocument();
-		expect(useTabsStore.getState().compareRunTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 	});
 
 	it("leaves another run's request alone", async () => {
-		useTabsStore.setState({ compareRunTarget: "run_elsewhere" });
+		useTabsStore.setState({ navIntent: { kind: "compare", target: "run_elsewhere" } });
 		renderDetail();
 
 		await screen.findByRole("button", { name: "Compare" });
 		expect(screen.queryByRole("heading", { name: "Compare runs" })).not.toBeInTheDocument();
-		expect(useTabsStore.getState().compareRunTarget).toBe("run_elsewhere");
+		expect(useTabsStore.getState().navIntent).toEqual({
+			kind: "compare",
+			target: "run_elsewhere",
+		});
+	});
+
+	it.each([["spec"], ["dataRow"]] as const)(
+		"leaves a %s intent for the same id alone",
+		async (kind) => {
+			useTabsStore.setState({
+				navIntent:
+					kind === "spec"
+						? { kind, target: "run_open" }
+						: { kind, target: "run_open", rowIndex: 1 },
+			});
+			renderDetail();
+
+			await screen.findByRole("button", { name: "Compare" });
+			expect(screen.queryByRole("heading", { name: "Compare runs" })).not.toBeInTheDocument();
+			expect(useTabsStore.getState().navIntent?.kind).toBe(kind);
+		}
+	);
+
+	it("does not fire a request for a run whose report never rendered on that run's later visit", async () => {
+		// Asked for while another report is on screen, then superseded by the
+		// next navigation: nothing is left armed for the run's own visit.
+		useTabsStore.getState().openRunComparison("run_elsewhere");
+		useTabsStore.getState().openTab({ type: "request", entityId: "req_1" });
+
+		render(withQueryClient(<LoadTestDetail report={REPORT} runId="run_elsewhere" />));
+
+		await screen.findByRole("button", { name: "Compare" });
+		expect(screen.queryByRole("heading", { name: "Compare runs" })).not.toBeInTheDocument();
 	});
 });

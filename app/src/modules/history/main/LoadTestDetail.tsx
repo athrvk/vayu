@@ -216,18 +216,20 @@ export default function LoadTestDetail({ report, runId }: LoadTestDetailProps) {
 
 	/*
 	 * A "Compare with…" chosen on this run's History row (#2164) lands here as
-	 * a store target, because `openTab` can only name the run. Handed over once
-	 * and cleared, so reopening the tab later opens on the report. The tab may
-	 * already be open, so this cannot be a mount-time initial state.
+	 * a store intent, because `openTab` can only name the run. Taken once, so
+	 * reopening the tab later opens on the report. The tab may already be open,
+	 * so this cannot be a mount-time initial state.
 	 */
-	const compareRequested = useTabsStore((s) => s.compareRunTarget === runId);
-	const clearCompareRunTarget = useTabsStore((s) => s.clearCompareRunTarget);
+	const compareRequested = useTabsStore(
+		(s) => s.navIntent?.kind === "compare" && s.navIntent.target === runId
+	);
+	const takeNavIntent = useTabsStore((s) => s.takeNavIntent);
 	useEffect(() => {
 		if (!compareRequested) return;
+		if (!takeNavIntent("compare", runId)) return;
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- see above
 		setComparing(true);
-		clearCompareRunTarget();
-	}, [compareRequested, clearCompareRunTarget]);
+	}, [compareRequested, runId, takeNavIntent]);
 
 	const openSample = ({ filter, number }: SampleDestination) => {
 		setSampleFilter(filter);

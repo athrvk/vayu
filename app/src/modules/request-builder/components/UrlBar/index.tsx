@@ -135,28 +135,29 @@ export default function UrlBar() {
 	 * row and showing the list on it - the failing step is then one click from
 	 * being sent again, which is the dead end the issue is about.
 	 *
-	 * Consumed once, exactly as `specTabTarget` is: the target has to survive
-	 * this tab being opened for the first time, and a later visit to the same
-	 * request must not re-open the list on a choice made ten minutes ago.
-	 * Cleared whether or not this request can bind rows at all - a request
-	 * outside a data-driven collection has no picker, and a target left
-	 * standing would fire on the next one that does.
+	 * Taken once: the intent has to survive this tab being opened for the first
+	 * time, and a later visit to the same request must not re-open the list on a
+	 * choice made ten minutes ago. Taken whether or not this request can bind
+	 * rows at all - a request outside a data-driven collection has no picker.
 	 */
 	const [rowMenuOpen, setRowMenuOpen] = useState(false);
-	const dataRowTarget = useTabsStore((s) => s.dataRowTarget);
-	const clearDataRowTarget = useTabsStore((s) => s.clearDataRowTarget);
+	const dataRowRequested = useTabsStore(
+		(s) => s.navIntent?.kind === "dataRow" && s.navIntent.target === request.id
+	);
+	const takeNavIntent = useTabsStore((s) => s.takeNavIntent);
 	// The same condition the caret is rendered on (`showRowCaret` below): while a
 	// stream is open Send is Stop and there is no picker to show.
 	const canBindRows = rows.available && !isStreaming;
 	useEffect(() => {
-		if (!dataRowTarget || dataRowTarget.requestId !== request.id) return;
-		rememberRowIndex(dataRowTarget.rowIndex);
-		/* eslint-disable-next-line react-hooks/set-state-in-effect -- the target
+		if (!dataRowRequested || !request.id) return;
+		const intent = takeNavIntent("dataRow", request.id);
+		if (!intent) return;
+		rememberRowIndex(intent.rowIndex);
+		/* eslint-disable-next-line react-hooks/set-state-in-effect -- the intent
 		   is state handed over from a navigation, not derived from a prop: it
-		   arrives before this tab renders and is consumed once. */
+		   arrives before this tab renders and is taken once. */
 		if (canBindRows) setRowMenuOpen(true);
-		clearDataRowTarget();
-	}, [dataRowTarget, request.id, canBindRows, clearDataRowTarget, rememberRowIndex]);
+	}, [dataRowRequested, request.id, canBindRows, takeNavIntent, rememberRowIndex]);
 
 	const canExecute = !isExecuting && request.url.trim().length > 0;
 

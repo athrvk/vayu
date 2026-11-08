@@ -110,7 +110,7 @@ export function useActiveEnvironmentRestore(): void {
 			environments.some((e) => e.id === activeEnvironmentId)
 		) {
 			hasPushedPersistedSelection.current = true;
-			setActiveEnvironment.mutate({ id: activeEnvironmentId, previousId: null });
+			setActiveEnvironment.mutate({ id: activeEnvironmentId });
 		}
 		// `setActiveEnvironment` is a stable-enough mutation object, but including
 		// it would re-run this on every render of the mutation state; the ref and

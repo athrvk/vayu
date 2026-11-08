@@ -810,7 +810,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	const handleSetActiveEnvironment = () => {
 		if (type === "environment" && environment) {
-			setActiveEnvironment.mutate({ id: environment.id, previousId: activeEnvironmentId });
+			setActiveEnvironment.mutate({ id: environment.id });
 		}
 	};
 
