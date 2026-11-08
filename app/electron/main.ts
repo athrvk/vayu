@@ -91,6 +91,7 @@ import {
 	type ContextCommand,
 } from "./context-menu.js";
 import { showApplicationMenu } from "./app-menu.js";
+import { menuAccelerators } from "./menu-accelerators.js";
 import type { FlushFailurePrompt } from "./save-flush.js";
 import { createQuitFlow, FLUSH_REQUEST_CHANNEL, registerFlushAckIpc } from "./quit-flow.js";
 import { createRendererRecovery } from "./renderer-recovery.js";
@@ -782,6 +783,7 @@ function sendNavigationCommand(direction: NavDirection) {
 
 function createMenu() {
 	const isMac = process.platform === "darwin";
+	const accelerators = menuAccelerators(process.platform);
 
 	const template: Electron.MenuItemConstructorOptions[] = [
 		// App menu (macOS only)
@@ -799,7 +801,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{
 								label: "Preferences…",
-								accelerator: "Cmd+,",
+								accelerator: accelerators.preferences,
 								click: () => openSettings(),
 							},
 							{ type: "separator" as const },
@@ -809,7 +811,7 @@ function createMenu() {
 							{ role: "hideOthers" as const },
 							{ role: "unhide" as const },
 							{ type: "separator" as const },
-							{ role: "quit" as const },
+							{ role: "quit" as const, accelerator: accelerators.quit },
 						],
 					},
 				]
@@ -820,15 +822,14 @@ function createMenu() {
 			// CmdOrCtrl+W belongs to the renderer (close tab) - rebind window
 			// close so the menu accelerator doesn't swallow the keydown.
 			submenu: isMac
-				? [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]
+				? [{ role: "close" as const, accelerator: accelerators.closeWindow }]
 				: [
 						{
 							label: "Settings",
-							accelerator: "Ctrl+,",
 							click: () => openSettings(),
 						},
 						{ type: "separator" as const },
-						{ role: "quit" as const },
+						{ role: "quit" as const, accelerator: accelerators.quit },
 					],
 		},
 		// Edit menu
@@ -864,12 +865,12 @@ function createMenu() {
 				// every browser does.
 				{
 					label: "Back",
-					accelerator: isMac ? "Cmd+[" : "Alt+Left",
+					accelerator: accelerators.back,
 					click: () => sendNavigationCommand("back"),
 				},
 				{
 					label: "Forward",
-					accelerator: isMac ? "Cmd+]" : "Alt+Right",
+					accelerator: accelerators.forward,
 					click: () => sendNavigationCommand("forward"),
 				},
 				{ type: "separator" as const },
@@ -885,12 +886,12 @@ function createMenu() {
 					: []),
 				{
 					label: "Actual Size",
-					accelerator: "CmdOrCtrl+0",
+					accelerator: accelerators.actualSize,
 					click: () => sendZoomCommand("reset"),
 				},
 				{
 					label: "Zoom In",
-					accelerator: "CmdOrCtrl+=",
+					accelerator: accelerators.zoomIn,
 					click: () => sendZoomCommand("in"),
 				},
 				// The role this replaced also answered to Cmd/Ctrl+Plus - the
@@ -899,13 +900,13 @@ function createMenu() {
 				// one accelerator.
 				{
 					label: "Zoom In",
-					accelerator: "CmdOrCtrl+Plus",
+					accelerator: accelerators.zoomInPlus,
 					visible: false,
 					click: () => sendZoomCommand("in"),
 				},
 				{
 					label: "Zoom Out",
-					accelerator: "CmdOrCtrl+-",
+					accelerator: accelerators.zoomOut,
 					click: () => sendZoomCommand("out"),
 				},
 				{ type: "separator" as const },
@@ -925,7 +926,7 @@ function createMenu() {
 							{ type: "separator" as const },
 							{ role: "window" as const },
 						]
-					: [{ role: "close" as const, accelerator: "Shift+CmdOrCtrl+W" }]),
+					: [{ role: "close" as const, accelerator: accelerators.closeWindow }]),
 			],
 		},
 		// Help menu - documentation links on all platforms, plus
