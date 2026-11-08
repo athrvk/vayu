@@ -836,7 +836,11 @@ logged as a warning: it means a client skipped composition.
     the create and delete halves empty. Both halves of stamping are that one
     walk: a matched request is stamped and a stamped request that matched
     nothing is *cleared* (#718), never a list the caller states. Unbinding is
-    `PUT /collections/:id` with `openapi: null`: one row, stamps untouched.
+    `PUT /collections/:id` with `openapi: null` or `{}`: one row, stamps
+    untouched. Any other `openapi` on that `PUT` is a `400` naming this route
+    (#3348, `reject_binding_on_update`), and `apply_collection_fields` drops a
+    client's `specHash`/`syncedAt` so a create or an import stamps both from
+    the stored document.
   - **`POST /specs/export`** (#855, `core/openapi_export.hpp`) writes a
     collection back out. A bound collection's stored bytes are *patched*
     (unclaimed operations removed, request values and stored examples written

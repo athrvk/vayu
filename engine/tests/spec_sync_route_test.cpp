@@ -158,10 +158,7 @@ class SpecSyncRouteTest : public ::testing::Test {
 
         bound_spec_ = store_spec (BOUND_DOC);
         root_       = create_collection (json{ { "name", "Pets API" } });
-        auto [status, body] = routes::update_collection_response (*db_, root_,
-        json{ { "openapi",
-        json{ { "specId", bound_spec_ }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
-        EXPECT_EQ (status, 200) << body.dump ();
+        seed_binding (root_, bound_spec_);
     }
     void TearDown () override {
         db_.reset ();
@@ -194,15 +191,25 @@ class SpecSyncRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /// Writes a binding straight onto the row, by default with a placeholder
+    /// version; `PUT /collections/:id` only unbinds (#3348), and
+    /// `POST /specs/bind` would restamp the requests too.
+    void seed_binding (const std::string& collection_id,
+    const std::string& spec_id,
+    const std::string& spec_hash = "seed") {
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi =
+        json{ { "specId", spec_id }, { "specHash", spec_hash }, { "syncedAt", 1 } }
+        .dump ();
+        db_->create_collection (*row);
+    }
+
     /** A folder under the root that binds a *different* stored document. */
     std::string create_foreign_folder (const std::string& parent_id) {
         const std::string folder =
         create_collection (json{ { "name", "Orders" }, { "parentId", parent_id } });
-        auto [status, response] = routes::update_collection_response (*db_, folder,
-        json{ { "openapi",
-        json{ { "specId", store_spec (NO_RESPONSES_DOC) },
-        { "specHash", "seed" }, { "syncedAt", 1 } } } });
-        EXPECT_EQ (status, 200) << response.dump ();
+        seed_binding (folder, store_spec (NO_RESPONSES_DOC));
         return folder;
     }
 
@@ -605,10 +612,7 @@ TEST_F (SpecSyncRouteTest, RefusesAFolderParentedBeneathAFolderBoundToADifferent
 TEST_F (SpecSyncRouteTest, ReachesAFolderBoundToTheSameDocument) {
     const std::string folder =
     create_collection (json{ { "name", "pets" }, { "parentId", root_ } });
-    auto [bound, bound_response] = routes::update_collection_response (*db_, folder,
-    json{ { "openapi",
-    json{ { "specId", bound_spec_ }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
-    ASSERT_EQ (bound, 200) << bound_response.dump ();
+    seed_binding (folder, bound_spec_);
     const std::string nested = create_request (folder, json{ { "name", "list pets" } });
 
     auto [status, response] = routes::spec_sync_response (*db_,
@@ -960,12 +964,7 @@ TEST_F (SpecSyncRouteTest, ASyncLeavesAnOlderRunsStoredCoverageAlone) {
     ASSERT_EQ (stored_status, 200) << stored.dump ();
     const std::string v1_id   = stored.value ("id", std::string{});
     const std::string v1_hash = stored.value ("hash", std::string{});
-    {
-        auto [status, body] = routes::update_collection_response (*db_, root_,
-        json{ { "openapi",
-        json{ { "specId", v1_id }, { "specHash", v1_hash }, { "syncedAt", 1 } } } });
-        ASSERT_EQ (status, 200) << body.dump ();
-    }
+    seed_binding (root_, v1_id, v1_hash);
     create_request (root_,
     json{ { "specOperation",
     json{ { "operationId", "listPets" }, { "method", "GET" }, { "path", "/pets" } } } });
@@ -1368,10 +1367,7 @@ TEST_F (DeclinedOperationTest, UnbindingOrBindingOtherBytesForgetsTheDeclinedOpe
     EXPECT_TRUE (db_->get_declined_operations (root_).empty ())
     << "unbinding forgets them";
 
-    ASSERT_EQ (routes::update_collection_response (*db_, root_,
-               json{ { "openapi", json{ { "specId", bound_spec_ } } } })
-               .first,
-    200);
+    seed_binding (root_, bound_spec_);
     delete_request (create_owners_request (root_));
     ASSERT_EQ (db_->get_declined_operations (root_).size (), 1u);
     const json bind_body{ { "collectionId", root_ },

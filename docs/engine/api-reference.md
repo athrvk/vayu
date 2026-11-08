@@ -1623,7 +1623,8 @@ the null-vs-absent rule.
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
-([#3251](#accepted-field-shapes)), or on a cycle (below); `409` if `parentId` names a collection in the
+([#3251](#accepted-field-shapes)), if an `openapi` binding names no stored spec
+(below), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -1647,7 +1648,7 @@ its value, an explicit `null` resets it to the default.
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "dataSchema": null,       // Optional, null clears the declared contract
-  "openapi": null,          // Optional, null unbinds the spec document
+  "openapi": null,          // Optional, null or {} unbinds the spec document; nothing else
   "specFile": null,         // Optional, null unbinds the spec file
   "dataFile": null          // Optional, null unbinds the data file
 }
@@ -1665,7 +1666,9 @@ list it just left. See [Ordering](#ordering).
 **Errors:** `404` if the collection does not exist; `412` if `If-Match` no
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
-a blank or padded `variables` key ([#3251](#accepted-field-shapes)) or on a cycle
+a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
+`openapi` that is neither `null` nor `{}` (binding is
+[`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1714,33 +1717,40 @@ that writes nothing.
 The schema is stored; the file's **rows are not**, anywhere. Where the file is
 lives in `dataFile`, below. See [Data-driven runs](../app/data-driven-runs.md).
 
-**`openapi` (both verbs, and `POST /import/apply`):** the OpenAPI document this
-collection is bound to (issue #637).
+**`openapi` (`POST /collections`, `POST /import/apply`, and unbinding on
+`PUT`):** the OpenAPI document this collection is bound to (issue #637).
 
 ```json
 {"specId":"spec_3f2b1c9a-...","specHash":"<hex sha256>","syncedAt":1700000000000}
 ```
 
 `{}` means bound to nothing, and is what an absent field on create and an
-explicit `null` on update both resolve to - so **unbinding is
-`{"openapi": null}`** rather than a verb of its own. A present value must be an
-object (`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is
-a binding and is validated further: `specId` must be a non-empty string that
-resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
-`specHash` a string, `syncedAt` a number. A write that unbinds, or binds bytes
-with another `specHash`, forgets the operations deletes declined under the old
-document (issue #3031; see [`DELETE /requests/:id`](#delete-requestsid)).
+explicit `null` on update both resolve to. A present value must be an object
+(`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is a
+binding and is validated further: `specId` must be a non-empty string that
+resolves to a stored [spec document](#specs) (`400` naming the id otherwise).
+
+**`PUT /collections/:id` only unbinds** (issue #3348): `{"openapi": null}` and
+`{"openapi": {}}` both store `{}`, and any other value is a `400` that names
+[`POST /specs/bind`](#post-specsbind), after the `404` and `412` checks. Binding
+or rebinding an existing collection restamps every request beneath it both
+ways, which only that route does, in one transaction. Unbinding forgets the
+operations deletes declined under the old document (issue #3031; see
+[`DELETE /requests/:id`](#delete-requestsid)).
 
 `specHash` records which *version* of the document the collection was last synced
 to; a scenario run of a bound collection stamps both values into its snapshot and
 report (see [GET /runs/:runId/report](#get-runsrunidreport)).
 
-**Send the `specId` alone and the engine fills in the rest** (issue #709): every
-write path stamps `specHash` from the document the id names and `syncedAt` from
-the moment of the write, so a binding cannot be stored without the version that
-contract coverage and response-schema validation compare against. Only the
-halves you omit are filled - a binding that states an older `specHash` keeps it,
-and a run of it reports `hash_mismatch` as before.
+**Send the `specId`; the engine writes the rest** (issues #709, #3348): a create
+stamps `specHash` from the document the id names and `syncedAt` from the moment
+of the write, so a binding cannot be stored without the version that contract
+coverage and response-schema validation compare against. A `specHash` or
+`syncedAt` the body sends is dropped, never stored: the version is the
+document's, not the caller's claim about it. A collection's recorded version can
+still fall behind its document's (a binding an older engine wrote); a run of it
+reports `hash_mismatch`, and a `PUT` that says nothing about `openapi` leaves it
+as it is.
 
 Deleting the document is refused while a collection binds it - the binding is
 never cascaded away, see [DELETE /specs/:id](#delete-specsid).
@@ -3330,7 +3340,9 @@ broken binding rather than a bad request.
 Bind a collection to an OpenAPI document, in **one transaction**: the document is
 stored, the collection's binding moves to it, and every request in the
 collection's subtree is stamped with the operation it matched or has its stamp
-cleared. Nothing is created or deleted - that is what a sync is for.
+cleared. Nothing is created or deleted - that is what a sync is for. It is the
+one way to bind or rebind an existing collection: `PUT /collections/:id` with
+any `openapi` but `null` or `{}` is a `400` naming this route (issue #3348).
 
 **The caller sends a document, never a pairing.** The engine reads the bytes it
 is about to store, derives the `operations` index from them, and matches the
@@ -3402,9 +3414,9 @@ the cap, or one that cannot be read as JSON or YAML - and in that last case
 nothing is written, so the collection stays bound to whatever it was bound to.
 `404` when the collection does not exist. `409` when a row moved under the write.
 
-Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null`, which
-writes one row, leaves every stamp in place - so unbind-then-rebind of the same
-document is lossless - and has no document to read. It does forget the declined
+Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null` (or
+`{}`), which writes one row, leaves every stamp in place - so unbind-then-rebind
+of the same document is lossless - and has no document to read. It does forget the declined
 operations, in the same transaction, as a bind to other bytes does.
 
 ### POST /specs/export
@@ -4612,7 +4624,8 @@ accepted a client-supplied `id` - which they no longer do (see
   `syncedAt` are stamped by the engine from the document - the one this payload
   just wrote, or the stored one an `openapi.specId` names - so an imported
   collection is bound to a *version* and its runs are measured against the
-  contract (issue #709).
+  contract (issue #709). A `specHash` or `syncedAt` the item sends is dropped,
+  never stored (issue #3348).
 - A **`clientCertificates`** item is a `client_certificates` registry
   candidate (issue #1656), in the same field shape `POST /client-certificates`
   takes (`host`, `port`, `certPath`, `keyPath`, `certFormat`, `passphrase`) -

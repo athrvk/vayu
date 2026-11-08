@@ -53,9 +53,6 @@ std::pair<int, nlohmann::json>
 create_spec_document_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
-std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
-const std::string& id,
-const nlohmann::json& json);
 std::pair<int, nlohmann::json>
 create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 std::pair<int, nlohmann::json>
@@ -114,11 +111,14 @@ class SpecDiffRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /// Writes the binding straight onto the row; `PUT /collections/:id` only
+    /// unbinds (#3348), and `POST /specs/bind` would restamp the requests too.
     void bind (const std::string& collection_id, const std::string& spec_id) {
-        auto [status, body] = routes::update_collection_response (*db_, collection_id,
-        json{ { "openapi",
-        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
-        EXPECT_EQ (status, 200) << body.dump ();
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi =
+        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } }.dump ();
+        db_->create_collection (*row);
     }
 
     /** The request an import of `BOUND_DOC` would have created for `listPets`. */
