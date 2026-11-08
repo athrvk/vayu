@@ -23,7 +23,9 @@ ways; until then the live view stays, with the report fetch's Retry.
   the same memo reason). The pill and Stop come from two primitives, `live` and
   `endedAs`, which `index.tsx` derives from the store's `phase` through `isDashboardRunLive` and
   `dashboardRunEnding` (#3351): Running with Stop while the run may still be executing - a lost
-  stream included, beside its Reconnect callout - and the run's ending after.
+  stream included, beside its Reconnect callout - and the run's ending after. A report
+  fetch that keeps finding the run still running gives up to that same callout rather than
+  to the report's Retry, so the pill and Stop stay while the engine generates load.
 - `hooks/` - Dashboard-scoped hooks (`useMode`, `useCollectionRunTarget`)
 - `utils/` - Pure derivation and geometry helpers
 - `types.ts` - Type definitions

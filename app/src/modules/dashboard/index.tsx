@@ -38,6 +38,22 @@ import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress, isRunTerminal } from "@/lib/run-status";
 import type { DisplayMetrics } from "./types";
 
+/** The lost-stream callout's body for a run whose report never stopped saying running. */
+const STILL_RUNNING_MESSAGE =
+	"The stream closed, but Vayu's engine still reports this load test as running.";
+
+/**
+ * The report kept saying the run is live after every attempt. A live run ends
+ * on the lost-stream callout: the engine is still generating load, so the pill
+ * and Stop stay, and Reconnect is the way on. A run the user stopped is not
+ * raised back to live; its fetch failed like any other, and Retry stays.
+ */
+function giveUpOnLiveReport(runId: string): void {
+	const { phase, streamLost, reportFailed } = useDashboardStore.getState();
+	if (isDashboardRunLive(phase)) streamLost(runId, STILL_RUNNING_MESSAGE);
+	else reportFailed(runId, "Vayu's engine still reports this run as running.");
+}
+
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
 	const currentRunId = useDashboardStore((s) => s.currentRunId);
@@ -62,9 +78,10 @@ export default function LoadTestDashboard() {
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
-	// Failures count against the same cap as empty reports, and the last one
-	// moves the store to `reportError`: a swallowed throw once re-ran the fetch
-	// forever, silently, showing an empty dashboard the whole time.
+	// Failures and still-running reports count against the same cap as empty
+	// reports, and the last one leaves `awaitingReport` (`reportError`, or
+	// `streamLost` for a run still going): a swallowed throw once re-ran the
+	// fetch forever, silently, showing an empty dashboard the whole time.
 	const loadAttemptRef = useRef(0);
 	const hasCheckedStatus = useRef(false);
 
@@ -108,8 +125,9 @@ export default function LoadTestDashboard() {
 	// Converge on the stored report while the run awaits it, with a delay and a
 	// capped retry (#1925). Usually `handleClose` lands the report inside the
 	// first delay and this fetches nothing. A lost stream means the run is still
-	// going and Reconnect is the way on, so this waits for that. Retry returns
-	// the phase to `awaitingReport`, which re-arms this.
+	// going and Reconnect is the way on, so this waits for that, and does not
+	// re-arm itself out of it. Retry returns the phase to `awaitingReport`,
+	// which re-arms this.
 	useEffect(() => {
 		if (!currentRunId || !awaitingReport || isLoadingReport) return;
 		// Longer initial delay to allow database writes to complete
@@ -118,6 +136,16 @@ export default function LoadTestDashboard() {
 			loadAttemptRef.current === 0
 				? TIMING.REPORT_INITIAL_DELAY_MS
 				: TIMING.REPORT_RETRY_DELAY_MS;
+
+		// Spend one attempt, or at the cap reset the count and give up as told.
+		const retryOr = (giveUp: () => void) => {
+			if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
+				loadAttemptRef.current++;
+				return;
+			}
+			loadAttemptRef.current = 0;
+			giveUp();
+		};
 
 		const timeoutId = setTimeout(async () => {
 			setIsLoadingReport(true);
@@ -129,40 +157,30 @@ export default function LoadTestDashboard() {
 				// Counted against the cap like a failure: the store would refuse it,
 				// and accepting it here would re-fetch on every pass with no end.
 				if (isRunInProgress(report?.metadata?.status)) {
-					throw new Error("Vayu's engine still reports this run as running.");
+					retryOr(() => giveUpOnLiveReport(currentRunId));
+					return;
 				}
-				if (report) {
-					const isValidReport =
-						report.summary?.totalRequests > 0 ||
-						report.summary?.summaryMissing === true ||
-						historicalMetrics.length === 0;
-
-					if (isValidReport) {
-						setFinalReport(currentRunId, report);
-						loadAttemptRef.current = 0;
-					} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
-						loadAttemptRef.current++;
-						setIsLoadingReport(false);
-					} else {
-						console.warn(
-							"Report still has zero data after retries; showing it as stored"
-						);
-						setFinalReport(currentRunId, report);
-						loadAttemptRef.current = 0;
-					}
-				}
-			} catch (err) {
-				// Count failures against the same cap as empty reports, so a
-				// persistent error stops rather than looping.
-				if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
-					loadAttemptRef.current++;
-				} else {
+				if (!report) return;
+				const isValidReport =
+					report.summary?.totalRequests > 0 ||
+					report.summary?.summaryMissing === true ||
+					historicalMetrics.length === 0;
+				if (isValidReport) {
+					setFinalReport(currentRunId, report);
 					loadAttemptRef.current = 0;
+					return;
+				}
+				retryOr(() => {
+					console.warn("Report still has zero data after retries; showing it as stored");
+					setFinalReport(currentRunId, report);
+				});
+			} catch (err) {
+				retryOr(() =>
 					reportFailed(
 						currentRunId,
 						err instanceof Error ? err.message : "Couldn't load the run report"
-					);
-				}
+					)
+				);
 			} finally {
 				setIsLoadingReport(false);
 			}

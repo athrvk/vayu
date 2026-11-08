@@ -27,9 +27,10 @@ import { isDashboardRunLive, useDashboardStore } from "@/stores";
 import { TIMING } from "@/config/timing";
 import type { RunReport } from "@/types";
 
-const { mockGetRunReport, mockStartMonitoring, headerProps } = vi.hoisted(() => ({
+const { mockGetRunReport, mockStartMonitoring, mockStopRun, headerProps } = vi.hoisted(() => ({
 	mockGetRunReport: vi.fn(),
 	mockStartMonitoring: vi.fn(),
+	mockStopRun: vi.fn(),
 	headerProps: [] as Record<string, unknown>[],
 }));
 // What the real service reaches the engine through.
@@ -41,7 +42,7 @@ vi.mock("@/services/sse-client", () => ({
 // call it makes, and `isMonitoring` keeps the mount check from reconnecting
 // on its own.
 vi.mock("@/services", () => ({
-	apiService: { getRunReport: mockGetRunReport },
+	apiService: { getRunReport: mockGetRunReport, stopRun: mockStopRun },
 	loadTestService: {
 		isMonitoring: () => true,
 		startMonitoring: mockStartMonitoring,
@@ -95,11 +96,29 @@ async function advance(ms: number): Promise<void> {
 	});
 }
 
+/**
+ * Settle a round trip after the call, not in the same tick: the report effect
+ * re-arms on its loading flag going true and back, and two updates landing
+ * before one render are batched into no change at all.
+ */
+function answerAfterRoundTrip(report: RunReport): Promise<RunReport> {
+	return new Promise((resolve) => setTimeout(() => resolve(report), ROUND_TRIP_MS));
+}
+
+/** The first report attempt and every retry the cap allows, each its own `act`. */
+async function spendEveryReportAttempt(): Promise<void> {
+	for (let i = 0; i <= TIMING.REPORT_MAX_ATTEMPTS; i++) {
+		await advance(i === 0 ? TIMING.REPORT_INITIAL_DELAY_MS : TIMING.REPORT_RETRY_DELAY_MS);
+		await advance(ROUND_TRIP_MS);
+	}
+}
+
 describe("dashboard error surfacing", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		mockGetRunReport.mockReset();
 		mockStartMonitoring.mockReset();
+		mockStopRun.mockReset().mockResolvedValue(undefined);
 		headerProps.length = 0;
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -200,12 +219,9 @@ describe("dashboard error surfacing", () => {
 		useDashboardStore.getState().streamClosed("run_retry");
 		render(createElement(LoadTestDashboard));
 
-		// The first attempt and every retry the cap allows.
-		for (let i = 0; i <= TIMING.REPORT_MAX_ATTEMPTS; i++) {
-			await advance(i === 0 ? TIMING.REPORT_INITIAL_DELAY_MS : TIMING.REPORT_RETRY_DELAY_MS);
-			await advance(ROUND_TRIP_MS);
-		}
+		await spendEveryReportAttempt();
 		expect(screen.getByText("Couldn't load the run report")).toBeTruthy();
+		expect(useDashboardStore.getState().phase.phase).toBe("reportError");
 
 		const fetched = mockGetRunReport.mock.calls.length;
 		mockGetRunReport.mockResolvedValueOnce(reportWith("completed"));
@@ -219,5 +235,73 @@ describe("dashboard error surfacing", () => {
 			kind: "completed",
 		});
 		expect(screen.queryByText("Couldn't load the run report")).toBeNull();
+	});
+
+	/*
+	 * The stream closed but the stored report kept saying running through every
+	 * attempt. Giving up to `reportError` took the pill and Stop away while the
+	 * engine still generated load (#3351). Mutation check: give up through
+	 * `reportFailed` here as before and the phase reddens on `streamLost`.
+	 */
+	it("ends a report that never stops saying running on the lost-stream callout", async () => {
+		mockGetRunReport.mockImplementation(() => answerAfterRoundTrip(reportWith("running")));
+		useDashboardStore.getState().startRun("run_live");
+		useDashboardStore.getState().streamClosed("run_live");
+		render(createElement(LoadTestDashboard));
+
+		await spendEveryReportAttempt();
+
+		const { phase } = useDashboardStore.getState();
+		expect(phase).toEqual({
+			phase: "streamLost",
+			message:
+				"The stream closed, but Vayu's engine still reports this load test as running.",
+		});
+		expect(isDashboardRunLive(phase)).toBe(true);
+		expect(lastHeader()).toMatchObject({ live: true, endedAs: null });
+		expect(screen.getByText("Lost the live metrics stream")).toBeTruthy();
+		expect(screen.queryByText("Couldn't load the run report")).toBeNull();
+
+		// Reconnect is the user's to press: nothing fetches on its own from here.
+		const fetched = mockGetRunReport.mock.calls.length;
+		await advance(TIMING.REPORT_INITIAL_DELAY_MS * 2);
+		expect(mockGetRunReport.mock.calls.length).toBe(fetched);
+
+		fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+		expect(mockStartMonitoring).toHaveBeenCalledWith("run_live");
+	});
+
+	// Mutation check: give up through `streamLost` alone and the stopped run
+	// stays awaiting, the effect re-arms, and the fetch never ends.
+	it("keeps Retry for a run the user stopped whose report still says running", async () => {
+		mockGetRunReport.mockImplementation(() => answerAfterRoundTrip(reportWith("running")));
+		useDashboardStore.getState().startRun("run_stopped");
+		useDashboardStore.getState().stopRun("run_stopped");
+		render(createElement(LoadTestDashboard));
+
+		await spendEveryReportAttempt();
+
+		const { phase } = useDashboardStore.getState();
+		expect(phase).toMatchObject({ phase: "reportError", stopped: true });
+		expect(isDashboardRunLive(phase)).toBe(false);
+		expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+	});
+
+	it("stops a run from the lost-stream callout the report left it on", async () => {
+		mockGetRunReport.mockImplementation(() => answerAfterRoundTrip(reportWith("running")));
+		useDashboardStore.getState().startRun("run_stop");
+		useDashboardStore.getState().streamClosed("run_stop");
+		render(createElement(LoadTestDashboard));
+		await spendEveryReportAttempt();
+		expect(useDashboardStore.getState().phase.phase).toBe("streamLost");
+
+		const onStop = lastHeader().onStop as () => Promise<void>;
+		await act(() => onStop());
+
+		expect(mockStopRun).toHaveBeenCalledWith("run_stop");
+		expect(useDashboardStore.getState().phase).toEqual({
+			phase: "awaitingReport",
+			stopped: true,
+		});
 	});
 });
