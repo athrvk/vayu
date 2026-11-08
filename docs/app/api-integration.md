@@ -1356,6 +1356,7 @@ app keeps no clock of its own. The loopback poll runs until `expiresAt` plus
 arrives first, and the embedded window is handed the time remaining
 (`timeoutMs` on `oauthOpenWindow`, which the main process refuses unless it is a
 positive finite number).
+
 `runInteractiveAuthorization(config, signal?)` stops on an `AbortSignal`: the poll delay
 and the embedded-window wait both end at once, every engine call is preceded by a
 check, and it rejects with `InteractiveAuthCancelledError` (a subclass of
