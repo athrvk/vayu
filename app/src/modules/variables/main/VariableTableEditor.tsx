@@ -331,16 +331,17 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// Per-field selectors, not a bare `useSaveStore()`: the whole-store call
 	// subscribed this editor to every field the store holds - `status`,
 	// `lastErrorMessage`, `activeContextId`, `contexts` - so a save anywhere
-	// else in the app re-rendered this editor even though only these eight
-	// stable action references are ever read (issue #1714).
+	// else in the app re-rendered this editor even though only these stable
+	// action references are ever read (issue #1714).
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
 	const setActiveContext = useSaveStore((s) => s.setActiveContext);
-	const markPendingSave = useSaveStore((s) => s.markPendingSave);
-	const startSaving = useSaveStore((s) => s.startSaving);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const failSave = useSaveStore((s) => s.failSave);
+	const reportPending = useSaveStore((s) => s.reportPending);
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const reportFailed = useSaveStore((s) => s.reportFailed);
+	const discard = useSaveStore((s) => s.discard);
 	const showToast = useToastStore((s) => s.showToast);
 	const offerUndo = useTrashUndo();
 
@@ -419,8 +420,8 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const markDirty = useCallback(() => {
 		hasPendingChangesRef.current = true;
 		setHasPendingChanges(true);
-		markPendingSave();
-	}, [markPendingSave]);
+		reportPending(contextId);
+	}, [reportPending, contextId]);
 
 	/**
 	 * Compare-and-clear: only drop the dirty flag if the rows are still the ones
@@ -435,21 +436,20 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * A row the save held back (`heldBack`, a name problem) is the same case: its
 	 * edit is on screen and in no payload, and a clean editor would reseed the row
 	 * away on the next cache echo (#3251). The Dock then says "Unsaved changes"
-	 * rather than "Saved", which the held row would make untrue.
+	 * rather than "Saved", which the held row would make untrue, and so it does
+	 * for an edit typed while the save was in flight.
 	 */
 	const finishSave = useCallback(
 		(snapshot: VariableRowData[], heldBack: boolean) => {
-			if (heldBack) {
-				markPendingSave();
+			if (heldBack || !sameRows(variablesRef.current, snapshot)) {
+				reportPending(contextId);
 				return;
 			}
-			if (sameRows(variablesRef.current, snapshot)) {
-				hasPendingChangesRef.current = false;
-				setHasPendingChanges(false);
-			}
-			completeSaveThenIdle(contextId);
+			hasPendingChangesRef.current = false;
+			setHasPendingChanges(false);
+			reportSaved(contextId);
 		},
-		[completeSaveThenIdle, markPendingSave, contextId]
+		[reportPending, reportSaved, contextId]
 	);
 
 	/**
@@ -501,7 +501,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			variablesObj[key] = val;
 		});
 
-		startSaving();
+		reportSaving(contextId);
 
 		return new Promise<void>((resolve, reject) => {
 			const handlers = {
@@ -517,8 +517,16 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 					finishSave(varsToSave, problems.size > 0);
 					resolve();
 				},
+				// Reported here and rejected as well: `runSave` sees the failure
+				// this save reported and does not publish the rejection again.
 				onError: (error: unknown) => {
-					failSave(error instanceof Error ? error.message : "Couldn't save", error);
+					reportFailed(
+						contextId,
+						error instanceof Error
+							? `Couldn't save - ${error.message}`
+							: "Couldn't save",
+						error
+					);
 					reject(error);
 				},
 			};
@@ -553,10 +561,11 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		updateGlobalsMutation,
 		updateEnvironmentMutation,
 		updateCollectionMutation,
-		startSaving,
+		contextId,
+		reportSaving,
+		reportFailed,
 		recordStoredNames,
 		finishSave,
-		failSave,
 	]);
 
 	// Keep performSaveRef updated
@@ -578,6 +587,10 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			unregisterContext(contextId);
 		};
 	}, [contextId, contextName, registerContext, unregisterContext, setActiveContext]);
+
+	// The rows go with the id: a switch reseeds them and an unmount drops them,
+	// so nothing is left for this id's report to describe.
+	useEffect(() => () => discard(contextId), [contextId, discard]);
 
 	// Update context when hasPendingChanges changes
 	useEffect(() => {
@@ -781,7 +794,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		try {
 			await deleteEnvironmentMutation.mutateAsync(id);
 		} catch (error) {
-			// A toast, not `failSave`: a delete is not an unsaved edit (`save-store.ts`).
+			// A toast, not `reportFailed`: a delete is not an unsaved edit (`save-store.ts`).
 			// The dialog stays open, so the delete can be retried or cancelled.
 			const fallback = "Couldn't delete the environment";
 			showToast(

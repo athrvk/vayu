@@ -9,13 +9,16 @@
  */
 
 /**
- * An auto-save's "Saved" must not take an unrelated failure down with it.
+ * An auto-save's "Saved", and a switch to another entity, must not take an
+ * unrelated failure down with them.
  *
  * `performSave` reported success as `completeSave()` plus its own
  * `setTimeout(() => setStatus("idle"))`. That timer fired regardless of what
- * had happened since: a failed delete published to the Dock in the meantime was
- * simply erased, leaving the Dock blank beside the failure's toast. It goes
- * through `completeSaveThenIdle` now, which resets only its own `saved`.
+ * had happened since: a failure published to the Dock in the meantime was
+ * simply erased, leaving the Dock blank beside the failure's toast. An entity
+ * switch did the same through a `reset()` of the one shared status (#3350).
+ * Each surface reports under its own id now, and the status is derived from
+ * all of them.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -25,7 +28,7 @@ import { createElement, type ReactNode } from "react";
 
 import { TIMING } from "@/config/timing";
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useSaveManager } from "./useSaveManager";
 
@@ -34,11 +37,11 @@ function wrapper({ children }: { children: ReactNode }) {
 	return createElement(QueryClientProvider, { client: queryClient }, children);
 }
 
-function mountManager(onSave: () => Promise<void>) {
+function mountManager(onSave: () => Promise<void>, initial = { entityId: "req_1" }) {
 	return renderHook(
-		() =>
+		({ entityId }: { entityId: string }) =>
 			useSaveManager({
-				entityId: "req_1",
+				entityId,
 				contextName: "Request",
 				onSave,
 				hasChanges: true,
@@ -46,14 +49,14 @@ function mountManager(onSave: () => Promise<void>) {
 				// debounce. `useSaveManager.debounce.test.tsx` varies the token.
 				changeToken: 1,
 			}),
-		{ wrapper }
+		{ wrapper, initialProps: initial }
 	);
 }
 
 describe("the status timer a request save arms", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 		// Auto-save off, so the only save in the test is the explicit one.
 		useClientSettingsStore.setState({ autoSave: { enabled: false, delayMs: 5000 } });
@@ -86,11 +89,48 @@ describe("the status timer a request save arms", () => {
 
 		// Anything else failing before the timer fires - a delete in the tree, a
 		// settings write. The Dock is showing that error now.
-		act(() => useSaveStore.getState().failSave("delete failed"));
+		act(() => useSaveStore.getState().reportFailed("settings", "Couldn't save settings"));
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
 		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	it("leaves another surface's failure on screen through an entity switch", async () => {
+		// Mutation check: putting back a store-wide reset in the entity-change
+		// effect, as its old `reset()` was, makes this "saved" - the switch's own
+		// flush landing over the settings failure.
+		act(() => useSaveStore.getState().reportFailed("settings", "Couldn't save settings"));
+		const { rerender } = mountManager(() => Promise.resolve());
+
+		await act(async () => {
+			rerender({ entityId: "req_2" });
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toBe("Couldn't save settings");
+	});
+
+	it("does not retry its own save because another surface failed", async () => {
+		// The auto-save path read the store-wide status to decide whether its
+		// own save had failed, so a success landing beside a failure elsewhere
+		// was retried on the backoff. Mutation check: deciding from `status`
+		// instead of the verdict calls onSave again here.
+		useClientSettingsStore.setState({ autoSave: { enabled: true, delayMs: 5000 } });
+		act(() => useSaveStore.getState().reportFailed("settings", "Couldn't save settings"));
+		const onSave = vi.fn(() => Promise.resolve());
+		mountManager(onSave);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+		});
+		expect(onSave).toHaveBeenCalledTimes(1);
 	});
 });

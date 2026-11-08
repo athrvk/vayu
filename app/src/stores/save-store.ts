@@ -8,11 +8,13 @@
 /**
  * Centralized Save Store
  *
- * Manages auto-save functionality across the app with:
- * - Debounced auto-save on changes
- * - Manual save (Ctrl/Cmd+S)
- * - Visual save status for UI feedback
- * - Save context registry for app-wide save handling
+ * Every surface that saves reports where its own edit stands under its own id
+ * (`reportPending` / `reportSaving` / `reportSaved` / `reportFailed` /
+ * `discard`), and the Dock's `status` is derived from all of those reports
+ * together (#3350). No surface writes `status` itself, so none can clear
+ * another's failure. The store also holds the save context registry that
+ * Ctrl/Cmd+S (`triggerSave`) and the quit and reconnect flushes (`flushAll`)
+ * walk.
  */
 
 /* global setTimeout */
@@ -26,9 +28,7 @@ import { useToastStore } from "./toast-store";
 export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
 
 /**
- * One context's verdict on one save, which is not the same thing as the
- * store-wide `status`: that is a single slot every surface publishes to, so two
- * contexts saving in the same tick overwrite each other's verdict.
+ * One context's verdict on one save, as `runSave` and `flushAll` count it.
  *
  * `pending` is a save the context declined to send (`SaveBlockedError`) or one
  * that left an edit behind: nothing failed, the edit is simply not on disk.
@@ -43,6 +43,20 @@ export type SaveStatus = "idle" | "pending" | "saving" | "saved" | "error";
  */
 export type SaveOutcome = "saved" | "failed" | "final" | "disk-full" | "pending";
 
+export const isFailedOutcome = (outcome: SaveOutcome | void): boolean =>
+	outcome === "failed" || outcome === "final" || outcome === "disk-full";
+
+/**
+ * Where one id's edit stands while it is not on disk. An id with nothing
+ * unsaved has no entry at all, so "clean" is absence. Entries are replaced on
+ * every report, never mutated: `runSave` tells a report made during a save
+ * from one made before it by identity.
+ */
+export type UnsavedEdit =
+	| { kind: "pending" }
+	| { kind: "saving" }
+	| { kind: "failed"; message: string; diskFull: boolean };
+
 /**
  * What `flushAll` reports. `FlushResult` in `electron/save-flush.ts` is the same
  * shape on the other side of the IPC hop. `reason` is present only when it
@@ -55,8 +69,6 @@ export interface FlushTally {
 	reason?: "disk-full";
 }
 
-type FillIn = (context: SaveContext) => void;
-
 /** Save context - represents a saveable entity in the app */
 export interface SaveContext {
 	/** Unique identifier for this save context */
@@ -65,8 +77,7 @@ export interface SaveContext {
 	name: string;
 	/**
 	 * Function to perform the save. A context that reports its own verdict
-	 * resolves with it; one that resolves with nothing is judged by the status it
-	 * published (see `runSave`).
+	 * resolves with it; see `runSave` for how each shape is judged.
 	 */
 	save: () => Promise<SaveOutcome | void>;
 	/** Whether there are pending changes */
@@ -74,48 +85,27 @@ export interface SaveContext {
 }
 
 /**
- * Every failed *save* is reported by a toast, and `failSave` is the single place
- * that does it. Doing it here rather than at the call sites is deliberate: there
- * were eight of them, and a missed one is a failure that reports nowhere at all.
- *
- * Only a save belongs here. `failSave` also parks the Dock on "Not saved" until
- * the next successful save, so a failure that is not an unsaved edit - a failed
- * delete, create or duplicate - raises its own `showToast` instead; routed here
- * it leaves "Not saved" stuck on screen describing no edit at all.
- *
- * This also removed the `errorMessage` field the store used to hold, back when
- * its only reader was the Dock's error line: the toast replaced that line, and
- * a field nothing reads is the defect this codebase hits most often. It is
- * back (as `lastErrorMessage`) because the toast turned out not to be the
- * whole answer - it clears itself after ten seconds, and nothing on screen
- * says "still not saved" after that. The Dock's persistent status line reads
- * it now, so the field has the reader it lacked before.
- *
- * `lastSavedAt` and `pendingSaveId` went the same way, for the same reason:
- * every match on either name was a write inside this file. `status` now has a
- * reader for all five of its values - the Dock renders `pending` as "Unsaved
- * changes", which is the only thing that says so anywhere when auto-save is
- * turned off. If a "Saved 2m ago" surface ever wants a timestamp back, it
- * arrives with that surface.
+ * Every failed *save* is reported by a toast, and `reportFailed` is the single
+ * place that raises it, once per failure. A failure that leaves no unsaved edit
+ * behind raises its own `showToast` instead - a failed delete, create or
+ * duplicate, and a write the surface rolls back on screen (a rename, a
+ * context-bar variable commit, a refused blank name): reported here it would
+ * hold the Dock on "Not saved" describing no edit, and nothing would ever
+ * report that id saved.
  */
 interface SaveState {
-	// Save status
+	/** Derived from `unsaved`: what the Dock renders. */
 	status: SaveStatus;
-
-	/**
-	 * The reason the last `failSave` gave, for the Dock's persistent "Not
-	 * saved" tooltip. Stale once `status` moves off `"error"` - nothing reads
-	 * it in any other state - so no caller needs to clear it on success.
-	 */
+	/** The most recent failure's message while `status` is `"error"`, else null. */
 	lastErrorMessage: string | null;
 
 	/**
-	 * Whether the last `failSave` was handed the engine's 507 as its cause
-	 * (#2685). It is how a context that publishes its failure and then resolves
-	 * gets judged `disk-full` rather than `failed`; `failSave` and `reset` write
-	 * it together with `lastErrorMessage`, so it never outlives the message.
+	 * Every id with an edit not on disk, oldest report first. Keyed by id, not
+	 * by registration: an entry outlives `unregisterContext` until its id is
+	 * reported saved or discarded, which is how the entity-switch flush of a
+	 * pane that has already unregistered still reaches the Dock.
 	 */
-	lastErrorDiskFull: boolean;
+	unsaved: ReadonlyMap<string, UnsavedEdit>;
 
 	// Active save context - the context that's currently focused/active
 	activeContextId: string | null;
@@ -123,45 +113,31 @@ interface SaveState {
 	// Registry of save contexts
 	contexts: Map<string, SaveContext>;
 
-	// Actions
-	setStatus: (status: SaveStatus) => void;
-	markPendingSave: () => void;
-	startSaving: () => void;
 	/**
-	 * Report a successful save: `saved`, then back to `idle` once the indicator
-	 * has been on screen for `TIMING.SAVED_STATUS_DURATION_MS`.
-	 *
-	 * This is the only way to report a success, because the reset is the half
-	 * every caller got wrong. A bare `setTimeout(() => setStatus("idle"))` fires
-	 * regardless of what happened in between, so it clears a failure another
-	 * surface published to the Dock, or wipes a `pending` from an edit made since.
-	 * `triggerSave` has always guarded its own reset this way; the five callers
-	 * that hand-rolled the timer did not.
-	 *
-	 * `reportingContextId` names the registered context whose save this is, when
-	 * there is one. A context's own `hasPendingChanges` is not consulted: the
-	 * registry entry is refreshed by a React effect, so a context that has just
-	 * written still reads dirty at the moment it reports. Every *other*
-	 * registered context is consulted (see the implementation), and a direct
-	 * writer - the collection tree's two renames, which register nothing - names
-	 * nobody and is therefore measured against all of them.
+	 * An edit `id` holds is not on disk. Does not demote a failure: the edit that
+	 * failed is still unsaved, so "Not saved" stays until a save is attempted.
 	 */
-	completeSaveThenIdle: (reportingContextId?: string) => void;
+	reportPending: (id: string) => void;
+	reportSaving: (id: string) => void;
 	/**
-	 * Report a failed save. `cause` is the error behind `message` when there is
-	 * one: a 507 in it is recorded so a context that resolves after publishing
-	 * the failure still counts as `disk-full` (see `outcomeFromPublishedStatus`).
+	 * `id` is on disk. The Dock shows `saved` for
+	 * `TIMING.SAVED_STATUS_DURATION_MS` unless another id still holds an edit or
+	 * something is reported in the meantime.
 	 */
-	failSave: (message: string, cause?: unknown) => void;
+	reportSaved: (id: string) => void;
 	/**
-	 * Withdraw the edit `contextId` reported as unsaved because it was thrown
-	 * away, not written: nothing was saved, so the Dock goes back to `idle`
-	 * rather than claiming `saved`. Leaves the status alone while another context
-	 * still holds an edit (that one owns `pending`/`error`) and when the status is
-	 * `saved` or `saving` (somebody else's write).
+	 * `id`'s save failed. Raises the failure toast; `cause` is the error behind
+	 * `message` when there is one, so a 507 is recorded as disk-full. For an id
+	 * discarded while this save was out, the toast is all it raises.
 	 */
-	discardPendingSave: (contextId: string) => void;
-	reset: () => void;
+	reportFailed: (id: string, message: string, cause?: unknown) => void;
+	/**
+	 * `id`'s edit was thrown away, not written: nothing to report as saved.
+	 * Only for an edit that is gone (reverted, reset, or dropped with the editor
+	 * that held it), because it also abandons a save still out for it - see
+	 * `abandoned`.
+	 */
+	discard: (id: string) => void;
 
 	// Context management
 	registerContext: (context: SaveContext) => void;
@@ -182,166 +158,198 @@ interface SaveState {
 	flushAll: () => Promise<FlushTally>;
 }
 
+type Derived = Pick<SaveState, "status" | "lastErrorMessage">;
+
+// Any failure wins, then a save in flight, then an edit not yet sent; only
+// with none of those does a recent save show. The newest failure is the one
+// described, because a failed report moves its id to the end of the map.
+function derive(unsaved: ReadonlyMap<string, UnsavedEdit>, justSaved: boolean): Derived {
+	let failure: Extract<UnsavedEdit, { kind: "failed" }> | undefined;
+	let saving = false;
+	let pending = false;
+	for (const edit of unsaved.values()) {
+		if (edit.kind === "failed") failure = edit;
+		else if (edit.kind === "saving") saving = true;
+		else pending = true;
+	}
+	if (failure) {
+		return { status: "error", lastErrorMessage: failure.message };
+	}
+	let status: SaveStatus = "idle";
+	if (saving) status = "saving";
+	else if (pending) status = "pending";
+	else if (justSaved) status = "saved";
+	return { status, lastErrorMessage: null };
+}
+
+const verdictOf = (edit: UnsavedEdit): SaveOutcome => {
+	if (edit.kind === "failed") return edit.diskFull ? "disk-full" : "failed";
+	return "pending";
+};
+
+const INITIAL = {
+	unsaved: new Map<string, UnsavedEdit>(),
+	status: "idle" as SaveStatus,
+	lastErrorMessage: null,
+	activeContextId: null,
+	contexts: new Map<string, SaveContext>(),
+};
+
+// Module-local rather than store state: only `derive` reads them, through
+// `apply`. `savedWindowGeneration` lets an armed timer tell whether it still
+// belongs to the most recent save.
+let justSaved = false;
+let savedWindowGeneration = 0;
+
+// Ids discarded since a save last started for them or a context last
+// registered under them. A save that was out when its editor dropped the edit
+// (an id switch, an unmount, a Reset) still settles, and its report describes
+// an edit nobody holds: recorded, nothing could ever clear it. So until the id
+// is taken back, a failure for it is a toast only, and a pending report counts
+// only from a registered owner - that is a new edit; from anyone else it is the
+// late save's "still unsaved".
+const abandoned = new Set<string>();
+
+// How many failures each id has reported, toast-only ones included: `runSave`
+// compares it across a save to tell whether the context already published its
+// rejection, which an entry cannot show once the id was abandoned mid-save.
+const failureReports = new Map<string, number>();
+const failuresOf = (id: string) => failureReports.get(id) ?? 0;
+
 export const useSaveStore = create<SaveState>((set, get) => {
-	// Bumped by every `completeSaveThenIdle`, so an armed reset can tell whether
-	// it is still the most recent one. Module-local rather than store state: no
-	// renderer reads it, and a field nothing renders is the defect this file's
-	// history is made of.
-	let idleResetGeneration = 0;
+	type SavedWindow = "open" | "close" | "keep";
 
-	// Is any registered context holding an unsaved edit? `exceptId` leaves out
-	// the context asking, which is the one entry that cannot be trusted at the
-	// moment it asks: a context's `hasPendingChanges` is refreshed by an effect,
-	// so its own still reads the pre-save `true` as its write lands.
-	const dirtyContextExists = (exceptId?: string) =>
-		[...get().contexts.values()].some(
-			(context) => context.id !== exceptId && context.hasPendingChanges
-		);
-
-	// A context that reports no verdict is judged by the status it published for
-	// itself: every such context reports its own failure through `failSave` and
-	// then resolves rather than rejecting (`SettingsMain`, `VariableTableEditor`),
-	// so resolving is not proof of success. Overwriting unconditionally turned a
-	// failed Cmd+S into "Saved" - with the failure toast still on screen next to
-	// it. This wrapper only fills in the silence when nothing else has.
-	//
-	// `fillIn` is how a success is published. `flushAll` runs every dirty context
-	// at once and passes a collector instead: filling in per context can itself
-	// publish `pending` (`completeSaveThenIdle` holds another dirty context
-	// against a success), and the next context to resolve would read that as its
-	// own verdict. The batch fills in once, after every verdict is in.
-	//
-	// The cause comes from the `cause` that context handed `failSave`, so a
-	// 507 reads `disk-full` here; a failSave given no cause reads `failed`.
-	const outcomeFromPublishedStatus = (context: SaveContext, fillIn: FillIn): SaveOutcome => {
-		const { status: published, lastErrorDiskFull } = get();
-		if (published === "error") return lastErrorDiskFull ? "disk-full" : "failed";
-		if (published === "pending") return "pending";
-		fillIn(context);
-		return "saved";
+	// Every write to `unsaved` goes through here, so the derived fields can never
+	// disagree with it and a multi-id change notifies subscribers once.
+	const apply = (
+		change: (unsaved: Map<string, UnsavedEdit>) => void,
+		savedWindow: SavedWindow = "close"
+	) => {
+		const unsaved = new Map(get().unsaved);
+		change(unsaved);
+		if (savedWindow === "open") {
+			justSaved = true;
+			armSavedWindowClose();
+		} else if (savedWindow === "close") {
+			justSaved = false;
+			savedWindowGeneration++;
+		}
+		set({ unsaved, ...derive(unsaved, justSaved) });
 	};
 
-	// A context that did report is believed over the shared status, which another
-	// context saving in the same tick may have overwritten. A reported "saved"
-	// still fills in the silence, because a context such as `useDraftSaveContext`
-	// publishes nothing on success, but never over another context's "error" or
-	// "pending".
-	const outcomeFromReport = (
-		context: SaveContext,
-		reported: SaveOutcome,
-		fillIn: FillIn
+	const armSavedWindowClose = () => {
+		const armed = ++savedWindowGeneration;
+		setTimeout(() => {
+			if (armed !== savedWindowGeneration) return;
+			justSaved = false;
+			set(derive(get().unsaved, justSaved));
+		}, TIMING.SAVED_STATUS_DURATION_MS);
+	};
+
+	// Delete-then-set moves the id to the end, which is what makes the newest
+	// failure the one `derive` describes.
+	const put = (id: string, edit: UnsavedEdit) => (unsaved: Map<string, UnsavedEdit>) => {
+		unsaved.delete(id);
+		unsaved.set(id, edit);
+	};
+
+	// The pending or failed edit a context reported while its save ran: an entry
+	// that replaced the one present when the save started.
+	const reportedDuringSave = (id: string, before: UnsavedEdit | undefined) => {
+		const now = get().unsaved.get(id);
+		return now !== before && now && now.kind !== "saving" ? now : undefined;
+	};
+
+	// A context that returns a verdict owns its publication. Only a success or a
+	// hold it left unreported is filled in for it - `useDraftSaveContext`
+	// publishes nothing on success - and a reported failure is never published
+	// a second time.
+	const settleVerdict = (
+		id: string,
+		before: UnsavedEdit | undefined,
+		verdict: SaveOutcome
 	): SaveOutcome => {
-		if (reported !== "saved") return reported;
-		const published = get().status;
-		if (published !== "error" && published !== "pending") fillIn(context);
+		const ownReported = get().unsaved.get(id) !== before;
+		if (!ownReported && verdict === "saved") get().reportSaved(id);
+		if (!ownReported && verdict === "pending") get().reportPending(id);
+		return verdict;
+	};
+
+	// A context that resolves with nothing is a success unless it reported
+	// otherwise while it ran. Resolving is not proof of success on its own:
+	// `SettingsMain` publishes its failure and then resolves.
+	const settleSilence = (id: string, before: UnsavedEdit | undefined): SaveOutcome => {
+		const reported = reportedDuringSave(id, before);
+		if (reported) return verdictOf(reported);
+		get().reportSaved(id);
 		return "saved";
 	};
 
-	// Internal helper - runs a save for the given context, updates store state,
-	// and reports what became of it. Caller must own the in-progress guard if
-	// needed.
-	const runSave = async (
-		context: SaveContext,
-		fillIn: FillIn = (c) => get().completeSaveThenIdle(c.id)
-	): Promise<SaveOutcome> => {
-		set({ status: "saving" });
-		try {
-			const reported = await context.save();
-			return reported
-				? outcomeFromReport(context, reported, fillIn)
-				: outcomeFromPublishedStatus(context, fillIn);
-		} catch (error) {
-			get().failSave(
+	// A rejection is published here unless the context already reported a
+	// failure during the save, which is the double toast a "report, then
+	// reject" context used to cost.
+	const settleRejection = (id: string, failuresBefore: number, error: unknown): SaveOutcome => {
+		if (failuresOf(id) === failuresBefore) {
+			get().reportFailed(
+				id,
 				error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
 				error
 			);
-			return isDiskFullError(error) ? "disk-full" : "failed";
+		}
+		const now = get().unsaved.get(id);
+		if (now?.kind === "failed") return verdictOf(now);
+		return isDiskFullError(error) ? "disk-full" : "failed";
+	};
+
+	// Runs one context's save and reports what became of it. Caller must own the
+	// in-progress guard if needed.
+	const runSave = async (context: SaveContext): Promise<SaveOutcome> => {
+		const before = get().unsaved.get(context.id);
+		const failuresBefore = failuresOf(context.id);
+		try {
+			const verdict = await context.save();
+			return verdict
+				? settleVerdict(context.id, before, verdict)
+				: settleSilence(context.id, before);
+		} catch (error) {
+			return settleRejection(context.id, failuresBefore, error);
 		}
 	};
 
 	return {
-		status: "idle",
-		lastErrorMessage: null,
-		lastErrorDiskFull: false,
-		activeContextId: null,
-		contexts: new Map(),
+		...INITIAL,
 
-		setStatus: (status) => set({ status }),
-
-		markPendingSave: () => set({ status: "pending" }),
-
-		startSaving: () => set({ status: "saving" }),
-
-		completeSaveThenIdle: (reportingContextId) => {
-			// "Saved" is a claim about the editor, not about one round trip. That
-			// is the rule #1381 wrote for `runSave`, and `runSave` only covers the
-			// contexts that go through it: a direct writer publishes its success
-			// straight onto the one status the Dock renders, so renaming a folder
-			// while the open request holds an unsaved edit said "Saved" - true of
-			// the rename, false of everything else on screen.
-			//
-			// So a success is only `saved` when nothing else is dirty. `pending`
-			// is the honest answer otherwise, and it is the Dock's "Unsaved
-			// changes" - the context still holding the edit clears it when it
-			// writes. Guarding here rather than at the call sites covers the ones
-			// added later, which is the half a per-caller fix cannot do.
-			if (dirtyContextExists(reportingContextId)) {
-				set({ status: "pending" });
-				// A registry entry is refreshed by an effect, so a *sibling* that
-				// finished its own write moments ago can still read dirty above -
-				// two surfaces saving within a render of each other each see the
-				// other as unsaved, and this `pending` would then sit on the Dock
-				// until the next save, describing nothing. So re-derive it once the
-				// effects have flushed. The two guards are the ones below: a later
-				// save re-arms the generation and owns the status from then on, and
-				// a `pending` a context published for its own unsaved edit is not
-				// this timer's to clear - that context is still in the registry,
-				// still dirty.
-				const armed = ++idleResetGeneration;
-				setTimeout(() => {
-					if (armed !== idleResetGeneration) return;
-					if (get().status !== "pending") return;
-					if (dirtyContextExists()) return;
-					get().setStatus("idle");
-				}, TIMING.SAVED_STATUS_DURATION_MS);
-				return;
-			}
-
-			set({ status: "saved" });
-			const armed = ++idleResetGeneration;
-			setTimeout(() => {
-				// Two conditions, and both are load-bearing. The status check keeps
-				// this timer off a status somebody else published meanwhile. The
-				// generation check keeps it off a *later* save's "saved": two saves
-				// a second apart would otherwise have the first timer end the second
-				// one's indicator early. `useSaveManager` hand-rolled the second half
-				// as a `clearTimeout` of its own timer; it lives here now, so every
-				// caller gets it.
-				if (armed !== idleResetGeneration) return;
-				if (get().status === "saved") get().setStatus("idle");
-			}, TIMING.SAVED_STATUS_DURATION_MS);
+		reportPending: (id) => {
+			if (abandoned.has(id) && !get().contexts.has(id)) return;
+			abandoned.delete(id);
+			if (get().unsaved.get(id)?.kind === "failed") return;
+			apply(put(id, { kind: "pending" }));
 		},
 
-		failSave: (message, cause) => {
-			set({
-				status: "error",
-				lastErrorMessage: message,
-				lastErrorDiskFull: isDiskFullError(cause),
-			});
+		reportSaving: (id) => {
+			abandoned.delete(id);
+			apply(put(id, { kind: "saving" }));
+		},
+
+		reportSaved: (id) => apply((unsaved) => unsaved.delete(id), "open"),
+
+		reportFailed: (id, message, cause) => {
+			failureReports.set(id, failuresOf(id) + 1);
+			if (!abandoned.has(id)) {
+				apply(put(id, { kind: "failed", message, diskFull: isDiskFullError(cause) }));
+			}
 			useToastStore.getState().showToast(message, "error");
 		},
 
-		discardPendingSave: (contextId) => {
-			const { status } = get();
-			if (status !== "pending" && status !== "error") return;
-			if (dirtyContextExists(contextId)) return;
-			get().reset();
+		discard: (id) => {
+			if (!get().unsaved.has(id)) return;
+			abandoned.add(id);
+			apply((unsaved) => unsaved.delete(id), "keep");
 		},
-
-		reset: () => set({ status: "idle", lastErrorMessage: null, lastErrorDiskFull: false }),
 
 		// Context management
 		registerContext: (context) => {
+			abandoned.delete(context.id);
 			const newContexts = new Map(get().contexts);
 			newContexts.set(context.id, context);
 			set({ contexts: newContexts });
@@ -390,19 +398,10 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 		flushAll: async () => {
 			const dirty = [...get().contexts.values()].filter((c) => c.hasPendingChanges);
-			const settled: SaveContext[] = [];
-			const outcomes = await Promise.all(
-				dirty.map((c) => runSave(c, (s) => settled.push(s)))
-			);
-			// Publish the batch's success once; a failure or a pending verdict
-			// published by a context stays on the status as it is.
-			const last = settled[settled.length - 1];
-			if (last && !["error", "pending"].includes(get().status)) {
-				get().completeSaveThenIdle(last.id);
-			}
+			const outcomes = await Promise.all(dirty.map(runSave));
 			const count = (...wanted: SaveOutcome[]) =>
 				outcomes.filter((outcome) => wanted.includes(outcome)).length;
-			const failed = count("failed", "final", "disk-full");
+			const failed = outcomes.filter(isFailedOutcome).length;
 			// The cause is named only when it explains every failure: one context
 			// that failed for another reason (a dead engine) makes the prompt's
 			// generic wording the honest one, and "the disk is full" would send the
@@ -423,3 +422,19 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		},
 	};
 });
+
+/**
+ * Back to a fresh store, saved-indicator timers included. Tests only: the app
+ * never clears another surface's report.
+ */
+export function resetSaveStoreForTests(): void {
+	justSaved = false;
+	savedWindowGeneration++;
+	abandoned.clear();
+	failureReports.clear();
+	useSaveStore.setState({
+		...INITIAL,
+		unsaved: new Map(),
+		contexts: new Map(),
+	});
+}

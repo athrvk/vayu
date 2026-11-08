@@ -9,13 +9,11 @@
  */
 
 /**
- * A variable save's "Saved" must not take an unrelated failure down with it.
+ * What a variable save leaves on the Dock, against the real save store.
  *
- * `finishSave` reported success as `completeSave()` plus its own
- * `setTimeout(() => setStatus("idle"))`, which fired regardless of what had
- * happened since - clearing an error another surface had published to the Dock,
- * or a `pending` from an edit typed in the meantime. It goes through
- * `completeSaveThenIdle` now, which resets only its own `saved`.
+ * The editor reports under its own context id, so its "Saved" cannot take
+ * another surface's failure down with it, and a failure it reports and then
+ * rejects is toasted once rather than again by `runSave` (#3350).
  *
  * The harness is `concurrent-edit-clobber.test.tsx`'s, with the real save store
  * in place of the mocked one.
@@ -26,7 +24,7 @@ import { render, fireEvent, screen, act } from "@testing-library/react";
 
 import { TIMING } from "@/config/timing";
 import { TooltipProvider } from "@/components/ui";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import VariableTableEditor from "./VariableTableEditor";
 import type { Collection, VariableValue } from "@/types";
@@ -101,17 +99,26 @@ const collection: Collection = {
 	updatedAt: new Date(0).toISOString(),
 };
 
+const otherCollection: Collection = { ...collection, id: "col_2", name: "other" };
+
+const editorFor = (source: Collection) => (
+	<TooltipProvider>
+		<VariableTableEditor config={{ type: "collection", collection: source }} />
+	</TooltipProvider>
+);
+
+function renderEditor() {
+	return render(editorFor(collection));
+}
+
+const hostValue = () => (screen.getAllByPlaceholderText("value") as HTMLInputElement[])[0];
+const store = () => useSaveStore.getState();
+
 /** Edit a row and blur it, which is what starts a save, then land the save. */
 function saveOnce() {
-	render(
-		<TooltipProvider>
-			<VariableTableEditor config={{ type: "collection", collection }} />
-		</TooltipProvider>
-	);
-
-	const [hostValue] = screen.getAllByPlaceholderText("value") as HTMLInputElement[];
-	fireEvent.change(hostValue, { target: { value: "example.org" } });
-	fireEvent.blur(hostValue);
+	renderEditor();
+	fireEvent.change(hostValue(), { target: { value: "example.org" } });
+	fireEvent.blur(hostValue());
 	expect(updateCollection).toHaveBeenCalledTimes(1);
 
 	act(() => pendingSave.opts.onSuccess());
@@ -122,12 +129,13 @@ describe("the status timer a variable save arms", () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		updateCollection.mockClear();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	it("returns the Dock to idle when nothing else has happened", async () => {
@@ -143,11 +151,121 @@ describe("the status timer a variable save arms", () => {
 	it("leaves a failure that arrived meanwhile on screen", async () => {
 		saveOnce();
 
-		act(() => useSaveStore.getState().failSave("delete failed"));
+		act(() => store().reportFailed("settings", "Couldn't save settings - busy"));
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
 		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	/*
+	 * Effect 5 of #3350: `onError` reported the failure and then rejected, and
+	 * `runSave` published the rejection again in its own words. Mutation
+	 * check: report under any id but the editor's own and this reds - two toasts.
+	 */
+	it("raises one toast for a failed save the store ran", async () => {
+		// Counted at the call: the toast store folds an identical second message
+		// into the first, which would hide a duplicate worded the same way.
+		const showToast = vi.spyOn(useToastStore.getState(), "showToast");
+		renderEditor();
+		fireEvent.change(hostValue(), { target: { value: "example.org" } });
+
+		let flushed!: ReturnType<ReturnType<typeof store>["flushAll"]>;
+		act(() => {
+			flushed = store().flushAll();
+		});
+		await act(async () => {
+			pendingSave.opts.onError(new Error("database is locked"));
+			await flushed;
+		});
+
+		expect(await flushed).toEqual({ saved: 0, failed: 1, pending: 0 });
+		expect(showToast).toHaveBeenCalledTimes(1);
+		expect(showToast).toHaveBeenCalledWith("Couldn't save - database is locked", "error");
+		expect(store().status).toBe("error");
+	});
+
+	/*
+	 * Mutation check: report saved whenever the save lands and this reds - the
+	 * Dock says "Saved" over the edit typed while it was in flight.
+	 */
+	it("says Unsaved changes for an edit typed while the save was in flight", () => {
+		renderEditor();
+		fireEvent.change(hostValue(), { target: { value: "example.org" } });
+		fireEvent.blur(hostValue());
+		fireEvent.change(hostValue(), { target: { value: "example.net" } });
+
+		act(() => pendingSave.opts.onSuccess());
+
+		expect(store().status).toBe("pending");
+	});
+
+	/*
+	 * Mutation check: drop the editor's unmount `discard` and this reds - the
+	 * Dock keeps "Unsaved changes" for rows nothing holds any more.
+	 */
+	it("withdraws its report when it unmounts holding an unsent edit", () => {
+		const { unmount } = renderEditor();
+		fireEvent.change(hostValue(), { target: { value: "example.org" } });
+		expect(store().status).toBe("pending");
+
+		unmount();
+
+		expect(store().status).toBe("idle");
+	});
+
+	/*
+	 * Selecting another collection reseeds the rows and discards the old id, and
+	 * the save the blur started is still out. Mutation check (confirmed): with
+	 * the store recording reports for an abandoned id, the first case sits on
+	 * "Not saved" and the second on "Unsaved changes", both for `collection-col_1`
+	 * rows nobody holds.
+	 */
+	describe("a save that lands after the editor switched collections", () => {
+		function switchAway(view: ReturnType<typeof renderEditor>) {
+			view.rerender(editorFor(otherCollection));
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+		}
+
+		// Through the store's flush rather than a blur, whose save nothing awaits:
+		// this is also the case that would toast twice, once from the editor and
+		// once from `runSave`, if the store judged "already reported" by an entry
+		// the discard has taken.
+		it("is one toast, not 'Not saved', when it fails", async () => {
+			const showToast = vi.spyOn(useToastStore.getState(), "showToast");
+			// The toast store's state object outlives `restoreAllMocks` (zustand
+			// merges it), so `spyOn` can hand back the earlier case's spy, calls and all.
+			showToast.mockClear();
+			const view = renderEditor();
+			fireEvent.change(hostValue(), { target: { value: "example.org" } });
+			let flushed!: ReturnType<ReturnType<typeof store>["flushAll"]>;
+			act(() => {
+				flushed = store().flushAll();
+			});
+			switchAway(view);
+
+			await act(async () => {
+				pendingSave.opts.onError(new Error("database is locked"));
+				await flushed;
+			});
+
+			expect(await flushed).toEqual({ saved: 0, failed: 1, pending: 0 });
+			expect(showToast).toHaveBeenCalledTimes(1);
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+			expect(store().status).toBe("idle");
+		});
+
+		it("leaves no 'Unsaved changes' when it succeeds", () => {
+			const view = renderEditor();
+			fireEvent.change(hostValue(), { target: { value: "example.org" } });
+			fireEvent.blur(hostValue());
+			switchAway(view);
+
+			act(() => pendingSave.opts.onSuccess());
+
+			expect(store().unsaved.has("collection-col_1")).toBe(false);
+			expect(store().status).not.toBe("pending");
+		});
 	});
 });

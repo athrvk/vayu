@@ -17,14 +17,16 @@
  * path. Engine settings are merge-patches, so leaving a category now writes its
  * edits rather than dropping them.
  *
- * The second test covers the status stomp that lived in the same file: a
- * `setStatus("idle")` fired on mount and on every clean render, so opening
- * Settings cleared an `error` some other context had just published to the Dock.
+ * The last cases cover what the flush leaves on the Dock, against the real save
+ * store: a clean branch that published `idle` on mount used to clear an `error`
+ * some other context had just published (#3350 moved the panel to reports under
+ * its own id).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import SettingsMain from "./SettingsMain";
 
 const entries = [
@@ -41,6 +43,18 @@ const entries = [
 		updatedAt: 0,
 	},
 	{
+		key: "request_timeout",
+		label: "Request timeout",
+		description: "Seconds before a request is abandoned",
+		type: "integer" as const,
+		value: "30",
+		default: "30",
+		category: "network_performance",
+		min: "1",
+		max: "600",
+		updatedAt: 0,
+	},
+	{
 		key: "worker_threads",
 		label: "Worker threads",
 		description: "Engine worker pool size",
@@ -54,7 +68,9 @@ const entries = [
 	},
 ];
 
-const mutateAsync = vi.fn((_payload: { entries: Record<string, string> }) => Promise.resolve({}));
+const mutateAsync = vi.fn((_payload: { entries: Record<string, string> }): Promise<unknown> =>
+	Promise.resolve({})
+);
 
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries }, isLoading: false, error: null }),
@@ -89,21 +105,7 @@ vi.mock("@/stores", () => ({
 		selector({ showToast }),
 }));
 
-const setStatus = vi.fn();
-vi.mock("@/stores/save-store", () => ({
-	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
-		selector({
-			startSaving: vi.fn(),
-			completeSaveThenIdle: vi.fn(),
-			failSave: vi.fn(),
-			setStatus: (...args: unknown[]) => setStatus(...args),
-			markPendingSave: vi.fn(),
-			registerContext: vi.fn(),
-			unregisterContext: vi.fn(),
-			setActiveContext: vi.fn(),
-			updateContext: vi.fn(),
-		}),
-}));
+// `@/stores/save-store` is the real one: what the flush reports is asserted.
 
 /** Only the engine-restart button reaches the real client; the rest is mocked. */
 function Panel() {
@@ -117,8 +119,8 @@ function Panel() {
 describe("SettingsMain - leaving a category", () => {
 	beforeEach(() => {
 		mutateAsync.mockClear();
-		setStatus.mockClear();
 		showToast.mockClear();
+		resetSaveStoreForTests();
 		selectedCategory = "network_performance";
 	});
 
@@ -193,14 +195,128 @@ describe("SettingsMain - leaving a category", () => {
 		expect(showToast).not.toHaveBeenCalled();
 	});
 
-	it("leaves the save status alone while it has nothing pending", async () => {
+	it("leaves another context's failure alone while it has nothing pending", async () => {
 		// Mounting a clean Settings panel used to publish `idle`, wiping whatever
 		// another context had put there - most damagingly an `error`.
+		useSaveStore.getState().reportFailed("globals-editor", "Couldn't save - busy");
 		const { unmount } = render(<Panel />);
 		await act(async () => {
 			unmount();
 		});
 
-		expect(setStatus).not.toHaveBeenCalled();
+		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	/*
+	 * The cleanup starts the write before the effect that sees the category's
+	 * edits gone. Mutation check: let that effect discard a report that is
+	 * `saving` and this reds - the Dock drops "Saving…" for a write still out.
+	 */
+	it("keeps the outgoing category's write on the Dock while it is in flight", async () => {
+		let land!: () => void;
+		mutateAsync.mockImplementationOnce(
+			() => new Promise((resolve) => (land = () => resolve({})))
+		);
+		const { rerender } = render(<Panel />);
+		fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+		selectedCategory = "general_engine";
+		await act(async () => {
+			rerender(<Panel />);
+		});
+		expect(useSaveStore.getState().status).toBe("saving");
+
+		await act(async () => land());
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("leaves nothing unsaved on the Dock once an invalid edit is dropped on unmount", async () => {
+		const { unmount } = render(<Panel />);
+		fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "9999" } });
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		await act(async () => {
+			unmount();
+		});
+
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	/*
+	 * Mutation check: stop the cleanup emptying `editedValuesRef` and this reds -
+	 * the unmounted panel's dropped edit reads as one staged after the write.
+	 */
+	it("reports the unmount flush saved when the only edit it left behind was dropped", async () => {
+		const { unmount } = render(<Panel />);
+		fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+		fireEvent.change(screen.getByLabelText("Request timeout"), { target: { value: "9999" } });
+
+		await act(async () => {
+			unmount();
+		});
+
+		expect(mutateAsync.mock.calls[0][0]).toEqual({ entries: { max_connections: "42" } });
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	/*
+	 * A flush's edits are no longer staged once it starts, so a failed one left
+	 * "Not saved" describing nothing, with no Save to retry it and nothing that
+	 * would ever clear it. It is a toast instead. Mutation check (confirmed):
+	 * report the flush's failure through `reportFailed`, as the Save button's is,
+	 * and the first two cases red on "error"; discard on every failure and the
+	 * third reds on "idle".
+	 */
+	describe("a flush that fails", () => {
+		const offline = () => Promise.reject(new Error("engine unreachable"));
+
+		it("toasts and clears the Dock when it leaves for another category", async () => {
+			mutateAsync.mockImplementationOnce(offline);
+			const { rerender } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+			selectedCategory = "general_engine";
+			await act(async () => {
+				rerender(<Panel />);
+			});
+
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't save settings - engine unreachable",
+				"error"
+			);
+			expect(useSaveStore.getState().unsaved.has("settings")).toBe(false);
+			expect(useSaveStore.getState().status).toBe("idle");
+		});
+
+		it("toasts and clears the Dock when the panel unmounts", async () => {
+			mutateAsync.mockImplementationOnce(offline);
+			const { unmount } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+
+			await act(async () => {
+				unmount();
+			});
+
+			expect(showToast).toHaveBeenCalledTimes(1);
+			expect(useSaveStore.getState().status).toBe("idle");
+		});
+
+		it("keeps an edit staged in the next category while it was out unsaved", async () => {
+			let fail!: () => void;
+			mutateAsync.mockImplementationOnce(
+				() => new Promise((_resolve, reject) => (fail = () => reject(new Error("busy"))))
+			);
+			const { rerender } = render(<Panel />);
+			fireEvent.change(screen.getByLabelText("Max connections"), { target: { value: "42" } });
+			selectedCategory = "general_engine";
+			await act(async () => {
+				rerender(<Panel />);
+			});
+			fireEvent.change(screen.getByLabelText("Worker threads"), { target: { value: "8" } });
+
+			await act(async () => fail());
+
+			expect(useSaveStore.getState().status).toBe("pending");
+		});
 	});
 });

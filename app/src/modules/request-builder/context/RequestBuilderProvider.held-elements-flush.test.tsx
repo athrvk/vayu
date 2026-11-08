@@ -29,7 +29,7 @@ import { render, screen, act, cleanup } from "@testing-library/react";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { TIMING } from "@/config/timing";
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore, type FlushTally } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore, type FlushTally } from "@/stores/save-store";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
 import type { RequestState, MergeableRequestField } from "../types";
@@ -120,7 +120,7 @@ const sentFields = (onSave: ReturnType<typeof vi.fn<OnSave>>) =>
 	[...(onSave.mock.calls[0][1] as ReadonlySet<string>)].sort();
 
 beforeEach(() => {
-	useSaveStore.getState().reset();
+	resetSaveStoreForTests();
 });
 
 afterEach(() => {

@@ -93,17 +93,23 @@ everything.
   answers `{ saved, failed, pending, reason? }` and `flushNeedsConfirmation`
   decides whether the main process asks before the window goes; `reason` is
   `"disk-full"` only when every failure was one, and the prompt then says the
-  disk is full instead of blaming the engine. Each context reports
-  its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
+  disk is full instead of blaming the engine. Each surface reports where its
+  own edit stands under its own id (`reportPending`, `reportSaving`,
+  `reportSaved`, `reportFailed`, `discard`) and the Dock's status is derived
+  from all of them, so no surface can clear another's failure (#3350); a
+  failure that leaves no unsaved edit (a rolled-back rename or commit, a write
+  that lands after its editor discarded the id) is a plain toast instead. Each
+  context reports its own verdict (`SaveOutcome`: saved, failed, final, disk-full or pending) rather than the
   store reading back the one shared status. A 507 reaches that verdict three
   ways: a save that rejects with the `ApiError` (`useSaveManager`,
   `useDraftSaveContext`'s collection editors, the store's own catch), a save
-  that returns the verdict itself (the inbox `CannedResponseControls`), and a
-  context that publishes through `failSave` and resolves (`SettingsMain`,
-  `variable-commit`), which is judged by the status it published and so must
-  pass the error as `failSave(message, error)` - the store keeps whether it was
-  a 507 (`lastErrorDiskFull`), and a call that omits the error reads `failed`
-  (#2685); a save an editor declines to send
+  that returns the verdict itself (the inbox `CannedResponseControls`,
+  `variable-commit`), and a context that reports through `reportFailed` and
+  resolves (`SettingsMain`), which is judged by the report it made during the
+  save and so must pass the error as the cause,
+  `reportFailed(id, message, error)` - the report keeps whether it was a 507,
+  and a call that omits the cause reads `failed` (#2685); a save an editor
+  declines to send
   (`SaveBlockedError`) is `pending`, not a failure, and the prompt does not
   blame the engine for it. The request builder declines only the part it
   knows the engine refuses: an invalid elements list is held back while every

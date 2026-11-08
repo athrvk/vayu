@@ -316,8 +316,8 @@ export default function InboxView() {
 	};
 
 	// A rejection is how `CannedResponseControls` learns the apply failed - it
-	// reports through the save store (`persist`'s `failSave`), which replaced
-	// this call's own toast (issue #1450).
+	// reports through the save store (`persist`'s `reportFailed`), which
+	// replaced this call's own toast (issue #1450).
 	const applyResponse = (response: Partial<InboxCannedResponse>): Promise<void> =>
 		inbox
 			? updateResponse.mutateAsync({ inboxId: inbox.inboxId, response }).then(() => undefined)

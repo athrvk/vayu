@@ -12,35 +12,29 @@
  * A committed variable used to leave "Saved" in the Dock forever.
  *
  * The context bar's variables section is the app's one non-draft commit path: it
- * fires the mutation
- * on blur and reported success with a bare `completeSave()` - `saved`, and no
- * reset armed at all. Nothing else was going to clear it, so the Dock kept
- * claiming a save that had happened minutes ago until some unrelated surface
- * published a status of its own. It reports through `completeSaveThenIdle` now,
- * like every other saving surface, which also means it cannot stomp a failure
- * that arrives in the two seconds after.
+ * fires the mutation on blur and reported success with a bare `completeSave()` -
+ * `saved`, and no reset armed at all. Nothing else was going to clear it, so the
+ * Dock kept claiming a save that had happened minutes ago until some unrelated
+ * surface published a status of its own. It reports under the bar's own id now
+ * (#3350), so its "Saved" expires like every other surface's and cannot settle
+ * another surface's failure.
  *
  * The harness is `VariablesSection.save-error.test.tsx`'s.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { TIMING } from "@/config/timing";
 import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import type { ResolvedVariable } from "@/types";
 
-const globalsMutate = vi.fn(
-	(_payload: unknown, opts: { onSuccess?: () => void; onSettled: () => void }) => {
-		opts.onSuccess?.();
-		opts.onSettled();
-	}
-);
+const globalsMutate = vi.fn(() => Promise.resolve());
 
 // The request references the resolved name (#1308), so `host` renders as a row at
 // the top of the section - the row this suite edits.
@@ -60,9 +54,9 @@ vi.mock("@/queries", () => ({
 		},
 	}),
 	useCollectionAncestors: () => [],
-	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
-	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: globalsMutate }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn() }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn() }),
 }));
 
 const resolved: Record<string, ResolvedVariable> = {
@@ -106,7 +100,7 @@ function renderSection() {
 }
 
 /** Commit an edit to the one variable on screen. */
-function commitOnce() {
+async function commitOnce() {
 	renderSection();
 	const input = screen.getByDisplayValue("example.com") as HTMLInputElement;
 	act(() => {
@@ -114,14 +108,14 @@ function commitOnce() {
 		fireEvent.blur(input);
 	});
 	expect(globalsMutate).toHaveBeenCalledTimes(1);
-	expect(useSaveStore.getState().status).toBe("saved");
+	await waitFor(() => expect(useSaveStore.getState().status).toBe("saved"));
 }
 
 describe("the status a variables-section commit publishes", () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		globalsMutate.mockClear();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 
@@ -130,7 +124,7 @@ describe("the status a variables-section commit publishes", () => {
 	});
 
 	it("returns the Dock to idle instead of leaving 'Saved' up indefinitely", async () => {
-		commitOnce();
+		await commitOnce();
 
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
@@ -140,13 +134,36 @@ describe("the status a variables-section commit publishes", () => {
 	});
 
 	it("leaves a failure that arrived meanwhile on screen", async () => {
-		commitOnce();
+		await commitOnce();
 
-		act(() => useSaveStore.getState().failSave("delete failed"));
+		act(() =>
+			useSaveStore.getState().reportFailed("settings", "Couldn't save settings - busy")
+		);
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
 		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	/*
+	 * Mutation check: report the commits under the failed surface's id and this
+	 * reds - the commit's "Saved" settles a failure it has nothing to do with.
+	 */
+	it("does not settle a failure another surface reported before it", async () => {
+		act(() =>
+			useSaveStore.getState().reportFailed("settings", "Couldn't save settings - busy")
+		);
+		renderSection();
+		const input = screen.getByDisplayValue("example.com") as HTMLInputElement;
+		act(() => {
+			fireEvent.change(input, { target: { value: "example.org" } });
+			fireEvent.blur(input);
+		});
+
+		expect(globalsMutate).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(useSaveStore.getState().unsaved.size).toBe(1));
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toBe("Couldn't save settings - busy");
 	});
 });

@@ -128,9 +128,9 @@ export function CannedResponseControls({
 		response.body !== "" || Object.keys(response.headers).length > 0
 	);
 
-	const startSaving = useSaveStore((s) => s.startSaving);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const failSave = useSaveStore((s) => s.failSave);
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const reportFailed = useSaveStore((s) => s.reportFailed);
 
 	const disabled = stopped || pending;
 
@@ -194,25 +194,26 @@ export function CannedResponseControls({
 	};
 
 	/**
-	 * Reports through the save store rather than a bare toast (issue #1450): a
-	 * refused apply calls `failSave`, which is both the app's one save-failure
-	 * seam and how the Dock's error state gets shown, and a landed one clears
-	 * through `completeSaveThenIdle` the same way every other explicit save
-	 * does. Registered below as this reply's save, so this same function is
-	 * what a quit flush or Ctrl/Cmd+S runs - `useDraftSaveContext` wraps it in
-	 * its own `failSave` catch, which never fires here since this already
-	 * resolves instead of throwing. It resolves with the verdict for that
-	 * reason: a bare resolution counts as saved, which a refused apply is not.
+	 * Reports under the reply's own id rather than as a bare toast (issue
+	 * #1450): a refused apply is `reportFailed`, which toasts and holds the Dock
+	 * on "Not saved" while the draft stays on screen unsaved. Registered below as
+	 * this reply's save, so this same function is what a quit flush or
+	 * Ctrl/Cmd+S runs - `useDraftSaveContext` wraps it in its own catch, which
+	 * never fires here since this resolves instead of throwing. It resolves with
+	 * the verdict for that reason: a bare resolution counts as saved, which a
+	 * refused apply is not, and neither is a draft `collect` refused.
 	 */
-	const persist = async (): Promise<SaveOutcome | void> => {
+	const persist = async (): Promise<SaveOutcome> => {
 		const next = collect();
-		if (!next) return;
-		startSaving();
+		if (!next) return "pending";
+		reportSaving(INBOX_REPLY_SAVE_CONTEXT);
 		try {
 			await onApply(next);
-			completeSaveThenIdle(INBOX_REPLY_SAVE_CONTEXT);
+			reportSaved(INBOX_REPLY_SAVE_CONTEXT);
+			return "saved";
 		} catch (error) {
-			failSave(
+			reportFailed(
+				INBOX_REPLY_SAVE_CONTEXT,
 				error instanceof Error
 					? `Couldn't update the response - ${error.message}`
 					: "Couldn't update the response",

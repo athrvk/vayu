@@ -432,10 +432,9 @@ function SaveError() {
  * `TIMING.SAVE_LINE_FADE_MS` past a return to `idle` so a CSS fade has
  * something to animate against - both a display concern, not the store's.
  *
- * `save-store`'s own `status` flips the instant a save lands or its indicator
- * expires, and every other reader of it (the eight
- * `startSaving`/`completeSaveThenIdle` call sites, and their own tests) needs
- * that truth immediately. Two things about the Dock's own line used to be
+ * `save-store`'s derived `status` flips the instant a save is reported or its
+ * indicator expires, and every other reader of it (the tests of every surface
+ * that reports to the store among them) needs that truth immediately. Two things about the Dock's own line used to be
  * true as a result, both wrong for a human watching it:
  *
  * - A save against the local engine often lands in well under 100ms, under

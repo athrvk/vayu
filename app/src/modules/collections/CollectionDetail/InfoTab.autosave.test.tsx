@@ -35,7 +35,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
 import type { Collection } from "@/types";
 
 const mutation = {
@@ -78,7 +79,8 @@ const nameField = () => screen.getByLabelText("Collection name") as HTMLInputEle
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useSaveStore.setState({ status: "idle" });
+	resetSaveStoreForTests();
+	useToastStore.setState({ toasts: [] });
 });
 
 describe("the collection Info tab saves like the request builder", () => {
@@ -123,7 +125,12 @@ describe("the collection Info tab saves like the request builder", () => {
 		expect(screen.getByDisplayValue("Acme API")).toBeTruthy();
 		// The disabled Save button used to be the whole message. With it gone,
 		// silence here would be indistinguishable from a save that worked.
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(useToastStore.getState().toasts).toMatchObject([
+			{ message: "A collection needs a name - kept the saved one.", variant: "error" },
+		]);
+		// The stored name is back, so nothing is unsaved for the Dock to report.
+		// Mutation check: report the refusal through the save store and this reds.
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 
 	it("does not save a name that did not change", () => {

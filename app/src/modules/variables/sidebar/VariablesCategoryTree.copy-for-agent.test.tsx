@@ -49,7 +49,7 @@ const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useTabsStore: (select: (s: { openTab: () => void }) => unknown) => select({ openTab: vi.fn() }),
 	useSaveStore: (select: (s: Record<string, unknown>) => unknown) =>
-		select({ startSaving: vi.fn(), completeSaveThenIdle: vi.fn(), failSave: vi.fn() }),
+		select({ reportSaving: vi.fn(), reportSaved: vi.fn(), discard: vi.fn() }),
 	useToastStore: (select: (s: { showToast: typeof showToast }) => unknown) =>
 		select({ showToast }),
 	useLayoutStore: (select: (s: { revealDrawerView: () => void }) => unknown) =>

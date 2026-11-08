@@ -526,7 +526,7 @@ All five tabs hold their edits in a draft; four of them commit it without being 
 
 **A dirty draft can show "Changed elsewhere" instead of losing an edit (#1437).** An MCP agent's `update_collection` landing while Info, a Script tab or Auth is mid-edit no longer overwrites the unsaved text: the shared [`ExternalChangeCallout`](#shared-external-change-callout-componentssharedexternalchangecallouttsx) renders the notice with a "Take theirs" action, driven by `useEntityDraft`'s `externalValue`. Auth and the Script tabs treat their draft as one value, so the whole tab shows one callout wired to `reset()`. Info's draft is `{name, description}`, so it merges per field instead - a field the user has not touched adopts the agent's change immediately, and only a field both sides touched shows its own callout. Its Take theirs calls `adopt`, so taking the value is a discard the Dock reports as idle, not "Saved" (#2033).
 
-Info's blank-name rule survives the buttons' removal by being spoken instead: `reportBlankNameRefused()` (`lib/blank-name.ts`) puts the stored name back and reports through `failSave`, the same channel and the same wording the request builder's Info tab uses. The Script tabs' `Clear` writes on the press rather than waiting for a blur that is not coming - focus lands on the button, not in the editor.
+Info's blank-name rule survives the buttons' removal by being spoken instead: the tab puts the stored name back and `reportBlankNameRefused()` (`lib/blank-name.ts`) says so in a toast, the same wording the request builder's Info tab uses. It is not reported to the save store: with the stored name back nothing is unsaved, so the Dock has no "Not saved" to show. The Script tabs' `Clear` writes on the press rather than waiting for a blur that is not coming - focus lands on the button, not in the editor.
 
 **Auth is the exception, and it is a decision (#446), not a leftover.** Not because a credential outranks a script - the request builder autosaves its own auth - but because a blur inside `AuthFields` is not a completion signal. Measured on this tab: an OAuth 2.0 config with Advanced open renders 20 focus stops, 9 of them non-value controls (the grant-type and Add-to pickers, three switches, the secret reveal toggle, the Advanced disclosure, Get Token), and clicking reveal to check a half-typed password fires `focusout` while the draft is dirty. The fields only make sense written together, which is what the button means. A script tab has exactly one focus stop. Because the tab therefore differs from its neighbours, it states its save model above the fields rather than only through a button further down the page. If collection auth is ever to persist by itself, the mechanism is `useSaveManager`'s debounce, not a blur.
 
@@ -1555,7 +1555,7 @@ timer, pausing on hover / focus / window blur, swipe-to-dismiss, and the
 `data-state` the exit animation keys off. `F8` moves focus into the stack.
 
 Toasts are the app's **single in-app** channel for reporting the outcome of an
-action the user took, including save failures (see `save-store.failSave`). The
+action the user took, including save failures (see `save-store.reportFailed`). The
 one exception leaves the app entirely: a terminal event that lands while Vayu
 is not the window in front may also raise an opt-in OS notification
 (`services/notify.ts`, issue #1358), and every one of those events still raises
