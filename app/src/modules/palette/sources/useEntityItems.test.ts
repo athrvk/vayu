@@ -59,13 +59,18 @@ const collections: Collection[] = [
 
 // Only the fields the hook reads - `id`, `name`, `method`, `url` - matter to
 // this test; the rest of `Request`'s shape is irrelevant to it.
-function request(id: string, collectionId: string, name: string): Request {
+function request(
+	id: string,
+	collectionId: string,
+	name: string,
+	url = "https://api.example/user"
+): Request {
 	return {
 		id,
 		collectionId,
 		name,
 		method: "GET",
-		url: "https://api.example/user",
+		url,
 		order: 0,
 		headers: [],
 		params: [],
@@ -78,6 +83,13 @@ function request(id: string, collectionId: string, name: string): Request {
 const requestsByCollection = new Map<string, Request[]>([
 	["c1", [request("r1", "c1", "Get user")]],
 	["c3", [request("r2", "c3", "Refresh token")]],
+	[
+		"c2",
+		[
+			request("r3", "c2", "New Request", "https://api.example/v1/orders"),
+			request("r4", "c2", "", "https://api.example/v1/invoices"),
+		],
+	],
 ]);
 
 const runsData = { pages: [{ runs: [] as Run[] }] };
@@ -106,6 +118,8 @@ describe("useEntityItems", () => {
 			"collection:c1",
 			"request:r1",
 			"collection:c2",
+			"request:r3",
+			"request:r4",
 			"collection:c3",
 			"request:r2",
 		]);
@@ -122,6 +136,17 @@ describe("useEntityItems", () => {
 			"collection:c3": "Payments / Auth",
 			"request:r1": "Payments",
 			"request:r2": "Payments / Auth / Tokens",
+			"request:r3": "Payments / Auth",
+			"request:r4": "Payments / Auth",
 		});
+	});
+
+	it("titles a request as its tab does: its own name, else its URL path", () => {
+		const { result } = renderHook(() => useEntityItems());
+		const titles = Object.fromEntries(result.current.map((item) => [item.id, item.title]));
+		expect(titles["request:r1"]).toBe("Get user");
+		// The default placeholder and a blank name both count as unnamed.
+		expect(titles["request:r3"]).toBe("/v1/orders");
+		expect(titles["request:r4"]).toBe("/v1/invoices");
 	});
 });

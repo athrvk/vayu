@@ -1234,7 +1234,8 @@ Three things about it are load-bearing:
 - **Tab rows are named by `components/layout/tab-descriptors.ts`**, the same hook `TabStrip`
   uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette. Its
   subtitle is the descriptor's `path` ("Users / Get user") so two same-named tabs differ; a tab
-  with no path falls back to the descriptor's `title`.
+  with no path falls back to the descriptor's `title`. A request row is titled by the same
+  `requestTabTitle` rule, so an unnamed request reads as its URL path in both places.
 
 Ranking lives in `ranking.ts` and happens **once**. The palette declares `shouldFilter={false}`,
 so cmdk scores nothing a second time; the scorer is still cmdk's own (`defaultFilter`, the
