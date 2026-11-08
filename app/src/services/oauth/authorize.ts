@@ -19,6 +19,16 @@ import type { OAuth2Config } from "@/types";
 
 export class InteractiveAuthError extends Error {}
 
+/**
+ * The caller's signal aborted the flow. Not a failure: whoever aborted already
+ * knows, so a catch that reports errors skips this one.
+ */
+export class InteractiveAuthCancelledError extends InteractiveAuthError {
+	constructor() {
+		super("Sign-in cancelled.");
+	}
+}
+
 const POLL_INTERVAL_MS = 1000;
 
 const TIMED_OUT_MESSAGE = "Couldn't finish authorization in time.";
@@ -32,23 +42,65 @@ const TIMED_OUT_MESSAGE = "Couldn't finish authorization in time.";
  */
 export const EXPIRY_GRACE_MS = 10 * 1000;
 
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw new InteractiveAuthCancelledError();
 }
 
-/** Reject with `message` if `promise` has not settled within `ms`. */
-function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+/**
+ * Call `onAbort` when `signal` aborts (at once if it already has). Returns the
+ * unsubscribe, which a settled wait must call so a long-lived signal does not
+ * accumulate listeners.
+ */
+function whenAborted(signal: AbortSignal | undefined, onAbort: () => void): () => void {
+	if (!signal) return () => undefined;
+	if (signal.aborted) {
+		onAbort();
+		return () => undefined;
+	}
+	signal.addEventListener("abort", onAbort, { once: true });
+	return () => signal.removeEventListener("abort", onAbort);
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const stopListening = whenAborted(signal, () => {
+			clearTimeout(timer);
+			reject(new InteractiveAuthCancelledError());
+		});
+		const timer = setTimeout(() => {
+			stopListening();
+			resolve();
+		}, ms);
+	});
+}
+
+/**
+ * Reject with `message` if `promise` has not settled within `ms`, or with the
+ * cancel error as soon as `signal` aborts. An abort stops the wait only: the
+ * promise itself keeps running and its eventual answer is dropped.
+ */
+function withDeadline<T>(
+	promise: Promise<T>,
+	ms: number,
+	message: string,
+	signal?: AbortSignal
+): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new InteractiveAuthError(message)), ms);
+		const settle = (finish: () => void) => {
+			clearTimeout(timer);
+			stopListening();
+			finish();
+		};
+		const stopListening = whenAborted(signal, () =>
+			settle(() => reject(new InteractiveAuthCancelledError()))
+		);
+		const timer = setTimeout(() => settle(() => reject(new InteractiveAuthError(message))), ms);
 		void promise.then(
-			(value) => {
-				clearTimeout(timer);
-				resolve(value);
-			},
-			(error: unknown) => {
-				clearTimeout(timer);
-				reject(error instanceof Error ? error : new InteractiveAuthError(String(error)));
-			}
+			(value) => settle(() => resolve(value)),
+			(error: unknown) =>
+				settle(() =>
+					reject(error instanceof Error ? error : new InteractiveAuthError(String(error)))
+				)
 		);
 	});
 }
@@ -57,8 +109,16 @@ function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Prom
  * Run the interactive flow for a *resolved* OAuth2Config (variables already
  * substituted). Resolves with the cache key on success; throws on failure or
  * when the desktop bridge is unavailable.
+ *
+ * Aborting @p signal rejects with `InteractiveAuthCancelledError` and stops
+ * every later engine call. It cannot close what it already opened: the
+ * renderer has no way to close the embedded window or the system browser tab,
+ * so the user closes those and the window's own answer is ignored.
  */
-export async function runInteractiveAuthorization(config: OAuth2Config): Promise<string> {
+export async function runInteractiveAuthorization(
+	config: OAuth2Config,
+	signal?: AbortSignal
+): Promise<string> {
 	const api = window.electronAPI;
 	if (!api) {
 		throw new InteractiveAuthError(
@@ -66,11 +126,13 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 		);
 	}
 
+	throwIfCancelled(signal);
 	const useEmbedded = config.useEmbeddedBrowser === true;
 	const started = await apiService.startOAuth2Authorize({
 		config,
 		mode: useEmbedded ? "embedded" : "loopback",
 	});
+	throwIfCancelled(signal);
 	// NaN compares false against everything, so a missing expiry would poll forever.
 	if (!Number.isFinite(started.expiresAt)) {
 		throw new InteractiveAuthError(
@@ -89,7 +151,8 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 				partition: `oauth:${computeOAuth2CacheKey(config)}`,
 			}),
 			remainingMs + EXPIRY_GRACE_MS,
-			TIMED_OUT_MESSAGE
+			TIMED_OUT_MESSAGE,
+			signal
 		);
 		if ("error" in result) {
 			throw new InteractiveAuthError(result.error);
@@ -98,6 +161,7 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 			started.attemptId,
 			result.callbackUrl
 		);
+		throwIfCancelled(signal);
 		if (status.state !== "completed") {
 			throw new InteractiveAuthError(status.error || "Couldn't complete authorization.");
 		}
@@ -106,14 +170,17 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 
 	// Loopback: open the system browser and poll the engine's listener result.
 	await api.openExternalUrl(started.authorizeUrl);
+	throwIfCancelled(signal);
 
 	const deadline = started.expiresAt + EXPIRY_GRACE_MS;
 	for (;;) {
+		throwIfCancelled(signal);
 		if (Date.now() > deadline) {
 			throw new InteractiveAuthError(TIMED_OUT_MESSAGE);
 		}
-		await delay(POLL_INTERVAL_MS);
+		await delay(POLL_INTERVAL_MS, signal);
 		const status = await apiService.getOAuth2AuthorizeStatus(started.attemptId);
+		throwIfCancelled(signal);
 		if (status.state === "completed") {
 			return status.cacheKey ?? computeOAuth2CacheKey(config);
 		}
