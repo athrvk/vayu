@@ -447,8 +447,9 @@ delete_spec_document_response (vayu::db::Database& db, const std::string& id) {
     // Read-decide-write, so the whole of it is one lock scope (issue #386's
     // rule): between "nobody binds this" and the delete, a concurrent collection
     // write could bind it and be left pointing at a document that is gone. The
-    // collection write cores hold the lock across their own check-and-write, so
-    // the two composites serialize against each other rather than interleaving.
+    // writes that bind (POST /collections, /import/apply, /specs/bind) hold the
+    // lock across their own check-and-write, so the two composites serialize
+    // against each other rather than interleaving.
     std::pair<int, nlohmann::json> result;
     db.with_lock ([&] {
         if (!db.get_spec_document (id).has_value ()) {

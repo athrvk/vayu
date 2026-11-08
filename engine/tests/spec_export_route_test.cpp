@@ -194,11 +194,14 @@ class SpecExportRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /// Writes the binding straight onto the row; `PUT /collections/:id` only
+    /// unbinds (#3348), and `POST /specs/bind` would restamp the requests too.
     void bind (const std::string& collection_id, const std::string& spec_id) {
-        auto [status, body] = routes::update_collection_response (*db_, collection_id,
-        json{ { "openapi",
-        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } } } });
-        EXPECT_EQ (status, 200) << body.dump ();
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi =
+        json{ { "specId", spec_id }, { "specHash", "seed" }, { "syncedAt", 1 } }.dump ();
+        db_->create_collection (*row);
     }
 
     std::string create_request (const std::string& collection_id,

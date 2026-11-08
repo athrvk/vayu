@@ -241,6 +241,34 @@ export type SaveFileReply =
 /** What `hashDataFile` resolves to. Mirrors `DataFileHashReply` in `electron/data-file.ts`. */
 export type DataFileHashReply = { status: "found"; hash: string } | { status: "missing" };
 
+/**
+ * Where the engine is in its life, as the main process's sidecar knows it
+ * (#3336). Mirrors `EngineLifecyclePayload` in `electron/engine-lifecycle.ts`.
+ * Facts, not a verdict: `slow` is an engine past its readiness budget and still
+ * watched, `crashed` one that left without being asked, with its exit `code`
+ * or `signal`, its last stderr lines, and `error` for a child that failed
+ * rather than exited.
+ */
+export type EngineLifecyclePayload =
+	| {
+			kind:
+				| "idle"
+				| "choosingPort"
+				| "replacing"
+				| "spawning"
+				| "ready"
+				| "slow"
+				| "stopping"
+				| "stopped";
+	  }
+	| {
+			kind: "crashed";
+			code: number | null;
+			signal: string | null;
+			stderrTail: string[];
+			error: string | null;
+	  };
+
 interface ElectronAPI {
 	// Engine management
 	/**
@@ -255,6 +283,10 @@ interface ElectronAPI {
 	 * Null otherwise.
 	 */
 	getEngineStartFailure: () => Promise<string | null>;
+	/** The engine's lifecycle now, for a window that loaded after the last push. */
+	getEngineLifecycle: () => Promise<EngineLifecyclePayload>;
+	/** Every lifecycle change from here on. Returns the unsubscribe. */
+	onEngineLifecycle: (callback: (lifecycle: EngineLifecyclePayload) => void) => () => void;
 
 	// MCP server (exposes Vayu to agents like Claude Code)
 	getMcpStatus: () => Promise<McpStatus>;
@@ -357,6 +389,7 @@ interface ElectronAPI {
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;
+		timeoutMs: number;
 		partition?: string;
 	}) => Promise<{ callbackUrl: string } | { error: string }>;
 

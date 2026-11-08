@@ -31,6 +31,7 @@
 #include <sys/socket.h>
 #endif
 
+#include "vayu/core/constants.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/routes.hpp"
@@ -784,6 +785,58 @@ TEST_F (ServerBindTest, StopCancelsAnOAuthCallbackHeldAtTheTokenEndpoint) {
     expect_stop_ends_the_held_handler (server, callback_port);
     const std::string page = callback.get ();
     EXPECT_NE (page.find ("Token exchange failed"), std::string::npos) << page;
+}
+
+// An embedded completion makes its token exchange on a management API
+// handler, which `stop()` joins, and it watches its attempt's cancel rather
+// than `server_stopping`, so the manager is shut down before that join
+// (#3347). The start answer also carries the attempt's expiry. Healthy: about
+// a second (one libcurl progress tick). Broken: the exchange's 30s timeout.
+// Ten seconds sits between them. Mutation check: move the authorize manager's
+// `shutdown ()` in `stop()` back below the join, and the stop takes 30s.
+TEST_F (ServerBindTest, StopCancelsAnEmbeddedOAuthCompletionHeldAtTheTokenEndpoint) {
+    vayu::tests::MockTokenServer idp;
+    const int port = released_port ();
+    vayu::http::Server server (*db_, run_manager_, port);
+    ASSERT_TRUE (server.start ());
+
+    const nlohmann::json config = { { "grantType", "authorization_code" },
+        { "authorizationUrl", "https://idp/auth" },
+        { "accessTokenUrl", idp.url ("/token-hang") }, { "clientId", "cid" },
+        { "callbackUrl", "https://app/callback" } };
+    const auto started_at = std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::system_clock::now ().time_since_epoch ())
+                            .count ();
+    const auto attempt = post_to_engine (port, "/oauth2/authorize/start",
+    { { "config", config }, { "mode", "embedded" } });
+    ASSERT_TRUE (attempt.is_object ());
+    ASSERT_TRUE (attempt.contains ("expiresAt") && attempt["expiresAt"].is_number_integer ())
+    << attempt.dump ();
+    EXPECT_GE (attempt["expiresAt"].get<int64_t> (),
+    started_at + vayu::core::constants::oauth_authorize::ATTEMPT_TTL_MS);
+
+    const std::string authorize_url = attempt.value ("authorizeUrl", "");
+    const auto state_at             = authorize_url.find ("state=") + 6;
+    const std::string state =
+    authorize_url.substr (state_at, authorize_url.find ('&', state_at) - state_at);
+    const nlohmann::json completion = { { "attemptId", attempt.value ("attemptId", "") },
+        { "callbackUrl", "https://app/callback?code=AUTHCODE&state=" + state } };
+
+    auto completed = std::async (std::launch::async, [port, completion] () {
+        httplib::Client client ("127.0.0.1", port);
+        client.set_read_timeout (40, 0);
+        const auto response = client.Post (
+        "/oauth2/authorize/complete", completion.dump (), "application/json");
+        return response ? response->status : -1;
+    });
+    ASSERT_TRUE (vayu::tests::wait_until ([&idp] { return idp.hits () > 0; }))
+    << "the completion never reached the token endpoint";
+
+    const auto began = std::chrono::steady_clock::now ();
+    server.stop ();
+    EXPECT_LT (std::chrono::steady_clock::now () - began, vayu::tests::WAIT_DEADLINE / 2)
+    << "stop() waited out an embedded completion's token exchange";
+    completed.wait ();
 }
 
 #if defined(__linux__)

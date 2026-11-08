@@ -638,16 +638,17 @@ collection is bound to nothing, so unbinding needs no verb of its own. A
 non-empty object is a binding and must carry a `specId` that resolves to a row in
 [`spec_documents`](#spec_documents); `specHash` records which *version* of the
 document the collection was last synced to, and `syncedAt` when. Shape validation
-lives in `apply_collection_fields` so all three write paths enforce it, and the
+lives in `apply_collection_fields` so the write paths that accept a binding enforce it, and the
 resolvability check sits in the route cores beside `reject_missing_collection` -
 `POST /import/apply` binds specs it is about to write in the same transaction.
 
 **The version half is the engine's** (issue #709). A client sends the `specId`;
 whichever write path receives it fills in `specHash` from the document that id
 names and `syncedAt` from the moment of the write - the same division
-`spec_documents.hash` itself draws. Only the halves the caller left out are
-filled, so a binding that deliberately records an older version keeps it and a
-run still reports `hash_mismatch` for it. This matters because both contract
+`spec_documents.hash` itself draws. A `specHash` or `syncedAt` a client sends on
+`POST /collections` or `POST /import/apply` is dropped first (issue #3348), so
+the pair always comes from the store; a stale one arises only when the
+document under a binding is replaced, and a run then reports `hash_mismatch`. This matters because both contract
 readers - coverage and response-schema validation - require the binding's hash
 to equal the stored document's before they engage: until #709 the import path
 stored `{specId}` alone, and every run of an imported collection therefore
@@ -1209,8 +1210,8 @@ pass that *releases* those references, and thereby runs on startup and at the en
 of every run. It also runs after `spec_sync_apply` (the accretion source) and
 after `delete_collection` (the last binder going away). Two rules keep it honest:
 a document written within `SPEC_DOCUMENT_SWEEP_GRACE_MS` (10 min) is always
-spared, because binding stores the document *before* the `PUT /collections/:id`
-that names it and a document in that window is a bind in flight, not an orphan;
+spared, because binding stores the document *before* the write
+that names it (`POST /specs/bind`, `POST /collections`) and a document in that window is a bind in flight, not an orphan;
 and the pass never throws or reads `content`, so no caller can fail over
 housekeeping and no 10 MiB blob is loaded to decide its fate.
 
@@ -1321,8 +1322,8 @@ each in the transaction of the write named:
   alone or with its collection's cohort); when a `POST /specs/sync` creates a
   request for the same operation (`core::declines_taken_back`, the diff's own
   identity rule run against the document being stored); when
-  `PUT /collections/:id` unbinds the collection, or it or `POST /specs/bind`
-  binds it to a document with another `specHash`; and when the bound collection
+  `PUT /collections/:id` unbinds the collection, or `POST /specs/bind` binds it
+  to a document with another `specHash`; and when the bound collection
   itself is purged.
 - **Kept** when the deleted request is purged, by hand or by
   `trashRetentionDays`: emptying the trash is not changing one's mind.
@@ -1548,6 +1549,13 @@ retried until it lands, because a lost final status leaves the run `running`, wh
 retention never prunes. A graceful shutdown waits for that worker, and a daemon killed
 before the write lands leaves the row to startup reconciliation (below). A refused move
 is logged (run id, the statuses named, the one found) and answered, never thrown.
+
+A load run's phase (`setup`, `sending`, `draining`, `summarising`, `settled`; #3341)
+is in-memory state of the active run (`core/run_phase.hpp`) and is not stored: `status`
+is the only column that records where a run is, and the phase adds no column and no
+schema version. What a Stop meant is visible only in the terminal `status` it left
+(`stopped` when it decided the outcome; a Stop in the natural-end drain leaves the
+run's own `completed` or `failed`).
 
 Every status write after the insert goes through it, each naming its real edge. A load
 or collection run is inserted `pending` and a design send `running`. A worker moves

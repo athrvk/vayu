@@ -203,6 +203,11 @@ void Server::stop () {
     // and the daemon's wait treats exactly that listener as a reason to shut
     // down. `httplib::Server::stop` is idempotent.
     stopping_ = true;
+    // Before the join, unlike the other managers below: an embedded OAuth
+    // completion makes its token exchange on a management handler and watches
+    // its attempt's cancel, which this raises. The shutdown is terminal, so a
+    // route that still reaches the manager is only refused.
+    oauth_authorize_manager_.shutdown ();
     server_.stop ();
 
     // `listen_after_bind` returns only once httplib has joined its worker
@@ -218,8 +223,8 @@ void Server::stop () {
     // After the listener is down, because "the server has stopped" must mean
     // no engine work is still in flight (#646), and with no route left to
     // start or stop anything they own. Each listener manager's handlers write
-    // through `db_`, and an OAuth callback is inside a curl transfer; a stream
-    // consumer holds `db_`, reads `cookie_jar_` and is inside one too.
+    // through `db_`; a stream consumer holds `db_`, reads `cookie_jar_` and is
+    // inside a curl transfer.
     // `daemon.cpp` runs `curl_global_cleanup` between this call and `~Server`,
     // so a worker joined only by a member destructor would still be
     // transferring while curl's global state was torn down underneath it - the
@@ -228,7 +233,6 @@ void Server::stop () {
     mock_server_manager_.shutdown ();
     inbox_manager_.shutdown ();
     mock_issuer_manager_.shutdown ();
-    oauth_authorize_manager_.shutdown ();
     sse_manager_.shutdown ();
 }
 

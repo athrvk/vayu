@@ -1531,6 +1531,7 @@ RunManager& manager) {
             throw std::runtime_error ("script.setup failed: " + *setup_failure);
         }
 
+        context->advance_phase (RunPhase::sending);
         for (size_t iteration = 0; iteration < asked.iterations; ++iteration) {
             if (context->should_stop) {
                 break;
@@ -1562,6 +1563,9 @@ RunManager& manager) {
                 ++summary.iterations_completed;
             }
         }
+        // No drain: a step's send has finished before the loop moves on, so a
+        // Stop from here on finds nothing left to cut short.
+        context->advance_phase (RunPhase::summarising);
 
         summary.steps_dropped = store.dropped ();
         summary.transactions  = transactions.build ();
@@ -1576,8 +1580,8 @@ RunManager& manager) {
             summary.steps_stored = stored_step_count (db, context->run_id);
         }
 
-        final_status = context->should_stop ? vayu::RunStatus::Stopped :
-                                              vayu::RunStatus::Completed;
+        final_status = context->stop_decides_outcome () ? vayu::RunStatus::Stopped :
+                                                          vayu::RunStatus::Completed;
 
         // `script.teardown`: `pm.info.run` reads this pass's own totals, and a
         // throwing teardown - `ElementPipeline::run` turns it into this

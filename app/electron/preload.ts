@@ -43,6 +43,30 @@ interface FlushResult {
 }
 
 /**
+ * The engine's lifecycle as main publishes it. Mirrors `EngineLifecyclePayload`
+ * in electron/engine-lifecycle.ts, inlined for the same reason as above.
+ */
+type EngineLifecyclePayload =
+	| {
+			kind:
+				| "idle"
+				| "choosingPort"
+				| "replacing"
+				| "spawning"
+				| "ready"
+				| "slow"
+				| "stopping"
+				| "stopped";
+	  }
+	| {
+			kind: "crashed";
+			code: number | null;
+			signal: string | null;
+			stderrTail: string[];
+			error: string | null;
+	  };
+
+/**
  * The channel a picked file's path is reported to main on (#2356). Main's
  * spelling is `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this
  * CommonJS script cannot import; `preload-grant-channel.test.ts` holds the two
@@ -123,6 +147,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	restartEngine: (): Promise<{ success: boolean; error?: string }> =>
 		ipcRenderer.invoke("engine:restart"),
 	getEngineStartFailure: (): Promise<string | null> => ipcRenderer.invoke("engine:startFailure"),
+	getEngineLifecycle: (): Promise<EngineLifecyclePayload> =>
+		ipcRenderer.invoke("engine:lifecycle"),
+	onEngineLifecycle: (callback: (lifecycle: EngineLifecyclePayload) => void) => {
+		const handler = (_event: unknown, lifecycle: EngineLifecyclePayload) => callback(lifecycle);
+		ipcRenderer.on("engine:lifecycle", handler);
+		return () => ipcRenderer.removeListener("engine:lifecycle", handler);
+	},
 
 	// MCP server (exposes Vayu to agents like Claude Code). See electron/mcp/.
 	getMcpStatus: (): Promise<{
@@ -376,6 +407,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;
+		timeoutMs: number;
 		partition?: string;
 	}): Promise<{ callbackUrl: string } | { error: string }> =>
 		ipcRenderer.invoke("oauth:openWindow", params),

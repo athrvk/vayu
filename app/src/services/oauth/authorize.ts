@@ -20,15 +20,17 @@ import type { OAuth2Config } from "@/types";
 export class InteractiveAuthError extends Error {}
 
 const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+const TIMED_OUT_MESSAGE = "Couldn't finish authorization in time.";
 
 /**
- * The embedded branch's ceiling. The main process owns the real deadline for
- * that window and closes it with a specific error, so this only covers an IPC
- * call that never answers at all - hence deliberately longer, so the specific
- * error wins whenever the main process is alive to send one.
+ * How long past the engine's `expiresAt` this side keeps waiting. The engine
+ * owns the deadline and answers a poll after it with `failed` "Authorization
+ * timed out", and the embedded window closes itself at it with the same words;
+ * both are specific errors that only arrive if this ceiling is the later of the
+ * two. It covers an engine or IPC call that never answers at all.
  */
-const EMBEDDED_TIMEOUT_MS = POLL_TIMEOUT_MS + 10 * 1000;
+export const EXPIRY_GRACE_MS = 10 * 1000;
 
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,16 +71,25 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 		config,
 		mode: useEmbedded ? "embedded" : "loopback",
 	});
+	// NaN compares false against everything, so a missing expiry would poll forever.
+	if (!Number.isFinite(started.expiresAt)) {
+		throw new InteractiveAuthError(
+			"Couldn't start authorization - Vayu's engine sent no expiry."
+		);
+	}
+	const remainingMs = started.expiresAt - Date.now();
 
 	if (useEmbedded) {
+		if (remainingMs <= 0) throw new InteractiveAuthError(TIMED_OUT_MESSAGE);
 		const result = await withDeadline(
 			api.oauthOpenWindow({
 				authorizeUrl: started.authorizeUrl,
 				redirectUri: started.redirectUri,
+				timeoutMs: remainingMs,
 				partition: `oauth:${computeOAuth2CacheKey(config)}`,
 			}),
-			EMBEDDED_TIMEOUT_MS,
-			"Couldn't finish authorization in time."
+			remainingMs + EXPIRY_GRACE_MS,
+			TIMED_OUT_MESSAGE
 		);
 		if ("error" in result) {
 			throw new InteractiveAuthError(result.error);
@@ -96,10 +107,10 @@ export async function runInteractiveAuthorization(config: OAuth2Config): Promise
 	// Loopback: open the system browser and poll the engine's listener result.
 	await api.openExternalUrl(started.authorizeUrl);
 
-	const deadline = Date.now() + POLL_TIMEOUT_MS;
+	const deadline = started.expiresAt + EXPIRY_GRACE_MS;
 	for (;;) {
 		if (Date.now() > deadline) {
-			throw new InteractiveAuthError("Couldn't finish authorization in time.");
+			throw new InteractiveAuthError(TIMED_OUT_MESSAGE);
 		}
 		await delay(POLL_INTERVAL_MS);
 		const status = await apiService.getOAuth2AuthorizeStatus(started.attemptId);

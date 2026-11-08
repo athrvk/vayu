@@ -42,6 +42,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -53,6 +54,7 @@
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
+#include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/list_page.hpp"
 #include "vayu/http/mock_server.hpp"
 #include "vayu/utils/json.hpp"
@@ -66,8 +68,9 @@ std::pair<int, nlohmann::json>
 trash_list_response (vayu::db::Database& db, const ListPageQuery& page_query);
 std::pair<int, nlohmann::json>
 trash_restore_response (vayu::db::Database& db, const std::string& id);
-std::pair<int, nlohmann::json>
-trash_purge_response (vayu::db::Database& db, const std::string& id);
+std::pair<int, nlohmann::json> trash_purge_response (vayu::db::Database& db,
+vayu::http::CookieJar& jar,
+const std::string& id);
 std::pair<int, nlohmann::json> list_request_examples_response (vayu::db::Database& db,
 const std::string& request_id);
 std::pair<int, nlohmann::json> update_request_example_response (vayu::db::Database& db,
@@ -96,6 +99,12 @@ std::pair<int, nlohmann::json>
 delete_environment_response (vayu::db::Database& db, const std::string& id);
 std::pair<int, nlohmann::json>
 export_postman_environment_response (vayu::db::Database& db, const nlohmann::json& json);
+// Defined in cookies.cpp.
+nlohmann::json cookies_response (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids);
+std::unordered_set<std::string> live_environment_ids (vayu::db::Database& db);
+nlohmann::json clear_cookies_response (vayu::http::CookieJar& jar,
+const std::optional<std::string>& scope);
 } // namespace vayu::http::routes
 
 namespace vayu::db {
@@ -133,6 +142,20 @@ class TrashTest : public ::testing::Test {
     void TearDown () override {
         db_.reset ();
         vayu::tests::remove_database_files (TEST_DB_PATH);
+    }
+
+    /// The `environmentId` of every scope `GET /cookies` lists, in its order;
+    /// "" for the no-environment jar.
+    std::vector<std::string> listed_cookie_scopes () {
+        std::vector<std::string> ids;
+        const auto body =
+        routes::cookies_response (jar_, routes::live_environment_ids (*db_));
+        for (const auto& scope : body["scopes"]) {
+            ids.push_back (scope["environmentId"].is_null () ?
+            std::string{} :
+            scope["environmentId"].get<std::string> ());
+        }
+        return ids;
     }
 
     void make_collection (const std::string& id,
@@ -267,6 +290,7 @@ class TrashTest : public ::testing::Test {
     }
 
     std::unique_ptr<Database> db_;
+    vayu::http::CookieJar jar_;
 };
 
 // ---------------------------------------------------------------------------
@@ -872,7 +896,7 @@ TEST_F (TrashTest, PurgingALiveRowIsRefused) {
     make_collection ("col_1", "API");
 
     EXPECT_FALSE (db_->purge_deleted ("col_1").has_value ());
-    auto [status, body] = routes::trash_purge_response (*db_, "col_1");
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "col_1");
     EXPECT_EQ (status, 404);
     ASSERT_HAS_VALUE (db_->get_collection ("col_1"))
     << "a mistyped id destroys nothing";
@@ -883,7 +907,7 @@ TEST_F (TrashTest, ThePurgeRouteReportsWhatItDestroyed) {
     make_request ("req_1", "col_1");
     db_->delete_collection ("col_1");
 
-    auto [status, body] = routes::trash_purge_response (*db_, "col_1");
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "col_1");
     ASSERT_EQ (status, 200);
     EXPECT_EQ (body["id"], "col_1");
     EXPECT_EQ (body["requests"], 1);
@@ -1129,7 +1153,7 @@ TEST_F (TrashTest, PurgingAnEnvironmentRemovesTheRow) {
     make_environment ("env_1", R"({"host":{"value":"a.test","enabled":true}})");
     db_->delete_environment ("env_1");
 
-    auto [status, body] = routes::trash_purge_response (*db_, "env_1");
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "env_1");
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["kind"], "environment");
     EXPECT_EQ (body["variables"], 1);
@@ -1145,7 +1169,7 @@ TEST_F (TrashTest, RestoringOrPurgingALiveEnvironmentIsA404) {
     make_environment ("env_1");
 
     EXPECT_EQ (routes::trash_restore_response (*db_, "env_1").first, 404);
-    EXPECT_EQ (routes::trash_purge_response (*db_, "env_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, jar_, "env_1").first, 404);
     EXPECT_EQ (stored_rows ("environments", "env_1"), 1)
     << "a mistyped id destroys nothing";
     EXPECT_TRUE (db_->get_environment ("env_1").has_value ());
@@ -1167,6 +1191,82 @@ TEST_F (TrashTest, RetentionPurgesAnEnvironmentPastTheWindowAndLeavesALiveOne) {
     EXPECT_EQ (stored_rows ("environments", "env_trashed"), 0);
     EXPECT_TRUE (db_->get_trash ().empty ());
     EXPECT_TRUE (db_->get_environment ("env_live").has_value ());
+}
+
+// ---------------------------------------------------------------------------
+// An environment's cookie jar (#3349): trash hides it, restore shows it again,
+// purge drops it
+// ---------------------------------------------------------------------------
+
+/// One session cookie for example.test, as libcurl exports it.
+std::string session_cookie_line (const std::string& value) {
+    return "example.test\tFALSE\t/\tFALSE\t0\tsession\t" + value;
+}
+
+// Mutation check: list `jar.snapshot ()` unfiltered in `cookies_response` and
+// env_1's scope is still listed while it sits in the trash.
+TEST_F (TrashTest, ATrashedEnvironmentsCookiesAreHiddenAndComeBackOnRestore) {
+    make_environment ("env_1");
+    make_environment ("env_2");
+    jar_.store ("env_1", { session_cookie_line ("one") });
+    jar_.store ("env_2", { session_cookie_line ("two") });
+    jar_.store (std::string (vayu::http::NO_ENVIRONMENT_SCOPE),
+    { session_cookie_line ("none") });
+
+    auto [deleted_status, deleted_body] =
+    routes::delete_environment_response (*db_, "env_1");
+    ASSERT_EQ (deleted_status, 200) << deleted_body.dump ();
+    EXPECT_EQ (listed_cookie_scopes (), (std::vector<std::string>{ "", "env_2" }))
+    << "a trashed environment's scope is listed, or the no-environment jar "
+       "went with it";
+
+    auto [restore_status, restore_body] = routes::trash_restore_response (*db_, "env_1");
+    ASSERT_EQ (restore_status, 200) << restore_body.dump ();
+    const auto body =
+    routes::cookies_response (jar_, routes::live_environment_ids (*db_));
+    ASSERT_EQ (body["scopes"].size (), 3u) << body.dump ();
+    EXPECT_EQ (body["scopes"][1]["environmentId"], "env_1");
+    ASSERT_EQ (body["scopes"][1]["cookies"].size (), 1u);
+    EXPECT_EQ (body["scopes"][1]["cookies"][0]["value"], "one")
+    << "the restore did not get the session back";
+}
+
+// Mutation check: drop the `jar.clear` from `trash_purge_response` and env_1's
+// lines survive the purge.
+TEST_F (TrashTest, PurgingAnEnvironmentDropsItsCookieJarAndOnlyThatOne) {
+    make_environment ("env_1");
+    make_environment ("env_2");
+    jar_.store ("env_1", { session_cookie_line ("one") });
+    jar_.store ("env_2", { session_cookie_line ("two") });
+    db_->delete_environment ("env_1");
+    db_->delete_environment ("env_2");
+
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "env_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_TRUE (jar_.lines_for ("env_1").empty ())
+    << "a purged environment's cookies outlived it";
+    EXPECT_EQ (jar_.lines_for ("env_2").size (), 1u)
+    << "the purge took a scope that is only trashed";
+}
+
+// Mutation check: have `clear_cookies_response`'s absent-scope branch clear
+// only the no-environment jar (all `GET /cookies` lists here) and the trashed
+// environment's cookie survives, with `cleared` at 1.
+TEST_F (TrashTest, ClearingEveryCookieAlsoClearsATrashedEnvironmentsJar) {
+    make_environment ("env_1");
+    jar_.store ("env_1", { session_cookie_line ("one") });
+    jar_.store (std::string (vayu::http::NO_ENVIRONMENT_SCOPE),
+    { session_cookie_line ("none") });
+    db_->delete_environment ("env_1");
+    ASSERT_EQ (listed_cookie_scopes (), std::vector<std::string>{ "" });
+
+    const auto cleared = routes::clear_cookies_response (jar_, std::nullopt);
+    EXPECT_EQ (cleared["cleared"], 2u) << "the hidden scope was not counted";
+    EXPECT_TRUE (jar_.snapshot ().empty ())
+    << "a clear-all left a trashed environment's credentials behind";
+
+    ASSERT_HAS_VALUE (db_->restore_deleted ("env_1"));
+    EXPECT_EQ (listed_cookie_scopes (), std::vector<std::string>{});
 }
 
 // ---------------------------------------------------------------------------
@@ -1312,7 +1412,7 @@ TEST_F (TrashTest, AnExampleWhoseRequestIsGoneIsUnlistedAndUnrestorable) {
     "Example 'exa_orphan' cannot be restored on its own - the request it "
     "belongs to is gone");
 
-    EXPECT_EQ (routes::trash_purge_response (*db_, "exa_orphan").first, 200);
+    EXPECT_EQ (routes::trash_purge_response (*db_, jar_, "exa_orphan").first, 200);
     EXPECT_EQ (stored_rows ("request_examples", "exa_orphan"), 0);
 }
 
@@ -1394,7 +1494,7 @@ TEST_F (TrashTest, RestoringOrPurgingALiveExampleIsA404) {
     make_user_example ("exa_1", "req_1");
 
     EXPECT_EQ (routes::trash_restore_response (*db_, "exa_1").first, 404);
-    EXPECT_EQ (routes::trash_purge_response (*db_, "exa_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, jar_, "exa_1").first, 404);
     EXPECT_EQ (stored_rows ("request_examples", "exa_1"), 1)
     << "a mistyped id destroys nothing";
     EXPECT_TRUE (db_->get_request_example ("exa_1").has_value ());
@@ -1408,7 +1508,7 @@ TEST_F (TrashTest, PurgingAnExampleRemovesTheRow) {
     make_user_example ("exa_1", "req_1");
     db_->delete_request_example ("exa_1");
 
-    auto [status, body] = routes::trash_purge_response (*db_, "exa_1");
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "exa_1");
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["kind"], "example");
     EXPECT_TRUE (body["purged"].get<bool> ());
@@ -1554,7 +1654,7 @@ TEST_F (TrashTest, PurgingAClientCertificateRemovesTheRowAndItsPassphrase) {
     make_client_certificate ("cert_1", "api.example.com");
     db_->delete_client_certificate ("cert_1");
 
-    auto [status, body] = routes::trash_purge_response (*db_, "cert_1");
+    auto [status, body] = routes::trash_purge_response (*db_, jar_, "cert_1");
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["kind"], "clientCertificate");
     EXPECT_TRUE (body["purged"].get<bool> ());
@@ -1570,7 +1670,7 @@ TEST_F (TrashTest, RestoringOrPurgingALiveClientCertificateIsA404) {
     make_client_certificate ("cert_1", "api.example.com");
 
     EXPECT_EQ (routes::trash_restore_response (*db_, "cert_1").first, 404);
-    EXPECT_EQ (routes::trash_purge_response (*db_, "cert_1").first, 404);
+    EXPECT_EQ (routes::trash_purge_response (*db_, jar_, "cert_1").first, 404);
     EXPECT_EQ (stored_rows ("client_certificates", "cert_1"), 1)
     << "a mistyped id destroys nothing";
     EXPECT_TRUE (db_->get_client_certificate ("cert_1").has_value ());

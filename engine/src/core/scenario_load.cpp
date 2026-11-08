@@ -1808,7 +1808,7 @@ vayu::http::routes::ScriptVariableScopes base_scopes) {
     // sends its later steps (#2914). A natural end has retired every VU, and
     // `submit_one` is `requests_sent`'s only writer, so the count is final
     // here. A stopped run keeps the bound, which is what it fell short of.
-    if (max_iterations > 0 && !context->should_stop) {
+    if (max_iterations > 0 && !context->stop_decides_outcome ()) {
         context->requests_expected = context->requests_sent.load ();
     }
 

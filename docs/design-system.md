@@ -3041,7 +3041,12 @@ Starting… / Engine connected / Engine disconnected, on `status-success-text` w
 and `--muted-foreground` otherwise), a running-services button and a
 pending-restart button that render only when there is something to report, the
 save status, and the version string. **This strip is where the connection
-state lives** - no sidebar footer carries a second copy.
+state lives** - no sidebar footer carries a second copy. When the engine is not
+running, the light's tooltip says why, and a button beside it recovers: Retry
+for a start that cannot succeed (a held port), Restart for an engine that left
+on its own, whose tooltip names the signal, exit code or error and quotes the
+last lines it printed (#3336). Both are the same `EngineRestartButton`, in the
+strip's existing height.
 
 The right cluster renders **only while the active tab is a request tab**; every
 other tab keeps the centred strip alone. Its one control is
