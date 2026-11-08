@@ -11873,7 +11873,8 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
   its body is neither an event nor counted. Neither does an interim `1xx` (a
   `100 Continue`) nor a proxy's answer to `CONNECT`: a tunnel refused there
   ends the stream as `error` with no `open`. A stream that failed before any
-  response arrived has none either.
+  response arrived has none either, and neither does one that ends on a
+  redirect the engine refuses to follow (too many hops, an unsendable scheme).
 - `message` carries one upstream event: its `event` name (`message` when the
   origin sent none), its `data` (multiple `data:` lines joined with `\n`), the
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
