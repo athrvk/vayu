@@ -1467,8 +1467,9 @@ outlives any one mounted view. `CommandSurfaces` covers the rest, and it has two
   `modules/request-builder/components/LoadTestCommandSurface.tsx`), `useCommandSurfaces` merges
   what is registered, and the command is `available` exactly while that contribution stands - so
   it is absent rather than inert while no builder is on screen, and closing the tab removes it.
-  Nothing about the load test moves: the single-active-run policy, the ceilings check and
-  `LoadTestConfigDialog` all stay in the builder.
+  Nothing about the load test moves: the builder's handler asks the single-run gate
+  (`canStartLoadRun`, `stores/run-gate.ts`, shared with the Run Collection dialog and agent
+  runs), and the ceilings check and `LoadTestConfigDialog` stay in the builder.
 
   Send has the identical live-draft problem, so it fills the second slot the same way -
   `useRegisterSendRequestSurface`, mounted by

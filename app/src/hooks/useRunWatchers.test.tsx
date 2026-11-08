@@ -19,12 +19,15 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { useRunWatchers } from "./useRunWatchers";
 import { apiService } from "@/services/api";
 import { loadTestService } from "@/services/load-test-service";
 import { scenarioRunService } from "@/services/scenario-run-service";
 import { useDashboardStore } from "@/stores/dashboard-store";
+import { useScenarioRunStore } from "@/stores/scenario-run-store";
+import { useTabsStore } from "@/stores/tabs-store";
+import { useToastStore } from "@/stores/toast-store";
 import type { McpDataChangedEvent, Run, RunConfigSnapshot } from "@/types/domain";
 
 type Bridge = NonNullable<Window["electronAPI"]>;
@@ -78,6 +81,8 @@ afterEach(() => {
 		loadTestConfig: null,
 		requestInfo: null,
 	});
+	useScenarioRunStore.setState({ runId: null, isStreaming: false });
+	useToastStore.setState({ toasts: [] });
 	bridged(null);
 	vi.restoreAllMocks();
 });
@@ -159,6 +164,8 @@ describe("useRunWatchers", () => {
 			const { emit } = mounted();
 
 			emit({ entity: "run", startedRun: { runId: "run_a", kind: "load" } });
+			// Stopped, so it no longer holds the dashboard against run B.
+			useDashboardStore.getState().stopRun("run_a");
 			emit({ entity: "run", startedRun: { runId: "run_b", kind: "load" } });
 			await settled();
 			resolveA(runRow("run_a", SNAPSHOT));
@@ -184,6 +191,86 @@ describe("useRunWatchers", () => {
 			expect(state.loadTestConfig).toBeNull();
 			expect(state.requestInfo).toBeNull();
 			expect(state.currentRunId).toBe("run_21");
+		});
+	});
+
+	/*
+	 * The engine has already started the agent's run, so the app cannot refuse
+	 * it; what it refuses is taking the dashboard from the run the user is
+	 * watching (#3351). Mutation check: drop the `canStartLoadRun()` test from
+	 * the listener and every case here reddens - the live run is replaced and
+	 * nothing is said.
+	 */
+	describe("an agent's load run while another run is live", () => {
+		const LIVE_RUNS = [
+			{
+				name: "a streaming load run",
+				hold: () => useDashboardStore.getState().startRun("run_live"),
+			},
+			{
+				// A lost stream is live: the engine still runs the load test.
+				name: "a load run whose stream was lost",
+				hold: () => {
+					useDashboardStore.getState().startRun("run_live");
+					useDashboardStore.getState().streamLost("run_live", "socket closed");
+				},
+			},
+			{
+				// One stream client serves both: attaching would take it.
+				name: "a streaming collection run",
+				hold: () => useScenarioRunStore.getState().startRun("run_live"),
+			},
+		];
+
+		it.each(LIVE_RUNS)("leaves $name watched and announces the agent's", ({ hold }) => {
+			const load = vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			const getRun = vi.spyOn(apiService, "getRun").mockResolvedValue(runRow("run_agent"));
+			hold();
+			const before = useDashboardStore.getState();
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_agent", kind: "load" } });
+
+			expect(load).not.toHaveBeenCalled();
+			expect(getRun).not.toHaveBeenCalled();
+			const after = useDashboardStore.getState();
+			expect(after.currentRunId).toBe(before.currentRunId);
+			expect(after.phase).toBe(before.phase);
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0]).toMatchObject({
+				variant: "warning",
+				message:
+					"An agent started a load test while another run is live, so it has no live view.",
+				action: { label: "View run" },
+			});
+		});
+
+		it("opens the agent's run from the toast", () => {
+			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			useDashboardStore.getState().startRun("run_live");
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_agent", kind: "load" } });
+			act(() => useToastStore.getState().toasts[0]?.action?.onClick());
+
+			const { openTabs, activeTabId } = useTabsStore.getState();
+			const active = openTabs.find((tab) => tab.id === activeTabId);
+			expect(active).toMatchObject({ type: "run", entityId: "run_agent" });
+		});
+
+		it("adopts the agent's run once the live run has ended", () => {
+			const load = vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
+			vi.spyOn(apiService, "getRun").mockResolvedValue(runRow("run_agent"));
+			useDashboardStore.getState().startRun("run_live");
+			useDashboardStore.getState().stopRun("run_live");
+			const { emit } = mounted();
+
+			emit({ entity: "run", startedRun: { runId: "run_agent", kind: "load" } });
+
+			expect(load).toHaveBeenCalledWith("run_agent");
+			expect(useDashboardStore.getState().currentRunId).toBe("run_agent");
+			expect(useToastStore.getState().toasts).toHaveLength(0);
 		});
 	});
 

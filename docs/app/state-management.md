@@ -1421,7 +1421,7 @@ type DashboardPhase =
   | { phase: "finished"; kind: "completed" | "stopped" | "failed"; report: RunReport }
 ```
 
-Two pure derivations are exported beside it, and every reader asks them rather than the phase. `isDashboardRunLive(phase)` is whether the run may still be executing on the engine: true for `streaming`, `streamLost` and an `awaitingReport` the user did not stop. The header's Running pill and Stop button, the keep-awake prompt, the URL bar's Load test swap and the builder's single-run guard all read it, so a lost stream keeps the run live everywhere, Running beside the "Lost the live metrics stream" callout. A `reportError` is not live: the stream had already closed, and holding the builder on a read that cannot answer would lock out every new run until the engine did. `dashboardRunEnding(phase)` is how the run ended as far as the dashboard knows - the report's kind, or "stopped" from the user's Stop before the report lands - and is what the pill names when the run is not live. `useHostSleepRecorder` is the one reader that wants the stream itself rather than the run, and reads `phase === "streaming"`: a lost stream's last tick is not where the run had got to.
+Two pure derivations are exported beside it, and every reader asks them rather than the phase. `isDashboardRunLive(phase)` is whether the run may still be executing on the engine: true for `streaming`, `streamLost` and an `awaitingReport` the user did not stop. The header's Running pill and Stop button, the keep-awake prompt, the URL bar's Load test swap and the single-run gate (`canStartLoadRun`, below) all read it, so a lost stream keeps the run live everywhere, Running beside the "Lost the live metrics stream" callout. A `reportError` is not live: the stream had already closed, and holding the builder on a read that cannot answer would lock out every new run until the engine did. `dashboardRunEnding(phase)` is how the run ended as far as the dashboard knows - the report's kind, or "stopped" from the user's Stop before the report lands - and is what the pill names when the run is not live. `useHostSleepRecorder` is the one reader that wants the stream itself rather than the run, and reads `phase === "streaming"`: a lost stream's last tick is not where the run had got to.
 
 **Every writer but `startRun` is addressed to a run, and a write for a run the store is not holding is dropped**, as in `execution-events-store` below. A continuation can outlive its run - `handleClose`'s awaited report fetch, a Stop request, a buffered flush - and landing on the run that replaced it was the defect #1925 and the finishing-run-A-starting-run-B race both were. A transition that does not apply from the current phase is dropped too: a close after a lost stream keeps the callout, a re-attached stream does not raise a stopped or settled run back to Running, and nothing moves a finished run but the next `startRun`.
 
@@ -1713,7 +1713,7 @@ showToast({                                     // returns the toast id
 
 Variants are `info` | `success` | `warning` | `error`, with base durations of 4s
 / 4s / 6s / 10s from `TIMING.TOAST_DURATION_MS`. `warning` is for a refusal ("A
-load test is already running") as distinct from a failure.
+load test is already running.", `runningRunSentence`) as distinct from a failure.
 
 **Three of the policies are user preferences** (`notifications` on
 `client-settings-store`, shapes in `constants/toast.ts`), applied here on the way
@@ -2695,7 +2695,13 @@ tools just created, plus which of the two run services owns its stream
 `loadTestService.startMonitoring` or `scenarioRunService.startMonitoring`, which
 is the same path the dashboard and the Run Collection dialog take, so the wake
 lock, the OS progress bar and the finished notification all begin when an
-agent's run does rather than when someone opens its tab. For a load run it
+agent's run does rather than when someone opens its tab. A load run is adopted
+only while `canStartLoadRun()` allows a load run to start (#3351). While another
+run holds the stream the hook leaves the dashboard, the stream and the user's run
+alone, and shows a warning toast ("An agent started a load test while another
+run is live, so it has no live view.") whose View run opens the agent's run in
+History; the run executes unwatched and its row converges on the runs poll. Once
+adopted, it
 points `dashboard-store` at the run first, exactly as those surfaces do:
 `startMonitoring` states that its caller has registered the run, and a store
 left unpointed would collect the ticks of a run it does not name. The event
@@ -3388,6 +3394,8 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 8. If any script ran, the environment / globals / collection query families are invalidated so values the script wrote are visible in the variables editor and the resolver. The gate is `scriptsMayWriteVariables(pre, post)` (`request-builder/utils/execute-mapping.ts`), shared by the builder's send path and the History run view's resend. **Both** script kinds count: `pm.environment.set` and friends persist engine-side from a Tests-tab script exactly as from a pre-request one, and with `refetchOnWindowFocus: false` nothing else is coming to correct a stale value
 
 ### Starting a Load Test Run
+
+**One load run owns the live stream at a time** (#3351). `canStartLoadRun()` in `stores/run-gate.ts` is the one answer, read by all three places a load run starts: the request builder (before its dialog opens, and again at Start), the Run Collection dialog in load mode, and `useRunWatchers` for an agent's run. It refuses while the dashboard's run is live (`isDashboardRunLive`, so a lost stream counts) or a collection run is streaming, because `sseClient` holds one `EventSource` and a load run attaching would take it from either. The engine sets no limit of its own; this is renderer policy. The answer names the running run (`{ kind: "load" | "collection", runId, label }`, the label being the dashboard's method and URL when it holds them), and `runningRunSentence` / `runningRunTab` turn that into the refusal and the tab that shows the run. The builder opens that tab with a warning toast; the dialog shows a blocking callout with View run and keeps Run disabled, following the gate through `useCanStartLoadRun()` so Run comes back when the run ends. Both refuse before `POST /runs`, so no engine run is started past a refusal. An agent's run has already started on the engine, so it cannot be refused: see `useRunWatchers` under the MCP section. A collection run's own start is not gated; it takes the stream from a live load run openly, through the dashboard's lost-stream callout (#1417).
 
 1. User configures load test in the dashboard modal (duration, concurrency, etc.)
 2. The request half is composed engine-side (`useEngine().composeRequest()`), then `apiService.startLoadTest()` sends the composed payload plus the load config to `POST /runs`

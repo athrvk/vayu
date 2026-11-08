@@ -19,13 +19,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import RunCollectionDialog from "./RunCollectionDialog";
 import { TooltipProvider } from "@/components/ui";
 import {
 	useClientSettingsStore,
 	useDashboardStore,
 	useDataFileStore,
+	useScenarioRunStore,
 	useSessionStore,
 	useTabsStore,
 } from "@/stores";
@@ -179,6 +180,9 @@ beforeEach(() => {
 	startRunState.isPending = false;
 	startRunState.error = null;
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
+	// A load run started by an earlier case would hold the gate shut.
+	useDashboardStore.setState({ currentRunId: null, phase: { phase: "idle" }, requestInfo: null });
+	useScenarioRunStore.setState({ runId: null, isStreaming: false });
 	useSessionStore.setState({ activeEnvironmentId: null });
 	useClientSettingsStore.getState().setLoadTestCeilings({ ...DEFAULT_LOAD_TEST_CEILINGS });
 	localStorage.removeItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
@@ -653,6 +657,8 @@ describe("running the sequence as a load test", () => {
 			dataFileCastNumbers: false,
 		});
 		unmount();
+		// Stopped, so it does not hold the second run back.
+		useDashboardStore.getState().stopRun("run_load_8");
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		enableLoadTest();
@@ -706,6 +712,92 @@ describe("running the sequence as a load test", () => {
 
 		fireEvent.click(run);
 		expect(mutate).not.toHaveBeenCalled();
+	});
+});
+
+/*
+ * One load run owns the live stream at a time, whichever surface starts it
+ * (#3351). The engine sets no limit, so refusing here, before `POST /runs`,
+ * is the only place the dialog can: once the engine has the run, it runs.
+ * Mutation check: drop `!heldBy` from `canRun` and the refusal cases send a
+ * second run, which then took the dashboard from the first without a word.
+ */
+describe("while another run holds the live stream", () => {
+	const enableLoadTest = () =>
+		fireEvent.click(screen.getByRole("switch", { name: /load test/i }));
+	const runButton = () => screen.getByRole("button", { name: /^run$/i }) as HTMLButtonElement;
+
+	it("refuses a load run while the dashboard's run is live, naming it", () => {
+		useDashboardStore
+			.getState()
+			.startRun("run_live", {}, { method: "GET", url: "https://api.example.com/items" });
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+
+		expect(
+			screen.getByText("A load test of GET https://api.example.com/items is already running.")
+		).toBeTruthy();
+		expect(runButton().disabled).toBe(true);
+		fireEvent.click(runButton());
+		expect(mutate).not.toHaveBeenCalled();
+		expect(useDashboardStore.getState().currentRunId).toBe("run_live");
+	});
+
+	it("refuses a load run while the dashboard's stream is lost, which is still live", () => {
+		useDashboardStore.getState().startRun("run_live");
+		useDashboardStore.getState().streamLost("run_live", "socket closed");
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+
+		expect(screen.getByText("A load test is already running.")).toBeTruthy();
+		expect(runButton().disabled).toBe(true);
+	});
+
+	it("refuses a load run while a collection run streams", () => {
+		useScenarioRunStore.getState().startRun("coll_live");
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+
+		expect(screen.getByText("A collection run is already running.")).toBeTruthy();
+		fireEvent.click(runButton());
+		expect(mutate).not.toHaveBeenCalled();
+	});
+
+	it("opens the running run and closes itself from View run", () => {
+		useScenarioRunStore.getState().startRun("coll_live");
+		const onOpenChange = vi.fn();
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={onOpenChange} />);
+		enableLoadTest();
+
+		fireEvent.click(screen.getByRole("button", { name: "View run" }));
+
+		expect(useTabsStore.getState().openTabs[0]).toMatchObject({
+			type: "run",
+			entityId: "coll_live",
+		});
+		expect(onOpenChange).toHaveBeenCalledWith(false);
+	});
+
+	it("lets the load run start once the live run has ended", () => {
+		useDashboardStore.getState().startRun("run_live");
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+		enableLoadTest();
+		expect(runButton().disabled).toBe(true);
+
+		act(() => useDashboardStore.getState().stopRun("run_live"));
+
+		expect(screen.queryByText(/is already running/)).toBeNull();
+		fireEvent.click(runButton());
+		expect(mutate).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not hold a sequence, which takes the stream openly", () => {
+		useDashboardStore.getState().startRun("run_live");
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		expect(screen.queryByText(/is already running/)).toBeNull();
+		fireEvent.click(runButton());
+		expect(mutate).toHaveBeenCalledTimes(1);
 	});
 });
 
@@ -1106,6 +1198,8 @@ describe("pass/fail budgets", () => {
 		startLoad("run_budget_1");
 		expect(useDashboardStore.getState().loadTestConfig?.latencyP99Ms).toBe(150);
 		unmount();
+		// Stopped, so it does not hold the second run back.
+		useDashboardStore.getState().stopRun("run_budget_1");
 
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 		openBudgets();

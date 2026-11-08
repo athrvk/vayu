@@ -315,8 +315,8 @@ export default function UrlBar() {
 				    button (or a disabled one) would only mislead. */}
 				{canStartLoadTest &&
 					(isLoadTestRunning ? (
-						/* While a run is live this becomes a shortcut to the running
-						   dashboard (single-active-run policy), on the status tokens
+						/* While the dashboard's run is live this becomes a shortcut to
+						   it (the gate is `canStartLoadRun`), on the status tokens
 						   rather than the accent - it is reporting a state, not
 						   offering the same action, and the colour is what says so
 						   now that the icon is gone. */

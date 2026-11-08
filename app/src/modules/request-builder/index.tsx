@@ -30,7 +30,9 @@ import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
 import EditorDraftSurface from "./components/EditorDraftSurface";
 import {
-	isDashboardRunLive,
+	canStartLoadRun,
+	runningRunSentence,
+	runningRunTab,
 	useTabsStore,
 	useSessionStore,
 	useDashboardStore,
@@ -731,29 +733,32 @@ export default function RequestBuilder() {
 		[fetchedRequest, updateRequestMutation]
 	);
 
+	/*
+	 * `canStartLoadRun` (#3351): while a run holds the stream, open it and say
+	 * which run it is instead of starting another. True when it refused.
+	 *
+	 * The gate is about *load* runs only. A streaming design request (issue
+	 * #574) is not checked here and deliberately does not block one: a design
+	 * stream holds one consumer on one run's events and reports into the
+	 * response pane, while a load run owns the dashboard, and neither can be
+	 * mistaken for the other or read the other's numbers.
+	 */
+	const refuseWhileRunLive = useCallback((): boolean => {
+		const gate = canStartLoadRun();
+		if (gate.ok) return false;
+		openTab(runningRunTab(gate.running));
+		showToast(runningRunSentence(gate.running), "warning");
+		return true;
+	}, [openTab, showToast]);
+
 	// Start load test callback - shows the config dialog
 	const handleStartLoadTest = useCallback(
 		(request: RequestState) => {
-			/*
-			 * Single-active-run policy: if one is already streaming, point the
-			 * user to it instead of starting another.
-			 *
-			 * This gate is about *load* runs only. A streaming design request
-			 * (issue #574) is not checked here and deliberately does not block
-			 * one: they are independent surfaces - a design stream holds one
-			 * consumer on one run's events and reports into the response pane,
-			 * while a load run owns the dashboard - and neither can be mistaken
-			 * for the other or read the other's numbers.
-			 */
-			if (isDashboardRunLive(useDashboardStore.getState().phase)) {
-				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running.", "warning");
-				return;
-			}
+			if (refuseWhileRunLive()) return;
 			setPendingLoadTestRequest(request);
 			setShowLoadTestDialog(true);
 		},
-		[openTab, showToast]
+		[refuseWhileRunLive]
 	);
 
 	// Actually start the load test with config
@@ -761,10 +766,8 @@ export default function RequestBuilder() {
 		async (config: LoadTestConfig) => {
 			if (!pendingLoadTestRequest || !fetchedRequest) return;
 
-			// Defensive re-check in case a run started while the dialog was open.
-			if (isDashboardRunLive(useDashboardStore.getState().phase)) {
-				openTab({ type: "dashboard", entityId: null });
-				showToast("A load test is already running.", "warning");
+			// Again, for a run that started while the dialog was open.
+			if (refuseWhileRunLive()) {
 				setShowLoadTestDialog(false);
 				return;
 			}
@@ -945,6 +948,7 @@ export default function RequestBuilder() {
 			showToast,
 			engineComposeRequest,
 			collectionAncestors,
+			refuseWhileRunLive,
 		]
 	);
 
