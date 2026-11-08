@@ -45,6 +45,8 @@ import type { McpHost } from "./tools/contract.js";
 import { engineCode } from "./tools/failure.js";
 import { composeLoadRunRequest } from "./tools/compose.js";
 import { INPUT_REQUIRED } from "./tools/kit.js";
+import { RUN_STATUSES } from "./tools/run-housekeeping.js";
+import { classifyRunStatus, PARTIAL_REPORT_NOTE } from "./tools/run-status.js";
 import { MCP_CAP_CEILINGS, resolveSafetyConfig, type McpSafetyConfig } from "./config.js";
 import { ENGINE_LOAD_DEFAULTS, LOAD_MODES } from "./safety.js";
 import {
@@ -12357,6 +12359,46 @@ describe("run status reads (#2436)", () => {
 			expect(stopped.nextStep).toMatch(/partial numbers.*no verdict/);
 		});
 
+		// The engine never emits a status outside RUN_STATUSES, so the row is injected.
+		test.each([
+			["an unlisted string", "archived"],
+			["null", null],
+			["missing", undefined],
+		])(
+			"a row whose status is %s is unfinished, flagged unknownStatus and bounded by stop_run (#3339)",
+			async (_label, status) => {
+				const out = await getRun(runRow({ status, endTime: START + 60_000 }));
+				expect(out.terminal).toBe(false);
+				expect(out.unknownStatus).toBe(true);
+				// Unfinished means no end, however the row spells endTime.
+				expect(out.endTime).toBeNull();
+				expect(out.nextStep).toMatch(/not one Vayu recognises/);
+				expect(out.nextStep).toMatch(
+					/treat the run as unfinished: read again in 10 s, or stop_run/
+				);
+				if (status === "archived") expect(out.nextStep).toContain('"archived"');
+			}
+		);
+
+		test.each(RUN_STATUSES)(
+			"a %s run carries no unknownStatus key at all (#3339)",
+			async (status) => {
+				const out = await getRun(runRow({ status, endTime: START + 1 }));
+				expect(out).not.toHaveProperty("unknownStatus");
+			}
+		);
+
+		test("an unknown status satisfies the output schema and the schema names unknownStatus (#3339)", async () => {
+			const client = fakeClient({
+				getRun: vi.fn().mockResolvedValue(runRow({ status: "archived" })),
+			});
+			const res = await dispatchTool("get_run", { runId: "run_1" }, ctxWith(client));
+			const schema = TOOLS.find((t) => t.name === "get_run")!.outputSchema!;
+			expect(schema.safeParse(res.structuredContent).success).toBe(true);
+			expect(res.structuredContent).toMatchObject({ unknownStatus: true });
+			expect(schema.safeParse({ unknownStatus: "yes" }).success).toBe(false);
+		});
+
 		// An engine that predates #2953 answers the stored seed (endTime = startTime)
 		// for a live run, so the status decides, never `endTime > 0`.
 		test.each([
@@ -12580,6 +12622,47 @@ describe("run status reads (#2436)", () => {
 			}
 		);
 
+		// The engine never emits a status outside RUN_STATUSES, so the report is injected.
+		test("a report whose status Vayu does not recognise is partial, flagged and names the status (#3339)", async () => {
+			const out = await readReport(report("archived"));
+			expect(out.partial).toBe(true);
+			expect(out.unknownStatus).toBe(true);
+			expect(out.note).toMatch(/"archived".*not one Vayu recognises.*unfinished.*stop_run/);
+			expect(out.note).not.toBe(PARTIAL_REPORT_NOTE);
+			expect(out.summary).toEqual({ totalRequests: 0 });
+		});
+
+		test.each([
+			["no status", { runId: "run_1" }],
+			["a non-string status", { runId: "run_1", status: 3 }],
+		])(
+			"metadata with %s counts as unknown, like get_run's null status (#3339)",
+			async (_label, metadata) => {
+				const out = await readReport({ metadata, summary: {} });
+				expect(out.partial).toBe(true);
+				expect(out.unknownStatus).toBe(true);
+				expect(out.note).toMatch(/missing.*not one Vayu recognises/);
+			}
+		);
+
+		test("an unknown-status report satisfies the output schema and the schema names unknownStatus (#3339)", async () => {
+			const client = fakeClient({
+				getRunReport: vi.fn().mockResolvedValue(report("archived")),
+			});
+			const res = await dispatchTool("get_run_report", { runId: "run_1" }, ctxWith(client));
+			const schema = TOOLS.find((t) => t.name === "get_run_report")!.outputSchema!;
+			expect(schema.safeParse(res.structuredContent).success).toBe(true);
+			expect(schema.safeParse({ unknownStatus: "yes" }).success).toBe(false);
+		});
+
+		test.each(RUN_STATUSES)(
+			"a %s report carries no unknownStatus key at all (#3339)",
+			async (status) => {
+				const out = await readReport(report(status));
+				expect(out).not.toHaveProperty("unknownStatus");
+			}
+		);
+
 		test("a report with no metadata is handed back as it came", async () => {
 			const answer = { latency: {}, summary: {}, statusCodes: {} };
 			expect(await readReport(answer)).toEqual(answer);
@@ -12617,6 +12700,52 @@ describe("run status reads (#2436)", () => {
 			expect(res.structuredContent).toMatchObject({ summary: { summaryMissing: true } });
 			// Not the top-level marker of an unfinished run.
 			expect(res.structuredContent).not.toHaveProperty("partial");
+		});
+	});
+
+	describe("the status sets derive from RUN_STATUSES (#3339)", () => {
+		test("every engine status is terminal or unfinished, and never unknown", () => {
+			const classes = RUN_STATUSES.map((status) => classifyRunStatus(status));
+			expect(classes).not.toContain("unknown");
+			expect(RUN_STATUSES.filter((s) => classifyRunStatus(s) === "terminal")).toEqual([
+				"completed",
+				"failed",
+				"stopped",
+			]);
+			expect(RUN_STATUSES.filter((s) => classifyRunStatus(s) === "unfinished")).toEqual([
+				"pending",
+				"running",
+			]);
+		});
+
+		test.each([["archived"], [""], [null], [undefined], [3], ["Running"]])(
+			"%j is unknown",
+			(status) => {
+				expect(classifyRunStatus(status)).toBe("unknown");
+			}
+		);
+
+		test("list_runs' status description lists exactly RUN_STATUSES, in order", () => {
+			const description = TOOLS.find((t) => t.name === "list_runs")!.inputSchema.status
+				.description!;
+			expect([...description.matchAll(/"(\w+)"/g)].map((m) => m[1])).toEqual([
+				...RUN_STATUSES,
+			]);
+		});
+
+		test("get_run and get_run_report enumerate the statuses the classifier knows", () => {
+			const getRunText = descriptionOf(TOOLS.find((t) => t.name === "get_run"));
+			expect(getRunText).toContain(
+				"`status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped)"
+			);
+			const reportText = descriptionOf(TOOLS.find((t) => t.name === "get_run_report"));
+			expect(reportText).toContain(
+				"is null until it is completed, failed or stopped; while it is `pending` or `running`"
+			);
+			for (const text of [getRunText, reportText]) {
+				expect(text).toContain("`unknownStatus: true`");
+				expect(text).toMatch(/does not recognise counts as unfinished/);
+			}
 		});
 	});
 
@@ -17249,7 +17378,11 @@ describe("secret withholding", () => {
 	});
 
 	const RUN_REPORT = {
-		metadata: { runId: "run_1", requestUrl: `https://api.example.com/v1?key=${QUERY_FORM}` },
+		metadata: {
+			runId: "run_1",
+			status: "completed",
+			requestUrl: `https://api.example.com/v1?key=${QUERY_FORM}`,
+		},
 		summary: { totalRequests: 1 },
 		results: [{ id: 1, statusCode: 200, trace: RUN_TRACE }],
 	};

@@ -60,7 +60,13 @@ import {
 	RUN_TYPES,
 	runListQuery,
 } from "./run-housekeeping.js";
-import { markPartialReport, projectRunStatus } from "./run-status.js";
+import {
+	markPartialReport,
+	projectRunStatus,
+	RUN_STATUS_WORDS,
+	TERMINAL_STATUS_WORDS,
+	UNFINISHED_STATUS_WORDS,
+} from "./run-status.js";
 import {
 	fieldsInput,
 	listPageInputs,
@@ -350,7 +356,7 @@ export const READ_TOOLS: McpTool[] = [
 				.enum(RUN_STATUSES)
 				.optional()
 				.describe(
-					'Only runs in this state: "pending", "running", "completed", "failed", "stopped".'
+					`Only runs in this state: ${RUN_STATUSES.map((status) => `"${status}"`).join(", ")}.`
 				),
 			requestId: z.string().optional().describe("Only runs of this saved request."),
 			collectionId: z
@@ -392,7 +398,8 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. `metadata.status` is the run's state, and `metadata.endTime` is null until it is completed, failed or stopped; while it is `pending` or `running`, the report also carries `partial: true` and a `note`, `summary` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. Read get_run(runId) for whether it is done. " +
+			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. " +
+			`\`metadata.status\` is the run's state, and \`metadata.endTime\` is null until it is ${TERMINAL_STATUS_WORDS}; while it is ${UNFINISHED_STATUS_WORDS}, the report also carries \`partial: true\` and a \`note\`, \`summary\` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. A status Vayu does not recognise counts as unfinished and adds \`unknownStatus: true\` (else absent). Read get_run(runId) for whether it is done. ` +
 			"A failed load run may carry `summary.partial: true` (the engine stopped before saving the final totals: the counts, `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last saved figures, a floor under the real totals, while `latency`, `peakConcurrency` and `avgQueueWaitMs` are absent, not recorded, never zero) or `summary.summaryMissing: true` (no summary was saved, so the counts are not whole-run totals and `latency`, `peakConcurrency` and `avgQueueWaitMs` are again absent); both are absent otherwise, never false, and neither is the top-level `partial`, which means the run is still going. " +
 			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 			"A run may also carry `warnings`, even when it finished and its numbers look fine: a request sent with an unresolved `{{token}}`, a step whose pre-request script load mode never runs, a raised per-host connection limit, or requests re-sent on a new connection after the server dropped a reused one. Each entry carries `code`, a human-readable `message`, and its code's counts. Absent for a run with nothing to report. " +
@@ -427,7 +434,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Read a run's state: whether it is still going, how far along it is, and what to do next. Returns `id`, `type`, `status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped), `startTime`, `endTime` (null while the run is not terminal), `elapsedMs`, `mode`, `concurrency`, `targetRps`, `duration`, `requestId`, `baseline` and `nextStep`. A duration-bound run also carries `plannedDurationMs` and `progress` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. `nextStep` names the poll interval for a run in progress. A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it." +
+			`Read a run's state: whether it is still going, how far along it is, and what to do next. Returns \`id\`, \`type\`, \`status\` (${RUN_STATUS_WORDS}), \`terminal\` (true once the status is ${TERMINAL_STATUS_WORDS}), \`startTime\`, \`endTime\` (null while the run is not terminal), \`elapsedMs\`, \`mode\`, \`concurrency\`, \`targetRps\`, \`duration\`, \`requestId\`, \`baseline\` and \`nextStep\`. A duration-bound run also carries \`plannedDurationMs\` and \`progress\` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. \`nextStep\` names the poll interval for a run in progress. A status Vayu does not recognise counts as unfinished and adds \`unknownStatus: true\` (else absent). A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it.` +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get run status",
