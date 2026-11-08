@@ -2108,8 +2108,10 @@ struct RouteContext {
     /// The data directory, as `core::absolute_data_dir` resolved it from
     /// `--data-dir` (#3328). Read by `/health`, which reports it so a client can
     /// tell its own engine from one serving another data directory. Empty in a
-    /// context built without one.
-    std::string data_dir;
+    /// context built without one. The initializer is not redundant: it keeps
+    /// -Wmissing-field-initializers quiet for the test fixtures that build a
+    /// context positionally and stop before this member.
+    std::string data_dir = {}; // NOLINT(readability-redundant-member-init)
 };
 
 // Route registration functions (implemented in separate files)
