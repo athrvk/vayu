@@ -74,7 +74,7 @@ function matchRank(haystack: string, needle: string): number | null {
  * against the plain needle instead.
  */
 function keyNeedle(needle: string): string {
-	return needle.replace(/\{\{|\}\}|\s+/g, "");
+	return needle.replaceAll("{{", "").replaceAll("}}", "").replace(/\s+/g, "");
 }
 
 export function useVariableItems(query: string): PaletteItem[] {
