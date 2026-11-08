@@ -58,7 +58,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			startRun: vi.fn(),
 			addSteps: vi.fn(),
 			setStreaming: mockScenarioSetStreaming,
-			setError: vi.fn(),
+			streamLost: vi.fn(),
 			summary: { counts: { passed: 0, failed: 0, skipped: 0, errored: 0 } },
 		}),
 	},
@@ -278,7 +278,7 @@ describe("a run superseded by the other service's run", () => {
 
 		loadTestService.startMonitoring(load);
 
-		expect(mockScenarioSetStreaming).toHaveBeenCalledWith(false);
+		expect(mockScenarioSetStreaming).toHaveBeenCalledWith(collection, false);
 	});
 
 	it("leaves the superseded run's socket closed and the new one open", () => {

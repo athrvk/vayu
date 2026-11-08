@@ -119,7 +119,7 @@ function shownNames(): string[] {
 
 function stream(steps: ScenarioStepEvent[]): void {
 	act(() => {
-		useScenarioRunStore.getState().addSteps(steps);
+		useScenarioRunStore.getState().addSteps("run-1", steps);
 	});
 }
 

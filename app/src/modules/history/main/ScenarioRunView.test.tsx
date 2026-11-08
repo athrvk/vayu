@@ -138,7 +138,7 @@ describe("live progress", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([
+			store.addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 0,
@@ -153,7 +153,7 @@ describe("live progress", () => {
 		expect(screen.getByText("Log in")).toBeTruthy();
 
 		act(() => {
-			useScenarioRunStore.getState().addSteps([
+			useScenarioRunStore.getState().addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 1,
@@ -177,7 +177,7 @@ describe("live progress", () => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
 			for (const step of [0, 1, 0, 1]) {
-				store.addSteps([
+				store.addSteps("run-1", [
 					{
 						iteration: 0,
 						stepIndex: step,
@@ -201,7 +201,7 @@ describe("live progress", () => {
 			const store = useScenarioRunStore.getState();
 			// A second run started elsewhere; this tab is not it.
 			store.startRun("run-2");
-			store.addSteps([
+			store.addSteps("run-2", [
 				{
 					iteration: 0,
 					stepIndex: 0,
@@ -292,7 +292,7 @@ describe("outcomes", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([
+			store.addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 0,
@@ -367,7 +367,7 @@ describe("stored step results", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([
+			store.addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 0,
@@ -742,7 +742,7 @@ describe("stored-exchange disclosure", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([
+			store.addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 0,
@@ -938,19 +938,22 @@ describe("the live run's place in its plan", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.setPlan(PLAN);
+			store.setPlan("run-1", PLAN);
 		});
 		// Mutation check: derive the iteration as `floor(stepsRun / stepsPerIteration)`
 		// without the +1 and this reads "Iteration 0".
 		expect(screen.getByText("Iteration 1 of 40 - 0 of 240 steps")).toBeTruthy();
 
 		act(() => {
-			useScenarioRunStore.getState().addSteps([0, 1, 2, 3, 4, 5].map((i) => liveStep(0, i)));
+			useScenarioRunStore.getState().addSteps(
+				"run-1",
+				[0, 1, 2, 3, 4, 5].map((i) => liveStep(0, i))
+			);
 		});
 		expect(screen.getByText("Iteration 1 of 40 - 6 of 240 steps")).toBeTruthy();
 
 		act(() => {
-			useScenarioRunStore.getState().addSteps([liveStep(1, 0)]);
+			useScenarioRunStore.getState().addSteps("run-1", [liveStep(1, 0)]);
 		});
 		expect(screen.getByText("Iteration 2 of 40 - 7 of 240 steps")).toBeTruthy();
 	});
@@ -963,7 +966,7 @@ describe("the live run's place in its plan", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([liveStep(0, 0)]);
+			store.addSteps("run-1", [liveStep(0, 0)]);
 		});
 
 		expect(screen.getByText("Running")).toBeTruthy();
@@ -976,7 +979,7 @@ describe("the live run's place in its plan", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-2");
-			store.setPlan(PLAN);
+			store.setPlan("run-2", PLAN);
 		});
 
 		expect(screen.queryByText(/^Iteration \d/)).toBeNull();
@@ -999,8 +1002,8 @@ describe("the live run's place in its plan", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.setPlan(PLAN);
-			store.setStreaming(false);
+			store.setPlan("run-1", PLAN);
+			store.setStreaming("run-1", false);
 		});
 
 		render(<ScenarioRunView run={RUN} />);
@@ -1140,7 +1143,7 @@ describe("steps that did not run", () => {
 		act(() => {
 			const store = useScenarioRunStore.getState();
 			store.startRun("run-1");
-			store.addSteps([
+			store.addSteps("run-1", [
 				{
 					iteration: 0,
 					stepIndex: 0,
