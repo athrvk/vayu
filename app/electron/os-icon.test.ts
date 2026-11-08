@@ -29,7 +29,7 @@ import {
 	type UserTask,
 } from "./os-icon";
 import { countOverlayBitmap, failedOverlayBitmap } from "./os-icon-overlay";
-import type { IpcEventLike } from "./renderer-watch";
+import type { IpcEventLike, NavigationDetails } from "./renderer-watch";
 
 /** A `setOverlayIcon` call, with the image reduced to something comparable. */
 interface OverlayCall {
@@ -452,18 +452,20 @@ describe("registerOsIconIpc", () => {
 		};
 		const log = vi.fn();
 		registerOsIconIpc(ipc, painter, log);
-		const senderEvents = new Map<string, () => void>();
+		const senderEvents = new Map<string, (details: NavigationDetails) => void>();
 		const sender = {
 			id: 1,
 			once: (event: "destroyed", fn: () => void) => senderEvents.set(event, fn),
-			on: (event: "did-start-loading", fn: () => void) => senderEvents.set(event, fn),
+			on: (event: "did-start-navigation", fn: (details: NavigationDetails) => void) =>
+				senderEvents.set(event, fn),
 		};
 		return {
 			applied,
 			log,
 			cleared: () => cleared,
 			send: (payload: unknown) => listener?.({ sender }, payload),
-			fire: (event: "destroyed" | "did-start-loading") => senderEvents.get(event)?.(),
+			fire: (event: "destroyed" | "did-start-navigation") =>
+				senderEvents.get(event)?.({ isMainFrame: true, isSameDocument: false }),
 		};
 	}
 
@@ -485,7 +487,7 @@ describe("registerOsIconIpc", () => {
 	 * crashes leaves a count on the Dock for captures whose list is gone.
 	 */
 	it("clears when the renderer goes away or reloads", () => {
-		for (const event of ["destroyed", "did-start-loading"] as const) {
+		for (const event of ["destroyed", "did-start-navigation"] as const) {
 			const ipc = ipcHarness();
 			ipc.send({ kind: "captured" });
 			expect(ipc.cleared()).toBe(0);

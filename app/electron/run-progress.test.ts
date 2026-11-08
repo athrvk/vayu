@@ -23,7 +23,7 @@ import {
 	RUN_PROGRESS_ERROR_FLASH_MS,
 	type RunProgressPainter,
 } from "./run-progress";
-import type { IpcEventLike } from "./renderer-watch";
+import type { IpcEventLike, NavigationDetails } from "./renderer-watch";
 
 type Call = [number, { mode: string }?];
 
@@ -191,18 +191,20 @@ describe("registerRunProgressIpc", () => {
 		};
 		const log = vi.fn();
 		registerRunProgressIpc(ipc, painter, log);
-		const senderEvents = new Map<string, () => void>();
+		const senderEvents = new Map<string, (details: NavigationDetails) => void>();
 		const sender = {
 			id: 1,
 			once: (event: "destroyed", fn: () => void) => senderEvents.set(event, fn),
-			on: (event: "did-start-loading", fn: () => void) => senderEvents.set(event, fn),
+			on: (event: "did-start-navigation", fn: (details: NavigationDetails) => void) =>
+				senderEvents.set(event, fn),
 		};
 		return {
 			applied,
 			log,
 			cleared: () => cleared,
 			send: (payload: unknown) => listener?.({ sender }, payload),
-			fire: (event: "destroyed" | "did-start-loading") => senderEvents.get(event)?.(),
+			fire: (event: "destroyed" | "did-start-navigation") =>
+				senderEvents.get(event)?.({ isMainFrame: true, isSameDocument: false }),
 		};
 	}
 
@@ -224,7 +226,7 @@ describe("registerRunProgressIpc", () => {
 	 * crashes mid-run leaves its bar on the taskbar for the rest of the session.
 	 */
 	it("clears when the renderer goes away or reloads", () => {
-		for (const event of ["destroyed", "did-start-loading"] as const) {
+		for (const event of ["destroyed", "did-start-navigation"] as const) {
 			const ipc = ipcHarness();
 			ipc.send({ state: "running", value: 0.25 });
 			expect(ipc.cleared()).toBe(0);

@@ -151,20 +151,6 @@ export interface OpenIntents {
 	notReady(): void;
 }
 
-/**
- * Whether a `did-start-navigation` replaces the page the renderer is mounted
- * in. Only that navigation can be followed by the main frame's
- * `did-finish-load` (which calls `ready`); a subframe (the response preview's
- * sandboxed `srcDoc` iframe) or a same-document change (a hash or pushState
- * route) never is, so holding intents for one would never release them.
- */
-export function startsMainFramePage(details: {
-	readonly isMainFrame: boolean;
-	readonly isSameDocument: boolean;
-}): boolean {
-	return details.isMainFrame && !details.isSameDocument;
-}
-
 export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 	const pending: OpenIntent[] = [];
 	/** Whether the renderer has said it can act on one. See the header. */

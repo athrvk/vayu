@@ -24,6 +24,7 @@ import {
 	type IpcEventLike,
 	type WakeLock,
 } from "./power-save.js";
+import type { NavigationDetails } from "./renderer-watch.js";
 
 function fakeBlocker() {
 	const started = new Set<number>();
@@ -230,14 +231,14 @@ describe("createWakeLock - reporting a sleep it could not prevent", () => {
 
 function fakeRenderer(id: number) {
 	const once = new Map<string, () => void>();
-	const on = new Map<string, () => void>();
+	const on = new Map<string, (details: NavigationDetails) => void>();
 	return {
 		id,
 		once(event: "destroyed", listener: () => void) {
 			once.set(event, listener);
 			return this;
 		},
-		on(event: "did-start-loading", listener: () => void) {
+		on(event: "did-start-navigation", listener: (details: NavigationDetails) => void) {
 			on.set(event, listener);
 			return this;
 		},
@@ -245,7 +246,7 @@ function fakeRenderer(id: number) {
 			once.get("destroyed")?.();
 		},
 		reload() {
-			on.get("did-start-loading")?.();
+			on.get("did-start-navigation")?.({ isMainFrame: true, isSameDocument: false });
 		},
 	};
 }

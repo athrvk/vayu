@@ -14,15 +14,26 @@
  * both need them exactly once per renderer, so this is the one copy of that -
  * a second hand-rolled one would be the copy that misses the next fix.
  *
- * `destroyed` is the window closing or the process going; `did-start-loading`
- * is a reload, where the new page cannot hand back what the old page took.
+ * `destroyed` is the window closing or the process going; a main-frame
+ * cross-document `did-start-navigation` is a reload, where the new page cannot
+ * hand back what the old page took. `did-start-loading` is not that signal: it
+ * also fires for a subframe, so the response viewer's HTML preview iframe would
+ * release a running load test's wake lock and progress bar (#3377).
  */
+
+import { startsMainFramePage } from "./main-frame-page.js";
+
+/** What `did-start-navigation` reports that decides whether the page is replaced. */
+export interface NavigationDetails {
+	readonly isMainFrame: boolean;
+	readonly isSameDocument: boolean;
+}
 
 /** The slice of `webContents` the two events need. */
 export interface RendererLike {
 	id: number;
 	once(event: "destroyed", listener: () => void): unknown;
-	on(event: "did-start-loading", listener: () => void): unknown;
+	on(event: "did-start-navigation", listener: (details: NavigationDetails) => void): unknown;
 }
 
 /** An IPC event as far as this is concerned: the renderer that sent it. */
@@ -32,7 +43,7 @@ export interface IpcEventLike {
 
 /**
  * Build a `watch(sender)` that calls `onGone(rendererId)` when that renderer is
- * destroyed or starts loading again. Subscribing twice for one renderer is a
+ * destroyed or its main frame starts a new page. Subscribing twice for one renderer is a
  * no-op, so a caller may watch on every message it handles.
  */
 export function createRendererWatch(
@@ -48,6 +59,8 @@ export function createRendererWatch(
 			watched.delete(sender.id);
 			gone();
 		});
-		sender.on("did-start-loading", gone);
+		sender.on("did-start-navigation", (details) => {
+			if (startsMainFramePage(details)) gone();
+		});
 	};
 }
