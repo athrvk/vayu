@@ -1024,7 +1024,7 @@ Aborting the fetch closes the connection, and the engine's buffered
 `POST /execute` watches for that (#3383): it cancels the transfer if it has not
 finished, about a second later at most, and records the run `stopped` rather
 than `completed`. A request already on the wire may still have reached its
-target, and the script writes made before the cancel still land. The builder's
+target, and the variable writes of its scripts still land. The builder's
 and the History copy's send paths therefore invalidate the Recent sends,
 History and variable queries for a cancelled send as they do for an answered
 one; only the response is dropped.
