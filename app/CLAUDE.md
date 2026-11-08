@@ -84,8 +84,10 @@ everything.
   keeps one per event per session (`engine-origin.test.ts`).
 - State: Zustand for UI state, TanStack Query for server state.
 - **A save that fails is retried, and the failure stays on screen until it
-  lands** (#1479): `useSaveManager` backs off up to `SAVE_RETRY_MAX_DELAY_MS`,
-  the health poll's reconnect branch flushes every dirty registered context
+  lands** (#1479): `useSaveManager` and the variables editor
+  (`VariableTableEditor`, #3353) back off up to `SAVE_RETRY_MAX_DELAY_MS`
+  through the one `saveRetryDelayMs` (`lib/save-failure.ts`), the health
+  poll's reconnect branch flushes every dirty registered context
   (`queries/health.ts`), and the Dock renders `error` as **Not saved**. A 4xx
   is the exception: the engine's verdict on the payload is `final`
   (`isFinalError`, #1889), so autosave does not re-send it and the next edit is
@@ -109,9 +111,9 @@ everything.
   ways: a save that rejects with the `ApiError` (`useSaveManager`,
   `useDraftSaveContext`'s collection editors, the store's own catch), a save
   that returns the verdict itself (the inbox `CannedResponseControls`,
-  `variable-commit`), and a context that reports through `reportFailed` and
-  resolves (`SettingsMain`), which is judged by the report it made during the
-  save and so must pass the error as the cause,
+  `variable-commit`, `VariableTableEditor`), and a context that reports
+  through `reportFailed` and resolves (`SettingsMain`), which is judged by the
+  report it made during the save and so must pass the error as the cause,
   `reportFailed(id, message, error)` - the report keeps whether it was a 507,
   and a call that omits the cause reads `failed` (#2685); a save an editor
   declines to send

@@ -64,10 +64,10 @@ export const TIMING = {
 	SAVING_MIN_VISIBLE_MS: 400,
 
 	/**
-	 * Ceiling on the backoff `useSaveManager` doubles through after a failed
-	 * auto-save. Read in exactly one place - the retry scheduled from
-	 * `performSave`'s catch - so a save that keeps failing settles into a fixed
-	 * cadence instead of backing off forever.
+	 * Ceiling on the backoff a surface doubles through after a failed save
+	 * (`useSaveManager`'s auto-save, the variables editor's). Read in exactly one
+	 * place, `saveRetryDelayMs` (`lib/save-failure.ts`), so every retrying
+	 * surface settles into the same fixed cadence instead of backing off forever.
 	 */
 	SAVE_RETRY_MAX_DELAY_MS: 60_000,
 

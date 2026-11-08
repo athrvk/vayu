@@ -52,7 +52,8 @@ import {
 	useDeleteEnvironmentMutation,
 	useUpdateCollectionMutation,
 } from "@/queries";
-import { useSaveStore, useSessionStore, useToastStore } from "@/stores";
+import { useClientSettingsStore, useSaveStore, useSessionStore, useToastStore } from "@/stores";
+import type { SaveOutcome } from "@/stores/save-store";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
 import { useVariablesStore } from "@/modules/variables/variables-store";
 import type { VariableValue, Collection, Environment } from "@/types";
@@ -66,6 +67,7 @@ import {
 import { Callout, DetailSkeleton, ErrorState } from "@/components/shared";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { cn } from "@/lib/utils";
+import { saveFailureOutcome, saveRetryDelayMs } from "@/lib/save-failure";
 import { sortVariableEntriesByCreatedAt } from "@/lib/variable-order";
 import type { VariableType } from "@/lib/variable-cast";
 import {
@@ -89,7 +91,7 @@ import {
 
 export interface VariableRowData {
 	/**
-	 * Editor-local row identity, never persisted (`performSave` builds its
+	 * Editor-local row identity, never persisted (`toVariableValue` builds the
 	 * payload field by field, so this cannot leak into a scope's variables).
 	 *
 	 * A variable has no stable identity of its own: `key` is editable, so
@@ -188,8 +190,7 @@ function toVariableValue(row: VariableRowData): VariableValue {
 		enabled: row.enabled,
 		secret: row.secret ?? false,
 		type: row.type ?? "string",
-		// See the comment on this same guard in `performSave`: an unknown
-		// creation time is never invented, only carried forward.
+		// An unknown creation time is never invented, only carried forward.
 		...(row.createdAt !== undefined && { createdAt: row.createdAt }),
 	};
 }
@@ -247,6 +248,149 @@ function computeUserChanges(rows: VariableRowData[], baseline: VariableMap): Var
 		if (!seenKeys.has(key)) changes[key] = null;
 	});
 	return changes;
+}
+
+/**
+ * What a save is computed from: the rows on screen, the map they are diffed
+ * against, and the freshest map known for the scope, which the save merges onto.
+ */
+interface EditorSnapshot {
+	rows: VariableRowData[];
+	baseline: VariableMap;
+	fresh: VariableMap;
+}
+
+/** Every key both the user and another writer moved, and to different values. */
+function conflictsOf({ rows, baseline, fresh }: EditorSnapshot): VariableConflict[] {
+	return findVariableConflicts(baseline, computeUserChanges(rows, baseline), fresh);
+}
+
+/** `map` with `key` taken from `source`: copied, or dropped where `source` has none. */
+function withKeyFrom(map: VariableMap, key: string, source: VariableMap): VariableMap {
+	const next = { ...map };
+	if (Object.prototype.hasOwnProperty.call(source, key)) next[key] = source[key];
+	else delete next[key];
+	return next;
+}
+
+/**
+ * The row that stands for stored variable `key`, or -1: the one still stored
+ * under it, else the one named it (a name is compared trimmed, as it is saved),
+ * else the one renamed away from it.
+ */
+function rowIndexFor(rows: VariableRowData[], key: string): number {
+	const standsFor = [
+		(row: VariableRowData) => row.baseKey === key && trimVariableName(row.key) === key,
+		(row: VariableRowData) => trimVariableName(row.key) === key,
+		(row: VariableRowData) => row.baseKey === key,
+	];
+	for (const matches of standsFor) {
+		const index = rows.findIndex((row) => !row.isNew && matches(row));
+		if (index !== -1) return index;
+	}
+	return -1;
+}
+
+/**
+ * `rows` with stored variable `key` set to the other writer's value: the row
+ * standing for it replaced (a rename of it undone), or a row added before the
+ * blank one; with no value there, that row removed.
+ */
+function withTheirs(
+	rows: VariableRowData[],
+	key: string,
+	theirs: VariableValue | undefined
+): VariableRowData[] {
+	const index = rowIndexFor(rows, key);
+	if (!theirs) return index === -1 ? rows : rows.filter((_, i) => i !== index);
+	const row = rowFromValue(key, theirs, index === -1 ? undefined : rows[index].id);
+	if (index !== -1) return rows.map((current, i) => (i === index ? row : current));
+	const blank = rows.findIndex((current) => current.isNew);
+	return blank === -1 ? [...rows, row] : [...rows.slice(0, blank), row, ...rows.slice(blank)];
+}
+
+interface SavePlan {
+	/** The rows the save is for, names trimmed. */
+	rows: VariableRowData[];
+	problems: ReturnType<typeof nameProblems>;
+	/** The keys the save sends, conflicted keys left out. */
+	changes: VariableChanges;
+	/** Held out of `changes` until the user picks a side. */
+	conflicts: VariableConflict[];
+	/** The whole map the PUT carries, in `createdAt` order. */
+	payload: VariableMap;
+}
+
+/**
+ * The user's own changes merged onto the freshest map, never the editor's whole
+ * copy, which would carry a key an MCP agent wrote after this editor last
+ * reseeded back to its pre-agent value (#1439). A key both sides moved is left
+ * out until the user chooses (#3353): saving it would be choosing for them.
+ * Payload order is by `createdAt` so the round trip preserves display order.
+ */
+function planSave(snapshot: EditorSnapshot): SavePlan {
+	// Names are trimmed on commit, not per keystroke: a trailing space typed
+	// mid-name has to survive until the user leaves the field (#3251).
+	const rows = withTrimmedNames(snapshot.rows);
+	const changes = computeUserChanges(rows, snapshot.baseline);
+	const conflicts = findVariableConflicts(snapshot.baseline, changes, snapshot.fresh);
+	for (const { key } of conflicts) delete changes[key];
+	const merged = mergeVariableChanges(snapshot.fresh, changes);
+	return {
+		rows,
+		problems: nameProblems(rows),
+		changes,
+		conflicts,
+		payload: Object.fromEntries(sortVariableEntriesByCreatedAt(Object.entries(merged))),
+	};
+}
+
+/**
+ * The baseline once `plan` has landed: the map it wrote, so the save's own
+ * history is never mistaken for a later external change. A conflicted key it
+ * held back keeps the baseline it had, or the conflict would vanish as if the
+ * user had chosen.
+ */
+function baselineAfter(plan: SavePlan, current: VariableMap): VariableMap {
+	return plan.conflicts.reduce((next, { key }) => withKeyFrom(next, key, current), plan.payload);
+}
+
+interface SaveHandlers {
+	onSuccess: () => void;
+	onError: (error: unknown) => void;
+}
+
+/**
+ * Runs a mutation and reports through both of TanStack's channels. The per-call
+ * callbacks fire as the mutation settles, but only while its observer has
+ * listeners, so never once the editor has unmounted; the promise always
+ * settles. The caller acts on whichever arrives first.
+ */
+function sendThrough<V>(
+	mutateAsync: (variables: V, options: SaveHandlers) => Promise<unknown>,
+	variables: V,
+	handlers: SaveHandlers
+): void {
+	mutateAsync(variables, handlers).then(() => handlers.onSuccess(), handlers.onError);
+}
+
+/**
+ * A save, bound to its entity when it is asked for. `send` is null when the
+ * entity is gone; `snapshot` is what the save is computed from if the editor
+ * has moved to another entity before the save's turn comes.
+ */
+interface SaveTarget {
+	contextId: string;
+	scope: VariableEditorType;
+	send: ((variables: VariableMap, handlers: SaveHandlers) => void) | null;
+	snapshot: EditorSnapshot;
+}
+
+/** A save waiting for the one in flight; it reads the rows when it starts. */
+interface WaitingSave {
+	target: SaveTarget;
+	promise: Promise<SaveOutcome>;
+	resolve: (outcome: SaveOutcome | Promise<SaveOutcome>) => void;
 }
 
 interface VariableEditorConfig {
@@ -353,15 +497,36 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// Shown beside each row. The save recomputes the same judgement from the ref,
 	// so a row is judged on what it holds when the save runs.
 	const rowProblems = useMemo(() => nameProblems(variables), [variables]);
-	const performSaveRef = useRef<() => Promise<void>>(() => Promise.resolve());
+	const performSaveRef = useRef<() => Promise<SaveOutcome>>(() => Promise.resolve("saved"));
 	/**
 	 * The map the user's edits are diffed against - the state a save last
 	 * agreed with the server on. Advanced on every full reseed, on a
-	 * successful save (to the map that save just wrote, so the save's own
-	 * history is never mistaken for a later external change), and per key
-	 * when a conflict is resolved.
+	 * successful save (`baselineAfter`), and per key when the user picks a
+	 * side of a conflict. Saves run one at a time, so the save that advances
+	 * it last is the one that carried the latest rows.
 	 */
 	const baselineRef = useRef<VariableMap>({});
+	/**
+	 * The freshest map known for the scope, which a save merges onto: the query
+	 * cache's, or a landed save's changes applied over it until the cache echo
+	 * arrives. A save queued behind another merges onto this, so it carries the
+	 * earlier save's keys even though its own diff no longer names them.
+	 */
+	const freshMapRef = useRef<VariableMap>({});
+	/**
+	 * The id whose rows, baseline and fresh map the refs hold; null once the
+	 * editor lets go of them (a switch's cleanup, an unmount). A save for any
+	 * other id computes from the snapshot it was asked with and touches no
+	 * editor state when it lands.
+	 */
+	const seededContextRef = useRef<string | null>(null);
+	// One save in flight, and the saves waiting for it in order (one per id).
+	const saveInFlightRef = useRef(false);
+	const waitingSavesRef = useRef<WaitingSave[]>([]);
+	// A failed save's retry, and the consecutive failures behind its backoff,
+	// as `useSaveManager.attemptAutoSave` keeps them.
+	const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const retryAttemptRef = useRef(0);
 	// The dirty flag, readable from an effect without being one of its
 	// dependencies - the row-init effect has to know whether the user has
 	// uncommitted edits *at the moment the cache changes under it*, and taking
@@ -433,23 +598,25 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	 * they never reached the engine. Staying dirty leaves the normal paths (blur,
 	 * Cmd+S, the quit flush) to write them.
 	 *
-	 * A row the save held back (`heldBack`, a name problem) is the same case: its
-	 * edit is on screen and in no payload, and a clean editor would reseed the row
-	 * away on the next cache echo (#3251). The Dock then says "Unsaved changes"
-	 * rather than "Saved", which the held row would make untrue, and so it does
-	 * for an edit typed while the save was in flight.
+	 * A row the save held back (`heldBack`, a name problem or an open conflict)
+	 * is the same case: its edit is on screen and in no payload, and a clean
+	 * editor would reseed the row away on the next cache echo (#3251, #3353).
+	 * The Dock then says "Unsaved changes" rather than "Saved", which the held
+	 * row would make untrue, and so it does for an edit typed while the save was
+	 * in flight.
 	 */
 	const finishSave = useCallback(
-		(snapshot: VariableRowData[], heldBack: boolean) => {
+		(id: string, snapshot: VariableRowData[], heldBack: boolean): SaveOutcome => {
 			if (heldBack || !sameRows(variablesRef.current, snapshot)) {
-				reportPending(contextId);
-				return;
+				reportPending(id);
+				return "pending";
 			}
 			hasPendingChangesRef.current = false;
 			setHasPendingChanges(false);
-			reportSaved(contextId);
+			reportSaved(id);
+			return "saved";
 		},
-		[reportPending, reportSaved, contextId]
+		[reportPending, reportSaved]
 	);
 
 	/**
@@ -478,100 +645,220 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		[]
 	);
 
-	// Auto-save function. Sends the freshest known map (`dataVariables`, kept
-	// live through the query cache) with only the keys the user actually
-	// changed applied on top - never the editor's whole local copy, which
-	// would carry a key an MCP agent wrote after this editor last reseeded
-	// back to its pre-agent value (#1439). Payload order is by `createdAt` so
-	// the round trip preserves display order.
-	const performSave = useCallback(async () => {
-		// Names are trimmed on commit, not per keystroke: a trailing space typed
-		// mid-name has to survive until the user leaves the field (#3251).
-		const varsToSave = withTrimmedNames(variablesRef.current);
-		if (varsToSave !== variablesRef.current) {
-			variablesRef.current = varsToSave;
-			setVariables(varsToSave);
+	const readLive = useCallback(
+		(): EditorSnapshot => ({
+			rows: variablesRef.current,
+			baseline: baselineRef.current,
+			fresh: freshMapRef.current,
+		}),
+		[]
+	);
+
+	// Bound when a save is asked for, not when its turn comes, so a save waiting
+	// behind another still writes the entity it was asked for.
+	const mutateGlobals = updateGlobalsMutation.mutateAsync;
+	const mutateEnvironment = updateEnvironmentMutation.mutateAsync;
+	const mutateCollection = updateCollectionMutation.mutateAsync;
+	const send = useMemo((): SaveTarget["send"] => {
+		if (type === "globals") {
+			return (variables, handlers) => sendThrough(mutateGlobals, { variables }, handlers);
 		}
-		const problems = nameProblems(varsToSave);
-		const changes = computeUserChanges(varsToSave, baselineRef.current);
-		const merged = mergeVariableChanges(dataVariables, changes);
-		const sorted = sortVariableEntriesByCreatedAt(Object.entries(merged));
-		const variablesObj: Record<string, VariableValue> = {};
-		sorted.forEach(([key, val]) => {
-			variablesObj[key] = val;
-		});
+		if (type === "environment") {
+			if (!environment) return null;
+			const { id, name } = environment;
+			// No `isActive`: absent means "keep" on a PUT, and echoing the cached
+			// value back would let a variable edit re-activate this environment
+			// from a stale read - deactivating whichever one the engine actually
+			// holds. Only the switch writes it.
+			return (variables, handlers) =>
+				sendThrough(mutateEnvironment, { id, name, variables }, handlers);
+		}
+		if (!collection) return null;
+		const { id, name } = collection;
+		return (variables, handlers) =>
+			sendThrough(mutateCollection, { id, name, variables }, handlers);
+	}, [type, environment, collection, mutateGlobals, mutateEnvironment, mutateCollection]);
 
-		reportSaving(contextId);
-
-		return new Promise<void>((resolve, reject) => {
-			const handlers = {
-				onSuccess: () => {
-					// The map just written, not `dataVariables`: the cache echo of
-					// this save has not arrived yet, and advancing the baseline
-					// here is what keeps a later external write from being
-					// compared against this save's own pre-image and misread as a
-					// conflict with itself.
-					baselineRef.current = variablesObj;
-					setConflicts([]);
-					recordStoredNames(varsToSave, problems);
-					finishSave(varsToSave, problems.size > 0);
-					resolve();
-				},
-				// Reported here and rejected as well: `runSave` sees the failure
-				// this save reported and does not publish the rejection again.
-				onError: (error: unknown) => {
-					reportFailed(
-						contextId,
-						error instanceof Error
-							? `Couldn't save - ${error.message}`
-							: "Couldn't save",
-						error
-					);
-					reject(error);
-				},
-			};
-
-			if (type === "globals") {
-				updateGlobalsMutation.mutate({ variables: variablesObj }, handlers);
-			} else if (type === "environment" && environment) {
-				updateEnvironmentMutation.mutate(
-					{
-						id: environment.id,
-						name: environment.name,
-						variables: variablesObj,
-						// No `isActive`: absent means "keep" on a PUT, and echoing
-						// the cached value back would let a variable edit re-activate
-						// this environment from a stale read - deactivating whichever
-						// one the engine actually holds. Only the switch writes it.
-					},
-					handlers
-				);
-			} else if (type === "collection" && collection) {
-				updateCollectionMutation.mutate(
-					{ id: collection.id, name: collection.name, variables: variablesObj },
-					handlers
-				);
+	/** A landed save: advance the editor to it, if the editor still holds its rows. */
+	const landSave = useCallback(
+		(id: string, plan: SavePlan): SaveOutcome => {
+			if (id !== seededContextRef.current) {
+				reportSaved(id);
+				return "saved";
 			}
-		});
-	}, [
-		type,
-		environment,
-		collection,
-		dataVariables,
-		updateGlobalsMutation,
-		updateEnvironmentMutation,
-		updateCollectionMutation,
-		contextId,
-		reportSaving,
-		reportFailed,
-		recordStoredNames,
-		finishSave,
-	]);
+			freshMapRef.current = mergeVariableChanges(freshMapRef.current, plan.changes);
+			baselineRef.current = baselineAfter(plan, baselineRef.current);
+			recordStoredNames(plan.rows, plan.problems);
+			// Recomputed against the new baseline rather than cleared: a conflict
+			// this save held back is still open, and only the user closes it.
+			setConflicts(conflictsOf(readLive()));
+			return finishSave(id, plan.rows, plan.problems.size > 0 || plan.conflicts.length > 0);
+		},
+		[reportSaved, recordStoredNames, readLive, finishSave]
+	);
 
-	// Keep performSaveRef updated
+	/**
+	 * Sends one save and hands its verdict to `settle`, exactly once, as soon as
+	 * the mutation answers - so the next queued save starts there and then. A
+	 * failure is reported here, once; `runSave` in the store takes that report
+	 * as already published. A throw before the request goes out is a failure
+	 * like any other, so the queue is never left waiting on a save that is not
+	 * in flight.
+	 */
+	const startSave = useCallback(
+		(target: SaveTarget, settle: (outcome: SaveOutcome) => void) => {
+			const { contextId: id, send: sendTo } = target;
+			// A save whose turn comes after the editor let go of its id (a switch, an
+			// unmount) reports nothing under that id: the id was discarded with the
+			// rows, and a report would revive it as an entry no editor owns - a
+			// "Not saved" nothing could ever clear. Its failure is still told, as
+			// the plain toast any write that lands after its editor left gets.
+			const live = id === seededContextRef.current;
+			let settled = false;
+			const finish = (outcome: SaveOutcome) => {
+				if (settled) return;
+				settled = true;
+				settle(outcome);
+			};
+			const fail = (error: unknown, outcome: SaveOutcome, message: string) => {
+				if (settled) return;
+				if (live) reportFailed(id, message, error);
+				else showToast(message, "error");
+				finish(outcome);
+			};
+			if (!sendTo) {
+				fail(undefined, "final", `Couldn't save - this ${target.scope} no longer exists`);
+				return;
+			}
+			const failWith = (error: unknown) =>
+				fail(
+					error,
+					saveFailureOutcome(error),
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				);
+			try {
+				const plan = planSave(live ? readLive() : target.snapshot);
+				if (live) {
+					if (plan.rows !== variablesRef.current) {
+						variablesRef.current = plan.rows;
+						setVariables(plan.rows);
+					}
+					setConflicts(plan.conflicts);
+					reportSaving(id);
+				}
+				sendTo(plan.payload, {
+					onSuccess: () => {
+						if (!settled) finish(landSave(id, plan));
+					},
+					onError: failWith,
+				});
+			} catch (error) {
+				failWith(error);
+			}
+		},
+		[readLive, reportSaving, reportFailed, showToast, landSave]
+	);
+
+	const clearRetry = useCallback(() => {
+		if (retryTimerRef.current) {
+			clearTimeout(retryTimerRef.current);
+			retryTimerRef.current = null;
+		}
+	}, []);
+
+	/**
+	 * `useSaveManager`'s backoff for a failed save: not for a `final` one, which
+	 * the engine would refuse again, nor once the edit is gone or the editor has
+	 * moved on. The delay is read when the failure lands, so a settings change
+	 * applies to the next retry.
+	 */
+	const scheduleRetry = useCallback(
+		(id: string, outcome: SaveOutcome) => {
+			if (outcome !== "failed" && outcome !== "disk-full") {
+				retryAttemptRef.current = 0;
+				return;
+			}
+			if (id !== seededContextRef.current || !hasPendingChangesRef.current) return;
+			const attempt = retryAttemptRef.current;
+			retryAttemptRef.current = attempt + 1;
+			const { delayMs } = useClientSettingsStore.getState().autoSave;
+			clearRetry();
+			retryTimerRef.current = setTimeout(
+				() => {
+					retryTimerRef.current = null;
+					void performSaveRef.current();
+				},
+				saveRetryDelayMs(delayMs, attempt)
+			);
+		},
+		[clearRetry]
+	);
+
+	/**
+	 * Runs `first`, then each save that queued behind it, one at a time. The
+	 * promise never rejects: the verdict is the result, so an un-awaited call
+	 * (blur, a toggle) has no rejection to leave unhandled. Only the last save
+	 * of a run arms a retry; one queued behind a failure is that retry already.
+	 */
+	const runSaves = useCallback(
+		(first: SaveTarget): Promise<SaveOutcome> => {
+			const run = (target: SaveTarget) =>
+				new Promise<SaveOutcome>((resolve) => {
+					saveInFlightRef.current = true;
+					startSave(target, (outcome) => {
+						resolve(outcome);
+						saveInFlightRef.current = false;
+						const next = waitingSavesRef.current.shift();
+						if (next) next.resolve(run(next.target));
+						else scheduleRetry(target.contextId, outcome);
+					});
+				});
+			return run(first);
+		},
+		[startSave, scheduleRetry]
+	);
+
+	/**
+	 * Every save goes through here, serialised as `useSaveManager`'s are. Two
+	 * saves in flight could land out of order and move the baseline back to the
+	 * older map, and a second `mutate` on the same mutation also silences the
+	 * first one's callbacks, so its promise would never settle. A save asked for
+	 * mid-flight waits; one asked for while another for the same id is already
+	 * waiting joins it, and that save reads the latest rows when it starts.
+	 */
+	const requestSave = useCallback((): Promise<SaveOutcome> => {
+		// A save starting now supersedes a retry; its own verdict re-arms one.
+		clearRetry();
+		const target: SaveTarget = { contextId, scope: type, send, snapshot: readLive() };
+		if (!saveInFlightRef.current) return runSaves(target);
+		const waiting = waitingSavesRef.current;
+		const last = waiting[waiting.length - 1];
+		if (last?.target.contextId === contextId) {
+			last.target = target;
+			return last.promise;
+		}
+		let resolve!: WaitingSave["resolve"];
+		const promise = new Promise<SaveOutcome>((r) => {
+			resolve = r;
+		});
+		waiting.push({ target, promise, resolve });
+		return promise;
+	}, [contextId, type, send, readLive, runSaves, clearRetry]);
+
 	useEffect(() => {
-		performSaveRef.current = performSave;
-	}, [performSave]);
+		performSaveRef.current = requestSave;
+	}, [requestSave]);
+
+	// A switch or an unmount lets go of the rows: nothing is left for a retry
+	// to save, and a save still out for them must not land in the next scope's.
+	useEffect(
+		() => () => {
+			clearRetry();
+			retryAttemptRef.current = 0;
+			seededContextRef.current = null;
+		},
+		[contextId, clearRetry]
+	);
 
 	// Register save context on mount
 	useEffect(() => {
@@ -611,7 +898,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// synchronously for `markDirty`/`finishSave` above.
 	const handleBlur = useCallback(() => {
 		if (hasPendingChangesRef.current) {
-			performSaveRef.current();
+			void performSaveRef.current();
 		}
 	}, []);
 
@@ -619,16 +906,16 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	// `contextId` is the identity of the active data source, so the effect
 	// reseeds when the user switches between globals / a specific environment /
 	// collection.
-	const lastSeededSourceRef = useRef<string | null>(null);
 	// The seed is gated on `hasPendingChangesRef`, a flag written synchronously by
 	// the editor and by a save's completion. Deriving the rows while rendering
 	// would mean reading that ref during render, which is the defect the guard
 	// exists to prevent; moving the guard into state would make it one render late
 	// and let a save echo overwrite keystrokes again - so the seed stays here.
 	useEffect(() => {
-		const isNewDataSource = lastSeededSourceRef.current !== contextId;
-		lastSeededSourceRef.current = contextId;
+		const isNewDataSource = seededContextRef.current !== contextId;
+		seededContextRef.current = contextId;
 		const freshMap = dataVariables;
+		freshMapRef.current = freshMap;
 
 		// A save's `onSuccess` writes the query cache, which arrives back here as
 		// a new `dataVariables` - the same scope, still dirty if anything was
@@ -642,13 +929,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 		// #1439 was exactly that - an editor that waits still sends its whole
 		// stale local map on the next save, silently overwriting the write it
 		// was waiting out. So the diff against `baseline` is recomputed here
-		// too, purely to report a conflict; `performSave` recomputes the same
+		// too, purely to report a conflict; `planSave` recomputes the same
 		// diff at save time and is what actually keeps both sides' work,
 		// merging onto the freshest map rather than this editor's own copy of
 		// it (`mergeVariableChanges`, shared with the context bar's commit).
 		if (!isNewDataSource && hasPendingChangesRef.current) {
-			const changes = computeUserChanges(variablesRef.current, baselineRef.current);
-			setConflicts(findVariableConflicts(baselineRef.current, changes, freshMap));
+			setConflicts(conflictsOf(readLive()));
 			return;
 		}
 
@@ -672,17 +958,16 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				else if (row.key) carriedIds.set(row.key, row.id);
 			});
 		}
-		if (dataVariables && Object.keys(dataVariables).length > 0) {
-			const entries = sortVariableEntriesByCreatedAt(Object.entries(dataVariables));
-			const rows: VariableRowData[] = entries.map(([key, val]) =>
-				rowFromValue(key, val, carriedIds.get(key))
-			);
-			rows.push(blankRow(carriedBlankId));
-			setVariables(rows);
-		} else {
-			setVariables([blankRow(carriedBlankId)]);
-		}
-	}, [contextId, dataVariables]);
+		const rows = sortVariableEntriesByCreatedAt(Object.entries(freshMap)).map(([key, val]) =>
+			rowFromValue(key, val, carriedIds.get(key))
+		);
+		rows.push(blankRow(carriedBlankId));
+		// The ref with the state, not a render later: `seededContextRef` already
+		// names this scope, and a save started before the next render must not
+		// read the previous scope's rows under it.
+		variablesRef.current = rows;
+		setVariables(rows);
+	}, [contextId, dataVariables, readLive]);
 
 	/*
 	 * Id-based and ref-backed, with an empty-ish dep list (`[markDirty]`,
@@ -717,7 +1002,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			setVariables(newVariables);
 			// Keep the ref in sync immediately (not just via the post-render effect):
 			// the secret toggle calls performSaveRef.current() synchronously right
-			// after this, and performSave reads variablesRef.current - a stale ref
+			// after this, and the save reads variablesRef.current - a stale ref
 			// would persist the pre-edit value and the backend re-sync would then
 			// revert the change. Mirrors removeVariable.
 			variablesRef.current = newVariables;
@@ -729,7 +1014,7 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	const removeVariable = useCallback(
 		(id: string) => {
 			const currentVariables = variablesRef.current;
-			const removedKey = currentVariables.find((v) => v.id === id)?.key;
+			const removed = currentVariables.find((v) => v.id === id);
 			const newVariables = currentVariables.filter((v) => v.id !== id);
 			if (newVariables.length === 0 || !newVariables.some((v) => v.isNew)) {
 				newVariables.push(blankRow());
@@ -737,54 +1022,59 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			setVariables(newVariables);
 			variablesRef.current = newVariables;
 			markDirty();
-			// A conflict named this row before it was deleted: with the row gone,
-			// "Take theirs" would find nothing to update and then immediately
-			// re-delete the key on save, since `computeUserChanges` reads its
-			// absence from the rows as the user's own deletion either way.
-			if (removedKey) setConflicts((prev) => prev.filter((c) => c.key !== removedKey));
-			performSaveRef.current();
+			// Deleting a conflicted row is the user's choice for that key: with the
+			// row gone, "Take theirs" would find nothing to update and the save
+			// would re-delete the key anyway, so the delete is taken as "keep mine".
+			const names = new Set(removed ? [removed.baseKey, trimVariableName(removed.key)] : []);
+			for (const { key } of conflictsOf(readLive())) {
+				if (names.has(key)) {
+					baselineRef.current = withKeyFrom(
+						baselineRef.current,
+						key,
+						freshMapRef.current
+					);
+				}
+			}
+			setConflicts((prev) => prev.filter((c) => !names.has(c.key)));
+			void performSaveRef.current();
 		},
-		[markDirty]
+		[markDirty, readLive]
 	);
 
-	// Wraps the ref-held `performSave` so a row can trigger an immediate save
+	// Wraps the ref-held save so a row can trigger an immediate save
 	// (the enabled checkbox, the type select, the secret toggle) with a
 	// callback identity that never changes - `performSaveRef.current` is
 	// always the latest save, so nothing needs to be in these deps at all.
 	const commitNow = useCallback(() => {
-		performSaveRef.current();
+		void performSaveRef.current();
 	}, []);
 
 	/**
-	 * The explicit half of "the user's value is kept until they choose": drop
-	 * the local edit for one conflicting key and take whatever the fresh map
-	 * holds instead, then save immediately - the same "toggle acts now"
-	 * pattern the enabled checkbox and the secret button already use.
+	 * The user's side of a conflict. A save leaves a conflicted key out until
+	 * this runs, and this saves at once - the same "toggle acts now" pattern the
+	 * enabled checkbox and the secret button use. Either way the key's baseline
+	 * becomes the other writer's value: "keep mine" then reads the row as the
+	 * user's change over it, "take theirs" first replaces the row with it.
 	 */
-	const resolveConflict = useCallback(
+	const keepMine = useCallback((key: string) => {
+		baselineRef.current = withKeyFrom(baselineRef.current, key, freshMapRef.current);
+		setConflicts((prev) => prev.filter((c) => c.key !== key));
+		void performSaveRef.current();
+	}, []);
+
+	const takeTheirs = useCallback(
 		(key: string) => {
-			const theirs = dataVariables[key];
 			// Computed synchronously and assigned to the ref directly, not inside
-			// the `setVariables` updater: `performSaveRef.current()` below reads
+			// the `setVariables` updater: the save `keepMine` starts reads
 			// `variablesRef.current` before this render commits, and a functional
 			// updater's body does not run until then. Mirrors `updateVariable` /
 			// `removeVariable`.
-			const next = theirs
-				? variablesRef.current.map((row) =>
-						row.key === key && !row.isNew ? rowFromValue(key, theirs, row.id) : row
-					)
-				: variablesRef.current.filter((row) => row.isNew || row.key !== key);
+			const next = withTheirs(variablesRef.current, key, freshMapRef.current[key]);
 			setVariables(next);
 			variablesRef.current = next;
-			baselineRef.current = theirs
-				? { ...baselineRef.current, [key]: theirs }
-				: Object.fromEntries(
-						Object.entries(baselineRef.current).filter(([k]) => k !== key)
-					);
-			setConflicts((prev) => prev.filter((c) => c.key !== key));
-			performSaveRef.current();
+			keepMine(key);
 		},
-		[dataVariables]
+		[keepMine]
 	);
 
 	// Environment-specific handlers
@@ -922,16 +1212,25 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							severity="warning"
 							title={`Changed elsewhere: ${conflict.key}`}
 							action={
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => resolveConflict(conflict.key)}
-								>
-									Take theirs
-								</Button>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => keepMine(conflict.key)}
+									>
+										Keep mine
+									</Button>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => takeTheirs(conflict.key)}
+									>
+										Take theirs
+									</Button>
+								</div>
 							}
 						>
-							Your edit is kept until you choose.
+							Your edit stays here, unsaved, until you choose.
 						</Callout>
 					))}
 				</div>

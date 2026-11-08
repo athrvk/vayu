@@ -63,9 +63,12 @@ vi.mock("@/queries", () => ({
 		isPending: false,
 	}),
 	useUpdateCollectionMutation: () => ({
-		mutate: (...args: unknown[]) =>
-			updateCollection(...(args as Parameters<typeof updateCollection>)),
-		mutateAsync: vi.fn(),
+		mutate: vi.fn(),
+		// Answers through the per-call callbacks, as a mounted mutation does.
+		mutateAsync: (...args: unknown[]) => {
+			updateCollection(...(args as Parameters<typeof updateCollection>));
+			return new Promise(() => {});
+		},
 	}),
 }));
 
@@ -183,6 +186,8 @@ describe("a variable name the editor cannot write", () => {
 
 		typeAndLeave(nameFields()[0], "host");
 		typeAndLeave(nameFields()[0], "access_token");
+		// Saves run one at a time: the first landing starts the second.
+		landSave();
 		landSave();
 
 		const sent = lastPayload();
