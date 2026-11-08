@@ -154,4 +154,79 @@ describe("execution events store", () => {
 		// the total against the row count, and null would read as "no events".
 		expect(useExecutionEventsStore.getState().totalEvents).toBe(1);
 	});
+
+	describe("handing the feed to another request's stream (#3352)", () => {
+		const replaced = () => useExecutionEventsStore.getState().replacedFeeds;
+
+		it("empties the feed at hand-over and records the run once the stream starts", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().addEvents("run_B", [event("b")]);
+
+			useExecutionEventsStore.getState().handOver("req_A");
+
+			const s = useExecutionEventsStore.getState();
+			expect(s).toMatchObject({ requestId: null, runId: null, isStreaming: false });
+			expect(s.events).toEqual([]);
+			// Mutation check: record in `handOver` again and a send that never
+			// opens a stream leaves this entry behind.
+			expect(replaced()).toEqual({});
+
+			start("run_A", "req_A");
+			expect(replaced()).toEqual({ req_B: "run_B" });
+			expect(useExecutionEventsStore.getState().displaced).toBeNull();
+		});
+
+		it("keeps the displaced feed for the next stream that does start", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			// req_A's start failed; req_C's is the stream that takes the feed.
+			useExecutionEventsStore.getState().handOver("req_C");
+			expect(replaced()).toEqual({});
+
+			start("run_C", "req_C");
+			expect(replaced()).toEqual({ req_B: "run_B" });
+		});
+
+		it("records nothing when the displaced request streams again itself", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_B2", "req_B");
+			expect(replaced()).toEqual({});
+		});
+
+		it("records nothing for a request's own re-send", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_B");
+			start("run_B2", "req_B");
+			expect(replaced()).toEqual({});
+		});
+
+		it("records nothing for a stream that had already ended", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().endStream("run_B", "completed", 0);
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_A", "req_A");
+			expect(replaced()).toEqual({});
+		});
+
+		it("forgets one request's record and keeps the others'", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_A", "req_A");
+			useExecutionEventsStore.getState().handOver("req_C");
+			start("run_C", "req_C");
+			expect(replaced()).toEqual({ req_B: "run_B", req_A: "run_A" });
+
+			useExecutionEventsStore.getState().forgetReplaced("req_B");
+			expect(replaced()).toEqual({ req_A: "run_A" });
+		});
+
+		it("clear() forgets a displaced feed too", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			useExecutionEventsStore.getState().clear();
+			start("run_A", "req_A");
+			expect(replaced()).toEqual({});
+		});
+	});
 });

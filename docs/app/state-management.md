@@ -1596,7 +1596,7 @@ There is deliberately no `stopMonitoring` on the service and no `clear` on the s
 
 The live half of a **streaming design request** (issue #574): `POST /execute` with `stream: true` answers `202 {runId, eventsUrl}` and the upstream's own events arrive over `GET /runs/:id/events`. `modules/request-builder/hooks/useExecutionEvents` buffers the relayed frames through `services/throttled-batcher.ts` and commits a batch per flush window on the user's `liveRefreshMs` cadence, so the store pays one copy and one notify per window rather than per frame (issue #1158) - the same batcher `LoadTestService` and `ScenarioRunService` commit through, now with three callers. The response pane's Events tab reads the store, so the rows survive switching to another request tab and back - the same split, and the same reason, as `scenario-run-store` above.
 
-It holds **one** stream: a second Send is what ends the first, so two are not a state the builder can reach. It also holds the **request** the stream belongs to, not only the run - one `RequestBuilderProvider` serves every request tab, so "are these rows mine?" is a question about the request on screen and a run id alone cannot answer it. Both the provider and the viewer select against `requestId`, which is what stops a stream started elsewhere appearing under a request that never streamed.
+It holds **one** stream: a second Send is what closes the first's feed, so two live feeds are not a state the builder can reach. It closes the feed and not the run: the engine's consumer worker keeps going until the stream's own end rule. So when the provider's stream branch empties the store (`handOver`) while another request's stream is live, that request's run is held as `displaced` and `startStream` records it in `replacedFeeds` (request id to run id, #3352) once the new stream has opened, so a Send whose stream is refused or never starts claims nothing; `replacedFeeds` outlives the stream fields; that request's response pane reads it to say its live feed was taken over, and the request's own next Send drops it (`forgetReplaced`). It also holds the **request** the stream belongs to, not only the run - one `RequestBuilderProvider` serves every request tab, so "are these rows mine?" is a question about the request on screen and a run id alone cannot answer it. Both the provider and the viewer select against `requestId`, which is what stops a stream started elsewhere appearing under a request that never streamed.
 
 **State:**
 ```typescript
@@ -1610,6 +1610,9 @@ It holds **one** stream: a second Send is what ends the first, so two are not a 
   isStreaming: boolean
   endReason: StreamEndReason | null
   error: string | null          // A transport failure on the relay
+  leftOut: LeftOutElement[]     // Draft elements this Send left out (#3066)
+  replacedFeeds: Record<string, string> // Request id -> run whose live feed another request's stream took over
+  displaced: { requestId: string; runId: string } | null // Live feed `handOver` emptied, recorded by the next `startStream`
 }
 ```
 
@@ -2767,16 +2770,16 @@ would fight the editor the user just came back to.
 
 ### `useEngine()` - Compose, Execute, Stop
 
-Wraps the three engine calls that are not queries, with `isExecuting` / `error`
-for the caller to render.
+Wraps the three engine calls that are not queries, with `error` for the caller
+to render. Whether a send is in flight is not here: the request builder holds
+that per request (`RequestBuilderProvider`'s `isExecuting`, #3352).
 
 **API:**
 ```typescript
 const {
   composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>
-  executeRequest: (params: ExecuteRequestRequest, environmentId?: string) => Promise<SanityResult | null>
+  executeRequest: (params: ExecuteRequestRequest, environmentId?: string, signal?: AbortSignal) => Promise<SanityResult | null>  // null once `signal` cancelled it
   stopLoadTest: (runId: string) => Promise<boolean>
-  isExecuting: boolean
   error: string | null
 } = useEngine();
 ```

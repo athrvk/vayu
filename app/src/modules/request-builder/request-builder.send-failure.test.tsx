@@ -24,6 +24,7 @@ import { render, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useTabsStore, useSessionStore, useToastStore } from "@/stores";
+import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import type { LoadTestConfig } from "@/types";
 import type { RequestState, ResponseState, StreamStartResult } from "./types";
@@ -108,6 +109,7 @@ function renderBuilder() {
 		<QueryClientProvider client={client}>{children}</QueryClientProvider>
 	);
 	render(<RequestBuilder />, { wrapper });
+	return client;
 }
 
 function seededState(): RequestState {
@@ -178,6 +180,44 @@ describe("a send the engine never answered", () => {
 		expect((await send()).errorCode).toBe("VARIABLE_UNRESOLVED");
 		expect((await stream()) as { response: ResponseState }).toMatchObject({
 			response: { errorCode: "VARIABLE_UNRESOLVED" },
+		});
+	});
+});
+
+/** A cancelled send is not a failure: the builder's Cancel has to reach the engine call (#3352). */
+describe("a send's Cancel", () => {
+	it("hands the provider's signal to the engine's execute", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.test/u" });
+		executeRequest.mockResolvedValue(null);
+		renderBuilder();
+		const cancel = new AbortController();
+
+		await act(async () => {
+			await (
+				providerProps.onExecute as (
+					r: RequestState,
+					dataRow: undefined,
+					signal: AbortSignal
+				) => Promise<ResponseState | null>
+			)(seededState(), undefined, cancel.signal);
+		});
+
+		expect(executeRequest).toHaveBeenCalledTimes(1);
+		expect(executeRequest.mock.calls[0][2]).toBe(cancel.signal);
+	});
+
+	it("still refreshes Recent sends, because the engine records the run", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.test/u" });
+		executeRequest.mockResolvedValue(null);
+		const client = renderBuilder();
+		const invalidate = vi.spyOn(client, "invalidateQueries");
+
+		await send();
+
+		// Mutation check: put the `if (!result) return null` exit back above
+		// the invalidations and a cancelled send leaves the list stale.
+		expect(invalidate).toHaveBeenCalledWith({
+			queryKey: queryKeys.runs.recentDesign("req_1"),
 		});
 	});
 });

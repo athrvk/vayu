@@ -20,17 +20,21 @@
  * whole of the fix on this side.
  *
  * In a file of its own because it stubs the provider out, and the rest of
- * `DesignRunView.test.tsx` needs the real one.
+ * `DesignRunView.test.tsx` needs the real one; the Cancel case below shares the
+ * stub for the same reason.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DesignRunView from "./DesignRunView";
+import { queryKeys } from "@/queries/keys";
 import type { Run } from "@/types";
 
+const executeRequest = vi.fn();
+const composeRequest = vi.fn();
 vi.mock("@/hooks/useEngine", () => ({
-	useEngine: () => ({ executeRequest: vi.fn(), composeRequest: vi.fn() }),
+	useEngine: () => ({ executeRequest, composeRequest }),
 }));
 
 vi.mock("@/queries", async () => {
@@ -80,17 +84,63 @@ const run = {
 	result: { timestamp: 1_750_000_000_000, statusCode: 200, statusText: "OK", latencyMs: 12 },
 } as unknown as Run;
 
+function renderView() {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	render(
+		<QueryClientProvider client={client}>
+			<DesignRunView run={run} />
+		</QueryClientProvider>
+	);
+	return client;
+}
+
 describe("DesignRunView - the copy declares which run it is", () => {
 	it("files the builder's memory under the run id, not under the copy's null id", () => {
-		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-		render(
-			<QueryClientProvider client={client}>
-				<DesignRunView run={run} />
-			</QueryClientProvider>
-		);
+		renderView();
 
 		expect(providerProps.memoryKey).toBe("run_42");
 		// And the id stays null: the identity is declared beside it, never as it.
 		expect((providerProps.initialRequest as { id: string | null }).id).toBeNull();
+	});
+});
+
+/** The copy's Send has the builder's Cancel too, so the signal must reach the engine call (#3352). */
+describe("DesignRunView - the copy's send can be cancelled", () => {
+	it("hands the provider's signal to the engine's execute", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.example.test/" });
+		executeRequest.mockResolvedValue(null);
+		renderView();
+		const cancel = new AbortController();
+
+		await (
+			providerProps.onExecute as (
+				r: unknown,
+				dataRow: undefined,
+				signal: AbortSignal
+			) => Promise<unknown>
+		)(providerProps.initialRequest, undefined, cancel.signal);
+
+		expect(executeRequest).toHaveBeenCalledTimes(1);
+		expect(executeRequest.mock.calls[0][2]).toBe(cancel.signal);
+	});
+
+	it("still tells History about the run, because the engine records it", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.example.test/" });
+		executeRequest.mockResolvedValue(null);
+		const client = renderView();
+		const invalidate = vi.spyOn(client, "invalidateQueries");
+
+		await (
+			providerProps.onExecute as (
+				r: unknown,
+				dataRow: undefined,
+				signal: AbortSignal
+			) => Promise<unknown>
+		)(providerProps.initialRequest, undefined, new AbortController().signal);
+
+		// Mutation check: put the `if (!result) return null` exit back above
+		// the invalidations and a cancelled replay leaves History stale.
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.lists() });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.count() });
 	});
 });

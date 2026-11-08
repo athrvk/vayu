@@ -2876,6 +2876,10 @@ call site that can drift. `label` renames the word ("Not now", "Keep it"),
 `size` and `className` pass through for the inline forms outside a
 `DialogFooter` that draw the same button in a denser row.
 `components/ui/dialog-cancel.test.ts` bans a `Cancel` label anywhere else.
+It is also the URL bar's Cancel for a buffered send in flight (#3352), because
+it is the one control that draws the word; `StopRunButton` is for runs and
+streams, which have a run id the engine can stop, whereas a buffered send has
+nothing to stop engine-side and Cancel only ends the renderer's wait.
 
 Three rules hold it together:
 

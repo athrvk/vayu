@@ -641,7 +641,22 @@ export interface RequestBuilderContextValue {
 	// UI State
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;
+	/**
+	 * A send of the request on screen is in flight. Held per request (#3352),
+	 * so a request left mid-send still reads true when the user comes back.
+	 */
 	isExecuting: boolean;
+	/**
+	 * The send in flight is a buffered one, which `cancelSend` can abort. A
+	 * stream's start is not: the engine has the run by the time it answers, and
+	 * Stop is what ends it.
+	 */
+	canCancelSend: boolean;
+	/**
+	 * Abort the on-screen request's buffered send (#3352). Its answer is dropped
+	 * and the request is idle again at once, the previous response kept.
+	 */
+	cancelSend: () => void;
 	/**
 	 * A stream this builder started is still open (issue #574).
 	 *

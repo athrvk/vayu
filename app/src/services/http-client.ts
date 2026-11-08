@@ -181,6 +181,11 @@ class HttpClient {
 		this.baseURL = baseURL;
 	}
 
+	/**
+	 * @param options.signal the caller's own cancel (#3352), composed with the
+	 * timeout as `stream()` composes it with the idle stall: an abort through it
+	 * rejects with `stream()`'s `AbortError`, never with the timeout's sentence.
+	 */
 	async request<T>(
 		method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS",
 		path: string,
@@ -189,9 +194,18 @@ class HttpClient {
 			timeout?: number;
 			params?: Record<string, string>;
 			headers?: Record<string, string>;
+			signal?: AbortSignal;
 		}
 	): Promise<T> {
+		const caller = options?.signal;
+		// Checked before the request is built, as in `stream()`: an already
+		// cancelled call must not reach the engine at all.
+		if (caller?.aborted) {
+			throw abortError();
+		}
 		const controller = new AbortController();
+		const onCallerAbort = () => controller.abort();
+		caller?.addEventListener("abort", onCallerAbort);
 		const timeout = options?.timeout || DEFAULT_REQUEST_TIMEOUT_MS;
 
 		const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -253,7 +267,15 @@ class HttpClient {
 				}
 				throw error;
 			}
+		} catch (error) {
+			// Both aborts end in the one controller, and the inner branches above
+			// call either a timeout; only the caller's signal says it was a cancel.
+			if (caller?.aborted) {
+				throw abortError();
+			}
+			throw error;
 		} finally {
+			caller?.removeEventListener("abort", onCallerAbort);
 			clearTimeout(timeoutId);
 		}
 	}
@@ -376,7 +398,11 @@ class HttpClient {
 		return this.request<T>("GET", path, undefined, { params });
 	}
 
-	async post<T>(path: string, body?: unknown, options?: { timeout?: number }): Promise<T> {
+	async post<T>(
+		path: string,
+		body?: unknown,
+		options?: { timeout?: number; signal?: AbortSignal }
+	): Promise<T> {
 		return this.request<T>("POST", path, body, options);
 	}
 

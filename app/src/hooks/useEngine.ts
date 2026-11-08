@@ -31,18 +31,21 @@ interface UseEngineReturn {
 	/**
 	 * Execute a request against the engine.
 	 * Accepts a composed ExecuteRequestRequest (flat headers, resolved auth/body).
+	 *
+	 * Resolves null once `signal` has aborted the send (#3352): a cancelled send
+	 * has no answer, and a synthesised error response would show a failure
+	 * nobody had.
 	 */
 	executeRequest: (
 		params: ExecuteRequestRequest,
-		environmentId?: string
+		environmentId?: string,
+		signal?: AbortSignal
 	) => Promise<SanityResult | null>;
 	stopLoadTest: (runId: string) => Promise<boolean>;
-	isExecuting: boolean;
 	error: string | null;
 }
 
 export function useEngine(): UseEngineReturn {
-	const [isExecuting, setIsExecuting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const composeRequest = useCallback(
@@ -57,18 +60,22 @@ export function useEngine(): UseEngineReturn {
 	const executeRequest = useCallback(
 		async (
 			params: ExecuteRequestRequest,
-			environmentId?: string
+			environmentId?: string,
+			signal?: AbortSignal
 		): Promise<SanityResult | null> => {
-			setIsExecuting(true);
 			setError(null);
 
 			try {
-				const result = await apiService.executeRequest({
-					...params,
-					environmentId: params.environmentId ?? environmentId,
-				});
+				const result = await apiService.executeRequest(
+					{
+						...params,
+						environmentId: params.environmentId ?? environmentId,
+					},
+					signal
+				);
 				return result;
 			} catch (err) {
+				if (signal?.aborted) return null;
 				const errorMessage =
 					err instanceof Error ? err.message : "Couldn't connect to Vayu's engine.";
 				const errorCode = err instanceof ApiError ? err.errorCode : "ENGINE_ERROR";
@@ -85,8 +92,6 @@ export function useEngine(): UseEngineReturn {
 					errorCode: errorCode,
 					errorMessage: errorMessage,
 				} as unknown as SanityResult;
-			} finally {
-				setIsExecuting(false);
 			}
 		},
 		[]
@@ -112,7 +117,6 @@ export function useEngine(): UseEngineReturn {
 		composeRequest,
 		executeRequest,
 		stopLoadTest,
-		isExecuting,
 		error,
 	};
 }

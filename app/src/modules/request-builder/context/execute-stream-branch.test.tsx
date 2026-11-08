@@ -164,6 +164,26 @@ describe("the streaming send branch", () => {
 		stopRun.mockClear();
 	});
 
+	it("stays sending until the engine answers, across a switch away and back", async () => {
+		let answer!: (r: StreamStartResult) => void;
+		const deferred = () => new Promise<StreamStartResult>((r) => (answer = r));
+		const { rerender } = render(renderFor("A", deferred));
+
+		await act(async () => {
+			void ctx().executeRequest();
+		});
+		rerender(renderFor("B", deferred));
+		expect(ctx().isExecuting).toBe(false);
+		rerender(renderFor("A", deferred));
+		expect(ctx().isExecuting).toBe(true);
+
+		await act(async () => {
+			answer({ ok: true, runId: "run_1", eventsUrl: "/runs/run_1/events" });
+		});
+		expect(ctx().isExecuting).toBe(false);
+		expect(ctx().isStreaming).toBe(true);
+	});
+
 	it("registers the stream against the request that sent it, and returns to idle", async () => {
 		render(renderFor("A", started));
 
@@ -331,6 +351,29 @@ describe("the streaming send branch", () => {
 		expect(ctx().isStreaming).toBe(true);
 	});
 
+	it("follows only the newer of two quick stream sends (#3352)", async () => {
+		const answers: Array<(r: StreamStartResult) => void> = [];
+		const deferred = () => new Promise<StreamStartResult>((r) => answers.push(r));
+		render(renderFor("A", deferred));
+
+		await act(async () => {
+			void ctx().executeRequest();
+			void ctx().executeRequest();
+		});
+		await act(async () => {
+			answers[1]({ ok: true, runId: "run_2", eventsUrl: "/runs/run_2/events" });
+		});
+		expect(useExecutionEventsStore.getState().runId).toBe("run_2");
+
+		// Mutation check: drop the provider's `send.isCurrent()` test before
+		// `startStream` and the older 202 takes the feed over from the newer run.
+		await act(async () => {
+			answers[0]({ ok: true, runId: "run_1", eventsUrl: "/runs/run_1/events" });
+		});
+		expect(useExecutionEventsStore.getState().runId).toBe("run_2");
+		expect(ctx().isExecuting).toBe(false);
+	});
+
 	it("does not report another request's stream as this one's", async () => {
 		const { rerender } = render(renderFor("A", started));
 		await act(async () => {
@@ -344,6 +387,127 @@ describe("the streaming send branch", () => {
 		// requestId` test in the provider's selectors and B inherits A's live
 		// stream, Stop button and all.
 		expect(ctx().isStreaming).toBe(false);
+	});
+
+	describe("another request's stream taking the live feed over (#3352)", () => {
+		const startedAs = (runId: string) => async (): Promise<StreamStartResult> => ({
+			ok: true,
+			runId,
+			eventsUrl: `/runs/${runId}/events`,
+		});
+		const replaced = () => useExecutionEventsStore.getState().replacedFeeds;
+
+		it("records the run it replaced against the request that started it", async () => {
+			const { rerender } = render(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("A", startedAs("run_A")));
+
+			// Mutation check: put back the plain `clear()` in the provider's
+			// stream branch and B's run is dropped with no record.
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({ B: "run_B" });
+			expect(useExecutionEventsStore.getState().runId).toBe("run_A");
+			// The replaced run is left to the engine, not stopped.
+			expect(stopRun).not.toHaveBeenCalled();
+
+			// A's own re-send replaces A's feed, not another request's.
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({ B: "run_B" });
+		});
+
+		it.each<[string, () => Promise<StreamStartResult | null>]>([
+			[
+				"refuses the stream",
+				async (): Promise<StreamStartResult> => ({
+					ok: false,
+					response: {
+						status: 0,
+						statusText: "Error",
+						headers: {},
+						body: "refused",
+						size: 0,
+						time: 0,
+					},
+				}),
+			],
+			["is cancelled before it answers", async (): Promise<StreamStartResult | null> => null],
+			[
+				"throws",
+				async (): Promise<StreamStartResult> => {
+					throw new Error("engine down");
+				},
+			],
+		])("leaves the live feed with no note when the new stream %s", async (_name, failing) => {
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { rerender } = render(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("A", failing));
+
+			// Mutation check: record in `handOver` again and B's pane claims
+			// a stream took its feed over although A's never opened.
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({});
+			// The old feed is still dropped, as before.
+			expect(useExecutionEventsStore.getState().runId).toBeNull();
+			logged.mockRestore();
+		});
+
+		it("forgets the record when that request streams again", async () => {
+			const { rerender } = render(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("A", startedAs("run_A")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("B", startedAs("run_B2")));
+
+			// Mutation check: drop the provider's `forgetReplaced` call and B's
+			// own new stream still carries the note about the old one.
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({ A: "run_A" });
+		});
+
+		it("forgets the record when that request sends without a stream", async () => {
+			useExecutionEventsStore.setState({ replacedFeeds: { B: "run_B" } });
+			const answered: ResponseState = {
+				status: 200,
+				statusText: "OK",
+				headers: {},
+				body: "",
+				size: 0,
+				time: 1,
+			};
+			render(
+				<TestQueryClient>
+					<RequestBuilderProvider
+						initialRequest={{ id: "B", name: "B" } as Partial<RequestState>}
+						onExecute={async () => answered}
+						onExecuteStream={started}
+					>
+						<Capture />
+					</RequestBuilderProvider>
+				</TestQueryClient>
+			);
+
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({});
+		});
 	});
 
 	describe("the elements the Send left out (#3066)", () => {

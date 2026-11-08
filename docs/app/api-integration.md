@@ -953,7 +953,7 @@ contract.
 
 ```typescript
 apiService.composeRequest(data): Promise<ComposedRequest>
-apiService.executeRequest(data): Promise<SanityResult>
+apiService.executeRequest(data, signal?): Promise<SanityResult>
 apiService.startLoadTest(data): Promise<StartLoadTestResponse>
 apiService.startScenarioRun(data): Promise<StartLoadTestResponse>
 ```
@@ -1013,6 +1013,19 @@ send. The MCP client keeps a copy in `electron/mcp/execute-budget.ts` (the main
 process cannot import renderer modules); `execute-budget.parity.test.ts` holds
 the two to the same number. `fetchOAuth2Token` has no script to wait for and
 stays at the setting plus the grace.
+
+**`executeRequest` takes the builder's Cancel as `signal`** (#3352), handed to
+`httpClient.post`, whose `request()` composes it with that abort timer the way
+`stream()` composes a caller's signal with its idle timer. A cancel rejects with
+`stream()`'s `AbortError`, never with the timeout's "Couldn't reach Vayu's
+engine in time.", and a signal that is already aborted puts nothing on the wire.
+
+That is all Cancel does: it stops the renderer waiting. The engine's
+`POST /execute` handler never checks for a client disconnect, so a request
+already sent still reaches its target and the engine finishes and records the
+run. The builder's and the History copy's send paths therefore invalidate the
+Recent sends, History and variable queries for a cancelled send as they do for
+an answered one; only the response is dropped.
 
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it

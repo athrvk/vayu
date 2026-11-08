@@ -36,6 +36,10 @@ vi.mock("./MethodSelector", () => ({ default: () => null }));
 vi.mock("./UrlInput", () => ({ default: () => null }));
 
 interface CtxOverrides {
+	isExecuting?: boolean;
+	/** A buffered send is in flight, so Cancel can abort it. */
+	canCancelSend?: boolean;
+	cancelSend?: () => void;
 	isStreaming?: boolean;
 	stopStream?: () => Promise<void>;
 	/** Whether a collection's data file is bound, so Send's row caret renders. */
@@ -63,7 +67,9 @@ function ctx(canStartLoadTest: boolean, overrides: CtxOverrides = {}): RequestBu
 		setResponse: vi.fn(),
 		activeTab: "params",
 		setActiveTab: vi.fn(),
-		isExecuting: false,
+		isExecuting: overrides.isExecuting ?? false,
+		canCancelSend: overrides.canCancelSend ?? false,
+		cancelSend: overrides.cancelSend ?? vi.fn(),
 		isStreaming: overrides.isStreaming ?? false,
 		stopStream: overrides.stopStream ?? vi.fn(async () => {}),
 		isSaving: false,
@@ -394,6 +400,43 @@ describe("the Send button while a stream is open", () => {
 	it("goes back to Send once the stream has ended", () => {
 		renderBar(true, { isStreaming: false });
 		expect(screen.getByRole("button", { name: /send/i })).toBeTruthy();
+	});
+});
+
+/**
+ * A buffered send in flight offers Cancel beside the disabled Send (#3352).
+ *
+ * Only a buffered one: a stream's start is answered with a run the engine
+ * already holds, and Stop is what ends that. So the gate is `canCancelSend`,
+ * never `isExecuting`, which is also true while a stream is starting.
+ */
+describe("Cancel while a send is in flight", () => {
+	const cancel = () => screen.queryByRole("button", { name: /^cancel$/i });
+
+	it("shows Cancel beside a disabled Send while a buffered send is in flight", () => {
+		renderBar(true, { isExecuting: true, canCancelSend: true });
+
+		expect(cancel()).not.toBeNull();
+		expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+	});
+
+	it("offers no Cancel while a stream's start is in flight", () => {
+		renderBar(true, { isExecuting: true, canCancelSend: false });
+		expect(cancel()).toBeNull();
+	});
+
+	it("offers no Cancel when nothing is sending", () => {
+		renderBar(true);
+		expect(cancel()).toBeNull();
+	});
+
+	it("cancels the send when clicked", () => {
+		const cancelSend = vi.fn();
+		renderBar(true, { isExecuting: true, canCancelSend: true, cancelSend });
+
+		fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+		expect(cancelSend).toHaveBeenCalledTimes(1);
 	});
 });
 

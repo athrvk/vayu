@@ -518,7 +518,8 @@ export default function RequestBuilder() {
 	const handleExecute = useCallback(
 		async (
 			request: RequestState,
-			dataRow?: Record<string, unknown>
+			dataRow?: Record<string, unknown>,
+			signal?: AbortSignal
 		): Promise<ResponseState | null> => {
 			if (!fetchedRequest) return null;
 
@@ -557,8 +558,28 @@ export default function RequestBuilder() {
 						// engine binds them here.
 						...(dataRow ? { data: dataRow } : {}),
 					},
-					activeEnvironmentId || undefined
+					activeEnvironmentId || undefined,
+					signal
 				);
+
+				// Before the cancelled-send exit: Cancel only stops the renderer
+				// waiting, so the engine still runs and records the request (#3352).
+				// This send is a new design run, and the context bar's Recent
+				// sends list is not polled - without this it would keep showing
+				// the sends from before this one for as long as the tab is open.
+				// The history list has its own 5s poll and needs nothing here.
+				queryClient.invalidateQueries({
+					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
+				});
+
+				// Refresh variables so script-set values (e.g. pm.environment.set)
+				// appear in the UI - an extractor's `scope` writes them too, see
+				// the helper's note.
+				if (elementsMayWriteVariables(elements)) {
+					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+				}
 
 				if (!result) return null;
 
@@ -579,23 +600,6 @@ export default function RequestBuilder() {
 							: "Couldn't get an OAuth 2.0 token. Check the Auth tab's token settings.",
 						"error"
 					);
-				}
-
-				// This send is a new design run, and the context bar's Recent
-				// sends list is not polled - without this it would keep showing
-				// the sends from before this one for as long as the tab is open.
-				// The history list has its own 5s poll and needs nothing here.
-				queryClient.invalidateQueries({
-					queryKey: queryKeys.runs.recentDesign(fetchedRequest.id),
-				});
-
-				// Refresh variables so script-set values (e.g. pm.environment.set)
-				// appear in the UI - an extractor's `scope` writes them too, see
-				// the helper's note.
-				if (elementsMayWriteVariables(elements)) {
-					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
-					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
-					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
 				}
 
 				// Shared with the History run view's send path - see execute-mapping.ts
