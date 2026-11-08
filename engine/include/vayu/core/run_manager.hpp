@@ -727,8 +727,8 @@ struct RunContext {
      * What every `pm.sendRequest` of this run inherits (issue #2841): the
      * route and default headers the run's transfers were sent under (the
      * `EventLoopConfig::transport` and `::default_headers` snapshot, #1256),
-     * the run's resolved `timeout` and the load byte bound
-     * (`maxResponseBodyBytes`).
+     * the run's resolved `timeout`, the load byte bound
+     * (`maxResponseBodyBytes`) and `should_stop` as the cancel (#3371).
      *
      * Written by `configure_event_loop` - the one place a load run resolves
      * them - before the loop starts, and only read afterwards: by

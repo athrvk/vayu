@@ -172,11 +172,17 @@ struct ReplayFailures {
  * `pm.request` writeback) is a second, distinct failure and is recorded
  * alongside them, never dropped just because the tests that did run are
  * counted - the same distinction `script_errored` draws in the design path.
+ *
+ * A script whose `pm.sendRequest` the run's Stop cancelled is not tallied at
+ * all: the run ended under it, so it judged nothing (#3371).
  */
 template <typename RecordFailure>
 void tally_replay_result (const vayu::ScriptResult& result,
 ScriptValidationTotals& totals,
 RecordFailure&& record_failure) {
+    if (result.send_cancelled) {
+        return;
+    }
     if (!result.tests.empty ()) {
         for (const auto& test : result.tests) {
             if (test.passed) {
@@ -1536,6 +1542,10 @@ int default_max_per_host) {
     context->script_send.default_headers = loop_config.default_headers;
     context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
     context->script_send.request_timeout_ms = timeout_ms;
+    // Stop and shutdown both raise `should_stop` (#3371). Not `aux_cancel`:
+    // the worker raises that at every end before the replay and teardown run,
+    // and their sends must still go out after a natural end.
+    context->script_send.cancel = &context->should_stop;
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);

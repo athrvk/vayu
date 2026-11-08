@@ -2200,6 +2200,14 @@ It is a subset of `pm.response` and has no `to.*` assertion chain.
   nothing to say why. Before issue #1188 this fetch was the one read in the
   engine with no bound at all.
 
+**A Stop ends it.** In a run, the run's Stop (or the engine shutting down)
+cancels a fetch in flight within about a second, and every fetch after it at
+once, so a hung host never holds a Stop open for the request timeout (#3371).
+The callback's `err` says `Request cancelled`. That is the run ending, not the
+script failing: a `script.setup` / `script.teardown` whose fetch was cancelled
+is recorded `skipped`, and a replayed `tests` script whose fetch was cancelled
+is left out of the run's pass and fail counts.
+
 **It leaves the way its execution leaves.** The fetch takes the transport policy
 its enclosing execution resolved - the proxy mode and URL, the bypass list, the
 custom CA bundle and the client-certificate registry - rather than whatever the

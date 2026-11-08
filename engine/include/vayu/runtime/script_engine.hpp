@@ -407,7 +407,9 @@ struct ScriptContext {
      *
      * The enclosing exchange's own (`ExchangeInputs::cancel`), so a script
      * send inside `POST /execute` ends with the server the way the request's
-     * own send does.
+     * own send does; in a run, the run's `should_stop`, through
+     * @ref ScriptSendInputs (#3371). A send it ends sets
+     * `ScriptResult::send_cancelled`.
      */
     const std::atomic<bool>* cancel = nullptr;
 
@@ -484,17 +486,18 @@ struct ScriptContext {
 
 /**
  * @brief What a `pm.sendRequest` inherits from the run it runs inside
- *        (issue #2841): the four `ScriptContext` fields a script cannot set
- *        for itself, resolved once by the run and applied together.
+ *        (issue #2841): the `ScriptContext` fields a script cannot set for
+ *        itself, resolved once by the run and applied together.
  *
- * One value rather than four assignments per call site, because every site
- * that left one out sent with the compiled-in default for it: a script that
- * waited 30 s on a run whose `timeout` was 500 ms, or left by another route
- * than the run's own transfers.
+ * One value rather than an assignment per field per call site, because every
+ * site that left one out sent with the compiled-in default for it: a script
+ * that waited 30 s on a run whose `timeout` was 500 ms, left by another route
+ * than the run's own transfers, or held Stop and shutdown open for its whole
+ * timeout (#3371).
  *
  * Default-constructed it holds a fresh `ScriptContext`'s own values, so
  * applying one changes nothing; a `RunContext` built by hand keeps the
- * compiled-in bounds.
+ * compiled-in bounds and no cancel.
  */
 struct ScriptSendInputs {
     /// `ScriptContext::transport`.
@@ -505,12 +508,16 @@ struct ScriptSendInputs {
     size_t max_response_bytes = vayu::core::constants::http::MAX_DESIGN_RESPONSE_BODY_BYTES;
     /// `ScriptContext::request_timeout_ms`.
     int request_timeout_ms = vayu::core::constants::server::DEFAULT_TIMEOUT_MS;
+    /// `ScriptContext::cancel`: the run's `should_stop`, which Stop and
+    /// shutdown both raise. Must outlive every script it is applied to.
+    const std::atomic<bool>* cancel = nullptr;
 
     void apply (ScriptContext& ctx) const {
         ctx.transport          = transport;
         ctx.default_headers    = default_headers;
         ctx.max_response_bytes = max_response_bytes;
         ctx.request_timeout_ms = request_timeout_ms;
+        ctx.cancel             = cancel;
     }
 };
 

@@ -1461,7 +1461,8 @@ RunManager& manager) {
         // the headers take the design scope's compression setting and the
         // bound is the design one. Every step's send reads these, and so does
         // a `script.setup` / `script.teardown` `pm.sendRequest`, with the
-        // run's timeout as the steps' own requests carry it (#2841).
+        // run's timeout as the steps' own requests carry it (#2841) and the
+        // run's Stop as its cancel (#3371).
         const vayu::runtime::ScriptSendInputs script_send{
             .transport       = vayu::http::resolve_transport_policy (db),
             .default_headers = vayu::http::resolve_default_header_policy (
@@ -1469,6 +1470,7 @@ RunManager& manager) {
             .max_response_bytes = vayu::http::routes::design_response_body_bound (db),
             .request_timeout_ms =
             vayu::http::routes::resolve_request_timeout_ms (context->config, db),
+            .cancel = &context->should_stop,
         };
         // Same reason, same read-once-for-the-run rule (issue #1514's
         // reopen): a step's `extract.json` / `assert.jsonpath` must not read

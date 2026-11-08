@@ -442,6 +442,18 @@ Manages the lifecycle of load test runs:
   timeout (#3343): a cancelled transfer ends at its next libcurl progress tick,
   about a second, and counts as neither a failed scrape nor a failed refresh.
   `should_stop` is not that flag because a natural end never sets it.
+- **The run's own thread carries `should_stop`** (#3371): every
+  `pm.sendRequest` its scripts make (`script.setup` / `script.teardown`, the
+  inline step scripts, the deferred replay, and a sequential collection run's
+  setup and teardown) takes it through `ScriptSendInputs::cancel`, because
+  Stop and shutdown both raise it and both wait on that thread. The auxiliary
+  threads keep `aux_cancel`: a replay or teardown after a natural end must
+  still send. A call it cancels is the run ending, never a failure: a
+  lifecycle script whose send it cancelled is `skipped` (so a cut-short setup
+  does not fail the run), and the replay leaves such a sample untallied
+  (`ScriptResult::send_cancelled`). A Stop latched before the replay leaves the
+  flag raised, so the replay's and teardown's sends after a Stop are cancelled
+  at once: a Stop abandons them.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the
