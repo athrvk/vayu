@@ -191,9 +191,11 @@ struct ClientConfig {
      *        outside the transfer ends it (issue #2683).
      *
      * Set by every send a management-API handler makes, from
-     * `RouteContext::server_stopping`, so `Server::stop()` can end those
-     * transfers before it joins the handler threads rather than waiting out
-     * whatever timeout a request typed. The flag must outlive the transfer.
+     * `RouteContext::server_stopping` (a buffered `POST /execute` through its
+     * `DisconnectWatch`, which its caller hanging up raises too, #3383), so
+     * `Server::stop()` can end those transfers before it joins the handler
+     * threads rather than waiting out whatever timeout a request typed. The
+     * flag must outlive the transfer.
      *
      * Read from libcurl's progress callback, which runs about once a second
      * while a transfer waits on a silent peer, so a cancel lands within about

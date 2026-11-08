@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -118,6 +119,17 @@ class SlowMockServer {
         svr.Get ("/hang", [this] (const httplib::Request&, httplib::Response& res) {
             ++hangs;
             hold_until_released ();
+            res.set_content ("{}", "application/json");
+        });
+        // `/hang` until its client hangs up, which it counts: the sign the
+        // caller dropped the transfer rather than waited it out.
+        svr.Get ("/hang-until-hangup",
+        [this] (const httplib::Request& req, httplib::Response& res) {
+            ++hangs;
+            if (hold_until_released (req.is_connection_closed)) {
+                ++hangups;
+                return;
+            }
             res.set_content ("{}", "application/json");
         });
         // Fast, except that every HANG_EVERY-th request is held like /hang: a
@@ -250,6 +262,10 @@ class SlowMockServer {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang";
     }
 
+    std::string hang_until_hangup_url () const {
+        return "http://127.0.0.1:" + std::to_string (port) + "/hang-until-hangup";
+    }
+
     std::string hang_every_url () const {
         return "http://127.0.0.1:" + std::to_string (port) + "/hang-every";
     }
@@ -313,9 +329,15 @@ class SlowMockServer {
         return scrapes.load ();
     }
 
-    /// How many requests `/hang` has received: the sign one is in flight.
+    /// How many requests `/hang` and `/hang-until-hangup` have received: the
+    /// sign one is in flight.
     int hang_count () const {
         return hangs.load ();
+    }
+
+    /// How many `/hang-until-hangup` requests ended because the client hung up.
+    int hangup_count () const {
+        return hangups.load ();
     }
 
     /// Connections the server is holding open right now - one per task in
@@ -326,15 +348,20 @@ class SlowMockServer {
         return live_connections->load (std::memory_order_relaxed);
     }
 
-    /// Until the fixture is torn down, or a hard cap so a leaked handler
-    /// cannot wedge the test binary.
-    void hold_until_released () const {
+    /// Until the fixture is torn down, @p ended answers true, or a hard cap
+    /// so a leaked handler cannot wedge the test binary. True when @p ended
+    /// is what let it go.
+    bool hold_until_released (const std::function<bool ()>& ended = nullptr) const {
         const auto deadline =
         std::chrono::steady_clock::now () + std::chrono::seconds (30);
         while (!released.load (std::memory_order_relaxed) &&
         std::chrono::steady_clock::now () < deadline) {
+            if (ended && ended ()) {
+                return true;
+            }
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
+        return false;
     }
 
     httplib::Server svr;
@@ -343,6 +370,7 @@ class SlowMockServer {
     std::atomic<bool> released{ false };
     std::atomic<int> scrapes{ 0 };
     std::atomic<int> hangs{ 0 };
+    std::atomic<int> hangups{ 0 };
     std::atomic<int> stall_hits{ 0 };
     std::atomic<int> hang_every_hits{ 0 };
     std::atomic<int> sse_held_first_hits{ 0 };

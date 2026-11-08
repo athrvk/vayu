@@ -37,6 +37,7 @@
 #include "vayu/core/threshold_eval.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
+#include "vayu/http/disconnect_watch.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/file_ref.hpp"
 #include "vayu/http/header_names.hpp"
@@ -1281,7 +1282,8 @@ std::optional<double> engine_ms) {
         // `Stopped`, which neither the response nor the error flag can say.
         // Only from Running: a buffered send has no context for
         // `POST /runs/:id/stop` to signal, so a Stop there writes the row
-        // itself, and it stands over the exchange recorded above.
+        // itself, as `stop_if_caller_left` does for a caller that hung up,
+        // and it stands over the exchange recorded above.
         vayu::RunStatus status = vayu::RunStatus::Completed;
         if (stream) {
             status = stream->status;
@@ -1607,6 +1609,9 @@ struct DesignSend {
     std::optional<vayu::http::Auth> late_auth;
     /// Copied from the payload; both paths judge the final URL by it.
     std::optional<vayu::http::TargetPolicy> target_policy;
+    /// The caller's connection, watched for a buffered send alone (#3383): a
+    /// stream outlives its caller by design. Owned by the handler.
+    vayu::http::DisconnectWatch* caller_watch = nullptr;
 
     [[nodiscard]] const vayu::http::TargetPolicy* target_policy_or_null () const {
         return target_policy ? &*target_policy : nullptr;
@@ -1702,11 +1707,16 @@ std::optional<std::string> validate_execute_elements (nlohmann::json& json) {
  * whole pre-row section is ordered by: a request that could not be flagged,
  * bound or built must leave no trace of an execution that never happened.
  *
+ * A buffered send's @p caller_watch starts before the build, so an OAuth 2.0
+ * token the build acquires stops for a caller that has gone too (#3383).
+ *
  * @return the message (and code, when it has one) to answer with, already
  *         logged, or nothing.
  */
-std::optional<ExecuteRefusal>
-read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePayload& out) {
+std::optional<ExecuteRefusal> read_execute_payload (RouteContext& ctx,
+const httplib::Request& req,
+ExecutePayload& out,
+std::optional<vayu::http::DisconnectWatch>& caller_watch) {
     // Depth-checked before anything copies the payload, `build_design_send`'s
     // snapshot of the same text included.
     auto parsed = parse_request_json (req.body, {}, refuse_overdeep_send_row);
@@ -1818,10 +1828,15 @@ read_execute_payload (RouteContext& ctx, const httplib::Request& req, ExecutePay
     // carrying a `{{data.*}}` are the one case the build leaves alone - the
     // bind below applies them once the row has reached them.
     const int request_timeout_ms = resolve_request_timeout_ms (json, ctx.db);
+    if (!stream.value) {
+        caller_watch.emplace (req.is_connection_closed, ctx.server_stopping);
+    }
+    const std::atomic<bool>& cancel =
+    caller_watch ? caller_watch->cancel () : ctx.server_stopping;
     // An OAuth 2.0 token acquired here has its endpoints judged by the policy
     // before anything is posted (#2521).
     auto built = vayu::http::build_request (json, &ctx.db, request_timeout_ms,
-    row_auth.resolution, *target_policy ? &**target_policy : nullptr, &ctx.server_stopping);
+    row_auth.resolution, *target_policy ? &**target_policy : nullptr, &cancel);
     if (built.parse_failed) {
         vayu::utils::log_warning ("http",
         "POST /execute - Invalid request format: " + built.error_message);
@@ -2411,6 +2426,23 @@ double auth_fetch_ms) {
 }
 
 /**
+ * A send whose caller hung up is `Stopped`, as a user's Stop of a buffered
+ * send is (#3383): the row leaves Running before the result is recorded, so
+ * `record_design_result` stores the exchange as it ended and its own move to
+ * Completed or Failed is refused. A server shutdown is not a caller leaving
+ * and keeps the status its exchange earned.
+ */
+void stop_if_caller_left (vayu::db::Database& db, const DesignSend& send) {
+    if (!send.run_id || send.caller_watch == nullptr || !send.caller_watch->caller_left ()) {
+        return;
+    }
+    vayu::utils::log_info ("run", "Send stopped: its caller disconnected",
+    { { "runId", *send.run_id } });
+    db.transition_run_status (
+    *send.run_id, { vayu::RunStatus::Running }, vayu::RunStatus::Stopped);
+}
+
+/**
  * The buffered half of a design send: pre-request script, send, test script -
  * the sequence a scenario step performs too, which is why it lives in
  * request_exchange.cpp rather than here (issue #353).
@@ -2449,7 +2481,8 @@ std::chrono::steady_clock::time_point handler_start) {
     ctx.db, vayu::http::DefaultHeaderScope::Design);
     inputs.max_response_bytes     = design_response_body_bound (ctx.db);
     inputs.max_element_body_bytes = element_body_bound (ctx.db);
-    inputs.cancel                 = &ctx.server_stopping;
+    inputs.cancel = send.caller_watch != nullptr ? &send.caller_watch->cancel () :
+                                                   &ctx.server_stopping;
     // The allowed folders as they stand at this send, read once.
     vayu::http::FilePlan files (vayu::http::FileAccessPolicy::from_database (ctx.db));
     inputs.files = &files;
@@ -2495,6 +2528,7 @@ std::chrono::steady_clock::time_point handler_start) {
     // Store result to database (non-blocking, errors logged). A transient
     // execution stops here: no trace row, so the post-auth headers this
     // exchange carries never reach disk - and neither do these results.
+    stop_if_caller_left (ctx.db, send);
     record_design_result (ctx.db, send.run_id, exchange.request, exchange.response,
     /*send.stream=*/nullptr, validation, scripts, elements, engine_ms);
 
@@ -2558,6 +2592,7 @@ DesignSend& send) {
     failed.status_text   = vayu::http::status_text (0);
     failed.error_code    = built.error_code;
     failed.error_message = built.error_message;
+    stop_if_caller_left (ctx.db, send);
     record_design_result (ctx.db, send.run_id, send.request, failed);
     res.status          = 200;
     nlohmann::json body = vayu::json::serialize (failed);
@@ -2602,7 +2637,9 @@ std::chrono::steady_clock::time_point handler_start) {
  * Executes a single HTTP request (Design Mode).
  *
  * Returns:
- * - 200: Request was processed (check response body for server status/errors)
+ * - 200: Request was processed (check response body for server status/errors).
+ *        A buffered send whose caller hangs up first is cancelled and its run
+ *        recorded `stopped` (#3383).
  * - 400: Invalid request format (malformed JSON, missing required fields)
  * - 500: The run record could not be written, or the send threw after it was
  *        (`guard_recorded_send` fails the row and names the error)
@@ -2612,12 +2649,15 @@ const httplib::Request& req,
 httplib::Response& res) {
     const auto handler_start = std::chrono::steady_clock::now ();
     ExecutePayload payload;
-    if (auto rejection = read_execute_payload (ctx, req, payload)) {
+    // Joined before the handler returns: it reads the connection's socket.
+    std::optional<vayu::http::DisconnectWatch> caller_watch;
+    if (auto rejection = read_execute_payload (ctx, req, payload, caller_watch)) {
         send_error (res, 400, rejection->message, rejection->code);
         return;
     }
 
     DesignSend send;
+    send.caller_watch = caller_watch ? &*caller_watch : nullptr;
     if (auto rejection = build_design_send (ctx, req, payload, send)) {
         send_error (res, 400, *rejection);
         return;

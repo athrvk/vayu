@@ -162,6 +162,7 @@ add_executable(vayu_tests
     execute_binary_body_test.cpp
     execute_elements_validation_test.cpp
     execute_transport_failure_test.cpp
+    execute_disconnect_test.cpp
     oauth_client_test.cpp
     oauth_route_test.cpp
     pkce_test.cpp
@@ -421,6 +422,7 @@ set(vayu_scratch_database_suites
     ExecuteBinaryBodyTest
     ExecuteElementsValidation
     ExecuteTransportFailureTest
+    ExecuteDisconnectTest
     ExecuteByteRowTest
     CustomCaVerificationTest
     DatabaseConcurrencyTest

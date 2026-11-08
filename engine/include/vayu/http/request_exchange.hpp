@@ -609,9 +609,9 @@ struct ExchangeInputs {
     std::function<bool ()> should_stop;
     /// `ClientConfig::cancel` for this exchange's send, every
     /// `pm.sendRequest` its scripts make and the OAuth 2.0 token @ref late_auth
-    /// acquires (issue #2683): `POST /execute` passes
-    /// `RouteContext::server_stopping`, so `Server::stop()` ends the transfer
-    /// rather than waiting on it. The scenario runner passes
+    /// acquires (issue #2683): `POST /execute` passes its `DisconnectWatch`'s
+    /// flag, which `Server::stop()` and the caller hanging up both raise
+    /// (#3383), so neither waits on the transfer. The scenario runner passes
     /// `RunContext::should_stop` for a streaming step alone (#3235), whose
     /// transfer only a cap or a stop ends; null leaves all three
     /// uncancellable, as its other steps are.
