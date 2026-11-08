@@ -1377,15 +1377,12 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 ```typescript
 {
   currentRunId: string | null
-  mode: "running" | "completed" | "stopped" | "failed"  // setFinalReport: engine status "failed" -> "failed"; a user stop stays "stopped". Any of completed/failed/stopped with a `finalReport` renders History's `LoadTestDetail` over it (#2136, #2220); without one the live view stays, carrying the report Retry
-  isStreaming: boolean
+  phase: DashboardPhase                 // Where the held run stands; see below (#3351)
   currentMetrics: LoadTestMetrics | null
   historicalMetrics: LoadTestMetrics[]  // Trimmed to liveWindowSeconds (cap: maxRetainedTicks)
   monitorSamples: MonitorSample[]       // Server vitals scraped this run (cap: maxRetainedTicks)
   liveWindowSeconds: number | null             // Live retention window; null = full run
-  finalReport: RunReport | null
-  error: string | null
-  isStopping: boolean
+  isStopping: boolean                          // A Stop request for the held run is in flight
   loadTestConfig: LoadTestRunConfig | null     // Config snapshot during run; `runOwnSloMs(loadTestConfig)` (capacity `sloMs`, else the `latencyP99Ms` budget, else undefined) is the SLO line the live charts draw
   requestInfo: LoadTestRequestInfo | null      // Request snapshot during run
   peakConcurrency: number                      // Running max (monotonic)
@@ -1395,18 +1392,42 @@ Because the value arrives asynchronously, the store seeds `liveWindowSeconds` wi
 
 **Key Methods:**
 ```typescript
-const {
-  startRun, stopRun, setStreaming,
-  setRunConfig,     // Fill in loadTestConfig / requestInfo of a run started without them (agent runs)
-  addMetricsBatch,  // Efficiently fold batch into history and update aggregates
-  addMonitorSamples, // Append scraped server vitals, bounded by maxRetainedTicks
-  setFinalReport, setError, setStopping,
-  setLiveWindowSeconds,  // Update the live retention window (from useLiveWindowSync)
-  setMaxRetainedTicks
-} = useDashboardStore();
+startRun(runId, config?, requestInfo?, sourceRequestId?)  // The one writer that replaces the held run
+// Every writer below names its run and is dropped for any other:
+setRunConfig(runId, config, requestInfo)  // Fill in loadTestConfig / requestInfo of a run started without them (agent runs)
+streamOpened(runId)                 // Stream attached, or re-attached by Reconnect -> streaming
+streamLost(runId, message)          // Error, drop or takeover while the engine runs on -> streamLost
+streamClosed(runId)                 // streaming -> awaitingReport
+stopRun(runId)                      // The engine accepted Stop -> awaitingReport, stopped
+addMetricsBatch(runId, batch)       // Fold a batch into history and update aggregates
+addMonitorSamples(runId, batch)     // Append scraped server vitals, bounded by maxRetainedTicks
+setFinalReport(runId, report)       // -> finished, unless the report says the run is still live
+reportFailed(runId, message)        // The report fetch gave up -> reportError
+retryReport(runId)                  // Retry -> awaitingReport
+setStopping(runId, stopping)
+setLiveWindowSeconds(seconds)       // Update the live retention window (from useLiveWindowSync)
+setMaxRetainedTicks(ticks)
 ```
 
-**`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect.
+**`phase` is the one encoding of where the held run stands** (issue #3351). It replaced four fields - `mode`, `isStreaming`, `error` and `finalReport` - that could disagree: a stream error left `isStreaming` true beside its message, so the pill said Running over a dead stream; a superseded or dropped stream left neither streaming nor settled, so the pill vanished while Stop still showed; and "awaiting the report" was only the absence of every other flag. Each phase carries only its own payload, in the style of `SpecSync.tsx`'s `CheckState`:
+
+```typescript
+type DashboardPhase =
+  | { phase: "idle" }
+  | { phase: "streaming" }
+  | { phase: "streamLost"; message: string }       // The engine runs on; the callout's body
+  | { phase: "awaitingReport"; stopped: boolean }  // `stopped`: the user's Stop decides the ending
+  | { phase: "reportError"; message: string; stopped: boolean }
+  | { phase: "finished"; kind: "completed" | "stopped" | "failed"; report: RunReport }
+```
+
+Two pure derivations are exported beside it, and every reader asks them rather than the phase. `isDashboardRunLive(phase)` is whether the run may still be executing on the engine: true for `streaming`, `streamLost` and an `awaitingReport` the user did not stop. The header's Running pill and Stop button, the keep-awake prompt and the single-run gate (`canStartLoadRun`, below, which the URL bar's Load test swap follows) all read it, so a lost stream keeps the run live everywhere, Running beside the "Lost the live metrics stream" callout. A `reportError` is not live: the stream had already closed, and holding the builder on a read that cannot answer would lock out every new run until the engine did. `dashboardRunEnding(phase)` is how the run ended as far as the dashboard knows - the report's kind, or "stopped" from the user's Stop before the report lands - and is what the pill names when the run is not live. `useHostSleepRecorder` is the one reader that wants the stream itself rather than the run, and reads `phase === "streaming"`: a lost stream's last tick is not where the run had got to.
+
+**Every writer but `startRun` is addressed to a run, and a write for a run the store is not holding is dropped**, as in `execution-events-store` below. A continuation can outlive its run - `handleClose`'s awaited report fetch, a Stop request, a buffered flush - and landing on the run that replaced it was the defect #1925 and the finishing-run-A-starting-run-B race both were. A transition that does not apply from the current phase is dropped too: a close after a lost stream keeps the callout, a re-attached stream does not raise a stopped or settled run back to Running, and nothing moves a finished run but the next `startRun`.
+
+**`setFinalReport` ignores a report for a run that is still live** (issue #1925). The engine answers `GET /runs/:id/report` for a running run too, with `metadata.status` saying so, and taking that answer as final painted Completed and removed the Stop button while the run kept generating load. A report whose status is `running` or `pending` leaves the store untouched, whichever caller fetched it; a report with no status at all is still taken as final. A report that lands settles the run as `finished`, with the engine's status as its kind (`failed` stays failed, #1932) unless the user stopped it, which stays `stopped`. Any of the three renders History's `LoadTestDetail` over the report (#2136, #2220); until one lands the live view stays, carrying the report Retry. `isRunInProgress` (`lib/run-status.ts`) is the one test, shared with `LoadTestService` and the dashboard's report effect. Its counterpart `isRunTerminal` (completed, stopped or failed) is the one spelling of the settled set; an unrecognised status is neither.
+
+**A view of a stored run asks `useRunLiveness(runId, status)`** (`hooks/useRunLiveness.ts`, #3351) whether that run is live: `ScenarioRunView` (Stop, the live progress line, the waiting empty state), `HistoryDetail` (the in-progress pane in place of a load run's report) and `HistoryList` (whether the delete confirm says it stops the run first). It joins the status the caller already holds, from `useRunQuery` or a runs list, with whichever live surface in this window holds the run: the dashboard, by `isDashboardRunLive`, or a collection run's stream. The rule is `isRunLive` in `lib/run-status.ts`: a terminal stored status is final whatever a stream that has not caught up says, an in-progress one keeps the run live through a lost stream, and only a status not read yet, or not recognised, defers to the streams. The caller passes the status rather than the hook reading the run's query, because a second observer of `runDetailOptions` would be a second poll of the same run. The dashboard's own surfaces (the header pill, the keep-awake prompt) ask `isDashboardRunLive` directly, since the run they describe is whichever the dashboard holds.
 
 The load-test dialog seeds its scrape cadence and bounds its metric list from
 the engine's `monitorIntervalMs` / `monitorMaxSeries` settings, through
@@ -1533,7 +1554,7 @@ normalize, as `host-sleep-store` does.
 
 The live half of a scenario (collection) run's tab. `ScenarioRunService` pushes the `step` SSE events in here and `ScenarioRunView` reads them, so the stream survives navigating away from the tab and back - the same split, for the same reason, as `LoadTestService` and `dashboard-store`.
 
-It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. `addSteps` drops a batch that arrives with no run registered, because the stream is replayable and a step from a replaced run can still land on a socket that has not finished closing.
+It holds **one** run. A scenario is sequential and the app starts one at a time, so `startRun` replaces the previous run's steps rather than accumulating; a tab for an older run reads an empty list rather than whatever is streaming now. **Every other writer - `addSteps`, `setPlan`, `setStreaming`, `streamLost` - names its run and is dropped for any other** (issue #3351), as `execution-events-store` does: the stream is replayable, so a step from a replaced run can still land on a socket that has not finished closing, and a release for one run must not lower a successor's flag. `ScenarioRunService` builds its step batcher per run for the same reason, the shape `useExecutionEvents` uses: `handleClose` flushes after it has let go of `activeRunId`, so the commit carries the run it was built for.
 
 **State:**
 ```typescript
@@ -1546,10 +1567,12 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
                              // than growing at its end
   plan: ScenarioRunPlanEvent | null  // The opening `plan` frame: stepsPerIteration,
                              // iterations, stepsExpected. Null until it arrives
-  isStreaming: boolean
+  isStreaming: boolean       // Between startRun and the stream closing or failing
   error: string | null       // A transport failure on the stream
 }
 ```
+
+`streamLost(runId, message)` records a transport failure and lowers `isStreaming` in one write. The run keeps executing on the engine, and `ScenarioRunView`'s "is it live" is `useRunLiveness(run.id, run.status)`, so once the stream says nothing more the run's stored status answers, instead of a Running spinner standing beside "Live updates stopped".
 
 **A batch per flush, not a commit per event** (issue #1153). `ScenarioRunService` buffers arriving `step` events and commits what it collected on the user's `liveRefreshMs` cadence, the same throttle `LoadTestService` puts on its ticks. The premise for having none - that a scenario's step rate is bounded by request latency - does not hold: the engine's scenario loop is sequential with no pacing, so a local target returns hundreds of steps per second, and each one used to cost a full copy of the step list, a store notify and a re-render of the run tab. The buffer is committed on the leading edge of a window and again on a trailing timer, and drained when the stream closes or fails; a run replaced mid-flight discards whatever it left buffered, since those rows belong to a list the store has already cleared. That mechanism - buffer, leading edge, trailing timer, and the `liveRefreshMs` read behind it - is one implementation, `services/throttled-batcher.ts` (issue #1206), and now has a third caller: `useExecutionEvents` buffers a design-mode request's streamed events through it the same way (issue #1158). When to flush and when to discard stay each caller's own, because the lifecycles genuinely differ - the design-mode hook flushes on teardown rather than discarding, because a teardown there is as often the builder unmounting mid-stream as it is a replacement, and the store's run guard is what drops the leftovers in the second case.
 
@@ -1559,7 +1582,7 @@ Steps are folded in by `foldStepEvents` (`modules/history/main/scenario-steps.ts
 
 `appendEpoch` is the second thing that fold publishes, and the reason it has to (issue #1205). Every commit hands the view a new array - immutability, which zustand's change detection depends on - so from the rows alone an appended row and a replaced one look alike, and a reader that wants to keep anything derived from the list has to compare the two lists to find out. The fold already knows, so it says: `foldStepEvents` returns `appendedOnly` beside the fold, and the store turns it into a monotone counter that moves for a replay that replaced a row, a gap-resume that spliced one in, and a `startRun` that emptied the list. `useFilteredSteps` (`modules/history/main/`) is its reader: it counts what the batch that arrived added to a chip's or the search box's match, and produces rows only as far as the growing window it owns has to show them, so a narrowed live list costs one predicate pass over the batch rather than over the whole run per flush - and, once that window is full, no array copy at all (issue #1297). Monotone matters - React may render once for two commits, and a value that could return to one a reader had already seen would let a stale prefix through.
 
-`plan` is the engine's `plan` frame, which opens the stream before the first step (#1398). `ScenarioRunService.handlePlan` keeps `stepsExpected` for the OS progress bar and hands the whole frame to `setPlan`, which `startRun` clears and which is dropped when no run is registered, the way `addSteps` drops a stray batch. `ScenarioRunView` reads it, scoped to its own run id, for the live "Iteration k of N" line (`docs/app/COMPONENTS.md`); it is meaningful only while the run streams, and the report's `scenario` block is what says how the run ended.
+`plan` is the engine's `plan` frame, which opens the stream before the first step (#1398). `ScenarioRunService.handlePlan` keeps `stepsExpected` for the OS progress bar and hands the whole frame to `setPlan`, addressed to its run, which `startRun` clears and which is dropped for any other run, the way `addSteps` drops a stray batch. `ScenarioRunView` reads it, scoped to its own run id, for the live "Iteration k of N" line (`docs/app/COMPONENTS.md`); it is meaningful only while the run streams, and the report's `scenario` block is what says how the run ended.
 
 Once a run reaches a terminal status its stored `results` rows are the complete record and the view reads those instead. `ScenarioRunService.handleClose` invalidates `runs.detail(runId)` and refetches `runs.report(runId)` through the query cache - the same keys the tab reads, so a bare fetch would leave the pane on the stale copy. It also invalidates `runs.lists()` (the History row still says "running") and `runs.lastCollectionRuns()` (the context bar's Last run section says it too, from its own family, and is not polled at all). The run's scripts and extractors may have written environment, globals or collection variables, so it also invalidates `environments.all`, `globals.all`, `collections.all` and `compose.all`, as Send, history replay and the MCP map do (#3250); unconditional, since a run that wrote nothing costs three GETs.
 
@@ -1693,7 +1716,7 @@ showToast({                                     // returns the toast id
 
 Variants are `info` | `success` | `warning` | `error`, with base durations of 4s
 / 4s / 6s / 10s from `TIMING.TOAST_DURATION_MS`. `warning` is for a refusal ("A
-load test is already running") as distinct from a failure.
+load test is already running.", `runningRunSentence`) as distinct from a failure.
 
 **Three of the policies are user preferences** (`notifications` on
 `client-settings-store`, shapes in `constants/toast.ts`), applied here on the way
@@ -2675,7 +2698,13 @@ tools just created, plus which of the two run services owns its stream
 `loadTestService.startMonitoring` or `scenarioRunService.startMonitoring`, which
 is the same path the dashboard and the Run Collection dialog take, so the wake
 lock, the OS progress bar and the finished notification all begin when an
-agent's run does rather than when someone opens its tab. For a load run it
+agent's run does rather than when someone opens its tab. A load run is adopted
+only while `canStartLoadRun()` allows a load run to start (#3351). While another
+run holds the stream the hook leaves the dashboard, the stream and the user's run
+alone, and shows a warning toast ("An agent started a load test while another
+run is live, so it has no live view.") whose View run opens the agent's run in
+History; the run executes unwatched and its row converges on the runs poll. Once
+adopted, it
 points `dashboard-store` at the run first, exactly as those surfaces do:
 `startMonitoring` states that its caller has registered the run, and a store
 left unpointed would collect the ticks of a run it does not name. The event
@@ -2684,9 +2713,10 @@ hands its `configSnapshot` to `setRunConfig` (issue #1935): the mode, duration,
 rate, concurrency and ramp the dashboard's cards and the keep-awake prompt read,
 and the method and URL it shows, mapped by `lib/run-config-snapshot.ts`.
 `setRunConfig` sets those two fields and nothing else - `startRun` would clear
-the ticks already gathered - and the write is dropped if another run has taken
-the dashboard by the time the row arrives. A row that cannot be read is
-swallowed, never `setError`, which would raise the lost-stream callout over a
+the ticks already gathered - and, being addressed to the run like every writer
+but `startRun`, it is dropped if another run has taken the dashboard by the
+time the row arrives. A row that cannot be read is
+swallowed, never `streamLost`, which would raise the lost-stream callout over a
 stream that is fine; the dashboard then keeps its config-less look. Every other `run`
 event names a run that already exists (a stop, a baseline change, a delete) and
 starts no watcher; `run_collection_smoke` sends its requests one at a time and
@@ -2768,9 +2798,11 @@ const {
 
 ### Live Metrics Streaming - `loadTestService` + `sseClient`
 
-There is **no React hook for the metrics stream**, on purpose. The stream has to
+There is **no React hook that owns the metrics stream**, on purpose. The stream has to
 outlive whichever view is mounted (navigate away from the dashboard mid-run and
-the run keeps streaming), so it is a module singleton:
+the run keeps streaming), so it is a module singleton, and the hooks that ask
+about a run (`useRunLiveness`, `useCanStartLoadRun`) only read the stores it
+writes:
 `services/load-test-service.ts` holds the state machine and
 `services/sse-client.ts` the `EventSource`.
 
@@ -3369,6 +3401,8 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 
 ### Starting a Load Test Run
 
+**One load run owns the live stream at a time** (#3351). `canStartLoadRun()` in `stores/run-gate.ts` is the one answer, read by all three places a load run starts: the request builder (before its dialog opens, and again at Start), the Run Collection dialog in load mode, and `useRunWatchers` for an agent's run. It refuses while the dashboard's run is live (`isDashboardRunLive`, so a lost stream counts) or a collection run is streaming, because `sseClient` holds one `EventSource` and a load run attaching would take it from either. The engine sets no limit of its own; this is renderer policy. The answer names the running run (`{ kind: "load" | "collection", runId, label }`, the label being the dashboard's method and URL when it holds them), and `runningRunSentence` / `runningRunTab` turn that into the refusal and the tab that shows the run. The builder opens that tab with a warning toast; the dialog shows a blocking callout with View run and keeps Run disabled, following the gate through `useCanStartLoadRun()` so Run comes back when the run ends. Both refuse before `POST /runs`, so no engine run is started past a refusal. An agent's run has already started on the engine, so it cannot be refused: see `useRunWatchers` under the MCP section. A collection run's own start is not gated; it takes the stream from a live load run openly, through the dashboard's lost-stream callout (#1417). The URL bar's Load test button follows the same gate through `useCanStartLoadRun()`, so it never offers a start the click would refuse: **View load test** (the dashboard) while the dashboard's run is live, **View collection run** (that run's tab) while a collection run streams. Re-attaching the dashboard to its own run asks a narrower question, `canReattachLoadRun()` (`reattachGateOf`), which refuses only while a collection run streams: the dashboard's run being live is the reason to re-attach, not a reason to refuse. The lost-stream callout's Reconnect refused that way opens the collection run's tab with the same warning toast as the builder, and the dashboard's re-attach on mount, which nobody asked for, stays on the callout without one; either way the collection run keeps its stream.
+
 1. User configures load test in the dashboard modal (duration, concurrency, etc.)
 2. The request half is composed engine-side (`useEngine().composeRequest()`), then `apiService.startLoadTest()` sends the composed payload plus the load config to `POST /runs`
 3. Engine responds with `runId`
@@ -3377,9 +3411,9 @@ and `request-builder.script-clearing.test.tsx` (the partial payload), and
 6. As metrics stream in, `addMetricsBatch()` folds them into historical metrics (trimmed to `liveWindowSeconds`, backstopped by `maxRetainedTicks`) and updates running aggregates (peak concurrency, SLO breakpoint)
 7. Dashboard view shows live metrics, request/response (from the SSE stream's final response), and aggregates
 8. When the run completes, the engine sends a `complete` event
-9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, with `staleTime: 0` so a mid-run copy a History tab cached is not served as final, #1934) and stores it in `dashboard-store.finalReport` - **only if the dashboard is still showing that run**. The store is re-read after the await: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
-10. Dashboard switches to "completed" mode (or "failed" / "stopped", which lay out the same final report) showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll, and so are the run's detail, report and series, which a History tab on the same run read while it was live
-11. **A stream that ends without a `complete` status is not a finished run** (issues #1925, #2140). The engine's `complete` frame normally carries the run's `status`, which `handleClose(status, { frame })` believes over the stored row. With no status it reads the same stored report, and if its `metadata.status` is still `running` or `pending` the two endings part ways. A dropped connection (`frame: false`) sets `dashboard-store.error` instead of the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A bare `complete` frame (`frame: true`, the engine's 60 s settle timeout) is waited out instead: the service re-reads the report every 500 ms for up to 30 s and finishes the run as soon as it is terminal, falling back to the report's own status to tell failed from finished, then raises the same error only if the bound passes. That wait is cancelled by a generation counter on the service (`settleGeneration`), bumped by `startMonitoring`, `releaseRun` (so `stopMonitoring` and `handleSuperseded`) and `handleError`; a bare `activeRunId` check could not do it, because Reconnect puts the same id back. A cancelled wait does nothing: no report, no notification, no error. A collection run taking the shared stream (`handleSuperseded`) sets the error the same way, and fetches nothing. Either way the dashboard stays in its running layout, Stop included, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch keyed on `!isStreaming && !finalReport`, held off while that callout is up, and re-armed by the report callout's Retry
+9. `LoadTestService.handleClose()` fetches the final report through the query cache (under `queryKeys.runs.report(runId)`, with `staleTime: 0` so a mid-run copy a History tab cached is not served as final, #1934) and hands it to `setFinalReport(runId, report)`, which settles the phase as `finished` - **only if the dashboard is still showing that run**. The write is addressed to the run the close was for, and the store drops it for any other: finishing run A and immediately starting run B otherwise landed A's report on B's dashboard, flipping a running test to "completed" with A's percentiles.
+10. Dashboard settles as `finished` with kind "completed" (or "failed" / "stopped", which lay out the same final report) showing the final report; the runs lists are invalidated so the terminal status lands without waiting for a poll, and so are the run's detail, report and series, which a History tab on the same run read while it was live
+11. **A stream that ends without a `complete` status is not a finished run** (issues #1925, #2140). The engine's `complete` frame normally carries the run's `status`, which `handleClose(status, { frame })` believes over the stored row. With no status it reads the same stored report, and if its `metadata.status` is still `running` or `pending` the two endings part ways. A dropped connection (`frame: false`) moves the phase to `streamLost` instead of landing the final report, posts no notification, and lets go of the run so Reconnect can start watching it again. A bare `complete` frame (`frame: true`, the engine's 60 s settle timeout) is waited out instead: the service re-reads the report every 500 ms for up to 30 s and finishes the run as soon as it is terminal, falling back to the report's own status to tell failed from finished, then loses the stream the same way only if the bound passes. That wait is cancelled by a generation counter on the service (`settleGeneration`), bumped by `startMonitoring`, `releaseRun` (so `stopMonitoring` and `handleSuperseded`) and `handleError`; a bare `activeRunId` check could not do it, because Reconnect puts the same id back. A cancelled wait does nothing: no report, no notification, no error. A collection run taking the shared stream (`handleSuperseded`) loses the stream the same way, and fetches nothing, and so does a stream error (`handleError`). Either way the run stays live, so the dashboard keeps its running layout, the Running pill and Stop, under the "Lost the live metrics stream" callout. The dashboard's own report effect is the backstop for a stream that stopped with no report in the store: one retry-capped fetch armed only in the `awaitingReport` phase, so it holds off while that callout is up, and re-armed by the report callout's Retry. A fetch that keeps failing gives up to `reportError`, whose Retry re-arms it; a report that still says running after every attempt gives up to `streamLost` instead, with the body "The stream closed, but Vayu's engine still reports this load test as running.", because `reportError` is not live and would take the pill and Stop away while the engine still generates load. From there Reconnect is the user's to press, so nothing re-fetches on its own. A run the user stopped is not raised back to live: its still-running report gives up to `reportError` like a failed fetch.
 
 ### Saving a Request with Auto-Save
 

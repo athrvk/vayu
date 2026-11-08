@@ -164,7 +164,7 @@ beforeEach(() => {
 		activeTabId: "t1",
 	});
 	useSessionStore.setState({ activeEnvironmentId: "env_1" });
-	useDashboardStore.getState().setStreaming(false);
+	useDashboardStore.setState({ phase: { phase: "idle" } });
 });
 
 describe("the load test dialog's target", () => {

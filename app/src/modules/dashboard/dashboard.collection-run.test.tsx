@@ -92,9 +92,7 @@ beforeEach(() => {
 	target.value = {};
 	useDashboardStore.setState({
 		currentRunId: "run_1",
-		mode: "running",
-		isStreaming: true,
-		finalReport: null,
+		phase: { phase: "streaming" },
 		loadTestConfig: null,
 		requestInfo: null,
 	});
@@ -133,9 +131,7 @@ describe("the live header's target and comment", () => {
 describe("the finished header's comment", () => {
 	it("passes the stored report's comment, since the report body no longer draws it", () => {
 		useDashboardStore.setState({
-			mode: "completed",
-			isStreaming: false,
-			finalReport: report("before the fix"),
+			phase: { phase: "finished", kind: "completed", report: report("before the fix") },
 		});
 		render(withQueryClient(<LoadTestDashboard />));
 
@@ -144,9 +140,7 @@ describe("the finished header's comment", () => {
 
 	it("passes none for a run that had none", () => {
 		useDashboardStore.setState({
-			mode: "completed",
-			isStreaming: false,
-			finalReport: report(undefined),
+			phase: { phase: "finished", kind: "completed", report: report(undefined) },
 		});
 		render(withQueryClient(<LoadTestDashboard />));
 

@@ -21,9 +21,10 @@
  * So the mounted feature hands its own handler out, and the palette merges what
  * is registered into the surfaces it offers. The alternative - reading the draft
  * out of the provider from outside it, or recomposing the payload in the command
- * - would be a second copy of `buildExecBody` and the single-active-run policy,
- * exactly the "hand-rolled copy of a primitive" defect the registry exists to
- * remove. Nothing about either action moves; only its *reachability* changes.
+ * - would be a second copy of `buildExecBody` and of the builder's call to the
+ * single-run gate (`canStartLoadRun`), exactly the "hand-rolled copy of a
+ * primitive" defect the registry exists to remove. Nothing about either action
+ * moves; only its *reachability* changes.
  *
  * **Four named slots, not a registry.** The second one arrived in #1243: Send
  * has the identical live-draft problem, so it joined as a slot rather than as a

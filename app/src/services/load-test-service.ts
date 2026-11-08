@@ -138,9 +138,13 @@ class LoadTestService {
 			return;
 		}
 
-		// If monitoring a different run, stop it first
+		// A run this one displaces has not ended, so it is let go of without the
+		// "stopped" notification a user's Stop posts, as `handleSuperseded` does.
+		// The disconnect drops this service's hand-off registration, so the
+		// `supersede()` inside `connect` below has nobody to tell.
 		if (this.activeRunId && this.activeRunId !== runId) {
-			this.stopMonitoring();
+			this.releaseRun(this.activeRunId);
+			sseClient.disconnect();
 		}
 
 		// Only on the user's standing say-so (#1357). With the setting off, a run
@@ -159,15 +163,13 @@ class LoadTestService {
 		this.activeRunId = runId;
 		this.isConnected = true;
 
-		const store = useDashboardStore.getState();
 		// Nothing here may clear the run: the caller invokes store.startRun() first
-		// to register it (currentRunId, config, "running" mode) and that already
-		// wipes the historical series / currentMetrics / finalReport. Nulling
-		// currentRunId would leave the dashboard showing no active test while one
-		// streams (replay-from-0 renders clean off startRun's wipe already). The
-		// store-wide `reset` this used to warn against no longer exists.
-		store.setStreaming(true);
-		store.setError(null);
+		// to register it (currentRunId, config, the streaming phase) and that
+		// already wipes the historical series, currentMetrics and the report.
+		// Nulling currentRunId would leave the dashboard showing no active test
+		// while one streams (replay-from-0 renders clean off startRun's wipe
+		// already). This only lifts a lost stream back to streaming (Reconnect).
+		useDashboardStore.getState().streamOpened(runId);
 
 		// The OS indicator starts the moment the run does (#1362), claimed for
 		// this run rather than for load runs in general (#1405): every later call
@@ -215,11 +217,12 @@ class LoadTestService {
 	 * Let go of everything this service holds on `runId`'s behalf, and say
 	 * nothing about how the run ended.
 	 *
-	 * The one place that does it, because two paths need it - the user stopping
-	 * the run, and another run taking the shared client away (#1417) - and a
-	 * second copy is a release that drifts out of step with the first. What
-	 * ended the run is the caller's to say: `stopMonitoring` has a notification
-	 * for it and a superseded run has nothing to report, because it has not
+	 * The one place that does it, because three paths need it - the user
+	 * stopping the run, another run taking the shared client away (#1417), and
+	 * `startMonitoring` moving on to another load run - and a second copy is a
+	 * release that drifts out of step with the first. What ended the run is the
+	 * caller's to say: `stopMonitoring` has a notification for it and a
+	 * superseded or displaced run has nothing to report, because it has not
 	 * ended at all.
 	 *
 	 * `handleClose` keeps a sequence of its own rather than calling this, and
@@ -264,13 +267,10 @@ class LoadTestService {
 		const runId = this.activeRunId;
 		if (!runId) return;
 		this.releaseRun(runId);
-		const store = useDashboardStore.getState();
-		// Nothing else will lower it: the spinner is raised in `startMonitoring`
-		// and lowered in `handleClose`, and `handleClose` is exactly what does
-		// not run for a run whose stream was taken.
-		store.setStreaming(false);
-		// The dashboard's stream callout, whose Reconnect is the way back (#1925).
-		store.setError(STREAM_SUPERSEDED_MESSAGE);
+		// `handleClose` is exactly what does not run for a run whose stream was
+		// taken, so nothing else would leave the streaming phase. The dashboard's
+		// stream callout, whose Reconnect is the way back (#1925).
+		useDashboardStore.getState().streamLost(runId, STREAM_SUPERSEDED_MESSAGE);
 	}
 
 	/**
@@ -344,9 +344,11 @@ class LoadTestService {
 	private commitBatch(batch: LoadTestMetrics[]): void {
 		const monitor = this.pendingMonitor;
 		this.pendingMonitor = [];
+		const runId = this.activeRunId;
+		if (!runId) return;
 		const store = useDashboardStore.getState();
-		store.addMetricsBatch(batch);
-		store.addMonitorSamples(monitor);
+		store.addMetricsBatch(runId, batch);
+		store.addMonitorSamples(runId, monitor);
 
 		// The taskbar and Dock ride the flush rather than the tick (#1362): this
 		// is already the live-refresh cadence, so the OS repaints as often as the
@@ -356,7 +358,7 @@ class LoadTestService {
 		if (latest) {
 			runProgress.report(
 				RUN_PROGRESS_KEYS.loadRun,
-				this.activeRunId,
+				runId,
 				deriveRunProgress(store.loadTestConfig, latest)
 			);
 		}
@@ -388,22 +390,23 @@ class LoadTestService {
 
 	private handleError(error: Error): void {
 		console.error("[LoadTestService] SSE error:", error);
+		const runId = this.activeRunId;
 		// Lowered so the callout's Reconnect, `startMonitoring` with this same
 		// run, is not turned away as a run already being watched (#1925).
 		this.isConnected = false;
 		this.cancelSettleWait();
 		wakeLock.release(WAKE_LOCK_KEYS.loadRun);
-		this.failProgress(this.activeRunId);
+		this.failProgress(runId);
 		// The stream dropped, not the load test - it keeps executing on the
-		// engine, so the notification says that instead of claiming it failed.
+		// engine, so the notification says that instead of claiming it failed,
+		// and the dashboard keeps it live beside the callout.
 		this.notifyTerminal(
-			this.activeRunId,
+			runId,
 			NOTIFY_KINDS.loadRunFailed,
 			`${error.message} The load test itself is unaffected.`,
 			{ title: "Lost live updates for this load test" }
 		);
-		const store = useDashboardStore.getState();
-		store.setError(error.message);
+		if (runId) useDashboardStore.getState().streamLost(runId, error.message);
 	}
 
 	/**
@@ -445,8 +448,8 @@ class LoadTestService {
 		if (this.progressFailedRunId !== runId) {
 			runProgress.clear(RUN_PROGRESS_KEYS.loadRun, runId);
 		}
-		useDashboardStore.getState().setStreaming(false);
 		if (!runId) return;
+		useDashboardStore.getState().streamClosed(runId);
 
 		const report = await this.fetchStoredReport(runId);
 		// The frame is the engine's word that the run ended. Without one the
@@ -550,11 +553,10 @@ class LoadTestService {
 		// starting run B leaves this continuation holding A's report while the
 		// dashboard shows B; applying it flipped B to "completed" with A's
 		// percentiles. The window is one local round trip, which is exactly long
-		// enough. First, because the dashboard is the terminal surface that
-		// matters and nothing done for a notification may come before it.
-		if (report && useDashboardStore.getState().currentRunId === runId) {
-			useDashboardStore.getState().setFinalReport(report);
-		}
+		// enough; the store drops a report addressed to a run it is not holding.
+		// First, because the dashboard is the terminal surface that matters and
+		// nothing done for a notification may come before it.
+		if (report) useDashboardStore.getState().setFinalReport(runId, report);
 		// A failed run is not a finished one, and until #1415 this said finished
 		// for both: the frame's status is preferred, and the report's own is the
 		// fallback for a stream that ended without one. The frame first,
@@ -608,8 +610,7 @@ class LoadTestService {
 		// bypasses the cache, but a reader that honours it, such as a History tab
 		// opened on this run later, must not take that copy as final.
 		void queryClient.invalidateQueries({ queryKey: queryKeys.runs.report(runId) });
-		const store = useDashboardStore.getState();
-		if (store.currentRunId === runId) store.setError(STREAM_DROPPED_MESSAGE);
+		useDashboardStore.getState().streamLost(runId, STREAM_DROPPED_MESSAGE);
 	}
 }
 

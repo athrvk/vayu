@@ -3671,7 +3671,9 @@ run's status pill (`RunStatusPill`), a `MethodBadge`, the URL, a config summary
 and `StopRunButton`. The band height is the `--spacing-band-lg` token, not a
 literal; see Chrome, Target and Icon Floors.
 
-The header has a live elapsed timer (`liveTick` state) that resets to 0 at the start of each run.
+The header's elapsed time is the `elapsedDuration` prop, the newest tick's
+`elapsed_seconds` from the engine, so it starts at 0 with each run and holds no
+timer of its own.
 
 ### SVG Sparkline
 

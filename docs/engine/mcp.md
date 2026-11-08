@@ -3048,7 +3048,11 @@ told to watch a run, and before this field existed only a renderer surface ever
 told them: a run an agent started painted nothing and said nothing until its
 dashboard tab was opened. `useRunWatchers` reads the field and enters the same
 `startMonitoring` path the dashboard does, so the main process still tracks no
-runs of its own. `run_collection_smoke` sends its requests one at a time through
+runs of its own. A load run is the exception while another run is live in the
+app (#3351): the user's run keeps the dashboard and the stream, the agent's run
+executes on the engine without a live view, and the app says so in a toast that
+opens the run in History. The tool's answer is the same either way.
+`run_collection_smoke` sends its requests one at a time through
 `POST /execute` and has no run to watch, so its `run` event carries nothing
 extra.
 

@@ -54,8 +54,8 @@ describe("appendEpoch", () => {
 		store().startRun("run-1");
 		const started = store().appendEpoch;
 
-		store().addSteps([event(0), event(1)]);
-		store().addSteps([event(2)]);
+		store().addSteps("run-1", [event(0), event(1)]);
+		store().addSteps("run-1", [event(2)]);
 
 		expect(store().steps).toHaveLength(3);
 		expect(store().appendEpoch).toBe(started);
@@ -63,22 +63,22 @@ describe("appendEpoch", () => {
 
 	it("moves when a replay replaces a row already shown", () => {
 		store().startRun("run-1");
-		store().addSteps([event(0, "passed"), event(1, "passed")]);
+		store().addSteps("run-1", [event(0, "passed"), event(1, "passed")]);
 		const before = store().appendEpoch;
 
 		// What a reconnect does: `Last-Event-ID` replays a step whose outcome the
 		// run has since revised.
-		store().addSteps([event(0, "failed")]);
+		store().addSteps("run-1", [event(0, "failed")]);
 
 		expect(store().appendEpoch).toBeGreaterThan(before);
 	});
 
 	it("moves when a gap-resume seats a row mid-list", () => {
 		store().startRun("run-1");
-		store().addSteps([event(0), event(3)]);
+		store().addSteps("run-1", [event(0), event(3)]);
 		const before = store().appendEpoch;
 
-		store().addSteps([event(1)]);
+		store().addSteps("run-1", [event(1)]);
 
 		expect(store().steps.map((s) => s.stepIndex)).toEqual([0, 1, 3]);
 		expect(store().appendEpoch).toBeGreaterThan(before);
@@ -86,11 +86,11 @@ describe("appendEpoch", () => {
 
 	it("holds still for a replay that changes nothing", () => {
 		store().startRun("run-1");
-		store().addSteps([event(0)]);
+		store().addSteps("run-1", [event(0)]);
 		const before = store().appendEpoch;
 		const rows = store().steps;
 
-		store().addSteps([event(0)]);
+		store().addSteps("run-1", [event(0)]);
 
 		// The commit itself is skipped, so there is nothing for a reader to redo.
 		expect(store().steps).toBe(rows);
@@ -99,7 +99,7 @@ describe("appendEpoch", () => {
 
 	it("moves when a second run replaces the first", () => {
 		store().startRun("run-1");
-		store().addSteps([event(0), event(1)]);
+		store().addSteps("run-1", [event(0), event(1)]);
 		const before = store().appendEpoch;
 
 		store().startRun("run-2");
@@ -117,14 +117,14 @@ describe("plan", () => {
 
 	it("holds the frame the run opened with", () => {
 		store().startRun("run-1");
-		store().setPlan(PLAN);
+		store().setPlan("run-1", PLAN);
 
 		expect(store().plan).toEqual(PLAN);
 	});
 
 	it("is cleared by the next run, so a run cannot be sized by the last one's frame", () => {
 		store().startRun("run-1");
-		store().setPlan(PLAN);
+		store().setPlan("run-1", PLAN);
 
 		store().startRun("run-2");
 
@@ -132,8 +132,43 @@ describe("plan", () => {
 	});
 
 	it("drops a frame that arrives with no run to belong to", () => {
-		store().setPlan(PLAN);
+		store().setPlan("run-1", PLAN);
 
 		expect(store().plan).toBeNull();
+	});
+});
+
+/*
+ * A socket that has not finished closing can still deliver a replaced run's
+ * frames, and a release for one run must not lower a successor's flag
+ * (#3351). Mutation check: drop the run comparison from any one writer and its
+ * row reddens.
+ */
+describe("writes addressed to a run", () => {
+	const PLAN = { stepsPerIteration: 6, iterations: 40, stepsExpected: 240 };
+
+	it.each([
+		["addSteps", () => store().addSteps("run-1", [event(0)])],
+		["setPlan", () => store().setPlan("run-1", PLAN)],
+		["setStreaming", () => store().setStreaming("run-1", false)],
+		["streamLost", () => store().streamLost("run-1", "The connection closed.")],
+	])("drops %s from a run the store no longer holds", (_name, write) => {
+		store().startRun("run-1");
+		store().startRun("run-2");
+		const held = store();
+
+		write();
+
+		expect(store()).toBe(held);
+		expect(store().isStreaming).toBe(true);
+	});
+
+	it("lowers the streaming flag with a stream error, so the run's own status decides", () => {
+		store().startRun("run-1");
+
+		store().streamLost("run-1", "The connection closed.");
+
+		expect(store().error).toBe("The connection closed.");
+		expect(store().isStreaming).toBe(false);
 	});
 });

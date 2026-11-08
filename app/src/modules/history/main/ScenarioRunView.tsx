@@ -49,7 +49,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ListOrdered, Loader2, Search } from "lucide-react";
 import { useRunReportQuery } from "@/queries";
 import { useStopRun } from "@/hooks/useStopRun";
-import { isRunInProgress } from "@/lib/run-status";
+import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { dataFileDisplayName, dataFileNote } from "@/lib/run-data-file";
 import { formatNumber } from "@/lib/format-number";
 import { useDataFileStatus } from "@/hooks/useDataFileStatus";
@@ -163,8 +163,6 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const scenario = report?.scenario;
 	const notRun = stepsNotRunText(scenario?.stepsNotRun);
 
-	const inProgress = isRunInProgress(run.status);
-
 	/*
 	 * Stoppable while the engine still owns the run, and that is two signals
 	 * rather than one. The stream says so for the tab that started the run; the
@@ -172,7 +170,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * executing - after a relaunch, or from History - which has no stream at all
 	 * and is exactly the case where waiting the run out hurts most.
 	 */
-	const isLive = isStreaming || inProgress;
+	const isLive = useRunLiveness(run.id, run.status);
 
 	const { stop, isStopping } = useStopRun(run.id);
 
@@ -500,7 +498,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					 * in progress rather than as a run that finished with
 					 * nothing to show.
 					 */
-					isStreaming || inProgress ? (
+					isLive ? (
 						<EmptyState
 							icon={Loader2}
 							iconClassName="animate-spin"

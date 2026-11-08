@@ -9,8 +9,25 @@
 export { useEngineStore, type EngineCrash, type EngineStatus } from "./engine-store";
 
 // Domain stores
-export { useDashboardStore, deriveRunProgress, runOwnSloMs } from "./dashboard-store";
+export {
+	useDashboardStore,
+	deriveRunProgress,
+	runOwnSloMs,
+	isDashboardRunLive,
+	dashboardRunEnding,
+	type DashboardPhase,
+	type FinishedKind,
+} from "./dashboard-store";
 export { useScenarioRunStore } from "./scenario-run-store";
+export {
+	canStartLoadRun,
+	canReattachLoadRun,
+	useCanStartLoadRun,
+	runningRunSentence,
+	runningRunTab,
+	type LoadRunGate,
+	type RunningRun,
+} from "./run-gate";
 export { useExecutionEventsStore } from "./execution-events-store";
 export { useImportModalStore } from "./import-modal-store";
 export { useEnvSwitcherStore } from "./env-switcher-store";

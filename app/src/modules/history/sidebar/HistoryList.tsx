@@ -6,6 +6,7 @@
  */
 
 import { formatNumber } from "@/lib/format-number";
+import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Search, Clock, Pin } from "lucide-react";
 import { useTabsStore, useLayoutStore, useToastStore } from "@/stores";
@@ -255,8 +256,7 @@ export default function HistoryList() {
 	// Deleting one of these stops it first, which is a second consequence the
 	// dialog has to name - "removed permanently" alone does not cover ending a
 	// test that is still generating load.
-	const deleteConfirmStopsRun =
-		runToDelete?.status === "running" || runToDelete?.status === "pending";
+	const deleteConfirmStopsRun = useRunLiveness(runToDelete?.id, runToDelete?.status);
 
 	// Naming the run deletes it even pinned, unlike Clear run history, which
 	// keeps baselines - so the dialog says what the pin is about to lose.

@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { isRunTerminal } from "@/lib/run-status";
 import type { RunTrendPoint } from "@/modules/dashboard/components/charts/uplot";
 import type { Run } from "@/types";
 
@@ -28,9 +29,7 @@ export function buildRunTrend(
 	return runs
 		.filter(
 			(run): run is Run & { type: "load" } =>
-				run.type === "load" &&
-				run.resultSummary !== undefined &&
-				(run.status === "completed" || run.status === "failed" || run.status === "stopped")
+				run.type === "load" && run.resultSummary !== undefined && isRunTerminal(run.status)
 		)
 		.sort((a, b) => b.startTime - a.startTime)
 		.slice(0, limit)

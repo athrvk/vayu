@@ -185,7 +185,7 @@ beforeEach(() => {
 		activeTabId: "t1",
 	});
 	useSessionStore.setState({ activeEnvironmentId: "env_1" });
-	useDashboardStore.getState().setStreaming(false);
+	useDashboardStore.setState({ phase: { phase: "idle" } });
 });
 
 const LOAD_CONFIG: LoadTestConfig = { mode: "constant_rps", duration_seconds: 10, rps: 5 };

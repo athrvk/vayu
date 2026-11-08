@@ -195,8 +195,8 @@ function sidebarRow(): string[] {
 function detailHeader(): string[] {
 	const { container } = render(
 		<DashboardHeader
-			mode="completed"
-			isStreaming={false}
+			live={false}
+			endedAs="completed"
 			isStopping={false}
 			onStop={async () => {}}
 			requestUrl="https://api.example.test/users"

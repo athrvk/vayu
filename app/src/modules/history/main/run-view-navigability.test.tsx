@@ -196,7 +196,7 @@ describe("a step's way back to its request", () => {
 		// the frame names the request (issue #831) and the row does not wait
 		// for the run's stored rows to be written.
 		useScenarioRunStore.getState().startRun("run-1");
-		useScenarioRunStore.getState().addSteps([
+		useScenarioRunStore.getState().addSteps("run-1", [
 			{
 				iteration: 11,
 				stepIndex: 0,
@@ -221,7 +221,7 @@ describe("a step's way back to its request", () => {
 		// A step whose plan entry has no stored request behind it. Absent, not
 		// disabled, on the same terms as the stored row above.
 		useScenarioRunStore.getState().startRun("run-1");
-		useScenarioRunStore.getState().addSteps([
+		useScenarioRunStore.getState().addSteps("run-1", [
 			{
 				iteration: 0,
 				stepIndex: 0,

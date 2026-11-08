@@ -68,7 +68,11 @@ beforeEach(() => {
 	resumeCb = null;
 	stubElectronAPI();
 	useHostSleepStore.setState({ byRun: {}, runOrder: [] });
-	useDashboardStore.setState({ currentRunId: null, isStreaming: false, currentMetrics: null });
+	useDashboardStore.setState({
+		currentRunId: null,
+		phase: { phase: "idle" },
+		currentMetrics: null,
+	});
 });
 
 afterEach(() => {
@@ -80,7 +84,7 @@ describe("useHostSleepRecorder", () => {
 	it("records one sleep against the streaming run, anchored at the suspend", () => {
 		useDashboardStore.setState({
 			currentRunId: "run_1",
-			isStreaming: true,
+			phase: { phase: "streaming" },
 			currentMetrics: tick(42),
 		});
 		renderHook(() => useHostSleepRecorder());
@@ -103,7 +107,7 @@ describe("useHostSleepRecorder", () => {
 	it("records nothing on a resume when no run has an id", () => {
 		useDashboardStore.setState({
 			currentRunId: null,
-			isStreaming: true,
+			phase: { phase: "streaming" },
 			currentMetrics: tick(5),
 		});
 		renderHook(() => useHostSleepRecorder());
@@ -114,10 +118,15 @@ describe("useHostSleepRecorder", () => {
 		expect(useHostSleepStore.getState().runOrder).toEqual([]);
 	});
 
-	it("records nothing on a resume when the run is not streaming", () => {
+	// A lost stream's run is still live, but its last tick is not where the run
+	// had got to, so it anchors nothing either.
+	it.each([
+		{ phase: "awaitingReport", stopped: false },
+		{ phase: "streamLost", message: "The connection closed." },
+	] as const)("records nothing on a resume when the run is not streaming ($phase)", (phase) => {
 		useDashboardStore.setState({
 			currentRunId: "run_1",
-			isStreaming: false,
+			phase,
 			currentMetrics: tick(5),
 		});
 		renderHook(() => useHostSleepRecorder());
@@ -131,7 +140,7 @@ describe("useHostSleepRecorder", () => {
 	it("records nothing on a resume with no preceding suspend", () => {
 		useDashboardStore.setState({
 			currentRunId: "run_1",
-			isStreaming: true,
+			phase: { phase: "streaming" },
 			currentMetrics: tick(5),
 		});
 		renderHook(() => useHostSleepRecorder());

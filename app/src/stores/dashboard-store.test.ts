@@ -9,7 +9,14 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { useDashboardStore, deriveRunProgress, runOwnSloMs } from "./dashboard-store";
+import {
+	useDashboardStore,
+	dashboardRunEnding,
+	deriveRunProgress,
+	isDashboardRunLive,
+	runOwnSloMs,
+	type DashboardPhase,
+} from "./dashboard-store";
 import type { LoadTestMetrics, RunReport } from "@/types";
 import { useClientSettingsStore } from "./client-settings-store";
 import { DEFAULT_SLO_THRESHOLD_MS } from "@/constants/client-settings";
@@ -39,7 +46,10 @@ describe("dashboard-store live retention window", () => {
 	it("trims ticks older than the time window (measured from the newest tick)", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(60);
-		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => tick(i * 10))); // 0..120s
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 13 }, (_, i) => tick(i * 10))
+		); // 0..120s
 
 		const hist = useDashboardStore.getState().historicalMetrics;
 		// Newest = 120s, cutoff = 60s → keep 60,70,…,120 (7 ticks).
@@ -51,7 +61,10 @@ describe("dashboard-store live retention window", () => {
 	it("keeps everything when the window is 'full' (null)", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(null);
-		s.addMetricsBatch(Array.from({ length: 500 }, (_, i) => tick(i)));
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 500 }, (_, i) => tick(i))
+		);
 		expect(useDashboardStore.getState().historicalMetrics).toHaveLength(500);
 	});
 
@@ -63,7 +76,10 @@ describe("dashboard-store live retention window", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(null); // full run - the ceiling is the only bound
 		s.setMaxRetainedTicks(120);
-		s.addMetricsBatch(Array.from({ length: 500 }, (_, i) => tick(i)));
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 500 }, (_, i) => tick(i))
+		);
 
 		const hist = useDashboardStore.getState().historicalMetrics;
 		expect(hist).toHaveLength(120);
@@ -82,8 +98,11 @@ describe("dashboard-store live retention window", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(60);
 		// A crossing at t=5s (p99 over the 200ms SLO), then advance well past the window.
-		s.addMetricsBatch([tick(5, 250)]);
-		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => tick(70 + i * 5)));
+		s.addMetricsBatch("r", [tick(5, 250)]);
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 13 }, (_, i) => tick(70 + i * 5))
+		);
 
 		const state = useDashboardStore.getState();
 		// The crossing tick (t=5) has rolled off, but the breakpoint stays latched.
@@ -104,7 +123,7 @@ describe("dashboard-store breakpoint on live frames (issue #2385)", () => {
 	it("latches on a gate frame's second p99, not on a window between gates", () => {
 		const s = useDashboardStore.getState();
 		// A ~100 ms window reading over the SLO, then a gate whose second did not.
-		s.addMetricsBatch([
+		s.addMetricsBatch("r", [
 			{ ...tick(0.5, 900), live: true },
 			{
 				...tick(1, 900),
@@ -117,7 +136,7 @@ describe("dashboard-store breakpoint on live frames (issue #2385)", () => {
 		]);
 		expect(useDashboardStore.getState().breakpoint.crossed).toBe(false);
 
-		s.addMetricsBatch([
+		s.addMetricsBatch("r", [
 			{
 				...tick(2, 10),
 				live: true,
@@ -143,7 +162,7 @@ describe("dashboard-store breakpoint atRunStart", () => {
 	it("is set when the first reading the run holds is already over the SLO", () => {
 		const s = useDashboardStore.getState();
 		// A window between gates holds no reading, so it does not count as one.
-		s.addMetricsBatch([{ ...tick(0.5, 900), live: true }, tick(1, 250)]);
+		s.addMetricsBatch("r", [{ ...tick(0.5, 900), live: true }, tick(1, 250)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			atRunStart: true,
@@ -151,14 +170,14 @@ describe("dashboard-store breakpoint atRunStart", () => {
 	});
 
 	it("is clear when an earlier tick in the same batch read under the SLO", () => {
-		useDashboardStore.getState().addMetricsBatch([tick(1, 50), tick(2, 250)]);
+		useDashboardStore.getState().addMetricsBatch("r", [tick(1, 50), tick(2, 250)]);
 		expect(useDashboardStore.getState().breakpoint.atRunStart).toBe(false);
 	});
 
 	it("is clear when an earlier batch read under the SLO", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([tick(1, 50)]);
-		s.addMetricsBatch([tick(2, 250)]);
+		s.addMetricsBatch("r", [tick(1, 50)]);
+		s.addMetricsBatch("r", [tick(2, 250)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			atRunStart: false,
@@ -174,7 +193,7 @@ describe("dashboard-store breakpoint SLO", () => {
 	it("judges a plain run against Settings and says so (#2939)", () => {
 		useDashboardStore.getState().startRun("r", { mode: "ramp_up" });
 		expect(useDashboardStore.getState().breakpoint.sloSource).toBe("settings");
-		useDashboardStore.getState().addMetricsBatch([tick(1, 250)]);
+		useDashboardStore.getState().addMetricsBatch("r", [tick(1, 250)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			sloMs: DEFAULT_SLO_THRESHOLD_MS,
@@ -200,8 +219,8 @@ describe("dashboard-store breakpoint SLO", () => {
 	it("relabels the source when the config arrives after the ticks, keeping the verdict (#2939)", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
-		s.addMetricsBatch([tick(1, 250)]);
-		s.setRunConfig({ mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
+		s.addMetricsBatch("r", [tick(1, 250)]);
+		s.setRunConfig("r", { mode: "ramp_up", latencyP99Ms: DEFAULT_SLO_THRESHOLD_MS }, null);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			timeSeconds: 1,
@@ -219,7 +238,7 @@ describe("dashboard-store breakpoint SLO", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
 		useClientSettingsStore.setState({ sloThresholdMs: 500 });
-		s.addMetricsBatch([tick(1, 300)]);
+		s.addMetricsBatch("r", [tick(1, 300)]);
 		const { breakpoint } = useDashboardStore.getState();
 		expect(breakpoint.crossed).toBe(false);
 		expect(breakpoint.sloMs).toBe(500);
@@ -228,9 +247,9 @@ describe("dashboard-store breakpoint SLO", () => {
 	it("a crossing keeps the SLO it crossed, whatever the setting becomes after", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
-		s.addMetricsBatch([tick(1, 250)]);
+		s.addMetricsBatch("r", [tick(1, 250)]);
 		useClientSettingsStore.setState({ sloThresholdMs: 900 });
-		s.addMetricsBatch([tick(2, 10)]);
+		s.addMetricsBatch("r", [tick(2, 10)]);
 		const { breakpoint } = useDashboardStore.getState();
 		expect(breakpoint.crossed).toBe(true);
 		expect(breakpoint.sloMs).toBe(200);
@@ -253,7 +272,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 	it("latches a 60 ms tick the 200 ms setting would have let through", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r", { mode: "capacity", sloMs: 50 });
-		s.addMetricsBatch([tick(1, 10), tick(2, 60)]);
+		s.addMetricsBatch("r", [tick(1, 10), tick(2, 60)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: true,
 			sloMs: 50,
@@ -265,7 +284,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 		const s = useDashboardStore.getState();
 		s.startRun("r", { mode: "capacity", sloMs: 50 });
 		useClientSettingsStore.setState({ sloThresholdMs: 500 });
-		s.addMetricsBatch([tick(1, 60)]);
+		s.addMetricsBatch("r", [tick(1, 60)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({ crossed: true, sloMs: 50 });
 	});
 
@@ -277,14 +296,14 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 	it("ignores a stray sloMs in any other mode, where the setting still governs", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r", { mode: "ramp_up", sloMs: 50 });
-		s.addMetricsBatch([tick(1, 60)]);
+		s.addMetricsBatch("r", [tick(1, 60)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: false,
 			sloMs: DEFAULT_SLO_THRESHOLD_MS,
 		});
 
 		useClientSettingsStore.setState({ sloThresholdMs: 500 });
-		s.addMetricsBatch([tick(2, 60)]);
+		s.addMetricsBatch("r", [tick(2, 60)]);
 		expect(useDashboardStore.getState().breakpoint.sloMs).toBe(500);
 	});
 
@@ -293,10 +312,10 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 		it("re-judges the retained ticks against the run's own SLO", () => {
 			const s = useDashboardStore.getState();
 			s.startRun("r");
-			s.addMetricsBatch([tick(1, 10), tick(2, 60)]);
+			s.addMetricsBatch("r", [tick(1, 10), tick(2, 60)]);
 			expect(useDashboardStore.getState().breakpoint.crossed).toBe(false);
 
-			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			s.setRunConfig("r", { mode: "capacity", sloMs: 50 }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: true,
 				sloMs: 50,
@@ -307,7 +326,7 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 		it("moves an uncrossed breakpoint onto the run's SLO before the next tick", () => {
 			const s = useDashboardStore.getState();
 			s.startRun("r");
-			s.setRunConfig({ mode: "capacity", sloMs: 50 }, null);
+			s.setRunConfig("r", { mode: "capacity", sloMs: 50 }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: false,
 				sloMs: 50,
@@ -318,9 +337,9 @@ describe("dashboard-store breakpoint SLO of a capacity run (issue #2816)", () =>
 			useClientSettingsStore.setState({ sloThresholdMs: 100 });
 			const s = useDashboardStore.getState();
 			s.startRun("r");
-			s.addMetricsBatch([tick(1, 150)]);
+			s.addMetricsBatch("r", [tick(1, 150)]);
 			useClientSettingsStore.setState({ sloThresholdMs: 900 });
-			s.setRunConfig({ mode: "ramp_up" }, null);
+			s.setRunConfig("r", { mode: "ramp_up" }, null);
 			expect(useDashboardStore.getState().breakpoint).toMatchObject({
 				crossed: true,
 				sloMs: 100,
@@ -357,7 +376,7 @@ describe("dashboard-store run's own SLO (issue #2939)", () => {
 	it("follows a config that arrives after the run started (setRunConfig)", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
-		s.setRunConfig({ mode: "constant_rps", latencyP99Ms: 120 }, null);
+		s.setRunConfig("r", { mode: "constant_rps", latencyP99Ms: 120 }, null);
 		expect(runOwnSloMs(useDashboardStore.getState().loadTestConfig)).toBe(120);
 	});
 
@@ -366,7 +385,7 @@ describe("dashboard-store run's own SLO (issue #2939)", () => {
 	it("leaves a non-capacity breakpoint judged against the setting", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r", { mode: "ramp_up", latencyP99Ms: 120 });
-		s.addMetricsBatch([tick(1, 150)]);
+		s.addMetricsBatch("r", [tick(1, 150)]);
 		expect(useDashboardStore.getState().breakpoint).toMatchObject({
 			crossed: false,
 			sloMs: DEFAULT_SLO_THRESHOLD_MS,
@@ -385,8 +404,8 @@ describe("dashboard-store monitor samples", () => {
 
 	it("appends scrapes in arrival order", () => {
 		const s = useDashboardStore.getState();
-		s.addMonitorSamples([{ timestamp: 1000, series: { cpu: 1 } }]);
-		s.addMonitorSamples([{ timestamp: 2000, series: { cpu: 2 } }]);
+		s.addMonitorSamples("r", [{ timestamp: 1000, series: { cpu: 1 } }]);
+		s.addMonitorSamples("r", [{ timestamp: 2000, series: { cpu: 2 } }]);
 
 		expect(useDashboardStore.getState().monitorSamples.map((m) => m.timestamp)).toEqual([
 			1000, 2000,
@@ -400,6 +419,7 @@ describe("dashboard-store monitor samples", () => {
 		const s = useDashboardStore.getState();
 		s.setMaxRetainedTicks(5);
 		s.addMonitorSamples(
+			"r",
 			Array.from({ length: 12 }, (_, i) => ({ timestamp: i, series: { cpu: i } }))
 		);
 
@@ -410,7 +430,7 @@ describe("dashboard-store monitor samples", () => {
 
 	it("clears the samples when a new run starts", () => {
 		const s = useDashboardStore.getState();
-		s.addMonitorSamples([{ timestamp: 1000, series: { cpu: 1 } }]);
+		s.addMonitorSamples("r", [{ timestamp: 1000, series: { cpu: 1 } }]);
 		useDashboardStore.getState().startRun("r2");
 		expect(useDashboardStore.getState().monitorSamples).toEqual([]);
 	});
@@ -494,73 +514,205 @@ describe("deriveRunProgress", () => {
 	});
 });
 
+const reportWith = (status?: string) =>
+	({
+		summary: { totalRequests: 10 },
+		latency: {},
+		...(status === undefined ? {} : { metadata: { status } }),
+	}) as unknown as RunReport;
+
+const phase = () => useDashboardStore.getState().phase;
+
 /*
  * The engine answers `GET /runs/:id/report` for a run it is still executing,
  * so a report in hand is not a finished run (#1925). Taking one as final
  * painted Completed and removed Stop while the run kept generating load.
  *
  * Mutation check: drop the `isRunInProgress` guard in `setFinalReport` and the
- * first two cases redden - `mode` becomes "completed" and the report lands.
- * Map "failed" to "completed" again and the failed case reddens (#1932).
+ * first two cases redden - the phase becomes `finished`. Map "failed" to
+ * "completed" again and the failed case reddens (#1932).
  */
 describe("dashboard-store setFinalReport", () => {
-	const reportWith = (status?: string) =>
-		({
-			summary: { totalRequests: 10 },
-			latency: {},
-			...(status === undefined ? {} : { metadata: { status } }),
-		}) as unknown as RunReport;
-
 	beforeEach(() => {
 		useDashboardStore.getState().startRun("r");
-		useDashboardStore.getState().setStreaming(false);
+		useDashboardStore.getState().streamClosed("r");
 	});
 
 	it.each(["running", "pending"])("leaves the store alone for a %s run", (status) => {
-		useDashboardStore.getState().setFinalReport(reportWith(status));
-		const s = useDashboardStore.getState();
-		expect(s.mode).toBe("running");
-		expect(s.finalReport).toBeNull();
+		useDashboardStore.getState().setFinalReport("r", reportWith(status));
+		expect(phase()).toEqual({ phase: "awaitingReport", stopped: false });
 	});
 
 	it("finalises a completed run", () => {
 		const report = reportWith("completed");
-		useDashboardStore.getState().setFinalReport(report);
-		expect(useDashboardStore.getState().mode).toBe("completed");
-		expect(useDashboardStore.getState().finalReport).toBe(report);
+		useDashboardStore.getState().setFinalReport("r", report);
+		expect(phase()).toEqual({ phase: "finished", kind: "completed", report });
 	});
 
 	it("finalises a stopped run as stopped", () => {
-		useDashboardStore.getState().setFinalReport(reportWith("stopped"));
-		expect(useDashboardStore.getState().mode).toBe("stopped");
+		useDashboardStore.getState().setFinalReport("r", reportWith("stopped"));
+		expect(dashboardRunEnding(phase())).toBe("stopped");
 	});
 
 	it("finalises a failed run as failed, not completed (#1932)", () => {
-		useDashboardStore.getState().setFinalReport(reportWith("failed"));
-		expect(useDashboardStore.getState().mode).toBe("failed");
-		expect(useDashboardStore.getState().isStreaming).toBe(false);
+		useDashboardStore.getState().setFinalReport("r", reportWith("failed"));
+		expect(dashboardRunEnding(phase())).toBe("failed");
+		expect(isDashboardRunLive(phase())).toBe(false);
 	});
 
 	it("keeps a stop the user asked for as stopped, even if the report says failed", () => {
-		useDashboardStore.getState().stopRun();
-		useDashboardStore.getState().setFinalReport(reportWith("failed"));
-		expect(useDashboardStore.getState().mode).toBe("stopped");
+		useDashboardStore.getState().stopRun("r");
+		useDashboardStore.getState().setFinalReport("r", reportWith("failed"));
+		expect(dashboardRunEnding(phase())).toBe("stopped");
 	});
 
 	it("takes a report with no status as final", () => {
-		useDashboardStore.getState().setFinalReport(reportWith());
-		expect(useDashboardStore.getState().mode).toBe("completed");
+		useDashboardStore.getState().setFinalReport("r", reportWith());
+		expect(dashboardRunEnding(phase())).toBe("completed");
 	});
 });
 
-describe("dashboard-store stopRun", () => {
-	it("clears a stream error, so the stopped run's report is not held off", () => {
+/*
+ * One field says where the held run stands (#3351). Each row drives the store
+ * from a phase through one writer and names the phase it must land in; a
+ * writer that does not apply from a phase leaves it where it was.
+ *
+ * Mutation check: let `streamClosed` apply from `streamLost` and the "close
+ * after a lost stream" row reddens; let `streamOpened` apply from a stopped run
+ * and its row reddens.
+ */
+describe("dashboard-store phase transitions", () => {
+	const LOST: DashboardPhase = { phase: "streamLost", message: "The connection closed." };
+	const AWAITING: DashboardPhase = { phase: "awaitingReport", stopped: false };
+	const STOPPED: DashboardPhase = { phase: "awaitingReport", stopped: true };
+	const FAILED_FETCH: DashboardPhase = {
+		phase: "reportError",
+		message: "Couldn't reach Vayu's engine.",
+		stopped: false,
+	};
+	const done = reportWith("completed");
+	const FINISHED: DashboardPhase = { phase: "finished", kind: "completed", report: done };
+
+	type Write = (s: ReturnType<typeof useDashboardStore.getState>) => void;
+	const lose: Write = (s) => s.streamLost("r", "The connection closed.");
+	const close: Write = (s) => s.streamClosed("r");
+	const open: Write = (s) => s.streamOpened("r");
+	const stop: Write = (s) => s.stopRun("r");
+	const fail: Write = (s) => s.reportFailed("r", "Couldn't reach Vayu's engine.");
+	const retry: Write = (s) => s.retryReport("r");
+	const land: Write = (s) => s.setFinalReport("r", done);
+
+	it.each<[string, DashboardPhase, Write, DashboardPhase]>([
+		["a stream error while streaming is a lost stream", { phase: "streaming" }, lose, LOST],
+		["a close while streaming awaits the report", { phase: "streaming" }, close, AWAITING],
+		["a close after a lost stream keeps the callout", LOST, close, LOST],
+		["Reconnect after a lost stream streams again", LOST, open, { phase: "streaming" }],
+		["a drop found while awaiting the report is a lost stream", AWAITING, lose, LOST],
+		[
+			"a Stop while streaming awaits the report as stopped",
+			{ phase: "streaming" },
+			stop,
+			STOPPED,
+		],
+		["a Stop after a lost stream awaits the report as stopped", LOST, stop, STOPPED],
+		["a stopped run is not raised back to streaming", STOPPED, open, STOPPED],
+		["a stopped run's stream is not lost", STOPPED, lose, STOPPED],
+		["a fetch that gives up is a report error", AWAITING, fail, FAILED_FETCH],
+		["Retry awaits the report again", FAILED_FETCH, retry, AWAITING],
+		[
+			"a report fetch failing after a Stop keeps the stop",
+			STOPPED,
+			fail,
+			{ ...FAILED_FETCH, stopped: true },
+		],
+		["a report lands on a lost stream", LOST, land, FINISHED],
+		["a finished run stays finished on a late close", FINISHED, close, FINISHED],
+		["a finished run is not stopped", FINISHED, stop, FINISHED],
+		["a finished run's stream is not lost", FINISHED, lose, FINISHED],
+	])("%s", (_name, from, write, to) => {
 		useDashboardStore.getState().startRun("r");
-		useDashboardStore.getState().setError("The connection closed.");
-		useDashboardStore.getState().stopRun();
-		const s = useDashboardStore.getState();
-		expect(s.mode).toBe("stopped");
-		expect(s.error).toBeNull();
+		useDashboardStore.setState({ phase: from });
+
+		write(useDashboardStore.getState());
+
+		expect(phase()).toEqual(to);
+	});
+
+	it("starts a new run streaming, whatever the last one left", () => {
+		useDashboardStore.getState().startRun("r");
+		useDashboardStore.setState({ phase: LOST });
+
+		useDashboardStore.getState().startRun("r2");
+
+		expect(phase()).toEqual({ phase: "streaming" });
+	});
+});
+
+/*
+ * Every reader of "is the run still going" asks this one function (#3351): the
+ * header's pill and Stop, the keep-awake prompt, the URL bar and the builder's
+ * guard. A lost stream is live, because the engine keeps executing the run.
+ *
+ * Mutation check: answer false for `streamLost` and its row reddens.
+ */
+describe("isDashboardRunLive", () => {
+	it.each<[DashboardPhase, boolean, ReturnType<typeof dashboardRunEnding>]>([
+		[{ phase: "idle" }, false, null],
+		[{ phase: "streaming" }, true, null],
+		[{ phase: "streamLost", message: "The connection closed." }, true, null],
+		[{ phase: "awaitingReport", stopped: false }, true, null],
+		[{ phase: "awaitingReport", stopped: true }, false, "stopped"],
+		[{ phase: "reportError", message: "x", stopped: false }, false, null],
+		[{ phase: "reportError", message: "x", stopped: true }, false, "stopped"],
+		[{ phase: "finished", kind: "failed", report: reportWith("failed") }, false, "failed"],
+	])("answers %o as live %s, ended %s", (p, live, ending) => {
+		expect(isDashboardRunLive(p)).toBe(live);
+		expect(dashboardRunEnding(p)).toBe(ending);
+	});
+});
+
+/*
+ * A continuation can outlive its run: a close handler's report fetch, a Stop
+ * request, a buffered flush. Every writer but `startRun` names its run and is
+ * dropped for any other, as `execution-events-store` does (#3351).
+ *
+ * Mutation check: drop the run comparison from any one writer (or from
+ * `forRun`) and its row reddens.
+ */
+describe("dashboard-store writes addressed to a run", () => {
+	type Write = (s: ReturnType<typeof useDashboardStore.getState>) => void;
+	const STREAMING: DashboardPhase = { phase: "streaming" };
+	const LOST: DashboardPhase = { phase: "streamLost", message: "The connection closed." };
+	const AWAITING: DashboardPhase = { phase: "awaitingReport", stopped: false };
+	const FAILED_FETCH: DashboardPhase = { phase: "reportError", message: "x", stopped: false };
+
+	// Each row holds the newer run in a phase its write would change, so a
+	// dropped row is the address at work rather than a write with nothing to do.
+	it.each<[string, DashboardPhase, Write]>([
+		["streamLost", STREAMING, (s) => s.streamLost("old", "The connection closed.")],
+		["streamClosed", STREAMING, (s) => s.streamClosed("old")],
+		["streamOpened", LOST, (s) => s.streamOpened("old")],
+		["stopRun", STREAMING, (s) => s.stopRun("old")],
+		["setStopping", STREAMING, (s) => s.setStopping("old", true)],
+		["addMetricsBatch", STREAMING, (s) => s.addMetricsBatch("old", [tick(1)])],
+		[
+			"addMonitorSamples",
+			STREAMING,
+			(s) => s.addMonitorSamples("old", [{ timestamp: 1, series: {} }]),
+		],
+		["setRunConfig", STREAMING, (s) => s.setRunConfig("old", { mode: "iterations" }, null)],
+		["setFinalReport", AWAITING, (s) => s.setFinalReport("old", reportWith("completed"))],
+		["reportFailed", AWAITING, (s) => s.reportFailed("old", "Couldn't reach Vayu's engine.")],
+		["retryReport", FAILED_FETCH, (s) => s.retryReport("old")],
+	])("drops %s for a run the store no longer holds", (_name, from, write) => {
+		useDashboardStore.getState().startRun("old");
+		useDashboardStore.getState().startRun("new");
+		useDashboardStore.setState({ phase: from });
+		const held = useDashboardStore.getState();
+
+		write(held);
+
+		expect(useDashboardStore.getState()).toBe(held);
 	});
 });
 
@@ -568,8 +720,9 @@ describe("dashboard-store setRunConfig", () => {
 	it("fills in config and request without restarting the run (#1935)", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r");
-		s.addMetricsBatch([tick(1), tick(2)]);
+		s.addMetricsBatch("r", [tick(1), tick(2)]);
 		s.setRunConfig(
+			"r",
 			{ mode: "ramp_up", duration: "30m" },
 			{ method: "GET", url: "https://x.test" }
 		);
@@ -578,8 +731,7 @@ describe("dashboard-store setRunConfig", () => {
 		expect(after.loadTestConfig).toEqual({ mode: "ramp_up", duration: "30m" });
 		expect(after.requestInfo).toEqual({ method: "GET", url: "https://x.test" });
 		expect(after.currentRunId).toBe("r");
-		expect(after.mode).toBe("running");
-		expect(after.isStreaming).toBe(true);
+		expect(after.phase).toEqual({ phase: "streaming" });
 		expect(after.historicalMetrics).toHaveLength(2);
 		expect(after.currentMetrics?.elapsed_seconds).toBe(2);
 	});
@@ -587,7 +739,7 @@ describe("dashboard-store setRunConfig", () => {
 	it("keeps the request it already has when the row names none", () => {
 		const s = useDashboardStore.getState();
 		s.startRun("r", undefined, { method: "GET", url: "https://x.test" });
-		s.setRunConfig({ mode: "iterations" }, null);
+		s.setRunConfig("r", { mode: "iterations" }, null);
 		expect(useDashboardStore.getState().requestInfo).toEqual({
 			method: "GET",
 			url: "https://x.test",
@@ -609,7 +761,7 @@ describe("dashboard-store p99 at peak", () => {
 	it("latches the peak-load reading, not the breakpoint tick's", () => {
 		const s = useDashboardStore.getState();
 		// Crosses the SLO at 19 virtual users (203 ms), then keeps climbing to 30.
-		s.addMetricsBatch([at(1, 10, 60), at(2, 19, 203), at(3, 30, 292)]);
+		s.addMetricsBatch("r", [at(1, 10, 60), at(2, 19, 203), at(3, 30, 292)]);
 		const state = useDashboardStore.getState();
 		expect(state.breakpoint.p99Ms).toBe(203);
 		expect(state.p99AtPeakMs).toBe(292);
@@ -617,17 +769,17 @@ describe("dashboard-store p99 at peak", () => {
 
 	it("restarts when the peak rises, across batches", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([at(1, 10, 500)]);
+		s.addMetricsBatch("r", [at(1, 10, 500)]);
 		expect(useDashboardStore.getState().p99AtPeakMs).toBe(500);
-		s.addMetricsBatch([at(2, 20, 100)]);
+		s.addMetricsBatch("r", [at(2, 20, 100)]);
 		expect(useDashboardStore.getState().p99AtPeakMs).toBe(100);
-		s.addMetricsBatch([at(3, 20, 140), at(4, 15, 900)]);
+		s.addMetricsBatch("r", [at(3, 20, 140), at(4, 15, 900)]);
 		expect(useDashboardStore.getState().p99AtPeakMs).toBe(140);
 	});
 
 	it("stays undefined while no tick at the peak has a whole-second p99", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([{ ...at(0.5, 30, 900), live: true }]);
+		s.addMetricsBatch("r", [{ ...at(0.5, 30, 900), live: true }]);
 		expect(useDashboardStore.getState().peakConcurrency).toBe(30);
 		expect(useDashboardStore.getState().p99AtPeakMs).toBeUndefined();
 	});
@@ -635,8 +787,11 @@ describe("dashboard-store p99 at peak", () => {
 	it("survives the peak tick rolling out of the retention window", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(60);
-		s.addMetricsBatch([at(5, 30, 292)]);
-		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => at(70 + i * 5, 12, 40)));
+		s.addMetricsBatch("r", [at(5, 30, 292)]);
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 13 }, (_, i) => at(70 + i * 5, 12, 40))
+		);
 		const state = useDashboardStore.getState();
 		expect(state.historicalMetrics.some((m) => m.elapsed_seconds === 5)).toBe(false);
 		expect(state.p99AtPeakMs).toBe(292);
@@ -644,10 +799,10 @@ describe("dashboard-store p99 at peak", () => {
 
 	it("startRun clears it for the next run", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([at(1, 30, 292)]);
+		s.addMetricsBatch("r", [at(1, 30, 292)]);
 		s.startRun("next");
 		expect(useDashboardStore.getState().p99AtPeakMs).toBeUndefined();
-		s.addMetricsBatch([at(1, 5, 20)]);
+		s.addMetricsBatch("next", [at(1, 5, 20)]);
 		expect(useDashboardStore.getState().p99AtPeakMs).toBe(20);
 	});
 });
@@ -665,25 +820,28 @@ describe("dashboard-store dispatch lag streak", () => {
 
 	it("latches the tick the windowed gap opened at, across batches", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([windowed(1, 100, 100), windowed(2, 100, 60)]);
+		s.addMetricsBatch("r", [windowed(1, 100, 100), windowed(2, 100, 60)]);
 		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
-		s.addMetricsBatch([windowed(3, 100, 55), windowed(4, 100, 60)]);
+		s.addMetricsBatch("r", [windowed(3, 100, 55), windowed(4, 100, 60)]);
 		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(2);
 	});
 
 	it("resets when the rates agree again, so the next gap starts a new streak", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([windowed(2, 100, 60), windowed(3, 100, 100)]);
+		s.addMetricsBatch("r", [windowed(2, 100, 60), windowed(3, 100, 100)]);
 		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
-		s.addMetricsBatch([windowed(4, 100, 60)]);
+		s.addMetricsBatch("r", [windowed(4, 100, 60)]);
 		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBe(4);
 	});
 
 	it("survives the tick it began on rolling out of the retention window", () => {
 		const s = useDashboardStore.getState();
 		s.setLiveWindowSeconds(60);
-		s.addMetricsBatch([windowed(5, 100, 60)]);
-		s.addMetricsBatch(Array.from({ length: 13 }, (_, i) => windowed(70 + i * 5, 100, 60)));
+		s.addMetricsBatch("r", [windowed(5, 100, 60)]);
+		s.addMetricsBatch(
+			"r",
+			Array.from({ length: 13 }, (_, i) => windowed(70 + i * 5, 100, 60))
+		);
 		const state = useDashboardStore.getState();
 		expect(state.historicalMetrics.some((m) => m.elapsed_seconds === 5)).toBe(false);
 		expect(state.dispatchLagSinceSeconds).toBe(5);
@@ -691,7 +849,7 @@ describe("dashboard-store dispatch lag streak", () => {
 
 	it("startRun clears it for the next run", () => {
 		const s = useDashboardStore.getState();
-		s.addMetricsBatch([windowed(2, 100, 60)]);
+		s.addMetricsBatch("r", [windowed(2, 100, 60)]);
 		s.startRun("next");
 		expect(useDashboardStore.getState().dispatchLagSinceSeconds).toBeNull();
 	});

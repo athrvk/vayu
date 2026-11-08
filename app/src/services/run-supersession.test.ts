@@ -26,18 +26,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /** The user's standing answer on keeping the machine awake (#1357). */
 const settings = { keepAwakeDuringRuns: true };
-const mockDashboardSetStreaming = vi.fn();
 // Hoisted rather than built in `getState`: that returns a fresh object per
 // call, so a spy made there could never be asserted on.
-const mockDashboardSetError = vi.fn();
+const mockDashboardStreamLost = vi.fn();
 const mockDashboardSetFinalReport = vi.fn();
 vi.mock("@/stores", () => ({
 	useDashboardStore: {
 		getState: () => ({
 			currentRunId: null,
 			loadTestConfig: {},
-			setStreaming: mockDashboardSetStreaming,
-			setError: mockDashboardSetError,
+			streamOpened: vi.fn(),
+			streamLost: mockDashboardStreamLost,
+			streamClosed: vi.fn(),
 			setFinalReport: mockDashboardSetFinalReport,
 			addMetricsBatch: vi.fn(),
 			addMonitorSamples: vi.fn(),
@@ -58,7 +58,7 @@ vi.mock("@/stores/scenario-run-store", () => ({
 			startRun: vi.fn(),
 			addSteps: vi.fn(),
 			setStreaming: mockScenarioSetStreaming,
-			setError: vi.fn(),
+			streamLost: vi.fn(),
 			summary: { counts: { passed: 0, failed: 0, skipped: 0, errored: 0 } },
 		}),
 	},
@@ -236,36 +236,25 @@ describe("a run superseded by the other service's run", () => {
 	});
 
 	/*
-	 * `UrlBar` disables Send while `isStreaming` is true and
-	 * `useHostSleepRecorder` reads it to decide which run a suspend belongs to,
-	 * so a flag left raised for a stream that is gone is not cosmetic.
-	 */
-	it("lowers the superseded run's streaming flag", () => {
-		const { load, collection } = runIds();
-		loadTestService.startMonitoring(load);
-		mockDashboardSetStreaming.mockClear();
-
-		scenarioRunService.startMonitoring(collection);
-
-		expect(mockDashboardSetStreaming).toHaveBeenCalledWith(false);
-	});
-
-	/*
 	 * The superseded run is still generating load, so the dashboard must keep
-	 * its running layout and its Stop button and say the stream went (#1925):
-	 * the error is what raises the "Lost the live metrics stream" callout, and
-	 * its Reconnect is the way back. Mutation check: drop the `setError` from
-	 * `handleSuperseded` and this reddens - the dashboard then sat in a running
-	 * mode with no pill and no word about why the numbers stopped.
+	 * it live - the Running pill and the Stop button - and say the stream went
+	 * (#1925, #3351): the lost stream raises the "Lost the live metrics stream"
+	 * callout, and its Reconnect is the way back. `useHostSleepRecorder` reads
+	 * the streaming phase to decide which run a suspend belongs to, so leaving
+	 * it is not cosmetic either. Addressed to the superseded run, so it cannot
+	 * land on another. Mutation check: drop the `streamLost` from
+	 * `handleSuperseded` and this reddens - the dashboard then sat streaming
+	 * with no word about why the numbers stopped.
 	 */
-	it("tells the dashboard its stream was taken, and finalises nothing", () => {
+	it("tells the dashboard its run's stream was taken, and finalises nothing", () => {
 		const { load, collection } = runIds();
 		loadTestService.startMonitoring(load);
-		mockDashboardSetError.mockClear();
+		mockDashboardStreamLost.mockClear();
 
 		scenarioRunService.startMonitoring(collection);
 
-		expect(mockDashboardSetError).toHaveBeenCalledWith(
+		expect(mockDashboardStreamLost).toHaveBeenCalledWith(
+			load,
 			expect.stringContaining("still running")
 		);
 		expect(mockDashboardSetFinalReport).not.toHaveBeenCalled();
@@ -278,7 +267,7 @@ describe("a run superseded by the other service's run", () => {
 
 		loadTestService.startMonitoring(load);
 
-		expect(mockScenarioSetStreaming).toHaveBeenCalledWith(false);
+		expect(mockScenarioSetStreaming).toHaveBeenCalledWith(collection, false);
 	});
 
 	it("leaves the superseded run's socket closed and the new one open", () => {
@@ -292,33 +281,34 @@ describe("a run superseded by the other service's run", () => {
 	});
 
 	/*
-	 * The same-service case was already handled and must stay that way: the
-	 * load service stops itself before reconnecting, which both says what ended
-	 * the run and disconnects the client, so the new hand-off has nobody to
-	 * tell. Mutation check: drop the `stopMonitoring()` call from
-	 * `startMonitoring` and the notification asserted below never happens.
+	 * A load run displaced by another load run has not ended either: the engine
+	 * still runs it, so "The run was stopped before it finished" would be the
+	 * same lie the superseded case above refuses (#3351). A user's Stop still
+	 * says it (`load-test-service.test.ts`). Mutation check: put the
+	 * `stopMonitoring()` call back in `startMonitoring` and the notification
+	 * count below reddens.
 	 *
 	 * What this does *not* pin is that `disconnect()` drops the registration -
-	 * `stopMonitoring` nulls `activeRunId` before disconnecting, so this
-	 * service's own `handleSuperseded` would early-return either way. That rule
-	 * is pinned where it lives, on the client (`sse-client.test.ts`).
+	 * `releaseRun` nulls `activeRunId` before disconnecting, so this service's
+	 * own `handleSuperseded` would early-return either way. That rule is pinned
+	 * where it lives, on the client (`sse-client.test.ts`).
 	 */
-	it("does not double up on a run superseded by its own service", () => {
+	it("says nothing about a load run displaced by another load run", () => {
 		const { load } = runIds();
 		const next = runIds().load;
 		loadTestService.startMonitoring(load);
 		mockNotifyPost.mockClear();
-		mockDashboardSetStreaming.mockClear();
+		mockDashboardStreamLost.mockClear();
+		mockProgressClear.mockClear();
 
 		loadTestService.startMonitoring(next);
 
-		// The one thing `stopMonitoring` has always said, and only it.
-		expect(mockNotifyPost).toHaveBeenCalledTimes(1);
-		expect(mockNotifyPost.mock.calls[0]?.[0]).toMatchObject({
-			kind: "load-run-stopped",
-			target: { view: "run", runId: load },
-		});
-		expect(mockDashboardSetStreaming).not.toHaveBeenCalledWith(false);
+		expect(mockNotifyPost).not.toHaveBeenCalled();
+		expect(mockIconFinished).not.toHaveBeenCalled();
+		expect(mockDashboardStreamLost).not.toHaveBeenCalled();
+		// It still gives up what it held, named by run (#1405).
+		expect(mockProgressClear).toHaveBeenCalledWith(LOAD_KEY, load);
+		expect(sockets()[0]?.readyState).toBe(MockEventSource.CLOSED);
 	});
 
 	/*

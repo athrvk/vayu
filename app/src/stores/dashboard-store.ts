@@ -27,8 +27,7 @@ import {
 	DEFAULT_MAX_RETAINED_TICKS,
 } from "@/constants/live-window";
 import { durationSeconds } from "@/constants/load-test";
-import { isRunInProgress } from "@/lib/run-status";
-import type { DashboardMode } from "@/modules/dashboard/types";
+import { isRunInProgress, type TerminalRunStatus } from "@/lib/run-status";
 
 /**
  * Retention seeded before the window is known. The real value is the engine's
@@ -105,13 +104,78 @@ function uncrossedBy(judge: SloJudge): Breakpoint {
 	return notCrossed(judge.sloMs, judge.sloSource);
 }
 
+/** How a run the dashboard holds ended, as its pill names it. */
+export type FinishedKind = TerminalRunStatus;
+
 /**
- * The mode a finished run settles in. A stop the user asked for stays "stopped"
- * whatever the report says; otherwise the engine's own status decides, so a
- * failed run is not shown as a neutral "completed" (#1932).
+ * Where the run the dashboard holds stands (#3351). One field rather than the
+ * `mode` / `isStreaming` / `error` / `finalReport` flags it replaced, which
+ * could disagree: a stream error left `isStreaming` true beside its message,
+ * and "awaiting the report" was only the absence of every other flag.
+ *
+ * - `idle`: no run yet.
+ * - `streaming`: the SSE stream is attached and ticks arrive.
+ * - `streamLost`: the stream ended (an error, a drop, a collection run taking
+ *   the client) while the engine still runs the load test; `message` is the
+ *   dashboard's callout body, and Reconnect is the way back.
+ * - `awaitingReport`: the stream closed, or the user stopped the run, and the
+ *   stored report is on its way. `stopped` is the user's Stop, which decides
+ *   the run's ending whatever the report says.
+ * - `reportError`: the report fetch gave up; Retry returns to `awaitingReport`.
+ * - `finished`: the report landed, and `kind` is how the run ended.
  */
-function finalModeFor(current: DashboardMode, reportStatus: string | undefined): DashboardMode {
-	if (current === "stopped" || reportStatus === "stopped") return "stopped";
+export type DashboardPhase =
+	| { phase: "idle" }
+	| { phase: "streaming" }
+	| { phase: "streamLost"; message: string }
+	| { phase: "awaitingReport"; stopped: boolean }
+	| { phase: "reportError"; message: string; stopped: boolean }
+	| { phase: "finished"; kind: FinishedKind; report: RunReport };
+
+/**
+ * Whether the run the dashboard holds may still be executing on the engine:
+ * the one answer the header's pill and Stop button, the keep-awake prompt, the
+ * URL bar and the builder's single-run guard read.
+ *
+ * A lost stream is live: the engine keeps running the load test, so the pill
+ * still says Running beside the lost-stream callout. Awaiting the report is
+ * live until the report says otherwise, unless the user's Stop ended it. A
+ * failed report fetch is not: the stream had already closed, and holding the
+ * builder on a read that cannot answer would lock out every new run until the
+ * engine did.
+ */
+export function isDashboardRunLive(phase: DashboardPhase): boolean {
+	switch (phase.phase) {
+		case "streaming":
+		case "streamLost":
+			return true;
+		case "awaitingReport":
+			return !phase.stopped;
+		default:
+			return false;
+	}
+}
+
+/**
+ * How the run ended as far as the dashboard knows: the report's kind once it
+ * landed, "stopped" from the user's Stop before it, and null while neither has
+ * happened. Never set while {@link isDashboardRunLive} is true.
+ */
+export function dashboardRunEnding(phase: DashboardPhase): FinishedKind | null {
+	if (phase.phase === "finished") return phase.kind;
+	if (phase.phase === "awaitingReport" || phase.phase === "reportError") {
+		return phase.stopped ? "stopped" : null;
+	}
+	return null;
+}
+
+/**
+ * The kind a finished run settles in. A stop the user asked for stays
+ * "stopped" whatever the report says; otherwise the engine's own status
+ * decides, so a failed run is not shown as a neutral "completed" (#1932).
+ */
+function finishedKindFor(phase: DashboardPhase, reportStatus: string | undefined): FinishedKind {
+	if (dashboardRunEnding(phase) === "stopped" || reportStatus === "stopped") return "stopped";
 	return reportStatus === "failed" ? "failed" : "completed";
 }
 
@@ -156,8 +220,8 @@ export interface LoadTestRequestInfo {
 
 interface DashboardState {
 	currentRunId: string | null;
-	mode: DashboardMode;
-	isStreaming: boolean;
+	/** Where {@link currentRunId} stands; see {@link DashboardPhase}. */
+	phase: DashboardPhase;
 	currentMetrics: LoadTestMetrics | null;
 	historicalMetrics: LoadTestMetrics[];
 	/**
@@ -171,8 +235,7 @@ interface DashboardState {
 	 * reads to stay out of the way entirely.
 	 */
 	monitorSamples: MonitorSample[];
-	finalReport: RunReport | null;
-	error: string | null;
+	/** A Stop request for the held run is in flight. */
 	isStopping: boolean;
 	// Config and request info (available during live streaming)
 	loadTestConfig: LoadTestRunConfig | null;
@@ -215,7 +278,13 @@ interface DashboardState {
 	 */
 	maxRetainedTicks: number;
 
-	// Actions
+	/*
+	 * Actions. `startRun` is the one that replaces the held run; every other
+	 * writer names the run it speaks for, and a write for a run the store is
+	 * not holding is dropped, as `execution-events-store` does. A continuation
+	 * that outlived its run (a report fetch, a close handler, a Stop request)
+	 * must not paint a newer run.
+	 */
 	startRun: (
 		runId: string,
 		config?: LoadTestRunConfig,
@@ -227,27 +296,84 @@ interface DashboardState {
 	 * Touches those two fields and nothing else: the run is already streaming,
 	 * and {@link startRun} would clear the metrics it has gathered.
 	 */
-	setRunConfig: (config: LoadTestRunConfig, requestInfo: LoadTestRequestInfo | null) => void;
-	stopRun: () => void;
-	setStreaming: (streaming: boolean) => void;
+	setRunConfig: (
+		runId: string,
+		config: LoadTestRunConfig,
+		requestInfo: LoadTestRequestInfo | null
+	) => void;
+	/** The engine accepted the user's Stop: the run awaits its report as stopped. */
+	stopRun: (runId: string) => void;
+	/** The stream attached (or re-attached, which is Reconnect) to a live run. */
+	streamOpened: (runId: string) => void;
+	/** The stream ended while the engine still runs the load test. */
+	streamLost: (runId: string, message: string) => void;
+	/** The stream closed; the stored report decides how the run ended. */
+	streamClosed: (runId: string) => void;
 	setLiveWindowSeconds: (seconds: number | null) => void;
 	setMaxRetainedTicks: (ticks: number) => void;
-	addMetricsBatch: (batch: LoadTestMetrics[]) => void;
-	addMonitorSamples: (batch: MonitorSample[]) => void;
-	setFinalReport: (report: RunReport) => void;
-	setError: (error: string | null) => void;
-	setStopping: (stopping: boolean) => void;
+	addMetricsBatch: (runId: string, batch: LoadTestMetrics[]) => void;
+	addMonitorSamples: (runId: string, batch: MonitorSample[]) => void;
+	setFinalReport: (runId: string, report: RunReport) => void;
+	/** The report fetch gave up; `message` is the callout body. */
+	reportFailed: (runId: string, message: string) => void;
+	/** Retry after {@link reportFailed}: the report is awaited again. */
+	retryReport: (runId: string) => void;
+	setStopping: (runId: string, stopping: boolean) => void;
+}
+
+const IDLE: DashboardPhase = { phase: "idle" };
+const STREAMING: DashboardPhase = { phase: "streaming" };
+
+/**
+ * Apply `next` to the state when it holds `runId`; otherwise return the state
+ * itself, so zustand notifies nobody. The writers that fold data in
+ * (`addMetricsBatch`, `addMonitorSamples`, `setFinalReport`) make the same
+ * comparison inside their own early return.
+ */
+function forRun(
+	state: DashboardState,
+	runId: string,
+	next: (state: DashboardState) => Partial<DashboardState>
+): Partial<DashboardState> {
+	return state.currentRunId === runId ? next(state) : state;
+}
+
+/**
+ * The held run with the config and request it was started without, its
+ * breakpoint re-judged where the config moves the line.
+ */
+function withRunConfig(
+	state: DashboardState,
+	config: LoadTestRunConfig,
+	requestInfo: LoadTestRequestInfo | null
+): Partial<DashboardState> {
+	const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
+	// A run started elsewhere (an MCP agent's) streams ticks before its config
+	// is read, so they were judged against the Settings threshold. A capacity
+	// run's own line replaces that verdict, from the ticks still retained.
+	const judge = sloJudgeFor(config);
+	const { breakpoint } = state;
+	if (judge.sloMs !== breakpoint.sloMs) {
+		if (capacitySloMs(config) === undefined) return patch;
+		const rejudged = computeBreakpoint(
+			state.historicalMetrics,
+			judge.sloMs,
+			runOwnSloMs(config)
+		);
+		return { ...patch, breakpoint: rejudged };
+	}
+	// The same number can be the run's budget or only the Settings default, and
+	// the config says which; the verdict itself does not move.
+	if (judge.sloSource === breakpoint.sloSource) return patch;
+	return { ...patch, breakpoint: { ...breakpoint, sloSource: judge.sloSource } };
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
 	currentRunId: null,
-	mode: "running",
-	isStreaming: false,
+	phase: IDLE,
 	currentMetrics: null,
 	historicalMetrics: [],
 	monitorSamples: [],
-	finalReport: null,
-	error: null,
 	isStopping: false,
 	loadTestConfig: null,
 	requestInfo: null,
@@ -262,13 +388,10 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	startRun: (runId, config, requestInfo, sourceRequestId) =>
 		set({
 			currentRunId: runId,
-			mode: "running",
-			isStreaming: true,
+			phase: STREAMING,
 			currentMetrics: null,
 			historicalMetrics: [],
 			monitorSamples: [],
-			finalReport: null,
-			error: null,
 			isStopping: false,
 			loadTestConfig: config ?? null,
 			requestInfo: requestInfo ?? null,
@@ -279,48 +402,53 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			dispatchLagSinceSeconds: null,
 		}),
 
-	setRunConfig: (config, requestInfo) =>
-		set((state) => {
-			const patch = { loadTestConfig: config, requestInfo: requestInfo ?? state.requestInfo };
-			// A run started elsewhere (an MCP agent's) streams ticks before its config
-			// is read, so they were judged against the Settings threshold. A capacity
-			// run's own line replaces that verdict, from the ticks still retained.
-			const judge = sloJudgeFor(config);
-			const { breakpoint } = state;
-			if (judge.sloMs !== breakpoint.sloMs) {
-				if (capacitySloMs(config) === undefined) return patch;
-				const rejudged = computeBreakpoint(
-					state.historicalMetrics,
-					judge.sloMs,
-					runOwnSloMs(config)
-				);
-				return { ...patch, breakpoint: rejudged };
-			}
-			// The same number can be the run's budget or only the Settings default, and
-			// the config says which; the verdict itself does not move.
-			if (judge.sloSource === breakpoint.sloSource) return patch;
-			return { ...patch, breakpoint: { ...breakpoint, sloSource: judge.sloSource } };
-		}),
+	setRunConfig: (runId, config, requestInfo) =>
+		set((state) => forRun(state, runId, (s) => withRunConfig(s, config, requestInfo))),
 
-	stopRun: () =>
-		set({
-			mode: "stopped",
-			isStreaming: false,
-			// A stream callout is about a run still going; this one was stopped, and
-			// the report effect holds off while the callout is up (#1925).
-			error: null,
-		}),
+	// From a lost stream too: the callout is about a run still going, and this
+	// one was stopped (#1925). A run already settled has nothing left to stop.
+	stopRun: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				isDashboardRunLive(s.phase)
+					? { phase: { phase: "awaitingReport", stopped: true } }
+					: s
+			)
+		),
 
-	setStreaming: (streaming) => set({ isStreaming: streaming }),
+	// Live phases only: a stream re-attached to a run that has settled or been
+	// stopped must not raise it back to Running.
+	streamOpened: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) => (isDashboardRunLive(s.phase) ? { phase: STREAMING } : s))
+		),
+
+	streamLost: (runId, message) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				isDashboardRunLive(s.phase) ? { phase: { phase: "streamLost", message } } : s
+			)
+		),
+
+	// Only from `streaming`: a close after a lost stream keeps the callout, and
+	// one after a Stop or a landed report has nothing to add.
+	streamClosed: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				s.phase.phase === "streaming"
+					? { phase: { phase: "awaitingReport", stopped: false } }
+					: s
+			)
+		),
 
 	setLiveWindowSeconds: (seconds) => set({ liveWindowSeconds: seconds }),
 
 	setMaxRetainedTicks: (ticks) =>
 		set({ maxRetainedTicks: ticks > 0 ? ticks : DEFAULT_MAX_RETAINED_TICKS }),
 
-	addMetricsBatch: (batch) =>
+	addMetricsBatch: (runId, batch) =>
 		set((state) => {
-			if (batch.length === 0) return state;
+			if (state.currentRunId !== runId || batch.length === 0) return state;
 			let newHistory = [...state.historicalMetrics, ...batch];
 
 			// Time-based retention: drop ticks older than the configured window,
@@ -388,26 +516,43 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	 * a 250ms scrape over an overnight soak would grow without limit beside a
 	 * series that is trimmed.
 	 */
-	addMonitorSamples: (batch) =>
+	addMonitorSamples: (runId, batch) =>
 		set((state) => {
-			if (batch.length === 0) return state;
+			if (state.currentRunId !== runId || batch.length === 0) return state;
 			const merged = [...state.monitorSamples, ...batch];
 			const cap = state.maxRetainedTicks;
 			return { monitorSamples: merged.length > cap ? merged.slice(-cap) : merged };
 		}),
 
-	setFinalReport: (report) =>
+	setFinalReport: (runId, report) =>
 		set((state) => {
 			// A live run's report is a snapshot, not a final one, whichever caller
 			// fetched it (#1925).
-			if (isRunInProgress(report.metadata?.status)) return state;
-			return {
-				finalReport: report,
-				mode: finalModeFor(state.mode, report.metadata?.status),
-				isStreaming: false,
-			};
+			if (state.currentRunId !== runId || isRunInProgress(report.metadata?.status)) {
+				return state;
+			}
+			const kind = finishedKindFor(state.phase, report.metadata?.status);
+			return { phase: { phase: "finished", kind, report } };
 		}),
 
-	setError: (error) => set({ error }),
-	setStopping: (stopping) => set({ isStopping: stopping }),
+	reportFailed: (runId, message) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				s.phase.phase === "awaitingReport"
+					? { phase: { phase: "reportError", message, stopped: s.phase.stopped } }
+					: s
+			)
+		),
+
+	retryReport: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) =>
+				s.phase.phase === "reportError"
+					? { phase: { phase: "awaitingReport", stopped: s.phase.stopped } }
+					: s
+			)
+		),
+
+	setStopping: (runId, stopping) =>
+		set((state) => forRun(state, runId, () => ({ isStopping: stopping }))),
 }));

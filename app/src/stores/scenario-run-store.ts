@@ -75,17 +75,29 @@ interface ScenarioRunState {
 	 * whole run. Read by `ScenarioRunView`'s live "Iteration k of N" line.
 	 */
 	plan: ScenarioRunPlanEvent | null;
-	/** True between `startRun` and the stream closing. */
+	/** True between `startRun` and the stream closing or failing. */
 	isStreaming: boolean;
 	/** A transport failure on the stream; cleared by the next `startRun`. */
 	error: string | null;
 
+	/*
+	 * `startRun` is the one action that replaces the held run. Every other
+	 * writer names the run it speaks for and is dropped for any other, as in
+	 * `execution-events-store`: the stream is replayable, so a frame from a
+	 * replaced run can still arrive on a socket that has not finished closing,
+	 * and a release for one run must not lower a successor's flag.
+	 */
 	/** Begin a run: clears any previous run's steps, then starts streaming. */
 	startRun: (runId: string) => void;
-	addSteps: (steps: readonly ScenarioStepEvent[]) => void;
-	setPlan: (plan: ScenarioRunPlanEvent) => void;
-	setStreaming: (streaming: boolean) => void;
-	setError: (error: string | null) => void;
+	addSteps: (runId: string, steps: readonly ScenarioStepEvent[]) => void;
+	setPlan: (runId: string, plan: ScenarioRunPlanEvent) => void;
+	setStreaming: (runId: string, streaming: boolean) => void;
+	/**
+	 * The stream failed: records why and lowers {@link isStreaming} in one
+	 * write. The run itself keeps executing on the engine, and the view reads
+	 * its stored status for that once the stream says nothing more.
+	 */
+	streamLost: (runId: string, message: string) => void;
 }
 
 export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
@@ -111,18 +123,11 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 			error: null,
 		})),
 
-	/*
-	 * Ignoring the identity of the run is not an option here: the stream is
-	 * replayable, so a step from a run that has been replaced can still arrive
-	 * on a socket that has not finished closing. It belongs to nothing on
-	 * screen, so it is dropped.
-	 *
-	 * A batch that changed nothing - every event in it a replay of a row already
-	 * held - returns the state object itself, so zustand notifies nobody.
-	 */
-	addSteps: (steps) =>
+	// A batch that changed nothing - every event in it a replay of a row
+	// already held - returns the state object itself, so zustand notifies nobody.
+	addSteps: (runId, steps) =>
 		set((state) => {
-			if (!state.runId || steps.length === 0) return state;
+			if (state.runId !== runId || steps.length === 0) return state;
 			const { fold, appendedOnly } = foldStepEvents(
 				{ steps: state.steps, summary: state.summary },
 				steps
@@ -136,10 +141,12 @@ export const useScenarioRunStore = create<ScenarioRunState>((set) => ({
 					};
 		}),
 
-	// Dropped with no run to belong to, for the same reason `addSteps` is: a
-	// frame that outlives the run it opened must not size the next one.
-	setPlan: (plan) => set((state) => (state.runId ? { plan } : state)),
+	// A frame that outlives the run it opened must not size the next one.
+	setPlan: (runId, plan) => set((state) => (state.runId === runId ? { plan } : state)),
 
-	setStreaming: (isStreaming) => set({ isStreaming }),
-	setError: (error) => set({ error }),
+	setStreaming: (runId, isStreaming) =>
+		set((state) => (state.runId === runId ? { isStreaming } : state)),
+
+	streamLost: (runId, error) =>
+		set((state) => (state.runId === runId ? { error, isStreaming: false } : state)),
 }));

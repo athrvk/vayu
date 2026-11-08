@@ -52,8 +52,8 @@ function mount(patch: Partial<DashboardHeaderProps>) {
 	return render(
 		withQueryClient(
 			<DashboardHeader
-				mode="completed"
-				isStreaming={false}
+				live={false}
+				endedAs="completed"
 				isStopping={false}
 				onStop={async () => {}}
 				{...patch}
@@ -95,7 +95,7 @@ describe("Export in the dashboard header", () => {
 	});
 
 	it("is absent while the run streams", () => {
-		mount({ mode: "running", isStreaming: true, requestUrl: "https://api.test/orders" });
+		mount({ live: true, endedAs: null, requestUrl: "https://api.test/orders" });
 
 		expect(exportButton()).toBeNull();
 		expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();

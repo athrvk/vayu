@@ -15,3 +15,32 @@
 export function isRunInProgress(status: string | null | undefined): boolean {
 	return status === "running" || status === "pending";
 }
+
+/** The statuses a run settles in: the engine will not move it again. */
+export type TerminalRunStatus = "completed" | "stopped" | "failed";
+
+/**
+ * Whether a run status says the run has settled.
+ *
+ * Not the complement of {@link isRunInProgress}: a missing or unrecognised
+ * status (an engine newer than this client) is neither in progress nor
+ * terminal, so a caller that needs a decision has to ask the engine again.
+ */
+export function isRunTerminal(status: string | null | undefined): status is TerminalRunStatus {
+	return status === "completed" || status === "stopped" || status === "failed";
+}
+
+/**
+ * Whether a run is live, from its stored status and from whether a stream in
+ * this window says so (`useRunLiveness` gathers the second).
+ *
+ * The stored status decides when it can: a terminal one is the engine's word
+ * that the run is over, whatever a stream that has not caught up still says,
+ * and an in-progress one keeps the run live through a lost stream. Only a
+ * status not read yet, or one this client does not recognise, defers to the
+ * stream.
+ */
+export function isRunLive(storedStatus: string | null | undefined, streamLive: boolean): boolean {
+	if (isRunTerminal(storedStatus)) return false;
+	return isRunInProgress(storedStatus) || streamLive;
+}
