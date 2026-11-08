@@ -28,7 +28,7 @@ import { dirname, join } from "node:path";
 import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { chordKeys } from "@/lib/platform";
-import { SHORTCUT_GROUPS } from "@/constants/shortcuts";
+import { SHORTCUT_GROUPS, TREE_RENAME_CHORD, ZOOM_IN_CHORD } from "@/constants/shortcuts";
 import KeyboardShortcutsPanel from "./KeyboardShortcutsPanel";
 
 const CHORDS = SHORTCUT_GROUPS.flatMap((group) => [...group.chords]);
@@ -64,6 +64,28 @@ describe("KeyboardShortcutsPanel", () => {
 			const caps = [...row!.querySelectorAll("kbd")].map((cap) => cap.textContent);
 			expect(caps).toEqual(chordKeys(chord));
 		}
+	});
+
+	it("lists what the native menu and the collection tree answer to (#3325)", () => {
+		// Neither is a renderer window handler, so neither had a row: zoom is the
+		// menu's, rename the tree's own `onKeyDown`.
+		const byLabel = new Map(rows().map((row) => [row.getAttribute("data-shortcut-row"), row]));
+		for (const chord of [ZOOM_IN_CHORD, TREE_RENAME_CHORD]) {
+			const row = byLabel.get(chord.label ?? null);
+			expect(row, `no row for ${chord.label}`).toBeTruthy();
+			expect([...row!.querySelectorAll("kbd")].map((cap) => cap.textContent)).toEqual(
+				chordKeys(chord)
+			);
+		}
+		expect(byLabel.get("Zoom in")).toBeTruthy();
+		expect(byLabel.get("Rename")).toBeTruthy();
+	});
+
+	it("gives every row a label no other row shares", () => {
+		// Rows are looked up by label, and a duplicate would make `getByText` in
+		// the cases above ambiguous rather than wrong.
+		const labels = CHORDS.map((chord) => chord.label);
+		expect(new Set(labels).size).toBe(labels.length);
 	});
 
 	it("prints every group heading", () => {

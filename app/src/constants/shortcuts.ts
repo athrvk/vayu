@@ -18,7 +18,7 @@
  */
 
 import { isMac, type Chord } from "@/lib/platform";
-import type { DrawerView } from "@/stores";
+import type { DrawerView } from "@/stores/layout-store";
 
 /** Send the request. */
 export const SEND_CHORD: Chord = { mod: true, key: "↵", label: "Send request" };
@@ -360,6 +360,116 @@ export const TAB_CHORDS: readonly Chord[] = Array.from({ length: 9 }, (_, i) => 
 	label: `Focus tab ${i + 1}`,
 }));
 
+/**
+ * Chords the native menu answers to (#3325). The renderer never sees these
+ * keydowns: Electron's menu takes them first, so they are **display-only** here.
+ * Do not pass one to `matchesChord` or a live handler - the handler would never
+ * fire, and the one chord that is not a real `mod` chord (`FULL_SCREEN_CHORD`
+ * on macOS) would answer to a different key.
+ *
+ * Every accelerator the menu registers is built from these by
+ * `electron/menu-accelerators.ts`; the main process cannot import this file, so
+ * `electron/menu-accelerators.test.ts` is what holds the two in step.
+ */
+export const ZOOM_IN_CHORD: Chord = { mod: true, key: "=", label: "Zoom in" };
+
+export const ZOOM_OUT_CHORD: Chord = { mod: true, key: "-", label: "Zoom out" };
+
+export const RESET_ZOOM_CHORD: Chord = { mod: true, key: "0", label: "Reset zoom" };
+
+/**
+ * Full screen. The menu item is Electron's `togglefullscreen` role, which
+ * brings its own accelerator: F11 on Windows and Linux, ⌃⌘F on macOS. Two
+ * definitions behind one name, chosen once at import the way `GO_BACK_CHORD`
+ * is, because the platforms disagree about the key rather than the modifier.
+ */
+export const FULL_SCREEN_CHORD: Chord = isMac
+	? { mod: true, ctrl: true, key: "F", label: "Full screen" }
+	: { key: "F11", label: "Full screen" };
+
+/**
+ * Close the window. ⇧⌘W because ⌘W is Close tab, which the renderer owns - the
+ * menu item is rebound so its accelerator does not swallow the keydown.
+ */
+export const CLOSE_WINDOW_CHORD: Chord = {
+	mod: true,
+	shift: true,
+	key: "W",
+	label: "Close window",
+};
+
+/**
+ * Quit. The role's own accelerator is the platform default on macOS and Linux
+ * and absent on Windows; the menu sets this one explicitly so the three agree
+ * and the panel's row is true everywhere.
+ */
+export const QUIT_CHORD: Chord = { mod: true, key: "Q", label: "Quit" };
+
+/**
+ * The key-cap for deleting, as the platform names it. Both keys of the pair do
+ * the same thing everywhere (`useRovingTreeFocus`, `TabItem`): a Mac keyboard's
+ * "delete" key reports `Backspace` and forward-delete reports `Delete`, so the
+ * cap names both rather than whichever one the author's keyboard calls Delete.
+ */
+const DELETE_KEYS = isMac ? "⌫ / ⌦" : "Delete / Backspace";
+
+/**
+ * The collection tree's keys and the tab strip's close key (#3325). Like the
+ * tab-move chords above they are bound by the focused element's own `onKeyDown`
+ * and only while a row or tab holds focus, so they are display-only here too:
+ * nothing matches them through `matchesChord`.
+ *
+ * Alt+Arrow is the keyboard half of drag-and-reorder: up and down step past a
+ * sibling, left takes the row out of its folder and right nests it in.
+ */
+export const TREE_MOVE_UP_CHORD: Chord = {
+	alt: true,
+	key: "↑",
+	label: "Move the focused row up",
+};
+
+export const TREE_MOVE_DOWN_CHORD: Chord = {
+	alt: true,
+	key: "↓",
+	label: "Move the focused row down",
+};
+
+export const TREE_MOVE_OUT_CHORD: Chord = {
+	alt: true,
+	key: "←",
+	label: "Move the focused row out of its folder",
+};
+
+export const TREE_MOVE_IN_CHORD: Chord = {
+	alt: true,
+	key: "→",
+	label: "Move the focused row into the folder above",
+};
+
+export const TREE_RENAME_CHORD: Chord = { key: "F2", label: "Rename" };
+
+export const TREE_DELETE_CHORD: Chord = { key: DELETE_KEYS, label: "Delete the focused row" };
+
+/**
+ * Open the focused row's menu. Three keys reach it: Shift+F10 and the Menu key
+ * are the platform pair, and Shift+Enter is the one a Mac keyboard has (no Menu
+ * key there).
+ */
+export const TREE_MENU_CHORD: Chord = { shift: true, key: "F10", label: "Open the row menu" };
+
+export const TREE_MENU_KEY_CHORD: Chord = {
+	key: "Menu",
+	label: "Open the row menu with the Menu key",
+};
+
+export const TREE_MENU_ENTER_CHORD: Chord = {
+	shift: true,
+	key: "↵",
+	label: "Open the row menu with Shift and Enter",
+};
+
+export const CLOSE_FOCUSED_TAB_CHORD: Chord = { key: DELETE_KEYS, label: "Close the focused tab" };
+
 /** A named block of chords, as a surface that lists them prints it. */
 export interface ShortcutGroup {
 	/** Stable across renders and reorderings - the React key. */
@@ -423,11 +533,39 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 		],
 	},
 	{
+		id: "tree",
+		title: "Collection tree and tabs",
+		chords: [
+			TREE_MOVE_UP_CHORD,
+			TREE_MOVE_DOWN_CHORD,
+			TREE_MOVE_OUT_CHORD,
+			TREE_MOVE_IN_CHORD,
+			TREE_RENAME_CHORD,
+			TREE_DELETE_CHORD,
+			TREE_MENU_CHORD,
+			TREE_MENU_KEY_CHORD,
+			TREE_MENU_ENTER_CHORD,
+			CLOSE_FOCUSED_TAB_CHORD,
+		],
+	},
+	{
 		id: "focus",
 		title: "Moving focus",
 		chords: [NEXT_REGION_CHORD, PREVIOUS_REGION_CHORD],
 	},
 	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD, EDIT_VARIABLE_CHORD] },
+	{
+		id: "window",
+		title: "Window",
+		chords: [
+			ZOOM_IN_CHORD,
+			ZOOM_OUT_CHORD,
+			RESET_ZOOM_CHORD,
+			FULL_SCREEN_CHORD,
+			CLOSE_WINDOW_CHORD,
+			QUIT_CHORD,
+		],
+	},
 ];
 
 /**
