@@ -39,6 +39,7 @@
  */
 
 import type { SettingsCategory } from "@/types";
+import { SHORTCUT_GROUPS } from "@/constants/shortcuts";
 
 export interface AppSettingDescriptor {
 	/** Unique across panels; also the `data-setting-anchor` the panel renders. */
@@ -412,8 +413,20 @@ export const APP_SETTINGS = [
 		panel: "shortcuts",
 		label: "Keyboard shortcuts",
 		searchText:
-			"Every chord the app listens for, listed for this platform - send, save, close tab, the sidebar views and the tab digits.",
-		keywords: ["hotkey", "keybinding", "chord", "accelerator", "cheat sheet"],
+			"Every chord the app listens for, listed for this platform - send, save, close tab, the sidebar views, the tab digits, the window's zoom, full screen and quit, and the collection tree's rename and delete.",
+		// Every chord's own label, so a search finds the row by the action the
+		// user types ("zoom", "rename", "full screen") and a chord added to the
+		// registry is searchable with no second edit here.
+		keywords: [
+			"hotkey",
+			"keybinding",
+			"chord",
+			"accelerator",
+			"cheat sheet",
+			...SHORTCUT_GROUPS.flatMap((group) =>
+				group.chords.map((chord) => chord.label ?? chord.key)
+			),
+		],
 	},
 
 	// Engine category Cards (`engine-categories.ts`): blocks the engine's generic

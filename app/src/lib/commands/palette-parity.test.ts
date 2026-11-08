@@ -72,6 +72,34 @@ const NO_COMMAND = new Map<Chord, string>([
 		"nine 'Focus tab N' rows would bury the actions they sit among, and " +
 			"the tabs are already listed by name",
 	]),
+	...[
+		shortcuts.ZOOM_IN_CHORD,
+		shortcuts.ZOOM_OUT_CHORD,
+		shortcuts.RESET_ZOOM_CHORD,
+		shortcuts.FULL_SCREEN_CHORD,
+		shortcuts.CLOSE_WINDOW_CHORD,
+		shortcuts.QUIT_CHORD,
+	].map((chord): [Chord, string] => [
+		chord,
+		"display only: the native menu answers to it, and the palette does not " +
+			"repeat the menu's window items",
+	]),
+	...[
+		shortcuts.TREE_MOVE_UP_CHORD,
+		shortcuts.TREE_MOVE_DOWN_CHORD,
+		shortcuts.TREE_MOVE_OUT_CHORD,
+		shortcuts.TREE_MOVE_IN_CHORD,
+		shortcuts.TREE_RENAME_CHORD,
+		shortcuts.TREE_DELETE_CHORD,
+		shortcuts.TREE_MENU_CHORD,
+		shortcuts.TREE_MENU_KEY_CHORD,
+		shortcuts.TREE_MENU_ENTER_CHORD,
+		shortcuts.CLOSE_FOCUSED_TAB_CHORD,
+	].map((chord): [Chord, string] => [
+		chord,
+		"display only: acts on the row or tab that holds focus, and the palette " +
+			"takes focus away before a command could run",
+	]),
 	...[shortcuts.MOVE_TAB_START_CHORD, shortcuts.MOVE_TAB_END_CHORD].map(
 		(chord): [Chord, string] => [
 			chord,

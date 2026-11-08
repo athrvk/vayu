@@ -56,7 +56,12 @@ everything.
   and belongs to a `SHORTCUT_GROUPS` entry** (#951): the Settings > Keyboard
   shortcuts panel draws every row from that registry, and
   `shortcuts.listed.test.ts` fails on a chord outside it. Every app-level chord
-  has a palette command or a written excuse (`palette-parity.test.ts`).
+  has a palette command or a written excuse (`palette-parity.test.ts`). The
+  panel also lists what the window never hears: the native menu's chords (zoom,
+  full screen, close window, quit) and the tree's and tab strip's own keys are
+  display-only `Chord`s, never passed to `matchesChord`, and the menu's
+  accelerator strings come from `electron/menu-accelerators.ts`, which
+  `electron/menu-accelerators.test.ts` holds equal to those chords (#3325).
 - **The collection tree's key guards come from the same file**: it bails out of
   its named cases on Ctrl/Cmd so those chords reach the window, and its
   editable-target check is `isTextEntryTarget`, which is `ownsEnterKey` plus a
