@@ -72,7 +72,7 @@ export interface PaletteItem {
 	 *
 	 * Short terms a person types on purpose - a method, a scope, an alias. They
 	 * are matched fuzzily along with the title, so anything long or punctuated
-	 * belongs in `substringKeywords` instead.
+	 * (a URL, a sentence of description) belongs in `substringKeywords` instead.
 	 */
 	keywords?: string[];
 	/**
@@ -83,6 +83,10 @@ export interface PaletteItem {
 	 * `/the/most/expensive/endpoint` by finding five letters in five places.
 	 * Nobody fuzzy-searches a URL - they type a piece of one - so it is matched
 	 * the way it is used.
+	 *
+	 * A settings section's description is the other case (#3322): a sentence the
+	 * settings sidebar finds by a phrase, so the palette matches it as one entry
+	 * rather than as words in `keywords`.
 	 *
 	 * The piece has to be contiguous, and that is the cost: `v1/charges` finds
 	 * the row, `v1charges` no longer does. No floor could have bought that back

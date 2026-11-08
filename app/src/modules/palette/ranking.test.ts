@@ -24,6 +24,9 @@ import {
 	RECENT_LIMIT,
 } from "./ranking";
 import type { PaletteItem, PaletteKind } from "./types";
+import { baseCommandContext } from "@/lib/commands/context";
+import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
+import { commandItems } from "./sources/commandItems";
 
 function item(overrides: Partial<PaletteItem> & { id: string; kind: PaletteKind }): PaletteItem {
 	return { title: overrides.id, perform: () => {}, ...overrides };
@@ -99,6 +102,42 @@ describe("substring keywords", () => {
 	it("loses to a row whose name actually says what was typed", () => {
 		const setting = item({ id: "s1", kind: "settings", title: "Refunds", preMatched: true });
 		expect(rankPalette([request, setting], "refunds").top.map((i) => i.id)).toEqual(["s1"]);
+	});
+});
+
+describe("settings commands", () => {
+	const settingsItems = commandItems(baseCommandContext()).filter((i) => i.kind === "settings");
+	const observability = settingsItems.find((i) => i.id === "command:settings:observability");
+	const observabilityDescription = ENGINE_SETTINGS_CATEGORIES.find(
+		(c) => c.id === "observability"
+	)?.description;
+
+	it("builds the Observability item from the registry", () => {
+		expect(observability).toBeDefined();
+		expect(observabilityDescription).toBeTruthy();
+	});
+
+	it("does not find a section by letters scattered across its description (#3322)", () => {
+		// "theme" is a t, h, e, m and e in five of Observability's description words.
+		expect(scoreItem(observability!, "theme")).toBeLessThan(MATCH_FLOOR);
+	});
+
+	it("still finds a section by its name", () => {
+		expect(scoreItem(observability!, "observ")).toBeGreaterThanOrEqual(MATCH_FLOOR);
+	});
+
+	it("finds a section by a literal phrase from its description", () => {
+		const phrase = "per-phase latency";
+		expect(observabilityDescription).toContain(phrase);
+		expect(scoreItem(observability!, phrase)).toBeGreaterThan(0);
+		expect(rendered([observability!], phrase)).toEqual([observability!.id]);
+	});
+
+	it.each(["POST", "staging"])("matches no settings section for %s", (query) => {
+		expect(settingsItems.length).toBeGreaterThan(10);
+		const matched = settingsItems.filter((i) => scoreItem(i, query) >= MATCH_FLOOR);
+		expect(matched.map((i) => i.id)).toEqual([]);
+		expect(rendered(settingsItems, query)).toEqual([]);
 	});
 });
 

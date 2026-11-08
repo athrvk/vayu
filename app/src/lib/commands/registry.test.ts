@@ -102,6 +102,28 @@ describe("the roster", () => {
 		expect(new Set(ids).size).toBe(ids.length);
 	});
 
+	it("matches a settings description as one literal entry, not as fuzzy keywords (#3322)", () => {
+		const sections = [...APP_SETTINGS_PANELS, ...ENGINE_SETTINGS_CATEGORIES];
+		for (const section of sections) {
+			const command = commandById(`settings:${section.id}`);
+			expect(command.substringKeywords, section.label).toEqual([section.description.trim()]);
+			const fixed = new Set([section.id, "settings", "engine", "preferences"]);
+			const proseWords = section.description.split(/\s+/).filter((word) => !fixed.has(word));
+			expect(proseWords.length, section.label).toBeGreaterThan(0);
+			for (const word of proseWords) {
+				expect(command.keywords, `${section.label}: ${word}`).not.toContain(word);
+			}
+		}
+	});
+
+	it("never carries a blank literal entry", () => {
+		for (const command of COMMANDS) {
+			for (const entry of command.substringKeywords ?? []) {
+				expect(entry.trim(), `command "${command.id}"`).not.toBe("");
+			}
+		}
+	});
+
 	it("covers every settings section the sidebar renders", () => {
 		const ids = new Set(COMMANDS.map((c) => c.id));
 		for (const panel of APP_SETTINGS_PANELS) {

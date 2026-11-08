@@ -1298,10 +1298,14 @@ Once something is typed, four rules apply:
   finds "Issue token", and a query reached only by two or more scattered jumps does not.
 - **`substringKeywords` are matched literally, not fuzzily.** A URL is the case this exists for:
   to a subsequence scorer any path is character soup, and "theme" scores 0.51 against
-  `/the/most/expensive/endpoint`. A request's URL is the one field that uses this. The piece typed
-  has to be contiguous, and that is the cost - `v1/charges` finds the row, `v1charges` does not. No
-  floor could buy that back: a URL is all separators, so a query scattered across its segments
-  reads as a series of *word* jumps, which is what scores the soup so highly to begin with.
+  `/the/most/expensive/endpoint`. A request's URL uses this, and so does a settings command's
+  description (#3322): the whole sentence is one entry, so it finds a section the way the settings
+  sidebar does (by a phrase it prints), where the description's words in `keywords` let "theme"
+  reach Observability by five letters in five words. A hit scores low enough that a row whose
+  name says the query always outranks it. The piece typed has to be contiguous, and that is the
+  cost - `v1/charges` finds the row, `v1charges` does not. No floor could buy that back: a URL is
+  all separators, so a query scattered across its segments reads as a series of *word* jumps,
+  which is what scores the soup so highly to begin with.
 - **Requests and collections render at most `PALETTE_GROUP_RENDER_LIMIT` (50) rows each** (#2545).
   They are the two kinds that grow with the workspace, and a row per request was ~5,200 mounted
   `CommandItem`s at 5,000 requests, re-rendered per keystroke. `groupsOf` caps *after* ordering, so
@@ -1335,7 +1339,9 @@ Four rules govern the deep sources, and each exists because of a way the naive v
   command registry contributes `settings` rows too, one per panel, and those are ordinary shallow
   rows that must clear the floor. Before #1175 the same end was reached by stuffing the keywords -
   with a whole description sentence for settings, and with the query itself for runs, which scored
-  every run as an exact match and outranked everything else.
+  every run as an exact match and outranked everything else. A settings command's description now
+  rides in `substringKeywords` (#3322), so only the id and the fixed terms ("settings",
+  "preferences", "engine") are fuzzy.
 
 Three things the rows and the frame say (#1176):
 
@@ -1417,8 +1423,8 @@ a command, never a second definition of one. Before this, "open settings" existe
 the native-menu bridge, the Dock, the settings sidebar and a keydown case, and nothing kept them
 in step or could enumerate them.
 
-- **`types.ts`** - `Command` (`id`, `title`, `keywords`, `group`, `icon`, `shortcut?`,
-  `available?`, `perform`) and `CommandContext`. A `title` may be a function of the context, which
+- **`types.ts`** - `Command` (`id`, `title`, `keywords`, `substringKeywords?`, `group`, `icon`,
+  `shortcut?`, `available?`, `perform`) and `CommandContext`. A `title` may be a function of the context, which
   is how a contextual command names its target: `Run "payments"`, not `Run collection`. A
   `shortcut` is the `Chord` from `constants/shortcuts.ts` that already runs this command - the
   object the handler matches, so a surface printing it cannot advertise a key nothing answers
@@ -1432,7 +1438,8 @@ in step or could enumerate them.
   command per run-export action, **generated** from `runExportActions` (`lib/run-export-formats.ts`),
   the list the Export menu draws (`Save "<tab>" as JSON`, `Copy "<tab>" as Markdown`; available only while a mounted menu fills
   `exportRun`, no chord) - plus one command per settings section, **generated** from `app-panels.ts` and `engine-categories.ts` so
-  a section added there appears here without an edit and cannot be named differently.
+  a section added there appears here without an edit and cannot be named differently. A section's
+  description is its `substringKeywords` entry, never words in `keywords` (#3322).
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
 - **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Four
