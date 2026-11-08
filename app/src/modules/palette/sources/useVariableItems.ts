@@ -67,6 +67,16 @@ function matchRank(haystack: string, needle: string): number | null {
 	return null;
 }
 
+/**
+ * The key a query names: a pasted `{{baseUrl}}`, a half-typed `{{base` or a
+ * spaced `{{ baseUrl }}` all read as the bare key. A variable key holds no
+ * whitespace, so all of it goes; an environment's name can, so it is matched
+ * against the plain needle instead.
+ */
+function keyNeedle(needle: string): string {
+	return needle.replace(/\{\{|\}\}|\s+/g, "");
+}
+
 export function useVariableItems(query: string): PaletteItem[] {
 	const { data: collections = [] } = useCollectionsQuery();
 	const { data: environments = [] } = useEnvironmentsQuery();
@@ -106,7 +116,9 @@ export function useVariableItems(query: string): PaletteItem[] {
 	return useMemo(() => {
 		// Deep search is search - see `useSettingsItems` for why the empty query
 		// contributes nothing.
-		if (needle === "") return [];
+		// After stripping, so a lone `{{` is as empty as no query.
+		const keyQuery = keyNeedle(needle);
+		if (keyQuery === "") return [];
 
 		const ranked: { item: PaletteItem; rank: number }[] = [];
 
@@ -134,7 +146,7 @@ export function useVariableItems(query: string): PaletteItem[] {
 			}
 
 			for (const variableKey of scope.variableKeys) {
-				const rank = matchRank(variableKey, needle);
+				const rank = matchRank(variableKey, keyQuery);
 				if (rank === null) continue;
 				ranked.push({
 					// +2 so a scope whose *name* matches outranks a key inside
@@ -147,6 +159,8 @@ export function useVariableItems(query: string): PaletteItem[] {
 						preMatched: true,
 						title: variableKey,
 						subtitle: scope.label,
+						// The spelling a pasted `{{key}}` scores against in `scoreItem`;
+						// `matchRank` admits the row, this keeps it promotable.
 						keywords: ["variable", `{{${variableKey}}}`],
 						icon: Braces,
 						perform: () => openScope(scope.category),

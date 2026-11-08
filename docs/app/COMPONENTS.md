@@ -1201,8 +1201,9 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
   tabs) - while the **deep** ones take the query, because their corpus is too large to render:
   `useSettingsItems` (every app setting and engine entry, through the shared settings index),
-  `useVariableItems` (environment names and variable keys across every scope) and `useRunItems`
-  (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
+  `useVariableItems` (environment names and variable keys across every scope; a key is found by
+  its pasted `{{name}}` spelling too, the braces and whitespace stripped from the query before it
+  is matched) and `useRunItems` (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
   data, it maps the [command registry](#command-registry-libcommands) onto the same shape.
 - **`useCommandSurfaces.ts`** - the collection picker, the run dialog, the theme hook and
   `useCopy`'s `copy`, which four commands need and no store can hold. Their original hosts are not always on screen (the
