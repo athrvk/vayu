@@ -1296,6 +1296,86 @@ describe("EngineSidecar - lifecycle", () => {
 });
 
 /*
+ * What `main.ts`'s `startEngine` reads when the first start rejects, to tell a
+ * launch that failed (error box, quit) from a start a quit or a restart
+ * overtook. The caller asks in its own rejection handler, so that is where
+ * these read the answer.
+ */
+describe("EngineSidecar - whether a failed start is the last word", () => {
+	/** The start's rejection, with the two facts read the moment it reaches the caller. */
+	function startOutcome(sidecar: EngineSidecar) {
+		return sidecar.start().then(
+			() => null,
+			(error: unknown) => ({
+				error,
+				shuttingDown: sidecar.isShuttingDown(),
+				restartPending: sidecar.hasRestartPending(),
+			})
+		);
+	}
+
+	// Mutation check: have `isShuttingDown()` return false and the abort reads
+	// as an ordinary failed start.
+	it("is overtaken by a quit that lands during the health poll", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		let quitting: Promise<void> | undefined;
+		system.probeHealth = vi.fn(async () => {
+			if (state.spawned.length > 0) quitting ??= sidecar.shutdown();
+			return false;
+		});
+
+		const outcome = await startOutcome(sidecar);
+		await quitting;
+
+		expect(outcome).toMatchObject({ shuttingDown: true, restartPending: false });
+		expect(String((outcome?.error as Error).message)).toMatch(/shutting down/);
+	});
+
+	// Mutation check: drop `this.pendingRestart = run;` from `restart()`, or have
+	// `hasRestartPending()` return false, and the restart reads as absent while
+	// it is still waiting behind the failed start.
+	it("is overtaken by a restart asked for while the start was polling", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		let restarting: Promise<void> | undefined;
+		system.probeHealth = vi.fn(async () => {
+			if (state.spawned.length !== 1) return state.healthy;
+			if (!restarting) {
+				restarting = sidecar.restart(0);
+				state.spawned[0].exit(127);
+			}
+			return false;
+		});
+
+		const outcome = await startOutcome(sidecar);
+		await restarting;
+
+		expect(outcome).toMatchObject({ shuttingDown: false, restartPending: true });
+		expect(String((outcome?.error as Error).message)).toMatch(/exit code 127/);
+		// The restart then did what the start could not.
+		expect(sidecar.getLifecycle()).toEqual({ kind: "ready" });
+		expect(sidecar.hasRestartPending()).toBe(false);
+	});
+
+	it("is the last word when nothing overtook it", async () => {
+		const { system, state } = fakeSystem();
+		vi.mocked(system.spawnEngine).mockImplementation(() => {
+			const child = new FakeChild();
+			state.spawned.push(child);
+			child.exit(127);
+			return child as unknown as ChildProcess;
+		});
+		system.probeHealth = vi.fn(async () => false);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+
+		const outcome = await startOutcome(sidecar);
+
+		expect(outcome).toMatchObject({ shuttingDown: false, restartPending: false });
+	});
+});
+
+/*
  * #2153: `{"status":"ok"}` is what any service's health route says. The
  * default probes read real sockets, because the fakes above would "pass" a
  * probe that trusts `status` alone.

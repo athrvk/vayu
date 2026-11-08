@@ -1256,6 +1256,20 @@ export class EngineSidecar {
 		return this.ownership.kind !== "none";
 	}
 
+	/** Whether `shutdown()` has been called. No engine is started after it. */
+	isShuttingDown(): boolean {
+		return this.shuttingDown;
+	}
+
+	/**
+	 * Whether a restart is queued or running. One asked for during a start is
+	 * still pending when that start's failure reaches its caller, so the caller
+	 * can leave the last word to the restart.
+	 */
+	hasRestartPending(): boolean {
+		return this.pendingRestart !== null;
+	}
+
 	/**
 	 * Restart the engine process with retry logic and exponential backoff.
 	 *

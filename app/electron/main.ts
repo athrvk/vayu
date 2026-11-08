@@ -38,6 +38,7 @@ import {
 	defaultSidecarSystem,
 } from "./sidecar.js";
 import { engineOrigin, enginePort, enginePortFixed, fixEnginePort } from "./engine-endpoint.js";
+import { bridgeEngineLifecycle, registerEngineLifecycleIpc } from "./engine-lifecycle.js";
 import { appLinkUrl } from "./app-links.js";
 import { resolveAppPaths } from "./app-paths.js";
 import { openThirdPartyNotices, openThirdPartyNoticesFromMenu } from "./third-party-notices.js";
@@ -1003,6 +1004,13 @@ async function startEngine() {
 			publishEnginePort,
 			receiveGrantSecret
 		);
+		// Before the start, whose first transitions happen inside it.
+		bridgeEngineLifecycle(engineSidecar, {
+			send: (channel, payload) => liveWindow()?.webContents.send(channel, payload),
+			// The grant sync the slow path below skips. Not the log floor: that path
+			// applies "debug", and the floor is fixed by its first application.
+			readyAfterSlow: () => void fileGrants.sync(),
+		});
 		await engineSidecar.start();
 		appLogger().info("main", "Engine started successfully", { url: engineSidecar.getApiUrl() });
 		// Sends a document the OS handed over before the engine listened, and
@@ -1033,6 +1041,17 @@ async function startEngine() {
 			});
 			appLogger().applyFloor("debug");
 			engineStartFailure = error.message;
+			return;
+		}
+
+		// Overtaken, not failed: the app is quitting, or a restart asked for during
+		// the start is queued behind it and answers `engine:restart` itself. An
+		// error box and a quit here would greet the one and cancel the other.
+		if (engineSidecar?.isShuttingDown() || engineSidecar?.hasRestartPending()) {
+			appLogger().info("main", "Engine start overtaken by a quit or a restart", {
+				error: String(error),
+			});
+			appLogger().applyFloor("debug");
 			return;
 		}
 
@@ -1348,6 +1367,11 @@ function setupIpcHandlers() {
 	// Why a launch left the window up without an engine, for the disconnected
 	// state to show; null when there is nothing to say.
 	ipcMain.handle("engine:startFailure", () => engineStartFailure);
+
+	// The lifecycle the sidecar pushes as it changes (`startEngine`), for a
+	// window that loaded after the last push. Before the sidecar exists there
+	// is nothing yet, which is `idle`.
+	registerEngineLifecycleIpc(ipcMain, () => engineSidecar?.getLifecycle() ?? { kind: "idle" });
 
 	// MCP server status - used by Settings to show the connect URL and state.
 	ipcMain.handle("mcp:status", () => {
