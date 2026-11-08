@@ -205,6 +205,22 @@ The Vayu Engine daemon must be running before using the CLI:
 vayu-cli run request.json
 ```
 
+A daemon started this way can run beside the desktop app, but only with a
+`--data-dir` of its own. Opening the app stops an engine whose `/health`
+reports the app's own data directory and leaves every other alone: a daemon on
+another `--data-dir` holds its port, and the app runs its own engine on its
+next port (9880-9889) instead. The app's data directory is its profile
+directory in a packaged build, and `<repo>/engine/data` in a development build,
+so a daemon run from `engine/` with its defaults (`./data`) serves the same
+directory as the dev app, and a packaged daemon given the app's profile as
+`--data-dir` does too; the app replaces either at launch. Give a standalone
+daemon its own `--data-dir` (the engine refuses a second process on one data
+directory anyway).
+
+An engine from before `/health` reported its data directory (#3328) is never
+taken over, whatever it serves, so after upgrading across that change an orphan
+of the old release must be quit by hand: the port-in-use error names it.
+
 The daemon exits **1** if it cannot take its port, naming the address on
 stderr - another process is listening there. Use `--port` to pick a different
 one, and `--daemon` to point the CLI at it. It also exits **1** when its

@@ -2603,7 +2603,9 @@ jest.spyOn(apiService, 'executeRequest').mockResolvedValue(mockResponse);
 1. Check the Dock: hovering "Engine connected" shows the address the app is
    using, and the disconnected state says why. "Another program is using port
    9876, and the fallback ports are held too" means every candidate is held;
-   free 9876 (Retry looks there alone) and press Retry.
+   free 9876 (Retry looks there alone) and press Retry. "Another Vayu engine"
+   in its place means a Vayu engine serving another data directory holds 9876;
+   the app never stops it, so stop it yourself and press Retry.
 2. Check if engine is running: `curl <address from the Dock>/health` (9876
    unless the app fell back)
 3. Check engine logs in Electron console

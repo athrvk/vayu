@@ -76,9 +76,12 @@ function isPortAvailable(port: number): Promise<boolean> {
 }
 
 /** `GET /health`'s body, or null on any transport, timeout or parse failure. */
-async function fetchHealth(
-	port: number
-): Promise<{ status?: unknown; version?: unknown; workers?: unknown } | null> {
+async function fetchHealth(port: number): Promise<{
+	status?: unknown;
+	version?: unknown;
+	workers?: unknown;
+	dataDir?: unknown;
+} | null> {
 	try {
 		const response = await fetch(`http://127.0.0.1:${port}/health`, {
 			signal: AbortSignal.timeout(ENGINE_HEALTH_REQUEST_TIMEOUT_MS),
@@ -90,19 +93,52 @@ async function fetchHealth(
 }
 
 /**
- * Does a Vayu engine answer on this port (#2153)? `status: "ok"` alone is what
- * any service's health route says, and a positive answer here stops whatever
- * answered with `POST /shutdown`, to replace it with this session's engine. The
- * engine's `/health` also carries a string `version` and a numeric `workers`;
- * a reply without both is another program, treated as a held port.
+ * A Vayu engine's answer to `GET /health`, reduced to what the sidecar decides
+ * on. `dataDir` is null from an engine older than #3328, which does not report
+ * one; nothing ties such an engine to this app, so it is never taken over.
  */
-async function isEngineRunning(port: number): Promise<boolean> {
+export interface EngineHealthAnswer {
+	dataDir: string | null;
+}
+
+/**
+ * The Vayu engine answering on this port, or null when none does (#2153).
+ * `status: "ok"` alone is what any service's health route says; the engine's
+ * `/health` also carries a string `version` and a numeric `workers`, and a reply
+ * without both is another program, treated as a held port.
+ */
+async function probeEngineHealth(port: number): Promise<EngineHealthAnswer | null> {
 	const data = await fetchHealth(port);
-	return (
+	const isEngine =
 		data?.status === "ok" &&
 		typeof data.version === "string" &&
-		typeof data.workers === "number"
-	);
+		typeof data.workers === "number";
+	if (!isEngine) return null;
+	return { dataDir: typeof data.dataDir === "string" ? data.dataDir : null };
+}
+
+/**
+ * Whether two data-directory paths name the same directory, as the engine
+ * reports one on `/health` (#3328): absolute, lexically normalised, symlinks
+ * as written. Both sides are resolved and lose any trailing separator.
+ *
+ * Case is folded on Windows only, where the file system ignores it and a drive
+ * letter's case varies by whoever spelled the path. macOS is left exact: the
+ * app's own engine reports the very string the app passed it, so folding would
+ * recognise no orphan that exact comparison misses, and on a case-sensitive
+ * APFS volume it would take two directories for one.
+ *
+ * The path flavour follows `process.platform` rather than the `path` default
+ * (the same choice in production) so a test can stub the platform.
+ */
+export function isSameDataDirectory(reported: string, own: string): boolean {
+	const windows = process.platform === "win32";
+	const flavour = windows ? path.win32 : path.posix;
+	const normalise = (dir: string) => {
+		const resolved = flavour.resolve(dir);
+		return windows ? resolved.toLowerCase() : resolved;
+	};
+	return normalise(reported) === normalise(own);
 }
 
 /**
@@ -310,8 +346,11 @@ export interface SidecarSystem {
 	engineProcessState(pid: number): EngineProcessState;
 	/** Force-kill a name-verified engine PID. Returns whether a kill was issued. */
 	killEngineProcess(pid: number): boolean;
-	/** Does a Vayu engine answer `/health` on this port: `status: ok` plus its `version` and `workers`? */
-	probeHealth(port: number): Promise<boolean>;
+	/**
+	 * The Vayu engine answering `/health` on this port (`status: ok` plus its
+	 * `version` and `workers`) and the data directory it reports, or null.
+	 */
+	probeHealth(port: number): Promise<EngineHealthAnswer | null>;
 	/** `POST /shutdown`. True means accepted, not that the process has gone. */
 	requestShutdown(port: number): Promise<boolean>;
 	/** Can we bind this port, i.e. is nothing at all listening? */
@@ -328,7 +367,7 @@ export const defaultSidecarSystem: SidecarSystem = {
 		}),
 	engineProcessState,
 	killEngineProcess: killVayuEngineProcess,
-	probeHealth: isEngineRunning,
+	probeHealth: probeEngineHealth,
 	requestShutdown: requestEngineShutdown,
 	isPortFree: isPortAvailable,
 	sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -338,12 +377,12 @@ export const defaultSidecarSystem: SidecarSystem = {
  * How this instance came to be attached to the engine it is talking to.
  *
  * `spawned` is the ordinary case and, once `start()` returns, the only one.
- * `adopted` is an engine that was already up when we started - after the
- * single-instance lock in main.ts, an orphan of a crashed session or, in
- * development, an engine started by hand - held only while it is being
- * stopped: it does not hold this session's grant secret, so it is replaced and
- * never used (#2356). It is ownership all the same, so a quit landing during
- * the replacement still stops it (#270).
+ * `adopted` is an engine serving this app's data directory that was already up
+ * when we started - after the single-instance lock in main.ts, an orphan of a
+ * crashed session or an engine started by hand on that directory - held only
+ * while it is being stopped: it does not hold this session's grant secret, so
+ * it is replaced and never used (#2356). It is ownership all the same, so a
+ * quit landing during the replacement still stops it (#270).
  */
 type Ownership =
 	| { kind: "none" }
@@ -431,32 +470,52 @@ export class EngineNotReadyError extends Error {
 }
 
 /**
- * Raised when every candidate port is held by something that is not a Vayu
- * engine (#2118). Like `EngineNotReadyError` it leaves the app up: the user can
- * free the port and press Retry, so the message is the sentence they read.
+ * What holds the port an `EnginePortInUseError` names: a program that is not a
+ * Vayu engine, or a Vayu engine serving another data directory (#3328).
+ */
+export type PortHolder = "program" | "vayu-engine";
+
+/**
+ * Raised when every candidate port is held by something this app may not stop
+ * (#2118): another program, or a Vayu engine serving another data directory
+ * (#3328). Like `EngineNotReadyError` it leaves the app up: the user can free
+ * the port and press Retry, so the message is the sentence they read.
  *
  * Several `ports` means a first start found every candidate held. The renderer
  * is told one port once, so the start narrows to the first (`claimPort`) and
  * Retry looks at that one alone: the sentence names it as the one to free and
- * mentions the fallbacks only as context.
+ * mentions the fallbacks only as context. `holder` is therefore what holds the
+ * first port, whatever holds the fallbacks.
  */
 export class EnginePortInUseError extends Error {
-	constructor(ports: readonly number[]) {
+	constructor(ports: readonly number[], holder: PortHolder = "program") {
 		const [first] = ports;
+		const who = holder === "vayu-engine" ? "Another Vayu engine" : "Another program";
 		super(
 			ports.length > 1
-				? `Another program is using port ${first}, and the fallback ports are held too. Free port ${first} and press Retry.`
-				: `Another program is using port ${first}. Quit it and press Retry.`
+				? `${who} is using port ${first}, and the fallback ports are held too. Free port ${first} and press Retry.`
+				: `${who} is using port ${first}. Quit it and press Retry.`
 		);
 		this.name = "EnginePortInUseError";
 	}
 }
 
-/** Where `start()` will run the engine, and whether something already answers `/health` there. */
+/**
+ * Where `start()` will run the engine, and whether our own engine already
+ * answers `/health` there (it reports this app's data directory; an engine
+ * reporting none never counts).
+ */
 interface PortChoice {
 	port: number;
 	answering: boolean;
 }
+
+/**
+ * Who answers `/health` on a candidate: an engine serving this app's data
+ * directory, a Vayu engine serving another's or reporting none (never stopped,
+ * its port counted held), or no Vayu engine at all.
+ */
+type EngineIdentity = "ours" | "foreign" | "none";
 
 /** The user-facing half of a `SpawnFailure`; ends up in a `showErrorBox`. */
 function describeSpawnFailure(failure: SpawnFailure): string {
@@ -651,7 +710,8 @@ export class EngineSidecar {
 
 	/**
 	 * Stop a healthy engine this session did not spawn, so the caller can spawn
-	 * one in its place (#2356).
+	 * one in its place (#2356). Only ever one serving this app's data directory
+	 * (#3328): an engine serving another's is not this app's to stop.
 	 *
 	 * Every write to file trust - a picked file, an allowed folder - needs the
 	 * grant secret the engine was spawned with, and an engine already running was
@@ -690,6 +750,10 @@ export class EngineSidecar {
 	 * A PID whose name could not be read arrives here too, and the kill refuses
 	 * it; the cost is the budget plus the stop's grace period, after which the
 	 * spawn goes ahead and the engine's own data-directory lock decides.
+	 *
+	 * Only an answer from our own engine ends the wait (#3328): a Vayu engine
+	 * serving another data directory that takes the port meanwhile is never sent
+	 * `/shutdown`, and the port check after the kill reports it.
 	 */
 	private async replaceLockedEngine(pid: number): Promise<void> {
 		this.transition({ kind: "replacing" });
@@ -698,7 +762,8 @@ export class EngineSidecar {
 			"Lock file indicates the process is running, but the engine is not responding on this port - waiting for it",
 			{ pid, port: this.port }
 		);
-		if (await this.pollHealthWithinBudget(() => null)) {
+		const oursAnswers = async () => (await this.identify(this.port)) === "ours";
+		if (await this.pollWithinBudget(() => null, oursAnswers)) {
 			await this.replaceAnsweringEngine(pid);
 			return;
 		}
@@ -757,39 +822,74 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Pick the candidate this start uses (#2118).
-	 *
-	 * With no live lock, each candidate in turn: one answering `/health` is
-	 * taken over (its engine replaced on that port), a free one is taken, a held
-	 * one is skipped. A live lock means our own engine is up somewhere, so every
-	 * candidate is asked for `/health` before any free port is taken: a crash
-	 * orphan on a fallback port is replaced there even once the default has come
-	 * free. When it answers nowhere it is starting (not listening, so its port
-	 * reads free) or hung (holding a port no probe can tell from another
-	 * program's), and the wait in `replaceLockedEngine` watches the first free
-	 * candidate, or the first candidate when none is free.
+	 * Who answers `/health` on `port` (#3328). An engine that reports this app's
+	 * data directory is ours. One that reports none (older than #3328) is always
+	 * foreign, even with a live lock in our data directory: the lock proves our
+	 * engine exists, not that this answering engine is it, and sending /shutdown
+	 * to a stranger on the port would then lead to killing the real one by PID.
 	 */
-	private async choosePort(lockedPid: number | null): Promise<PortChoice> {
-		if (lockedPid !== null) {
-			const answering = await this.firstCandidate((port) => this.system.probeHealth(port));
-			if (answering !== null) return { port: answering, answering: true };
-			const free = await this.firstCandidate((port) => this.system.isPortFree(port));
-			return { port: free ?? this.candidates[0], answering: false };
-		}
-
-		for (const port of this.candidates) {
-			if (await this.system.probeHealth(port)) return { port, answering: true };
-			if (await this.system.isPortFree(port)) return { port, answering: false };
-		}
-		throw new EnginePortInUseError(this.candidates);
+	private async identify(port: number): Promise<EngineIdentity> {
+		const health = await this.system.probeHealth(port);
+		if (health === null) return "none";
+		const ours = health.dataDir !== null && isSameDataDirectory(health.dataDir, this.dataDir);
+		if (ours) return "ours";
+		appLogger().info(
+			"sidecar",
+			"A Vayu engine not serving this data directory answers on this port - leaving it alone",
+			{ port, dataDir: health.dataDir }
+		);
+		return "foreign";
 	}
 
-	/** The first candidate `test` accepts, asked in order, or null. */
-	private async firstCandidate(test: (port: number) => Promise<boolean>): Promise<number | null> {
+	/**
+	 * Pick the candidate this start uses (#2118). Only an engine serving this
+	 * app's data directory is ever taken over; a Vayu engine serving another's
+	 * holds its port like any other program (#3328).
+	 */
+	private choosePort(lockedPid: number | null): Promise<PortChoice> {
+		return lockedPid === null ? this.choosePortUnlocked() : this.choosePortLocked();
+	}
+
+	/**
+	 * No live lock: each candidate in turn. One where our engine answers is
+	 * taken over (replaced on that port), a free one is taken, a held one is
+	 * skipped.
+	 */
+	private async choosePortUnlocked(): Promise<PortChoice> {
+		let firstHolder: PortHolder | undefined;
 		for (const port of this.candidates) {
-			if (await test(port)) return port;
+			const identity = await this.identify(port);
+			if (identity === "ours") return { port, answering: true };
+			if (identity === "none" && (await this.system.isPortFree(port))) {
+				return { port, answering: false };
+			}
+			firstHolder ??= identity === "foreign" ? "vayu-engine" : "program";
 		}
-		return null;
+		throw new EnginePortInUseError(this.candidates, firstHolder);
+	}
+
+	/**
+	 * A live lock means our own engine is up somewhere, so every candidate is
+	 * asked for `/health` before any free port is taken: a crash orphan on a
+	 * fallback port is replaced there even once the default has come free. When
+	 * it answers nowhere it is starting (not listening, so its port reads free)
+	 * or hung (holding a port no probe can tell from another program's), and the
+	 * wait in `replaceLockedEngine` watches the first free candidate, or the
+	 * first not held by another Vayu engine when none is free. A port such an
+	 * engine answers on cannot be where ours is.
+	 */
+	private async choosePortLocked(): Promise<PortChoice> {
+		const unclaimed: number[] = [];
+		for (const port of this.candidates) {
+			const identity = await this.identify(port);
+			if (identity === "ours") return { port, answering: true };
+			if (identity === "none") unclaimed.push(port);
+		}
+		for (const port of unclaimed) {
+			if (await this.system.isPortFree(port)) return { port, answering: false };
+		}
+		if (unclaimed.length > 0) return { port: unclaimed[0], answering: false };
+		throw new EnginePortInUseError(this.candidates, "vayu-engine");
 	}
 
 	/**
@@ -870,7 +970,8 @@ export class EngineSidecar {
 		// Free when chosen, but an engine stopped there may not have let go of
 		// it, and something else may have taken it since.
 		if (!(await this.system.isPortFree(this.port))) {
-			throw new EnginePortInUseError([this.port]);
+			const foreign = (await this.identify(this.port)) === "foreign";
+			throw new EnginePortInUseError([this.port], foreign ? "vayu-engine" : "program");
 		}
 
 		// Check if binary exists. The remediation names `build.py` because that is
@@ -1036,7 +1137,7 @@ export class EngineSidecar {
 		child: ChildProcess,
 		spawnFailure: () => SpawnFailure | null
 	): Promise<void> {
-		if (await this.pollHealthWithinBudget(spawnFailure)) {
+		if (await this.pollWithinBudget(spawnFailure, () => this.engineAnswers())) {
 			appLogger().info("sidecar", "Engine is ready");
 			this.transition({ kind: "ready" });
 			return;
@@ -1057,7 +1158,7 @@ export class EngineSidecar {
 			for (;;) {
 				await this.system.sleep(ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
 				if (!stillSlow()) return;
-				if (!(await this.system.probeHealth(this.port))) continue;
+				if (!(await this.engineAnswers())) continue;
 				if (!stillSlow()) return;
 				appLogger().info("sidecar", "Engine answered after the readiness budget");
 				this.transition({ kind: "ready" });
@@ -1069,14 +1170,26 @@ export class EngineSidecar {
 	}
 
 	/**
+	 * Does any Vayu engine answer on this sidecar's port? The readiness question
+	 * after a spawn and while an adopted engine leaves, where whose engine it is
+	 * adds nothing: the port was found free just before the spawn, and the
+	 * adopted engine was already identified as ours.
+	 */
+	private async engineAnswers(): Promise<boolean> {
+		return (await this.system.probeHealth(this.port)) !== null;
+	}
+
+	/**
 	 * The ramped health poll behind `waitForEngine`, shared with the wait on a
-	 * lock-file engine that has not answered yet (#1905).
+	 * lock-file engine that has not answered yet (#1905). `answered` is the
+	 * probe each round asks.
 	 *
-	 * @returns `true` once `/health` answers, `false` when the budget is spent.
+	 * @returns `true` once `answered` does, `false` when the budget is spent.
 	 *          A `spawnFailure` that reports a dead child throws instead.
 	 */
-	private async pollHealthWithinBudget(
-		spawnFailure: () => SpawnFailure | null
+	private async pollWithinBudget(
+		spawnFailure: () => SpawnFailure | null,
+		answered: () => Promise<boolean>
 	): Promise<boolean> {
 		let waited = 0;
 		let interval = ENGINE_HEALTH_POLL_INITIAL_INTERVAL_MS;
@@ -1095,7 +1208,7 @@ export class EngineSidecar {
 				throw new Error(describeSpawnFailure(died));
 			}
 
-			if (await this.system.probeHealth(this.port)) return true;
+			if (await answered()) return true;
 
 			if (waited >= ENGINE_HEALTH_POLL_BUDGET_MS) return false;
 
@@ -1232,7 +1345,7 @@ export class EngineSidecar {
 			const alive =
 				pid !== null
 					? this.system.engineProcessState(pid) !== "not-engine"
-					: await this.system.probeHealth(this.port);
+					: await this.engineAnswers();
 			if (!alive) return true;
 		}
 		return false;

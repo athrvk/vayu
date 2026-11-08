@@ -161,13 +161,29 @@ engine then writes its own PID over the file.
 
 **A live engine is replaced, never adopted** (issue #2356). The lock file can
 point at a PID that is alive and answering `/health`: an orphan from a crashed
-session, two installed builds sharing a data directory, or in development an
-engine started by hand. Every write to file trust (an allowed folder, a picked
-file) needs the grant secret the app passes the engine it spawns, and that
-engine was given another launch's secret or none, so `EngineSidecar` stops it
-(`POST /shutdown`, then the same PID kill the graceful path already falls back
-to) and spawns its own on the same port. That also covers an engine built for a
-different Vayu release (issue #1492).
+session, two installed builds sharing a data directory, or an engine started by
+hand on this data directory. Every write to file trust (an allowed folder, a
+picked file) needs the grant secret the app passes the engine it spawns, and
+that engine was given another launch's secret or none, so `EngineSidecar` stops
+it (`POST /shutdown`, then the same PID kill the graceful path already falls
+back to) and spawns its own on the same port. That also covers an engine built
+for a different Vayu release (issue #1492).
+
+**Only an engine serving this data directory is stopped** (issue #3328). An
+engine answering `/health` on a candidate port is the app's when the `dataDir`
+it reports matches the app's data directory (both resolved, no trailing
+separator, case ignored on Windows only). One serving another directory - a
+standalone `vayu-engine` for `vayu-cli`, a second app instance on another
+profile - holds its port like any other program: never sent `/shutdown`, never
+killed, and the next candidate is tried. An engine too old to report `dataDir`
+is never the app's, with or without a live lock: the lock proves the app's
+engine exists, not that this answering engine is it, so it is left alone and
+its port counted held. After upgrading across that change, an orphan of the old
+release must be quit by hand (the port-in-use error names it). A standalone
+daemon is left alone only when its `--data-dir` differs from the app's, which
+is `<repo>/engine/data` in a development build: a daemon run from `engine/`
+with its defaults serves that same directory and is replaced, so give it its
+own `--data-dir`.
 
 **A live lock PID that does not answer `/health` is waited for, then replaced**
 (issue #1905). Between "stale" and "healthy" there is a third case: the PID is
@@ -177,19 +193,25 @@ migrations before it listens - or hung. Spawning beside it loses the flock, and
 reporting the port as held would blame another program for Vayu's own engine.
 So `EngineSidecar` polls `/health` on the same ramped
 budget a freshly spawned engine gets (`ENGINE_HEALTH_POLL_BUDGET_MS`). An
-engine that answers in time is asked to shut down and replaced like any other
-(above). One that does not is stopped by PID (the name-verified kill, so a
+engine that answers in time as this data directory's is asked to shut down and
+replaced like any other (above); an answer from an engine serving another
+directory does not end the wait. One that does not is stopped by PID (the name-verified kill, so a
 recycled PID is left alone), the port is given `ENGINE_PORT_RELEASE_DELAY_MS`
 to clear, the replaced PID is logged, and this instance spawns its own. The
 port-in-use error (`EnginePortInUseError`) is left for ports held when the lock
-file names no live Vayu engine.
+file names no live Vayu engine, or held by an engine serving another data
+directory.
 
 **A live lock is looked for on every candidate port** (issue #2118). The engine
 may run on 9876 or a fallback (`ENGINE_PORT_CANDIDATES`), so with a live lock
 PID every candidate is asked for `/health` before any free port is taken: an
-orphan left on a fallback port is replaced there even after 9876 has come free. When
-it answers on none, the wait above watches the first free candidate (where a
-still-starting engine, not yet listening, would be), or 9876 when none is free.
+orphan left on a fallback port is replaced there even after 9876 has come free,
+and an engine serving another data directory on an earlier candidate does not
+shadow it. When it answers on none, the wait above watches the first free
+candidate (where a still-starting engine, not yet listening, would be), or the
+first not held by another data directory's engine when none is free. When every
+candidate is held by such engines, startup reports "Another Vayu engine is using
+port 9876" without waiting.
 
 **The engine releases the lock after its database has closed** (issue #2420).
 `run_daemon` (`engine/src/daemon.cpp`) holds the lock in an `InstanceLock`
@@ -252,8 +274,9 @@ the process whose PID the file names.
 - Function: `checkLockFile()` - reads the lock file's PID and classifies it
 - Function: `engineProcessState()` - cross-platform process check with process name verification, answering `engine`, `not-engine` or `unknown`. `process.kill(pid, 0)` first on every platform (no subprocess, and the stale-lock case ends there), then `tasklist` / `ps` to verify the name against PID reuse; a name check that cannot run answers `unknown`, which keeps the lock and is never killed
 - Method: `liveLockPid()` - removes the lock only for a `not-engine` PID
-- Method: `replaceAnsweringEngine()` - stops a healthy engine `start()` finds already on the port, so it can spawn its own
-- Method: `replaceLockedEngine()` - settles a live lock PID: waits on `pollHealthWithinBudget()`, then asks it to shut down if it answered or kills it if it stayed silent
+- Method: `identify()` - whose engine answers `/health` on a port: `ours` (its `dataDir` is this app's), `foreign` (another `dataDir`, or none reported), or `none`
+- Method: `replaceAnsweringEngine()` - stops a healthy engine of ours `start()` finds already on the port, so it can spawn its own
+- Method: `replaceLockedEngine()` - settles a live lock PID: waits on `pollWithinBudget()` for ours to answer, then asks it to shut down if it answered or kills it if it stayed silent
 - Automatic cleanup in `start()` method
 - File: `app/electron/sidecar.ts`
 
