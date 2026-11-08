@@ -26,6 +26,7 @@ import { useTabsStore } from "@/stores";
 import { useCollectionsQuery, useMultipleCollectionRequests, useRunsQuery } from "@/queries";
 import { flattenRunPages } from "@/queries";
 import { collectionPath } from "@/modules/collections/tree-utils";
+import { requestTabTitle } from "@/lib/request-title";
 import type { PaletteItem } from "../types";
 
 /** When each request was last sent, from the run history already in cache. */
@@ -83,7 +84,9 @@ export function useEntityItems(): PaletteItem[] {
 				result.push({
 					id: `request:${request.id}`,
 					kind: "request",
-					title: request.name,
+					// The name the request's tab shows, so an unnamed request reads as
+					// its URL path rather than "New Request" (#3323).
+					title: requestTabTitle(request.name, request.url),
 					subtitle: path,
 					// The URL finds a request whose name says nothing about it - and
 					// it is a keyword rather than the subtitle because the collection
@@ -97,6 +100,7 @@ export function useEntityItems(): PaletteItem[] {
 					keywords: [request.method],
 					substringKeywords: [request.url],
 					method: request.method,
+					entityKey: `request:${request.id}`,
 					...(lastSent.has(request.id) ? { recencyAt: lastSent.get(request.id) } : {}),
 					perform: () => openTab({ type: "request", entityId: request.id }),
 				});

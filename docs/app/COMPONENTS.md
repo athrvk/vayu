@@ -1201,8 +1201,9 @@ run any command by name. Mounted once by `Shell`, alongside `ImportModal`.
   tabs), `useEntityItems` (requests + collections), `useViewItems` (drawer views and singleton
   tabs) - while the **deep** ones take the query, because their corpus is too large to render:
   `useSettingsItems` (every app setting and engine entry, through the shared settings index),
-  `useVariableItems` (environment names and variable keys across every scope) and `useRunItems`
-  (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
+  `useVariableItems` (environment names and variable keys across every scope; a key is found by
+  its pasted `{{name}}` spelling too, the braces and whitespace stripped from the query before it
+  is matched) and `useRunItems` (server-backed, `GET /runs?q=`). `commandItems.ts` is a plain function, not a hook: it owns no
   data, it maps the [command registry](#command-registry-libcommands) onto the same shape.
 - **`useCommandSurfaces.ts`** - the collection picker, the run dialog, the theme hook and
   `useCopy`'s `copy`, which four commands need and no store can hold. Their original hosts are not always on screen (the
@@ -1232,7 +1233,10 @@ Three things about it are load-bearing:
   rather than an effect - child effects run first, so by the time an effect here fires the
   dialog has already taken focus.
 - **Tab rows are named by `components/layout/tab-descriptors.ts`**, the same hook `TabStrip`
-  uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette.
+  uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette. Its
+  subtitle is the descriptor's `path` ("Users / Get user") so two same-named tabs differ; a tab
+  with no path falls back to the descriptor's `title`. A request row is titled by the same
+  `requestTabTitle` rule, so an unnamed request reads as its URL path in both places.
 
 Ranking lives in `ranking.ts` and happens **once**. The palette declares `shouldFilter={false}`,
 so cmdk scores nothing a second time; the scorer is still cmdk's own (`defaultFilter`, the
@@ -1252,7 +1256,10 @@ it (#1176), and both are built here rather than by a source of their own:
   glance at what you were just doing). The cap stayed at six when the list grew taller (#1177):
   the extra height went to the sections *under* Recents, which were the ones nobody could see, and
   a longer list of recents would take it straight back. It reads the same `recencyAt` the within-section
-  order reads, so nothing re-derives a recency and the two cannot disagree. In practice that is
+  order reads, so nothing re-derives a recency and the two cannot disagree. A request that is sent
+  and open has two dated rows, its own and its tab's, so the request row is dropped from Recents
+  (matched on `PaletteItem.entityKey`, `request:<id>`, which both sources stamp) and keeps its
+  place in Requests, instead of taking two of the six slots (#3323). In practice that is
   open tabs and requests that have been sent: the deep sources contribute nothing to an empty
   query at all, so a past run reaches the list only once something is typed - where it is a
   search result rather than a recent, which is the distinction being drawn. How far back it
