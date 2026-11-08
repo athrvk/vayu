@@ -21,6 +21,7 @@ import {
 	createOpenIntents,
 	isImportableFile,
 	parseOpenIntents,
+	startsMainFramePage,
 	type OpenIntent,
 } from "./open-intent";
 import { NEW_REQUEST_ARG, OPEN_COLLECTION_ARG } from "./os-icon";
@@ -284,5 +285,21 @@ describe("createOpenIntents", () => {
 		os.intents.ready();
 		os.intents.ready();
 		expect(os.sent).toEqual([{ kind: "import", path: "a.json" }]);
+	});
+});
+
+/*
+ * #3339: the response preview's sandboxed iframe starts loading too, and only
+ * the main frame's `did-finish-load` releases held intents. Mutation check:
+ * drop the `isMainFrame` or the `isSameDocument` term and a row reddens.
+ */
+describe("startsMainFramePage", () => {
+	it.each([
+		["a main-frame cross-document navigation", true, false, true],
+		["a subframe navigation", false, false, false],
+		["a main-frame same-document navigation", true, true, false],
+		["a subframe same-document navigation", false, true, false],
+	])("%s", (_name, isMainFrame, isSameDocument, expected) => {
+		expect(startsMainFramePage({ isMainFrame, isSameDocument })).toBe(expected);
 	});
 });

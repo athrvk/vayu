@@ -12733,6 +12733,12 @@ describe("run status reads (#2436)", () => {
 			]);
 		});
 
+		test("list_runs says endTime is null until the run reaches a terminal status", () => {
+			expect(descriptionOf(TOOLS.find((t) => t.name === "list_runs"))).toContain(
+				"`endTime` is null until the run is completed, failed or stopped."
+			);
+		});
+
 		test("get_run and get_run_report enumerate the statuses the classifier knows", () => {
 			const getRunText = descriptionOf(TOOLS.find((t) => t.name === "get_run"));
 			expect(getRunText).toContain(

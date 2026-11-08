@@ -326,8 +326,8 @@ buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
 They are held again whenever a window is created (the macOS Dock rebuilding a
-closed one) or a page starts loading (a reload after a crash or an unresponsive
-renderer), so an intent offered before the new page mounts waits for its
+closed one) or the main frame starts loading a new document (a reload after a crash or an
+unresponsive renderer; a subframe or same-document navigation does not count), so an intent offered before the new page mounts waits for its
 `did-finish-load` instead of going to a page with no subscriber (#3339).
 Main carries the path and never reads the file, but it does record the path as
 one the user opened (`electron/file-grants.ts`, #2357); the renderer reads it

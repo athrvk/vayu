@@ -66,7 +66,12 @@ import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
-import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
+import {
+	createOpenIntents,
+	isImportableFile,
+	OPEN_INTENT_CHANNEL,
+	startsMainFramePage,
+} from "./open-intent.js";
 import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
@@ -673,11 +678,14 @@ function createWindow() {
 	// `legacyStorage`, read before this window and written by its preload.
 	const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;
 	installWindowNavigationGuard(mainWindow.webContents, rendererUrl);
-	// Every load starts a page with no subscriber yet, a crash or unresponsive
+	// A new main-frame document has no subscriber yet, a crash or unresponsive
 	// reload included, and nothing tells the main process before the page can
 	// speak (#3339). Registered ahead of the load so the first one is seen.
-	mainWindow.webContents.on("did-start-loading", () => {
-		openIntents.notReady();
+	// Main frame only: `did-start-loading` also fires for a subframe (the
+	// response preview's iframe), which never reaches the `did-finish-load`
+	// below, so the gate would stay shut for good.
+	mainWindow.webContents.on("did-start-navigation", (details) => {
+		if (startsMainFramePage(details)) openIntents.notReady();
 	});
 	mainWindow.loadURL(rendererUrl);
 

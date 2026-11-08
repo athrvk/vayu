@@ -273,15 +273,18 @@ describe("startup ordering", () => {
 	it("holds open intents again for every window and every page load (#3339)", () => {
 		// `ready` is set by `did-finish-load` and nothing else clears it, so a new
 		// window or a reload would send an intent to a page with no subscriber.
-		// Mutation check: delete either `notReady` call and this reddens.
+		// The reload hold is main-frame only: `did-start-loading` also fires for the
+		// response preview's iframe, which never reaches `did-finish-load`.
+		// Mutation check: delete either `notReady` call, swap the event back to
+		// `did-start-loading`, or drop the `startsMainFramePage` call and this reddens.
 		const bodyAt = main.indexOf("\nfunction createWindow() {");
 		const bodyEnd = main.indexOf("\n}\n", bodyAt);
-		const body = main.slice(bodyAt, bodyEnd);
 		expect(bodyAt).toBeGreaterThan(-1);
-		expect(body.length).toBeGreaterThan(0);
+		expect(bodyEnd).toBeGreaterThan(bodyAt);
+		const body = main.slice(bodyAt, bodyEnd);
 
 		const loadAt = body.indexOf("mainWindow.loadURL(");
-		const startLoadingAt = body.indexOf('webContents.on("did-start-loading"');
+		const startNavigationAt = body.indexOf('webContents.on("did-start-navigation"');
 		const readyAt = body.indexOf("openIntents.ready();");
 
 		// Before the first line that can start a page, so the first load is seen.
@@ -289,12 +292,12 @@ describe("startup ordering", () => {
 		expect(body.indexOf("openIntents.notReady();")).toBeLessThan(
 			body.indexOf("new BrowserWindow(")
 		);
-		expect(startLoadingAt).toBeGreaterThan(-1);
-		expect(startLoadingAt).toBeLessThan(loadAt);
-		expect(body.indexOf("openIntents.notReady();", startLoadingAt)).toBeGreaterThan(
-			startLoadingAt
-		);
-		expect(body.indexOf("openIntents.notReady();", startLoadingAt)).toBeLessThan(loadAt);
+		expect(startNavigationAt).toBeGreaterThan(-1);
+		expect(startNavigationAt).toBeLessThan(loadAt);
+		const handler = body.slice(startNavigationAt, loadAt);
+		expect(handler).toContain("openIntents.notReady();");
+		expect(handler).toContain("startsMainFramePage(details)");
+		expect(body).not.toContain('"did-start-loading"');
 		expect(readyAt).toBeGreaterThan(loadAt);
 	});
 });
