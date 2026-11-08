@@ -14,6 +14,11 @@
  * a way to look, and "clear cookies" is the first thing anyone reaches for
  * when a stale session breaks a call. These two endpoints are that, and they
  * are the whole user-visible surface of the jar's lifetime.
+ *
+ * A trashed environment keeps its jar, so a restore gets the session back, but
+ * the read hides it: a panel row naming an environment the app can no longer
+ * resolve is a ghost (#3349). Purging the environment drops the jar
+ * (`trash_purge_response`).
  */
 
 #include "vayu/http/list_page.hpp"
@@ -22,6 +27,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -52,6 +58,19 @@ struct ScopedCookie {
     vayu::http::JarCookie cookie;
 };
 
+/// The jar's scopes minus those whose environment is not live (trashed, purged,
+/// or never stored). The no-environment jar names no environment, so it always
+/// stays.
+std::vector<vayu::http::CookieScopeView> visible_scopes (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids) {
+    auto scopes = jar.snapshot ();
+    std::erase_if (scopes, [&] (const vayu::http::CookieScopeView& scope) {
+        return scope.environment_id.has_value () &&
+        !live_environment_ids.contains (*scope.environment_id);
+    });
+    return scopes;
+}
+
 /// Every cookie in scope-key order, then each jar's own line order.
 std::vector<ScopedCookie> flatten (std::vector<vayu::http::CookieScopeView> scopes) {
     std::vector<ScopedCookie> flat;
@@ -79,10 +98,14 @@ nlohmann::json scoped_cookie_json (const ScopedCookie& scoped) {
  * see, while making the panel useless for the case it exists to answer -
  * "which session is this request actually using". They stay out of the logs,
  * where redaction does apply (`debug_redact.hpp`).
+ *
+ * @param live_environment_ids `live_environment_ids (db)`: a scope whose
+ *        environment is not among them is left out.
  */
-nlohmann::json cookies_response (const vayu::http::CookieJar& jar) {
+nlohmann::json cookies_response (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids) {
     nlohmann::json scopes = nlohmann::json::array ();
-    for (const auto& scope : jar.snapshot ()) {
+    for (const auto& scope : visible_scopes (jar, live_environment_ids)) {
         nlohmann::json entry;
         entry["environmentId"] = environment_id_json (scope.environment_id);
         nlohmann::json cookies = nlohmann::json::array ();
@@ -106,9 +129,10 @@ nlohmann::json cookies_response (const vayu::http::CookieJar& jar) {
  * its scope's `environmentId`), in the `{data, pagination}` envelope (#2443).
  */
 std::pair<int, nlohmann::json> cookies_response (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids,
 const ListPageQuery& page_query) {
     if (!page_query.present ()) {
-        return { 200, cookies_response (jar) };
+        return { 200, cookies_response (jar, live_environment_ids) };
     }
     const auto page = parse_list_page (page_query);
     if (!page) {
@@ -116,12 +140,21 @@ const ListPageQuery& page_query) {
     }
     return { 200,
         list_page_of (
-        *page, flatten (jar.snapshot ()),
+        *page, flatten (visible_scopes (jar, live_environment_ids)),
         [&page] (const ScopedCookie& scoped) {
             return page->matches (scoped.cookie.name) ||
             page->matches (scoped.cookie.domain);
         },
         scoped_cookie_json) };
+}
+
+/// The ids of every environment not in the trash, read once per GET /cookies.
+std::unordered_set<std::string> live_environment_ids (vayu::db::Database& db) {
+    std::unordered_set<std::string> ids;
+    for (auto& environment : db.get_environments ()) {
+        ids.insert (std::move (environment.id));
+    }
+    return ids;
 }
 
 /**
@@ -133,6 +166,10 @@ const ListPageQuery& page_query) {
  *        jar, present-with-an-id clears that environment's. An empty value is
  *        a real request rather than a mistake, because `NO_ENVIRONMENT_SCOPE`
  *        is exactly the jar an id cannot name.
+ *
+ * A clear-all also empties the jars `GET /cookies` hides, and `cleared` counts
+ * them: "clear cookies" must not leave a trashed environment's credentials
+ * behind.
  */
 nlohmann::json clear_cookies_response (vayu::http::CookieJar& jar,
 const std::optional<std::string>& scope) {
@@ -145,15 +182,17 @@ const std::optional<std::string>& scope) {
 void register_cookie_routes (RouteContext& ctx) {
     /**
      * GET /cookies
-     * The jar's contents, one entry per scope that holds anything.
+     * The jar's contents, one entry per scope that holds anything, leaving out
+     * a scope whose environment is in the trash.
      * Query params: q, limit, offset (optional) - any of them answers one page
      * of the cookies whose name or domain holds `q`, flattened out of their
      * scopes, in the `{data, pagination}` envelope (#2443).
      */
     ctx.server.Get ("/cookies", [&ctx] (const httplib::Request& req, httplib::Response& res) {
         try {
+            const auto live_ids = live_environment_ids (ctx.db);
             auto [status, body] =
-            cookies_response (ctx.cookie_jar, list_page_query (req));
+            cookies_response (ctx.cookie_jar, live_ids, list_page_query (req));
             res.status = status;
             res.set_content (body.dump (), "application/json");
         } catch (const std::exception& e) {

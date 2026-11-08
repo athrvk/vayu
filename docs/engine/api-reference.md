@@ -2500,7 +2500,8 @@ claimed again.
 Destroy a deleted collection, request, environment, example or client
 certificate for good, with its whole subtree - requests, and the examples they
 own, trashed ones included; an environment, an example or a client certificate
-is its one row (a certificate's passphrase goes with it). This is the hard cascade soft
+is its one row (a certificate's passphrase goes with it), and an environment
+takes its [cookie jar](#get-cookies) with it. This is the hard cascade soft
 delete replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
@@ -5513,6 +5514,8 @@ scope, so its `{{names}}` stay unresolved.
 Restore it with [`POST /trash/:id/restore`](#post-trashidrestore), which brings
 it back inactive; destroy it for good with [`DELETE /trash/:id`](#delete-trashid),
 which is also what the startup sweep does once `trashRetentionDays` has passed.
+Its [cookie jar](#get-cookies) is kept while it is in the trash, out of
+`GET /cookies`, so a restore brings its session back; a purge drops it.
 
 **Response:**
 ```json
@@ -5642,6 +5645,14 @@ match is sent whatever its `SameSite` value (`Strict`, `Lax` or `None`).
 Every jar that holds anything, one entry per scope, in scope-key order (the
 no-environment jar first), each jar's cookies in its own line order.
 
+A jar whose environment is in the [Trash](#trash) is left out of both forms
+(issue #3349). The jar is kept, so
+[`POST /trash/:id/restore`](#post-trashidrestore) brings the environment's
+session back with it and it is listed again; a purge
+([`DELETE /trash/:id`](#delete-trashid)) drops it. The same goes for a jar
+keyed by an `environmentId` that names no stored environment. The
+no-environment jar is always listed.
+
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the cookies whose `name` or
   `domain` holds `q`, in the `{data, pagination}` envelope - see
@@ -5707,7 +5718,10 @@ a mistake.
 ```
 
 `cleared` counts the cookies dropped; clearing a scope that holds nothing is a
-`200` with `0`, not an error.
+`200` with `0`, not an error. Clearing every jar also clears the ones
+`GET /cookies` leaves out because their environment is in the trash, and
+`cleared` counts their cookies too: clearing everything leaves no credentials
+behind.
 
 ## Client certificates
 

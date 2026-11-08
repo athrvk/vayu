@@ -34,6 +34,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -61,11 +62,13 @@ namespace vayu::http::routes {
 // Defined in routes/cookies.cpp - the extracted cores of GET /cookies and
 // DELETE /cookies, exercised directly per the suite's route-test convention
 // (globals_route_test.cpp).
-nlohmann::json cookies_response (const vayu::http::CookieJar& jar);
+nlohmann::json cookies_response (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids);
 nlohmann::json clear_cookies_response (vayu::http::CookieJar& jar,
 const std::optional<std::string>& scope);
 // The same GET with its `q` / `limit` / `offset` keys (#2443).
 std::pair<int, nlohmann::json> cookies_response (const vayu::http::CookieJar& jar,
+const std::unordered_set<std::string>& live_environment_ids,
 const ListPageQuery& page_query);
 } // namespace vayu::http::routes
 
@@ -1796,7 +1799,7 @@ TEST (CookieJarWrite, ASecureFlagOnAWrittenCookieIsStoredAndHonouredByTheReadVie
     server.url ("/echo"), env);
     ASSERT_TRUE (sent.script_ok) << sent.script_error;
 
-    const auto held = vayu::http::routes::cookies_response (jar);
+    const auto held = vayu::http::routes::cookies_response (jar, { "env_a" });
     ASSERT_EQ (held["scopes"].size (), 1u);
     ASSERT_EQ (held["scopes"][0]["cookies"].size (), 1u);
     EXPECT_EQ (held["scopes"][0]["cookies"][0]["secure"], true)
@@ -2089,7 +2092,7 @@ TEST (CookieJarWrite, AScriptWrittenCookieShowsUpInTheSettingsPanelsView) {
     server.url ("/echo"), env);
     ASSERT_TRUE (sent.script_ok) << sent.script_error;
 
-    const auto body = vayu::http::routes::cookies_response (jar);
+    const auto body = vayu::http::routes::cookies_response (jar, { "env_a" });
     ASSERT_EQ (body["scopes"].size (), 1u);
     ASSERT_EQ (body["scopes"][0]["cookies"].size (), 1u);
     EXPECT_EQ (body["scopes"][0]["cookies"][0]["name"], "written");
@@ -2925,7 +2928,7 @@ TEST (CookieJarRoute, ReportsEveryFieldAndNamesTheNoEnvironmentScopeAsNull) {
     netscape_line (".example.com", "TRUE", "/app", "TRUE",
     std::to_string (FAR_FUTURE), "session", "abc") });
 
-    const auto body = vayu::http::routes::cookies_response (jar);
+    const auto body = vayu::http::routes::cookies_response (jar, {});
     ASSERT_EQ (body["scopes"].size (), 1u);
     const auto& scope = body["scopes"][0];
     // null rather than "": the panel resolves an id to an environment name, and
@@ -2988,6 +2991,11 @@ void fill_three_scopes (CookieJar& jar) {
     jar.store ("env_a", { line ("auth.Example.COM", "c2"), line ("x.test", "c3") });
 }
 
+/// Both environments `fill_three_scopes` stores into, as live.
+std::unordered_set<std::string> three_scopes_live () {
+    return { "env_a", "env_b" };
+}
+
 std::vector<std::string> names_of (const nlohmann::json& rows) {
     std::vector<std::string> names;
     for (const auto& row : rows) {
@@ -3002,10 +3010,11 @@ std::vector<std::string> names_of (const nlohmann::json& rows) {
 TEST (CookieJarRoute, NoPagingKeysAnswersTheScopesBodyByteForByte) {
     CookieJar jar;
     fill_three_scopes (jar);
-    auto [status, body] =
-    vayu::http::routes::cookies_response (jar, vayu::http::routes::ListPageQuery{});
+    auto [status, body] = vayu::http::routes::cookies_response (
+    jar, three_scopes_live (), vayu::http::routes::ListPageQuery{});
     EXPECT_EQ (status, 200);
-    EXPECT_EQ (body.dump (), vayu::http::routes::cookies_response (jar).dump ());
+    EXPECT_EQ (body.dump (),
+    vayu::http::routes::cookies_response (jar, three_scopes_live ()).dump ());
 }
 
 // The paged form is flat: each cookie carries its scope's `environmentId`,
@@ -3017,8 +3026,8 @@ TEST (CookieJarRoute, PagedFormMatchesQAgainstNameOrDomainAcrossFlattenedScopes)
     CookieJar jar;
     fill_three_scopes (jar);
 
-    auto [status, body] =
-    vayu::http::routes::cookies_response (jar, { .q = "eXaMpLe.com" });
+    auto [status, body] = vayu::http::routes::cookies_response (
+    jar, three_scopes_live (), { .q = "eXaMpLe.com" });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (names_of (body["data"]),
     (std::vector<std::string>{ "c0", "c2", "c4", "c5" }));
@@ -3035,14 +3044,14 @@ TEST (CookieJarRoute, PagedFormMatchesQAgainstNameOrDomainAcrossFlattenedScopes)
     EXPECT_EQ (body["data"][1]["environmentId"], "env_a");
     EXPECT_EQ (body["data"][3]["environmentId"], "env_b");
 
-    auto [by_name_status, by_name] =
-    vayu::http::routes::cookies_response (jar, { .q = "session" });
+    auto [by_name_status, by_name] = vayu::http::routes::cookies_response (
+    jar, three_scopes_live (), { .q = "session" });
     ASSERT_EQ (by_name_status, 200);
     EXPECT_EQ (names_of (by_name["data"]), (std::vector<std::string>{ "SESSION_c1" }));
 
     jar.clear ("env_a");
     auto [cleared_status, cleared] =
-    vayu::http::routes::cookies_response (jar, { .q = "c2" });
+    vayu::http::routes::cookies_response (jar, three_scopes_live (), { .q = "c2" });
     ASSERT_EQ (cleared_status, 200);
     EXPECT_TRUE (cleared["data"].empty ());
     EXPECT_EQ (cleared["pagination"]["total"], 0);
@@ -3057,7 +3066,7 @@ TEST (CookieJarRoute, PagedFormWalksTheFlattenedCookiesInStablePages) {
     for (const auto& [offset, returned, has_more] :
     { std::tuple{ "0", 4, true }, std::tuple{ "4", 2, false } }) {
         auto [status, body] = vayu::http::routes::cookies_response (
-        jar, { .limit = "4", .offset = offset });
+        jar, three_scopes_live (), { .limit = "4", .offset = offset });
         ASSERT_EQ (status, 200) << body.dump ();
         EXPECT_EQ (body["pagination"]["returned"], returned) << offset;
         EXPECT_EQ (body["pagination"]["hasMore"], has_more) << offset;
@@ -3076,10 +3085,39 @@ TEST (CookieJarRoute, PagedFormRefusesABadLimitOrOffset) {
     for (const auto& [query, code] :
     { std::pair{ vayu::http::routes::ListPageQuery{ .limit = "0" }, "invalid_limit" },
     std::pair{ vayu::http::routes::ListPageQuery{ .offset = "5abc" }, "invalid_offset" } }) {
-        auto [status, body] = vayu::http::routes::cookies_response (jar, query);
+        auto [status, body] =
+        vayu::http::routes::cookies_response (jar, three_scopes_live (), query);
         EXPECT_EQ (status, 400) << body.dump ();
         EXPECT_EQ (body["error"]["code"], code);
     }
+}
+
+// A scope whose environment is not live (trashed or purged, #3349) is left out
+// of both forms, and the no-environment jar, which names no environment, is
+// listed even when no environment is live. The jar itself keeps the hidden
+// scope. Mutation check: list `jar.snapshot ()` unfiltered and env_b's scope
+// and cookies come back.
+TEST (CookieJarRoute, AScopeWhoseEnvironmentIsNotLiveIsLeftOutOfBothForms) {
+    CookieJar jar;
+    fill_three_scopes (jar);
+
+    const auto body = vayu::http::routes::cookies_response (jar, { "env_a" });
+    ASSERT_EQ (body["scopes"].size (), 2u) << body.dump ();
+    EXPECT_TRUE (body["scopes"][0]["environmentId"].is_null ());
+    EXPECT_EQ (body["scopes"][1]["environmentId"], "env_a");
+
+    auto [status, paged] =
+    vayu::http::routes::cookies_response (jar, { "env_a" }, { .q = "c" });
+    ASSERT_EQ (status, 200) << paged.dump ();
+    EXPECT_EQ (names_of (paged["data"]),
+    (std::vector<std::string>{ "c0", "SESSION_c1", "c2", "c3" }));
+
+    const auto none_live = vayu::http::routes::cookies_response (jar, {});
+    ASSERT_EQ (none_live["scopes"].size (), 1u) << none_live.dump ();
+    EXPECT_TRUE (none_live["scopes"][0]["environmentId"].is_null ());
+
+    EXPECT_EQ (jar.lines_for ("env_b").size (), 2u)
+    << "hiding a scope must not drop it from the jar";
 }
 
 } // namespace

@@ -125,12 +125,21 @@ trash_restore_response (vayu::db::Database& db, const std::string& id) {
  *
  * 404 on anything the trash does not hold, which is also what makes this
  * unable to destroy a live collection by a mistyped id.
+ *
+ * A purged environment takes its cookie jar with it (#3349); trash only hid
+ * the jar so a restore could bring the session back. The startup retention
+ * sweep needs no counterpart: it runs inside `Database::init`, before the
+ * in-memory jar can hold anything.
  */
-std::pair<int, nlohmann::json>
-trash_purge_response (vayu::db::Database& db, const std::string& id) {
+std::pair<int, nlohmann::json> trash_purge_response (vayu::db::Database& db,
+vayu::http::CookieJar& jar,
+const std::string& id) {
     auto outcome = db.purge_deleted (id);
     if (!outcome) {
         return error_response (404, "Nothing in the trash with id '" + id + "'");
+    }
+    if (outcome->entry.kind == "environment") {
+        jar.clear (outcome->entry.id);
     }
     nlohmann::json body = trash_entry_json (outcome->entry);
     body["purged"]      = true;
@@ -195,15 +204,16 @@ void register_trash_routes (RouteContext& ctx) {
     /**
      * DELETE /trash/:id
      * Destroys a deleted collection, request, environment, example or client
-     * certificate for good, with its whole subtree. There is no undo for this
-     * one - it is the undo's counterpart.
+     * certificate for good, with its whole subtree; an environment's cookie
+     * jar goes with it. There is no undo for this one - it is the undo's
+     * counterpart.
      * Returns: the purged entry, or 404 if the trash does not hold that id.
      */
     ctx.server.Delete (R"(/trash/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.matches[1];
         try {
-            auto [status, body] = trash_purge_response (ctx.db, id);
+            auto [status, body] = trash_purge_response (ctx.db, ctx.cookie_jar, id);
             if (status != 200) {
                 vayu::utils::log_warning ("http",
                 "DELETE /trash/:id - " + std::to_string (status) + ": " +

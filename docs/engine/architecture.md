@@ -600,7 +600,11 @@ makes a session survive from one design-mode request to the next.
 - **Lifetime: the process.** In memory only; a stored jar is credential-grade
   material and would need the treatment auth tokens already have rather than a
   new path beside the request store. `GET /cookies` shows it, `DELETE /cookies`
-  empties it, and the app surfaces both in Settings → General → Cookies.
+  empties it, and the app surfaces both in Settings → General → Cookies. An
+  environment's jar follows the environment through the trash (issue #3349):
+  trashing keeps it but `GET /cookies` leaves it out, a restore lists it again,
+  and a purge (`DELETE /trash/:id`) drops it. The jar has no database, so the
+  route filters by the live environment ids it reads per request.
 - **Storage: libcurl's own lines.** The jar holds what `CURLINFO_COOKIELIST`
   exports and hands it back through `CURLOPT_COOKIELIST`, so domain matching,
   path matching, `Secure` and expiry stay inside libcurl's cookie engine. The
