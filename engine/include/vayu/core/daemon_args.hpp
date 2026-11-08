@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -130,6 +131,30 @@ read_daemon_args (std::span<char* const> args, DaemonArgs& out) {
         }
     }
     return DaemonRequest::Continue;
+}
+
+/**
+ * @brief The data directory @p data_dir names, as `GET /health` reports it
+ *        (#3328): absolute against the current directory, dot segments and a
+ *        trailing separator removed, symlinks left as written, UTF-8.
+ *
+ * Resolved once at startup because a relative `--data-dir` means the directory
+ * the engine was started in, which no client can know. Symlinks stay unresolved
+ * so the answer compares equal to the spelling a client passed. UTF-8 through
+ * `u8string`, because on Windows a narrow path is in the ANSI code page, which
+ * a JSON body cannot carry.
+ *
+ * @throws std::filesystem::filesystem_error when the current directory cannot
+ *         be read.
+ */
+inline std::string absolute_data_dir (const std::string& data_dir) {
+    std::filesystem::path resolved =
+    std::filesystem::absolute (std::filesystem::path (data_dir)).lexically_normal ();
+    if (resolved.has_relative_path () && !resolved.has_filename ()) {
+        resolved = resolved.parent_path ();
+    }
+    const std::u8string utf8 = resolved.u8string ();
+    return { utf8.begin (), utf8.end () };
 }
 
 } // namespace vayu::core

@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "vayu/core/constants.hpp"
 #include "vayu/http/request_log.hpp"
@@ -126,8 +127,13 @@ refuse_unbounded_body (const httplib::Request& req, httplib::Response& res) {
 
 } // namespace
 
-Server::Server (vayu::db::Database& db, vayu::core::RunManager& run_manager, int port, GrantSecret grant_secret)
-: db_ (db), run_manager_ (run_manager), port_ (port), grant_secret_ (grant_secret) {
+Server::Server (vayu::db::Database& db,
+vayu::core::RunManager& run_manager,
+int port,
+GrantSecret grant_secret,
+std::string data_dir)
+: db_ (db), run_manager_ (run_manager), port_ (port),
+  grant_secret_ (grant_secret), data_dir_ (std::move (data_dir)) {
     setup_routes ();
 }
 
@@ -288,7 +294,7 @@ void Server::setup_routes () {
     route_ctx_ = std::make_unique<routes::RouteContext> (routes::RouteContext{ server_,
     db_, run_manager_, shutdown_callback_, oauth_authorize_manager_,
     cookie_jar_, mock_issuer_manager_, inbox_manager_, mock_server_manager_,
-    sse_manager_, run_summary_cache_, grant_secret_, stopping_ });
+    sse_manager_, run_summary_cache_, grant_secret_, stopping_, data_dir_ });
 
     routes::register_health_routes (*route_ctx_);
     routes::register_config_routes (*route_ctx_);

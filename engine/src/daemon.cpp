@@ -157,8 +157,10 @@ int run_daemon (std::span<char* const> args) {
     // files an older engine left at 0644 are tightened here, before the
     // logger or the database touch them. `tests/platform_test.cpp` scans for
     // this call, because a daemon that skipped it passes every other test.
+    std::string reported_data_dir;
     try {
         vayu::platform::prepare_data_directory (data_dir);
+        reported_data_dir = vayu::core::absolute_data_dir (data_dir);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what () << "\n";
         return 1;
@@ -254,7 +256,7 @@ int run_daemon (std::span<char* const> args) {
     vayu::http::set_engine_port (port);
 
     // Create and start HTTP server
-    vayu::http::Server server (db, run_manager, port, grant_secret);
+    vayu::http::Server server (db, run_manager, port, grant_secret, reported_data_dir);
 
     // Set shutdown callback for /shutdown endpoint
     // This callback is invoked before the server stops, allowing us to

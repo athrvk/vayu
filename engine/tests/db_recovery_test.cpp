@@ -48,7 +48,7 @@
 
 namespace vayu::http::routes {
 // Declared in health.cpp; the body of GET /health.
-nlohmann::json build_health_response (vayu::db::Database& db);
+nlohmann::json build_health_response (vayu::db::Database& db, const std::string& data_dir);
 } // namespace vayu::http::routes
 
 namespace {
@@ -137,7 +137,7 @@ TEST_F (DbRecoveryTest, CleanStartWritesNoMarkerAndReportsNoRecovery) {
     EXPECT_FALSE (db->recovery ().has_value ());
     EXPECT_FALSE (std::filesystem::exists (vayu::db::recovery_marker_path (DB_PATH)));
 
-    const auto health = vayu::http::routes::build_health_response (*db);
+    const auto health = vayu::http::routes::build_health_response (*db, {});
     EXPECT_EQ (health["status"], "ok");
     // Absent, not null - a first run must be distinguishable from a wipe by the
     // presence of the key alone, which is what the app's notice tests.
@@ -197,7 +197,7 @@ TEST_F (DbRecoveryTest, HealthReportsTheOutcomeWithBothPaths) {
     write_corrupt_database ();
     auto db = std::make_unique<vayu::db::Database> (DB_PATH);
 
-    const auto health = vayu::http::routes::build_health_response (*db);
+    const auto health = vayu::http::routes::build_health_response (*db, {});
     ASSERT_TRUE (health.contains ("recovery"));
     EXPECT_EQ (health["recovery"]["outcome"], "started_fresh_quarantined");
     EXPECT_EQ (health["recovery"]["databasePath"], db->path ());
@@ -222,8 +222,7 @@ TEST_F (DbRecoveryTest, RestoringFromABackupIsADifferentOutcome) {
 
     ASSERT_HAS_VALUE (db->recovery ());
     EXPECT_TRUE (recorded_outcome (*db) == RecoveryOutcome::RestoredFromBackup);
-    EXPECT_EQ (
-    vayu::http::routes::build_health_response (*db)["recovery"]["outcome"],
+    EXPECT_EQ (vayu::http::routes::build_health_response (*db, {})["recovery"]["outcome"],
     "restored_from_backup");
     // Restoring overwrote the corrupt file, so this branch quarantines too -
     // the backup is by definition older than what it replaces, and the rows

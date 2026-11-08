@@ -2105,6 +2105,11 @@ struct RouteContext {
     /// join waits on no request's timeout and no open stream. Owned by Server,
     /// and no route writes it.
     const std::atomic<bool>& server_stopping = never_stopping ();
+    /// The data directory, as `core::absolute_data_dir` resolved it from
+    /// `--data-dir` (#3328). Read by `/health`, which reports it so a client can
+    /// tell its own engine from one serving another data directory. Empty in a
+    /// context built without one.
+    std::string data_dir;
 };
 
 // Route registration functions (implemented in separate files)
