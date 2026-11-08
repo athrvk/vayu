@@ -1232,7 +1232,9 @@ Three things about it are load-bearing:
   rather than an effect - child effects run first, so by the time an effect here fires the
   dialog has already taken focus.
 - **Tab rows are named by `components/layout/tab-descriptors.ts`**, the same hook `TabStrip`
-  uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette.
+  uses. A tab must not read "GET /v1/orders" in the strip and "Request" in the palette. Its
+  subtitle is the descriptor's `path` ("Users / Get user") so two same-named tabs differ; a tab
+  with no path falls back to the descriptor's `title`.
 
 Ranking lives in `ranking.ts` and happens **once**. The palette declares `shouldFilter={false}`,
 so cmdk scores nothing a second time; the scorer is still cmdk's own (`defaultFilter`, the
