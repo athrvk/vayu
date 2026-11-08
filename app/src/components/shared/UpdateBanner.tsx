@@ -5,7 +5,16 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { ArrowUpCircle, Check, Copy, ExternalLink, Power, RotateCw, X } from "lucide-react";
+import {
+	ArrowUpCircle,
+	Check,
+	Copy,
+	ExternalLink,
+	Power,
+	RefreshCw,
+	RotateCw,
+	X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { LabelSwap } from "@/components/ui/label-swap";
@@ -15,7 +24,7 @@ import { useCopy } from "@/hooks/useCopy";
 import type { UpdateVerificationFailure } from "@/types/electron";
 
 /**
- * The line the banner prints. The failure wins over every other state: it is
+ * The line the banner prints. A failure wins over every other state: it is
  * the one outcome the user has to act on, and its reason is what they need.
  */
 function bannerMessage(
@@ -24,16 +33,20 @@ function bannerMessage(
 		readyToInstall: boolean;
 		downloadProgress: number | null;
 		verificationFailure: UpdateVerificationFailure | null;
+		downloadFailure: { version: string; error: string } | null;
 	}
 ): string {
-	const { readyToInstall, downloadProgress, verificationFailure } = state;
+	const { readyToInstall, downloadProgress, verificationFailure, downloadFailure } = state;
 	if (verificationFailure) {
 		return `Couldn't verify Vayu ${verificationFailure.version}. ${verificationFailure.reason}`;
+	}
+	if (downloadFailure) {
+		return `Couldn't download Vayu ${downloadFailure.version} - ${downloadFailure.error}`;
 	}
 	if (readyToInstall) return `Vayu ${update.version} is ready to install.`;
 	if (downloadProgress === null) return `Vayu ${update.version} is available.`;
 	const percent = Math.round(downloadProgress * 100);
-	// The bytes are in but `update:downloaded` waits on the attestation check,
+	// The bytes are in but `verified` waits on the attestation check,
 	// which takes seconds: a bar parked at 100% reads as a hang.
 	if (percent >= 100) return `Verifying Vayu ${update.version}…`;
 	return `Downloading Vayu ${update.version}… ${percent}%`;
@@ -58,6 +71,7 @@ function UpdateBanner() {
 		readyToInstall,
 		downloadProgress,
 		verificationFailure,
+		downloadFailure,
 		dismiss,
 		restartToInstall,
 		openReleasePage,
@@ -72,7 +86,14 @@ function UpdateBanner() {
 		readyToInstall,
 		downloadProgress,
 		verificationFailure,
+		downloadFailure,
 	});
+
+	// The result is the Settings card's to show; the banner follows the download
+	// state the check starts moving.
+	const retryDownload = () => {
+		void window.electronAPI?.checkForUpdates();
+	};
 
 	const copyInstallCommand = async () => {
 		if (!update.installCommand) return;
@@ -99,6 +120,11 @@ function UpdateBanner() {
 				<Button size="sm" variant="secondary" onClick={openReleasePage}>
 					<ExternalLink className="size-icon" />
 					View release
+				</Button>
+			) : downloadFailure ? (
+				<Button size="sm" variant="secondary" onClick={retryDownload}>
+					<RefreshCw className="size-icon" />
+					Retry
 				</Button>
 			) : readyToInstall ? (
 				<Button size="sm" onClick={restartToInstall}>

@@ -23,7 +23,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 │   ├── <CommandSearchBar />             // Input-shaped trigger for the ⌘K palette; never its own search
 │   └── EnvPill + WindowControls (Linux only; Windows native overlay; macOS traffic lights)
 ├── <RecoveryBanner />                   // components/shared/RecoveryBanner.tsx - only when the engine restored or deleted the database
-├── <UpdateBanner />                     // components/shared/UpdateBanner.tsx - a newer release: progress, "Verifying", restart-to-install, or why the installer was refused (#2372)
+├── <UpdateBanner />                     // components/shared/UpdateBanner.tsx - a newer release: progress, "Verifying", restart-to-install, why the installer was refused (#2372), or that the download failed, with Retry (#3338)
 ├── <KeepAwakePrompt />                  // components/shared/KeepAwakePrompt.tsx - asks once about a run long enough for the machine to sleep under it (#1357)
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
