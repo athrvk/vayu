@@ -286,6 +286,24 @@ export default function ResponseViewer() {
 	const shown = response ?? streamedResponse;
 
 	/*
+	 * Another request's stream took this request's live feed over (#3352). The
+	 * run it fed was not stopped, so the pane says where it went rather than
+	 * falling back to "No response yet" as if nothing had been sent. Gone once
+	 * the pane shows that run's own stored record.
+	 */
+	const replacedRunId = useExecutionEventsStore((s) =>
+		requestId ? s.replacedFeeds[requestId] : undefined
+	);
+	const feedNotice = !!replacedRunId && shown?.restoredFrom?.runId !== replacedRunId && (
+		<div className="px-4 pt-3 shrink-0">
+			<Callout severity="info" title="Live feed taken over">
+				Another request&apos;s stream took over the live feed. This request&apos;s stream
+				kept running in Vayu&apos;s engine, and History shows its events once it ends.
+			</Callout>
+		</div>
+	);
+
+	/*
 	 * Loading state - **only when there is nothing on screen to keep**.
 	 *
 	 * It used to be `isExecuting || …`, which replaced the whole pane with a
@@ -320,7 +338,7 @@ export default function ResponseViewer() {
 
 	// Empty state
 	if (!shown) {
-		return (
+		const empty = (
 			<EmptyState
 				className="bg-panel"
 				icon={Send}
@@ -335,6 +353,13 @@ export default function ResponseViewer() {
 					</span>
 				}
 			/>
+		);
+		if (!feedNotice) return empty;
+		return (
+			<div className="flex-1 flex flex-col min-h-0 bg-panel">
+				{feedNotice}
+				{empty}
+			</div>
 		);
 	}
 
@@ -523,6 +548,9 @@ export default function ResponseViewer() {
 				// count and its end reason live.
 				streaming={isStreaming ? { events: events.length } : undefined}
 			/>
+
+			{/* Above the response it explains: an earlier run restored in its place. */}
+			{feedNotice}
 
 			{/*
 			 * The engine's own sentence about what the auth block did on the wire:

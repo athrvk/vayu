@@ -1181,6 +1181,9 @@ export default function RequestBuilderProvider({
 			// while reading the response stay out of it; only a saved request
 			// can hold an example, so an unsaved one takes none.
 			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
+			// This Send supersedes the note that another request took this one's
+			// live feed over.
+			if (executingId) useExecutionEventsStore.getState().forgetReplaced(executingId);
 			/*
 			 * Persist under the request that ran, so returning to it shows its own
 			 * response; `storeSetResponse` is keyed by id and safe even if this
@@ -1209,7 +1212,9 @@ export default function RequestBuilderProvider({
 				// The previous stream's rows belong to the send that is being
 				// replaced. Cleared here rather than on arrival of the first event,
 				// so a stream that never opens does not leave the last one on screen.
-				useExecutionEventsStore.getState().clear();
+				// Another request's live stream keeps running at the engine, and the
+				// store notes it for that request's pane.
+				useExecutionEventsStore.getState().handOver(executingId);
 				try {
 					const started = await onExecuteStream(executingRequest, dataRow);
 					if (!started) return;

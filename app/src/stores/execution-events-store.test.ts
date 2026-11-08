@@ -154,4 +154,48 @@ describe("execution events store", () => {
 		// the total against the row count, and null would read as "no events".
 		expect(useExecutionEventsStore.getState().totalEvents).toBe(1);
 	});
+
+	describe("handing the feed to another request's stream (#3352)", () => {
+		const replaced = () => useExecutionEventsStore.getState().replacedFeeds;
+
+		it("empties the feed and records the live run it took over", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().addEvents("run_B", [event("b")]);
+
+			useExecutionEventsStore.getState().handOver("req_A");
+
+			const s = useExecutionEventsStore.getState();
+			expect(s).toMatchObject({ requestId: null, runId: null, isStreaming: false });
+			expect(s.events).toEqual([]);
+			expect(replaced()).toEqual({ req_B: "run_B" });
+			// Kept through the next stream's start: it describes a feed the store
+			// no longer holds.
+			start("run_A", "req_A");
+			expect(replaced()).toEqual({ req_B: "run_B" });
+		});
+
+		it("records nothing for a request's own re-send", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_B");
+			expect(replaced()).toEqual({});
+		});
+
+		it("records nothing for a stream that had already ended", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().endStream("run_B", "completed", 0);
+			useExecutionEventsStore.getState().handOver("req_A");
+			expect(replaced()).toEqual({});
+		});
+
+		it("forgets one request's record and keeps the others'", () => {
+			start("run_B", "req_B");
+			useExecutionEventsStore.getState().handOver("req_A");
+			start("run_A", "req_A");
+			useExecutionEventsStore.getState().handOver("req_C");
+			expect(replaced()).toEqual({ req_B: "run_B", req_A: "run_A" });
+
+			useExecutionEventsStore.getState().forgetReplaced("req_B");
+			expect(replaced()).toEqual({ req_A: "run_A" });
+		});
+	});
 });
