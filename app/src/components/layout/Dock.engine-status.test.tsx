@@ -71,6 +71,8 @@ beforeEach(() => {
 		engineStatus: "unreachable",
 		engineError: null,
 		engineStartFailure: null,
+		engineCrash: null,
+		engineRestarting: false,
 	});
 });
 
@@ -211,5 +213,85 @@ describe("a start failure the main process reported", () => {
 		});
 		renderDock();
 		expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+	});
+});
+
+/*
+ * #3336. The sidecar reports an engine that left on its own; the Dock names how
+ * and offers Restart, which a crash used to leave the window without.
+ */
+describe("an engine that left on its own", () => {
+	const CRASH = { code: 1, signal: null, stderrTail: ["database is locked"], error: null };
+
+	it("names the exit and quotes what it printed", async () => {
+		useEngineStore.setState({ engineStatus: "unreachable", engineCrash: CRASH });
+		renderDock();
+
+		const trigger = screen.getByText("Engine disconnected").closest("[tabindex='0']");
+		fireEvent.focus(trigger!);
+		await waitFor(() =>
+			expect(screen.getAllByText("Vayu's engine exited with code 1.").length).toBeGreaterThan(
+				0
+			)
+		);
+		expect(screen.getAllByText("database is locked").length).toBeGreaterThan(0);
+	});
+
+	it("offers Restart, which restarts the engine", async () => {
+		const restartEngine = vi.fn().mockResolvedValue({ success: false, error: "no" });
+		(window as unknown as { electronAPI?: unknown }).electronAPI = { restartEngine };
+		useEngineStore.setState({ engineStatus: "unreachable", engineCrash: CRASH });
+		renderDock();
+
+		fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+	});
+
+	it("shows Restarting while the restart is in flight, from any surface", () => {
+		useEngineStore.setState({
+			engineStatus: "starting",
+			engineCrash: CRASH,
+			engineRestarting: true,
+		});
+		renderDock();
+
+		const button = screen.getByRole("button", { name: "Restarting…" });
+		expect((button as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it("does not wait for the poll: the sidecar's word is enough to explain and offer Restart", async () => {
+		// The light is still the poll's last verdict; only the explanation and the
+		// button come from the lifecycle.
+		useEngineStore.setState({ engineStatus: "connected", engineCrash: CRASH });
+		renderDock();
+
+		expect(screen.getByText("Engine connected")).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+		const trigger = screen.getByText("Engine connected").closest("[tabindex='0']");
+		fireEvent.focus(trigger!);
+		await waitFor(() =>
+			expect(screen.getAllByText("Vayu's engine exited with code 1.").length).toBeGreaterThan(
+				0
+			)
+		);
+	});
+
+	it("offers the held-port Retry, not Restart, when both are on record", () => {
+		useEngineStore.setState({
+			engineStatus: "unreachable",
+			engineCrash: CRASH,
+			engineStartFailure: "Another program is using port 9876. Press Retry.",
+		});
+		renderDock();
+
+		expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+	});
+
+	it("offers neither a button nor a reason once the engine runs again", () => {
+		useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
+		renderDock();
+
+		expect(screen.queryByRole("button")).toBeNull();
 	});
 });

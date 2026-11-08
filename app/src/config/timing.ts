@@ -33,9 +33,9 @@ export const TIMING = {
 	/**
 	 * How long the "Saved" indicator stays visible after a save.
 	 *
-	 * Read in exactly one place - `completeSaveThenIdle` in `save-store.ts`, which
-	 * is the only way a success is reported - so every saving surface in the app
-	 * shows it for the same time.
+	 * Read in exactly one place - the window `reportSaved` opens in
+	 * `save-store.ts`, which is the only way a success is reported - so every
+	 * saving surface in the app shows it for the same time.
 	 */
 	SAVED_STATUS_DURATION_MS: 3000,
 
@@ -53,9 +53,9 @@ export const TIMING = {
 	 *
 	 * Deliberately a presentation concern, not a store one: `save-store.ts`'s
 	 * `status` still flips to `"saved"` the instant a save lands - every other
-	 * reader of that store (the eight `startSaving`/`completeSaveThenIdle`
-	 * callers' own tests among them) needs the truth as soon as it is known, not
-	 * a truth held back for legibility. Read in exactly one place -
+	 * reader of that store (the tests of every surface that reports to it among
+	 * them) needs the truth as soon as it is known, not a truth held back for
+	 * legibility. Read in exactly one place -
 	 * `SaveStatusLine` in `layout/Dock.tsx`, the only surface that renders
 	 * `status` for a human to read - which holds the *display* on "saving" a
 	 * little past a status change it has already received, rather than delaying

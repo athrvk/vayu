@@ -20,14 +20,15 @@
  * the one that waits). The defect this fixes is orthogonal to that choice: the
  * *other* ways to save could not reach any of them.
  *
- * A failure on this path toasts through `failSave` rather than resolving
- * quietly. The editors render their own inline `SaveFailed` callout for a
- * button press, but a Cmd+S from another pane - or a quit flush with nothing on
- * screen at all - has no callout to read, and a resolved promise reads as a
- * success. Swallowing here would report "Saved" for a write that failed.
+ * A failure on this path is reported through `reportFailed` rather than
+ * resolving quietly. The editors render their own inline `SaveFailed` callout
+ * for a button press, but a Cmd+S from another pane - or a quit flush with
+ * nothing on screen at all - has no callout to read, and a resolved promise
+ * reads as a success. Swallowing here would report "Saved" for a write that
+ * failed.
  *
- * The registered save also resolves with its verdict (`SaveOutcome`), so the
- * store counts this editor's own result rather than the shared status.
+ * The registered save also resolves with its verdict (`SaveOutcome`), which is
+ * what the store counts.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -53,9 +54,9 @@ interface DraftSaveContextOptions {
 	/**
 	 * Persist the draft. Rejecting is how a failure is reported; rejecting with
 	 * `SaveBlockedError` says the edit was deliberately not sent and is still unsaved.
-	 * A save that reports its own failure through `failSave` and resolves (the
-	 * canned reply, whose Apply button shares this function) returns the verdict
-	 * instead, or the resolution reads as `saved`.
+	 * A save that reports its own failure and resolves (the canned reply, whose
+	 * Apply button shares this function) returns the verdict instead, or the
+	 * resolution reads as `saved`.
 	 */
 	save: () => Promise<SaveOutcome | void>;
 	/**
@@ -78,10 +79,10 @@ export function useDraftSaveContext({
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
 	const setActiveContext = useSaveStore((s) => s.setActiveContext);
-	const markPendingSave = useSaveStore((s) => s.markPendingSave);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const discardPendingSave = useSaveStore((s) => s.discardPendingSave);
-	const failSave = useSaveStore((s) => s.failSave);
+	const reportPending = useSaveStore((s) => s.reportPending);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const reportFailed = useSaveStore((s) => s.reportFailed);
+	const discard = useSaveStore((s) => s.discard);
 
 	// The registered save is bound once and reads the latest `save` when it runs,
 	// so a keystroke does not have to re-register the context.
@@ -98,14 +99,18 @@ export function useDraftSaveContext({
 			// no toast and no "Not saved" - the edit is still unsaved, which is what
 			// `pending` says. Mirrors `useSaveManager`.
 			if (error instanceof SaveBlockedError) {
-				markPendingSave();
+				reportPending(id);
 				return "pending";
 			}
 			const fallback = `Couldn't save ${name}`;
-			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+			reportFailed(
+				id,
+				error instanceof Error ? `${fallback} - ${error.message}` : fallback,
+				error
+			);
 			return isDiskFullError(error) ? "disk-full" : "failed";
 		}
-	}, [failSave, markPendingSave, name]);
+	}, [id, name, reportFailed, reportPending]);
 
 	// Registration is deliberately independent of the dirty flag - it is pushed
 	// by the effect below, which runs later in the same commit. Taking `isDirty`
@@ -116,14 +121,19 @@ export function useDraftSaveContext({
 		return () => unregisterContext(id);
 	}, [id, name, runSave, registerContext, unregisterContext]);
 
-	// Mirrors the registry entry's dirty flag onto the store-wide `status`, which
-	// is what the Dock actually reads for "Unsaved changes" (`hasPendingChanges`
-	// on a context is not consulted there - see save-store.ts). Without this,
-	// `useSaveManager`'s autosave editors lit the Dock on every keystroke and
-	// these three never did at all. Edge-triggered on `isDirty`, and guarded on
-	// `id` staying the same: a context switching entities (collection.id
-	// changing) reseeds cleanly rather than reporting the *previous* entity's
-	// dirty-to-clean transition as this one's save completing.
+	// The draft goes with its id: a switch reseeds it (`useEntityDraft`) and an
+	// unmount drops it, so nothing is left for this id's report to describe.
+	// Its own effect, keyed on `id` alone, because the registration above also
+	// re-runs on a rename, which drops no draft.
+	useEffect(() => () => discard(id), [id, discard]);
+
+	// Reports the registry entry's dirty flag under this id, which is what the
+	// Dock's "Unsaved changes" is derived from (`hasPendingChanges` on a context
+	// is not consulted there - see save-store.ts). Edge-triggered on `isDirty`,
+	// and guarded on `id` staying the same: a context switching entities
+	// (collection.id changing) reseeds cleanly rather than reporting the
+	// *previous* entity's dirty-to-clean transition as this one's save
+	// completing.
 	// Seeded `isDirty: false` regardless of the actual first render, so an
 	// editor that somehow mounts already dirty still reports the rising edge
 	// instead of silently agreeing with itself that nothing changed.
@@ -135,22 +145,14 @@ export function useDraftSaveContext({
 		const discarded = consumeDiscard?.() ?? false;
 		const prev = prevRef.current;
 		if (prev.id === id) {
-			if (isDirty && !prev.isDirty) markPendingSave();
+			if (isDirty && !prev.isDirty) reportPending(id);
 			else if (!isDirty && prev.isDirty) {
-				if (discarded) discardPendingSave(id);
-				else completeSaveThenIdle(id);
+				if (discarded) discard(id);
+				else reportSaved(id);
 			}
 		}
 		prevRef.current = { id, isDirty };
-	}, [
-		id,
-		isDirty,
-		consumeDiscard,
-		updateContext,
-		markPendingSave,
-		completeSaveThenIdle,
-		discardPendingSave,
-	]);
+	}, [id, isDirty, consumeDiscard, updateContext, reportPending, reportSaved, discard]);
 
 	useEffect(() => {
 		if (isActive) setActiveContext(id);

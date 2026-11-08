@@ -352,6 +352,55 @@ type Ownership =
 	| { kind: "adopted"; pid: number | null };
 
 /**
+ * Where the engine is in its life, as this instance knows it (#3336). Changed
+ * only through `EngineSidecar.transition()`, which publishes every change.
+ *
+ * - `replacing`: stopping an engine so this session's can take its place - one
+ *   found running at start, or this session's own during a restart.
+ * - `slow`: the readiness budget is spent but the child is alive; it is still
+ *   watched, and answering moves it to `ready`.
+ * - `crashed`: the current child left without being asked to. `error` is the
+ *   message of a child `error` event, null for an exit.
+ * - `stopping` / `stopped`: an intentional stop. Once the app is quitting,
+ *   nothing but `stopped` follows `stopping`.
+ */
+export type EngineLifecycle =
+	| { kind: "idle" }
+	| { kind: "choosingPort" }
+	| { kind: "replacing" }
+	| { kind: "spawning" }
+	| { kind: "ready" }
+	| { kind: "slow" }
+	| {
+			kind: "crashed";
+			code: number | null;
+			signal: NodeJS.Signals | null;
+			stderrTail: string[];
+			error: string | null;
+	  }
+	| { kind: "stopping" }
+	| { kind: "stopped" };
+
+export type EngineLifecycleListener = (
+	lifecycle: EngineLifecycle,
+	previous: EngineLifecycle
+) => void;
+
+/** The states a start passes through on its way to an engine, left for `idle` when it fails. */
+const STARTING_STATES: ReadonlySet<EngineLifecycle["kind"]> = new Set([
+	"choosingPort",
+	"replacing",
+	"spawning",
+]);
+
+/** The states in which the current child leaving is a crash rather than a stop. */
+const CHILD_EXPECTED_STATES: ReadonlySet<EngineLifecycle["kind"]> = new Set([
+	"spawning",
+	"ready",
+	"slow",
+]);
+
+/**
  * Why a spawned engine is never going to answer.
  *
  * Recorded by the child's `exit` and `error` handlers so `waitForEngine` can
@@ -445,13 +494,24 @@ export class EngineSidecar {
 	private binaryPath: string;
 	private system: SidecarSystem;
 	/**
-	 * Set once the app is on its way out. Read at every point in `start()` and
-	 * `restart()` that could otherwise spawn - a spawn that lands after the quit
-	 * path has taken its last look at the sidecar is a process nothing kills.
+	 * Set once the app is on its way out, and never cleared. Read at every point
+	 * in a start or restart that could otherwise spawn - a spawn that lands after
+	 * the quit path has taken its last look at the sidecar is a process nothing
+	 * kills. A flag rather than the lifecycle's `stopping`, which an ordinary
+	 * `stop()` also passes through.
 	 */
-	private stopping = false;
-	/** A restart in progress, so the quit path can wait it out rather than race it. */
-	private restartInFlight: Promise<void> | null = null;
+	private shuttingDown = false;
+	private lifecycle: EngineLifecycle = { kind: "idle" };
+	private readonly lifecycleListeners = new Set<EngineLifecycleListener>();
+	private readonly readyAfterSlowHooks = new Set<() => void>();
+	/**
+	 * The tail of the operation queue. `start`, `stop`, `restart` and `shutdown`
+	 * each run after the one before has settled, so two of them never drive the
+	 * child at once: overlapping restarts used to each spawn an engine.
+	 */
+	private queueTail: Promise<void> = Promise.resolve();
+	/** The queued or running restart, which a second request joins. */
+	private pendingRestart: Promise<void> | null = null;
 
 	/**
 	 * @param onPortFixed called once, when the first start settles the port, and
@@ -481,6 +541,61 @@ export class EngineSidecar {
 	/** Where this engine keeps its state. See `engineDataDirectory()`. */
 	getDataDirectory(): string {
 		return this.dataDir;
+	}
+
+	getLifecycle(): EngineLifecycle {
+		return this.lifecycle;
+	}
+
+	/** Called with every lifecycle change. Returns the unsubscribe. */
+	onLifecycle(listener: EngineLifecycleListener): () => void {
+		this.lifecycleListeners.add(listener);
+		return () => this.lifecycleListeners.delete(listener);
+	}
+
+	/**
+	 * Called each time a `slow` engine answers and becomes `ready`: the start
+	 * that gave up on it has already returned, so whatever it would have done
+	 * with a ready engine is the hook's to do. Returns the unsubscribe.
+	 */
+	onReadyAfterSlow(hook: () => void): () => void {
+		this.readyAfterSlowHooks.add(hook);
+		return () => this.readyAfterSlowHooks.delete(hook);
+	}
+
+	/** The one writer of `lifecycle`. */
+	private transition(next: EngineLifecycle): void {
+		if (this.shuttingDown && next.kind !== "stopping" && next.kind !== "stopped") return;
+		const previous = this.lifecycle;
+		this.lifecycle = next;
+		appLogger().info("sidecar", "Engine lifecycle", { from: previous.kind, to: next.kind });
+		for (const listener of this.lifecycleListeners) {
+			this.callListener(() => listener(next, previous));
+		}
+		if (previous.kind === "slow" && next.kind === "ready") {
+			for (const hook of this.readyAfterSlowHooks) this.callListener(hook);
+		}
+	}
+
+	/** A listener that throws must not leave the transition half-published. */
+	private callListener(run: () => void): void {
+		try {
+			run();
+		} catch (error) {
+			appLogger().error("sidecar", "Engine lifecycle listener threw", {
+				error: String(error),
+			});
+		}
+	}
+
+	/** Run `operation` once every earlier one has settled, whatever its outcome. */
+	private enqueue(operation: () => Promise<void>): Promise<void> {
+		const run = this.queueTail.then(operation);
+		this.queueTail = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
 	}
 
 	/**
@@ -547,6 +662,7 @@ export class EngineSidecar {
 	 * longer needs a probe of its own.
 	 */
 	private async replaceAnsweringEngine(pid: number | null): Promise<void> {
+		this.transition({ kind: "replacing" });
 		appLogger().warn(
 			"sidecar",
 			"An engine this session did not start is running - stopping it to start one that holds this session's grant secret",
@@ -576,6 +692,7 @@ export class EngineSidecar {
 	 * spawn goes ahead and the engine's own data-directory lock decides.
 	 */
 	private async replaceLockedEngine(pid: number): Promise<void> {
+		this.transition({ kind: "replacing" });
 		appLogger().warn(
 			"sidecar",
 			"Lock file indicates the process is running, but the engine is not responding on this port - waiting for it",
@@ -718,14 +835,30 @@ export class EngineSidecar {
 	}
 
 	/**
-	 * Start the engine process
+	 * Start the engine process, after any start, stop or restart already queued.
 	 */
-	async start(): Promise<void> {
+	start(): Promise<void> {
+		return this.enqueue(() => this.runStart());
+	}
+
+	private async runStart(): Promise<void> {
 		if (this.ownership.kind !== "none") {
 			appLogger().info("sidecar", "Engine already running (managed by this instance)");
 			return;
 		}
 
+		try {
+			await this.launch();
+		} catch (error) {
+			// A dead child has already made this `crashed`, and a slow one `slow`;
+			// a start that failed on the way to a child has nothing running.
+			if (STARTING_STATES.has(this.lifecycle.kind)) this.transition({ kind: "idle" });
+			throw error;
+		}
+	}
+
+	private async launch(): Promise<void> {
+		this.transition({ kind: "choosingPort" });
 		// Ensure data directory exists first
 		this.ensureDataDirectory();
 
@@ -764,8 +897,18 @@ export class EngineSidecar {
 		// on the child is tracked, so the quit path can kill it. Every check
 		// earlier than this one has an await after it, which is a window a quit
 		// can land in - and a child spawned into that window is an orphan.
-		this.assertNotStopping();
+		this.assertNotShuttingDown();
 
+		this.transition({ kind: "spawning" });
+		const { child, spawnFailure } = this.spawnChild();
+		await this.waitForEngine(child, spawnFailure);
+	}
+
+	/**
+	 * Spawn the engine and attach to it. Returns the child and what it did
+	 * instead of coming up, if anything.
+	 */
+	private spawnChild(): { child: ChildProcess; spawnFailure: () => SpawnFailure | null } {
 		// Spawn the engine process. `--verbose 0` in production: the engine writes
 		// its own structured records to `engine_<stamp>.log` (#1557) regardless,
 		// so nothing here reads its console text any more (#1558) - dev keeps `2`
@@ -773,7 +916,7 @@ export class EngineSidecar {
 		// engine takes it out of its own environment at start, so a restart
 		// cannot reuse the last one and does not need to.
 		const grantSecret = newGrantSecret();
-		this.process = this.system.spawnEngine(
+		const child = this.system.spawnEngine(
 			this.binaryPath,
 			[
 				"--port",
@@ -785,15 +928,16 @@ export class EngineSidecar {
 			],
 			{ ...process.env, [ENGINE_GRANT_SECRET_ENV]: grantSecret }
 		);
+		this.process = child;
 		this.ownership = { kind: "spawned" };
 		this.onGrantSecret(grantSecret);
 
 		// Drain stdout without re-printing it - the engine's own file is the
 		// record now (#1557, #1558). Still read eagerly: on Linux an unread pipe
 		// blocks the child on buffer space once it fills.
-		if (this.process.stdout) {
-			this.process.stdout.setEncoding("utf8");
-			this.process.stdout.resume();
+		if (child.stdout) {
+			child.stdout.setEncoding("utf8");
+			child.stdout.resume();
 		}
 
 		// Kept for the failure message: an engine that dies at spawn has usually
@@ -803,9 +947,9 @@ export class EngineSidecar {
 		// (the engine has no file yet) is worth keeping.
 		const stderrTail: string[] = [];
 
-		if (this.process.stderr) {
-			this.process.stderr.setEncoding("utf8");
-			this.process.stderr.on("data", (data) => {
+		if (child.stderr) {
+			child.stderr.setEncoding("utf8");
+			child.stderr.on("data", (data) => {
 				const lines = data
 					.toString()
 					.split("\n")
@@ -816,42 +960,56 @@ export class EngineSidecar {
 				}
 			});
 			// Resume reading to prevent backpressure
-			this.process.stderr.resume();
+			child.stderr.resume();
 		}
-
-		// Forget the child only while it is still the current one: a restart's
-		// replacement is already spawned by the time a slow `exit` can land, and
-		// clearing then would drop the handle to a live engine.
-		const child = this.process;
-		const forget = () => {
-			if (this.process !== child) return;
-			this.process = null;
-			if (this.ownership.kind === "spawned") {
-				this.ownership = { kind: "none" };
-			}
-		};
 
 		// Scoped to this spawn rather than to the instance: a restart's replacement
 		// is a different child, and its wait must not inherit the reason the
 		// previous one died.
 		let failure: SpawnFailure | null = null;
 
-		// Handle process exit
 		child.on("exit", (code, signal) => {
 			appLogger().info("sidecar", "Engine exited", { code, signal });
 			failure = { kind: "exit", code, signal, stderr: [...stderrTail] };
-			forget();
+			this.childLeft(child, {
+				kind: "crashed",
+				code,
+				signal,
+				stderrTail: [...stderrTail],
+				error: null,
+			});
 		});
 
-		// Handle errors
 		child.on("error", (err) => {
 			appLogger().error("sidecar", "Engine error", { error: String(err) });
 			failure = { kind: "error", message: err.message };
-			forget();
+			this.childLeft(child, {
+				kind: "crashed",
+				code: null,
+				signal: null,
+				stderrTail: [...stderrTail],
+				error: err.message,
+			});
 		});
 
-		// Wait for the engine to be ready
-		await this.waitForEngine(() => failure);
+		return { child, spawnFailure: () => failure };
+	}
+
+	/**
+	 * Forget a child that exited or errored, and report a crash when nobody
+	 * asked it to go. Only while it is still the current child: a restart's
+	 * replacement is already spawned by the time a slow `exit` can land, and
+	 * clearing then would drop the handle to a live engine.
+	 */
+	private childLeft(child: ChildProcess, crash: EngineLifecycle & { kind: "crashed" }): void {
+		if (this.process !== child) return;
+		this.process = null;
+		if (this.ownership.kind === "spawned") {
+			this.ownership = { kind: "none" };
+		}
+		// Every intentional stop leaves these states first (`replacing`,
+		// `stopping`), so a child leaving in one of them left on its own.
+		if (CHILD_EXPECTED_STATES.has(this.lifecycle.kind)) this.transition(crash);
 	}
 
 	/**
@@ -870,14 +1028,44 @@ export class EngineSidecar {
 	 * letting the early attempts be cheap.
 	 *
 	 * Throws `EngineNotReadyError` when the budget is spent and the child is
-	 * still alive; the caller decides what a slow engine costs.
+	 * still alive; the caller decides what a slow engine costs. The child is
+	 * `slow` from then on and still watched, so it becomes `ready` when it
+	 * answers.
 	 */
-	private async waitForEngine(spawnFailure: () => SpawnFailure | null): Promise<void> {
+	private async waitForEngine(
+		child: ChildProcess,
+		spawnFailure: () => SpawnFailure | null
+	): Promise<void> {
 		if (await this.pollHealthWithinBudget(spawnFailure)) {
 			appLogger().info("sidecar", "Engine is ready");
+			this.transition({ kind: "ready" });
 			return;
 		}
+		this.transition({ kind: "slow" });
+		void this.watchSlowEngine(child);
 		throw new EngineNotReadyError(ENGINE_HEALTH_POLL_BUDGET_MS);
+	}
+
+	/**
+	 * Keep probing a `slow` child until it answers, leaves or is stopped. Outside
+	 * the operation queue on purpose: the start that gave up on it has returned,
+	 * and a restart or stop moves the lifecycle off `slow`, which ends the watch.
+	 */
+	private async watchSlowEngine(child: ChildProcess): Promise<void> {
+		const stillSlow = () => this.process === child && this.lifecycle.kind === "slow";
+		try {
+			for (;;) {
+				await this.system.sleep(ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
+				if (!stillSlow()) return;
+				if (!(await this.system.probeHealth(this.port))) continue;
+				if (!stillSlow()) return;
+				appLogger().info("sidecar", "Engine answered after the readiness budget");
+				this.transition({ kind: "ready" });
+				return;
+			}
+		} catch (error) {
+			appLogger().error("sidecar", "Watching a slow engine failed", { error: String(error) });
+		}
 	}
 
 	/**
@@ -897,7 +1085,7 @@ export class EngineSidecar {
 			// A quit arriving mid-startup must not be held for the rest of the
 			// ceiling: the child is already tracked, so the quit path kills it and
 			// this loop's only remaining job is to stop waiting.
-			this.assertNotStopping();
+			this.assertNotShuttingDown();
 
 			// Before the probe, not after: by the time control is back here the
 			// child's exit handler has already run, and one more health request to a
@@ -918,8 +1106,8 @@ export class EngineSidecar {
 	}
 
 	/** Throw if the app is shutting down, so no caller spawns into a quit. */
-	private assertNotStopping(): void {
-		if (this.stopping) {
+	private assertNotShuttingDown(): void {
+		if (this.shuttingDown) {
 			throw new Error("Engine start aborted: the app is shutting down");
 		}
 	}
@@ -932,7 +1120,15 @@ export class EngineSidecar {
 	 * asked over HTTP, watched by PID (or by health, when no lock PID was
 	 * readable), and force-killed by PID if it outlives the grace period.
 	 */
-	async stop(): Promise<void> {
+	stop(): Promise<void> {
+		return this.enqueue(async () => {
+			this.transition({ kind: "stopping" });
+			await this.runStop();
+			this.transition({ kind: "stopped" });
+		});
+	}
+
+	private async runStop(): Promise<void> {
 		const owned = this.ownership;
 		if (owned.kind === "none") {
 			appLogger().info("sidecar", "Engine not running");
@@ -1060,29 +1256,37 @@ export class EngineSidecar {
 		return this.ownership.kind !== "none";
 	}
 
+	/** Whether `shutdown()` has been called. No engine is started after it. */
+	isShuttingDown(): boolean {
+		return this.shuttingDown;
+	}
+
+	/**
+	 * Whether a restart is queued or running. One asked for during a start is
+	 * still pending when that start's failure reaches its caller, so the caller
+	 * can leave the last word to the restart.
+	 */
+	hasRestartPending(): boolean {
+		return this.pendingRestart !== null;
+	}
+
 	/**
 	 * Restart the engine process with retry logic and exponential backoff.
 	 *
-	 * The promise is kept on the instance so `shutdown()` can wait it out: a
-	 * restart's stop-then-spawn has a gap, and a quit landing inside it used to
-	 * leave a fresh engine nothing would ever kill.
+	 * Queued behind whatever is running, so a restart requested during the first
+	 * start's health poll waits for that start rather than killing the child it
+	 * is polling. A restart requested while another is queued or running joins
+	 * it, and gets the same promise: two restarts used to both spawn.
 	 */
-	async restart(maxRetries: number = ENGINE_RESTART_MAX_RETRIES): Promise<void> {
-		const run = this.runRestart(maxRetries);
-		// Swallowed separately from the caller's copy: the quit path only needs to
-		// know the restart is over, not whether it worked.
-		const inFlight = run.then(
-			() => undefined,
-			() => undefined
-		);
-		this.restartInFlight = inFlight;
-		try {
-			await run;
-		} finally {
-			// Only clear our own: an overlapping restart owns the field now, and
-			// dropping its promise would let a quit stop waiting for a live one.
-			if (this.restartInFlight === inFlight) this.restartInFlight = null;
-		}
+	restart(maxRetries: number = ENGINE_RESTART_MAX_RETRIES): Promise<void> {
+		if (this.pendingRestart) return this.pendingRestart;
+		const run = this.enqueue(() => this.runRestart(maxRetries));
+		this.pendingRestart = run;
+		const settled = () => {
+			if (this.pendingRestart === run) this.pendingRestart = null;
+		};
+		run.then(settled, settled);
+		return run;
 	}
 
 	private async runRestart(maxRetries: number): Promise<void> {
@@ -1094,7 +1298,7 @@ export class EngineSidecar {
 			try {
 				// Checked per attempt, not once up front: a quit can arrive between
 				// two retries just as easily as before the first.
-				this.assertNotStopping();
+				this.assertNotShuttingDown();
 
 				if (attempt > 0) {
 					// Calculate exponential delay: baseDelay * 2^(attempt-1)
@@ -1107,10 +1311,11 @@ export class EngineSidecar {
 					await this.system.sleep(delay);
 				}
 
-				await this.stop();
+				if (this.ownership.kind !== "none") this.transition({ kind: "replacing" });
+				await this.runStop();
 				// Small delay to ensure port is released
 				await this.system.sleep(ENGINE_PORT_RELEASE_DELAY_MS);
-				await this.start();
+				await this.runStart();
 				appLogger().info("sidecar", "Engine restarted successfully");
 				return;
 			} catch (error) {
@@ -1123,7 +1328,7 @@ export class EngineSidecar {
 
 				// A shutdown is not a failed restart to retry - the engine is meant
 				// to be down, and retrying would spawn the orphan we just avoided.
-				if (this.stopping) {
+				if (this.shuttingDown) {
 					throw lastError;
 				}
 
@@ -1150,16 +1355,16 @@ export class EngineSidecar {
 	 * Stop the engine for good, on the way out of the app.
 	 *
 	 * Distinct from `stop()` because quit is one-way: further restarts are
-	 * refused from here on, and a restart already in flight is waited out rather
-	 * than raced, so the engine cannot be spawned again behind the shutdown.
+	 * refused from here on, and a start or restart already queued is waited out
+	 * rather than raced, so the engine cannot be spawned again behind the
+	 * shutdown. Each of those checks the flag before it spawns.
 	 */
-	async shutdown(): Promise<void> {
-		this.stopping = true;
-		const inFlight = this.restartInFlight;
-		if (inFlight) {
-			appLogger().info("sidecar", "Waiting for the in-flight restart before shutting down");
-			await inFlight;
-		}
-		await this.stop();
+	shutdown(): Promise<void> {
+		this.shuttingDown = true;
+		this.transition({ kind: "stopping" });
+		return this.enqueue(async () => {
+			await this.runStop();
+			this.transition({ kind: "stopped" });
+		});
 	}
 }

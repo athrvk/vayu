@@ -175,6 +175,25 @@ class EventLoop {
     std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
 
     /**
+     * @brief Turn this run of the loop into a cancelling stop, from any thread
+     *
+     * What lets a Stop that arrives while another thread is blocked in
+     * `stop (true, deadline)` cut that drain short (#3341). Every in-flight
+     * transfer is cancelled as `stop (false)` cancels it and the workers
+     * exit; the queued backlog, and anything submitted afterwards, is
+     * completed as cancelled by the `stop ()` that ends the loop, whichever
+     * kind it is, since a `stop (true)` after this cancels rather than drains.
+     * Nothing consumes the queue until that `stop ()`, so a producer that
+     * keeps submitting blocks once a worker's queue is full.
+     * Never blocks, never joins and never takes a lock, so it is safe beside a
+     * stop in progress; calling it again changes nothing. It does not end the
+     * loop: `is_running ()` stays true and `stop ()` (or the destructor) is
+     * still owed. A `start ()` after that `stop ()` begins a run it does not
+     * reach. The caller keeps the loop alive across the call.
+     */
+    void cancel ();
+
+    /**
      * @brief Check if the event loop is running
      */
     [[nodiscard]] bool is_running () const;

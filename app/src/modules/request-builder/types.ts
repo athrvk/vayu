@@ -25,6 +25,7 @@ import type { ResponseBytes } from "./utils/response-bytes";
 import type { SendWithRowState } from "./hooks/useSendWithRow";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 import type { LeftOutElement } from "@/lib/elements";
+import type { EditStatus } from "@/hooks/useSaveManager";
 import type { ElementErrors } from "@/components/shared/ElementList/useElementRefusals";
 import type {
 	BodyMode,
@@ -658,7 +659,8 @@ export interface RequestBuilderContextValue {
 	stopStream: () => Promise<void>;
 	isSaving: boolean;
 	hasUnsavedChanges: boolean;
-	saveStatus: "idle" | "pending" | "saving" | "saved" | "error";
+	/** This request's own edit, not the Dock's app-wide status (#3350). */
+	saveStatus: EditStatus;
 
 	// Variable Resolution
 	resolveString: (input: string) => string;

@@ -9,7 +9,7 @@
  */
 
 /**
- * A failed auto-save used to stop trying, permanently. `failSave` published
+ * A failed auto-save used to stop trying, permanently. The failure published
  * `status: "error"` and a ten-second toast, and nothing on the auto-save path
  * ever scheduled another attempt: the effect that arms a save only reacts to a
  * *new* edit, and the draft that just failed to save is not one.
@@ -25,8 +25,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore, type FlushTally } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore, type FlushTally } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
+import { SaveBlockedError } from "@/lib/elements";
 import { TIMING } from "@/config/timing";
 import { useSaveManager } from "./useSaveManager";
 
@@ -57,10 +58,7 @@ function mountManager(initial: Props) {
 
 beforeEach(() => {
 	vi.useFakeTimers();
-	useSaveStore.getState().reset();
-	// A prior case's re-registered draft (#1489) would read as a dirty sibling and
-	// turn the next case's "saved" into "pending".
-	useSaveStore.setState({ contexts: new Map() });
+	resetSaveStoreForTests();
 	useClientSettingsStore.setState({ autoSave: { enabled: true, delayMs: 5000 } });
 	queryClient.clear();
 });
@@ -238,6 +236,57 @@ describe("retrying a failed auto-save", () => {
 		expect(context?.hasPendingChanges).toBe(true);
 	});
 
+	it("clears that context once a later flush saves it, so the Dock goes idle and a reconnect sends nothing", async () => {
+		// Mutation check: re-registering the raw saver, which leaves the entry
+		// dirty after it lands, makes the second flush send the draft again.
+		const onSaveA = vi.fn().mockRejectedValueOnce(new Error("engine unreachable"));
+		onSaveA.mockRejectedValueOnce(new Error("engine unreachable"));
+		onSaveA.mockResolvedValue(undefined);
+		const onSaveB = vi.fn().mockResolvedValue(undefined);
+		const { rerender } = mountManager({ entityId: "req_a", onSave: onSaveA });
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(5000);
+		});
+		await act(async () => {
+			rerender({ entityId: "req_b", onSave: onSaveB, hasChanges: false });
+			await vi.advanceTimersByTimeAsync(0);
+		});
+		expect(useSaveStore.getState().status).toBe("error");
+
+		let first: FlushTally | undefined;
+		await act(async () => {
+			first = await useSaveStore.getState().flushAll();
+		});
+		expect(first).toEqual({ saved: 1, failed: 0, pending: 0 });
+		expect(onSaveA).toHaveBeenCalledTimes(3);
+		expect(useSaveStore.getState().contexts.has("request-req_a")).toBe(false);
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(TIMING.SAVED_STATUS_DURATION_MS);
+		});
+		expect(useSaveStore.getState().status).toBe("idle");
+
+		await act(async () => {
+			await useSaveStore.getState().flushAll();
+		});
+		expect(onSaveA).toHaveBeenCalledTimes(3);
+	});
+
+	it("does not leave a held-back entity-switch flush counting as unsaved", async () => {
+		// The pane is gone and the provider reseeds from the next entity, so
+		// nothing is left that could ever send the held part.
+		const onSaveA = vi.fn().mockRejectedValue(new SaveBlockedError());
+		const { rerender } = mountManager({ entityId: "req_a", onSave: onSaveA });
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		await act(async () => {
+			rerender({ entityId: "req_b", onSave: vi.fn(), hasChanges: false });
+			await vi.advanceTimersByTimeAsync(0);
+		});
+
+		expect(onSaveA).toHaveBeenCalledTimes(1);
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
 	it("pokes the health query on a network failure, not on a 4xx the engine rejected outright", async () => {
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 		const onSave = vi
@@ -378,6 +427,10 @@ describe("a save the disk had no room for", () => {
 		expect(useSaveStore.getState().lastErrorMessage).toBe(
 			"Couldn't save - The disk holding Vayu's data is full - free up space and try again"
 		);
+		// Mutation check: reporting the failure without its cause clears this.
+		expect(useSaveStore.getState().unsaved.get("request-req_1")).toMatchObject({
+			diskFull: true,
+		});
 	});
 
 	it("keeps the generic lead for a 4xx", async () => {

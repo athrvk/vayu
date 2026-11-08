@@ -27,7 +27,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,10 +35,9 @@ import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import type { Collection, Environment, ResolvedVariable, VariableValue } from "@/types";
 
-type Handlers = { onError: (e: unknown) => void; onSettled: () => void };
 type VariableMap = Record<string, VariableValue>;
 
 const globalsMutate = vi.fn();
@@ -63,9 +62,9 @@ vi.mock("@/queries", () => ({
 		},
 	}),
 	useCollectionAncestors: () => [],
-	useUpdateGlobalsMutation: () => ({ mutate: globalsMutate }),
-	useUpdateEnvironmentMutation: () => ({ mutate: environmentMutate }),
-	useUpdateCollectionMutation: () => ({ mutate: collectionMutate }),
+	useUpdateGlobalsMutation: () => ({ mutateAsync: globalsMutate }),
+	useUpdateEnvironmentMutation: () => ({ mutateAsync: environmentMutate }),
+	useUpdateCollectionMutation: () => ({ mutateAsync: collectionMutate }),
 }));
 
 /** The resolver's verdict for this render - the winner, and which source it won from. */
@@ -174,12 +173,16 @@ function inputFor(displayValue: string): HTMLInputElement {
 	return screen.getByDisplayValue(displayValue) as HTMLInputElement;
 }
 
+/** A PUT the test never answers, unless it installs an answer of its own. */
+const inFlight = () => new Promise<never>(() => {});
+
 beforeEach(() => {
-	globalsMutate.mockReset();
-	environmentMutate.mockReset();
-	collectionMutate.mockReset();
+	for (const mutate of [globalsMutate, environmentMutate, collectionMutate]) {
+		mutate.mockReset();
+		mutate.mockImplementation(inFlight);
+	}
 	useToastStore.setState({ toasts: [] });
-	useSaveStore.getState().reset();
+	resetSaveStoreForTests();
 	resolved = {};
 });
 
@@ -296,8 +299,8 @@ describe("VariablesSection - the commit payload", () => {
 	});
 
 	it("reads the cache at commit time, so a second blur does not revert the first", () => {
-		// Both mutations are left in flight - neither `onSettled` nor `onError` is
-		// called. Built from the render closure, the second payload would carry
+		// Both mutations are left in flight - neither promise settles. Built from
+		// the render closure, the second payload would carry
 		// `example.com`, the value the first commit just replaced.
 		resolved = {
 			host: { value: "example.com", scope: "global" },
@@ -314,20 +317,20 @@ describe("VariablesSection - the commit payload", () => {
 		expect(second.port.value).toBe("9090");
 	});
 
-	it("restores only the edited name when the engine refuses", () => {
+	it("restores only the edited name when the engine refuses", async () => {
 		resolved = {
 			host: { value: "example.com", scope: "global" },
 			port: { value: "8080", scope: "global" },
 		};
 
 		const { client } = renderSection();
-		globalsMutate.mockImplementation((_payload: unknown, handlers: Handlers) => {
-			handlers.onError(new Error("value must not be empty"));
-			handlers.onSettled();
-		});
+		globalsMutate.mockImplementation(() =>
+			Promise.reject(new Error("value must not be empty"))
+		);
 
 		const input = inputFor("example.com");
 		editAndBlur(input, "example.org");
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
 
 		const cached = client.getQueryData<{ variables: Record<string, VariableValue> }>(
 			queryKeys.globals.all
@@ -409,9 +412,12 @@ describe("VariablesSection - an in-flight commit and the save store", () => {
 		resolved = { host: { value: "example.com", scope: "global" } };
 
 		let settle: (() => void) | null = null;
-		globalsMutate.mockImplementation((_payload: unknown, handlers: Handlers) => {
-			settle = handlers.onSettled;
-		});
+		globalsMutate.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					settle = resolve;
+				})
+		);
 
 		renderSection();
 		editAndBlur(inputFor("example.com"), "example.org");

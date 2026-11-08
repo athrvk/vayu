@@ -54,6 +54,7 @@ beforeEach(() => {
 		engineError: null,
 		engineStartWindow: null,
 		pendingRestart: false,
+		engineRestarting: false,
 		restartRequiredKeys: [],
 	});
 	useToastStore.setState({ toasts: [] });

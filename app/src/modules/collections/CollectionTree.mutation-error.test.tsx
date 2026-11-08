@@ -16,8 +16,8 @@
  * that just refused.
  *
  * The report is a plain error toast that names what was attempted, and never
- * the save-state machine: `failSave` parks the Dock on "Not saved", and a
- * failed delete or create is not an unsaved edit.
+ * the save store: `reportFailed` parks the Dock on "Not saved", and a failed
+ * delete or create is not an unsaved edit.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -25,6 +25,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -71,7 +72,7 @@ function renderTree() {
 beforeEach(() => {
 	deleteRequest.mockReset();
 	createCollection.mockReset();
-	useSaveStore.getState().reset();
+	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
 });

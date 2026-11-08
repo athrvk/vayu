@@ -499,7 +499,7 @@ TEST (CollectMetrics, StaysOpenUntilTheStopDrainCompletes) {
     vayu::tests::wait_until ([&] () { return ctx->published_count.load () >= 3; }))
     << "the metrics thread never ticked";
     size_t ticks_at_stop = ctx->published_count.load ();
-    ctx->should_stop     = true;
+    ctx->request_stop ();
 
     // The worker is still draining: the stream must stay open and keep ticking.
     // Three ticks: a thread that exits on should_stop still publishes the tick

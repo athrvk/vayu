@@ -33,6 +33,10 @@ void EventLoop::stop (bool wait_for_pending, std::chrono::milliseconds drain_tim
     impl_->stop (wait_for_pending, drain_timeout);
 }
 
+void EventLoop::cancel () {
+    impl_->cancel ();
+}
+
 bool EventLoop::is_running () const {
     return impl_->running;
 }

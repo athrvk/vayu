@@ -997,8 +997,7 @@ TEST_F (ScenarioLoadTest, AStoppedIterationsRunKeepsTheExpectedUpperBound) {
         EXPECT_TRUE (vayu::tests::wait_until (
         [&context] () { return context->event_loop->active_count () >= 2; }))
         << "both virtual users never had a transfer in flight";
-        context->should_stop = true;
-        context->notify_refill ();
+        context->request_stop ();
     });
     auto base_scopes = vayu::http::routes::load_script_variable_scopes (
     *db_, std::nullopt, context->scenario->request.collection_id);
@@ -1047,8 +1046,7 @@ TEST_F (ScenarioLoadTest, AStepTheStopCancelledMovesNoStepTally) {
         std::chrono::steady_clock::now () < deadline) {
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
         }
-        context->should_stop = true;
-        context->notify_refill ();
+        context->request_stop ();
     });
     auto base_scopes = vayu::http::routes::load_script_variable_scopes (
     *db_, std::nullopt, context->scenario->request.collection_id);

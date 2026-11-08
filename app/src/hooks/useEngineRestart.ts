@@ -16,13 +16,18 @@
  * A second copy of that would be a second place for the invalidate, the window
  * or the flag to be forgotten.
  *
+ * One restart at a time, across both places: whether one is in flight is the
+ * engine store's `engineRestarting`, not state of a hook instance, so a second
+ * click, or the other surface's button, finds it running and does nothing
+ * rather than asking the main process again (#3336).
+ *
  * Failure is a toast, not a `window.alert`. The alert this replaced blocked the
  * whole renderer on a modal the user could only dismiss, and from the Dock it
  * would interrupt whatever they were doing elsewhere; every other failure in
  * the app already reports this way.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEngineStore, useSaveStore, useToastStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
@@ -30,7 +35,7 @@ import { systemNotify, NOTIFY_KINDS } from "@/services/notify";
 import { TIMING } from "@/config/timing";
 
 export function useEngineRestart(): { restart: () => Promise<void>; isRestarting: boolean } {
-	const [isRestarting, setIsRestarting] = useState(false);
+	const isRestarting = useEngineStore((s) => s.engineRestarting);
 	const queryClient = useQueryClient();
 	const clearRestartRequired = useEngineStore((s) => s.clearRestartRequired);
 	const openEngineStartWindow = useEngineStore((s) => s.openEngineStartWindow);
@@ -50,30 +55,33 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			return;
 		}
 
-		setIsRestarting(true);
-		// The engine the health poll is watching is about to be killed and replaced
-		// by one that repeats the whole cold start - orphan reconciliation, inbox
-		// cleanup, the page-reclaim rewrite - with the port down for all of it. Say
-		// so before it happens: without a start window the poll reads that silence
-		// as an engine that answered and stopped, and paints "Disconnected" with a
-		// transport error beside this very button's "Restarting…" (#1227).
-		//
-		// Evidence, not a status. `useHealthQuery` remains the only thing that
-		// classifies, so a restart whose engine never comes back still spends the
-		// window and reaches `unreachable` with its reason, on a cold launch's
-		// budget.
-		//
-		// The poll may already have a question out to the engine about to be
-		// killed, and an answer it sent while alive would report a process that no
-		// longer exists. Since a success closes the window, that straggler would
-		// close this one and hand the failures that follow back to the dead-engine
-		// path. Drop it rather than let it speak for the engine replacing it.
-		await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
-		openEngineStartWindow(Date.now());
-		// The failure being retried would keep the poll reading the coming
-		// silence as unreachable; the main process re-reports it if it holds.
-		setEngineStartFailure(null);
+		// Read from the store, not from the render's `isRestarting`: two clicks in
+		// the same frame both see the stale `false` there.
+		if (useEngineStore.getState().engineRestarting) return;
+		useEngineStore.getState().setEngineRestarting(true);
 		try {
+			// The engine the health poll is watching is about to be killed and replaced
+			// by one that repeats the whole cold start - orphan reconciliation, inbox
+			// cleanup, the page-reclaim rewrite - with the port down for all of it. Say
+			// so before it happens: without a start window the poll reads that silence
+			// as an engine that answered and stopped, and paints "Disconnected" with a
+			// transport error beside this very button's "Restarting…" (#1227).
+			//
+			// Evidence, not a status. `useHealthQuery` remains the only thing that
+			// classifies, so a restart whose engine never comes back still spends the
+			// window and reaches `unreachable` with its reason, on a cold launch's
+			// budget.
+			//
+			// The poll may already have a question out to the engine about to be
+			// killed, and an answer it sent while alive would report a process that no
+			// longer exists. Since a success closes the window, that straggler would
+			// close this one and hand the failures that follow back to the dead-engine
+			// path. Drop it rather than let it speak for the engine replacing it.
+			await queryClient.cancelQueries({ queryKey: queryKeys.health.status() });
+			openEngineStartWindow(Date.now());
+			// The failure being retried would keep the poll reading the coming
+			// silence as unreachable; the main process re-reports it if it holds.
+			setEngineStartFailure(null);
 			const result = await window.electronAPI.restartEngine();
 			if (!result.success) {
 				// Nothing is coming up after all. Closing the window puts the next
@@ -109,7 +117,7 @@ export function useEngineRestart(): { restart: () => Promise<void>; isRestarting
 			// failed restart must leave it standing.
 			clearRestartRequired();
 		} finally {
-			setIsRestarting(false);
+			useEngineStore.getState().setEngineRestarting(false);
 		}
 	}, [
 		queryClient,

@@ -12,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -196,9 +197,13 @@ class EventLoopWorker {
 
     void start ();
     /// See EventLoop::stop. `drain_timeout` bounds the drain when
-    /// `wait_for_pending` is true; zero means unbounded.
+    /// `wait_for_pending` is true; zero means unbounded. A drain asked for
+    /// after `cancel` cancels instead.
     void stop (bool wait_for_pending,
     std::chrono::milliseconds drain_timeout = std::chrono::milliseconds::zero ());
+    /// See EventLoop::cancel. Any thread; never blocks, never joins and never
+    /// touches the pending queue.
+    void cancel ();
     void submit (std::unique_ptr<TransferData> data);
 
     size_t active_count () const;
@@ -253,18 +258,36 @@ class EventLoopWorker {
     /// false when no deadline was set.
     [[nodiscard]] bool drain_deadline_passed () const;
 
+    /// Wakes the worker wherever it is parked: on `queue_has_items` when idle,
+    /// in `curl_multi_poll` when driving transfers. Any thread.
+    void wake ();
+
+    /**
+     * What the worker is doing, and the one place a stop is recorded (#3341).
+     *
+     * - `run`: sending what is submitted.
+     * - `drain`: stop(true) - send the queue, await the transfers, until both
+     *   are empty or `drain_deadline_ticks` passes.
+     * - `cancel`: stop(false) or cancel() - cancel the in-flight transfers and
+     *   exit, leaving the queue to stop(), which cancels it once the join has
+     *   made it the SPSC queue's sole consumer.
+     *
+     * Moves only forward: `run` to either, `drain` to `cancel`, and nothing
+     * leaves `cancel` until start() begins a new run. That is what lets
+     * cancel() land before, during or after a drain on any worker without a
+     * lock: a stop(true) that arrives after it finds `cancel` and keeps it.
+     */
+    enum class WorkerMode : std::uint8_t { run, drain, cancel };
+
     CURLM* multi_handle = nullptr;
     std::thread thread;
     std::atomic<bool> running{ false };
-    std::atomic<bool> stop_requested{ false };
-    // Set to true when stop(true) is called so the run_loop continues draining
-    // the pending queue before exiting. When false (stop(false)), the worker
-    // cancels its in-flight transfers and abandons the queue; the caller drains
-    // the queue as sole consumer after join() to avoid a concurrent SPSC pop.
-    std::atomic<bool> drain_on_stop{ true };
+    // Stored with release and loaded with acquire, so a worker that reads
+    // `drain` also reads the deadline stored before it.
+    std::atomic<WorkerMode> mode{ WorkerMode::run };
     // steady_clock ticks after which a drain gives up and cancels what is left.
-    // 0 = no deadline. Written by the stopping thread before `stop_requested`,
-    // read by the worker, so a release/acquire pair carries both.
+    // 0 = no deadline. Written by the stopping thread before it moves `mode`
+    // to `drain`; read by the worker only in `drain`.
     std::atomic<int64_t> drain_deadline_ticks{ 0 };
 
     // Lock-free queue for high performance

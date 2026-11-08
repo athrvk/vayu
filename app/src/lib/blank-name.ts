@@ -13,16 +13,16 @@
  * both of them the same way - two surfaces enforcing one rule in two different
  * wordings is how a rule stops reading as a rule.
  *
- * `failSave` is the app's single save-failure channel: it toasts and puts the
- * Dock in its error state (see `stores/save-store`). A client-side refusal is
- * not a mutation failure, so `SaveFailed` - which renders a *rejected*
- * mutation - never sees this one and cannot report it.
+ * A toast and nothing else. The caller puts the stored name back, so the
+ * refusal leaves no unsaved edit for the Dock to call "Not saved" (see
+ * `stores/save-store`), and a client-side refusal is not a mutation failure,
+ * so `SaveFailed` - which renders a *rejected* mutation - never sees it.
  *
  * Restoring the stored value is the caller's, because only the caller knows
  * where its draft lives.
  */
 
-import { useSaveStore } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
 
 /**
  * Report that a blank name was refused and the stored one put back.
@@ -30,5 +30,5 @@ import { useSaveStore } from "@/stores/save-store";
  * @param what - the thing being named, lower case: "request", "collection".
  */
 export function reportBlankNameRefused(what: string): void {
-	useSaveStore.getState().failSave(`A ${what} needs a name - kept the saved one.`);
+	useToastStore.getState().showToast(`A ${what} needs a name - kept the saved one.`, "error");
 }

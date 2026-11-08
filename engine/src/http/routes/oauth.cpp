@@ -169,10 +169,11 @@ void register_oauth_routes (RouteContext& ctx) {
             return;
         }
         res.status = 200;
-        res.set_content (nlohmann::json{ { "attemptId", result.attempt_id },
-                         { "authorizeUrl", result.authorize_url },
-                         { "redirectUri", result.redirect_uri } }
-                         .dump (),
+        res.set_content (
+        nlohmann::json{ { "attemptId", result.attempt_id },
+        { "authorizeUrl", result.authorize_url },
+        { "redirectUri", result.redirect_uri }, { "expiresAt", result.expires_at } }
+        .dump (),
         "application/json");
     });
 
@@ -184,15 +185,20 @@ void register_oauth_routes (RouteContext& ctx) {
             refuse_request_body (res, "POST /oauth2/authorize/complete", body.error ());
             return;
         }
+        // The attempt's own cancel ends the exchange: a DELETE of the attempt,
+        // or `Server::stop`, which shuts the manager down before joining this
+        // handler.
         const auto st = ctx.authorize_manager.complete (ctx.db,
         body->value ("attemptId", std::string{}),
-        body->value ("callbackUrl", std::string{}), &ctx.server_stopping);
+        body->value ("callbackUrl", std::string{}));
         res.status    = st.state == "not_found" ? 404 : 200;
         res.set_content (authorize_status_json (st).dump (-1, ' ', false,
                          nlohmann::json::error_handler_t::replace),
         "application/json");
     });
 
+    // Reads only, like every GET: the manager's reaper is what expires an
+    // attempt and frees its port (#3347).
     ctx.server.Get (R"(/oauth2/authorize/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {
         const auto st = ctx.authorize_manager.status (req.matches[1]);

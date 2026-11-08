@@ -13,7 +13,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ApiError } from "@/services/http-client";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import SettingsMain from "./SettingsMain";
 
@@ -79,10 +79,11 @@ function Panel() {
  * A settings write the engine refused with a 507 must reach the quit prompt as
  * disk-full (#2685).
  *
- * `saveEntries` reports its failure through `failSave` and resolves, so the
- * store judges the context by the status it published; without the error handed
- * to `failSave` that reads as a generic failure and the prompt blames the engine
- * for a full disk. Driven through the store's `flushAll`, which is what quit runs.
+ * `saveEntries` reports its failure through `reportFailed` and resolves, so the
+ * store judges the context by the report it made during the save; without the
+ * error handed over as the cause that reads as a generic failure and the prompt
+ * blames the engine for a full disk. Driven through the store's `flushAll`,
+ * which is what quit runs.
  */
 
 async function flushAnEditedPanel(rejectWith: Error) {
@@ -101,8 +102,7 @@ async function flushAnEditedPanel(rejectWith: Error) {
 describe("a settings write refused at quit", () => {
 	beforeEach(() => {
 		mutateAsync.mockClear();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 

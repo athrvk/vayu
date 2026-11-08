@@ -1011,6 +1011,29 @@ constexpr int SPIN_COUNT = 2000;
 } // namespace queue
 
 /**
+ * @brief Interactive OAuth 2.0 authorization attempt bounds (issue #3347)
+ *
+ * Rails rather than preferences: a loopback attempt holds a `127.0.0.1` port
+ * and a listener thread until it settles or expires, and the user who started
+ * it may have closed the browser tab long ago.
+ */
+namespace oauth_authorize {
+/// How long an attempt waits for its redirect. Past it the attempt is failed
+/// with "Authorization timed out" and its listener is torn down; the start
+/// answer reports the instant as `expiresAt`.
+constexpr int64_t ATTEMPT_TTL_MS = int64_t{ 5 } * 60 * 1000;
+/// How long a settled attempt's result stays readable, counted from its start,
+/// so a poller that was asleep still reads the outcome rather than `not_found`.
+constexpr int64_t RECORD_RETENTION_MS = 2 * ATTEMPT_TTL_MS;
+/// Cadence of the manager's expiry sweep: an expired attempt's port is freed
+/// within this of its deadline.
+constexpr int64_t REAP_INTERVAL_MS = 1000;
+/// Attempts not yet settled at once, embedded ones included. A settled result
+/// kept for `RECORD_RETENTION_MS` holds no listener and does not count.
+constexpr size_t MAX_ATTEMPTS = 16;
+} // namespace oauth_authorize
+
+/**
  * @brief Local OAuth 2.0 mock issuer bounds
  *
  * Rails rather than preferences: every one of these bounds a resource the
@@ -1031,9 +1054,9 @@ constexpr size_t MAX_PENDING_CODES = 256;
 /// one and mints one, so this only binds when many are issued and never used.
 constexpr size_t MAX_REFRESH_TOKENS = 256;
 /// How long an authorization code stays exchangeable. RFC 6749 §4.1.2 asks for
-/// a short lifetime; this matches the interactive attempt TTL in
-/// oauth_authorize.cpp so the two halves of one flow expire together.
-constexpr int64_t CODE_TTL_MS = int64_t{ 5 } * 60 * 1000;
+/// a short lifetime; this is the interactive attempt's TTL so the two halves of
+/// one flow expire together.
+constexpr int64_t CODE_TTL_MS = oauth_authorize::ATTEMPT_TTL_MS;
 /// Ceiling on the `slow` failure mode's delay. Past a minute the caller is
 /// testing its own timeout, and the wait holds a cpp-httplib pool thread.
 constexpr int64_t MAX_SLOW_MS = 60000;

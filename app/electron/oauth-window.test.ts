@@ -31,7 +31,6 @@ import { dirname, join } from "node:path";
 import {
 	createAuthWindowFlow,
 	readAuthWindowParams,
-	AUTH_WINDOW_TIMEOUT_MS,
 	ERR_ABORTED,
 	type AuthWindowFlow,
 	type AuthWindowResult,
@@ -46,6 +45,7 @@ const oauthSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "
 const PARAMS = {
 	authorizeUrl: "https://idp.example.com/authorize?client_id=abc",
 	redirectUri: "https://app.example.com/callback",
+	timeoutMs: 90_000,
 };
 
 const CALLBACK = "https://app.example.com/callback?code=xyz&state=s";
@@ -207,13 +207,23 @@ describe("the deadline is the backstop for a load that neither ends nor fails", 
 		const flow = createAuthWindowFlow(PARAMS, w.transport);
 		flow.start();
 
-		expect(w.timeoutMs()).toBe(AUTH_WINDOW_TIMEOUT_MS);
+		expect(w.timeoutMs()).toBe(PARAMS.timeoutMs);
 		expect(await answer(flow)).toBe("pending");
 
 		w.expire();
 
 		expect(await answer(flow)).toEqual({ error: "Authorization timed out" });
 		expect(w.destroy).toHaveBeenCalledTimes(1);
+	});
+
+	it("arms the deadline with the time the caller passed, not a fixed one", () => {
+		const first = fakeWindow();
+		createAuthWindowFlow({ ...PARAMS, timeoutMs: 12_345 }, first.transport).start();
+		const second = fakeWindow();
+		createAuthWindowFlow({ ...PARAMS, timeoutMs: 600_000 }, second.transport).start();
+
+		expect(first.timeoutMs()).toBe(12_345);
+		expect(second.timeoutMs()).toBe(600_000);
 	});
 
 	it("cannot overwrite an answer already given", async () => {
@@ -274,6 +284,7 @@ describe("readAuthWindowParams", () => {
 	const RENDERER_SHAPE = {
 		authorizeUrl: "https://idp/x",
 		redirectUri: "vayu://cb",
+		timeoutMs: 45_000,
 		partition: "oauth:abc",
 	};
 
@@ -317,6 +328,17 @@ describe("readAuthWindowParams", () => {
 		expect(() => readAuthWindowParams({ ...RENDERER_SHAPE, authorizeUrl })).toThrow(
 			"Refusing to open a non-HTTP(S) authorize URL"
 		);
+	});
+
+	it.each([
+		["missing", undefined],
+		["zero, which would close the window before it opened", 0],
+		["negative", -1],
+		["NaN, which a timer fires at once", Number.NaN],
+		["Infinity, which a timer never fires", Number.POSITIVE_INFINITY],
+		["a numeric string", "300000"],
+	])("refuses a deadline that is %s", (_label, timeoutMs) => {
+		expect(() => readAuthWindowParams({ ...RENDERER_SHAPE, timeoutMs })).toThrow(/deadline/);
 	});
 
 	it.each([[null], [undefined], ["https://idp/x"], [42]])(

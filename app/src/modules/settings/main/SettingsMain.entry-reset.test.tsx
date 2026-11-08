@@ -110,21 +110,6 @@ vi.mock("@/stores", () => ({
 		selector({ showToast }),
 }));
 
-vi.mock("@/stores/save-store", () => ({
-	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
-		selector({
-			startSaving: vi.fn(),
-			completeSaveThenIdle: vi.fn(),
-			failSave: vi.fn(),
-			setStatus: vi.fn(),
-			markPendingSave: vi.fn(),
-			registerContext: vi.fn(),
-			unregisterContext: vi.fn(),
-			setActiveContext: vi.fn(),
-			updateContext: vi.fn(),
-		}),
-}));
-
 function renderSettings() {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(

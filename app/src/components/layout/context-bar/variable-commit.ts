@@ -24,6 +24,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSaveStore } from "@/stores";
+import { isFailedOutcome, type SaveOutcome } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
+import { isDiskFullError } from "@/lib/disk-full";
 import {
 	useUpdateGlobalsMutation,
 	useUpdateEnvironmentMutation,
@@ -49,11 +52,14 @@ interface CommitScope {
 	read: () => VariableMap | undefined;
 	/** Patch the cache so a later commit's `read` already sees this one. */
 	write: (next: VariableMap) => void;
-	/** Send the map to the engine. */
-	mutate: (
-		next: VariableMap,
-		handlers: { onError: (e: unknown) => void; onSettled: () => void }
-	) => void;
+	/**
+	 * Send the map to the engine. The mutation's own promise, never `mutate`'s
+	 * per-call callbacks: an observer holds one set of those, replaced by the
+	 * next `mutate` and never called once its host unmounts (query-core's
+	 * `MutationObserver`), so a commit whose callbacks were dropped never
+	 * settled and the Dock said "Saving…" until restart.
+	 */
+	mutate: (next: VariableMap) => Promise<unknown>;
 }
 
 /**
@@ -67,65 +73,78 @@ interface CommitScope {
 const SAVE_CONTEXT_ID = "context-bar-variables";
 
 /**
+ * One verdict for every commit a flush waited on: failed if any failed, and
+ * disk-full only when each failure was the engine's 507, the same rule
+ * `flushAll` applies across contexts.
+ */
+function verdictOf(outcomes: SaveOutcome[]): SaveOutcome {
+	const failures = outcomes.filter(isFailedOutcome);
+	if (failures.length === 0) return "saved";
+	return failures.every((outcome) => outcome === "disk-full") ? "disk-full" : "failed";
+}
+
+/**
  * Track in-flight commits so the quit-time flush waits for them.
  *
  * `onBeforeQuit` awaits `flushAll` (`App.tsx`), which only knows about
  * *registered* save contexts - the bar registered none, so the renderer could be
  * torn down mid-PUT with the input already showing the value as committed. One
  * context covers the whole bar: `hasPendingChanges` says whether any commit is
- * outstanding, and `save()` resolves when the last one settles.
+ * outstanding, and `save()` resolves with their verdict when the last one
+ * settles.
+ *
+ * The Dock shows "Saving…" under the bar's id while any commit is out. A failed
+ * commit rolls its input back, so it leaves no unsaved edit: the batch it was
+ * in withdraws the report instead of reporting it saved, and the failure is the
+ * caller's toast, never "Not saved" (`save-store.ts`).
  *
  * Returns a function that opens a commit and hands back its `settle` callback,
- * for the mutation's `onSettled`. Commits are held as promises rather than
- * counted so `save()` can await the requests themselves.
+ * for when the mutation's promise settles. Commits are held as promises rather
+ * than counted so `save()` can await the requests themselves.
  */
-function usePendingCommits(): () => () => void {
+function usePendingCommits(): () => (outcome: SaveOutcome) => void {
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
-	const pending = useRef<Set<Promise<void>>>(new Set());
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const discard = useSaveStore((s) => s.discard);
+	const pending = useRef<Set<Promise<SaveOutcome>>>(new Set());
+	// What the commits settled since the bar last had none in flight.
+	const settled = useRef<SaveOutcome[]>([]);
 
 	useEffect(() => {
 		const inFlight = pending.current;
 		registerContext({
 			id: SAVE_CONTEXT_ID,
 			name: "Variables",
-			save: async () => {
-				await Promise.all([...inFlight]);
-			},
+			save: async () => verdictOf(await Promise.all([...inFlight])),
 			hasPendingChanges: false,
 		});
 		return () => unregisterContext(SAVE_CONTEXT_ID);
 	}, [registerContext, unregisterContext]);
 
 	return useCallback(() => {
-		let settle: () => void = () => {};
-		const commit = new Promise<void>((resolve) => {
+		let settle: (outcome: SaveOutcome) => void = () => {};
+		const commit = new Promise<SaveOutcome>((resolve) => {
 			settle = resolve;
 		});
 		pending.current.add(commit);
 		updateContext(SAVE_CONTEXT_ID, { hasPendingChanges: true });
-		useSaveStore.getState().startSaving();
+		reportSaving(SAVE_CONTEXT_ID);
 
-		return () => {
+		return (outcome) => {
 			pending.current.delete(commit);
-			settle();
+			settled.current.push(outcome);
+			settle(outcome);
 			if (pending.current.size > 0) return;
 			updateContext(SAVE_CONTEXT_ID, { hasPendingChanges: false });
-			// A failed commit already reported itself through `failSave`; painting
-			// "Saved" over it is the same defect `runSave` guards against in the
-			// save store.
-			//
-			// `completeSaveThenIdle`, not a success plus a hand-rolled reset timer:
-			// the store holds one status for the whole app, so a bare
-			// `setTimeout(() => setStatus("idle"))` clears whatever is current when
-			// it lands. This path armed no reset at all before #369, which left
-			// "Saved" in the Dock until something else changed it.
-			if (useSaveStore.getState().status !== "error") {
-				useSaveStore.getState().completeSaveThenIdle(SAVE_CONTEXT_ID);
-			}
+			const batch = verdictOf(settled.current);
+			settled.current = [];
+			if (batch === "saved") reportSaved(SAVE_CONTEXT_ID);
+			else discard(SAVE_CONTEXT_ID);
 		};
-	}, [updateContext]);
+	}, [updateContext, reportSaving, reportSaved, discard]);
 }
 
 /**
@@ -150,7 +169,7 @@ export function useVariableCommit(): (
 	const updateGlobalsMutation = useUpdateGlobalsMutation();
 	const updateEnvironmentMutation = useUpdateEnvironmentMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
-	const failSave = useSaveStore((s) => s.failSave);
+	const showToast = useToastStore((s) => s.showToast);
 	const beginCommit = usePendingCommits();
 
 	/**
@@ -176,8 +195,7 @@ export function useVariableCommit(): (
 					queryClient.setQueryData<GlobalVariables>(queryKeys.globals.all, (old) =>
 						old ? { ...old, variables: next } : old
 					),
-				mutate: (next, handlers) =>
-					updateGlobalsMutation.mutate({ variables: next }, handlers),
+				mutate: (next) => updateGlobalsMutation.mutateAsync({ variables: next }),
 			};
 		}
 
@@ -201,8 +219,8 @@ export function useVariableCommit(): (
 					queryClient.setQueryData<Environment[]>(key, (old) =>
 						old?.map((e) => (e.id === sourceId ? { ...e, variables: next } : e))
 					),
-				mutate: (next, handlers) =>
-					updateEnvironmentMutation.mutate({ id: sourceId, variables: next }, handlers),
+				mutate: (next) =>
+					updateEnvironmentMutation.mutateAsync({ id: sourceId, variables: next }),
 			};
 		}
 
@@ -217,8 +235,8 @@ export function useVariableCommit(): (
 				queryClient.setQueryData<Collection[]>(key, (old) =>
 					old?.map((c) => (c.id === sourceId ? { ...c, variables: next } : c))
 				),
-			mutate: (next, handlers) =>
-				updateCollectionMutation.mutate({ id: sourceId, variables: next }, handlers),
+			mutate: (next) =>
+				updateCollectionMutation.mutateAsync({ id: sourceId, variables: next }),
 		};
 	};
 
@@ -226,12 +244,12 @@ export function useVariableCommit(): (
 		const newValue = input.value;
 		if (newValue === resolved.value) return;
 
-		const rollBack = (message: string, cause?: unknown) => {
+		// A toast, not `reportFailed`: the input goes back to the stored value,
+		// so no edit is left unsaved (`usePendingCommits`).
+		const rollBack = (message: string) => {
 			input.value = resolved.value;
-			failSave(message, cause);
+			showToast(message, "error");
 		};
-		// `failSave` is the app's one save-failure surface (it toasts and sets the
-		// Dock's status) - see the note on it in save-store.
 		// The definition this bar resolved against is gone - deleted from its
 		// scope, or its environment or collection removed, between render and blur.
 		// Writing it back would resurrect it, so the edit is refused; saying so
@@ -252,8 +270,9 @@ export function useVariableCommit(): (
 		scope.write(next);
 
 		const settle = beginCommit();
-		scope.mutate(next, {
-			onError: (error: unknown) => {
+		scope.mutate(next).then(
+			() => settle("saved"),
+			(error: unknown) => {
 				// Restore this name alone rather than the whole snapshot: another
 				// variable's commit may have patched the map in the meantime, and
 				// replacing it wholesale would revert that one too - the very
@@ -261,12 +280,9 @@ export function useVariableCommit(): (
 				const current = scope.read();
 				if (current) scope.write(mergeVariableChanges(current, { [name]: previous }));
 				const fallback = `Couldn't save {{${name}}}`;
-				rollBack(
-					error instanceof Error ? `${fallback} - ${error.message}` : fallback,
-					error
-				);
-			},
-			onSettled: settle,
-		});
+				rollBack(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+				settle(isDiskFullError(error) ? "disk-full" : "failed");
+			}
+		);
 	};
 }

@@ -29,7 +29,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { useSaveManager } from "./useSaveManager";
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore, type SaveContext } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore, type SaveContext } from "@/stores/save-store";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 function wrapper({ children }: { children: ReactNode }) {
@@ -78,7 +78,7 @@ async function settle() {
 describe("a save arriving while another is in flight", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		// Auto-save off isolates the explicit saves under test - and is also the
 		// setting under which losing them is unbounded rather than capped by the
 		// auto-save delay.
@@ -209,14 +209,13 @@ describe("a save arriving while another is in flight", () => {
  * The other half of the false-"saved" seam, one layer up.
  *
  * `runSave` in the store wrapped `context.save()` and set "saved" whenever it
- * resolved. But every registered context reports its own failure through
- * `failSave` and then resolves rather than rejecting - `useSaveManager`,
- * `SettingsMain` and `VariableTableEditor` all do - so a failed Cmd+S ended up
- * displaying "Saved" beside its own failure toast.
+ * resolved. But a context can report its own failure and then resolve rather
+ * than reject - `SettingsMain` does - so a failed Cmd+S ended up displaying
+ * "Saved" beside its own failure toast.
  */
 describe("the store's save trigger", () => {
 	beforeEach(() => {
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 	});
 
 	function registerContext(save: () => Promise<void>): SaveContext {
@@ -233,7 +232,7 @@ describe("the store's save trigger", () => {
 
 	it("does not paint 'saved' over a failure the context already reported", async () => {
 		registerContext(async () => {
-			useSaveStore.getState().failSave("database is locked");
+			useSaveStore.getState().reportFailed("request-x", "database is locked");
 		});
 
 		await useSaveStore.getState().triggerSave();

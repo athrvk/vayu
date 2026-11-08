@@ -30,6 +30,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -164,6 +165,41 @@ TEST_F (RunShutdownTest, DestructorDrainsAnActiveRun) {
     EXPECT_NE (stored->status, vayu::RunStatus::Running)
     << "~RunManager returned while the run was still executing - its worker "
        "outlives the manager and the database";
+}
+
+// A run that ended on its own is still draining transfers the upstream holds
+// when the daemon shuts down; shutdown cuts that drain short (#3341) instead
+// of waiting out the request timeout, and the run keeps the Completed it
+// earned. Healthy: the cancel and a join, well under a second. Broken: the
+// drain runs to the 15s timeout. The bound sits between and the broken side
+// stays under the 60s CTest timeout. Mutation check: drop the cancel from
+// `RunContext::request_stop` and the shutdown takes the timeout.
+TEST_F (RunShutdownTest, ShutdownCutsANaturalEndDrainShort) {
+    constexpr size_t IN_FLIGHT = 4;
+    const std::string run_id   = "run-shutdown-drain";
+    create_run_row (run_id);
+    const nlohmann::json config = { { "mode", "iterations" }, { "iterations", IN_FLIGHT },
+        { "concurrency", IN_FLIGHT }, { "url", server->hang_url () },
+        { "method", "GET" }, { "timeout", 15000 }, { "workers", 1 } };
+
+    vayu::core::RunManager manager;
+    ASSERT_TRUE (manager.start_run (run_id, config, *db));
+    const auto context = manager.get_run (run_id);
+    ASSERT_NE (context, nullptr);
+    ASSERT_TRUE (vayu::tests::wait_until ([&] {
+        return context->phase () == vayu::core::RunPhase::draining &&
+        context->active_transfer_count () == IN_FLIGHT;
+    }))
+    << "the run never reached its drain with its requests in flight";
+
+    const auto start = Clock::now ();
+    manager.shutdown (std::chrono::milliseconds (5000));
+    const auto elapsed = ms_since (start);
+
+    EXPECT_LT (elapsed, 5000) << "shutdown waited " << elapsed << "ms on a natural-end drain";
+    const auto stored = db->get_run (run_id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->status, vayu::RunStatus::Completed);
 }
 
 // Once the drain has begun, a request that races it is refused rather than

@@ -10,8 +10,8 @@
  * starting - the same rule window-state.ts is held to, for a worse blast radius.
  *
  * conf parses the file inside the Store constructor and rethrows a SyntaxError
- * unless told otherwise, and this store is first touched by main.ts's `startMcp`
- * during startup. A corrupt mcp-config.json therefore rejected the `whenReady`
+ * unless told otherwise, and this store is first touched by the MCP lifecycle's
+ * start during startup. A corrupt mcp-config.json therefore rejected the `whenReady`
  * handler before it ever reached `createWindow()`: no window, on every launch,
  * with the engine sidecar already running headless behind it.
  *
@@ -247,10 +247,10 @@ describe("main.ts startup ordering", () => {
 		return main.slice(start, end);
 	}
 
-	/** The body of `startMcp`, up to the next top-level function. */
-	function startMcpBody(): string {
-		const start = main.indexOf("async function startMcp()");
-		const end = main.indexOf("async function stopMcp()", start);
+	/** The `createMcpLifecycle({...})` call, up to the status helper after it. */
+	function lifecycleWiring(): string {
+		const start = main.indexOf("createMcpLifecycle<");
+		const end = main.indexOf("function currentMcpStatus(", start);
 		expect(start).toBeGreaterThan(-1);
 		expect(end).toBeGreaterThan(start);
 		return main.slice(start, end);
@@ -259,21 +259,21 @@ describe("main.ts startup ordering", () => {
 	it("creates the window before starting MCP", () => {
 		const body = whenReadyBody();
 		const window = body.indexOf("createWindow();");
-		const mcp = body.indexOf("await startMcp();");
+		const mcp = body.indexOf("await mcpLifecycle.start();");
 
 		expect(window).toBeGreaterThan(-1);
 		expect(mcp).toBeGreaterThan(-1);
 		expect(window).toBeLessThan(mcp);
 	});
 
-	it("reads the enabled preference inside startMcp's try, not ahead of it", () => {
-		const body = startMcpBody();
-		const guard = body.indexOf("try {");
-		const read = body.indexOf("loadMcpEnabled()");
-
-		expect(guard).toBeGreaterThan(-1);
-		expect(read).toBeGreaterThan(-1);
-		expect(guard).toBeLessThan(read);
+	/*
+	 * The lifecycle reads `isEnabled` inside its own guard and records a throw
+	 * as a failed start (lifecycle.test.ts). That only protects launch if the
+	 * store read is what it is handed, and if launch does not read it first.
+	 */
+	it("leaves the enabled preference to the lifecycle's guarded start", () => {
+		expect(lifecycleWiring()).toContain("isEnabled: loadMcpEnabled,");
+		expect(whenReadyBody()).not.toContain("loadMcpEnabled(");
 	});
 
 	/*
@@ -288,7 +288,7 @@ describe("main.ts startup ordering", () => {
 		expect(end).toBeGreaterThan(start);
 		const body = main.slice(start, end);
 
-		expect(body).toContain("effectiveSafety(mcpService)");
+		expect(body).toContain("effectiveSafety(mcpLifecycle.service())");
 		expect(body).not.toContain("DEFAULT_MCP_SAFETY_CONFIG");
 	});
 });

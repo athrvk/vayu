@@ -189,7 +189,7 @@ four more are opened on demand, and the rule that separates them is where each m
 | Listener | Bind | Opened by | Serves |
 |----------|------|-----------|--------|
 | Management API | `127.0.0.1:9876` (configurable port) | Daemon startup | Every route in [api-reference.md](api-reference.md) |
-| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode | One `/callback` path, for the length of one authorization attempt (5-minute TTL) |
+| OAuth 2.0 loopback callback | `127.0.0.1`, ephemeral port | `POST /oauth2/authorize/start` in loopback mode (at most 16 unsettled) | One `/callback` path, until the attempt settles or its 5-minute TTL expires, polled or not |
 | [Mock OAuth 2.0 issuer](api-reference.md#local-mock-issuer) | `127.0.0.1`, ephemeral port | `POST /mock-issuer/start` (at most 8) | `/token` and `/authorize`, until stopped |
 | [Webhook inbox](api-reference.md#webhook-inbox) | `127.0.0.1` by default; wider only on explicit confirmation | `POST /inbox/start` | Records any method on any path, answers a canned response; CORS per `allowedOrigins` |
 | [Collection mock server](api-reference.md#mock-server) | `127.0.0.1`, ephemeral port unless one is named | `POST /mock/start` (at most 8) | A collection's saved example responses, on the paths its requests describe, until stopped; CORS per `allowedOrigins` |
@@ -270,9 +270,15 @@ against a manager's cap under the same lock as the running entries, so simultane
 overshoot it; it tears an erased entry down outside that lock, so a handler still running holds up
 only the caller that stopped it; and its `shutdown()` is terminal, signalling every entry before it
 joins any. What stays per-manager is the route registration, the error each bind failure answers
-with, the OAuth attempt TTL sweep, and the two records that outlive their listener (a stopped inbox,
-a settled OAuth attempt), whose listener is torn down under the registry's lock because the record
-stays in it. Since #1140 a manager may hand the `ManagedListener` the
+with, the OAuth attempt reaper, and the records that outlive their listener. A stopped inbox's
+listener is torn down under the registry's lock because the record stays in it. A settled OAuth
+attempt's result moves out of the registry instead: the authorize manager owns a reaper thread
+(#3347) that fails each attempt still pending at its deadline, copies every settled result aside for
+the 10-minute polling window and retires the listener outside the lock, so an attempt nobody polls
+frees its port, the cap counts only unsettled attempts, and `GET /oauth2/authorize/:id` reads
+without writing. `Server::stop()` shuts the authorize manager down *before* joining the management
+API's handlers, the one manager it does, because an embedded completion's token exchange runs on
+one of those handlers and watches its attempt's cancel. Since #1140 a manager may hand the `ManagedListener` the
 `httplib::Server` those routes are registered on, too: the inbox hands it a subclass that routes
 every request as one path, so that a path too long for cpp-httplib's regex matcher still reaches its
 capture, and the other three take the plain server the listener builds for itself. The mock server
@@ -382,16 +388,25 @@ Manages the lifecycle of load test runs:
   its submission queues - along with the bound data rows and the scenario plan, so a finished
   run holds none of them for the window (issue #1154). The counters and histograms behind the
   summary stay, because the report and a late `/live` consumer read them.
-- **Stop discards, completion drains (with a deadline)**: a stopped run throws away its queued
-  backlog and cancels in-flight transfers, so a stop is not paced by the upstream; a run that
-  reaches the end of its duration waits for genuine in-flight requests, but no longer than
-  `timeout` + 2s. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
+- **A Stop means what its phase says** (issue #3341): `RunContext` carries a `RunPhase` (`setup`,
+  `sending`, `draining`, `summarising`, `settled`; `core/run_phase.hpp`) and `request_stop`
+  latches the phase the *first* Stop landed in. A Stop before the strategy returns (`setup` or
+  `sending`) decides the outcome (`stop_decides_outcome`): the run ends `stopped`, its queued
+  backlog is thrown away and in-flight transfers are cancelled, so a stop is not paced by the
+  upstream. A Stop after the strategy returned on its own (`draining`) decides nothing: it
+  cancels the natural-end drain at once, the in-flight transfers are counted as cancelled, and
+  the run keeps its own end - `completed`, or `failed` by its `failRun` thresholds. A run that
+  reaches the end of its duration with no Stop waits for genuine in-flight requests, but no
+  longer than `timeout` + 2s. A sequential collection run has no drain. The phase and the latch
+  are one atomic byte (`RunPhaseLatch`) that only compare-exchange loops write, so the worker's
+  advance and a Stop's latch are totally ordered. **The phase is memory only**: it is not
+  stored, there is no schema change, and a stored run carries only its `RunStatus`. A streaming run (`stream: true`) is not bounded by `timeout`: its bound is the
   stream's duration cap (`maxStreamDurationMs`) plus the 5s backstop grace plus 2s
   (`natural_end_drain_ms`, issue #2834), so the drain never cuts a healthy stream short of its
   cap. A collection run waits for the longer of the two: its longest streaming step's cap the
   same way (`longest_stream_bounds`, issue #3235), or `timeout` + 2s for its ordinary steps
-  (`collection_natural_end_drain_ms`). A request the drain deadline cancels is recorded as an error; one a user stop
-  cancels is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
+  (`collection_natural_end_drain_ms`). A request the drain deadline cancels with no Stop is recorded
+  as an error; one a user stop cancels, in either phase, is not (issue #2136) - it is counted apart, as `cancelled`, outside the run's total and
   its error count, so `requests_sent` is always the total plus the cancelled count.
 - **The move to the retained map is the "worker is finished" signal**: it happens after the
   final metrics flush and status update, which is what `DELETE /runs/:id` waits on before
@@ -400,8 +415,9 @@ Manages the lifecycle of load test runs:
   `closed` alone flips when the last tick lands, before that tail. It is *not* the "worker
   thread has exited" signal - the move is the worker's last statement, and the thread is still
   unwinding after it.
-- **Graceful shutdown drains, then joins**: `RunManager::shutdown()` sets `should_stop` on
-  every active run, waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
+- **Graceful shutdown drains, then joins**: `RunManager::shutdown()` calls `request_stop` on
+  every active run (the same latch, so a run still sending ends `stopped` and one in its
+  natural-end drain has the drain cut short and keeps its own end), waits up to 5s (`RUN_SHUTDOWN_GRACE_MS`) for them to reach a terminal
   status, and then **joins** every worker thread. The manager owns those thread handles -
   a worker holds a `shared_ptr` to its own `RunContext`, so a context that owned its thread
   could end up joining itself. The wait is bounded; the join is not, because abandoning a
@@ -590,7 +606,11 @@ makes a session survive from one design-mode request to the next.
 - **Lifetime: the process.** In memory only; a stored jar is credential-grade
   material and would need the treatment auth tokens already have rather than a
   new path beside the request store. `GET /cookies` shows it, `DELETE /cookies`
-  empties it, and the app surfaces both in Settings → General → Cookies.
+  empties it, and the app surfaces both in Settings → General → Cookies. An
+  environment's jar follows the environment through the trash (issue #3349):
+  trashing keeps it but `GET /cookies` leaves it out, a restore lists it again,
+  and a purge (`DELETE /trash/:id`) drops it. The jar has no database, so the
+  route filters by the live environment ids it reads per request.
 - **Storage: libcurl's own lines.** The jar holds what `CURLINFO_COOKIELIST`
   exports and hands it back through `CURLOPT_COOKIELIST`, so domain matching,
   path matching, `Secure` and expiry stay inside libcurl's cookie engine. The
@@ -754,7 +774,8 @@ applied to the outgoing request rather than being left to the UI. This lives in
 - **`oauth_authorize`** - the interactive Authorization Code manager: an
   engine-hosted `127.0.0.1` loopback listener + PKCE (S256) and `state`, so the
   entire flow (including the code exchange) stays in-process; the app only opens
-  the browser. Owned by the `Server` for a clean shutdown.
+  the browser. Its reaper thread expires attempts at their TTL whether or not
+  anyone polls (#3347). Owned by the `Server` for a clean shutdown.
 - **`mock_issuer`** - the local OAuth 2.0 issuer (`routes/mock_issuer.cpp`):
   `POST /mock-issuer/start` binds another `127.0.0.1` listener serving `/token`
   and `/authorize`, so auth flows are exercisable offline with no real identity
@@ -765,7 +786,7 @@ applied to the outgoing request rather than being left to the UI. This lives in
   the same reverse-member-order rule as the authorize manager.
 
 **Listener inventory.** Both auth listeners are spawned, loopback-bound and
-short-lived - the interactive-auth callback (one per attempt, 5-minute TTL) and
+short-lived - the interactive-auth callback (one per attempt, 5-minute TTL, at most 16 at once) and
 mock issuers (at most 8, until stopped) - and neither may ever bind wider than
 `127.0.0.1`, because one carries an authorization code and the other hands out
 bearer tokens. The full inventory, including the one listener that *may* bind
@@ -1141,30 +1162,53 @@ that never arrived.
 4. Create RunContext (the worker builds, starts and *publishes* the
    EventLoop itself, inside execute_load_test)
    ↓
-5. Start worker thread (execute_load_test)
+5. Start worker thread (execute_load_test); phase `setup`
    ↓
 6. Start metrics thread (collect_metrics), and - for each refreshable oauth2
    token the run sends - an auth-refresh watchdog (run_auth_refresh)
    ↓
-7. Strategy submits requests via SPSC queue → event loop
+7. script.setup runs, then phase `sending`: the strategy submits requests
+   via SPSC queue → event loop
    ↓
-8. Metrics collector aggregates results in-memory; metrics thread
+8. The strategy returns on its own (phase `draining`), or a Stop that
+   latched while sending ended it. A Stop that latched while sending
+   cancels at once (stop(false): backlog discarded, in-flight cancelled)
+   and the run will end `stopped`. Otherwise the loop drains to its
+   natural-end deadline (stop(true, deadline)); a Stop landing in this
+   drain cancels it through RunContext::request_stop, counts the
+   in-flight transfers as cancelled, and leaves the run's own end
+   (`completed`, or `failed` by failRun) standing
+   ↓
+9. Event loop has let go: phase `summarising`; summary and final
+   status written
+   ↓
+10. Metrics collector aggregates results in-memory; metrics thread
    writes per-tick snapshots into the retained tick topic, and at
    the 1 Hz gate one DB row holding that second's merged percentiles
+   (runs beside steps 7-9, from step 6 on)
    ↓
-9. Client streams ticks via SSE (/runs/:runId/live), replayed
+11. Client streams ticks via SSE (/runs/:runId/live), replayed
    from the oldest retained tick then tailed to the `complete` event,
    which waits until the run has written its terminal status
    (RunContext::settled)
    ↓
-10. On completion: batch-write results to DB; event loop, data rows
+12. On completion: batch-write results to DB; event loop, data rows
     and plan released; run retained (TTL) so late clients still get
-    the full series
+    the full series; phase `settled` (RunManager::retain_run)
 ```
+
+The phase lives only in memory (`RunContext`, `core/run_phase.hpp`): the database
+keeps the `RunStatus` alone and the schema is unchanged. A sequential collection
+run moves `sending` to `summarising` with no `draining` between, so a Stop on it
+always decides the outcome. `POST /runs/:runId/stop` on an active load run
+answers the stored status once the worker has written a terminal one, `stopped`
+when the Stop decided the outcome, and `running` for a Stop that landed in the
+drain before the worker wrote its own verdict.
 
 The metrics thread's exit is gated on `is_running`, not on `should_stop`. A stop
 request only asks the worker to stop; the worker then blocks in `event_loop->stop`
-- cancelling on a user stop, draining to a deadline at the natural end - and
+- cancelling for a Stop that latched while sending, draining to a deadline at the
+natural end (a Stop in that drain cuts it short) - and
 clears `is_running` afterwards. Exiting on `should_stop` emitted the final tick
 and set `closed` while requests were still settling, so the live view froze at
 the stop click while the stored report - written after the worker returned -
@@ -1489,9 +1533,11 @@ against its own tick clock; the search's own `elapsed_ms` runs from
 `maintain_concurrency`'s start, an origin the metrics thread does not have. The
 four are one struct under one mutex rather than an atomic each, so a frame
 cannot pair a new level with the previous one's start or judged count. It is
-written when a level opens and in `CapacitySearch::finish`, which resolves a
-user stop to `stopped` before the worker clears `is_running`, so the final frame
-names the reason the report does. Nothing in the search reads it back, so the
+written when a level opens and in `CapacitySearch::finish`, which, when the
+search named no reason of its own, resolves the end to `stopped` only if a Stop
+decided the outcome (`stop_decides_outcome`: the operator stopped before the
+search ended) and to `deadline` otherwise, before the worker clears
+`is_running`, so the final frame names the reason the report does. Nothing in the search reads it back, so the
 invariant above still holds.
 
 ### Scenario load runs - the virtual-user state machine
@@ -1664,14 +1710,17 @@ consumers drained** (`Server::stop()` sets the flag every handler reads as
 `RouteContext::server_stopping`, which cancels each outbound transfer a
 handler is making - the `/execute` send and its `pm.sendRequest`s, an OAuth
 token request, an import fetch, a connection test - and ends each SSE relay
-(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it then closes the
-listener and joins its accept loop's thread, which returns only once httplib
-has joined every handler, so each request in flight has answered first, also
-when the loop had already ended on its own, which is what the daemon's wait
-reads as a reason to shut down (#2667); then it calls `shutdown()` on the
-four listener managers - mock servers, inboxes, mock issuers, OAuth callback
-attempts - each of which signals every entry, ending a paced answer's wait
-and cancelling a callback's token exchange, before joining any (#3345); then
+(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it shuts the OAuth
+authorization manager down, which cancels an embedded completion's token
+exchange, made on a management handler, through its attempt (#3347); it then
+closes the listener and joins its accept loop's thread, which returns only
+once httplib has joined every handler, so each request in flight has answered
+first, also when the loop had already ended on its own, which is what the
+daemon's wait reads as a reason to shut down (#2667); then it calls
+`shutdown()` on the other three listener managers - mock servers, inboxes,
+mock issuers - each of which, like the OAuth one, signals every entry, ending
+a paced answer's wait and cancelling a callback's token exchange, before
+joining any (#3345); then
 `SseStreamManager::shutdown()`, which signals every stream and joins its
 worker) → run workers signalled and joined (each joins its own metrics and
 monitor threads and stops its event loop first) → the start-of-session
@@ -1689,8 +1738,10 @@ while curl's global state was torn down, and still writing its run row through
 a `Database` that is about to be destroyed - the #125 defect in the one worker
 `RunManager` does not own (#646). An OAuth callback is in the same position
 during its token exchange, and every listener's handler writes through the
-`Database` (#3345). They run after the management API's own handlers are
-joined, so no route is left to start or stop a listener under them. Any other
+`Database` (#3345). The three that can run after the management API's own
+handlers are joined do, so no route is left to start or stop a listener under
+them; the OAuth manager's shutdown is terminal, so a route that still reaches
+it is only refused. Any other
 owner of an `SseStreamManager` or a listener manager owes the same order: shut
 it down before the `Database` and `CookieJar` its threads reach through go
 away.

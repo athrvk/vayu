@@ -80,9 +80,9 @@ describe("startup ordering", () => {
 		// headless engine and no window at all. Overlapping the engine with the
 		// window does not license overlapping this too.
 		const windowAt = main.indexOf("\n\tcreateWindow();");
-		// One tab again: `startMcp` is also called by the MCP enable/disable IPC
-		// handler, which says nothing about startup ordering.
-		const mcpAt = main.indexOf("\n\tawait startMcp();");
+		// One tab again: the MCP enable/disable IPC handler also starts it, which
+		// says nothing about startup ordering.
+		const mcpAt = main.indexOf("\n\tawait mcpLifecycle.start();");
 
 		expect(mcpAt).toBeGreaterThan(-1);
 		expect(mcpAt).toBeGreaterThan(windowAt);
@@ -198,6 +198,52 @@ describe("startup ordering", () => {
 		expect(main.slice(portInUseAt, quitAt)).toContain("return;");
 		// And the reason is kept for the renderer, not only logged.
 		expect(main.slice(portInUseAt, quitAt)).toContain("engineStartFailure = error.message;");
+	});
+
+	/*
+	 * #3336. Mutation check: drop the overtaken branch, or either half of its
+	 * condition, and this reddens. A quit landing mid-start used to raise
+	 * "Couldn't start Vayu's engine" on the way out, and a start that failed
+	 * with a restart queued behind it quit the app under that restart. That
+	 * the sidecar still reports both facts when the start's rejection arrives
+	 * is driven in `sidecar.test.ts`.
+	 */
+	it("does not end the app for a start a quit or a restart overtook", () => {
+		const start = main.indexOf("async function startEngine()");
+		const overtakenAt = main.indexOf(
+			"if (engineSidecar?.isShuttingDown() || engineSidecar?.hasRestartPending()) {",
+			start
+		);
+		const dialogAt = main.indexOf("showErrorBox", start);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(overtakenAt).toBeGreaterThan(start);
+		expect(overtakenAt).toBeLessThan(dialogAt);
+		expect(main.slice(overtakenAt, dialogAt)).toContain("return;");
+	});
+
+	/*
+	 * #3336. Mutation check: move the bridge below the start and its first
+	 * transitions, and a slow engine's ready-after-slow hook, can be missed.
+	 */
+	it("bridges the engine's lifecycle to the window before it starts the engine", () => {
+		const start = main.indexOf("async function startEngine()");
+		const bridgeAt = main.indexOf("bridgeEngineLifecycle(engineSidecar, {", start);
+		const startAt = main.indexOf("await engineSidecar.start();", start);
+
+		expect(bridgeAt).toBeGreaterThan(start);
+		expect(startAt).toBeGreaterThan(bridgeAt);
+		expect(main.slice(bridgeAt, startAt)).toContain(
+			"readyAfterSlow: () => void fileGrants.sync(),"
+		);
+	});
+
+	it("answers the engine's lifecycle before it waits on the engine", () => {
+		const setupAt = main.indexOf("\nfunction setupIpcHandlers()");
+		const setupBody = main.slice(setupAt, main.indexOf("\n}\n", setupAt));
+
+		expect(setupAt).toBeGreaterThan(-1);
+		expect(setupBody).toContain("registerEngineLifecycleIpc(ipcMain, ");
 	});
 
 	/*

@@ -951,7 +951,10 @@ inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
 The daemon then stops the server (and with it every mock server, inbox, mock
 issuer and OAuth callback listener, a paced answer going out at once and a
-callback's token exchange cancelled), stops and joins active runs, refreshes the
+callback's token exchange cancelled), stops and joins active runs (a run still
+sending ends `stopped`; one in its natural-end drain has the drain cut short, its
+in-flight transfers counted as `cancelled`, and keeps its own end, as for
+[a Stop](#post-runsrunidstop), issue #3341), refreshes the
 recovery backup `<db>.bak` if the session wrote anything (bounded at 2 s and by
 what is left of the app's 5 s window; on a timeout the previous backup stands,
 see [db-schema.md](db-schema.md#startup-validation-backup-and-recovery)), closes the
@@ -1620,7 +1623,8 @@ the null-vs-absent rule.
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
-([#3251](#accepted-field-shapes)), or on a cycle (below); `409` if `parentId` names a collection in the
+([#3251](#accepted-field-shapes)), if an `openapi` binding names no stored spec
+(below), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -1644,7 +1648,7 @@ its value, an explicit `null` resets it to the default.
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "dataSchema": null,       // Optional, null clears the declared contract
-  "openapi": null,          // Optional, null unbinds the spec document
+  "openapi": null,          // Optional, null or {} unbinds the spec document; nothing else
   "specFile": null,         // Optional, null unbinds the spec file
   "dataFile": null          // Optional, null unbinds the data file
 }
@@ -1662,7 +1666,9 @@ list it just left. See [Ordering](#ordering).
 **Errors:** `404` if the collection does not exist; `412` if `If-Match` no
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
-a blank or padded `variables` key ([#3251](#accepted-field-shapes)) or on a cycle
+a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
+`openapi` that is neither `null` nor `{}` (binding is
+[`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1711,33 +1717,40 @@ that writes nothing.
 The schema is stored; the file's **rows are not**, anywhere. Where the file is
 lives in `dataFile`, below. See [Data-driven runs](../app/data-driven-runs.md).
 
-**`openapi` (both verbs, and `POST /import/apply`):** the OpenAPI document this
-collection is bound to (issue #637).
+**`openapi` (`POST /collections`, `POST /import/apply`, and unbinding on
+`PUT`):** the OpenAPI document this collection is bound to (issue #637).
 
 ```json
 {"specId":"spec_3f2b1c9a-...","specHash":"<hex sha256>","syncedAt":1700000000000}
 ```
 
 `{}` means bound to nothing, and is what an absent field on create and an
-explicit `null` on update both resolve to - so **unbinding is
-`{"openapi": null}`** rather than a verb of its own. A present value must be an
-object (`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is
-a binding and is validated further: `specId` must be a non-empty string that
-resolves to a stored [spec document](#specs) (`400` naming the id otherwise),
-`specHash` a string, `syncedAt` a number. A write that unbinds, or binds bytes
-with another `specHash`, forgets the operations deletes declined under the old
-document (issue #3031; see [`DELETE /requests/:id`](#delete-requestsid)).
+explicit `null` on update both resolve to. A present value must be an object
+(`400` otherwise, like `variables` and `dataSchema`). A *non-empty* one is a
+binding and is validated further: `specId` must be a non-empty string that
+resolves to a stored [spec document](#specs) (`400` naming the id otherwise).
+
+**`PUT /collections/:id` only unbinds** (issue #3348): `{"openapi": null}` and
+`{"openapi": {}}` both store `{}`, and any other value is a `400` that names
+[`POST /specs/bind`](#post-specsbind), after the `404` and `412` checks. Binding
+or rebinding an existing collection restamps every request beneath it both
+ways, which only that route does, in one transaction. Unbinding forgets the
+operations deletes declined under the old document (issue #3031; see
+[`DELETE /requests/:id`](#delete-requestsid)).
 
 `specHash` records which *version* of the document the collection was last synced
 to; a scenario run of a bound collection stamps both values into its snapshot and
 report (see [GET /runs/:runId/report](#get-runsrunidreport)).
 
-**Send the `specId` alone and the engine fills in the rest** (issue #709): every
-write path stamps `specHash` from the document the id names and `syncedAt` from
-the moment of the write, so a binding cannot be stored without the version that
-contract coverage and response-schema validation compare against. Only the
-halves you omit are filled - a binding that states an older `specHash` keeps it,
-and a run of it reports `hash_mismatch` as before.
+**Send the `specId`; the engine writes the rest** (issues #709, #3348): a create
+stamps `specHash` from the document the id names and `syncedAt` from the moment
+of the write, so a binding cannot be stored without the version that contract
+coverage and response-schema validation compare against. A `specHash` or
+`syncedAt` the body sends is dropped, never stored: the version is the
+document's, not the caller's claim about it. A collection's recorded version can
+still fall behind its document's (a binding an older engine wrote); a run of it
+reports `hash_mismatch`, and a `PUT` that says nothing about `openapi` leaves it
+as it is.
 
 Deleting the document is refused while a collection binds it - the binding is
 never cascaded away, see [DELETE /specs/:id](#delete-specsid).
@@ -2497,7 +2510,8 @@ claimed again.
 Destroy a deleted collection, request, environment, example or client
 certificate for good, with its whole subtree - requests, and the examples they
 own, trashed ones included; an environment, an example or a client certificate
-is its one row (a certificate's passphrase goes with it). This is the hard cascade soft
+is its one row (a certificate's passphrase goes with it), and an environment
+takes its [cookie jar](#get-cookies) with it. This is the hard cascade soft
 delete replaced, asked for deliberately; there is no undo for it.
 
 Unlike a restore, a purge is not limited to the cohort: a row an earlier delete
@@ -3326,7 +3340,9 @@ broken binding rather than a bad request.
 Bind a collection to an OpenAPI document, in **one transaction**: the document is
 stored, the collection's binding moves to it, and every request in the
 collection's subtree is stamped with the operation it matched or has its stamp
-cleared. Nothing is created or deleted - that is what a sync is for.
+cleared. Nothing is created or deleted - that is what a sync is for. It is the
+one way to bind or rebind an existing collection: `PUT /collections/:id` with
+any `openapi` but `null` or `{}` is a `400` naming this route (issue #3348).
 
 **The caller sends a document, never a pairing.** The engine reads the bytes it
 is about to store, derives the `operations` index from them, and matches the
@@ -3398,9 +3414,9 @@ the cap, or one that cannot be read as JSON or YAML - and in that last case
 nothing is written, so the collection stays bound to whatever it was bound to.
 `404` when the collection does not exist. `409` when a row moved under the write.
 
-Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null`, which
-writes one row, leaves every stamp in place - so unbind-then-rebind of the same
-document is lossless - and has no document to read. It does forget the declined
+Unbinding is not here: it is `PUT /collections/:id` with `"openapi": null` (or
+`{}`), which writes one row, leaves every stamp in place - so unbind-then-rebind
+of the same document is lossless - and has no document to read. It does forget the declined
 operations, in the same transaction, as a bind to other bytes does.
 
 ### POST /specs/export
@@ -4608,7 +4624,8 @@ accepted a client-supplied `id` - which they no longer do (see
   `syncedAt` are stamped by the engine from the document - the one this payload
   just wrote, or the stored one an `openapi.specId` names - so an imported
   collection is bound to a *version* and its runs are measured against the
-  contract (issue #709).
+  contract (issue #709). A `specHash` or `syncedAt` the item sends is dropped,
+  never stored (issue #3348).
 - A **`clientCertificates`** item is a `client_certificates` registry
   candidate (issue #1656), in the same field shape `POST /client-certificates`
   takes (`host`, `port`, `certPath`, `keyPath`, `certFormat`, `passphrase`) -
@@ -5510,6 +5527,8 @@ scope, so its `{{names}}` stay unresolved.
 Restore it with [`POST /trash/:id/restore`](#post-trashidrestore), which brings
 it back inactive; destroy it for good with [`DELETE /trash/:id`](#delete-trashid),
 which is also what the startup sweep does once `trashRetentionDays` has passed.
+Its [cookie jar](#get-cookies) is kept while it is in the trash, out of
+`GET /cookies`, so a restore brings its session back; a purge drops it.
 
 **Response:**
 ```json
@@ -5639,6 +5658,14 @@ match is sent whatever its `SameSite` value (`Strict`, `Lax` or `None`).
 Every jar that holds anything, one entry per scope, in scope-key order (the
 no-environment jar first), each jar's cookies in its own line order.
 
+A jar whose environment is in the [Trash](#trash) is left out of both forms
+(issue #3349). The jar is kept, so
+[`POST /trash/:id/restore`](#post-trashidrestore) brings the environment's
+session back with it and it is listed again; a purge
+([`DELETE /trash/:id`](#delete-trashid)) drops it. The same goes for a jar
+keyed by an `environmentId` that names no stored environment. The
+no-environment jar is always listed.
+
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the cookies whose `name` or
   `domain` holds `q`, in the `{data, pagination}` envelope - see
@@ -5704,7 +5731,10 @@ a mistake.
 ```
 
 `cleared` counts the cookies dropped; clearing a scope that holds nothing is a
-`200` with `0`, not an error.
+`200` with `0`, not an error. Clearing every jar also clears the ones
+`GET /cookies` leaves out because their environment is in the trash, and
+`cleared` counts their cookies too: clearing everything leaves no credentials
+behind.
 
 ## Client certificates
 
@@ -6970,8 +7000,8 @@ hands it back.
 
 | Method / Path | Purpose |
 |---------------|---------|
-| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri}` |
-| `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}` |
+| `POST /oauth2/authorize/start` | `{config, mode?}` → `{attemptId, authorizeUrl, redirectUri, expiresAt}` |
+| `GET /oauth2/authorize/:attemptId` | Poll status → `{state: "pending"\|"completed"\|"failed"\|"not_found", error?, cacheKey?}`; reads only |
 | `POST /oauth2/authorize/complete` | `{attemptId, callbackUrl}` → status (embedded mode) |
 | `DELETE /oauth2/authorize/:attemptId` | Cancel → `{cancelled: true}` |
 
@@ -6981,18 +7011,36 @@ The authorize URL carries `response_type`, `client_id`, `redirect_uri`,
 navigation has no body or headers); a row naming a parameter already in the URL
 is skipped.
 
-Attempts time out after 5 minutes; on success the token is written to the cache
-and `cacheKey` is returned. Cancelling a loopback attempt, or the engine
-shutting down, cancels a token exchange its callback is still making: the
-callback's tab is told the exchange failed. A completion (the loopback callback and `POST
+An attempt times out 5 minutes after it starts. `expiresAt` is that instant in
+epoch milliseconds, the one deadline a client waits on. The engine enforces it
+whether or not anyone polls: within a second of `expiresAt` the attempt is
+failed with `Authorization timed out` and its loopback listener is closed, so an
+abandoned attempt never keeps its port. On success the token is written to the
+cache and `cacheKey` is returned. A settled result stays readable for 10 minutes
+from the start, then the attempt answers `not_found`.
+
+`GET /oauth2/authorize/:attemptId` reads only: polling never settles, fails or
+tears down an attempt. An attempt past `expiresAt` reads as `failed` with
+`Authorization timed out` from that instant on, and a callback or completion
+arriving after it cannot change that.
+
+At most 16 attempts may be unsettled at once, embedded ones included; the next
+start is refused with `429` `oauth2_authorize_limit_reached`. A settled attempt
+holds no listener and leaves the count.
+
+Cancelling an attempt (`DELETE`), or the engine shutting down, cancels a token
+exchange still in flight for it, the loopback callback's and an embedded `POST
+/oauth2/authorize/complete`'s alike: the callback's tab is told the exchange
+failed, and the completion answers `404`. A completion (the loopback callback and `POST
 /oauth2/authorize/complete` alike) always exchanges its code and replaces any
 token already cached under that key.
 
 The loopback callback reads nothing before `state`, `error` included: a request
 with a missing or wrong `state` answers `400` and the attempt keeps waiting, so
 an IdP that omits `state` on its error redirect leaves the attempt pending until
-the 5-minute timeout. A loopback attempt settles once, and the first settlement
-wins: a later callback with the right `state` answers `409` and changes nothing.
+it times out. A callback with the right `state` after `expiresAt` answers `410`.
+A loopback attempt settles once, and the first settlement wins: a later callback
+with the right `state` answers `409` and changes nothing.
 
 ### Local mock issuer
 
@@ -9319,10 +9367,14 @@ load run.
 The verdict is the run's, not the process's: a run **stopped early** is judged on
 what it measured up to that point, and its status stays `stopped` whatever the
 verdict says. The app says so on a stopped run, under the verdict's counts, with
-how long the run went against how long it was planned for. A **completed** run
-whose config set `thresholds.failRun: true` and whose budgets it missed ends `failed` instead of `completed`; without the
+how long the run went against how long it was planned for. A run that reached
+its **own end** whose config set `thresholds.failRun: true` and whose budgets it
+missed ends `failed` instead of `completed`; without the
 flag, or on a run that met every budget, a failing budget is reported but
-never changes the terminal status.
+never changes the terminal status. Only a Stop that decided the outcome (one
+before the strategy returned) makes a run `stopped`: a Stop that cuts the
+natural-end drain short leaves the run to its own end, so `failRun` still judges
+it (issue #3341, see [POST /runs/:runId/stop](#post-runsrunidstop)).
 
 Each check carries `evaluated`. A latency percentile needs a timed request
 to mean anything, so a run that recorded none (every request was refused
@@ -10950,7 +11002,9 @@ over the limit. It also stops when two step-ups buy under 5% more throughput
 (`plateau`; the report then names the level where throughput stopped growing as
 `saturation*`, which is lower than `maxHealthy*`, the last level tried), when
 `concurrency` is reached (`cap_reached`), when `duration` runs out
-(`deadline`), or when the operator stops the run (`stopped`).
+(`deadline`), or when the operator stops the run before the search has ended
+(`stopped`); a Stop that arrives only after the search ended on its own leaves
+the reason it had (issue #3341).
 
 An **omitted `duration`** on a capacity run defaults to **5 minutes**, not the
 60 seconds every other mode falls back to: this mode walks a level every
@@ -11050,7 +11104,8 @@ response came back, with an error status) and **No response**:
 | Report (`GET /runs/:runId/report`) | `summary.httpErrorRequests` | `summary.noResponseRequests` |
 
 A request `POST /runs/:runId/stop` cancels before it is answered is **not an
-error** (issue #2136). It got no outcome from the target, so it is counted on
+error** (issue #2136), whether the Stop landed while the run was sending or cut
+its natural-end drain short (issue #3341). It got no outcome from the target, so it is counted on
 its own, as **cancelled**, and is in no other count: not the total, not the
 status-code distribution, not either half above, not the error rate. A healthy
 target stopped mid-run therefore reads `errorRate` 0 however many requests
@@ -11066,7 +11121,8 @@ were in flight. The surfaces that carry it:
 So `totalRequests` is the requests that got an outcome,
 `successfulRequests + failedRequests`, and every request the run sent is in
 exactly one of `totalRequests` and the cancelled count. Only a Stop's
-cancellation is exempt. When a run reaches its natural end, a request still in
+cancellation is exempt. When a run reaches its natural end and no Stop has been
+requested, a request still in
 flight after its effective timeout (the run's `timeout`, else the
 `defaultTimeout` setting) plus a 2s grace is cancelled too, except in a
 streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
@@ -12221,25 +12277,46 @@ to 5s for its worker to settle, and answers with a summary of what the run
 actually did. A collection run's summary is optional; see
 [Stopping a collection run](#stopping-a-collection-run) below.
 
-**Stop discards, it does not drain.** The queued backlog is thrown away rather
-than sent, and transfers already in flight are cancelled (removed from curl and
-completed as a `CANCELLED` "Request cancelled"), so the target stops receiving
-traffic immediately and the stop's latency does not belong to the upstream. A
-cancelled request was submitted, so it is counted, but **not as an error**
-(issue #2136): it is `summary.cancelled`, outside `totalRequests`, `errors` and
-`errorRate` (see [What counts as an error](#what-counts-as-an-error)). Every
-request the run sent is in exactly one of `totalRequests` and `cancelled`.
+**What a Stop means depends on the phase it lands in** (issue #3341). A load
+run moves through `setup`, `sending`, `draining`, `summarising` and `settled`,
+in memory only, and the first Stop is latched with the phase it arrived in.
 
-A run that ends **naturally** still lets its in-flight requests finish, but only
-up to its effective timeout (its own `timeout`, else the `defaultTimeout`
-setting) plus a 2s grace, except a streaming run, whose bound is its
-`maxStreamDurationMs` plus grace (the 5s stream backstop plus the same 2s,
-issue #2834); anything still outstanding then is
-cancelled the same way - and, because nobody asked for that one to stop, it is
-an error with no response, not a cancellation. Without that bound an upstream
-that never answers would hold the run in `running` indefinitely.
+- **A Stop before the strategy returns (`setup` or `sending`) decides the
+  outcome, and the run ends `stopped`.** The queued backlog is thrown away
+  rather than sent, and transfers already in flight are cancelled (removed from
+  curl and completed as a `CANCELLED` "Request cancelled"), so the target stops
+  receiving traffic immediately and the stop's latency does not belong to the
+  upstream. A cancelled request was submitted, so it is counted, but **not as
+  an error** (issue #2136): it is `summary.cancelled`, outside `totalRequests`,
+  `errors` and `errorRate` (see [What counts as an
+  error](#what-counts-as-an-error)). Every request the run sent is in exactly
+  one of `totalRequests` and `cancelled`.
+- **A Stop after the strategy returned on its own (`draining`) decides
+  nothing about the run's end.** A run that ends **naturally** lets its
+  in-flight requests finish, but only up to its effective timeout (its own
+  `timeout`, else the `defaultTimeout` setting) plus a 2s grace, except a
+  streaming run, whose bound is its `maxStreamDurationMs` plus grace (the 5s
+  stream backstop plus the same 2s, issue #2834). A Stop in that drain cuts it
+  short at once: the transfers still in flight are cancelled and counted as
+  `cancelled`, not as errors, because the operator asked for it. The run keeps
+  its own end - `completed`, or `failed` when `thresholds.failRun` judges it
+  so - and its sending window is what it would have been without the Stop,
+  since the Stop ended no sending.
+- **A drain that hits its deadline with no Stop** cancels what is still
+  outstanding the same way, and because nobody asked for that one to stop, it
+  is an error with no response, not a cancellation. Without that bound an
+  upstream that never answers would hold the run in `running` indefinitely.
 
-**Response** (active run):
+[`POST /shutdown`](#post-shutdown) follows the same rules: it also cuts a
+natural-end drain short and leaves the run `completed`.
+
+**Response** (active run). `status` is the stored status once the worker has
+written a terminal one; before that it is `stopped` when the Stop decided the
+outcome, and `running` when it landed after the run's own end (the `draining`
+phase), where the worker has not yet written the `completed` or `failed` it will
+end with. `running` there is accurate rather than a failure to stop: the drain
+is already cancelled, and the terminal status follows once the worker writes
+it.
 ```json
 {
   "status": "stopped",
@@ -12315,7 +12392,8 @@ report: a step the plan skipped is a step and not a request. `errors`,
 distribution over those requests, and `avgLatencyMs` is the stored latency
 block's `avg` (`0` when no step sent). There is no `cancelled`: a collection
 run keeps no count of what its stop cancelled. `status` is the run's stored
-status.
+status. A sequential run has no drain, so a Stop always lands while it is
+sending and decides the outcome: the run ends `stopped`.
 
 **The summary is absent when the worker has not stored one** within the 5s,
 or could not store it. The answer is then
@@ -13730,6 +13808,7 @@ VAYU_UPDATE_SCRIPT_TYPEDEFS=1 ctest --preset linux-dev -R ScriptTypes
 | 404 | Resource not found |
 | 409 | OAuth 2.0 interactive authorization required (`/run` pre-flight, `/oauth2/token`) |
 | 412 | A whole-record `PUT` or a `POST /globals` whose `If-Match` no longer names the stored row (`precondition_failed`, [Conditional updates](#conditional-updates-with-if-match)) |
+| 429 | A start refused at its cap: `oauth2_authorize_limit_reached` (16 unsettled sign-in attempts), `mock_issuer_limit_reached` (8 mock issuers) |
 | 500 | Internal server error, including a storage failure that is neither a full disk nor a lock ([resource writes](#a-storage-failure-is-not-a-400)) |
 | 502 | Upstream network error (OAuth 2.0 token endpoint, `/import/fetch` proxy) |
 | 503 | Engine is shutting down (`POST /runs`, see below), or the database stayed locked past its busy timeout (a resource write; carries `Retry-After: 1`) |

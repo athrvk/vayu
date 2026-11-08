@@ -154,6 +154,29 @@ class SpecsRouteTest : public ::testing::Test {
     }
 
     /**
+     * Writes @p binding straight to @p collection_id's row. No route stores a
+     * version its document does not have (#3348), but a row an older engine
+     * wrote, or one edited outside the engine, can hold one, and every reader
+     * has to report it as `hash_mismatch`.
+     */
+    void write_binding (const std::string& collection_id, const json& binding) {
+        auto row = db_->get_collection (collection_id);
+        ASSERT_HAS_VALUE (row);
+        row->openapi = binding.dump ();
+        db_->create_collection (*row);
+    }
+
+    /** The stored binding of @p collection_id, parsed. */
+    json stored_binding (const std::string& collection_id) {
+        const auto row = db_->get_collection (collection_id);
+        if (!row) {
+            ADD_FAILURE () << "no collection " << collection_id;
+            return json::object ();
+        }
+        return json::parse (row->openapi);
+    }
+
+    /**
      * Resolves @p collection_id into a plan, with the limits every test here
      * uses. One copy: what these assert is the *binding* the resolution carries,
      * and four hand-written limit blocks would be four chances to disagree about
@@ -380,20 +403,12 @@ TEST_F (SpecsRouteTest, AnUnboundCollectionSerializesAnEmptyBinding) {
 }
 
 TEST_F (SpecsRouteTest, RejectsABindingThatNamesNoSpec) {
-    const std::string spec_id = store_spec ();
     // An object that is not empty is a binding, and a binding without a specId
     // names nothing - it would read back as a bound collection nobody can
     // resolve.
     auto [status, body] = routes::create_collection_response (
     *db_, json{ { "name", "Pets" }, { "openapi", { { "syncedAt", 5 } } } });
     EXPECT_EQ (status, 400) << body.dump ();
-
-    for (const auto& bad : { json{ { "specId", spec_id }, { "specHash", 7 } },
-         json{ { "specId", spec_id }, { "syncedAt", "yesterday" } } }) {
-        auto [bad_status, bad_body] = routes::create_collection_response (
-        *db_, json{ { "name", "Pets" }, { "openapi", bad } });
-        EXPECT_EQ (bad_status, 400) << bad_body.dump ();
-    }
 }
 
 TEST_F (SpecsRouteTest, RejectsABindingToASpecThatDoesNotExist) {
@@ -403,28 +418,82 @@ TEST_F (SpecsRouteTest, RejectsABindingToASpecThatDoesNotExist) {
     EXPECT_NE (
     created_body["error"]["message"].get<std::string> ().find ("spec_ghost"),
     std::string::npos);
-
-    // And on update, which is the path a bind-from-here flow actually uses.
-    const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    auto [updated, updated_body] = routes::update_collection_response (
-    *db_, col_id, json{ { "openapi", { { "specId", "spec_ghost" } } } });
-    EXPECT_EQ (updated, 400) << updated_body.dump ();
 }
 
 TEST_F (SpecsRouteTest, AnUpdateThatSaysNothingAboutTheBindingKeepsIt) {
     const std::string spec_id = store_spec ();
-    const std::string col_id  = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id }, { "syncedAt", 42 } } } });
+    const std::string col_id  = create_collection (
+    json{ { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } });
+    const json before = stored_binding (col_id);
 
     auto [status, body] =
     routes::update_collection_response (*db_, col_id, json{ { "name", "Pets v2" } });
     ASSERT_EQ (status, 200) << body.dump ();
-    EXPECT_EQ (body["openapi"]["specId"].get<std::string> (), spec_id);
-    EXPECT_EQ (body["openapi"]["syncedAt"].get<int> (), 42);
+    EXPECT_EQ (body["openapi"], before);
+    EXPECT_EQ (stored_binding (col_id), before);
 }
 
 // ---------------------------------------------------------------------------
-// The version half of a binding, which the engine owns (issue #709)
+// PUT /collections/:id only unbinds (issue #3348)
+// ---------------------------------------------------------------------------
+
+TEST_F (SpecsRouteTest, AnUpdateThatStatesABindingIsRefusedAndPointsAtBind) {
+    // Binding restamps the subtree's requests both ways, which only
+    // `POST /specs/bind` does; a PUT that bound would leave every request
+    // stamped against whatever the collection bound before.
+    const std::string bound_spec = store_spec ();
+    constexpr const char* OTHER =
+    R"({"openapi":"3.1.0","info":{"title":"Store","version":"1.0.0"},"paths":{}})";
+    const std::string other_spec = store_spec (OTHER);
+    const std::string bound_id   = create_collection (
+    json{ { "name", "Pets" }, { "openapi", { { "specId", bound_spec } } } });
+    const std::string plain_id = create_collection (json{ { "name", "Plain" } });
+
+    const auto bodies = std::to_array<json> ({
+    json{ { "openapi", { { "specId", other_spec } } } },
+    json{ { "openapi", { { "specId", bound_spec } } } }, // the same document
+    json{ { "openapi",
+    { { "specId", other_spec }, { "specHash", routes::spec_content_hash (OTHER) } } } },
+    json{ { "openapi", { { "specId", "spec_ghost" } } } },
+    json{ { "openapi", "spec_1" } },
+    });
+    for (const std::string& col_id : { bound_id, plain_id }) {
+        const json before = stored_binding (col_id);
+        for (const auto& body : bodies) {
+            auto [status, response] =
+            routes::update_collection_response (*db_, col_id, body);
+            EXPECT_EQ (status, 400) << body.dump () << " -> " << response.dump ();
+            EXPECT_NE (response["error"]["message"].get<std::string> ().find ("POST /specs/bind"),
+            std::string::npos)
+            << response.dump ();
+            EXPECT_EQ (stored_binding (col_id), before)
+            << body.dump () << " must leave the binding as it was";
+        }
+    }
+
+    // A missing collection is still a 404 first: the refusal is about a row
+    // that exists.
+    auto [missing, missing_body] = routes::update_collection_response (
+    *db_, "col_missing", json{ { "openapi", { { "specId", other_spec } } } });
+    EXPECT_EQ (missing, 404) << missing_body.dump ();
+}
+
+TEST_F (SpecsRouteTest, AnUpdateUnbindsWithAnEmptyObjectOrNull) {
+    const std::string spec_id = store_spec ();
+    for (const json& unbind : { json::object (), json (nullptr) }) {
+        const std::string col_id = create_collection (
+        json{ { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } });
+
+        auto [status, body] = routes::update_collection_response (
+        *db_, col_id, json{ { "openapi", unbind } });
+        ASSERT_EQ (status, 200) << unbind.dump () << " -> " << body.dump ();
+        EXPECT_EQ (body["openapi"], json::object ()) << unbind.dump ();
+        EXPECT_EQ (stored_binding (col_id), json::object ()) << unbind.dump ();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The version half of a binding, which the engine owns (issues #709, #3348)
 // ---------------------------------------------------------------------------
 
 TEST_F (SpecsRouteTest, ABindingWrittenWithoutAVersionIsStampedFromTheStoredDocument) {
@@ -438,38 +507,51 @@ TEST_F (SpecsRouteTest, ABindingWrittenWithoutAVersionIsStampedFromTheStoredDocu
     routes::spec_content_hash (PETSTORE));
     EXPECT_GT (body["openapi"].value ("syncedAt", int64_t{ 0 }), 0);
 
-    const auto row = db_->get_collection (body["id"].get<std::string> ());
-    ASSERT_HAS_VALUE (row)
-    << "the create must have stored the collection it just returned";
-    const json stored = json::parse (row->openapi);
+    const json stored = stored_binding (body["id"].get<std::string> ());
     EXPECT_EQ (stored.value ("specHash", std::string{}), routes::spec_content_hash (PETSTORE))
     << "the response must be the row, not a dressed-up copy of it";
 }
 
-TEST_F (SpecsRouteTest, AnUpdateThatBindsIsStampedTheSameWay) {
+TEST_F (SpecsRouteTest, ACreateNeverStoresAClientSuppliedVersion) {
+    // A client's `specHash` is a claim about bytes it did not send; stored, it
+    // would make a run report coverage against a document the collection was
+    // never bound to. Whatever it sends, the stored version is the document's.
     const std::string spec_id = store_spec ();
-    // The path the Spec tab's bind-from-here flow actually takes.
-    const std::string col_id = create_collection (json{ { "name", "Pets" } });
-    auto [status, body]      = routes::update_collection_response (
-    *db_, col_id, json{ { "openapi", { { "specId", spec_id } } } });
-    ASSERT_EQ (status, 200) << body.dump ();
-    EXPECT_EQ (body["openapi"]["specHash"].get<std::string> (),
-    routes::spec_content_hash (PETSTORE));
-    EXPECT_GT (body["openapi"]["syncedAt"].get<int64_t> (), 0);
+    const auto claims         = std::to_array<json> ({
+    json{ { "specHash", "stale-hash" }, { "syncedAt", 42 } },
+    json{ { "specHash", 7 }, { "syncedAt", "yesterday" } },
+    });
+    for (json binding : claims) {
+        binding["specId"]   = spec_id;
+        auto [status, body] = routes::create_collection_response (
+        *db_, json{ { "name", "Pets" }, { "openapi", binding } });
+        ASSERT_EQ (status, 200) << binding.dump () << " -> " << body.dump ();
+
+        const json stored = stored_binding (body["id"].get<std::string> ());
+        EXPECT_EQ (stored.value ("specHash", std::string{}),
+        routes::spec_content_hash (PETSTORE))
+        << binding.dump ();
+        ASSERT_TRUE (stored["syncedAt"].is_number ()) << stored.dump ();
+        EXPECT_GT (stored["syncedAt"].get<int64_t> (), 42) << binding.dump ();
+        EXPECT_EQ (body["openapi"], stored);
+    }
 }
 
-TEST_F (SpecsRouteTest, AStampLeavesAnAlreadyCompleteBindingAlone) {
-    const std::string spec_id = store_spec ();
+TEST_F (SpecsRouteTest, AnUpdateLeavesAStaleBindingStale) {
     // A binding whose recorded version the document has since moved past is a
-    // real state - it is what a run reports as `hash_mismatch` - so a write must
-    // not quietly "repair" it into agreement with whatever is stored today.
-    const std::string col_id = create_collection (json{ { "name", "Pets" },
-    { "openapi", { { "specId", spec_id }, { "specHash", "stale-hash" }, { "syncedAt", 42 } } } });
-    const auto row           = db_->get_collection (col_id);
-    ASSERT_HAS_VALUE (row);
-    const json stored = json::parse (row->openapi);
-    EXPECT_EQ (stored.value ("specHash", std::string{}), "stale-hash");
-    EXPECT_EQ (stored.value ("syncedAt", int64_t{ 0 }), 42);
+    // real state - it is what a run reports as `hash_mismatch` - so a write
+    // that says nothing about the binding must not quietly "repair" it into
+    // agreement with whatever is stored today.
+    const std::string spec_id = store_spec ();
+    const std::string col_id  = create_collection (json{ { "name", "Pets" } });
+    const json stale = { { "specId", spec_id }, { "specHash", "stale-hash" },
+        { "syncedAt", 42 } };
+    write_binding (col_id, stale);
+
+    auto [status, body] =
+    routes::update_collection_response (*db_, col_id, json{ { "name", "Pets v2" } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (stored_binding (col_id), stale);
 }
 
 // ---------------------------------------------------------------------------
@@ -626,7 +708,7 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
                      { "sourceUrl", "https://example.test/openapi.json" } } } },
         { "collections",
         { { { "tempId", "c1" }, { "name", "Pets" },
-        { "openapi", { { "specTempId", "s1" }, { "syncedAt", 9 } } } } } },
+        { "openapi", { { "specTempId", "s1" }, { "specHash", "stale-hash" }, { "syncedAt", 9 } } } } } },
         { "requests",
         { { { "tempId", "r1" }, { "collectionTempId", "c1" }, { "name", "list" },
         { "method", "GET" }, { "url", "https://example.test/pets" },
@@ -651,11 +733,11 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
     EXPECT_EQ (binding["specId"].get<std::string> (), spec_id)
     << "the temp id must have been rewritten to the engine's real id";
     EXPECT_FALSE (binding.contains ("specTempId"));
-    EXPECT_EQ (binding["syncedAt"].get<int> (), 9);
     // The version is the engine's half, taken from the document this same call
-    // stored (issue #709) - the payload never carries it.
+    // stored (issues #709, #3348) - what the payload claimed is dropped.
     EXPECT_EQ (binding.value ("specHash", std::string{}),
     routes::spec_content_hash (PETSTORE));
+    EXPECT_GT (binding.value ("syncedAt", int64_t{ 0 }), 9);
 
     // Operation identity rides the shared applier, so it arrives free.
     auto stored_req = db_->get_request (body["idMap"]["r1"].get<std::string> ());
@@ -668,7 +750,8 @@ TEST_F (SpecsRouteTest, ImportWritesSpecsAndResolvesABindingThroughTheTempIdMap)
 TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     const std::string spec_id = store_spec ();
     json payload              = { { "collections",
-    { { { "tempId", "c1" }, { "name", "Pets" }, { "openapi", { { "specId", spec_id } } } } } } };
+    { { { "tempId", "c1" }, { "name", "Pets" },
+    { "openapi", { { "specId", spec_id }, { "specHash", "stale-hash" }, { "syncedAt", 9 } } } } } } };
 
     auto [status, body] = routes::import_apply_response (*db_, payload);
     ASSERT_EQ (status, 200) << body.dump ();
@@ -677,10 +760,11 @@ TEST_F (SpecsRouteTest, ImportMayBindASpecThatIsAlreadyStored) {
     const json binding = json::parse (stored->openapi);
     EXPECT_EQ (binding["specId"].get<std::string> (), spec_id);
     // Stamped from the stored document, the same as the payload-local case -
-    // an incremental import binds a version too, or it binds nothing usable.
+    // an incremental import binds a version too, or it binds nothing usable -
+    // and never the one the payload claimed (#3348).
     EXPECT_EQ (binding.value ("specHash", std::string{}),
     routes::spec_content_hash (PETSTORE));
-    EXPECT_GT (binding.value ("syncedAt", int64_t{ 0 }), 0);
+    EXPECT_GT (binding.value ("syncedAt", int64_t{ 0 }), 9);
 }
 
 /**
@@ -1008,10 +1092,10 @@ TEST_F (SpecsRouteTest, ABindingWhoseHashHasMovedIsNotMeasuredRatherThanMismeasu
     auto [status, stored] =
     routes::create_spec_document_response (*db_, json{ { "content", PETSTORE } });
     ASSERT_EQ (status, 200) << stored.dump ();
-    const std::string col_id = create_collection (json{ { "name", "Pets" },
-    { "openapi",
-    { { "specId", stored.value ("id", std::string{}) },
-    { "specHash", "a-hash-this-document-never-had" } } } });
+    const std::string col_id = create_collection (json{ { "name", "Pets" } });
+    write_binding (col_id,
+    json{ { "specId", stored.value ("id", std::string{}) },
+    { "specHash", "a-hash-this-document-never-had" }, { "syncedAt", 1 } });
     create_request (col_id);
 
     auto resolved = resolve (col_id);
@@ -1133,10 +1217,9 @@ TEST_F (SpecsRouteTest, TheDesignPathAndTheScenarioPathResolveOneBinding) {
     std::string root_id;
     const std::string tag_id = bind_root_with_tag_child (
     *db_, root_spec, routes::spec_content_hash (PETSTORE), &root_id);
-    auto [bind_status, bound] = routes::update_collection_response (*db_, tag_id,
-    json{ { "openapi",
-    { { "specId", nearer_spec }, { "specHash", "a-hash-this-document-never-had" } } } });
-    ASSERT_EQ (bind_status, 200) << bound.dump ();
+    write_binding (tag_id,
+    json{ { "specId", nearer_spec },
+    { "specHash", "a-hash-this-document-never-had" }, { "syncedAt", 1 } });
     // One level deeper again, so neither path is answering from the collection
     // the binding sits on.
     auto [leaf_status, leaf] = routes::create_collection_response (

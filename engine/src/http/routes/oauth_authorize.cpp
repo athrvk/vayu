@@ -27,28 +27,36 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
+#include <string_view>
 #include <variant>
+#include <vector>
 
 namespace vayu::http {
 
 namespace {
 
-constexpr int64_t kAttemptTtlMs = int64_t{ 5 } * 60 * 1000; // 5 minutes
+namespace limits = vayu::core::constants::oauth_authorize;
 
-// Attempt::result_state. kSettling is held by the one caller that won the
-// claim, until it publishes; every reader reports it as pending.
-constexpr int kPending   = 0;
-constexpr int kCompleted = 1;
-constexpr int kFailed    = 2;
-constexpr int kSettling  = 3;
+/// Where an attempt is. `Settling` is held by the one caller that won the
+/// claim, until it publishes; every reader reports it as pending.
+enum class AttemptState : std::uint8_t {
+    Pending,
+    Settling,
+    Completed,
+    Failed,
+};
 
-bool is_settled (int state) {
-    return state == kCompleted || state == kFailed;
+bool is_settled (AttemptState state) {
+    return state == AttemptState::Completed || state == AttemptState::Failed;
 }
+
+constexpr const char* TIMED_OUT = "Authorization timed out";
 
 int64_t now_ms () {
     return std::chrono::duration_cast<std::chrono::milliseconds> (
@@ -107,6 +115,30 @@ std::string generate_attempt_id () {
     return vayu::utils::generate_id ("oauth_");
 }
 
+/// Reports a failure from a frame nothing may escape (the destructor, the
+/// reaper's thread entry); building the message allocates, so it is caught.
+void log_unrecoverable (std::string_view what, std::string_view detail) noexcept {
+    try {
+        vayu::utils::log_error ("oauth", std::string (what) + ": " + std::string (detail));
+    } catch (...) {
+        // @deliberate the logger failed while reporting a failure in a frame
+        // that terminates if anything escapes it; there is nowhere left to
+        // report to.
+    }
+}
+
+void refuse_start (RegistryRefusal refusal, AuthorizeStart& out) {
+    if (refusal == RegistryRefusal::ShutDown) {
+        refuse_shut_down (out);
+        return;
+    }
+    out.ok            = false;
+    out.http_status   = 429;
+    out.error_code    = "oauth2_authorize_limit_reached";
+    out.error_message = "At most " + std::to_string (limits::MAX_ATTEMPTS) +
+    " sign-ins may be in progress at once - finish or cancel one first";
+}
+
 } // namespace
 
 std::string build_authorize_url (const nlohmann::json& config,
@@ -155,9 +187,9 @@ bool pkce) {
 // Attempt + manager
 // ---------------------------------------------------------------------------
 
-/** What the loopback callback resolved to, for the attempt to record. */
+/** What a callback resolved to, for the attempt to record. */
 struct CallbackOutcome {
-    int result_state = kFailed; ///< kCompleted or kFailed.
+    AttemptState result_state = AttemptState::Failed; ///< Completed or Failed.
     std::string error;
     std::string cache_key;
     const char* heading = "Authorization failed";
@@ -183,32 +215,39 @@ const std::string& expected_state) {
 
 /**
  * The outcome of a callback whose state matched: the IdP's own refusal, or the
- * token exchange this redirect exists to make, which @p cancel ends early.
+ * token exchange this redirect exists to make, which @p cancel (when set) ends
+ * early. Never throws: a claimed attempt that never publishes is never reaped.
  */
 CallbackOutcome resolve_oauth_callback (vayu::db::Database& db,
 const nlohmann::json& config,
 const std::string& code_verifier,
 const std::string& redirect_uri,
 const std::map<std::string, std::string>& params,
-const std::atomic<bool>& cancel) {
+const std::atomic<bool>* cancel) {
     CallbackOutcome outcome;
     if (auto refusal = redirect_refusal (params)) {
         outcome.error = std::move (*refusal);
         return outcome;
     }
 
-    const std::string code = params.count ("code") ? params.at ("code") : "";
-    oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
-    // Bounded by the setting: an exchange has no payload to carry a timeout.
-    auto result = oauth::acquire_token (db, config, false, exchange,
-    routes::resolve_request_timeout_ms (nlohmann::json::object (), db), nullptr, &cancel);
-    if (!std::holds_alternative<vayu::db::OAuthToken> (result)) {
-        outcome.error   = std::get<oauth::TokenError> (result).message;
-        outcome.heading = "Token exchange failed";
+    outcome.heading = "Token exchange failed";
+    try {
+        const std::string code = params.count ("code") ? params.at ("code") : "";
+        oauth::InteractiveExchange exchange{ code, code_verifier, redirect_uri };
+        // Bounded by the setting: an exchange has no payload to carry a timeout.
+        auto result = oauth::acquire_token (db, config, false, exchange,
+        routes::resolve_request_timeout_ms (nlohmann::json::object (), db),
+        nullptr, cancel);
+        if (!std::holds_alternative<vayu::db::OAuthToken> (result)) {
+            outcome.error = std::get<oauth::TokenError> (result).message;
+            return outcome;
+        }
+    } catch (const std::exception& e) {
+        outcome.error = e.what ();
         return outcome;
     }
     outcome.cache_key    = oauth::cache_key (config);
-    outcome.result_state = kCompleted;
+    outcome.result_state = AttemptState::Completed;
     outcome.heading      = "Authorization received";
     return outcome;
 }
@@ -218,31 +257,102 @@ struct OAuth2AuthorizeManager::Attempt {
     std::string code_verifier;
     nlohmann::json config;
     std::string redirect_uri;
-    bool pkce          = true;
-    int64_t created_at = 0;
+    bool pkce = true;
+    Clock::time_point deadline;
+    Clock::time_point erase_at;
 
-    std::atomic<int> result_state{ kPending };
+    std::atomic<AttemptState> result_state{ AttemptState::Pending };
     // Written once, by the claim winner (the callback handler, the reaper or
     // complete()), and read only once result_state is settled.
     std::string error;
     std::string cache_key;
 
+    /// What an embedded completion's exchange watches. That exchange runs
+    /// outside the registry's lock, and a cancel or a shutdown can destroy this
+    /// record under it, so the flag is shared and raised by the destructor.
+    std::shared_ptr<std::atomic<bool>> completion_cancel =
+    std::make_shared<std::atomic<bool>> (false);
+
+    Attempt () = default;
+    ~Attempt () {
+        completion_cancel->store (true, std::memory_order_release);
+    }
+    Attempt (const Attempt&)            = delete;
+    Attempt& operator= (const Attempt&) = delete;
+    Attempt (Attempt&&)                 = delete;
+    Attempt& operator= (Attempt&&)      = delete;
+
+    [[nodiscard]] bool expired (Clock::time_point now) const {
+        return now >= deadline;
+    }
+
     /// Take the one right to settle a pending attempt (#2369). The callback
     /// handler writes `error` and `cache_key` without the registry's lock,
-    /// which it cannot take: a teardown under `status` or the reaper holds it
-    /// while joining the handler's thread. The claim is what keeps a late
-    /// callback from rewriting a settled attempt's fields.
+    /// which it cannot take: a teardown under the lock joins the handler's
+    /// thread. The claim is what keeps a late callback from rewriting a
+    /// settled attempt's fields. Only the reaper claims past the deadline.
     bool claim () {
-        int expected = kPending;
-        return result_state.compare_exchange_strong (expected, kSettling);
+        AttemptState expected = AttemptState::Pending;
+        return result_state.compare_exchange_strong (expected, AttemptState::Settling);
     }
 
     /// The claim winner's write. The settled state is stored last, so a reader
     /// that sees it also sees the fields it describes.
-    void publish (int settled_state, std::string error_text, std::string key) {
+    void publish (AttemptState settled_state, std::string error_text, std::string key) {
         error     = std::move (error_text);
         cache_key = std::move (key);
         result_state.store (settled_state);
+    }
+
+    /// What every reader reports, without changing anything: a pending
+    /// attempt past its deadline is the timeout the reaper will record.
+    [[nodiscard]] AuthorizeStatus observed (Clock::time_point now) const {
+        switch (result_state.load ()) {
+        case AttemptState::Completed: return { "completed", error, cache_key };
+        case AttemptState::Failed: return { "failed", error, cache_key };
+        case AttemptState::Settling: return { "pending", "", "" };
+        case AttemptState::Pending: break;
+        }
+        if (expired (now)) {
+            return { "failed", TIMED_OUT, "" };
+        }
+        return { "pending", "", "" };
+    }
+
+    /// The loopback listener's `/callback`: the IdP's redirect, or any local
+    /// process that found the port.
+    void answer_callback (vayu::db::Database& db,
+    const std::string& attempt_id,
+    const httplib::Request& req,
+    httplib::Response& res) {
+        const auto query  = req.target.find ('?');
+        const auto params = parse_query (
+        query == std::string::npos ? std::string{} : req.target.substr (query + 1));
+        // Any local process can reach this port, so a callback without the
+        // attempt's state leaves it pending and the listener waiting.
+        if (!callback_state_matches (params, state)) {
+            vayu::utils::log_warning ("oauth",
+            "OAuth callback ignored, missing or wrong state: " + attempt_id);
+            res.status = 400;
+            res.set_content (callback_page ("State mismatch (possible CSRF)"), "text/html");
+            return;
+        }
+        // Past the deadline the attempt is already the timeout every reader
+        // reports, so a late redirect cannot turn it around.
+        if (expired (Clock::now ())) {
+            res.status = 410;
+            res.set_content (callback_page (TIMED_OUT), "text/html");
+            return;
+        }
+        if (!claim ()) {
+            res.status = 409;
+            res.set_content (callback_page ("Authorization already handled"), "text/html");
+            return;
+        }
+        const CallbackOutcome outcome = resolve_oauth_callback (
+        db, config, code_verifier, redirect_uri, params, &stop_signal.flag ());
+        publish (outcome.result_state, outcome.error, outcome.cache_key);
+        res.set_content (callback_page (outcome.heading), "text/html");
     }
 
     /// Requested when the attempt's listener stops, before it is joined. The
@@ -257,40 +367,89 @@ struct OAuth2AuthorizeManager::Attempt {
     ManagedListener listener;
 };
 
-OAuth2AuthorizeManager::OAuth2AuthorizeManager () = default;
-
-OAuth2AuthorizeManager::~OAuth2AuthorizeManager () = default;
-
-void OAuth2AuthorizeManager::shutdown () {
-    attempts_.shutdown ();
+OAuth2AuthorizeManager::OAuth2AuthorizeManager (AuthorizeTimings timings)
+: timings_ (timings), attempts_ (limits::MAX_ATTEMPTS) {
+    reaper_ = std::thread ([this] { run_reaper (); });
 }
 
-// The reaper and `status` retire an attempt's listener under the registry's
-// lock because they keep its record for the polls that follow. Each does so
-// only once the attempt is settled or claimed by itself, so no callback of it
-// is still in a token exchange for the join to wait on.
-void OAuth2AuthorizeManager::reap_timed_out_locked (Attempts::Entries& attempts) {
-    const int64_t now = now_ms ();
-    for (auto it = attempts.begin (); it != attempts.end ();) {
-        Attempt& attempt = *it->second;
-        const int state  = attempt.result_state.load ();
-        if (state == kPending && now > attempt.created_at + kAttemptTtlMs) {
-            // Pending past its TTL → fail it and free the listener, unless a
-            // callback claimed it since the load above.
-            if (attempt.claim ()) {
-                attempt.publish (kFailed, "Authorization timed out", {});
-                retire_listener (attempt);
-            }
-            ++it;
-        } else if (is_settled (state) && now > attempt.created_at + (2 * kAttemptTtlMs)) {
-            // Terminal and well past the polling window → drop the record so the
-            // map does not grow unbounded on a long-lived daemon.
-            retire_listener (attempt);
-            it = attempts.erase (it);
-        } else {
-            ++it;
+OAuth2AuthorizeManager::~OAuth2AuthorizeManager () {
+    try {
+        shutdown ();
+    } catch (const std::exception& e) {
+        log_unrecoverable ("OAuth2 authorize manager shutdown failed", e.what ());
+    } catch (...) {
+        log_unrecoverable ("OAuth2 authorize manager shutdown failed", "unknown exception");
+    }
+}
+
+void OAuth2AuthorizeManager::shutdown () {
+    // The reaper first: it moves attempts out of the registry, and one it
+    // holds while the registry drains would be retired by neither.
+    reaper_stop_.request ();
+    if (reaper_.joinable ()) {
+        reaper_.join ();
+    }
+    attempts_.shutdown ();
+    std::lock_guard<std::mutex> lock (settled_mutex_);
+    settled_.clear ();
+}
+
+void OAuth2AuthorizeManager::run_reaper () {
+    while (!reaper_stop_.wait_for (timings_.reap_interval)) {
+        try {
+            reap ();
+        } catch (const std::exception& e) {
+            log_unrecoverable ("OAuth2 authorize reaper tick failed", e.what ());
+        } catch (...) {
+            log_unrecoverable ("OAuth2 authorize reaper tick failed", "unknown exception");
         }
     }
+}
+
+// Fails each pending attempt past its deadline, moves every settled attempt's
+// result aside and retires its listener outside the registry's lock, then drops
+// results past their retention. A claimed attempt still exchanging is left for
+// its claim winner to publish.
+void OAuth2AuthorizeManager::reap () {
+    const auto now = Clock::now ();
+    std::vector<std::unique_ptr<Attempt>> retiring;
+    attempts_.with_entries ([&] (Attempts::Entries& attempts) {
+        for (auto it = attempts.begin (); it != attempts.end ();) {
+            Attempt& attempt = *it->second;
+            if (attempt.expired (now) && attempt.claim ()) {
+                attempt.publish (AttemptState::Failed, TIMED_OUT, {});
+                vayu::utils::log_info (
+                "oauth", "OAuth2 authorize timed out: " + it->first);
+            }
+            if (!is_settled (attempt.result_state.load ())) {
+                ++it;
+                continue;
+            }
+            {
+                // Recorded before the erase, under the registry's lock, so a
+                // reader that misses the attempt there finds it here.
+                std::lock_guard<std::mutex> lock (settled_mutex_);
+                settled_.insert_or_assign (it->first,
+                SettledRecord{ attempt.observed (now), attempt.erase_at });
+            }
+            retiring.push_back (std::move (it->second));
+            it = attempts.erase (it);
+        }
+    });
+    for (const auto& attempt : retiring) {
+        retire_listener (*attempt);
+    }
+
+    std::lock_guard<std::mutex> lock (settled_mutex_);
+    std::erase_if (settled_,
+    [now] (const auto& entry) { return now >= entry.second.erase_at; });
+}
+
+AuthorizeStatus OAuth2AuthorizeManager::settled_status (const std::string& attempt_id) const {
+    std::lock_guard<std::mutex> lock (settled_mutex_);
+    const auto it = settled_.find (attempt_id);
+    return it == settled_.end () ? AuthorizeStatus{ "not_found", "", "" } :
+                                   it->second.status;
 }
 
 AuthorizeStart OAuth2AuthorizeManager::start (vayu::db::Database& db,
@@ -308,14 +467,17 @@ const std::string& mode) {
 
     auto slot = attempts_.reserve ();
     if (!slot) {
-        refuse_shut_down (out);
+        refuse_start (slot.error (), out);
         return out;
     }
 
-    auto attempt        = std::make_unique<Attempt> ();
-    attempt->config     = config;
-    attempt->created_at = now_ms ();
-    attempt->pkce       = [&] {
+    auto attempt             = std::make_unique<Attempt> ();
+    attempt->config          = config;
+    const auto now           = Clock::now ();
+    attempt->deadline        = now + timings_.attempt_ttl;
+    attempt->erase_at        = now + timings_.record_retention;
+    const int64_t expires_at = now_ms () + timings_.attempt_ttl.count ();
+    attempt->pkce            = [&] {
         auto it = config.find ("pkce");
         return it == config.end () || !it->is_boolean () || it->get<bool> ();
     }();
@@ -341,36 +503,7 @@ const std::string& mode) {
 
         attempt->listener.server ().Get ("/callback",
         [raw, &db, attempt_id] (const httplib::Request& req, httplib::Response& res) {
-            const auto params = parse_query (req.target.find ('?') != std::string::npos ?
-            req.target.substr (req.target.find ('?') + 1) :
-            std::string{});
-            // Any local process can reach this port, so a callback without the
-            // attempt's state leaves it pending and the listener waiting.
-            if (!callback_state_matches (params, raw->state)) {
-                vayu::utils::log_warning ("oauth",
-                "OAuth callback ignored, missing or wrong state: " + attempt_id);
-                res.status = 400;
-                res.set_content (
-                callback_page ("State mismatch (possible CSRF)"), "text/html");
-                return;
-            }
-            if (!raw->claim ()) {
-                res.status = 409;
-                res.set_content (
-                callback_page ("Authorization already handled"), "text/html");
-                return;
-            }
-            CallbackOutcome outcome;
-            try {
-                outcome = resolve_oauth_callback (db, raw->config, raw->code_verifier,
-                raw->redirect_uri, params, raw->stop_signal.flag ());
-            } catch (const std::exception& e) {
-                // A claimed attempt that never publishes is never reaped.
-                outcome.error   = e.what ();
-                outcome.heading = "Token exchange failed";
-            }
-            raw->publish (outcome.result_state, outcome.error, outcome.cache_key);
-            res.set_content (callback_page (outcome.heading), "text/html");
+            raw->answer_callback (db, attempt_id, req, res);
         });
 
         // Ephemeral only, so the port guard never refuses this one; the label
@@ -389,10 +522,10 @@ const std::string& mode) {
 
     out.attempt_id    = attempt_id;
     out.redirect_uri  = attempt->redirect_uri;
+    out.expires_at    = expires_at;
     out.authorize_url = build_authorize_url (
     config, attempt->state, challenge, attempt->redirect_uri, attempt->pkce);
 
-    attempts_.with_entries (reap_timed_out_locked);
     if (!attempts_.commit (std::move (*slot), attempt_id, std::move (attempt))) {
         out = AuthorizeStart{};
         refuse_shut_down (out);
@@ -404,63 +537,47 @@ const std::string& mode) {
 
 AuthorizeStatus OAuth2AuthorizeManager::complete (vayu::db::Database& db,
 const std::string& attempt_id,
-const std::string& callback_url,
-const std::atomic<bool>* cancel) {
+const std::string& callback_url) {
     // Snapshot what the exchange needs under the lock, then release it: the token
     // exchange is a network round-trip and must not stall status() polls for
     // other attempts (the manager is shared across all in-flight authorizations).
     std::string state, code_verifier, redirect_uri;
     nlohmann::json config;
-    const auto answered =
-    attempts_
-    .with_entry (attempt_id,
-    [&] (Attempt& attempt) -> std::optional<AuthorizeStatus> {
-        if (const int s = attempt.result_state.load (); s != kPending) {
-            // Settled (e.g. a duplicate complete) - return as-is; a claim held
-            // by a loopback callback mid-exchange is still pending.
-            if (!is_settled (s)) {
-                return AuthorizeStatus{ "pending", "", "" };
-            }
-            return AuthorizeStatus{ s == kCompleted ? "completed" : "failed",
-                attempt.error, attempt.cache_key };
-        }
-        if (!attempt.claim ()) {
-            return AuthorizeStatus{ "pending", "", "" };
+    std::shared_ptr<const std::atomic<bool>> cancel;
+    const auto now      = Clock::now ();
+    const auto answered = attempts_.with_entry (
+    attempt_id, [&] (Attempt& attempt) -> std::optional<AuthorizeStatus> {
+        // Settled (a duplicate complete), held by a loopback callback, or past
+        // its deadline: answered as any reader would see it.
+        if (attempt.expired (now) || !attempt.claim ()) {
+            return attempt.observed (now);
         }
         state         = attempt.state;
         code_verifier = attempt.code_verifier;
         redirect_uri  = attempt.redirect_uri;
         config        = attempt.config;
+        cancel        = attempt.completion_cancel;
         return std::nullopt;
-    })
-    .value_or (AuthorizeStatus{ "not_found", "", "" });
-    if (answered) {
-        return *answered;
+    });
+    if (!answered) {
+        return settled_status (attempt_id);
+    }
+    if (*answered) {
+        return **answered;
     }
 
     const auto qpos = callback_url.find ('?');
     const auto params =
     parse_query (qpos == std::string::npos ? "" : callback_url.substr (qpos + 1));
 
-    int result_state = kFailed;
-    std::string error;
-    std::string cache_key;
-    if (auto refusal = redirect_refusal (params)) {
-        error = std::move (*refusal);
-    } else if (params.count ("state") == 0 || params.at ("state") != state) {
-        error = "State mismatch (possible CSRF)";
+    // An IdP refusal reads the same with or without its state; anything else
+    // is read only with the attempt's own.
+    CallbackOutcome outcome;
+    if (redirect_refusal (params) || callback_state_matches (params, state)) {
+        outcome = resolve_oauth_callback (
+        db, config, code_verifier, redirect_uri, params, cancel.get ());
     } else {
-        const std::string code = params.count ("code") ? params.at ("code") : "";
-        oauth::InteractiveExchange ex{ code, code_verifier, redirect_uri };
-        auto result = oauth::acquire_token (db, config, false, ex,
-        routes::resolve_request_timeout_ms (nlohmann::json::object (), db), nullptr,
-        cancel); // no lock held
-        if (std::holds_alternative<vayu::db::OAuthToken> (result)) {
-            result_state = kCompleted;
-            cache_key    = oauth::cache_key (config);
-        } else {
-            error = std::get<oauth::TokenError> (result).message;
-        }
+        outcome.error = "State mismatch (possible CSRF)";
     }
 
     // Re-acquire the lock to store the outcome; the attempt may have been
@@ -468,35 +585,25 @@ const std::atomic<bool>* cancel) {
     return attempts_
     .with_entry (attempt_id,
     [&] (Attempt& attempt) {
-        attempt.publish (result_state, error, cache_key);
-        return AuthorizeStatus{ result_state == kCompleted ? "completed" : "failed",
-            attempt.error, attempt.cache_key };
+        attempt.publish (outcome.result_state, outcome.error, outcome.cache_key);
+        return attempt.observed (now);
     })
     .value_or (AuthorizeStatus{ "not_found", "", "" });
 }
 
 AuthorizeStatus OAuth2AuthorizeManager::status (const std::string& attempt_id) {
-    return attempts_.with_entries ([&] (Attempts::Entries& attempts) -> AuthorizeStatus {
-        reap_timed_out_locked (attempts);
-        const auto it = attempts.find (attempt_id);
-        if (it == attempts.end ()) {
-            return { "not_found", "", "" };
-        }
-        Attempt& attempt = *it->second;
-        const int s      = attempt.result_state.load ();
-        if (!is_settled (s)) {
-            return { "pending", "", "" };
-        }
-        // Terminal: free the listener but keep the (small) result record so
-        // repeat polls are idempotent.
-        retire_listener (attempt);
-        return { s == kCompleted ? "completed" : "failed", attempt.error,
-            attempt.cache_key };
-    });
+    const auto now = Clock::now ();
+    if (auto live = attempts_.with_entry (attempt_id,
+        [now] (const Attempt& attempt) { return attempt.observed (now); })) {
+        return *live;
+    }
+    return settled_status (attempt_id);
 }
 
 void OAuth2AuthorizeManager::cancel (const std::string& attempt_id) {
     attempts_.remove (attempt_id);
+    std::lock_guard<std::mutex> lock (settled_mutex_);
+    settled_.erase (attempt_id);
 }
 
 } // namespace vayu::http
