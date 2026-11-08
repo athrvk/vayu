@@ -21,6 +21,7 @@ import { RequestBuilderContext } from "./RequestBuilderContext";
 import { emptyDrafts, type BodyDrafts, type VariablesDraft } from "../utils/body-drafts";
 import { UNSAVED_AUTO_KEY } from "./auto-record-slot";
 import { retainKeys } from "./retain-keys";
+import { createSendTracker, NO_SENDS, type InFlightSends, type SendTicket } from "./send-tracker";
 import { useVariableResolver, useVariableWriter, useSaveManager } from "@/hooks";
 import { resolveDataContract } from "@/lib/data-contract";
 import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
@@ -349,7 +350,6 @@ export default function RequestBuilderProvider({
 		serve(useRevealStore.getState().pending);
 		return useRevealStore.subscribe((s) => serve(s.pending));
 	}, [requestId, bodyMode, clearReveal, setActiveTab]);
-	const [isExecuting, setIsExecuting] = useState(false);
 	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
 	/*
@@ -760,10 +760,6 @@ export default function RequestBuilderProvider({
 		setFieldConflicts({});
 		setRequestGone(false);
 		setLastProcessedInitialRequest(initialRequest);
-		// Clear any executing state carried over from the request we just left.
-		// It belongs to that request's in-flight run, not this one; without this
-		// the switched-to request shows a "Sending" spinner it never triggered.
-		setIsExecuting(false);
 
 		// Restore response from store for this request
 		const requestId = initialRequest.id;
@@ -1145,6 +1141,16 @@ export default function RequestBuilderProvider({
 		}
 	}, [streamRunId]);
 
+	/*
+	 * Which requests have a send in flight (#3352), filed under `memoryKey` like
+	 * every other per-builder map here. `isExecuting` is derived for the request
+	 * on screen, so leaving a request mid-send and coming back finds it still
+	 * sending, and its Send stays refused until its own answer lands.
+	 */
+	const [inFlightSends, setInFlightSends] = useState<InFlightSends>(NO_SENDS);
+	const [sendTracker] = useState(() => createSendTracker(setInFlightSends));
+	const isExecuting = inFlightSends.has(memoryKey);
+
 	/**
 	 * Execute the request.
 	 *
@@ -1169,6 +1175,19 @@ export default function RequestBuilderProvider({
 			// while reading the response stay out of it; only a saved request
 			// can hold an example, so an unsaved one takes none.
 			const sent = executingId ? sentRequestOf(executingRequest) : undefined;
+			/*
+			 * Persist under the request that ran, so returning to it shows its own
+			 * response; `storeSetResponse` is keyed by id and safe even if this
+			 * provider has moved on. The live view is touched only while that request
+			 * is on screen - the ref is current, unlike this closure's `executingId`.
+			 * An answer from a send that a newer send of the same request overtook
+			 * is dropped, so it can never land over the newer one's.
+			 */
+			const land = (send: SendTicket, result: ResponseState) => {
+				if (!send.isCurrent()) return;
+				if (executingId) storeSetResponse(executingId, result);
+				if (currentRequestIdRef.current === executingId) setLocalResponse(result);
+			};
 
 			/*
 			 * A stream-flagged request takes the other endpoint answer (issue #574):
@@ -1177,7 +1196,7 @@ export default function RequestBuilderProvider({
 			 * Send that silently did nothing is worse than one that buffers.
 			 */
 			if (executingRequest.stream && onExecuteStream) {
-				setIsExecuting(true);
+				const send = sendTracker.begin(memoryKey);
 				setLocalResponse(null);
 				if (executingId) useResponseStore.getState().clearResponse(executingId);
 				// The previous stream's rows belong to the send that is being
@@ -1188,12 +1207,12 @@ export default function RequestBuilderProvider({
 					const started = await onExecuteStream(executingRequest, dataRow);
 					if (!started) return;
 					if (!started.ok) {
-						if (executingId) storeSetResponse(executingId, started.response);
-						if (currentRequestIdRef.current === executingId) {
-							setLocalResponse(started.response);
-						}
+						land(send, started.response);
 						return;
 					}
+					// An overtaken send's stream is not followed: the feed is the
+					// newer send's to open.
+					if (!send.isCurrent()) return;
 					streamSentRef.current = sent ? { runId: started.runId, sent } : null;
 					useExecutionEventsStore.getState().startStream({
 						requestId: executingId,
@@ -1205,15 +1224,13 @@ export default function RequestBuilderProvider({
 					console.error("Request execution failed:", error);
 				} finally {
 					/*
-					 * Cleared even though the stream has only just begun. The request
+					 * Finished even though the stream has only just begun. The request
 					 * is no longer in flight - the engine has the transfer and has
 					 * answered - and leaving the spinner up would hide the Events tab
 					 * behind "Sending…" for the whole life of the stream. `isStreaming`
 					 * is what reports the rest.
 					 */
-					if (currentRequestIdRef.current === executingId) {
-						setIsExecuting(false);
-					}
+					send.finish();
 				}
 				return;
 			}
@@ -1244,34 +1261,27 @@ export default function RequestBuilderProvider({
 			 * mount initialiser and the request-switch reset read the store
 			 * back, so a stale entry would resurface on the next switch.
 			 */
-			setIsExecuting(true);
+			const send = sendTracker.begin(memoryKey);
 
 			try {
 				const executed = await onExecute(executingRequest, dataRow);
 				const result = executed && sent ? { ...executed, sentRequest: sent } : executed;
-				if (result) {
-					// Persist under the request that ran, so returning to it shows its
-					// own response. `storeSetResponse` is keyed by id and is safe even
-					// if this provider has since moved on to another request.
-					if (executingId) storeSetResponse(executingId, result);
-					// Only touch the shared live view if that request is still on
-					// screen. The ref reflects the current request, unlike this
-					// closure's frozen `executingId`.
-					if (currentRequestIdRef.current === executingId) {
-						setLocalResponse(result);
-					}
-				}
+				if (result) land(send, result);
 			} catch (error) {
 				console.error("Request execution failed:", error);
 			} finally {
-				// Same guard: a stale finish must not clear the spinner of a different
-				// request the user has since started.
-				if (currentRequestIdRef.current === executingId) {
-					setIsExecuting(false);
-				}
+				send.finish();
 			}
 		},
-		[request, onExecute, onExecuteStream, storeSetResponse, forgetRowIndex]
+		[
+			request,
+			memoryKey,
+			sendTracker,
+			onExecute,
+			onExecuteStream,
+			storeSetResponse,
+			forgetRowIndex,
+		]
 	);
 
 	// Start load test

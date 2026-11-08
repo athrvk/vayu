@@ -641,6 +641,10 @@ export interface RequestBuilderContextValue {
 	// UI State
 	activeTab: RequestTab;
 	setActiveTab: (tab: RequestTab) => void;
+	/**
+	 * A send of the request on screen is in flight. Held per request (#3352),
+	 * so a request left mid-send still reads true when the user comes back.
+	 */
 	isExecuting: boolean;
 	/**
 	 * A stream this builder started is still open (issue #574).

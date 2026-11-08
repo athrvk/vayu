@@ -14,21 +14,21 @@
  * still in flight when the user switches requests must land on the request that
  * actually ran - not on whatever is on screen when it resolves.
  *
- * Before the fix the shared `isExecuting` / `response` state leaked: switching
- * mid-flight left the new request showing a "Sending" spinner it never
- * triggered, and the slow request's body then appeared under the new request.
- * These lock the two halves of the fix - the reset effect clears `isExecuting`
- * on a request change, and `executeRequest` guards the shared view with the id
- * that is on screen *now* while still persisting the result under the id that
- * ran. Revert either half and one of these fails.
+ * The send lifecycle is held per request (#3352): a switch neither hands the
+ * spinner to the switched-to request nor takes it from the one still sending,
+ * and of two sends of one request only the newer one's finish and answer count.
+ * `executeRequest` guards the shared view with the id that is on screen *now*
+ * while still persisting the result under the id that ran.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { TestQueryClient } from "@/test/TestQueryClient";
 import { useEffect } from "react";
-import { render, act, waitFor } from "@testing-library/react";
+import { render, act, waitFor, screen, fireEvent } from "@testing-library/react";
 import RequestBuilderProvider from "./RequestBuilderProvider";
 import { useRequestBuilderContext } from "./RequestBuilderContext";
+import UrlBar from "../components/UrlBar";
+import { TooltipProvider } from "@/components/ui";
 import { useResponseStore } from "@/stores";
 import type { RequestBuilderContextValue, RequestState, ResponseState } from "../types";
 
@@ -65,6 +65,11 @@ vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries: [] } }),
 }));
 
+// The URL bar's method and URL fields pull in the variable-highlighting input;
+// the Send button is all these cases read.
+vi.mock("../components/UrlBar/MethodSelector", () => ({ default: () => null }));
+vi.mock("../components/UrlBar/UrlInput", () => ({ default: () => null }));
+
 function makeResponse(tag: string): ResponseState {
 	return {
 		status: 200,
@@ -94,22 +99,33 @@ function Capture() {
 function renderFor(id: string, onExecute: (r: RequestState) => Promise<ResponseState | null>) {
 	return (
 		<TestQueryClient>
-			<RequestBuilderProvider
-				initialRequest={{ id, name: id } as Partial<RequestState>}
-				onExecute={onExecute}
-			>
-				<Capture />
-			</RequestBuilderProvider>
+			<TooltipProvider>
+				<RequestBuilderProvider
+					initialRequest={{ id, name: id, url: `https://api.test/${id}` }}
+					onExecute={onExecute}
+				>
+					<Capture />
+					<UrlBar />
+				</RequestBuilderProvider>
+			</TooltipProvider>
 		</TestQueryClient>
 	);
 }
 
-/** An onExecute whose promise the test resolves by hand. */
+/** An onExecute whose calls the test resolves by hand, each on its own. */
 function deferredExecute() {
-	let resolve!: (r: ResponseState | null) => void;
-	const fn = vi.fn(() => new Promise<ResponseState | null>((r) => (resolve = r)));
-	return { fn, resolve: (r: ResponseState | null) => resolve(r) };
+	const pending: Array<(r: ResponseState | null) => void> = [];
+	const fn = vi.fn(() => new Promise<ResponseState | null>((r) => pending.push(r)));
+	return {
+		fn,
+		/** Resolve the `call`-th send (0 is the first). */
+		resolveCall: (call: number, r: ResponseState | null) => pending[call](r),
+		resolve: (r: ResponseState | null) => pending[0](r),
+	};
 }
+
+/** The URL bar's Send button, whichever label it carries. */
+const sendButton = () => screen.getByRole("button", { name: /^(Send|Sending…)$/ });
 
 describe("execute survives a request switch without leaking", () => {
 	beforeEach(() => {
@@ -175,6 +191,7 @@ describe("execute survives a request switch without leaking", () => {
 		// Leave A, then come back before it finishes.
 		rerender(renderFor("B", exec.fn));
 		rerender(renderFor("A", exec.fn));
+		expect(ctx().isExecuting).toBe(true);
 
 		const resultA = makeResponse("A-RESULT");
 		await act(async () => {
@@ -185,5 +202,83 @@ describe("execute survives a request switch without leaking", () => {
 		await waitFor(() => expect(ctx().response?.body).toBe("A-RESULT"));
 		expect(ctx().isExecuting).toBe(false);
 		expect(useResponseStore.getState().getResponse("A")?.body).toBe("A-RESULT");
+	});
+});
+
+describe("the send lifecycle is held per request (#3352)", () => {
+	beforeEach(() => {
+		useResponseStore.getState().clearAll();
+	});
+
+	it("A, B, A during a send keeps A's Send disabled until its response lands", async () => {
+		const exec = deferredExecute();
+		const { rerender } = render(renderFor("A", exec.fn));
+
+		await act(async () => {
+			fireEvent.click(sendButton());
+		});
+		expect(sendButton()).toBeDisabled();
+
+		rerender(renderFor("B", exec.fn));
+		expect(sendButton()).toBeEnabled();
+
+		rerender(renderFor("A", exec.fn));
+		expect(sendButton()).toBeDisabled();
+		expect(sendButton()).toHaveAccessibleName("Sending…");
+		// The disabled button is the whole gate: a click on it sends nothing.
+		fireEvent.click(sendButton());
+		expect(exec.fn).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			exec.resolve(makeResponse("A-RESULT"));
+		});
+		await waitFor(() => expect(sendButton()).toBeEnabled());
+		expect(ctx().response?.body).toBe("A-RESULT");
+	});
+
+	it("of two quick sends, an older answer arriving last is dropped", async () => {
+		const exec = deferredExecute();
+		render(renderFor("A", exec.fn));
+
+		await act(async () => {
+			void ctx().executeRequest();
+			void ctx().executeRequest();
+		});
+		expect(exec.fn).toHaveBeenCalledTimes(2);
+
+		await act(async () => {
+			exec.resolveCall(1, makeResponse("NEWER"));
+		});
+		await waitFor(() => expect(ctx().response?.body).toBe("NEWER"));
+
+		await act(async () => {
+			exec.resolveCall(0, makeResponse("OLDER"));
+		});
+		expect(ctx().response?.body).toBe("NEWER");
+		expect(useResponseStore.getState().getResponse("A")?.body).toBe("NEWER");
+		expect(ctx().isExecuting).toBe(false);
+	});
+
+	it("of two quick sends, the older one finishing first leaves the newer one sending", async () => {
+		const exec = deferredExecute();
+		render(renderFor("A", exec.fn));
+
+		await act(async () => {
+			void ctx().executeRequest();
+			void ctx().executeRequest();
+		});
+
+		await act(async () => {
+			exec.resolveCall(0, makeResponse("OLDER"));
+		});
+		expect(ctx().isExecuting).toBe(true);
+		expect(ctx().response?.body).not.toBe("OLDER");
+		expect(useResponseStore.getState().getResponse("A")).toBeNull();
+
+		await act(async () => {
+			exec.resolveCall(1, makeResponse("NEWER"));
+		});
+		await waitFor(() => expect(ctx().response?.body).toBe("NEWER"));
+		expect(ctx().isExecuting).toBe(false);
 	});
 });

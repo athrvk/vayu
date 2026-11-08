@@ -2736,8 +2736,9 @@ would fight the editor the user just came back to.
 
 ### `useEngine()` - Compose, Execute, Stop
 
-Wraps the three engine calls that are not queries, with `isExecuting` / `error`
-for the caller to render.
+Wraps the three engine calls that are not queries, with `error` for the caller
+to render. Whether a send is in flight is not here: the request builder holds
+that per request (`RequestBuilderProvider`'s `isExecuting`, #3352).
 
 **API:**
 ```typescript
@@ -2745,7 +2746,6 @@ const {
   composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>
   executeRequest: (params: ExecuteRequestRequest, environmentId?: string) => Promise<SanityResult | null>
   stopLoadTest: (runId: string) => Promise<boolean>
-  isExecuting: boolean
   error: string | null
 } = useEngine();
 ```

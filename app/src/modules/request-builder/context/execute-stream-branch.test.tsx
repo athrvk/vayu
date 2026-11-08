@@ -164,6 +164,26 @@ describe("the streaming send branch", () => {
 		stopRun.mockClear();
 	});
 
+	it("stays sending until the engine answers, across a switch away and back", async () => {
+		let answer!: (r: StreamStartResult) => void;
+		const deferred = () => new Promise<StreamStartResult>((r) => (answer = r));
+		const { rerender } = render(renderFor("A", deferred));
+
+		await act(async () => {
+			void ctx().executeRequest();
+		});
+		rerender(renderFor("B", deferred));
+		expect(ctx().isExecuting).toBe(false);
+		rerender(renderFor("A", deferred));
+		expect(ctx().isExecuting).toBe(true);
+
+		await act(async () => {
+			answer({ ok: true, runId: "run_1", eventsUrl: "/runs/run_1/events" });
+		});
+		expect(ctx().isExecuting).toBe(false);
+		expect(ctx().isStreaming).toBe(true);
+	});
+
 	it("registers the stream against the request that sent it, and returns to idle", async () => {
 		render(renderFor("A", started));
 
@@ -329,6 +349,29 @@ describe("the streaming send branch", () => {
 		expect(ctx().response).toBeNull();
 		expect(useResponseStore.getState().getResponse("A")).toBeNull();
 		expect(ctx().isStreaming).toBe(true);
+	});
+
+	it("follows only the newer of two quick stream sends (#3352)", async () => {
+		const answers: Array<(r: StreamStartResult) => void> = [];
+		const deferred = () => new Promise<StreamStartResult>((r) => answers.push(r));
+		render(renderFor("A", deferred));
+
+		await act(async () => {
+			void ctx().executeRequest();
+			void ctx().executeRequest();
+		});
+		await act(async () => {
+			answers[1]({ ok: true, runId: "run_2", eventsUrl: "/runs/run_2/events" });
+		});
+		expect(useExecutionEventsStore.getState().runId).toBe("run_2");
+
+		// Mutation check: drop the provider's `send.isCurrent()` test before
+		// `startStream` and the older 202 takes the feed over from the newer run.
+		await act(async () => {
+			answers[0]({ ok: true, runId: "run_1", eventsUrl: "/runs/run_1/events" });
+		});
+		expect(useExecutionEventsStore.getState().runId).toBe("run_2");
+		expect(ctx().isExecuting).toBe(false);
 	});
 
 	it("does not report another request's stream as this one's", async () => {

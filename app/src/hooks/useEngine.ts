@@ -37,12 +37,10 @@ interface UseEngineReturn {
 		environmentId?: string
 	) => Promise<SanityResult | null>;
 	stopLoadTest: (runId: string) => Promise<boolean>;
-	isExecuting: boolean;
 	error: string | null;
 }
 
 export function useEngine(): UseEngineReturn {
-	const [isExecuting, setIsExecuting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const composeRequest = useCallback(
@@ -59,7 +57,6 @@ export function useEngine(): UseEngineReturn {
 			params: ExecuteRequestRequest,
 			environmentId?: string
 		): Promise<SanityResult | null> => {
-			setIsExecuting(true);
 			setError(null);
 
 			try {
@@ -85,8 +82,6 @@ export function useEngine(): UseEngineReturn {
 					errorCode: errorCode,
 					errorMessage: errorMessage,
 				} as unknown as SanityResult;
-			} finally {
-				setIsExecuting(false);
 			}
 		},
 		[]
@@ -112,7 +107,6 @@ export function useEngine(): UseEngineReturn {
 		composeRequest,
 		executeRequest,
 		stopLoadTest,
-		isExecuting,
 		error,
 	};
 }
