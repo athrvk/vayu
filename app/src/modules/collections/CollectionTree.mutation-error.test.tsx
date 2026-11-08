@@ -16,8 +16,8 @@
  * that just refused.
  *
  * The report is a plain error toast that names what was attempted, and never
- * the save-state machine: `failSave` parks the Dock on "Not saved", and a
- * failed delete or create is not an unsaved edit.
+ * the save store: `reportFailed` parks the Dock on "Not saved", and a failed
+ * delete or create is not an unsaved edit.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

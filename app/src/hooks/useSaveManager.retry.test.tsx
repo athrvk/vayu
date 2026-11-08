@@ -9,7 +9,7 @@
  */
 
 /**
- * A failed auto-save used to stop trying, permanently. `failSave` published
+ * A failed auto-save used to stop trying, permanently. The failure published
  * `status: "error"` and a ten-second toast, and nothing on the auto-save path
  * ever scheduled another attempt: the effect that arms a save only reacts to a
  * *new* edit, and the draft that just failed to save is not one.
@@ -428,7 +428,9 @@ describe("a save the disk had no room for", () => {
 			"Couldn't save - The disk holding Vayu's data is full - free up space and try again"
 		);
 		// Mutation check: reporting the failure without its cause clears this.
-		expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
+		expect(useSaveStore.getState().unsaved.get("request-req_1")).toMatchObject({
+			diskFull: true,
+		});
 	});
 
 	it("keeps the generic lead for a 4xx", async () => {

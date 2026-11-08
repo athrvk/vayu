@@ -90,11 +90,11 @@ const saveStoreState = {
 	unregisterContext: vi.fn(),
 	updateContext: vi.fn(),
 	setActiveContext: vi.fn(),
-	markPendingSave: vi.fn(),
-	startSaving: vi.fn(),
-	completeSaveThenIdle: vi.fn(),
-	failSave: vi.fn(),
-	setStatus: vi.fn(),
+	reportPending: vi.fn(),
+	reportSaving: vi.fn(),
+	reportSaved: vi.fn(),
+	reportFailed: vi.fn(),
+	discard: vi.fn(),
 };
 
 const variablesStoreState = { selectedCategory: null, setSelectedCategory: vi.fn() };

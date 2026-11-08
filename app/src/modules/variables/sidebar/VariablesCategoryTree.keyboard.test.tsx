@@ -76,14 +76,14 @@ vi.mock("@/queries", () => ({
 }));
 
 const setSelectedCategory = vi.fn();
-const failSave = vi.fn();
-const startSaving = vi.fn();
-const completeSaveThenIdle = vi.fn();
+const reportSaving = vi.fn();
+const reportSaved = vi.fn();
+const discard = vi.fn();
 const showToast = vi.fn();
 vi.mock("@/stores", () => ({
 	useTabsStore: (select: (s: { openTab: () => void }) => unknown) => select({ openTab: vi.fn() }),
 	useSaveStore: (select: (s: Record<string, unknown>) => unknown) =>
-		select({ startSaving, completeSaveThenIdle, failSave }),
+		select({ reportSaving, reportSaved, discard }),
 	useToastStore: (select: (s: { showToast: typeof showToast }) => unknown) =>
 		select({ showToast }),
 	// The empty-collections note's "Browse collections" action reads this
@@ -144,7 +144,6 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	createEnvironment.mockReset();
 	updateEnvironment.mockReset();
-	failSave.mockReset();
 	environments = [STAGING, PRODUCTION];
 	deleteEnvironment.mockResolvedValue(undefined);
 	redraw = null;
@@ -424,7 +423,7 @@ describe("a delete never strands focus", () => {
 			"Couldn't delete the environment - database is locked",
 			"error"
 		);
-		expect(failSave).not.toHaveBeenCalled();
+		expect(reportSaving).not.toHaveBeenCalled();
 	});
 
 	it("returns focus to the row when the dialog is cancelled", async () => {
@@ -491,12 +490,18 @@ describe("a failed environment write is reported, never swallowed", () => {
 				"error"
 			)
 		);
-		expect(failSave).not.toHaveBeenCalled();
+		expect(reportSaving).not.toHaveBeenCalled();
 	});
 
-	it("reports a rejected rename through the Dock and reverts the row only afterwards", async () => {
+	/*
+	 * A failed rename puts the stored name back, so it leaves nothing unsaved:
+	 * the Dock's "Saving…" is withdrawn and the failure is a toast, never "Not
+	 * saved" (`save-store.ts`). Mutation check: report the failure through the
+	 * Dock instead of discarding and toasting, and this reds.
+	 */
+	it("toasts a rejected rename, withdraws its report, and reverts the row only afterwards", async () => {
 		let fieldMountedWhenReported: boolean | null = null;
-		failSave.mockImplementation(() => {
+		showToast.mockImplementation(() => {
 			fieldMountedWhenReported = screen.queryByDisplayValue("Sandbox") !== null;
 		});
 		updateEnvironment.mockRejectedValue(new Error("database is locked"));
@@ -507,13 +512,14 @@ describe("a failed environment write is reported, never swallowed", () => {
 		fireEvent.keyDown(screen.getByDisplayValue("Sandbox"), { key: "Enter" });
 
 		await waitFor(() =>
-			expect(failSave).toHaveBeenCalledWith(
-				"Couldn't rename the environment - database is locked"
+			expect(showToast).toHaveBeenCalledWith(
+				"Couldn't rename the environment - database is locked",
+				"error"
 			)
 		);
-		expect(startSaving).toHaveBeenCalledTimes(1);
-		expect(completeSaveThenIdle).not.toHaveBeenCalled();
-		expect(showToast).not.toHaveBeenCalled();
+		expect(reportSaving).toHaveBeenCalledWith(`rename-environment-${STAGING.id}`);
+		expect(discard).toHaveBeenCalledWith(`rename-environment-${STAGING.id}`);
+		expect(reportSaved).not.toHaveBeenCalled();
 		// The field was still up when the failure was reported, and is gone after.
 		expect(fieldMountedWhenReported).toBe(true);
 		await waitFor(() => expect(screen.queryByDisplayValue("Sandbox")).toBeNull());
@@ -528,9 +534,11 @@ describe("a failed environment write is reported, never swallowed", () => {
 		fireEvent.change(screen.getByDisplayValue("Staging"), { target: { value: "Sandbox" } });
 		fireEvent.keyDown(screen.getByDisplayValue("Sandbox"), { key: "Enter" });
 
-		await waitFor(() => expect(completeSaveThenIdle).toHaveBeenCalledTimes(1));
-		expect(startSaving).toHaveBeenCalledTimes(1);
-		expect(failSave).not.toHaveBeenCalled();
+		await waitFor(() =>
+			expect(reportSaved).toHaveBeenCalledWith(`rename-environment-${STAGING.id}`)
+		);
+		expect(reportSaving).toHaveBeenCalledTimes(1);
+		expect(discard).not.toHaveBeenCalled();
 	});
 
 	it("closes the field without a write or a save when the name is unchanged", async () => {
@@ -541,6 +549,6 @@ describe("a failed environment write is reported, never swallowed", () => {
 
 		await waitFor(() => expect(screen.queryByDisplayValue("Staging")).not.toBeInTheDocument());
 		expect(updateEnvironment).not.toHaveBeenCalled();
-		expect(startSaving).not.toHaveBeenCalled();
+		expect(reportSaving).not.toHaveBeenCalled();
 	});
 });

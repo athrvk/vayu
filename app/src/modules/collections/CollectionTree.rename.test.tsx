@@ -18,9 +18,10 @@
  * unchanged-name check, so opening a rename and clicking away PUT the name it
  * already had.
  *
- * The third case is the status timer: both paths armed a bare
+ * The third case is what a rename leaves on the Dock: both paths armed a bare
  * `setTimeout(() => setStatus("idle"))`, which fires no matter what happened in
- * between - clearing a failure another surface had published to the Dock.
+ * between - clearing a failure another surface had published to the Dock. A
+ * rename reports under an id of its own now (#3350).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -28,6 +29,7 @@ import { render, fireEvent, act, waitFor, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 import { TIMING } from "@/config/timing";
@@ -86,7 +88,7 @@ function startRename(selector: string) {
 beforeEach(() => {
 	updateCollection.mockReset().mockResolvedValue(collection);
 	updateRequest.mockReset().mockResolvedValue(request);
-	useSaveStore.setState({ status: "idle" });
+	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
 });
@@ -143,10 +145,11 @@ describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName, s
 		renderTree();
 		const field = startRename(selector);
 
-		// Recorded when the status flips, which is the moment the failure is reported.
+		// Recorded when the toast is raised, which is the moment the failure is
+		// reported.
 		let fieldMountedWhenReported: boolean | null = null;
-		const unsubscribe = useSaveStore.subscribe((state) => {
-			if (state.status === "error" && fieldMountedWhenReported === null) {
+		const unsubscribe = useToastStore.subscribe((state) => {
+			if (state.toasts.length > 0 && fieldMountedWhenReported === null) {
 				fieldMountedWhenReported = screen.queryByDisplayValue(newName) !== null;
 			}
 		});
@@ -154,7 +157,7 @@ describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName, s
 		fireEvent.change(field, { target: { value: newName } });
 		fireEvent.keyDown(field, { key: "Enter" });
 
-		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
+		await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
 		unsubscribe();
 		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
 		expect(fieldMountedWhenReported).toBe(true);
@@ -209,7 +212,13 @@ describe("renaming a collection", () => {
 		expect(document.querySelector('[data-collection-id="c1"] input')).not.toBeNull();
 	});
 
-	it("reports a failed rename", async () => {
+	/*
+	 * The row snaps back to the stored name, so nothing is left unsaved for the
+	 * Dock to call "Not saved" - and nothing would ever report the rename's id
+	 * saved to clear it. Mutation check: report the failure through
+	 * `reportFailed` instead and the status assertion reds.
+	 */
+	it("toasts a failed rename and leaves the Dock as it was", async () => {
 		updateCollection.mockRejectedValue(new Error("database is locked"));
 		renderTree();
 		const field = startRename('[data-collection-id="c1"]');
@@ -217,12 +226,16 @@ describe("renaming a collection", () => {
 		fireEvent.change(field, { target: { value: "Payments" } });
 		fireEvent.keyDown(field, { key: "Enter" });
 
-		await waitFor(() => expect(useSaveStore.getState().status).toBe("error"));
-		expect(useToastStore.getState().toasts[0]?.message).toMatch(/database is locked/i);
+		await waitFor(() =>
+			expect(useToastStore.getState().toasts[0]?.message).toBe(
+				"Couldn't rename the collection - database is locked"
+			)
+		);
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 });
 
-describe("the status timer a rename arms", () => {
+describe("what a rename leaves on the Dock", () => {
 	beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
 	afterEach(() => vi.useRealTimers());
 
@@ -247,9 +260,9 @@ describe("the status timer a rename arms", () => {
 		fireEvent.keyDown(field, { key: "Enter" });
 		await waitFor(() => expect(useSaveStore.getState().status).toBe("saved"));
 
-		// Anything else failing before the timer fires: an unrelated delete, an
-		// editor's autosave. The Dock is now showing that error.
-		act(() => useSaveStore.getState().failSave("delete failed"));
+		// Another surface failing before the timer fires: an editor's autosave.
+		// The Dock is now showing that error.
+		act(() => useSaveStore.getState().reportFailed("globals-editor", "Couldn't save - busy"));
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
@@ -257,5 +270,23 @@ describe("the status timer a rename arms", () => {
 		// The rename's timer used to clear it and leave the Dock saying nothing at
 		// all, next to a toast about a failure.
 		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	/*
+	 * Mutation check: report the rename under the failed editor's id and this
+	 * reds - the rename's success settles a failure it has nothing to do with.
+	 */
+	it("does not settle another surface's failure by landing", async () => {
+		act(() => useSaveStore.getState().reportFailed("globals-editor", "Couldn't save - busy"));
+		renderTree();
+		const field = startRename('[data-collection-id="c1"]');
+		fireEvent.change(field, { target: { value: "Payments" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+
+		await waitFor(() => expect(updateCollection).toHaveBeenCalledTimes(1));
+		await act(async () => {});
+
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toBe("Couldn't save - busy");
 	});
 });

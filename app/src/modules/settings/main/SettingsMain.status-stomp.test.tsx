@@ -9,18 +9,13 @@
  */
 
 /**
- * A settings write's "Saved" must not take an unrelated failure down with it.
+ * What a settings write leaves on the Dock, against the real save store.
  *
- * `saveEntries` reported success as `completeSave()` plus its own
- * `setTimeout(() => setStatus("idle"))` - the same unguarded timer the panel's
- * *other* status bug was about, where an unconditional `setStatus("idle")` on
- * every clean render wiped an error just by opening Settings. The pending
- * tracking (`markedPendingRef`) fixed that one; this is the success path, and it
- * goes through `completeSaveThenIdle` now.
- *
- * The panel is driven through the category-switch flush rather than the Save
- * button because it is the same `saveEntries` call and needs no mocked click
- * target - see `SettingsMain.category-switch.test.tsx`, whose harness this is.
+ * The panel reports under its own id (`settings`), so its success cannot take
+ * another surface's failure down with it, and its own report says "Not saved"
+ * only while the edit that failed is still staged (#3350). Most cases drive the
+ * category-switch flush, which is the same `saveEntries` call as the Save button
+ * and needs no click target - see `SettingsMain.category-switch.test.tsx`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -28,7 +23,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { TIMING } from "@/config/timing";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import SettingsMain from "./SettingsMain";
 
@@ -47,7 +42,9 @@ const entries = [
 	},
 ];
 
-const mutateAsync = vi.fn((_payload: { entries: Record<string, string> }) => Promise.resolve({}));
+const mutateAsync = vi.fn((_payload: { entries: Record<string, string> }): Promise<unknown> =>
+	Promise.resolve({})
+);
 
 vi.mock("@/queries", () => ({
 	useConfigQuery: () => ({ data: { entries }, isLoading: false, error: null }),
@@ -101,11 +98,19 @@ async function saveOnce() {
 	expect(useSaveStore.getState().status).toBe("saved");
 }
 
-describe("the status timer a settings write arms", () => {
+const store = () => useSaveStore.getState();
+const maxConnections = () => screen.getByLabelText("Max connections");
+
+/** Another surface's failure, already on the Dock. */
+function anotherSurfaceFailed() {
+	act(() => store().reportFailed("globals-editor", "Couldn't save - busy"));
+}
+
+describe("the status a settings write leaves", () => {
 	beforeEach(() => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		mutateAsync.mockClear();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 
@@ -120,17 +125,79 @@ describe("the status timer a settings write arms", () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
-		expect(useSaveStore.getState().status).toBe("idle");
+		expect(store().status).toBe("idle");
 	});
 
 	it("leaves a failure that arrived meanwhile on screen", async () => {
 		await saveOnce();
 
-		act(() => useSaveStore.getState().failSave("delete failed"));
+		anotherSurfaceFailed();
 		await act(async () => {
 			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
 		});
 
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(store().status).toBe("error");
+	});
+
+	/*
+	 * Effect 4 of #3350: the panel's clean branch used to publish `idle`, which
+	 * wiped whatever another surface had on the Dock. Mutation check: point the
+	 * clean branch's `discard` at "globals-editor" and this reds.
+	 */
+	it("does not clear another surface's failure when it mounts clean or an edit is reverted", () => {
+		anotherSurfaceFailed();
+		render(<Panel />);
+		expect(store().status).toBe("error");
+
+		fireEvent.change(maxConnections(), { target: { value: "42" } });
+		fireEvent.click(screen.getByRole("button", { name: "Revert" }));
+
+		expect(store().status).toBe("error");
+		expect(store().lastErrorMessage).toBe("Couldn't save - busy");
+	});
+
+	/*
+	 * Mutation check: drop the clean branch's `discard` and the last assertion
+	 * reds - "Not saved" outlives the edit it described.
+	 */
+	it("says Not saved while the failed edit is staged, and stops once it is reverted", async () => {
+		mutateAsync.mockRejectedValueOnce(new Error("busy"));
+		render(<Panel />);
+		fireEvent.change(maxConnections(), { target: { value: "42" } });
+		await act(async () => {
+			await store().flushAll();
+		});
+		expect(store().status).toBe("error");
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+
+		fireEvent.click(screen.getByRole("button", { name: "Revert" }));
+
+		expect(store().status).toBe("idle");
+	});
+
+	/*
+	 * Mutation check: report saved unconditionally after the write and this
+	 * reds - the Dock says "Saved" over the edit typed while it was in flight.
+	 */
+	it("says Unsaved changes for an edit typed while its write was in flight", async () => {
+		let land!: () => void;
+		mutateAsync.mockImplementationOnce(
+			() => new Promise((resolve) => (land = () => resolve({})))
+		);
+		render(<Panel />);
+		fireEvent.change(maxConnections(), { target: { value: "42" } });
+		let flushed!: Promise<unknown>;
+		act(() => {
+			flushed = store().flushAll();
+		});
+		expect(store().status).toBe("saving");
+
+		fireEvent.change(maxConnections(), { target: { value: "43" } });
+		await act(async () => {
+			land();
+			await flushed;
+		});
+
+		expect(store().status).toBe("pending");
 	});
 });

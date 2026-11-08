@@ -161,15 +161,16 @@ describe("the derived status", () => {
 		expect(status()).toBe("idle");
 	});
 
-	it("records whether a failure was the engine's 507", () => {
+	it("records on each failure whether it was the engine's 507", () => {
 		store().reportFailed("a", "Couldn't save - full", diskFull());
-		expect(store().lastErrorDiskFull).toBe(true);
-
 		store().reportFailed("b", "Couldn't save - busy", new ApiError(503, "unavailable", "busy"));
-		expect(store().lastErrorDiskFull).toBe(false);
 
-		store().reportSaved("b");
-		expect(store().lastErrorDiskFull).toBe(true);
+		expect(store().unsaved.get("a")).toEqual({
+			kind: "failed",
+			message: "Couldn't save - full",
+			diskFull: true,
+		});
+		expect(store().unsaved.get("b")).toMatchObject({ kind: "failed", diskFull: false });
 	});
 
 	it("raises one toast per reported failure", () => {
@@ -452,7 +453,7 @@ describe("flushAll", () => {
 				pending: 0,
 				reason: "disk-full",
 			});
-			expect(store().lastErrorDiskFull).toBe(true);
+			expect(store().unsaved.get("request-1")).toMatchObject({ diskFull: true });
 		});
 
 		it("names no cause for any other rejection", async () => {
@@ -464,7 +465,7 @@ describe("flushAll", () => {
 
 			expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
 			expect(result).not.toHaveProperty("reason");
-			expect(store().lastErrorDiskFull).toBe(false);
+			expect(store().unsaved.get("request-1")).toMatchObject({ diskFull: false });
 		});
 
 		it("is disk-full when a silent context reported the 507 as its cause (#2685)", async () => {
@@ -497,83 +498,6 @@ describe("flushAll", () => {
 			registerContext("request-1", true);
 
 			expect(await store().flushAll()).not.toHaveProperty("reason");
-		});
-	});
-});
-
-/**
- * The unkeyed wrappers keep the old shared-status behaviour for the callers
- * #3350's second half has not moved yet, inside one slot of their own. These
- * cases go with them.
- */
-describe("the unkeyed wrappers", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("cannot clear a keyed failure", () => {
-		store().reportFailed("request-1", "boom");
-
-		store().startSaving();
-		store().completeSaveThenIdle();
-		store().setStatus("idle");
-
-		expect(status()).toBe("error");
-	});
-
-	it("reports pending for a direct writer while a silent context is dirty", () => {
-		registerContext("settings", true);
-
-		store().startSaving();
-		store().completeSaveThenIdle();
-
-		expect(status()).toBe("pending");
-	});
-
-	it("does not hold a context's own success against it", () => {
-		registerContext("settings", true);
-
-		store().completeSaveThenIdle("settings");
-
-		expect(status()).toBe("saved");
-	});
-
-	it("clears a pending it invented once the lagging registry catches up", () => {
-		registerContext("settings", true);
-		store().completeSaveThenIdle("variables");
-		expect(status()).toBe("pending");
-
-		registerContext("settings", false);
-		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
-
-		expect(status()).toBe("idle");
-	});
-
-	it("clears only a pending with setStatus('idle'), never a failure", () => {
-		store().markPendingSave();
-		store().setStatus("idle");
-		expect(status()).toBe("idle");
-
-		store().failSave("boom");
-		store().setStatus("idle");
-		expect(status()).toBe("error");
-	});
-
-	it("judges a silent context by a failure it published unkeyed during its save", async () => {
-		registerContext("settings", true, () => {
-			store().failSave("Couldn't save settings", diskFull());
-			return Promise.resolve();
-		});
-
-		await expect(store().flushAll()).resolves.toEqual({
-			saved: 0,
-			failed: 1,
-			pending: 0,
-			reason: "disk-full",
 		});
 	});
 });

@@ -9,14 +9,12 @@
  */
 
 /**
- * A sidebar rename writes the shared save status by hand - it registers no save
- * context, so `runSave`'s rule never covered it - and the Dock renders that one
- * status for the whole app. Renaming a folder while the open request holds an
- * unsaved edit therefore said "Saved": true of the rename, false of the editor
- * (#1385).
- *
- * The rename itself is unchanged, and these cases say so: the status it
- * publishes is the only thing that moved, and the failure it reports is not.
+ * A sidebar rename registers no save context, so it reports on the Dock under
+ * an id of its own. Renaming a folder while the open request holds an unsaved
+ * edit used to say "Saved": true of the rename, false of the editor (#1385).
+ * The Dock is derived from every id's report now (#3350), so the editor's
+ * `pending` outranks the rename's success, and a failed rename - which puts the
+ * stored name back - is a toast rather than a "Not saved" describing no edit.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -24,7 +22,7 @@ import { renderHook, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTreeCrud } from "./useTreeCrud";
 import type { Collection, RequestSummary } from "@/types";
@@ -66,20 +64,15 @@ function renderCrud() {
 	);
 }
 
-/** The open request tab, mid-edit: registered, dirty, and nothing to do with the tree. */
-function registerDirtyRequestContext() {
-	useSaveStore.getState().registerContext({
-		id: "request-r-open",
-		name: "Request",
-		save: () => Promise.resolve(),
-		hasPendingChanges: true,
-	});
+/** The open request tab, mid-edit: it reports its unsent edit under its own id. */
+function openRequestHoldsAnEdit() {
+	useSaveStore.getState().reportPending("request-r-open");
 }
 
-describe("collection tree rename and the shared save status", () => {
+describe("what a collection tree rename leaves on the Dock", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 		updateCollection.mockResolvedValue(undefined);
 		updateRequest.mockResolvedValue(undefined);
@@ -103,7 +96,7 @@ describe("collection tree rename and the shared save status", () => {
 	] as const)(
 		"does not report 'Saved' for a $kind rename while an editor is dirty",
 		async ({ submit, update, id, name }) => {
-			registerDirtyRequestContext();
+			openRequestHoldsAnEdit();
 			const { result } = renderCrud();
 
 			await act(async () => {
@@ -125,8 +118,13 @@ describe("collection tree rename and the shared save status", () => {
 		expect(useSaveStore.getState().status).toBe("saved");
 	});
 
-	it("still reports a failed rename through failSave, dirty editor or not", async () => {
-		registerDirtyRequestContext();
+	/*
+	 * Mutation check: drop `writeRename`'s `discard` and the Dock stays on
+	 * "Saving…"; report the failure through `reportFailed` and it says "Not
+	 * saved". Either reds the status assertion.
+	 */
+	it("toasts a failed rename once and leaves the editor's report standing", async () => {
+		openRequestHoldsAnEdit();
 		updateRequest.mockRejectedValue(new Error("Request name already taken"));
 		const { result } = renderCrud();
 
@@ -134,7 +132,8 @@ describe("collection tree rename and the shared save status", () => {
 			await result.current.handlers.onRequestRenameSubmit("r-1", "List accounts");
 		});
 
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().status).toBe("pending");
+		expect(useSaveStore.getState().unsaved.has("rename-request-r-1")).toBe(false);
 		expect(useToastStore.getState().toasts).toHaveLength(1);
 		expect(useToastStore.getState().toasts[0]).toMatchObject({
 			message: "Couldn't rename the request - Request name already taken",

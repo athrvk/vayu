@@ -176,9 +176,9 @@ export default function VariablesCategoryTree() {
 	const selectedCategory = useVariablesStore((s) => s.selectedCategory);
 	const setSelectedCategory = useVariablesStore((s) => s.setSelectedCategory);
 	const openTab = useTabsStore((s) => s.openTab);
-	const startSaving = useSaveStore((s) => s.startSaving);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const failSave = useSaveStore((s) => s.failSave);
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const discard = useSaveStore((s) => s.discard);
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const offerUndo = useTrashUndo();
@@ -225,20 +225,21 @@ export default function VariablesCategoryTree() {
 	};
 
 	/**
-	 * Report a failed create, duplicate or delete as a plain error toast. Not
-	 * `failSave`: that parks the Dock on "Not saved", and none of these is an
-	 * unsaved edit (`save-store.ts`). The fallback leads because the engine's
-	 * message says why, never what was being attempted.
+	 * Report a failed create, duplicate, delete or rename as a plain error toast.
+	 * Not `reportFailed`: that parks the Dock on "Not saved", and none of these
+	 * leaves an unsaved edit (`save-store.ts`) - a failed rename puts the stored
+	 * name back. The fallback leads because the engine's message says why, never
+	 * what was being attempted.
 	 */
 	const reportFailure = (error: unknown, fallback: string) =>
 		showToast(error instanceof Error ? `${fallback} - ${error.message}` : fallback, "error");
 
 	/**
-	 * A rename is a save, so it goes through the save store and a failure parks
-	 * the Dock on "Not saved". The field stays mounted until the PUT settles: the
-	 * hook has already closed the editor, so the blur that follows is a no-op, and
-	 * unmounting early would snap the row back to the old name before the failure
-	 * is reported.
+	 * A rename registers no save context, so it reports under an id of its own
+	 * while the PUT is out; a failure withdraws that report and toasts. The field
+	 * stays mounted until the PUT settles: the hook has already closed the editor,
+	 * so the blur that follows is a no-op, and unmounting early would snap the row
+	 * back to the old name before the failure is reported.
 	 */
 	const submitRenameEnvironment = async (envId: string, name: string) => {
 		const current = environments.find((e) => e.id === envId);
@@ -246,13 +247,14 @@ export default function VariablesCategoryTree() {
 			setRenamingEnvId(null);
 			return;
 		}
-		startSaving();
+		const reportId = `rename-environment-${envId}`;
+		reportSaving(reportId);
 		try {
 			await updateEnvironmentMutation.mutateAsync({ id: envId, name });
-			completeSaveThenIdle();
+			reportSaved(reportId);
 		} catch (error) {
-			const fallback = "Couldn't rename the environment";
-			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
+			discard(reportId);
+			reportFailure(error, "Couldn't rename the environment");
 		} finally {
 			setRenamingEnvId((current) => (current === envId ? null : current));
 		}
@@ -403,7 +405,7 @@ export default function VariablesCategoryTree() {
 				setSelectedCategory(null);
 			}
 		} catch (error) {
-			// A toast, not `failSave`: a delete is not an unsaved edit (`save-store.ts`).
+			// A toast, not `reportFailed`: a delete is not an unsaved edit (`save-store.ts`).
 			reportFailure(error, "Couldn't delete the environment");
 		} finally {
 			// Both outcomes close it, because focus is handed back from the close

@@ -723,81 +723,122 @@ which keeps queries loading rather than failed while it answers `starting`.
 
 #### `save-store.ts` - Centralized Auto-Save
 
-Orchestrates auto-save across the app with a registry of saveable contexts (e.g., request tabs, environment editors). Provides Ctrl/Cmd+S integration and unified save status.
+Orchestrates saving across the app. Every surface that saves reports where its
+own edit stands, the Dock's status is derived from all of those reports, and a
+registry of saveable contexts (request tabs, environment editors, Settings)
+backs Ctrl/Cmd+S and the quit and reconnect flushes.
 
 **State:**
 ```typescript
 {
-  status: "idle" | "pending" | "saving" | "saved" | "error"
-  lastErrorMessage: string | null
+  unsaved: ReadonlyMap<string, UnsavedEdit>  // every id with an edit not on disk
+  status: "idle" | "pending" | "saving" | "saved" | "error"  // derived from `unsaved`
+  lastErrorMessage: string | null            // derived: the newest failure's message
   activeContextId: string | null
-  contexts: Map<string, SaveContext>  // Saveable entities
+  contexts: Map<string, SaveContext>         // Saveable entities
 }
+
+type UnsavedEdit =
+  | { kind: "pending" }
+  | { kind: "saving" }
+  | { kind: "failed"; message: string; diskFull: boolean }
 ```
 
-**`failSave` is the app's single failure seam.** It sets `status: "error"` *and*
-raises an error toast carrying the reason. Its call sites are the collection
-and environment trees' *renames* (a rename is a save: `startSaving`, then
-`completeSaveThenIdle` or `failSave`; both trees keep the rename field mounted
-until the PUT settles, so a failure is reported over the typed name rather than
-after the row has snapped back), `useSaveManager`, `SettingsMain`,
-`VariableTableEditor`, `useDraftSaveContext`, the context bar's
-`VariablesSection` and the inbox's `CannedResponseControls` - and doing the
-reporting here rather than at each of them means a new caller cannot forget to
-report. A failed create, duplicate or delete (collections, requests and
-environments alike) is not a save: nothing is pending and nothing retries, so
-it raises its own error toast and leaves the Dock alone. The last two call
-sites above were added because both could fail in complete silence:
-the variables section fired three mutations with no `onError` at all, and the
-manual-draft editors rendered an inline callout that a quit flush has no screen
-to show. `CannedResponseControls` (#1450) is a direct writer like
-`SettingsMain`: pressing Apply calls `startSaving`/`completeSaveThenIdle`/
-`failSave` itself around the PUT, rather than only through the
-`useDraftSaveContext`-registered `save` those two functions also serve to
-Ctrl/Cmd+S and the quit flush - the registration alone would report nothing
-for a direct click, since only `triggerSave`/`flushAll` route a registered
-context's `save` through the store's own status wrapper.
+**Each surface reports under its own id, and nothing writes `status` (#3350).**
+The store used to hold one `status` that every surface wrote through public
+setters (`setStatus`, `markPendingSave`, `startSaving`, `failSave`, `reset`), so
+one surface's write erased another's: switching request tabs ran a `reset()`
+that wiped the variables editor's "Not saved", Settings' clean branch published
+`idle` over another context's error, and the autosave retry read another
+surface's failure as its own. Those setters are gone. A surface reports:
 
-`VariablesSection` also **registers a context** (`context-bar-variables`),
-because `failSave` alone only covers the failure. A variable commit is a plain
-mutation rather than a draft, so it registers one entry for the whole section
-whose
-`hasPendingChanges` tracks whether any commit is outstanding and whose `save()`
-resolves when the last one settles - without it `flushAll` had nothing to wait
-for, and the renderer could be torn down mid-PUT with the input already showing
-the value as committed.
+| Report | Meaning |
+|--------|---------|
+| `reportPending(id)` | The edit `id` holds is not on disk. Does not demote a failure: the edit that failed is still unsaved. |
+| `reportSaving(id)` | A write for `id` is in flight. |
+| `reportSaved(id)` | `id` is on disk; opens the "Saved" window. |
+| `reportFailed(id, message, cause?)` | `id`'s write failed. Raises the error toast, once, and records whether `cause` was the engine's 507. |
+| `discard(id)` | `id`'s edit was thrown away, not written: nothing to report as saved. |
 
-**Only the context that set a status clears it.** `SettingsMain` used to run an
-unconditional `setStatus("idle")` whenever it had nothing pending - which
-included mount - so merely opening Settings wiped an `error` another context had
-just published to the Dock. It now tracks whether the `pending` on screen is its
-own and leaves anything else alone.
+An id with nothing unsaved has no entry, so "clean" is absence. **The
+derivation:** any failure wins, and the newest one is described, because a
+failed report moves its id to the end of the map; then a save in flight; then an
+edit not yet sent; only with none of those does a recent save show `saved`, for
+`TIMING.SAVED_STATUS_DURATION_MS`, before `idle`. A report under one id cannot
+touch another's entry, which is the whole fix: a rename landing, Settings
+mounting clean, a tab switch - none of them can make the Dock stop saying "Not
+saved" while some other edit is still unsaved. `resetSaveStoreForTests` is the
+only thing that clears every report, and only tests call it.
 
-The same rule is why **`completeSaveThenIdle` is the only way to report a
-success**: it sets `saved` and arms the return to `idle` behind two checks - that
-the status is still the `saved` it set, and that no later save has re-armed the
-reset since. A bare `completeSave()` followed by
-`setTimeout(() => setStatus("idle"), …)` fires regardless of what happened in the
-meantime, so a rename that succeeded two seconds ago cleared the failure a delete
-had just published; and two saves a second apart had the first one's timer end
-the second one's indicator early. `triggerSave` has always guarded the first way,
-`useSaveManager` hand-rolled the second as a `clearTimeout` of its own timer.
-Both live in the store now, and the six call sites (`useSaveManager`,
-`SettingsMain`, `VariableTableEditor`, `VariablesSection`, both collection-tree
-renames) share that one implementation rather than five copies of the timer.
+An entry is keyed by id, not by registration: it outlives `unregisterContext`
+until its id is reported saved or discarded. That is how the entity-switch
+flush of a pane that has already unregistered still reaches the Dock.
 
-`completeSave` is gone with them. It set `saved` and armed nothing, so every
-caller either paired it with a hand-rolled timer or - `VariablesSection`, the one
-non-draft commit path - left "Saved" in the Dock until something else happened to
-change it. The indicator's lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one
-place, for every surface that saves.
+**The ids.** `useSaveManager` reports under its context id (`request-<id>`),
+`useDraftSaveContext` under the id it registers, `VariableTableEditor` under
+its context id (`globals-editor`, `environment-<id>`, `collection-<id>`),
+`SettingsMain` under `settings`, the inbox reply under `inbox-reply`, and the
+context bar's variables section under `context-bar-variables`. A surface that
+drops its draft discards its id: `useDraftSaveContext` and `VariableTableEditor`
+when the id changes or they unmount, and `SettingsMain` when its staged edits
+are gone (reverted, or flushed with every one of them invalid) and no write is in
+flight. Settings reports an invalid staged edit as `pending` too: it is unsaved,
+held back the way a blocked save is.
+
+**A failure that leaves no unsaved edit is a toast, not `reportFailed`.**
+`reportFailed` holds the Dock on "Not saved" until that id saves again, so it is
+for a failed write whose edit is still on screen. A failed create, duplicate or
+delete (collections, requests and environments alike) leaves nothing pending and
+nothing retries; a failed rename (the collection tree's two, the environment
+tree's) puts the stored name back; a failed context-bar variable commit puts the
+stored value back in its input; a refused blank name (`reportBlankNameRefused`,
+`lib/blank-name.ts`) restores the stored name. Each raises its own error toast.
+Reported to the store, any of them would park the Dock on "Not saved" describing
+no edit, under an id nothing would ever report saved.
+
+**Direct writers** are the surfaces that write without going through the store's
+`runSave`, and they report the same way. The tree renames register no save
+context: each reports `saving` under `rename-collection-<id>`,
+`rename-request-<id>` or `rename-environment-<id>` while the PUT is out, then
+`saved`, or a `discard` and the toast. The rename field stays mounted until the
+PUT settles, so a failure is reported over the typed name rather than after the
+row has snapped back. `SettingsMain`'s Save button and category-switch flush,
+and the inbox's `CannedResponseControls` Apply (#1450), report around the PUT
+themselves, because a direct click reaches no registered context's `save`
+through the store. Each of them reports `pending` rather than `saved` for an
+edit staged while its write was in flight, as `useSaveManager` does. A direct
+writer also cannot report "Saved" over another surface's unsaved edit (#1385):
+a rename landing while the open request holds an unsaved script reports `saved`
+under the rename's id, and the request's `pending` outranks it.
+
+`VariablesSection` also **registers a context** (`context-bar-variables`). A
+variable commit is a plain mutation rather than a draft, so it registers one
+entry for the whole section whose `hasPendingChanges` tracks whether any commit
+is outstanding and whose `save()` resolves when the last one settles - without
+it `flushAll` had nothing to wait for, and the renderer could be torn down
+mid-PUT with the input already showing the value as committed. It reports
+`saving` while any commit is out; when the last one settles it reports `saved`,
+or withdraws the report if one of them failed (the toast has said so, and the
+input is back on the stored value). Its `save()` resolves with the commits'
+verdict, `failed`, or `disk-full` when every failure was a 507, which is what
+the quit prompt counts.
+
+`completeSave`, `completeSaveThenIdle` and the hand-rolled
+`setTimeout(() => setStatus("idle"), …)` timers went with the setters. The
+"Saved" window is the store's own: `reportSaved` opens it and any later report
+closes it, so a success two seconds ago cannot clear a failure reported since,
+and two saves a second apart cannot end each other's indicator early. Its
+lifetime is `TIMING.SAVED_STATUS_DURATION_MS`, in one place, for every surface
+that saves.
 
 **`lastErrorMessage` is the reason behind an `"error"` status**, for the Dock's
 persistent line - see below. It went through the same fate as `errorMessage`
 once: the field existed for the Dock's error line, that line was removed in
 favour of the toast, and the field went with it as one nothing read any more.
 It is back because the toast turned out not to be the whole answer (next
-paragraph), and this time it has a second reader.
+paragraph), and this time it has a second reader. Whether that failure was a
+507 is kept on its entry (`diskFull`), not beside it: `flushAll` reads it per
+context, and no screen reads a store-wide copy.
 
 There is no `lastSavedAt` or `pendingSaveId`, for the same reason that field
 almost went a second time - every match on either name was a write inside
@@ -808,15 +849,15 @@ because auto-save is a setting the user can turn off, and with it off nothing
 was written back and nothing said as much (the tab strip carries no
 unsaved-dot on purpose).
 
-**`"error"` has two readers now, not one.** The toast `failSave` raises expires
-after `TIMING.TOAST_DURATION_MS.error` (10s), and a failed save can leave a
-draft unsaved for as long as the engine stays down - far longer than that. The
+**`"error"` has two readers now, not one.** The toast `reportFailed` raises
+expires after `TIMING.TOAST_DURATION_MS.error` (10s), and a failed save can leave
+a draft unsaved for as long as the engine stays down - far longer than that. The
 Dock's ambient status line (`Dock.tsx`) renders an `"error"` status as **"Not
 saved"**, coloured with `--destructive-text`, with `lastErrorMessage` in a
 tooltip on hover - the same shape `EngineStatus` uses for its own error, rather
-than a second way of saying "hover for the reason." It stays until the next
-save transition, so it outlives the toast for exactly as long as the draft
-stays unsaved.
+than a second way of saying "hover for the reason." It stays until the failed
+id is reported saved or discarded, so it outlives the toast for exactly as long
+as the edit stays unsaved.
 
 **A failed auto-save now retries itself.** `useSaveManager`'s debounced timer
 is the only caller that does: on a failure it re-arms with the auto-save
@@ -845,74 +886,64 @@ Every registered context is safe to flush here, unlike the quit flush's
 urgency: a context with nothing pending is a no-op, and one that has never
 failed loses nothing by saving now instead of on its own schedule.
 
-**`triggerSave` will not report a success the context did not have.** Registered
-contexts report their own failures through `failSave` and then *resolve* rather
-than rejecting, so `runSave` cannot take a resolved promise for a success. Without
-that a failed Cmd/Ctrl+S showed "Saved" beside its own failure toast.
+**`triggerSave` will not report a success the context did not have.** A
+registered context can report its own failure under its id and then *resolve*
+rather than reject (`SettingsMain`), so `runSave` cannot take a resolved promise
+for a success. Without that a failed Cmd/Ctrl+S showed "Saved" beside its own
+failure toast.
 
 **A context's `save` can report its own verdict** (`SaveOutcome`: `"saved"`,
-`"failed"`, `"final"`, `"disk-full"` or `"pending"`; `useSaveManager` and `useDraftSaveContext` do). The
-store-wide `status` is one slot, so two contexts saving in the same tick
-overwrite each other's - reading it back charged one context's failure to the
-other, and `flushAll` counted a save that landed as failed. `runSave` believes
-the reported verdict. A reported `"saved"` still fills in the silence with
-`completeSaveThenIdle` (the draft editors publish nothing on success), but never
-over another context's `error` or `pending`. `pending` is a save that settled
-without persisting its edit: a `SaveBlockedError` (the editor declined to send an
-incomplete element; the request builder still sends the rest of the request,
-#3048) or an edit that landed while the write was in flight. It is
-not a failure - no toast, no "Not saved", no retry - and `flushAll` counts it in
-`pending`. `"final"` is a failure that will not retry (a 4xx); `flushAll` counts
-it in `failed`. `"disk-full"` is a failure that retries like any other and knows
-its cause (a 507, #2423); `flushAll` counts it in `failed` too, and sets
-`reason: "disk-full"` on its result only when every failed context was
-disk-full. One failure of another kind beside it leaves the key out, because
-then "the disk is full" would be only part of the story. The key is absent, not
-`undefined`, when there is no cause. Three places turn a rejected save into
-`"disk-full"`, all through `isDiskFullError` (`lib/disk-full.ts`): `performSave`
-(`useSaveManager`), the `useDraftSaveContext` save (the collection editors, whose saves reject)
-and `runSave`'s own catch in the store.
+`"failed"`, `"final"`, `"disk-full"` or `"pending"`; `useSaveManager`,
+`useDraftSaveContext` and the context bar's variables section do), and that
+verdict is what `runSave` and `flushAll` count - never a status read back from
+the store, which charged one context's failure to another when the status was a
+single shared slot. A reported `"saved"` or `"pending"` that the context did not
+also report under its own id during the save is filled in for it (the draft
+editors report nothing on success), and a failure it reported is never
+published a second time. `pending` is a save that settled without persisting
+its edit: a `SaveBlockedError` (the editor declined to send an incomplete
+element; the request builder still sends the rest of the request, #3048) or an
+edit that landed while the write was in flight. It is not a failure - no toast,
+no "Not saved", no retry - and `flushAll` counts it in `pending`. `"final"` is a
+failure that will not retry (a 4xx); `flushAll` counts it in `failed`.
+`"disk-full"` is a failure that retries like any other and knows its cause (a
+507, #2423); `flushAll` counts it in `failed` too, and sets `reason:
+"disk-full"` on its result only when every failed context was disk-full. One
+failure of another kind beside it leaves the key out, because then "the disk is
+full" would be only part of the story. The key is absent, not `undefined`, when
+there is no cause. Three places turn a rejected save into `"disk-full"`, all
+through `isDiskFullError` (`lib/disk-full.ts`): `performSave`
+(`useSaveManager`), the `useDraftSaveContext` save (the collection editors,
+whose saves reject) and `runSave`'s own catch in the store.
 
-A context that resolves with nothing (`SettingsMain`, `VariableTableEditor`,
-`variable-commit`) is judged by the status it published, as before: `error` is
-`failed`, and `pending` (#1381) is `pending`, because a context that saw an edit
-land mid-write publishes it for the payload that went out not holding that edit.
-A context that resolves having published through `failSave` - `SettingsMain` and
-`variable-commit` - names a 507 by handing `failSave` the error:
-`failSave(message, error)`. The store records whether that error was a 507
-(`lastErrorDiskFull`, written and cleared with `lastErrorMessage`), and the
-published `error` then reads `"disk-full"` rather than `"failed"` (#2685). A
-`failSave` call with no cause, or a later one with a different cause, replaces
-it, so the flag always describes the failure now on the Dock. `VariableTableEditor`
-passes the error too, but its save also rejects, so `runSave`'s catch reaches the
-same verdict. The inbox's `CannedResponseControls` (whose `persist` catches its
-own rejection, so it must not rethrow: the wrapper would toast a second time)
-returns the verdict from `persist` instead, which `useDraftSaveContext` forwards;
-a bare resolution there would read `saved`. Otherwise `runSave` fills in the silence. The `pending` that
-`completeSaveThenIdle` itself publishes while a sibling is dirty is not read back
-as the next void context's own.
+A context that resolves with nothing (`SettingsMain`) is judged by what it
+reported under its own id during that save: an entry that replaced the one
+present when the save started. A `failed` entry reads `failed`, or `disk-full`
+when its cause was a 507; a `pending` one reads `pending` (#1381), because a
+context that saw an edit land mid-write reports it for the payload that went
+out not holding that edit; no report is a success, which `runSave` then reports.
+So a context that reports and resolves names a 507 by handing the error over as
+the cause, `reportFailed(id, message, error)`; a call that omits it reads
+`failed` (#2685). A context that reports and then *rejects*
+(`VariableTableEditor`) is judged the same way: `runSave`'s catch publishes a
+rejection only when the context did not report a failure during that save, so
+the failure is toasted once rather than once by the editor and again by the
+store. The inbox's `CannedResponseControls` (whose `persist`
+catches its own rejection, so it must not rethrow: the wrapper would toast a
+second time) returns the verdict from `persist` instead, which
+`useDraftSaveContext` forwards; a bare resolution there would read `saved`,
+which is also why a draft that `collect` refuses resolves `pending`.
 
-**A writer that registers no context inherits that rule from
-`completeSaveThenIdle`.** The collection tree's two renames call `startSaving`
-and `completeSaveThenIdle` by hand, so `runSave` never saw them: a rename
-published "Saved" onto the one status the Dock renders while the open request
-held an unsaved script - true of the rename, false of everything else on screen
-(#1385). The success reporter now asks the registry, and publishes `pending`
-instead while any *other* registered context still has `hasPendingChanges`; the
-context holding that edit clears it when it writes. A registered context names
-itself as it reports - `completeSaveThenIdle(contextId)` - because its own entry
-is refreshed by an effect and so still reads dirty at the moment its write
-lands. A direct writer names nobody and is measured against all of them, which
-is the point of guarding in the store rather than at the call sites: the writer
-added next inherits it without knowing the rule exists.
-
-That same effect lag is why the `pending` this guard publishes is re-derived
-once, after `TIMING.SAVED_STATUS_DURATION_MS`. Two surfaces finishing within a
-render of each other each read the other's not-yet-refreshed entry as dirty, so
-both report `pending` over an editor holding nothing - and nothing would revisit
-it until the next save. The re-check clears it only while no context is dirty
-and no later save has re-armed the reset, so a `pending` a context published for
-its own unsaved edit is untouched.
+**A goodbye flush is retired by the flush that saves it.** An entity switch or
+unmount flushes the pane's edit after its context has unregistered
+(`settleGoodbyeFlush` in `useSaveManager.ts`). A failure re-registers a retry
+context under the same id, so the reconnect flush (#1479) and the quit flush
+(#1489) can send it again; that retry unregisters itself once its save lands,
+and the landing reports the id saved. Before #3350 nothing marked it clean, so
+the Dock sat on "Unsaved changes" and every reconnect re-sent the stale draft. A
+save the editor held back has nothing left to send it (the provider reseeds
+from the next entity), so its id is discarded. A pane that came back to the
+entity owns the id again and is left alone.
 
 **SaveContext:**
 ```typescript
@@ -926,13 +957,17 @@ its own unsaved edit is untouched.
 
 **Key Methods:**
 ```typescript
-const {
-  registerContext, unregisterContext, updateContext,
-  setActiveContext, getActiveContext,
-  triggerSave,       // Ctrl/Cmd+S - saves active or first dirty context
-  flushAll           // Save all dirty contexts (used before app quit); resolves
-                      // to { saved, failed, pending, reason? } - see below
-} = useSaveStore();
+// One selector per member: a bare `useSaveStore()` subscribes to every field (#1714).
+const reportFailed = useSaveStore((s) => s.reportFailed);
+
+// Reports, under the caller's own id - see the table above:
+//   reportPending, reportSaving, reportSaved, reportFailed, discard
+// Registry:
+//   registerContext, unregisterContext, updateContext,
+//   setActiveContext, getActiveContext
+// triggerSave()  Ctrl/Cmd+S - saves the active context, else the first dirty one
+// flushAll()     saves every dirty context (quit, reconnect); resolves to
+//                { saved, failed, pending, reason? } - see above
 ```
 
 **Non-persisted**. See `useSaveManager` (debounced-autosave editors) and
@@ -2020,10 +2055,10 @@ left it before the write returns:
   carries. They are normally what was drawn, but a normalization is authoritative
   from the engine, so the tree settles on real positions rather than a guess.
 - `onError` restores the snapshots wholesale and reports through
-  `useToastStore.showToast`, not `failSave`: the drop is rolled back, so no edit
-  is unsaved, and `failSave` would park the Dock on "Not saved" with nothing
-  pending (a failure that is not an unsaved edit raises its own toast, per
-  `save-store.ts`). The mutation owns this rather than its caller, so the
+  `useToastStore.showToast`, not `reportFailed`: the drop is rolled back, so no
+  edit is unsaved, and `reportFailed` would park the Dock on "Not saved" with
+  nothing pending (a failure that is not an unsaved edit raises its own toast,
+  per `save-store.ts`). The mutation owns this rather than its caller, so the
   gesture layer cannot forget it.
 - `onSettled` invalidates the affected keys **once** - the collections list only
   if a collection moved or a parent was normalized, and only the request lists
@@ -3137,26 +3172,26 @@ useDraftSaveContext({
   the store-driven paths, which is why `InfoTab` refuses a blank collection name
   inside `persist`. With its buttons gone that guard is now the only one, and it
   is silent by itself - the tab pairs it with `reportBlankNameRefused()`
-  (`lib/blank-name.ts`), which restores the stored name and reports through
-  `failSave`.
+  (`lib/blank-name.ts`), a toast raised once the tab has put the stored name
+  back; with nothing left unsaved there is no "Not saved" to report.
 - **`isDirty` also drives the Dock's "Unsaved changes" line (#1483).** The
   registry's own `hasPendingChanges` is not what the Dock reads - only the
-  store-wide `status` is - so the hook calls `markPendingSave()` the moment
-  `isDirty` turns true and `completeSaveThenIdle(id)` the moment it turns false
-  again, mirroring `useSaveManager`'s autosave editors. Edge-triggered, and
-  reset rather than fired across an `id` change, so switching the entity a
-  mounted editor describes never reports the previous entity's save as this
-  one's.
+  store's per-id reports are - so the hook calls `reportPending(id)` the moment
+  `isDirty` turns true and `reportSaved(id)` the moment it turns false again,
+  mirroring `useSaveManager`'s autosave editors. Edge-triggered, and reset
+  rather than fired across an `id` change, so switching the entity a mounted
+  editor describes never reports the previous entity's save as this one's. The
+  draft goes with its id, so the hook discards the id's report when the id
+  changes or the editor unmounts.
 - **A discard is not a save (#1931, #2033).** The clean edge is a save landing,
   a `useEntityDraft` `reset` (the Reset button, an external change's "Take
   theirs") or an `adopt` that lands on the persisted value (`InfoTab`'s
   per-field Take theirs). All three editors (`InfoTab`, `AuthTab`,
   `ElementsTab`) pass the draft's `consumeDiscard` as the hook's
   `consumeDiscard` option; when it says the edge was a discard the hook calls
-  `discardPendingSave(id)` instead, so the Dock returns to idle rather than
-  flashing "Saved" for a write that never happened. `discardPendingSave` leaves
-  the status alone while another context still holds an edit, and when it is
-  `saved` or `saving`.
+  `discard(id)` instead, so the Dock returns to idle rather than flashing
+  "Saved" for a write that never happened. `discard` removes only this id's
+  report, so another context's edit or failure stays on the Dock.
 
 ### The request builder's draft adopts an external write per field
 
@@ -3386,7 +3421,7 @@ back their dirty tabs the same way (#3324).
 
 5. **Centralized save on app quit:** On Electron's `before-quit` event, call `useSaveStore().flushAll()` to persist any pending changes before the app closes. An editor that is not registered is not merely unsaved here, it is invisible - which is how the collection tabs lost drafts silently for as long as they existed. `flushAll` reports what happened (`{ saved, failed, pending }`), and the main process (`electron/quit-flow.ts`) asks before discarding anything it did not save (#1489) rather than closing on faith - on the window's close as well as on quit.
 
-    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `failSave` (toast + status) or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
+    Corollary: **an editing surface must never fail without saying so.** There is no global `MutationCache.onError` in `lib/query-client.ts`, so a bare `mutation.mutate(...)` reports nothing at all. Route the failure through `reportFailed` (toast + "Not saved") when the edit stays on screen, a toast when the surface rolls it back, or render the mutation's `isError`, and roll an uncontrolled input back to the stored value while you are at it - the context bar's variables section did neither, so a rejected edit sat on screen looking committed.
 
 6. **Leaving an editor saves or asks; it does not drop.** A settings category switch, an unmount, a tab switch - each used to discard dirty state silently in at least one place. Settings flushes its valid edits on the way out (engine config writes are cheap merge-patches); the collection tabs keep their panels mounted so there is nothing to discard.
 

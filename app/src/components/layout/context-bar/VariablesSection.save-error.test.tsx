@@ -20,7 +20,9 @@
  *
  * Both halves are asserted - the toast, and the value on screen - because a
  * toast beside an input still showing the new value tells the user their edit
- * was saved and also that it failed.
+ * was saved and also that it failed. The Dock is asserted too: with the value
+ * put back nothing is left unsaved, so the failure is the toast alone and never
+ * a "Not saved" that no later save under the bar's id would ever clear.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -137,6 +139,9 @@ describe("VariablesSection - a rejected variable edit", () => {
 		expect(toasts[0].message).toBe("Couldn't save {{host}} - value must not be empty");
 		expect(toasts[0].variant).toBe("error");
 		expect(input.value).toBe("example.com");
+		// Mutation check: settle the failed batch as saved, or report the failure
+		// through `reportFailed`, and this reds.
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 
 	it("refuses out loud when the variable is gone from its scope", () => {
@@ -157,6 +162,7 @@ describe("VariablesSection - a rejected variable edit", () => {
 		expect(globalsMutate).not.toHaveBeenCalled();
 		expect(useToastStore.getState().toasts).toHaveLength(1);
 		expect(input.value).toBe("example.com");
+		expect(useSaveStore.getState().status).toBe("idle");
 
 		delete resolved.missing;
 		resolved.host = { value: "example.com", scope: "global" };

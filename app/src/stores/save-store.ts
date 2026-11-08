@@ -86,17 +86,18 @@ export interface SaveContext {
 
 /**
  * Every failed *save* is reported by a toast, and `reportFailed` is the single
- * place that raises it, once per failure. A failure that is not an unsaved edit
- * - a failed delete, create or duplicate - raises its own `showToast` instead:
- * reported here it would hold the Dock on "Not saved" describing no edit.
+ * place that raises it, once per failure. A failure that leaves no unsaved edit
+ * behind raises its own `showToast` instead - a failed delete, create or
+ * duplicate, and a write the surface rolls back on screen (a rename, a
+ * context-bar variable commit, a refused blank name): reported here it would
+ * hold the Dock on "Not saved" describing no edit, and nothing would ever
+ * report that id saved.
  */
 interface SaveState {
 	/** Derived from `unsaved`: what the Dock renders. */
 	status: SaveStatus;
 	/** The most recent failure's message while `status` is `"error"`, else null. */
 	lastErrorMessage: string | null;
-	/** Whether that failure was the engine's 507 (#2685). */
-	lastErrorDiskFull: boolean;
 
 	/**
 	 * Every id with an edit not on disk, oldest report first. Keyed by id, not
@@ -132,21 +133,6 @@ interface SaveState {
 	/** `id`'s edit was thrown away, not written: nothing to report as saved. */
 	discard: (id: string) => void;
 
-	/*
-	 * Unkeyed wrappers for the callers #3350's second half has not moved to
-	 * the keyed reports yet (`SettingsMain`, `VariableTableEditor`,
-	 * `variable-commit`, `useTreeCrud`, `VariablesCategoryTree`,
-	 * `CannedResponseControls`, `blank-name`). They all write one shared slot,
-	 * `UNKEYED_SLOT`, which keeps the old shared-status behaviour among those
-	 * callers and nowhere else. Deleted with that change.
-	 */
-	markPendingSave: () => void;
-	startSaving: () => void;
-	completeSaveThenIdle: (reportingContextId?: string) => void;
-	failSave: (message: string, cause?: unknown) => void;
-	/** Clears the unkeyed slot's `pending`, and nothing else. */
-	setStatus: (status: "idle") => void;
-
 	// Context management
 	registerContext: (context: SaveContext) => void;
 	unregisterContext: (id: string) => void;
@@ -166,10 +152,7 @@ interface SaveState {
 	flushAll: () => Promise<FlushTally>;
 }
 
-/** The id every unkeyed wrapper reports under (see `SaveState`). */
-const UNKEYED_SLOT = "unkeyed";
-
-type Derived = Pick<SaveState, "status" | "lastErrorMessage" | "lastErrorDiskFull">;
+type Derived = Pick<SaveState, "status" | "lastErrorMessage">;
 
 // Any failure wins, then a save in flight, then an edit not yet sent; only
 // with none of those does a recent save show. The newest failure is the one
@@ -184,17 +167,13 @@ function derive(unsaved: ReadonlyMap<string, UnsavedEdit>, justSaved: boolean): 
 		else pending = true;
 	}
 	if (failure) {
-		return {
-			status: "error",
-			lastErrorMessage: failure.message,
-			lastErrorDiskFull: failure.diskFull,
-		};
+		return { status: "error", lastErrorMessage: failure.message };
 	}
 	let status: SaveStatus = "idle";
 	if (saving) status = "saving";
 	else if (pending) status = "pending";
 	else if (justSaved) status = "saved";
-	return { status, lastErrorMessage: null, lastErrorDiskFull: false };
+	return { status, lastErrorMessage: null };
 }
 
 const verdictOf = (edit: UnsavedEdit): SaveOutcome => {
@@ -206,7 +185,6 @@ const INITIAL = {
 	unsaved: new Map<string, UnsavedEdit>(),
 	status: "idle" as SaveStatus,
 	lastErrorMessage: null,
-	lastErrorDiskFull: false,
 	activeContextId: null,
 	contexts: new Map<string, SaveContext>(),
 };
@@ -216,9 +194,6 @@ const INITIAL = {
 // belongs to the most recent save.
 let justSaved = false;
 let savedWindowGeneration = 0;
-// The unkeyed `completeSaveThenIdle`'s own re-check timer, kept apart so a keyed
-// save does not cancel it.
-let unkeyedRecheckGeneration = 0;
 
 export const useSaveStore = create<SaveState>((set, get) => {
 	type SavedWindow = "open" | "close" | "keep";
@@ -257,40 +232,23 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		unsaved.set(id, edit);
 	};
 
-	// A registered context that is dirty and reports nothing under its own id.
-	// Only the unkeyed wrappers ask: a keyed context speaks for itself.
-	const silentDirtyContextExists = (exceptId?: string) =>
-		[...get().contexts.values()].some(
-			(context) =>
-				context.id !== exceptId &&
-				context.hasPendingChanges &&
-				!get().unsaved.has(context.id)
-		);
-
-	type Before = { own: UnsavedEdit | undefined; unkeyed: UnsavedEdit | undefined };
-	const snapshot = (id: string): Before => ({
-		own: get().unsaved.get(id),
-		unkeyed: get().unsaved.get(UNKEYED_SLOT),
-	});
-
 	// The pending or failed edit a context reported while its save ran: an entry
-	// that replaced the one present when the save started. The unkeyed half goes
-	// with the unkeyed wrappers.
-	const reportedDuringSave = (id: string, before: Before): UnsavedEdit | undefined => {
-		const now = snapshot(id);
-		if (now.own !== before.own && now.own && now.own.kind !== "saving") return now.own;
-		if (now.unkeyed !== before.unkeyed && now.unkeyed && now.unkeyed.kind !== "saving") {
-			return now.unkeyed;
-		}
-		return undefined;
+	// that replaced the one present when the save started.
+	const reportedDuringSave = (id: string, before: UnsavedEdit | undefined) => {
+		const now = get().unsaved.get(id);
+		return now !== before && now && now.kind !== "saving" ? now : undefined;
 	};
 
 	// A context that returns a verdict owns its publication. Only a success or a
 	// hold it left unreported is filled in for it - `useDraftSaveContext`
 	// publishes nothing on success - and a reported failure is never published
 	// a second time.
-	const settleVerdict = (id: string, before: Before, verdict: SaveOutcome): SaveOutcome => {
-		const ownReported = get().unsaved.get(id) !== before.own;
+	const settleVerdict = (
+		id: string,
+		before: UnsavedEdit | undefined,
+		verdict: SaveOutcome
+	): SaveOutcome => {
+		const ownReported = get().unsaved.get(id) !== before;
 		if (!ownReported && verdict === "saved") get().reportSaved(id);
 		if (!ownReported && verdict === "pending") get().reportPending(id);
 		return verdict;
@@ -299,7 +257,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// A context that resolves with nothing is a success unless it reported
 	// otherwise while it ran. Resolving is not proof of success on its own:
 	// `SettingsMain` publishes its failure and then resolves.
-	const settleSilence = (id: string, before: Before): SaveOutcome => {
+	const settleSilence = (id: string, before: UnsavedEdit | undefined): SaveOutcome => {
 		const reported = reportedDuringSave(id, before);
 		if (reported) return verdictOf(reported);
 		get().reportSaved(id);
@@ -308,7 +266,11 @@ export const useSaveStore = create<SaveState>((set, get) => {
 
 	// A rejection is published here unless the context already reported it,
 	// which is the double toast a "report, then reject" context used to cost.
-	const settleRejection = (id: string, before: Before, error: unknown): SaveOutcome => {
+	const settleRejection = (
+		id: string,
+		before: UnsavedEdit | undefined,
+		error: unknown
+	): SaveOutcome => {
 		const reported = reportedDuringSave(id, before);
 		if (reported?.kind === "failed") return verdictOf(reported);
 		get().reportFailed(
@@ -322,7 +284,7 @@ export const useSaveStore = create<SaveState>((set, get) => {
 	// Runs one context's save and reports what became of it. Caller must own the
 	// in-progress guard if needed.
 	const runSave = async (context: SaveContext): Promise<SaveOutcome> => {
-		const before = snapshot(context.id);
+		const before = get().unsaved.get(context.id);
 		try {
 			const verdict = await context.save();
 			return verdict
@@ -353,39 +315,6 @@ export const useSaveStore = create<SaveState>((set, get) => {
 		discard: (id) => {
 			if (!get().unsaved.has(id)) return;
 			apply((unsaved) => unsaved.delete(id), "keep");
-		},
-
-		markPendingSave: () => get().reportPending(UNKEYED_SLOT),
-
-		startSaving: () => get().reportSaving(UNKEYED_SLOT),
-
-		failSave: (message, cause) => get().reportFailed(UNKEYED_SLOT, message, cause),
-
-		setStatus: () => {
-			if (get().unsaved.get(UNKEYED_SLOT)?.kind === "pending") get().discard(UNKEYED_SLOT);
-		},
-
-		// The unkeyed slot is shared, so a success here cannot tell whose
-		// `pending` it would clear: a dirty context that reports nothing of its own
-		// keeps it pending. Its registry entry is refreshed by an effect and can
-		// lag the write, so the slot is re-checked once that has settled.
-		completeSaveThenIdle: (reportingContextId) => {
-			const held = silentDirtyContextExists(reportingContextId);
-			apply(
-				(unsaved) => {
-					if (reportingContextId) unsaved.delete(reportingContextId);
-					if (held) put(UNKEYED_SLOT, { kind: "pending" })(unsaved);
-					else unsaved.delete(UNKEYED_SLOT);
-				},
-				held ? "close" : "open"
-			);
-			if (!held) return;
-			const armed = ++unkeyedRecheckGeneration;
-			setTimeout(() => {
-				if (armed !== unkeyedRecheckGeneration) return;
-				if (silentDirtyContextExists()) return;
-				get().setStatus("idle");
-			}, TIMING.SAVED_STATUS_DURATION_MS);
 		},
 
 		// Context management
@@ -470,7 +399,6 @@ export const useSaveStore = create<SaveState>((set, get) => {
 export function resetSaveStoreForTests(): void {
 	justSaved = false;
 	savedWindowGeneration++;
-	unkeyedRecheckGeneration++;
 	useSaveStore.setState({
 		...INITIAL,
 		unsaved: new Map(),

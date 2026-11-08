@@ -128,9 +128,9 @@ export function useTreeCrud({
 	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
 	const expandCollection = useCollectionsStore((s) => s.expandCollection);
 	const toggleCollectionExpanded = useCollectionsStore((s) => s.toggleCollectionExpanded);
-	const startSaving = useSaveStore((s) => s.startSaving);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const failSave = useSaveStore((s) => s.failSave);
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const discard = useSaveStore((s) => s.discard);
 
 	const createCollectionMutation = useCreateCollectionMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
@@ -170,14 +170,12 @@ export function useTreeCrud({
 	);
 
 	/**
-	 * Report a failed create, duplicate or delete as a plain error toast.
+	 * Report a failed create, duplicate, delete or rename as a plain error toast.
 	 *
-	 * Not `failSave`: that is the save-state machine's failure, and it parks
-	 * the Dock on "Not saved" until the next successful save. None of these
-	 * is an unsaved edit - nothing is pending, nothing will retry - so routing
-	 * them there left a "Not saved" line describing no edit at all, stuck
-	 * until some unrelated save cleared it. The renames below are saves
-	 * (`startSaving` first), and keep `failSave`.
+	 * Not `reportFailed`: that parks the Dock on "Not saved" until the id it
+	 * names saves. None of these leaves an unsaved edit - nothing is pending,
+	 * nothing will retry, and a failed rename puts the stored name back - so
+	 * "Not saved" would describe no edit at all.
 	 *
 	 * The fallback leads even when the engine sent a message: its message says
 	 * why ("database is locked"), never what was being attempted.
@@ -189,6 +187,25 @@ export function useTreeCrud({
 				"error"
 			),
 		[showToast]
+	);
+
+	/**
+	 * A rename registers no save context, so it reports under an id of its own
+	 * while the PUT is out. A failure withdraws that report rather than failing
+	 * it, for the reason on `reportFailure`.
+	 */
+	const writeRename = useCallback(
+		async (id: string, write: () => Promise<unknown>, fallback: string) => {
+			reportSaving(id);
+			try {
+				await write();
+				reportSaved(id);
+			} catch (error) {
+				discard(id);
+				reportFailure(error, fallback);
+			}
+		},
+		[reportSaving, reportSaved, discard, reportFailure]
 	);
 
 	const handleCollectionClick = useCallback(
@@ -301,22 +318,15 @@ export function useTreeCrud({
 			return;
 		}
 
-		startSaving();
-		try {
-			await updateCollectionMutation.mutateAsync({
-				id: collectionId,
-				name: trimmedValue,
-			});
-			completeSaveThenIdle();
-		} catch (error) {
-			const fallback = "Couldn't rename the collection";
-			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-		} finally {
-			// The field stays mounted until the PUT settles so a failure is reported
-			// over the typed name. Functional: a rename started on another row
-			// meanwhile keeps its field.
-			setRenamingId((current) => (current === collectionId ? null : current));
-		}
+		await writeRename(
+			`rename-collection-${collectionId}`,
+			() => updateCollectionMutation.mutateAsync({ id: collectionId, name: trimmedValue }),
+			"Couldn't rename the collection"
+		);
+		// The field stays mounted until the PUT settles so a failure is reported
+		// over the typed name. Functional: a rename started on another row
+		// meanwhile keeps its field.
+		setRenamingId((current) => (current === collectionId ? null : current));
 	});
 
 	const handleStartRequestRename = useCallback((request: RequestSummary) => {
@@ -347,21 +357,14 @@ export function useTreeCrud({
 			return;
 		}
 
-		startSaving();
-		try {
-			await updateRequestMutation.mutateAsync({
-				id: requestId,
-				name: trimmedValue,
-			});
-			completeSaveThenIdle();
-		} catch (error) {
-			const fallback = "Couldn't rename the request";
-			failSave(error instanceof Error ? `${fallback} - ${error.message}` : fallback);
-		} finally {
-			// Same as the collection path: held until the PUT settles, and a rename
-			// started on another row meanwhile keeps its field.
-			setRenamingRequestId((current) => (current === requestId ? null : current));
-		}
+		await writeRename(
+			`rename-request-${requestId}`,
+			() => updateRequestMutation.mutateAsync({ id: requestId, name: trimmedValue }),
+			"Couldn't rename the request"
+		);
+		// Same as the collection path: held until the PUT settles, and a rename
+		// started on another row meanwhile keeps its field.
+		setRenamingRequestId((current) => (current === requestId ? null : current));
 	});
 
 	/**

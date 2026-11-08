@@ -326,7 +326,7 @@ describe("how a draft save's rejection is reported (#2423)", () => {
 			"Couldn't save Test editor - The disk holding Vayu's data is full"
 		);
 		// Mutation check: reporting the failure without its cause clears this.
-		expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
+		expect(useSaveStore.getState().unsaved.get("a")).toMatchObject({ diskFull: true });
 	});
 
 	it("is a plain failure for any other rejection", async () => {

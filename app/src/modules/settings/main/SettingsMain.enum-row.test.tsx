@@ -72,23 +72,6 @@ vi.mock("@/stores", () => ({
 		selector({ showToast: vi.fn() }),
 }));
 
-vi.mock("@/stores/save-store", () => ({
-	// SettingsMain destructures nine members; a partial mock throws on the first
-	// one it calls, which is easy to mistake for a defect in the component.
-	useSaveStore: (selector: (s: Record<string, unknown>) => unknown) =>
-		selector({
-			startSaving: vi.fn(),
-			completeSaveThenIdle: vi.fn(),
-			failSave: vi.fn(),
-			setStatus: vi.fn(),
-			markPendingSave: vi.fn(),
-			registerContext: vi.fn(),
-			unregisterContext: vi.fn(),
-			setActiveContext: vi.fn(),
-			updateContext: vi.fn(),
-		}),
-}));
-
 function renderSettings() {
 	// SettingsMain calls useQueryClient directly (for invalidation), so the
 	// provider is required even with the query hooks mocked.

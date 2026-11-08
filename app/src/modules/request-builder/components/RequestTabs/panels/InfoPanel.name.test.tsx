@@ -32,7 +32,8 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { RequestBuilderContext } from "../../../context";
 import type { RequestBuilderContextValue } from "../../../types";
 import { createDefaultRequestState } from "../../../utils/request-state";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
+import { useToastStore } from "@/stores/toast-store";
 
 // The description half is a Monaco-backed markdown editor and is covered by its
 // own tests; the name field is a plain input and is what this is about.
@@ -67,7 +68,8 @@ const nameField = () => screen.getByLabelText("Request name") as HTMLInputElemen
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useSaveStore.setState({ status: "idle" });
+	resetSaveStoreForTests();
+	useToastStore.setState({ toasts: [] });
 });
 
 describe("the request Info tab's name field", () => {
@@ -105,6 +107,11 @@ describe("the request Info tab's name field", () => {
 		// Refused, not saved: a save here would carry the blank to the engine, and
 		// the payload dropping it would make the refusal silent instead.
 		expect(saveRequest).not.toHaveBeenCalled();
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(useToastStore.getState().toasts).toMatchObject([
+			{ message: "A request needs a name - kept the saved one.", variant: "error" },
+		]);
+		// The stored name is back, so nothing is unsaved for the Dock to report.
+		// Mutation check: report the refusal through the save store and this reds.
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 });

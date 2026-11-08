@@ -23,6 +23,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
 import type { InboxCannedResponse } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -49,7 +50,7 @@ function lastToastMessage(): string | undefined {
 beforeEach(() => {
 	cleanup();
 	useToastStore.setState({ toasts: [] });
-	useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
+	resetSaveStoreForTests();
 });
 
 describe("every field the engine serves", () => {
@@ -273,8 +274,8 @@ describe("the key/value table it borrows", () => {
 
 describe("Apply reports through the save store (#1450)", () => {
 	/*
-	 * Mutation check: comment out the `startSaving()`/`completeSaveThenIdle()`
-	 * pair in `persist` and this reds - the status never leaves "idle".
+	 * Mutation check: comment out the `reportSaving`/`reportSaved` pair in
+	 * `persist` and this reds - the status stays "Unsaved changes".
 	 */
 	it("moves the Dock's status from saving to saved on a successful apply", async () => {
 		const onApply = vi.fn().mockResolvedValue(undefined);
@@ -297,9 +298,10 @@ describe("Apply reports through the save store (#1450)", () => {
 
 	/*
 	 * Mutation check: swallow the rejection in `persist` instead of calling
-	 * `failSave` and this reds - the status stays "saved"/"idle" with no toast.
+	 * `reportFailed` and this reds - the status never reaches "error" and
+	 * nothing toasts.
 	 */
-	it("reports a refused apply through failSave, not a bare toast", async () => {
+	it("reports a refused apply through reportFailed, not a bare toast", async () => {
 		const onApply = vi.fn().mockRejectedValue(new Error("Engine refused the update"));
 		render(
 			<CannedResponseControls
@@ -319,6 +321,65 @@ describe("Apply reports through the save store (#1450)", () => {
 			message: "Couldn't update the response - Engine refused the update",
 			variant: "error",
 		});
+	});
+
+	/*
+	 * The reply reports under its own id, so another surface's report cannot
+	 * settle its failure and its own cannot settle another's. Mutation check:
+	 * report under any id but `inbox-reply` and the second assertion reds.
+	 */
+	it("keeps a refused apply apart from another surface's reports", async () => {
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={vi.fn().mockRejectedValue(new Error("Engine refused the update"))}
+			/>
+		);
+		useSaveStore.getState().reportFailed("settings", "Couldn't save settings - busy");
+
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "503" } });
+		fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+		await waitFor(() =>
+			expect(useSaveStore.getState().unsaved.get("inbox-reply")?.kind).toBe("failed")
+		);
+
+		useSaveStore.getState().reportSaved("settings");
+		expect(useSaveStore.getState().status).toBe("error");
+		expect(useSaveStore.getState().lastErrorMessage).toBe(
+			"Couldn't update the response - Engine refused the update"
+		);
+	});
+
+	/*
+	 * Mutation check: return nothing from `persist` when `collect` refuses and
+	 * this reds - the flush counts the refused draft as saved.
+	 */
+	it("counts a draft it refused to send as pending, not saved", async () => {
+		const onApply = vi.fn();
+		render(
+			<CannedResponseControls
+				response={response()}
+				pending={false}
+				stopped={false}
+				onApply={onApply}
+			/>
+		);
+		fireEvent.change(screen.getByLabelText("Reply status"), { target: { value: "42" } });
+		await waitFor(() =>
+			expect(useSaveStore.getState().contexts.get("inbox-reply")?.hasPendingChanges).toBe(
+				true
+			)
+		);
+
+		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			saved: 0,
+			failed: 0,
+			pending: 1,
+		});
+		expect(onApply).not.toHaveBeenCalled();
+		expect(useSaveStore.getState().status).toBe("pending");
 	});
 
 	it("registers the reply as a save context, so a quit flush would reach it", () => {
@@ -423,9 +484,12 @@ describe("a reply apply refused at quit (#2685)", () => {
 		);
 
 		expect(result).toEqual({ saved: 0, failed: 1, pending: 0, reason: "disk-full" });
-		// The verdict above is `persist`'s own return; this is the cause it handed
-		// `failSave`, which is what a silent sibling would be judged by.
-		expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
+		// The verdict above is `persist`'s own return; this is the cause it
+		// reported under the reply's id.
+		expect(useSaveStore.getState().unsaved.get("inbox-reply")).toMatchObject({
+			kind: "failed",
+			diskFull: true,
+		});
 		// `persist` resolves with its verdict rather than rethrowing, so the
 		// failure is toasted once, not once by `persist` and again by the wrapper.
 		expect(useToastStore.getState().toasts).toHaveLength(1);
