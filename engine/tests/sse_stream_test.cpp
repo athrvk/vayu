@@ -39,6 +39,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "proxy_server.hpp"
 #include "silent_listener.hpp"
 #include "temp_database.hpp"
 #include "timed_out_after.hpp"
@@ -205,6 +206,17 @@ class StreamServer {
             res.set_content (body.chunks.front (), body.content_type);
         });
 
+        // Headers and no body at all, whatever `bodiless ()` set: a 204, a
+        // bodiless 401, an empty 200. A POST is answered the same way, after
+        // the `100 Continue` httplib sends a request that expects one.
+        const auto bodiless = [this] (const httplib::Request& req, httplib::Response& res) {
+            note_request (req);
+            res.status = bodiless_status_.load ();
+            res.set_header ("X-Fixture", "bodiless");
+        };
+        svr_.Get ("/bodiless", bodiless);
+        svr_.Post ("/bodiless", bodiless);
+
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Fixture", "silent");
             res.set_chunked_content_provider (
@@ -326,6 +338,11 @@ class StreamServer {
         hop_delay_ms_ = ms;
     }
 
+    /// The status `/bodiless` answers from now on.
+    void bodiless (int status) {
+        bodiless_status_.store (status);
+    }
+
     /// Redirects `/hop` has answered or is answering.
     int hops_received () const {
         return hop_count_.load ();
@@ -386,6 +403,7 @@ class StreamServer {
     Canned hop_reply_{ 302, "application/json", { R"({"hop":"first"})" } };
     Canned canned_;
     std::atomic<int> hop_delay_ms_{ 0 };
+    std::atomic<int> bodiless_status_{ 204 };
     std::atomic<int> hop_count_{ 0 };
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
@@ -813,10 +831,10 @@ TEST (SseConsumer, ARedirectHopThatNeverConnectsIsATimeoutErrorNotIdle) {
 
 // The 302 is itself shaped as an event stream, so a body that reached the
 // stream would publish an `open` for the redirect, dispatch its event and count
-// its bytes. Mutation checks: publish the `open` frame per hop (ahead of the
-// `discard` return, `announced` reset in `begin_response_hop`) and two frames
-// are published; drop the `discard` return and the redirect's event and its
-// `open` are recorded.
+// its bytes. Mutation checks: announce at the end of every header block (drop
+// the `discard` condition in `stream_header_callback`) and two frames are
+// published; drop the `discard` return in `stream_write_callback` and the
+// redirect's event is recorded.
 TEST (SseConsumer, AFollowedRedirectsBodyIsNoPartOfTheStream) {
     StreamServer server;
     server.hop_body ("text/event-stream", "data: from-the-redirect\n\n");
@@ -1055,6 +1073,70 @@ TEST (SseConsumer, TheFinalHopsContentTypeDecides) {
     EXPECT_TRUE (response.body.empty ()) << response.body;
     ASSERT_HAS_VALUE (response.stream_body_bytes);
     EXPECT_EQ (*response.stream_body_bytes, 9u);
+}
+
+// ---------------------------------------------------------------------------
+// The `open` frame without a body (#3342)
+//
+// A reply that ends at its headers still opens, once, with its status: the
+// frame is announced at the end of the final header block, not at a body byte.
+// ---------------------------------------------------------------------------
+
+// Mutation check: announce from the first body byte again (the write
+// callback) and every case publishes no `open`.
+TEST (SseConsumer, AReplyWithNoBodyStillOpensOnceWithItsStatus) {
+    for (const int status : { 204, 401, 200 }) {
+        SCOPED_TRACE (status);
+        StreamServer server;
+        server.bodiless (status);
+        SseStreamContext context ("run_test", brisk_limits ());
+        const auto response = vayu::http::consume_sse_stream (
+        spec_for (server.url ("/bodiless"), brisk_limits ()), context);
+
+        EXPECT_EQ (context.end_reason (), SseEndReason::Completed) << response.error_message;
+        EXPECT_EQ (response.status_code, status);
+        const auto opens = open_frames (context);
+        ASSERT_EQ (opens.size (), 1u);
+        EXPECT_EQ (opens[0]["statusCode"], status);
+        EXPECT_EQ (opens[0]["headers"]["x-fixture"], "bodiless");
+    }
+}
+
+// The `100 Continue` a typed `Expect` draws is a header block of its own, and
+// not the stream's answer. Mutation check: drop the interim condition in
+// `stream_header_callback` and the one frame reads 100.
+TEST (SseConsumer, AnInterimResponseIsNotTheStreamsOpen) {
+    StreamServer server;
+    server.bodiless (204);
+    auto spec           = spec_for (server.url ("/bodiless"), brisk_limits ());
+    spec.request.method = vayu::HttpMethod::POST;
+    spec.request.body.mode    = vayu::BodyMode::Text;
+    spec.request.body.content = "payload";
+    spec.request.headers      = { { "Expect", "100-continue" } };
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (response.status_code, 204) << response.error_message;
+    const auto opens = open_frames (context);
+    ASSERT_EQ (opens.size (), 1u);
+    EXPECT_EQ (opens[0]["statusCode"], 204);
+}
+
+// A proxy's answer to CONNECT is the tunnel's, not the stream's: this one
+// refuses with a 407, which must not open the stream. Mutation check: drop
+// `CURLOPT_SUPPRESS_CONNECT_HEADERS` and the refusal publishes an `open` of 407.
+TEST (SseConsumer, AProxysConnectAnswerIsNotTheStreamsOpen) {
+    vayu::tests::MockProxy proxy;
+    auto spec = spec_for ("https://127.0.0.1:1/events", brisk_limits ());
+    spec.transport.proxy_mode = vayu::http::ProxyMode::Manual;
+    spec.transport.proxy_url  = proxy.url ();
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::ProxyError) << response.error_message;
+    EXPECT_EQ (proxy.count (), 1u);
+    EXPECT_TRUE (open_frames (context).empty ());
 }
 
 // ---------------------------------------------------------------------------

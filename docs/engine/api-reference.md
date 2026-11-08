@@ -11866,10 +11866,14 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
 ```
 
 - `open` is published once, as soon as the response's header block arrives, so
-  even a late consumer learns what the stream connected to. With
-  `followRedirects` on it describes the hop the stream ends at: a redirect the
-  stream follows publishes no `open`, and its body is neither an event nor
-  counted.
+  even a late consumer learns what the stream connected to. A reply with no
+  body (a `204`, a bodiless `401`, an empty `200`) still publishes it, with its
+  status, before `complete` (#3342). With `followRedirects` on it describes the
+  hop the stream ends at: a redirect the stream follows publishes no `open`, and
+  its body is neither an event nor counted. Neither does an interim `1xx` (a
+  `100 Continue`) nor a proxy's answer to `CONNECT`: a tunnel refused there
+  ends the stream as `error` with no `open`. A stream that failed before any
+  response arrived has none either.
 - `message` carries one upstream event: its `event` name (`message` when the
   origin sent none), its `data` (multiple `data:` lines joined with `\n`), the
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than

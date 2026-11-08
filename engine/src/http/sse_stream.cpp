@@ -362,7 +362,7 @@ struct TransferState {
     /// `Location`): that hop's body is no part of the stream, so it reaches no
     /// `open` frame, no parser and no byte count.
     bool discard = false;
-    /// Set at the final hop's first body byte, so the `open` frame is
+    /// Set when the final hop's header block ends, so the `open` frame is
     /// published once per chain.
     bool announced = false;
     /// Set by the callback or the chain that ended the stream by a rule, so the
@@ -438,6 +438,19 @@ void begin_response_hop (TransferState& state) {
     state.discard = false;
 }
 
+/// Publish the final hop's status line and headers as the ring's first frame,
+/// so even a relay that attaches later replays what the stream connected to.
+/// The frame carries the folded map only: `Response::header_lines` is read by
+/// the completed trace, and a client without the lines falls back to the map.
+void announce_response (TransferState& state) {
+    if (state.announced) {
+        return;
+    }
+    state.announced = true;
+    state.context->note_response_open (state.response->status_code,
+    state.response->status_text, state.response->headers);
+}
+
 void note_activity (TransferState& state) {
     state.last_byte_at  = std::chrono::steady_clock::now ();
     state.last_byte_hop = state.hop;
@@ -451,17 +464,6 @@ size_t stream_write_callback (char* ptr, size_t size, size_t nmemb, void* userda
         return total_size;
     }
     const std::string_view bytes (ptr, total_size);
-
-    // The header block is complete by the time the first body byte arrives, so
-    // this is where the run learns what it connected to - published as the
-    // ring's first frame so even a relay that attaches later replays it. The
-    // frame carries the folded map only: `Response::header_lines` is read by
-    // the completed trace, and a client without the lines falls back to the map.
-    if (!state->announced) {
-        state->announced = true;
-        state->context->note_response_open (state->response->status_code,
-        state->response->status_text, state->response->headers);
-    }
 
     // A reply that is not an event stream (a JSON 404, NDJSON) still goes
     // through the parser below, so a server that streams SSE under the wrong
@@ -497,6 +499,14 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
         state->discard = state->request->request.follow_redirects &&
         is_redirect_status (state->block_status) &&
         location_of (response->header_lines).has_value ();
+        // The end of a header block, announced here rather than at a body byte
+        // so a reply with none (a 204, a bodiless 401) still opens (#3342). A
+        // 1xx is followed by another block and a followed redirect by another
+        // hop, so neither is the stream's answer.
+        const bool interim = state->block_status >= 100 && state->block_status < 200;
+        if (!state->discard && !interim) {
+            announce_response (*state);
+        }
         return total_size;
     }
     if (line.starts_with ("HTTP/")) {
@@ -510,9 +520,9 @@ size_t stream_header_callback (char* buffer, size_t size, size_t nitems, void* u
             std::string{};
             // Read off the status line rather than left to the
             // `CURLINFO_RESPONSE_CODE` read after the transfer: the `open`
-            // frame is published from the *first body byte*, and a stream's
-            // transfer does not finish for minutes. Waiting would publish `0`
-            // as the status of a perfectly healthy 200.
+            // frame is published at the end of the header block, and a
+            // stream's transfer does not finish for minutes. Waiting would
+            // publish `0` as the status of a perfectly healthy 200.
             const auto code_end =
             second_space == std::string::npos ? line.size () : second_space;
             // Whole-token, so a code with a tail glued to it ("200OK") leaves
@@ -779,6 +789,9 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     set_opt<CURLOPT_WRITEDATA> (curl, &state);
     set_opt<CURLOPT_HEADERFUNCTION> (curl, stream_header_callback);
     set_opt<CURLOPT_HEADERDATA> (curl, &state);
+    // A proxy's answer to CONNECT is not the stream's: let through, its block's
+    // end would announce the tunnel's `200` (or a refusal's 407) as `open`.
+    set_opt<CURLOPT_SUPPRESS_CONNECT_HEADERS> (curl, 1L);
     set_opt<CURLOPT_NOPROGRESS> (curl, 0L);
     set_opt<CURLOPT_XFERINFOFUNCTION> (curl, stream_progress_callback);
     set_opt<CURLOPT_XFERINFODATA> (curl, &state);
