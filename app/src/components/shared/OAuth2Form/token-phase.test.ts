@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { OAuth2TokenStatusResponse } from "@/types";
-import { lapseInstant, tokenPhase } from "./token-phase";
+import { lapseInstant, noTokenState, tokenPhase } from "./token-phase";
 
 const NOW = Date.UTC(2026, 0, 1);
 
@@ -86,5 +86,28 @@ describe("lapseInstant", () => {
 		["a token that never expires", cached(null)],
 	])("is null for %s", (_name, status) => {
 		expect(lapseInstant(status)).toBeNull();
+	});
+});
+
+describe("noTokenState", () => {
+	const settled = { isLoading: false, isError: false };
+
+	it.each([
+		["a missing field, over a pending check", true, { isLoading: true, isError: false }],
+		["a missing field, over a failed check", true, { isLoading: false, isError: true }],
+	])("reports %s", (_name, incomplete, query) => {
+		expect(noTokenState(incomplete, query)).toBe("missing-fields");
+	});
+
+	it("is checking while the engine has not answered", () => {
+		expect(noTokenState(false, { isLoading: true, isError: false })).toBe("checking");
+	});
+
+	it("is check-failed when the check errored", () => {
+		expect(noTokenState(false, { isLoading: false, isError: true })).toBe("check-failed");
+	});
+
+	it("is none-cached only once the engine has answered", () => {
+		expect(noTokenState(false, settled)).toBe("none-cached");
 	});
 });

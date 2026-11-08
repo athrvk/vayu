@@ -71,3 +71,20 @@ export function tokenPhase(status: OAuth2TokenStatusResponse | undefined, now: n
 		expiry: expiryText(expiresAt, lapsed),
 	};
 }
+
+export type NoTokenState = "missing-fields" | "checking" | "check-failed" | "none-cached";
+
+/**
+ * Why no token is on screen. A missing field is the most actionable and wins;
+ * otherwise "none-cached" is only true once the engine has answered, so a
+ * pending or failed check must not read as one (#3354).
+ */
+export function noTokenState(
+	incomplete: boolean,
+	query: { isLoading: boolean; isError: boolean }
+): NoTokenState {
+	if (incomplete) return "missing-fields";
+	if (query.isLoading) return "checking";
+	if (query.isError) return "check-failed";
+	return "none-cached";
+}
