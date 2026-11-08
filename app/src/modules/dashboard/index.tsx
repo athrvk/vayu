@@ -19,7 +19,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardStore, useLayoutStore, useToastStore } from "@/stores";
+import {
+	dashboardRunEnding,
+	isDashboardRunLive,
+	useDashboardStore,
+	useLayoutStore,
+	useToastStore,
+} from "@/stores";
 import { apiService, loadTestService } from "@/services";
 import { EmptyState, Callout, TabBreadcrumb, reportOutcome } from "@/components/shared";
 import { Button } from "@/components/ui";
@@ -35,46 +41,37 @@ import type { DisplayMetrics } from "./types";
 export default function LoadTestDashboard() {
 	const showToast = useToastStore((state) => state.showToast);
 	const currentRunId = useDashboardStore((s) => s.currentRunId);
-	const mode = useDashboardStore((s) => s.mode);
-	const isStreaming = useDashboardStore((s) => s.isStreaming);
+	// Changes identity only on a transition, never on a tick.
+	const phase = useDashboardStore((s) => s.phase);
 	const currentMetrics = useDashboardStore((s) => s.currentMetrics);
 	const historicalMetrics = useDashboardStore((s) => s.historicalMetrics);
-	const finalReport = useDashboardStore((s) => s.finalReport);
 	const isStopping = useDashboardStore((s) => s.isStopping);
 	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
 	const requestInfo = useDashboardStore((s) => s.requestInfo);
 	const stopRun = useDashboardStore((s) => s.stopRun);
 	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
+	const reportFailed = useDashboardStore((s) => s.reportFailed);
+	const retryReport = useDashboardStore((s) => s.retryReport);
 	const setStopping = useDashboardStore((s) => s.setStopping);
-	// Written by the SSE layer on a connection failure and, until now, read
-	// by nothing - so a dead metrics stream looked like a run with no data.
-	const streamError = useDashboardStore((s) => s.error);
-	const setStreamError = useDashboardStore((s) => s.setError);
+
+	const live = isDashboardRunLive(phase);
+	const awaitingReport = phase.phase === "awaitingReport";
 
 	// A collection load run has no URL; this is what the header says instead.
 	const { collectionName, stepCount } = useCollectionRunTarget(currentRunId);
 
 	// Track whether we're loading the report
 	const [isLoadingReport, setIsLoadingReport] = useState(false);
-	/**
-	 * Set once the report fetch has failed as many times as it is allowed to.
-	 *
-	 * Before this, a throw was swallowed: the `try`/`finally` below had no
-	 * `catch`, so `isLoadingReport` went back to false, that is an effect
-	 * dependency, the guard `!finalReport && !isLoadingReport` became true again,
-	 * and the fetch re-ran. `loadAttemptRef` was only incremented on the
-	 * zero-data path, never on failure, so the cap never engaged - a persistent
-	 * failure (engine down) retried forever, silently, showing an empty
-	 * dashboard the whole time.
-	 */
-	const [reportError, setReportError] = useState<string | null>(null);
+	// Failures count against the same cap as empty reports, and the last one
+	// moves the store to `reportError`: a swallowed throw once re-ran the fetch
+	// forever, silently, showing an empty dashboard the whole time.
 	const loadAttemptRef = useRef(0);
 	const hasCheckedStatus = useRef(false);
 
 	// Check run status on mount - handles case where user navigated away and returned
 	// Also ensures SSE reconnection if service lost connection
 	useEffect(() => {
-		if (currentRunId && mode === "running" && !hasCheckedStatus.current) {
+		if (currentRunId && live && !hasCheckedStatus.current) {
 			hasCheckedStatus.current = true;
 
 			// Check if the run is still actually running on the backend
@@ -85,7 +82,7 @@ export default function LoadTestDashboard() {
 						const status = report.metadata.status;
 						if (isRunTerminal(status)) {
 							// Run finished while we were away - update state
-							setFinalReport(report);
+							setFinalReport(currentRunId, report);
 							loadTestService.stopMonitoring();
 						} else if (!loadTestService.isMonitoring(currentRunId)) {
 							// Run is still running but service is not connected - reconnect
@@ -106,18 +103,15 @@ export default function LoadTestDashboard() {
 		if (!currentRunId) {
 			hasCheckedStatus.current = false;
 		}
-	}, [currentRunId, mode, setFinalReport]);
+	}, [currentRunId, live, setFinalReport]);
 
-	// Converge on the stored report once the stream has stopped, with a delay
-	// and a capped retry. Keyed on the stream, not on `mode`: a run whose stream
-	// ended is still in `running` until a final report arrives, and that is the
-	// state this has to resolve (#1925). Usually `handleClose` lands the report
-	// inside the first delay and this fetches nothing. A stream error means the
-	// run is still going and Reconnect is the way on, so this waits for that.
-	// `reportError` is a dependency so that Retry, which clears it, re-arms this.
+	// Converge on the stored report while the run awaits it, with a delay and a
+	// capped retry (#1925). Usually `handleClose` lands the report inside the
+	// first delay and this fetches nothing. A lost stream means the run is still
+	// going and Reconnect is the way on, so this waits for that. Retry returns
+	// the phase to `awaitingReport`, which re-arms this.
 	useEffect(() => {
-		if (!currentRunId || isStreaming || finalReport || streamError) return;
-		if (isLoadingReport || reportError) return;
+		if (!currentRunId || !awaitingReport || isLoadingReport) return;
 		// Longer initial delay to allow database writes to complete
 		// This helps avoid "database is locked" issues
 		const delay =
@@ -144,7 +138,7 @@ export default function LoadTestDashboard() {
 						historicalMetrics.length === 0;
 
 					if (isValidReport) {
-						setFinalReport(report);
+						setFinalReport(currentRunId, report);
 						loadAttemptRef.current = 0;
 					} else if (loadAttemptRef.current < TIMING.REPORT_MAX_ATTEMPTS) {
 						loadAttemptRef.current++;
@@ -153,7 +147,7 @@ export default function LoadTestDashboard() {
 						console.warn(
 							"Report still has zero data after retries; showing it as stored"
 						);
-						setFinalReport(report);
+						setFinalReport(currentRunId, report);
 						loadAttemptRef.current = 0;
 					}
 				}
@@ -164,7 +158,8 @@ export default function LoadTestDashboard() {
 					loadAttemptRef.current++;
 				} else {
 					loadAttemptRef.current = 0;
-					setReportError(
+					reportFailed(
+						currentRunId,
 						err instanceof Error ? err.message : "Couldn't load the run report"
 					);
 				}
@@ -176,12 +171,10 @@ export default function LoadTestDashboard() {
 		return () => clearTimeout(timeoutId);
 	}, [
 		currentRunId,
-		isStreaming,
-		finalReport,
-		streamError,
+		awaitingReport,
 		isLoadingReport,
-		reportError,
 		setFinalReport,
+		reportFailed,
 		historicalMetrics.length,
 	]);
 
@@ -198,11 +191,11 @@ export default function LoadTestDashboard() {
 	const handleStop = useCallback(
 		async function attemptStop() {
 			if (currentRunId) {
-				setStopping(true);
+				setStopping(currentRunId, true);
 				try {
 					await apiService.stopRun(currentRunId);
 					loadTestService.stopMonitoring();
-					stopRun();
+					stopRun(currentRunId);
 				} catch (error) {
 					// The button re-enables and the run keeps streaming, so without
 					// this the click is indistinguishable from one that did nothing.
@@ -222,7 +215,7 @@ export default function LoadTestDashboard() {
 						},
 					});
 				} finally {
-					setStopping(false);
+					setStopping(currentRunId, false);
 				}
 			}
 		},
@@ -233,8 +226,8 @@ export default function LoadTestDashboard() {
 	// report once its report is here, so the run reads the same now and later
 	// (#1932, #2136, #2220). Until then (a stopped run's report still on its way,
 	// or a fetch that failed) it keeps the live view, which carries the Retry.
-	const report =
-		mode === "completed" || mode === "failed" || mode === "stopped" ? finalReport : null;
+	const report = phase.phase === "finished" ? phase.report : null;
+	const endedAs = dashboardRunEnding(phase);
 
 	// The header pill's half of the verdict (#2130); the report draws the banner.
 	const judgement = useMemo(() => reportOutcome(report), [report]);
@@ -280,16 +273,13 @@ export default function LoadTestDashboard() {
 	}
 
 	/*
-	 * One notice slot for both failures the dashboard can hit. The stream error
-	 * comes first: without live metrics the page has nothing to show, whereas a
-	 * missing report still leaves whatever was captured. Only the live view shows
-	 * them: a report on screen has nothing left to retry or reconnect, and a stream
-	 * error can outlive the run when a remount's status check lands the report.
+	 * One notice slot for both failures the dashboard can hit. Each is a phase
+	 * of its own, so the two never stand together, and a report on screen has
+	 * nothing left to retry or reconnect.
 	 */
-	const reportNotice = report ? null : reportError;
-	const notices = (streamError || reportNotice) && (
+	const notices = (phase.phase === "streamLost" || phase.phase === "reportError") && (
 		<div className="enter-fade px-5 pt-3 shrink-0">
-			{streamError ? (
+			{phase.phase === "streamLost" ? (
 				<Callout
 					severity="blocking"
 					title="Lost the live metrics stream"
@@ -297,16 +287,13 @@ export default function LoadTestDashboard() {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => {
-								setStreamError(null);
-								loadTestService.startMonitoring(currentRunId);
-							}}
+							onClick={() => loadTestService.startMonitoring(currentRunId)}
 						>
 							Reconnect
 						</Button>
 					}
 				>
-					{streamError} Anything already received is still shown below.
+					{phase.message} Anything already received is still shown below.
 				</Callout>
 			) : (
 				<Callout
@@ -318,14 +305,14 @@ export default function LoadTestDashboard() {
 							size="sm"
 							onClick={() => {
 								loadAttemptRef.current = 0;
-								setReportError(null);
+								retryReport(currentRunId);
 							}}
 						>
 							Retry
 						</Button>
 					}
 				>
-					{reportNotice} The live metrics below are whatever was captured before the run
+					{phase.message} The live metrics below are whatever was captured before the run
 					finished.
 				</Callout>
 			)}
@@ -338,8 +325,8 @@ export default function LoadTestDashboard() {
 				{/* Identity and Export only: the report below carries the crumb, the
 				    URL, the configuration and the verdict banner. */}
 				<DashboardHeader
-					mode={mode}
-					isStreaming={isStreaming}
+					live={live}
+					endedAs={endedAs}
 					isStopping={isStopping}
 					onStop={handleStop}
 					outcome={judgement?.outcome}
@@ -359,8 +346,8 @@ export default function LoadTestDashboard() {
 		<div className="flex-1 flex flex-col overflow-hidden">
 			{/* Compact single-row header */}
 			<DashboardHeader
-				mode={mode}
-				isStreaming={isStreaming}
+				live={live}
+				endedAs={endedAs}
 				isStopping={isStopping}
 				onStop={handleStop}
 				requestUrl={requestInfo?.url}
@@ -399,4 +386,4 @@ export default function LoadTestDashboard() {
 }
 
 // Re-export types
-export type { DashboardMode, DisplayMetrics } from "./types";
+export type { DisplayMetrics } from "./types";

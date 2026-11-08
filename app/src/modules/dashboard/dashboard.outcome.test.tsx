@@ -87,18 +87,18 @@ const MISSED: RunReport["thresholdValidation"] = {
 	verdict: "failed",
 };
 
-function seed(
-	mode: "running" | "completed" | "failed" | "stopped",
-	finalReport: RunReport | null,
-	isStreaming = false
-) {
-	useDashboardStore.setState({ currentRunId: "run_1", mode, isStreaming, finalReport });
+/** A run whose report landed and says `kind`. */
+function seed(kind: "completed" | "failed" | "stopped", finalReport: RunReport) {
+	useDashboardStore.setState({
+		currentRunId: "run_1",
+		phase: { phase: "finished", kind, report: finalReport },
+	});
 }
 
 const renderDashboard = () => render(withQueryClient(<LoadTestDashboard />));
 
 afterEach(() => {
-	useDashboardStore.setState({ currentRunId: null, finalReport: null });
+	useDashboardStore.setState({ currentRunId: null, phase: { phase: "idle" } });
 });
 
 describe("the dashboard's verdict banner", () => {
@@ -142,7 +142,7 @@ describe("the dashboard's verdict banner", () => {
 	});
 
 	it("draws no banner while the run is streaming", () => {
-		seed("running", report({ metadata: undefined }), true);
+		useDashboardStore.setState({ currentRunId: "run_1", phase: { phase: "streaming" } });
 		renderDashboard();
 
 		expect(screen.queryByText("Not judged")).toBeNull();
@@ -150,8 +150,11 @@ describe("the dashboard's verdict banner", () => {
 		expect(screen.getByTestId("header").dataset.outcome).toBe("");
 	});
 
-	it("draws no banner for a finished run whose report has not arrived", () => {
-		seed("completed", null);
+	it("draws no banner for a run whose report has not arrived", () => {
+		useDashboardStore.setState({
+			currentRunId: "run_1",
+			phase: { phase: "awaitingReport", stopped: false },
+		});
 		renderDashboard();
 
 		expect(screen.queryByText("Not judged")).toBeNull();

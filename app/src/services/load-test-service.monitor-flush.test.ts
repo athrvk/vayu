@@ -29,8 +29,9 @@ vi.mock("@/stores", () => ({
 	useDashboardStore: {
 		getState: () => ({
 			currentRunId: null,
-			setStreaming: vi.fn(),
-			setError: vi.fn(),
+			streamOpened: vi.fn(),
+			streamLost: vi.fn(),
+			streamClosed: vi.fn(),
 			setFinalReport: vi.fn(),
 			addMetricsBatch: mockAddMetricsBatch,
 			addMonitorSamples: mockAddMonitorSamples,
@@ -106,7 +107,7 @@ describe("LoadTestService - scrapes riding the metrics flush", () => {
 
 		expect(mockAddMetricsBatch).toHaveBeenCalledTimes(1);
 		expect(mockAddMonitorSamples).toHaveBeenCalledTimes(1);
-		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith([scrapeAt(1)]);
+		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith("run_1", [scrapeAt(1)]);
 	});
 
 	it("carries a scrape that arrived inside the window on the trailing commit", () => {
@@ -121,7 +122,7 @@ describe("LoadTestService - scrapes riding the metrics flush", () => {
 		// A scrape has no timer of its own - it waits for the next tick's flush.
 		expect(mockAddMonitorSamples).not.toHaveBeenCalled();
 		vi.advanceTimersByTime(METRICS_UI_THROTTLE_MS);
-		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith([scrapeAt(2)]);
+		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith("run_2", [scrapeAt(2)]);
 	});
 
 	it("commits a scrape the run ended before any tick could carry", async () => {
@@ -137,9 +138,9 @@ describe("LoadTestService - scrapes riding the metrics flush", () => {
 		// and this scrape is silently lost at the end of every run that ends
 		// between ticks.
 		expect(mockAddMonitorSamples).toHaveBeenCalledTimes(1);
-		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith([scrapeAt(3)]);
+		expect(mockAddMonitorSamples).toHaveBeenLastCalledWith("run_3", [scrapeAt(3)]);
 		// Beside an empty tick batch, which is what this did before the batcher.
-		expect(mockAddMetricsBatch).toHaveBeenLastCalledWith([]);
+		expect(mockAddMetricsBatch).toHaveBeenLastCalledWith("run_3", []);
 	});
 
 	it("drops what a stopped run left buffered rather than committing it late", () => {

@@ -40,7 +40,7 @@ import { loadConfigFromSnapshot, requestInfoFromSnapshot } from "@/lib/run-confi
  * run's stored snapshot (issue #1935).
  *
  * Best effort: the run is already being watched, and a row that cannot be read
- * leaves the dashboard as it was. It must not reach `setError`, which raises the
+ * leaves the dashboard as it was. It must not reach `streamLost`, which raises the
  * lost-stream callout for a stream that is fine. A response that arrives after
  * another run took the dashboard is dropped rather than written over it.
  */

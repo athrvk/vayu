@@ -137,7 +137,7 @@ beforeEach(() => {
 		activeTabId: "t1",
 	});
 	useSessionStore.setState({ activeEnvironmentId: "env_1" });
-	useDashboardStore.getState().setStreaming(false);
+	useDashboardStore.setState({ phase: { phase: "idle" } });
 });
 
 describe("loading a request's own timeout", () => {

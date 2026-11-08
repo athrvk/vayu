@@ -167,7 +167,7 @@ beforeEach(() => {
 	// A started run leaves the dashboard streaming, and the builder refuses to
 	// open the dialog while one is - so a load-run case would otherwise pass or
 	// fail depending on which case ran before it.
-	useDashboardStore.getState().setStreaming(false);
+	useDashboardStore.setState({ phase: { phase: "idle" } });
 });
 
 describe("a Send that binds one row", () => {

@@ -23,10 +23,10 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import { withQueryClient } from "@/test/query-wrapper";
-import { useDashboardStore } from "@/stores";
+import { useDashboardStore, type DashboardPhase } from "@/stores";
 import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import type { RunReport } from "@/types";
 import LoadTestDashboard from "./index";
@@ -86,14 +86,18 @@ function historyTabs(report: RunReport): (string | null)[] {
 	return names;
 }
 
-function renderDashboard(
-	mode: "running" | FinishedStatus,
-	finalReport: RunReport | null,
-	isStreaming = false
-) {
-	useDashboardStore.setState({ currentRunId: "run_1", mode, isStreaming, finalReport });
+function renderDashboard(phase: DashboardPhase) {
+	useDashboardStore.setState({ currentRunId: "run_1", phase });
 	return render(withQueryClient(<LoadTestDashboard />));
 }
+
+const finished = (kind: FinishedStatus, report: RunReport): DashboardPhase => ({
+	phase: "finished",
+	kind,
+	report,
+});
+const STREAMING: DashboardPhase = { phase: "streaming" };
+const AWAITING_REPORT: DashboardPhase = { phase: "awaitingReport", stopped: false };
 
 describe("the dashboard's finished run", () => {
 	it.each<FinishedStatus>(["completed", "failed", "stopped"])(
@@ -103,7 +107,7 @@ describe("the dashboard's finished run", () => {
 			const expected = historyTabs(report);
 			expect(expected.length).toBeGreaterThan(0);
 
-			renderDashboard(status, report);
+			renderDashboard(finished(status, report));
 
 			expect(tabNames()).toEqual(expected);
 			expect(screen.getByRole("tab", { name: "Sampled requests" })).toBeInTheDocument();
@@ -113,36 +117,27 @@ describe("the dashboard's finished run", () => {
 		}
 	);
 
-	it("drops a stale stream error once the report is on screen", () => {
-		// A remount's status check can land the report while the error from a
-		// dropped stream is still set; Reconnect on a finished run does nothing.
-		useDashboardStore.setState({ error: "stream dropped" });
-		renderDashboard("completed", reportFor("completed"));
+	it("replaces the lost-stream callout with the report a remount's check lands", () => {
+		renderDashboard({ phase: "streamLost", message: "stream dropped" });
+		expect(screen.getByText("Lost the live metrics stream")).toBeInTheDocument();
+
+		act(() => useDashboardStore.getState().setFinalReport("run_1", reportFor("completed")));
 
 		expect(screen.queryByText("Lost the live metrics stream")).toBeNull();
 		expect(screen.getByRole("tab", { name: "Sampled requests" })).toBeInTheDocument();
-		useDashboardStore.setState({ error: null });
-	});
-
-	it("still shows the stream error while there is no report", () => {
-		useDashboardStore.setState({ error: "stream dropped" });
-		renderDashboard("running", null, true);
-
-		expect(screen.getByText("Lost the live metrics stream")).toBeInTheDocument();
-		useDashboardStore.setState({ error: null });
 	});
 
 	it("keeps the live metrics, and no tab bar, for a running run", () => {
-		renderDashboard("running", null, true);
+		renderDashboard(STREAMING);
 
 		expect(screen.getByTestId("live-metrics")).toBeInTheDocument();
 		expect(tabNames()).toEqual([]);
 	});
 
-	it("keeps the live metrics for a finished run whose report has not arrived", () => {
+	it("keeps the live metrics for a run whose report has not arrived", () => {
 		// The report fetch and its Retry live on the live view; a report-less
-		// finished run must not land on an empty report.
-		renderDashboard("completed", null);
+		// run must not land on an empty report.
+		renderDashboard(AWAITING_REPORT);
 
 		expect(screen.getByTestId("live-metrics")).toBeInTheDocument();
 		expect(tabNames()).toEqual([]);
@@ -153,7 +148,7 @@ describe("the header's Export target", () => {
 	const lastHeader = () => headerProps[headerProps.length - 1];
 
 	it("names the finished run, with the report's URL and method for its baseline", () => {
-		renderDashboard("completed", reportFor("completed"));
+		renderDashboard(finished("completed", reportFor("completed")));
 
 		expect(lastHeader()).toMatchObject({
 			exportRunId: "run_1",
@@ -163,10 +158,10 @@ describe("the header's Export target", () => {
 	});
 
 	it.each([
-		["a streaming run", "running", true],
-		["a finished run whose report has not arrived", "completed", false],
-	] as const)("is not handed to the header for %s", (_name, mode, isStreaming) => {
-		renderDashboard(mode, null, isStreaming);
+		["a streaming run", STREAMING],
+		["a run whose report has not arrived", AWAITING_REPORT],
+	] as const)("is not handed to the header for %s", (_name, phase) => {
+		renderDashboard(phase);
 
 		expect(lastHeader().exportRunId).toBeUndefined();
 	});

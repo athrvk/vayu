@@ -12,18 +12,21 @@
  * The header's status pill says how the run ended (#1932).
  *
  * A failed run reached the pill as "completed" and drew the neutral grey
- * Completed chip. Every settled mode now has its own word and its own status
- * family; idle, and a run that is neither streaming nor settled, draw nothing.
+ * Completed chip. Every ending now has its own word and its own status family;
+ * a live run says Running (#3351), and a run that is neither live nor ended
+ * draws nothing.
  *
- * Mutation check: map `failed` back to the completed treatment in
- * `DashboardHeader`'s `pillStatus` and the failed case reddens; give `failed` the
- * `bg-muted` tint in `RUN_STATUS` and the family assertion reddens.
+ * Mutation check: give `failed` the `bg-muted` tint in `RUN_STATUS` and the
+ * family assertion reddens; draw `endedAs` alone in `DashboardHeader` and the
+ * Running case reddens; gate Stop on `endedAs === null` instead of `live` and
+ * the neither-live-nor-ended case reddens.
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import DashboardHeader from "./DashboardHeader";
-import type { DashboardHeaderProps, DashboardMode } from "../types";
+import type { FinishedKind } from "@/stores/dashboard-store";
+import type { DashboardHeaderProps } from "../types";
 
 vi.mock("@/stores", () => ({
 	useTabsStore: (select: (s: unknown) => unknown) =>
@@ -32,13 +35,13 @@ vi.mock("@/stores", () => ({
 }));
 
 function mount(
-	mode: DashboardMode,
-	isStreaming = false,
+	endedAs: FinishedKind | null,
+	live = false,
 	outcome?: DashboardHeaderProps["outcome"]
 ) {
 	const props: DashboardHeaderProps = {
-		mode,
-		isStreaming,
+		live,
+		endedAs,
 		isStopping: false,
 		onStop: async () => {},
 		outcome,
@@ -72,8 +75,8 @@ describe("DashboardHeader status pill", () => {
 		expect(screen.queryByRole("button", { name: /stop/i })).toBeNull();
 	});
 
-	it("draws Running while streaming and keeps the Stop button", () => {
-		mount("running", true);
+	it("draws Running while the run is live and keeps the Stop button", () => {
+		mount(null, true);
 
 		const el = screen.getByText("Running").closest("[data-status]");
 		expect(el!.className).toContain("text-status-running-text");
@@ -81,13 +84,10 @@ describe("DashboardHeader status pill", () => {
 		expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
 	});
 
-	it("draws no pill for idle, or for a running mode that is not streaming", () => {
-		const { unmount } = mount("idle");
+	it("draws no pill and no Stop for a run that is neither live nor ended", () => {
+		mount(null, false);
 		expect(pill()).toBeNull();
-		unmount();
-
-		mount("running", false);
-		expect(pill()).toBeNull();
+		expect(screen.queryByRole("button", { name: /stop/i })).toBeNull();
 	});
 
 	describe("a completed run's verdict (#2130)", () => {
@@ -126,7 +126,7 @@ describe("DashboardHeader status pill", () => {
 			expect(glyphShape("failed")).not.toBe(glyphShape("not-judged"));
 		});
 
-		it("leaves every other mode as it was, whatever verdict it is handed", () => {
+		it("leaves every other ending as it was, whatever verdict it is handed", () => {
 			mount("failed", false, "not-judged");
 
 			const el = screen.getByText("Failed").closest("[data-status]")!;

@@ -36,7 +36,7 @@ function streamRun(runId: string, seconds: number | null) {
 	act(() => {
 		useDashboardStore.setState({
 			currentRunId: runId,
-			isStreaming: true,
+			phase: { phase: "streaming" },
 			loadTestConfig: seconds === null ? { mode: "iterations" } : { duration: `${seconds}s` },
 		});
 	});
@@ -46,7 +46,11 @@ beforeEach(() => {
 	cleanup();
 	mockHold.mockClear();
 	useClientSettingsStore.setState({ keepAwakeDuringRuns: false });
-	useDashboardStore.setState({ currentRunId: null, isStreaming: false, loadTestConfig: null });
+	useDashboardStore.setState({
+		currentRunId: null,
+		phase: { phase: "idle" },
+		loadTestConfig: null,
+	});
 });
 
 const dialog = () => screen.queryByRole("dialog");
@@ -118,8 +122,8 @@ describe("KeepAwakePrompt", () => {
 		// SSE connection reconnecting, or the dashboard re-attaching when the
 		// user navigates back to it. Without the record of what has been asked,
 		// every one of those re-opens a question the user already answered.
-		act(() => useDashboardStore.setState({ isStreaming: false }));
-		act(() => useDashboardStore.setState({ isStreaming: true }));
+		act(() => useDashboardStore.setState({ phase: { phase: "idle" } }));
+		act(() => useDashboardStore.setState({ phase: { phase: "streaming" } }));
 
 		expect(dialog()).toBeNull();
 	});

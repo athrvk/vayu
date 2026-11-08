@@ -30,6 +30,7 @@ import LoadTestCommandSurface from "./components/LoadTestCommandSurface";
 import SendRequestCommandSurface from "./components/SendRequestCommandSurface";
 import EditorDraftSurface from "./components/EditorDraftSurface";
 import {
+	isDashboardRunLive,
 	useTabsStore,
 	useSessionStore,
 	useDashboardStore,
@@ -744,7 +745,7 @@ export default function RequestBuilder() {
 			 * while a load run owns the dashboard - and neither can be mistaken
 			 * for the other or read the other's numbers.
 			 */
-			if (useDashboardStore.getState().isStreaming) {
+			if (isDashboardRunLive(useDashboardStore.getState().phase)) {
 				openTab({ type: "dashboard", entityId: null });
 				showToast("A load test is already running.", "warning");
 				return;
@@ -761,7 +762,7 @@ export default function RequestBuilder() {
 			if (!pendingLoadTestRequest || !fetchedRequest) return;
 
 			// Defensive re-check in case a run started while the dialog was open.
-			if (useDashboardStore.getState().isStreaming) {
+			if (isDashboardRunLive(useDashboardStore.getState().phase)) {
 				openTab({ type: "dashboard", entityId: null });
 				showToast("A load test is already running.", "warning");
 				setShowLoadTestDialog(false);

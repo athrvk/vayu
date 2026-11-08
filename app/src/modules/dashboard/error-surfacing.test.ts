@@ -23,13 +23,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useDashboardStore } from "@/stores";
+import { isDashboardRunLive, useDashboardStore } from "@/stores";
 import { TIMING } from "@/config/timing";
 import type { RunReport } from "@/types";
 
-const { mockGetRunReport, mockStartMonitoring } = vi.hoisted(() => ({
+const { mockGetRunReport, mockStartMonitoring, headerProps } = vi.hoisted(() => ({
 	mockGetRunReport: vi.fn(),
 	mockStartMonitoring: vi.fn(),
+	headerProps: [] as Record<string, unknown>[],
 }));
 // What the real service reaches the engine through.
 vi.mock("@/services/api", () => ({ apiService: { getRunReport: mockGetRunReport } }));
@@ -47,8 +48,13 @@ vi.mock("@/services", () => ({
 		stopMonitoring: vi.fn(),
 	},
 }));
+// The header's props are what its pill and Stop button are drawn from
+// (`DashboardHeader.status.test.tsx` holds that mapping).
 vi.mock("./components", () => ({
-	DashboardHeader: () => null,
+	DashboardHeader: (props: Record<string, unknown>) => {
+		headerProps.push(props);
+		return null;
+	},
 	MetricsView: () => null,
 }));
 // The collection target is read from the run's row; these cases are about the
@@ -70,6 +76,15 @@ function dropStream(): Promise<void> {
 	).handleClose(null);
 }
 
+/** `handleError` is private; the SSE client calls it when the stream fails. */
+function failStream(message: string): void {
+	(loadTestService as unknown as { handleError: (e: Error) => void }).handleError(
+		new Error(message)
+	);
+}
+
+const lastHeader = () => headerProps[headerProps.length - 1];
+
 /** How long a stubbed engine call takes to answer. */
 const ROUND_TRIP_MS = 10;
 
@@ -85,6 +100,7 @@ describe("dashboard error surfacing", () => {
 		vi.useFakeTimers();
 		mockGetRunReport.mockReset();
 		mockStartMonitoring.mockReset();
+		headerProps.length = 0;
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "warn").mockImplementation(() => {});
 	});
@@ -97,9 +113,9 @@ describe("dashboard error surfacing", () => {
 	/*
 	 * A stream that ends with no `complete` frame, for a run the engine still
 	 * reports as running. Mutation checks: drop the `isRunInProgress` branch in
-	 * `LoadTestService.handleClose` and the mode flips to "completed" with no
-	 * callout; drop `streamError` from the dashboard's report effect guard and
-	 * that effect fetches the live report anyway.
+	 * `LoadTestService.handleClose` and the run finishes "completed" with no
+	 * callout; arm the dashboard's report effect on `streamLost` too and that
+	 * effect fetches the live report anyway.
 	 */
 	it("shows a dropped stream for a live run as lost, not Completed", async () => {
 		mockGetRunReport.mockResolvedValue(reportWith("running"));
@@ -109,10 +125,10 @@ describe("dashboard error surfacing", () => {
 
 		await act(() => dropStream());
 
-		const state = useDashboardStore.getState();
-		expect(state.mode).toBe("running");
-		expect(state.finalReport).toBeNull();
-		expect(state.error).not.toBeNull();
+		const { phase } = useDashboardStore.getState();
+		expect(phase.phase).toBe("streamLost");
+		expect(isDashboardRunLive(phase)).toBe(true);
+		expect(lastHeader()).toMatchObject({ live: true, endedAs: null });
 		expect(screen.getByText("Lost the live metrics stream")).toBeTruthy();
 
 		// The run is live, so the stored report is not what the page waits on.
@@ -122,7 +138,40 @@ describe("dashboard error surfacing", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
 		expect(mockStartMonitoring).toHaveBeenCalledWith("run_drop");
-		expect(useDashboardStore.getState().error).toBeNull();
+	});
+
+	/*
+	 * A stream error left the run "streaming" beside its message, and a
+	 * superseded stream left it neither streaming nor settled: the first drew
+	 * Running over a dead stream as if nothing had happened, the second drew no
+	 * pill at all while Stop still showed (#3351). Both are a lost stream on a
+	 * run the engine is still executing.
+	 *
+	 * Mutation check: make `isDashboardRunLive` answer false for `streamLost`
+	 * and every case reddens on `live`; write `handleError` back to leave the
+	 * phase streaming and the first case reddens on the phase.
+	 */
+	it.each([
+		["a stream error", () => failStream("The connection to Vayu's engine closed.")],
+		[
+			"a collection run taking the stream",
+			() =>
+				(loadTestService as unknown as { handleSuperseded: () => void }).handleSuperseded(),
+		],
+	])("keeps the run live, with the callout, after %s", (_name, lose) => {
+		mockGetRunReport.mockResolvedValue(reportWith("running"));
+		useDashboardStore.getState().startRun("run_lost");
+		loadTestService.startMonitoring("run_lost");
+		render(createElement(LoadTestDashboard));
+
+		act(() => lose());
+
+		const { phase } = useDashboardStore.getState();
+		expect(phase.phase).toBe("streamLost");
+		expect(isDashboardRunLive(phase)).toBe(true);
+		expect(lastHeader()).toMatchObject({ live: true, endedAs: null });
+		expect(screen.getByText("Lost the live metrics stream")).toBeTruthy();
+		loadTestService.stopMonitoring();
 	});
 
 	/*
@@ -148,7 +197,7 @@ describe("dashboard error surfacing", () => {
 				)
 		);
 		useDashboardStore.getState().startRun("run_retry");
-		useDashboardStore.getState().setStreaming(false);
+		useDashboardStore.getState().streamClosed("run_retry");
 		render(createElement(LoadTestDashboard));
 
 		// The first attempt and every retry the cap allows.
@@ -165,7 +214,10 @@ describe("dashboard error surfacing", () => {
 
 		expect(mockGetRunReport.mock.calls.length - fetched).toBe(1);
 		expect(mockGetRunReport).toHaveBeenLastCalledWith("run_retry");
-		expect(useDashboardStore.getState().mode).toBe("completed");
+		expect(useDashboardStore.getState().phase).toMatchObject({
+			phase: "finished",
+			kind: "completed",
+		});
 		expect(screen.queryByText("Couldn't load the run report")).toBeNull();
 	});
 });

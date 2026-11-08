@@ -55,7 +55,7 @@ const configuration = () => (headerProps.latest as DashboardHeaderProps).configu
 
 beforeEach(() => {
 	headerProps.latest = null;
-	useDashboardStore.setState({ currentRunId: "run_1", mode: "running", isStreaming: true });
+	useDashboardStore.setState({ currentRunId: "run_1", phase: { phase: "streaming" } });
 });
 
 describe("the dashboard's live configuration", () => {

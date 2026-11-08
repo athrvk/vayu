@@ -53,7 +53,7 @@
 import { useEffect, useState } from "react";
 
 import { useRequestBuilderContext } from "../../context";
-import { useDashboardStore, useTabsStore } from "@/stores";
+import { isDashboardRunLive, useDashboardStore, useTabsStore } from "@/stores";
 import {
 	Tooltip,
 	TooltipContent,
@@ -114,7 +114,7 @@ export default function UrlBar() {
 		lastRowIndex,
 		rememberRowIndex,
 	} = useRequestBuilderContext();
-	const isLoadTestRunning = useDashboardStore((s) => s.isStreaming);
+	const isLoadTestRunning = useDashboardStore((s) => isDashboardRunLive(s.phase));
 	const openTab = useTabsStore((s) => s.openTab);
 
 	/*

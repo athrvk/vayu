@@ -74,8 +74,7 @@ async function settled(): Promise<void> {
 afterEach(() => {
 	useDashboardStore.setState({
 		currentRunId: null,
-		mode: "running",
-		error: null,
+		phase: { phase: "idle" },
 		loadTestConfig: null,
 		requestInfo: null,
 	});
@@ -101,7 +100,7 @@ describe("useRunWatchers", () => {
 		// dashboard opened later finds no current run and the ticks that arrived
 		// while it was closed belong to nothing.
 		expect(useDashboardStore.getState().currentRunId).toBe("run_7");
-		expect(useDashboardStore.getState().mode).toBe("running");
+		expect(useDashboardStore.getState().phase).toEqual({ phase: "streaming" });
 	});
 
 	describe("configuring a load run from its row (#1935)", () => {
@@ -171,7 +170,7 @@ describe("useRunWatchers", () => {
 		});
 
 		it("leaves the dashboard and its error alone when the row cannot be read", async () => {
-			// Mutation check: replace the swallow with `setError(...)` and the
+			// Mutation check: replace the swallow with `streamLost(...)` and the
 			// lost-stream callout appears over a stream that is fine.
 			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
 			vi.spyOn(apiService, "getRun").mockRejectedValue(new Error("engine unreachable"));
@@ -181,7 +180,7 @@ describe("useRunWatchers", () => {
 			await settled();
 
 			const state = useDashboardStore.getState();
-			expect(state.error).toBeNull();
+			expect(state.phase).toEqual({ phase: "streaming" });
 			expect(state.loadTestConfig).toBeNull();
 			expect(state.requestInfo).toBeNull();
 			expect(state.currentRunId).toBe("run_21");

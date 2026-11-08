@@ -13,6 +13,7 @@
 
 import type { CapacityResult } from "@/components/shared/capacityStop";
 import type { RunOutcome } from "@/components/shared/run-outcome";
+import type { FinishedKind } from "@/stores/dashboard-store";
 import type { LiveCapacityState, LoadTestMetrics } from "@/types";
 import type { LoadMode } from "./hooks/useMode";
 import type { Breakpoint } from "./utils/computeBreakpoint";
@@ -20,18 +21,17 @@ import type { PooledLatency } from "./utils/pooledLatency";
 import type { DispatchStatus } from "./utils/dispatchLag";
 
 // ============================================================================
-// Dashboard State Types
-// ============================================================================
-
-export type DashboardMode = "idle" | "running" | "completed" | "stopped" | "failed";
-
-// ============================================================================
 // Component Props Types
 // ============================================================================
 
 export interface DashboardHeaderProps {
-	mode: DashboardMode;
-	isStreaming: boolean;
+	/**
+	 * `isDashboardRunLive` and `dashboardRunEnding` of the store's phase
+	 * (#3351): the pill says Running and Stop shows while `live`; otherwise the
+	 * pill names `endedAs`, and a run that is neither draws no pill.
+	 */
+	live: boolean;
+	endedAs: FinishedKind | null;
 	isStopping: boolean;
 	onStop: () => Promise<void>;
 	requestUrl?: string;

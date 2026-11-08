@@ -59,10 +59,8 @@ beforeEach(() => {
 	metricsProps.latest = null;
 	useDashboardStore.setState({
 		currentRunId: "run_1",
-		mode: "running",
-		isStreaming: true,
+		phase: { phase: "streaming" },
 		loadTestConfig: null,
-		finalReport: null,
 	});
 });
 
