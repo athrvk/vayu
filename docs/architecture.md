@@ -253,16 +253,20 @@ from the moment the main process reports it (`startedRun` on
 `mcp:data-changed`, issue #1419), so it paints the same fill, and opening its
 dashboard tab later attaches nothing new - `startMonitoring` is idempotent for a
 run already being watched. One indicator is all the OS gives an application, and
-one run is all the renderer watches: the SSE client is a singleton, so starting a
-second run closes the first one's stream - and tells its service so, which hands
-the displaced run's wake lock back and gives up its bar rather than leaving both
-standing (issue #1417). The lock is the half with a visible outcome: the incoming
+one run is all the renderer watches: the SSE client is a singleton. A load run
+is refused before it starts while another run holds the stream, and an agent's
+load run is not adopted while another run is live (the single-run gate,
+`canStartLoadRun` in `app/src/stores/run-gate.ts`, #3351). The one start left
+ungated is a collection run over a live load run: it closes the load run's
+stream - and tells its service so, which hands the displaced run's wake lock
+back and gives up its bar rather than leaving both standing (issue #1417). The lock is the half with a visible outcome: the incoming
 run claims the indicator before it connects, so the bar is transferred rather
 than cleared, and the displaced run's release - named by the run it speaks for -
 finds nothing of its own left to wipe. The
-superseded run is not stopped and says nothing to the user: it is still running
-in the engine, and its row reaches a terminal status on the next list read
-rather than through a notification for a run nobody is watching. The indicator
+superseded run is not stopped and posts no notification: it is still running in
+the engine, so the dashboard keeps it live under its lost-stream callout, and
+its row reaches a terminal status on the next list read rather than through a
+notification for a run nobody is watching. The indicator
 follows the run being watched: a run claims it by id when
 the renderer starts watching it, and a run that no longer holds that claim is
 ignored whether it reports, fails or stops - including a run of the same kind as

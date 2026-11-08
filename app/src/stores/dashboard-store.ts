@@ -27,7 +27,7 @@ import {
 	DEFAULT_MAX_RETAINED_TICKS,
 } from "@/constants/live-window";
 import { durationSeconds } from "@/constants/load-test";
-import { isRunInProgress } from "@/lib/run-status";
+import { isRunInProgress, type TerminalRunStatus } from "@/lib/run-status";
 
 /**
  * Retention seeded before the window is known. The real value is the engine's
@@ -105,7 +105,7 @@ function uncrossedBy(judge: SloJudge): Breakpoint {
 }
 
 /** How a run the dashboard holds ended, as its pill names it. */
-export type FinishedKind = "completed" | "stopped" | "failed";
+export type FinishedKind = TerminalRunStatus;
 
 /**
  * Where the run the dashboard holds stands (#3351). One field rather than the

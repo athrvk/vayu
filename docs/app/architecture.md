@@ -204,7 +204,7 @@ The app uses a dual-state management approach:
    - `layout-store.ts`: Drawer and sidebar visibility/state
    - `session-store.ts`: Active environment id (mirrored from the engine) and the last-used collection
    - `engine-store.ts`: Engine health, connectivity status
-   - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), streaming state
+   - `dashboard-store.ts`: Load test metrics (retained by time window, see `state-management.md`), the run phase
    - `response-store.ts`: The last response per request id - status, headers, body, script results. LRU-bounded at twice `MAX_OPEN_TABS` and by a 256 MiB byte budget (`RESPONSE_CACHE_MAX_BYTES`, #2544), since each entry holds a body plus its raw copy
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
    - `toast-store.ts`: The transient notification queue

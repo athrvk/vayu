@@ -67,12 +67,7 @@ function DashboardHeader({
 		}
 	};
 
-	// Elapsed time is driven entirely by `elapsedDuration`, which is the engine's
-	// authoritative elapsed while running (last SSE tick's elapsed_seconds) and
-	// the final report's testDuration once completed. Both are monotonic, so the
-	// timer never double-counts or jumps backward. (A previous client-side 1s
-	// liveTick was ADDED on top of elapsedDuration - since both advanced on
-	// different clocks, the timer ran ~2x fast and flickered/regressed on desync.)
+	// Elapsed time is `elapsedDuration` only, so there is one clock.
 	const displayMs = elapsedDuration;
 
 	// Running for as long as the engine may still be executing the run, a lost
