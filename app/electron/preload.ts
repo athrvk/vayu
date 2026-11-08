@@ -376,6 +376,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	oauthOpenWindow: (params: {
 		authorizeUrl: string;
 		redirectUri: string;
+		timeoutMs: number;
 		partition?: string;
 	}): Promise<{ callbackUrl: string } | { error: string }> =>
 		ipcRenderer.invoke("oauth:openWindow", params),

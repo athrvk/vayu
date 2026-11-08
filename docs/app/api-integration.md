@@ -1319,7 +1319,7 @@ apiService.getOAuth2TokenStatus(cacheKey): Promise<OAuth2StatusResponse> // GET 
 apiService.clearOAuth2Token(cacheKey): Promise<void>                   // DELETE /oauth2/token?key=
 
 // Interactive Authorization Code flow (engine-hosted loopback + PKCE)
-apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStart>
+apiService.startOAuth2Authorize(data): Promise<OAuth2AuthorizeStartResponse>  // { attemptId, authorizeUrl, redirectUri, expiresAt }
 apiService.getOAuth2AuthorizeStatus(attemptId): Promise<OAuth2AuthorizeStatus>
 apiService.completeOAuth2Authorize(attemptId, callbackUrl): Promise<OAuth2AuthorizeStatus>
 ```
@@ -1336,7 +1336,13 @@ two audiences sent as rows are two cached tokens; a row whose key names a creden
 key alone, so the key never carries the secret. `scope`, `audience` and `resource`
 themselves are still not in it.
 The interactive flow is orchestrated in `services/oauth/authorize.ts` (opens the
-system browser or an embedded Electron window, then polls the engine).
+system browser or an embedded Electron window, then polls the engine). The engine
+owns the deadline and reports it as `expiresAt` (epoch ms) on the start answer; the
+app keeps no clock of its own. The loopback poll runs until `expiresAt` plus
+`EXPIRY_GRACE_MS`, so the engine's own `failed` "Authorization timed out" answer
+arrives first, and the embedded window is handed the time remaining
+(`timeoutMs` on `oauthOpenWindow`, which the main process refuses unless it is a
+positive finite number).
 
 > **`HttpClient.delete`** takes an optional `params` argument so the token-clear
 > call can pass `?key=`.
