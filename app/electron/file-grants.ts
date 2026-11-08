@@ -102,8 +102,16 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 	const canonical = deps.canonical ?? ((filePath: string) => fs.realpath(filePath));
 	let granted = new Set<string>();
 	let stale = true;
+	// Bumped wherever the copy is marked stale: a read begun before the bump
+	// cannot mark it fresh, nor be joined by a question asked after.
+	let generation = 0;
 	const pending = new Set<string>();
 	let syncing: Promise<void> | null = null;
+
+	function markStale(): void {
+		generation += 1;
+		stale = true;
+	}
 
 	/**
 	 * One `POST /file-grants`. A path the engine could not be asked about stays
@@ -125,7 +133,7 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 		// Already granted, under the canonical spelling the 409 does not carry;
 		// the re-read learns it.
 		if (result.status === 409) {
-			stale = true;
+			markStale();
 			return true;
 		}
 		deps.log("The engine refused to record a picked file", {
@@ -138,7 +146,9 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 	async function runSync(): Promise<void> {
 		for (const filePath of [...pending]) await send(filePath);
 		if (!stale) return;
+		const asked = generation;
 		const listed = await deps.client.listFileGrants();
+		if (asked !== generation) return;
 		// Left stale on a failed read, so the next question asks again.
 		if (listed.outcome !== "done") return;
 		granted = new Set(listed.value.map((row) => row.path));
@@ -146,10 +156,12 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 	}
 
 	function sync(): Promise<void> {
-		syncing ??= runSync().finally(() => {
-			syncing = null;
+		if (syncing) return syncing;
+		const started = runSync().finally(() => {
+			if (syncing === started) syncing = null;
 		});
-		return syncing;
+		syncing = started;
+		return started;
 	}
 
 	return {
@@ -170,7 +182,8 @@ export function createFileGrants(deps: FileGrantsDeps): FileGrants {
 		sync,
 
 		invalidate() {
-			stale = true;
+			markStale();
+			syncing = null;
 		},
 	};
 }

@@ -60,7 +60,13 @@ import {
 	RUN_TYPES,
 	runListQuery,
 } from "./run-housekeeping.js";
-import { markPartialReport, projectRunStatus } from "./run-status.js";
+import {
+	markPartialReport,
+	projectRunStatus,
+	RUN_STATUS_WORDS,
+	TERMINAL_STATUS_WORDS,
+	UNFINISHED_STATUS_WORDS,
+} from "./run-status.js";
 import {
 	fieldsInput,
 	listPageInputs,
@@ -313,7 +319,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		description: (config) =>
 			"List past runs (single Design-mode requests, collection runs and load tests), " +
-			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot, and \`endTime\` is null until the run is completed, failed or stopped. A finished load test's row also carries \`resultSummary\` {rps, p95Ms, errorRate, verdict}: errorRate is a percentage 0-100 over HTTP responses, verdict is "passed" or "failed" and absent when the run declared no budgets, and any key the run did not record is absent. A capacity run also carries \`capacity\` {stopReason, maxHealthyConcurrency, kneeConcurrency}: the levels the search held and gave out at, either absent when the search found none, and its rps, p95Ms and errorRate average every level. A scenario load run that made an exact assertion (assert.*, required extract.*, inline pm.test) also carries \`assertionsPassed\` and \`assertionsFailed\`, never folded into errorRate (a run of 200s that failed them reads errorRate 0); both are omitted for every other run; a design run's row carries {statusCode, latencyMs} there instead, and a finished collection run's carries {passed, failed, skipped, errored, verdict}: its disjoint step outcomes, verdict as for a load test. verdict is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and errorRate uses the same failure definition as the report's summary.errorRate, over the stored status-code distribution, and is absent when no distribution is stored. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\`, \`dataFileHash\` (SHA-256 of its bytes) and \`dataFileCastNumbers\` (true only when the file was read with 'Read numbers as numbers') on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` / \`dataFileCastNumbers\` on a collection run - compare the hash with \`dataFile.hash\` in a full list_collections row before re-running with the same file. ` +
+			`newest first - the only order the engine lists in. Returns a {data, pagination} envelope of at most ${DEFAULT_RUN_PAGE_LIMIT} runs by default (${MAX_ENGINE_PAGE_LIMIT} max); each row carries a compact summary (requestName/url/method/mode/duration/concurrency/comment), not the full config snapshot, and \`endTime\` is null until the run is ${TERMINAL_STATUS_WORDS}. A finished load test's row also carries \`resultSummary\` {rps, p95Ms, errorRate, verdict}: errorRate is a percentage 0-100 over HTTP responses, verdict is "passed" or "failed" and absent when the run declared no budgets, and any key the run did not record is absent. A capacity run also carries \`capacity\` {stopReason, maxHealthyConcurrency, kneeConcurrency}: the levels the search held and gave out at, either absent when the search found none, and its rps, p95Ms and errorRate average every level. A scenario load run that made an exact assertion (assert.*, required extract.*, inline pm.test) also carries \`assertionsPassed\` and \`assertionsFailed\`, never folded into errorRate (a run of 200s that failed them reads errorRate 0); both are omitted for every other run; a design run's row carries {statusCode, latencyMs} there instead, and a finished collection run's carries {passed, failed, skipped, errored, verdict}: its disjoint step outcomes, verdict as for a load test. verdict is the stored budget verdict even for a stopped run, whose partial data the app shows as "Not judged", and errorRate uses the same failure definition as the report's summary.errorRate, over the stored status-code distribution, and is absent when no distribution is stored. A data-driven run's summary names the file its rows came from, never its path: \`dataFileName\`, \`dataFileHash\` (SHA-256 of its bytes) and \`dataFileCastNumbers\` (true only when the file was read with 'Read numbers as numbers') on a single-request run, \`summary.scenario.dataFileName\` / \`dataFileHash\` / \`dataFileCastNumbers\` on a collection run - compare the hash with \`dataFile.hash\` in a full list_collections row before re-running with the same file. ` +
 			"Filter to find a specific run instead of paging blocks of history: by saved request, by collection (collection runs only - a design or load run stores none), by type, by status, by text over the stored config, or to pinned baselines only. " +
 			"`pagination.total` and `hasMore` describe the filtered set, so a filtered page says how much more of that filter there is. " +
 			PAGE_CURSOR_SENTENCE +
@@ -350,7 +356,7 @@ export const READ_TOOLS: McpTool[] = [
 				.enum(RUN_STATUSES)
 				.optional()
 				.describe(
-					'Only runs in this state: "pending", "running", "completed", "failed", "stopped".'
+					`Only runs in this state: ${RUN_STATUSES.map((status) => `"${status}"`).join(", ")}.`
 				),
 			requestId: z.string().optional().describe("Only runs of this saved request."),
 			collectionId: z
@@ -392,7 +398,8 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. `metadata.status` is the run's state, and `metadata.endTime` is null until it is completed, failed or stopped; while it is `pending` or `running`, the report also carries `partial: true` and a `note`, `summary` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. Read get_run(runId) for whether it is done. " +
+			"Get the report for a run; a run still in progress returns a partial report marked `partial: true`. A finished run's report carries summary, latency percentiles (p50/p95/p99), status codes, errors, and timing breakdown - ideal input for analyzing performance. " +
+			`\`metadata.status\` is the run's state, and \`metadata.endTime\` is null until it is ${TERMINAL_STATUS_WORDS}; while it is ${UNFINISHED_STATUS_WORDS}, the report also carries \`partial: true\` and a \`note\`, \`summary\` holds what has accumulated so far, no budget verdict exists yet, and the zeros are not results. Both keys are absent for a finished run. A status Vayu does not recognise counts as unfinished and adds \`unknownStatus: true\` (else absent). Read get_run(runId) for whether it is done. ` +
 			"A failed load run may carry `summary.partial: true` (the engine stopped before saving the final totals: the counts, `errorRate`, `statusCodes`, `avgRps`, duration and bytes are the last saved figures, a floor under the real totals, while `latency`, `peakConcurrency` and `avgQueueWaitMs` are absent, not recorded, never zero) or `summary.summaryMissing: true` (no summary was saved, so the counts are not whole-run totals and `latency`, `peakConcurrency` and `avgQueueWaitMs` are again absent); both are absent otherwise, never false, and neither is the top-level `partial`, which means the run is still going. " +
 			`${RUN_ERROR_DEFINITION_SENTENCE} ` +
 			"A run may also carry `warnings`, even when it finished and its numbers look fine: a request sent with an unresolved `{{token}}`, a step whose pre-request script load mode never runs, a raised per-host connection limit, or requests re-sent on a new connection after the server dropped a reused one. Each entry carries `code`, a human-readable `message`, and its code's counts. Absent for a run with nothing to report. " +
@@ -427,7 +434,7 @@ export const READ_TOOLS: McpTool[] = [
 		invalidates: [],
 		notFound: { ...ID_KINDS.run, idArg: "runId" },
 		description: (config) =>
-			"Read a run's state: whether it is still going, how far along it is, and what to do next. Returns `id`, `type`, `status` (pending, running, completed, failed or stopped), `terminal` (true once the status is completed, failed or stopped), `startTime`, `endTime` (null while the run is not terminal), `elapsedMs`, `mode`, `concurrency`, `targetRps`, `duration`, `requestId`, `baseline` and `nextStep`. A duration-bound run also carries `plannedDurationMs` and `progress` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. `nextStep` names the poll interval for a run in progress. A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it." +
+			`Read a run's state: whether it is still going, how far along it is, and what to do next. Returns \`id\`, \`type\`, \`status\` (${RUN_STATUS_WORDS}), \`terminal\` (true once the status is ${TERMINAL_STATUS_WORDS}), \`startTime\`, \`endTime\` (null while the run is not terminal), \`elapsedMs\`, \`mode\`, \`concurrency\`, \`targetRps\`, \`duration\`, \`requestId\`, \`baseline\` and \`nextStep\`. A duration-bound run also carries \`plannedDurationMs\` and \`progress\` (0 to 1, elapsed over planned); both are null for an iterations run, a design run or a duration that does not parse, never an estimate. \`nextStep\` names the poll interval for a run in progress. A status Vayu does not recognise counts as unfinished and adds \`unknownStatus: true\` (else absent). A stopped run carries no budget verdict. Cheap enough to poll: it never carries the trace, results or the rest of the stored config - get_run_report has those. An id that names no run is an error naming it.` +
 			withheldPointer(config, "recorded"),
 		annotations: {
 			title: "Get run status",
