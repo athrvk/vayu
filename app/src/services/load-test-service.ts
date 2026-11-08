@@ -214,6 +214,29 @@ class LoadTestService {
 	}
 
 	/**
+	 * The dashboard found, on mount, that `runId`'s stored report is already
+	 * terminal (#3380): let go of the stream and announce how the run really
+	 * ended, once. `stopMonitoring` is the user's Stop and would post "stopped"
+	 * for a run that completed, and the latch would then swallow the real
+	 * notification. A run this service is not attached to has nothing to
+	 * release, so it does nothing.
+	 */
+	settleOnStoredReport(runId: string, report: RunReport): void {
+		if (this.activeRunId !== runId) return;
+		this.releaseRun(runId);
+		sseClient.disconnect();
+		if (report.metadata?.status === "stopped") {
+			this.notifyTerminal(
+				runId,
+				NOTIFY_KINDS.loadRunStopped,
+				"The run was stopped before it finished."
+			);
+			return;
+		}
+		this.finishRun(runId, null, report);
+	}
+
+	/**
 	 * Let go of everything this service holds on `runId`'s behalf, and say
 	 * nothing about how the run ended.
 	 *
