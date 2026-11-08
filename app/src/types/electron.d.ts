@@ -178,6 +178,16 @@ export interface UpdateVerificationFailure {
 	reason: string;
 }
 
+/** Where the update download stands. Mirrors `UpdateDownloadState` in `electron/updater.ts`. */
+export type UpdateDownloadState =
+	| { kind: "none" }
+	| { kind: "downloading"; version: string; progress: UpdateDownloadProgress | null }
+	| { kind: "verifying"; version: string }
+	/** The only state that installs, from the restart button or on quit. */
+	| { kind: "verified"; version: string }
+	| { kind: "refused"; version: string; reason: string }
+	| { kind: "failed"; version: string; error: string };
+
 /**
  * Outcome of a check the user asked for. Mirrors `UpdateCheckResult` in
  * `electron/updater.ts`; the two are separated only by the process boundary.
@@ -321,6 +331,13 @@ interface ElectronAPI {
 	onUpdateVerificationFailed: (callback: (info: UpdateVerificationFailure) => void) => () => void;
 	/** Silent strategies only (Windows, Linux AppImage) - see updater.ts. */
 	onDownloadProgress: (callback: (progress: UpdateDownloadProgress) => void) => () => void;
+	/** Silent strategies only: every change to the download, on `update:state`. */
+	onUpdateState: (callback: (state: UpdateDownloadState) => void) => () => void;
+	/**
+	 * The download as it stands now, for a renderer that mounts after a push it
+	 * missed (a reload keeps `verified`). `none` until the updater has loaded.
+	 */
+	getUpdateState: () => Promise<UpdateDownloadState>;
 	restartToInstallUpdate: () => Promise<void>;
 	checkForUpdates: () => Promise<UpdateCheckResult>;
 	openReleasePage: () => Promise<void>;

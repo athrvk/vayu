@@ -158,6 +158,28 @@ function failAttempt(err: Error): void {
 	listeners.get("error")?.(err);
 }
 
+/** Every payload the current window received on `channel`, in order. */
+function sent(channel: string): unknown[] {
+	return currentWindow!.webContents.send.mock.calls
+		.filter(([name]) => name === channel)
+		.map(([, payload]) => payload as unknown);
+}
+
+/** The latest payload on `channel`; `at(-1)` is past the electron tsconfig's lib. */
+function lastSent(channel: string): unknown {
+	const payloads = sent(channel);
+	return payloads[payloads.length - 1];
+}
+
+/** A verification the test answers when it chooses. */
+function holdVerification(): (result: unknown) => void {
+	let answer!: (result: unknown) => void;
+	verifyInstallerAttestation.mockImplementationOnce(
+		() => new Promise((resolve) => (answer = resolve))
+	);
+	return (result) => answer(result);
+}
+
 /** Let the retry's delay elapse so the second attempt runs. */
 async function letRetryRun(): Promise<void> {
 	await vi.advanceTimersByTimeAsync(2_000);
@@ -838,21 +860,6 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 		return updater;
 	}
 
-	function sent(channel: string): unknown[] {
-		return currentWindow!.webContents.send.mock.calls
-			.filter(([name]) => name === channel)
-			.map(([, payload]) => payload as unknown);
-	}
-
-	/** A verification the test answers when it chooses. */
-	function holdVerification(): (result: unknown) => void {
-		let answer!: (result: unknown) => void;
-		verifyInstallerAttestation.mockImplementationOnce(
-			() => new Promise((resolve) => (answer = resolve))
-		);
-		return (result) => answer(result);
-	}
-
 	it("keeps the quit-time install off before anything has downloaded", async () => {
 		await arm("win32", undefined);
 		expect(fakeUpdater.autoInstallOnAppQuit).toBe(false);
@@ -1061,4 +1068,130 @@ describe("a downloaded update installs only once its attestation verifies (#2372
 			expect(wouldInstallOnQuit()).toBe(false);
 		}
 	);
+});
+
+describe("the download state (#3338)", () => {
+	// One value the restart button, the quit-time install and the renderer all
+	// read: pushed on `update:state` at every change, answered on demand.
+
+	it("reports a download that fails after its announcement, without retrying a check", async () => {
+		// The check cycle ends at `update-available`, so the download's own error
+		// arrives with no check in flight; it used to settle nobody and reach no
+		// window, leaving the banner on its last progress tick.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow, getUpdateState, restartToInstall } =
+			await loadUpdater();
+		initAutoUpdater(getWindow);
+		const pending = checkForUpdatesNow("renderer");
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		await expect(pending).resolves.toMatchObject({ status: "available" });
+
+		failAttempt(new Error("ECONNRESET"));
+
+		const failed = { kind: "failed", version: "1.0.0", error: "ECONNRESET" };
+		expect(getUpdateState()).toEqual(failed);
+		expect(lastSent("update:state")).toEqual(failed);
+		await letRetryRun();
+		expect(checkForUpdates).toHaveBeenCalledTimes(1);
+		expect(showMessageBox).not.toHaveBeenCalled();
+		restartToInstall();
+		expect(quitAndInstall).not.toHaveBeenCalled();
+	});
+
+	it("leaves a check's own failure to the check while a download runs", async () => {
+		// A check started mid-download fails on the feed, not the transfer: it
+		// gets its retry, and the download it did not touch stays as it was.
+		vi.useFakeTimers();
+		const { initAutoUpdater, checkForUpdatesNow, getUpdateState } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		listeners.get("update-available")?.({ version: "1.0.0" });
+
+		void checkForUpdatesNow("renderer");
+		failAttempt(new Error("ERR_NETWORK_CHANGED"));
+		await letRetryRun();
+
+		expect(getUpdateState()).toEqual({ kind: "downloading", version: "1.0.0", progress: null });
+		expect(checkForUpdates).toHaveBeenCalledTimes(2);
+	});
+
+	it("arms the quit-time install in verified and in no other state", async () => {
+		const answer = holdVerification();
+		const { initAutoUpdater, getUpdateState } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		const installs = () => [getUpdateState().kind, fakeUpdater.autoInstallOnAppQuit];
+
+		expect(installs()).toEqual(["none", false]);
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		listeners.get("download-progress")?.({
+			percent: 50,
+			bytesPerSecond: 1,
+			transferred: 5,
+			total: 10,
+		});
+		expect(installs()).toEqual(["downloading", false]);
+
+		finishDownload("1.0.0");
+		await vi.waitFor(() => expect(verifyInstallerAttestation).toHaveBeenCalledTimes(1));
+		expect(installs()).toEqual(["verifying", false]);
+
+		answer({ ok: true });
+		await vi.waitFor(() => expect(getUpdateState().kind).toBe("verified"));
+		expect(installs()).toEqual(["verified", true]);
+
+		failAttempt(new Error("ECONNRESET")); // nothing in flight: not a download's
+		expect(installs()).toEqual(["verified", true]);
+
+		listeners.get("update-available")?.({ version: "1.1.0" });
+		failAttempt(new Error("ECONNRESET"));
+		expect(installs()).toEqual(["failed", false]);
+
+		listeners.get("update-available")?.({ version: "1.2.0" });
+		verifyInstallerAttestation.mockResolvedValueOnce({ ok: false, reason: "No attestation." });
+		finishDownload("1.2.0");
+		await vi.waitFor(() => expect(getUpdateState().kind).toBe("refused"));
+		expect(installs()).toEqual(["refused", false]);
+
+		// What the window was told, in order, each state carrying only its own fields.
+		expect(sent("update:state").map((state) => (state as { kind: string }).kind)).toEqual([
+			"downloading",
+			"downloading",
+			"verifying",
+			"verified",
+			"downloading",
+			"failed",
+			"downloading",
+			"verifying",
+			"refused",
+		]);
+		expect(sent("update:state")).toContainEqual({ kind: "verifying", version: "1.0.0" });
+	});
+
+	it("answers verified to a window that reloads after the push", async () => {
+		// A reload drops the renderer's copy of every event it was sent; the
+		// verified download still has to offer Restart to install.
+		const { initAutoUpdater, getUpdateState, restartToInstall } = await loadUpdater();
+		initAutoUpdater(getWindow);
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		finishDownload("1.0.0");
+		await vi.waitFor(() =>
+			expect(lastSent("update:state")).toEqual({ kind: "verified", version: "1.0.0" })
+		);
+
+		currentWindow = makeWindow();
+
+		expect(getUpdateState()).toEqual({ kind: "verified", version: "1.0.0" });
+		expect(currentWindow.webContents.send).not.toHaveBeenCalled();
+		restartToInstall();
+		expect(quitAndInstall).toHaveBeenCalledTimes(1);
+	});
+
+	it("answers none on the notify path, which never downloads", async () => {
+		const { initAutoUpdater, getUpdateState } = await loadUpdater("darwin");
+		initAutoUpdater(getWindow);
+		listeners.get("update-available")?.({ version: "1.0.0" });
+		failAttempt(new Error("ECONNRESET"));
+
+		expect(getUpdateState()).toEqual({ kind: "none" });
+		expect(sent("update:state")).toEqual([]);
+	});
 });

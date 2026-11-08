@@ -43,6 +43,27 @@ interface FlushResult {
 }
 
 /**
+ * Where the update download stands. Mirrors `UpdateDownloadState` in
+ * electron/updater.ts, inlined for the same reason as `FlushResult`.
+ */
+type UpdateDownloadStateShape =
+	| { kind: "none" }
+	| {
+			kind: "downloading";
+			version: string;
+			progress: {
+				percent: number;
+				bytesPerSecond: number;
+				transferred: number;
+				total: number;
+			} | null;
+	  }
+	| { kind: "verifying"; version: string }
+	| { kind: "verified"; version: string }
+	| { kind: "refused"; version: string; reason: string }
+	| { kind: "failed"; version: string; error: string };
+
+/**
  * The channel a picked file's path is reported to main on (#2356). Main's
  * spelling is `FILE_PICKED_CHANNEL` in electron/file-grants.ts, which this
  * CommonJS script cannot import; `preload-grant-channel.test.ts` holds the two
@@ -303,6 +324,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:downloadProgress", handler);
 		return () => ipcRenderer.removeListener("update:downloadProgress", handler);
 	},
+	// Pushed on every change to the download; `getUpdateState` answers the same
+	// value on demand, for a renderer that mounts after the push.
+	onUpdateState: (callback: (state: UpdateDownloadStateShape) => void) => {
+		const handler = (_event: unknown, state: unknown) =>
+			callback(state as UpdateDownloadStateShape);
+		ipcRenderer.on("update:state", handler);
+		return () => ipcRenderer.removeListener("update:state", handler);
+	},
+	getUpdateState: (): Promise<UpdateDownloadStateShape> => ipcRenderer.invoke("update:getState"),
 	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
 	// Shape mirrors `UpdateCheckResult` in updater.ts, inlined because this file
 	// is a CommonJS script and must not grow imports.
