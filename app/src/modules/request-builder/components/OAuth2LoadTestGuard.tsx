@@ -48,6 +48,8 @@ import {
 	willRefreshFetchedToken,
 } from "./oauth2-load-test-coverage";
 import { Callout } from "@/components/shared";
+import { lapseInstant, noTokenState, tokenPhase } from "@/components/shared/OAuth2Form/token-phase";
+import { useNow } from "@/hooks/useNow";
 
 interface OAuth2LoadTestGuardProps {
 	/** Variable-resolved OAuth 2.0 config for the pending request. */
@@ -79,7 +81,20 @@ export default function OAuth2LoadTestGuard({
 	const statusQuery = useOAuth2TokenStatusQuery(cacheKey);
 	const fetchMutation = useFetchOAuth2TokenMutation();
 
-	const token = statusQuery.data?.found ? statusQuery.data.token : undefined;
+	const status = statusQuery.data;
+	// A token the engine flags expired has lapsed whatever its `expiresAt` says, so
+	// the same phase the token row shows decides it; the clock flips it at the
+	// expiry without waiting for the next poll.
+	const now = useNow(lapseInstant(status));
+	const lapsed = tokenPhase(status, now).expiry?.word === "expired";
+	const cachedToken = status?.found ? status.token : undefined;
+	const token = useMemo(
+		() =>
+			cachedToken && lapsed
+				? { ...cachedToken, expiresAt: Math.min(cachedToken.expiresAt ?? now, now) }
+				: cachedToken,
+		[cachedToken, lapsed, now]
+	);
 
 	// Compute the coverage state (pure decision - see coverageState).
 	const state = useMemo(
@@ -92,6 +107,10 @@ export default function OAuth2LoadTestGuard({
 			),
 		[durationSeconds, cacheKey, token, config]
 	);
+
+	// With an answer on screen a failed refetch changes nothing: the stale verdict
+	// stands. Only an absent answer can be pending or unreachable (#3388).
+	const noToken = status ? "none-cached" : noTokenState(false, statusQuery);
 
 	// Reset the override whenever the situation changes. This is the render-phase
 	// "adjust state when a prop changes" pattern - cheaper and more correct than a
@@ -142,6 +161,19 @@ export default function OAuth2LoadTestGuard({
 					: state.viaRefresh
 						? `${subject} expires during the run - Vayu's engine refreshes it mid-run.`
 						: `${subject} covers the whole run.`}
+			</Callout>
+		);
+	}
+
+	if (state.kind === "no-token" && noToken === "checking") {
+		return <Callout severity="info" title="Checking for a cached token…" />;
+	}
+
+	if (state.kind === "no-token" && noToken === "check-failed") {
+		return (
+			<Callout severity="warning" title="Couldn't check for a cached token">
+				Whether one is cached, and how long it lasts, isn&apos;t known. Starting is not
+				blocked.
 			</Callout>
 		);
 	}

@@ -20,7 +20,7 @@ import { render, screen } from "@testing-library/react";
 import type { OAuth2Config } from "@/types";
 import OAuth2LoadTestGuard from "./OAuth2LoadTestGuard";
 
-const statusQuery = { data: undefined as unknown };
+const statusQuery = { data: undefined as unknown, isLoading: false, isError: false };
 const fetchMutation = { mutate: vi.fn(), isPending: false };
 
 vi.mock("@/queries/oauth", () => ({
@@ -40,9 +40,10 @@ const config: OAuth2Config = {
 };
 
 /** A cached token with @p remainingS left of a @p lifetimeS life. */
-function cacheToken(lifetimeS: number, remainingS: number) {
+function cacheToken(lifetimeS: number, remainingS: number, expired = false) {
 	statusQuery.data = {
 		found: true,
+		expired,
 		token: {
 			expiresIn: lifetimeS,
 			expiresAt: Date.now() + remainingS * 1000,
@@ -115,6 +116,11 @@ const VERDICTS: Verdict[] = [
 	},
 ];
 
+beforeEach(() => {
+	statusQuery.isLoading = false;
+	statusQuery.isError = false;
+});
+
 describe("OAuth2LoadTestGuard's no-token body", () => {
 	beforeEach(() => {
 		statusQuery.data = { found: false };
@@ -167,4 +173,81 @@ describe("OAuth2LoadTestGuard's verdict wording", () => {
 			expect(screen.queryByText(v.plain)).toBeNull();
 		}
 	);
+});
+
+describe("OAuth2LoadTestGuard while the token status is not known (#3388)", () => {
+	const NO_TOKEN_TITLE = /No token cached/;
+
+	beforeEach(() => {
+		statusQuery.data = undefined;
+	});
+
+	it("says it is checking while the status query loads, never that no token is cached", () => {
+		statusQuery.isLoading = true;
+		renderGuard({});
+
+		expect(screen.getByText("Checking for a cached token…")).toBeInTheDocument();
+		expect(screen.queryByText(NO_TOKEN_TITLE)).toBeNull();
+		expect(screen.queryByRole("button", { name: /Fetch/ })).toBeNull();
+	});
+
+	it("says the check failed when the engine is unreachable, never that no token is cached", () => {
+		statusQuery.isError = true;
+		renderGuard({});
+
+		expect(screen.getByText("Couldn't check for a cached token")).toBeInTheDocument();
+		expect(screen.queryByText(NO_TOKEN_TITLE)).toBeNull();
+	});
+
+	it.each([
+		["loading", "isLoading"],
+		["failed", "isError"],
+	] as const)("does not gate Start while the check is %s", (_name, flag) => {
+		statusQuery[flag] = true;
+		const onGateChange = vi.fn();
+		render(
+			<OAuth2LoadTestGuard
+				config={config}
+				durationSeconds={600}
+				onGateChange={onGateChange}
+			/>
+		);
+
+		expect(onGateChange).toHaveBeenLastCalledWith(false);
+	});
+
+	it("keeps a stale verdict on screen when a refetch fails", () => {
+		cacheToken(7200, 7200);
+		statusQuery.isError = true;
+		renderGuard({});
+
+		expect(screen.getByText(/^Access token covers the whole run\.$/)).toBeInTheDocument();
+		expect(screen.queryByText(/Couldn't check/)).toBeNull();
+	});
+
+	it("keeps a stale no-token answer as no token cached when a refetch fails", () => {
+		statusQuery.data = { found: false };
+		statusQuery.isError = true;
+		renderGuard({});
+
+		expect(screen.getByText("No token cached yet")).toBeInTheDocument();
+		expect(screen.queryByText(/Couldn't check/)).toBeNull();
+	});
+});
+
+describe("OAuth2LoadTestGuard's lapsed token", () => {
+	it("reads a token the engine flags expired as lapsed though its expiresAt is ahead", () => {
+		cacheToken(3600, 3000, true);
+		renderGuard({ config: unrenewable, durationSeconds: 60 });
+
+		expect(screen.getByText("Token expires before the run ends")).toBeInTheDocument();
+		expect(screen.queryByText(/covers the whole run/)).toBeNull();
+	});
+
+	it("still reads the same token as covering the run when the engine does not flag it", () => {
+		cacheToken(3600, 3000, false);
+		renderGuard({ config: unrenewable, durationSeconds: 60 });
+
+		expect(screen.getByText(/^Access token covers the whole run\.$/)).toBeInTheDocument();
+	});
 });
