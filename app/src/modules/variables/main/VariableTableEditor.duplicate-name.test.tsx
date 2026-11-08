@@ -183,6 +183,8 @@ describe("a variable name the editor cannot write", () => {
 
 		typeAndLeave(nameFields()[0], "host");
 		typeAndLeave(nameFields()[0], "access_token");
+		// Saves run one at a time: the first landing starts the second.
+		landSave();
 		landSave();
 
 		const sent = lastPayload();

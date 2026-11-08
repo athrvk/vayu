@@ -8,7 +8,8 @@
 /**
  * What a save surface does with a failure: the verdict a thrown error earns,
  * and the wait before trying again. One rule for every surface that retries
- * its own saves (`useSaveManager`), rather than a copy per surface.
+ * its own saves (`useSaveManager`, `VariableTableEditor`), rather than a copy
+ * per surface.
  */
 
 import { TIMING } from "@/config/timing";

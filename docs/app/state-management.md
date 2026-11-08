@@ -955,10 +955,10 @@ failure toast.
 
 **A context's `save` can report its own verdict** (`SaveOutcome`: `"saved"`,
 `"failed"`, `"final"`, `"disk-full"` or `"pending"`; `useSaveManager`,
-`useDraftSaveContext` and the context bar's variables section do), and that
-verdict is what `runSave` and `flushAll` count - never a status read back from
-the store, which charged one context's failure to another when the status was a
-single shared slot. A reported `"saved"` or `"pending"` that the context did not
+`useDraftSaveContext`, `VariableTableEditor` and the context bar's variables
+section do), and that verdict is what `runSave` and `flushAll` count - never a
+status read back from the store, which charged one context's failure to another
+when the status was a single shared slot. A reported `"saved"` or `"pending"` that the context did not
 also report under its own id during the save is filled in for it (the draft
 editors report nothing on success), and a failure it reported is never
 published a second time. `pending` is a save that settled without persisting
@@ -972,9 +972,10 @@ failure that will not retry (a 4xx); `flushAll` counts it in `failed`.
 "disk-full"` on its result only when every failed context was disk-full. One
 failure of another kind beside it leaves the key out, because then "the disk is
 full" would be only part of the story. The key is absent, not `undefined`, when
-there is no cause. Three places turn a rejected save into `"disk-full"`, all
-through `isDiskFullError` (`lib/disk-full.ts`): `performSave`
-(`useSaveManager`), the `useDraftSaveContext` save (the collection editors,
+there is no cause. Three places turn a failed save into `"disk-full"`, all
+through `isDiskFullError` (`lib/disk-full.ts`): `saveFailureOutcome`
+(`lib/save-failure.ts`, read by `useSaveManager`'s `performSave` and by
+`VariableTableEditor`), the `useDraftSaveContext` save (the collection editors,
 whose saves reject) and `runSave`'s own catch in the store.
 
 A context that resolves with nothing (`SettingsMain`) is judged by what it
@@ -985,11 +986,10 @@ context that saw an edit land mid-write reports it for the payload that went
 out not holding that edit; no report is a success, which `runSave` then reports.
 So a context that reports and resolves names a 507 by handing the error over as
 the cause, `reportFailed(id, message, error)`; a call that omits it reads
-`failed` (#2685). A context that reports and then *rejects*
-(`VariableTableEditor`) is judged the same way: `runSave`'s catch publishes a
-rejection only when the context did not report a failure during that save, so
-the failure is toasted once rather than once by the editor and again by the
-store. That is counted (each id's failure reports, toast-only ones included),
+`failed` (#2685). A context that reports and then *rejects* is judged the same
+way: `runSave`'s catch publishes a rejection only when the context did not
+report a failure during that save, so the failure is toasted once rather than
+once by the editor and again by the store. That is counted (each id's failure reports, toast-only ones included),
 not read from the entry, because an editor that switched away mid-save has
 discarded the entry its failure would have replaced. The inbox's `CannedResponseControls` (whose `persist`
 catches its own rejection, so it must not rethrow: the wrapper would toast a
@@ -1911,14 +1911,35 @@ rather than each re-deriving the read-fresh-merge-write shape (#1439):
   `mergeVariableChanges` applies the one changed key onto it before `write`/
   `mutate`.
 - **`VariableTableEditor`** (`modules/variables/main/`) commits every row the
-  user has actually edited. `performSave` diffs the current rows against
+  user has actually edited. `planSave` diffs the current rows against
   `baselineRef` - the map the table last agreed with the server on - to get a
   `VariableChanges` of only the touched keys, then merges that onto
-  `dataVariables`, the query-cache-backed prop, which is why it stays current
-  even while the row-init effect below is refusing to reseed. A key nobody
-  touched - an MCP agent's `update_environment` landing while the table has an
-  unrelated unsaved edit - therefore survives the next save regardless of what
-  the editor's own copy of it says.
+  `freshMapRef`, the freshest map the editor knows: the query cache's
+  `dataVariables`, which stays current even while the row-init effect below is
+  refusing to reseed, with each landed save's own changes applied over it until
+  that save's cache echo arrives. A key nobody touched - an MCP agent's
+  `update_environment` landing while the table has an unrelated unsaved edit -
+  therefore survives the next save regardless of what the editor's own copy of
+  it says.
+
+**The editor's saves run one at a time (#3353).** A blur followed by a toggle
+asks for two saves; the second waits for the first, and a third asked for while
+one is already waiting joins it. A waiting save binds its entity (the context id
+and the mutation that writes it) when it is asked for, but reads the rows, the
+baseline and the fresh map when it starts, so it carries everything typed
+meanwhile and merges onto the map the first save left in `freshMapRef` - its own
+diff against the advanced baseline no longer names the first save's keys. Two
+saves in flight could land out of order and leave `baselineRef` at the older
+map, so a later external write was compared against the wrong pre-image; and a
+second `mutate` on one TanStack mutation stops the first call's callbacks from
+firing, so that save's promise never settled. If the editor switches entity
+before a waiting save starts, the save computes from the snapshot taken when it
+was asked for and, when it lands, touches nothing of the scope now on screen. A
+save for an environment or collection that is no longer there reports
+`Couldn't save - this environment no longer exists` (or collection) and resolves
+`"final"` rather than sitting on "saving" until the quit flush's ceiling. Every
+save resolves with its `SaveOutcome` and never rejects, so the blur and toggle
+callers, which do not await it, cannot leave a rejection unhandled.
 
 **A key both sides touched is a conflict, not a coin flip.** While the table is
 dirty, the row-init effect recomputes the same diff against `baselineRef` on
@@ -1926,7 +1947,7 @@ every `dataVariables` change purely to call `findVariableConflicts`, which
 reports a key only when the fresh map *and* the user's edit both moved it away
 from the baseline to different values. The table renders one `Callout` per
 conflicting key naming it, with a "Take theirs" action; the user's value is
-what saves by default (it is already the value `performSave` sends for that
+what saves by default (it is already the value `planSave` sends for that
 key) until they explicitly take the other side's. `baselineRef` itself only
 advances on a full reseed, on this editor's own successful save (to the map
 that save just wrote, so a later write is never compared against this save's

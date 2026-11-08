@@ -109,9 +109,9 @@ everything.
   ways: a save that rejects with the `ApiError` (`useSaveManager`,
   `useDraftSaveContext`'s collection editors, the store's own catch), a save
   that returns the verdict itself (the inbox `CannedResponseControls`,
-  `variable-commit`), and a context that reports through `reportFailed` and
-  resolves (`SettingsMain`), which is judged by the report it made during the
-  save and so must pass the error as the cause,
+  `variable-commit`, `VariableTableEditor`), and a context that reports
+  through `reportFailed` and resolves (`SettingsMain`), which is judged by the
+  report it made during the save and so must pass the error as the cause,
   `reportFailed(id, message, error)` - the report keeps whether it was a 507,
   and a call that omits the cause reads `failed` (#2685); a save an editor
   declines to send
