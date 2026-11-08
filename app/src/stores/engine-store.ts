@@ -34,6 +34,18 @@ import type { EngineRecovery } from "@/types/domain";
  */
 export type EngineStatus = "starting" | "connected" | "unreachable";
 
+/**
+ * How the main process's engine left without being asked to (#3336): the facts
+ * its sidecar recorded, as `engine:lifecycle` carries them. `error` is set for a
+ * child that failed to run rather than one that exited.
+ */
+export interface EngineCrash {
+	code: number | null;
+	signal: string | null;
+	stderrTail: string[];
+	error: string | null;
+}
+
 interface EngineState {
 	// Engine Connection
 	engineStatus: EngineStatus;
@@ -58,6 +70,24 @@ interface EngineState {
 	 * Retry. Written by the health poll, cleared by the poll an engine answers.
 	 */
 	engineStartFailure: string | null;
+
+	/**
+	 * How the engine's process left, when the sidecar reports it left on its own
+	 * (#3336); `null` while it runs or once a start is under way again.
+	 *
+	 * A fact about the process, not a status: `engineStatus` stays the health
+	 * poll's verdict, and this only explains it and offers the Dock's Restart.
+	 * Written by `useEngineLifecycle` from each pushed transition, so it clears
+	 * when the sidecar moves on rather than when a restart is asked for.
+	 */
+	engineCrash: EngineCrash | null;
+
+	/**
+	 * A restart is in flight. One flag for every surface that offers the action
+	 * (the Dock and the Settings banner), so a second click or the other surface
+	 * does not start another; see `useEngineRestart`.
+	 */
+	engineRestarting: boolean;
 
 	/**
 	 * What the engine's startup did about a database it could not open (issue
@@ -117,6 +147,8 @@ interface EngineState {
 	setEngineStatus: (status: EngineStatus) => void;
 	setEngineError: (error: string | null) => void;
 	setEngineStartFailure: (failure: string | null) => void;
+	setEngineCrash: (crash: EngineCrash | null) => void;
+	setEngineRestarting: (restarting: boolean) => void;
 	setEngineRecovery: (recovery: EngineRecovery | null) => void;
 	setWorkers: (workers: number | null) => void;
 	openEngineStartWindow: (openedAt: number) => void;
@@ -133,6 +165,8 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	engineStatus: "starting",
 	engineError: null,
 	engineStartFailure: null,
+	engineCrash: null,
+	engineRestarting: false,
 	recovery: null,
 	workers: null,
 	// Closed until the health poll mounts and opens it. Nothing can have polled
@@ -145,6 +179,8 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	setEngineStatus: (status) => set({ engineStatus: status }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineStartFailure: (failure) => set({ engineStartFailure: failure }),
+	setEngineCrash: (crash) => set({ engineCrash: crash }),
+	setEngineRestarting: (restarting) => set({ engineRestarting: restarting }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 	setWorkers: (workers) => set({ workers }),
 	openEngineStartWindow: (openedAt) => set({ engineStartWindow: openedAt }),

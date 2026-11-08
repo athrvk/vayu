@@ -648,6 +648,8 @@ Merged store managing engine connection status and restart-required notification
   engineStatus: EngineStatus  // "starting" | "connected" | "unreachable"
   engineError: string | null
   engineStartFailure: string | null  // The main process's sentence when no engine can start (every port held), or null
+  engineCrash: EngineCrash | null  // How the engine's process left on its own ({ code, signal, stderrTail, error }), or null
+  engineRestarting: boolean  // A restart is in flight, shared by every surface that offers one
   recovery: EngineRecovery | null  // What the engine's startup did to the database
   workers: number | null  // The `workers` setting's effective value, or null before the first poll
   engineStartWindow: number | null  // When the engine now coming up began, or null
@@ -662,6 +664,8 @@ const {
   engineStatus, setEngineStatus,
   engineError, setEngineError,
   engineStartFailure, setEngineStartFailure,
+  engineCrash, setEngineCrash,
+  engineRestarting, setEngineRestarting,
   recovery, setEngineRecovery,
   workers, setWorkers,
   engineStartWindow, openEngineStartWindow, closeEngineStartWindow,
@@ -683,6 +687,35 @@ restart opened its start window is dropped, because it describes the start
 Retry just cleared. While it is set the status is `unreachable` whatever the
 startup grace says, and the Dock shows it in place of `engineError` and offers
 Retry.
+
+`engineCrash` is the main process's account of how the engine's process left
+when nobody asked it to (issue #3336): the exit `code`, `signal`, `stderrTail`
+and `error` of the sidecar's `crashed` lifecycle state, as `engine:lifecycle`
+carries them. `useEngineLifecycle` (mounted once in `App`, after
+`useHealthQuery`) writes it: a `crashed` push sets it, and only `ready`, `slow`,
+`stopping` and `stopped` clear it (an engine that is up, alive but slow, or
+stopped on purpose). The transient kinds `idle`, `choosingPort`, `replacing` and
+`spawning` leave it standing, so a restart that fails before it spawns a child
+(the sidecar ends on `idle`) still leaves the Dock its sentence and its Restart
+button, and while the restart runs the button reads Restarting... through
+`engineRestarting`. The one-time read of the current state
+yields to a push that landed while it was in flight and to a restart that
+opened a new start window, so a late reply cannot put a crash back over the
+engine replacing it. **It is a fact, not a status: `useHealthQuery` stays the
+only classifier of `engineStatus`**, and `engineCrash` never writes it. It
+explains an unreachable engine and lets the Dock offer Restart, so that button
+can appear a poll before the light turns. The Dock reads it for the connection
+tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
+the sentence, then the last three non-empty stderr lines) and ignores it while
+`engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
+both the tooltip and the button (Retry, not Restart).
+
+`engineRestarting` is whether a restart is in flight, held here rather than in
+each `useEngineRestart` instance so that the Dock's button and the Settings
+banner share it: a second click, or the other surface's button, finds it set and
+asks the main process for nothing. The hook reads it from the store, not from
+its render's value, because two clicks in one frame both see a stale `false`
+there.
 
 `workers` is the `workers` field from the same poll (issue #1508) - the
 `workers` setting's effective value, not the machine's raw core count - read by

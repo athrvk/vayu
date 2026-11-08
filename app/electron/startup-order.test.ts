@@ -185,6 +185,52 @@ describe("startup ordering", () => {
 	});
 
 	/*
+	 * #3336. Mutation check: drop the overtaken branch, or either half of its
+	 * condition, and this reddens. A quit landing mid-start used to raise
+	 * "Couldn't start Vayu's engine" on the way out, and a start that failed
+	 * with a restart queued behind it quit the app under that restart. That
+	 * the sidecar still reports both facts when the start's rejection arrives
+	 * is driven in `sidecar.test.ts`.
+	 */
+	it("does not end the app for a start a quit or a restart overtook", () => {
+		const start = main.indexOf("async function startEngine()");
+		const overtakenAt = main.indexOf(
+			"if (engineSidecar?.isShuttingDown() || engineSidecar?.hasRestartPending()) {",
+			start
+		);
+		const dialogAt = main.indexOf("showErrorBox", start);
+
+		expect(start).toBeGreaterThan(-1);
+		expect(overtakenAt).toBeGreaterThan(start);
+		expect(overtakenAt).toBeLessThan(dialogAt);
+		expect(main.slice(overtakenAt, dialogAt)).toContain("return;");
+	});
+
+	/*
+	 * #3336. Mutation check: move the bridge below the start and its first
+	 * transitions, and a slow engine's ready-after-slow hook, can be missed.
+	 */
+	it("bridges the engine's lifecycle to the window before it starts the engine", () => {
+		const start = main.indexOf("async function startEngine()");
+		const bridgeAt = main.indexOf("bridgeEngineLifecycle(engineSidecar, {", start);
+		const startAt = main.indexOf("await engineSidecar.start();", start);
+
+		expect(bridgeAt).toBeGreaterThan(start);
+		expect(startAt).toBeGreaterThan(bridgeAt);
+		expect(main.slice(bridgeAt, startAt)).toContain(
+			"readyAfterSlow: () => void fileGrants.sync(),"
+		);
+	});
+
+	it("answers the engine's lifecycle before it waits on the engine", () => {
+		const setupAt = main.indexOf("\nfunction setupIpcHandlers()");
+		const setupBody = main.slice(setupAt, main.indexOf("\n}\n", setupAt));
+
+		expect(setupAt).toBeGreaterThan(-1);
+		expect(setupBody).toContain("registerEngineLifecycleIpc(ipcMain, ");
+	});
+
+	/*
 	 * #2118. The renderer reads the start failure to decide an engine is not
 	 * coming; a retry in flight must not keep reporting the one it replaces.
 	 * Mutation check: drop the clear and the slice below has no assignment
