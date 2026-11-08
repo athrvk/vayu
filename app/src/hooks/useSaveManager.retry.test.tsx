@@ -28,6 +28,7 @@ import { useClientSettingsStore } from "@/stores";
 import { resetSaveStoreForTests, useSaveStore, type FlushTally } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
 import { SaveBlockedError } from "@/lib/elements";
+import { saveRetryDelayMs } from "@/lib/save-failure";
 import { TIMING } from "@/config/timing";
 import { useSaveManager } from "./useSaveManager";
 
@@ -127,14 +128,12 @@ describe("retrying a failed auto-save", () => {
 	});
 
 	it("never waits past the retry ceiling", () => {
-		// The formula the hook uses, pinned against the constant it reads -
-		// this is what "capped at a minute" means without driving eight
-		// failures through fake timers to prove it.
-		const delay = (attempt: number) =>
-			Math.min(5000 * 2 ** attempt, TIMING.SAVE_RETRY_MAX_DELAY_MS);
-		expect(delay(0)).toBe(5000);
-		expect(delay(3)).toBe(40000);
-		expect(delay(10)).toBe(TIMING.SAVE_RETRY_MAX_DELAY_MS);
+		// The helper the hook reads its delay from, pinned against the constant
+		// it caps at - this is what "capped at a minute" means without driving
+		// eight failures through fake timers to prove it.
+		expect(saveRetryDelayMs(5000, 0)).toBe(5000);
+		expect(saveRetryDelayMs(5000, 3)).toBe(40000);
+		expect(saveRetryDelayMs(5000, 10)).toBe(TIMING.SAVE_RETRY_MAX_DELAY_MS);
 	});
 
 	it("stops retrying once a save lands, rather than continuing to back off", async () => {

@@ -65,8 +65,8 @@ export const TIMING = {
 
 	/**
 	 * Ceiling on the backoff `useSaveManager` doubles through after a failed
-	 * auto-save. Read in exactly one place - the retry scheduled from
-	 * `performSave`'s catch - so a save that keeps failing settles into a fixed
+	 * auto-save. Read in exactly one place, `saveRetryDelayMs`
+	 * (`lib/save-failure.ts`), so a save that keeps failing settles into a fixed
 	 * cadence instead of backing off forever.
 	 */
 	SAVE_RETRY_MAX_DELAY_MS: 60_000,

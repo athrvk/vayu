@@ -28,10 +28,8 @@ import {
 import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
-import { TIMING } from "@/config/timing";
 import { SaveBlockedError } from "@/lib/elements";
-import { isDiskFullError } from "@/lib/disk-full";
-import { isFinalError } from "@/lib/query-client";
+import { saveFailureOutcome, saveRetryDelayMs } from "@/lib/save-failure";
 
 /**
  * The id this hook registers and reports under. Every registration, update and
@@ -297,8 +295,7 @@ export function useSaveManager({
 					// waiting.
 					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
 				}
-				if (isDiskFullError(error)) return "disk-full";
-				return isFinalError(error) ? "final" : "failed";
+				return saveFailureOutcome(error);
 			}
 		});
 		saveQueueRef.current = run;
@@ -342,10 +339,7 @@ export function useSaveManager({
 		// failing settles into a fixed cadence instead of backing off forever.
 		const attempt = retryAttemptRef.current;
 		retryAttemptRef.current = attempt + 1;
-		const delay = Math.min(
-			autoSaveDelayMsRef.current * 2 ** attempt,
-			TIMING.SAVE_RETRY_MAX_DELAY_MS
-		);
+		const delay = saveRetryDelayMs(autoSaveDelayMsRef.current, attempt);
 		clearRetry();
 		retryTimeoutRef.current = setTimeout(() => {
 			void attemptAutoSaveRef.current();
