@@ -74,6 +74,7 @@ import {
 	useSaveStore,
 	useTabsStore,
 } from "@/stores";
+import { closeTabFromKeyboard } from "@/components/layout/tab-focus";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 import { navigateHistory } from "@/lib/navigate-history";
@@ -199,11 +200,12 @@ const ACTION_COMMANDS: readonly Command[] = [
 		keywords: ["dismiss", "shut"],
 		group: "action",
 		icon: X,
-		// The Shell's handler closes the same active tab on this chord.
+		// The Shell's handler closes the same active tab on this chord, through the
+		// same focus hand-off.
 		shortcut: CLOSE_TAB_CHORD,
 		available: (ctx) => ctx.activeTab !== null,
 		perform: (ctx) => {
-			if (ctx.activeTab) useTabsStore.getState().closeTab(ctx.activeTab.id);
+			if (ctx.activeTab) closeTabFromKeyboard(ctx.activeTab.id);
 		},
 	},
 	/*

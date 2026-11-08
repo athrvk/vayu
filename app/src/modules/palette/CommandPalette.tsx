@@ -34,6 +34,7 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { flushSync } from "react-dom";
 import { CommandDialog, CommandFooter, CommandInput, Kbd } from "@/components/ui";
 import { useLayoutStore, useToastStore } from "@/stores";
 import { PALETTE_CHORD, matchesChord } from "@/constants/shortcuts";
@@ -198,9 +199,18 @@ export function CommandPalette() {
 		setNavigated(false);
 	};
 
+	/*
+	 * Close, then perform - and the close is flushed. A command that moves focus
+	 * (closing a tab hands it to the replacement, #3401) has to do it once the
+	 * palette is gone: while the dialog is open its focus trap pulls focus back
+	 * into the search field, and the restore effect above, which runs on the
+	 * close, would then take focus to whatever held it before the palette opened.
+	 * Flushed so that effect has run by the time `perform` does, leaving the
+	 * command the last word on where focus is.
+	 */
 	const pick = (item: PaletteItem) => {
+		flushSync(() => setPaletteOpen(false));
 		item.perform();
-		setPaletteOpen(false);
 	};
 
 	return (

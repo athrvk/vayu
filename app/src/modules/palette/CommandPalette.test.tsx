@@ -36,6 +36,7 @@ import { useImportModalStore, useLayoutStore, useTabsStore, useToastStore } from
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { useLiveCommandSurfaceStore, type CommandContext } from "@/lib/commands";
 import { CLOSE_TAB_CHORD } from "@/constants/shortcuts";
+import { tabElementId } from "@/components/layout/tab-aria";
 import { formatNumber } from "@/lib/format-number";
 import { chordKeys, isMac } from "@/lib/platform";
 import { formatInstant } from "@/lib/time-value";
@@ -159,6 +160,24 @@ vi.mock("./sources/commandItems", async (importOriginal) => {
 	};
 });
 
+/**
+ * The two things `closeTabFromKeyboard` looks for in the strip, and nothing
+ * else: a focusable element per open tab under the id the strip gives it, and
+ * the "+" button. Rendered so the palette's own focus handling has real
+ * elements to collide with.
+ */
+function StripStub() {
+	const openTabs = useTabsStore((s) => s.openTabs);
+	return (
+		<div>
+			{openTabs.map((tab) => (
+				<button key={tab.id} id={tabElementId(tab.id)} role="tab" aria-label={tab.id} />
+			))}
+			<button data-tab-new aria-label="New tab" />
+		</div>
+	);
+}
+
 function renderPalette() {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return render(
@@ -166,6 +185,7 @@ function renderPalette() {
 			{/* A focusable neighbour, so "focus goes back where it was" has
 			    somewhere to go back to. */}
 			<input aria-label="outside" />
+			<StripStub />
 			<CommandPalette />
 		</QueryClientProvider>
 	);
@@ -1004,6 +1024,71 @@ describe("closing", () => {
 
 		await waitFor(() => expect(useLayoutStore.getState().paletteOpen).toBe(false));
 		await waitFor(() => expect(document.activeElement).toBe(outside));
+	});
+
+	/*
+	 * A palette command closes the dialog and runs as it goes, so the close-tab
+	 * hand-off (#3401) has to survive the dialog's own focus handling: the focus
+	 * trap that holds focus inside while the palette is open, and the restore
+	 * above that returns to whatever was focused before it opened.
+	 */
+	describe("Close tab", () => {
+		const TABS = [
+			{ id: "t1", type: "welcome", entityId: null },
+			{ id: "t2", type: "settings", entityId: null },
+		] as const;
+
+		function pickCloseTab() {
+			open();
+			typeQuery("close");
+			act(() => {
+				screen.getByText('Close "Settings"').click();
+			});
+		}
+
+		it("leaves focus on the replacement tab when focus was outside the strip", async () => {
+			useTabsStore.setState({ openTabs: [...TABS], activeTabId: "t2" });
+			renderPalette();
+			// Connected after the close, so the restore has a target to take focus to.
+			screen.getByLabelText("outside").focus();
+
+			pickCloseTab();
+
+			await waitFor(() => expect(useLayoutStore.getState().paletteOpen).toBe(false));
+			expect(useTabsStore.getState().activeTabId).toBe("t1");
+			await waitFor(() =>
+				expect(document.activeElement).toBe(document.getElementById(tabElementId("t1")))
+			);
+		});
+
+		it("leaves focus on the replacement tab when the closed tab held focus", async () => {
+			useTabsStore.setState({ openTabs: [...TABS], activeTabId: "t2" });
+			renderPalette();
+			document.getElementById(tabElementId("t2"))!.focus();
+
+			pickCloseTab();
+
+			await waitFor(() => expect(useLayoutStore.getState().paletteOpen).toBe(false));
+			await waitFor(() =>
+				expect(document.activeElement).toBe(document.getElementById(tabElementId("t1")))
+			);
+		});
+
+		it("leaves focus on the New tab button when it closes the last tab", async () => {
+			useTabsStore.setState({
+				openTabs: [{ id: "t2", type: "settings", entityId: null }],
+				activeTabId: "t2",
+			});
+			renderPalette();
+			screen.getByLabelText("outside").focus();
+
+			pickCloseTab();
+
+			await waitFor(() => expect(useLayoutStore.getState().paletteOpen).toBe(false));
+			await waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByLabelText("New tab"))
+			);
+		});
 	});
 
 	it("starts empty on the next open rather than restoring the last query", async () => {
