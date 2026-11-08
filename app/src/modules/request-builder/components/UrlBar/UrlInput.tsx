@@ -49,9 +49,8 @@ export default function UrlInput({ className }: UrlInputProps) {
 	);
 
 	/*
-	 * A request created blank asked for the caret here (#3400). The field mounts
-	 * after the tab opens, so the ask travels as a nav intent and is answered on
-	 * the render that has both the intent and this field, once.
+	 * The field mounts after the tab opens, so a blank new request's ask for the
+	 * caret travels as a nav intent, answered once it is mounted (#3400).
 	 */
 	const focusRequested = useTabsStore(
 		(s) => s.navIntent?.kind === "focusUrl" && s.navIntent.target === request.id

@@ -154,9 +154,7 @@ export function useNewRequest(): UseNewRequestReturn {
 					method: preset?.method ?? "GET",
 					url: preset?.url ?? "",
 				});
-				// A blank request is waiting to be typed into; a preset one arrives filled
-				// in, and its caller (a demo, an import, a saved run) may have a reason to
-				// keep focus where it is.
+				// A preset request arrives filled in, so its caller keeps focus (#3400).
 				if (preset) openTab({ type: "request", entityId: newRequest.id });
 				else openRequestFocusingUrl(newRequest.id);
 			} catch (error) {
