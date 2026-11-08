@@ -1357,6 +1357,9 @@ function setupIpcHandlers() {
 	ipcMain.handle("update:openReleasePage", async () => (await loadUpdater()).openReleasePage());
 	ipcMain.handle("update:check", () => checkForUpdates("renderer"));
 	ipcMain.handle("update:quitForUpdate", async () => (await loadUpdater()).quitForUpdate());
+	// Not held on `updaterArmed`: a renderer asks once as it mounts, and an
+	// updater that is not loaded yet has downloaded nothing.
+	ipcMain.handle("update:getState", () => updaterModule?.getUpdateState() ?? { kind: "none" });
 
 	// Apply and persist a safety-config change from Settings. The renderer input
 	// is sanitized here (never trusted), applied live to the running server, and

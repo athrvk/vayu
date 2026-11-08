@@ -763,9 +763,9 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the public-good trusted root (refreshed over TUF by
   `electron/sigstore-trusted-root.ts`), and found
   the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
-  SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
-  and the quit-time install all wait for it; a failure sends
-  `update:verificationFailed` instead and the file is never installed. Any
+  SLSA v1 subject naming that digest. The `verified` download state, restart-to-install
+  and the quit-time install all wait for it; a failure moves the state to
+  `refused` and the file is never installed. Any
   failure, including a network one, refuses: there is no path that accepts after
   an error. Both requests, the attestation lookup and the TUF refresh, go
   through the one injected `fetch` (Electron's `net.fetch`), so both follow the

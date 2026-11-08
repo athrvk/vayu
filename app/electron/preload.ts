@@ -43,6 +43,27 @@ interface FlushResult {
 }
 
 /**
+ * Where the update download stands. Mirrors `UpdateDownloadState` in
+ * electron/updater.ts, inlined for the same reason as `FlushResult`.
+ */
+type UpdateDownloadStateShape =
+	| { kind: "none" }
+	| {
+			kind: "downloading";
+			version: string;
+			progress: {
+				percent: number;
+				bytesPerSecond: number;
+				transferred: number;
+				total: number;
+			} | null;
+	  }
+	| { kind: "verifying"; version: string }
+	| { kind: "verified"; version: string }
+	| { kind: "refused"; version: string; reason: string }
+	| { kind: "failed"; version: string; error: string };
+
+/**
  * The engine's lifecycle as main publishes it. Mirrors `EngineLifecyclePayload`
  * in electron/engine-lifecycle.ts, inlined for the same reason as above.
  */
@@ -307,33 +328,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
 		ipcRenderer.on("update:available", handler);
 		return () => ipcRenderer.removeListener("update:available", handler);
 	},
-	onUpdateDownloaded: (callback: (info: { version: string }) => void) => {
-		const handler = (_event: unknown, info: { version: string }) => callback(info);
-		ipcRenderer.on("update:downloaded", handler);
-		return () => ipcRenderer.removeListener("update:downloaded", handler);
+	// Pushed on every change to the download; `getUpdateState` answers the same
+	// value on demand, for a renderer that mounts after the push.
+	onUpdateState: (callback: (state: UpdateDownloadStateShape) => void) => {
+		const handler = (_event: unknown, state: unknown) =>
+			callback(state as UpdateDownloadStateShape);
+		ipcRenderer.on("update:state", handler);
+		return () => ipcRenderer.removeListener("update:state", handler);
 	},
-	// Sent instead of `update:downloaded` when the installer's attestation does
-	// not verify; shape mirrors `UpdateVerificationFailure` in updater.ts.
-	onUpdateVerificationFailed: (callback: (info: { version: string; reason: string }) => void) => {
-		const handler = (_event: unknown, info: { version: string; reason: string }) =>
-			callback(info);
-		ipcRenderer.on("update:verificationFailed", handler);
-		return () => ipcRenderer.removeListener("update:verificationFailed", handler);
-	},
-	// Silent strategies only (Windows, Linux AppImage) - see updater.ts.
-	onDownloadProgress: (
-		callback: (progress: {
-			percent: number;
-			bytesPerSecond: number;
-			transferred: number;
-			total: number;
-		}) => void
-	) => {
-		const handler = (_event: unknown, progress: unknown) =>
-			callback(progress as Parameters<typeof callback>[0]);
-		ipcRenderer.on("update:downloadProgress", handler);
-		return () => ipcRenderer.removeListener("update:downloadProgress", handler);
-	},
+	getUpdateState: (): Promise<UpdateDownloadStateShape> => ipcRenderer.invoke("update:getState"),
 	restartToInstallUpdate: (): Promise<void> => ipcRenderer.invoke("update:restartToInstall"),
 	// Shape mirrors `UpdateCheckResult` in updater.ts, inlined because this file
 	// is a CommonJS script and must not grow imports.
