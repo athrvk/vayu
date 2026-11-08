@@ -1118,6 +1118,22 @@ TEST_F (ScriptSendRequestStopTest, AnInlineStepScriptTheStopCutShortIsNoVerdict)
     element_row (*run, "/scenario/steps/0/elements", "el_script"), run->summary);
 }
 
+// The Stop lands while `script.teardown`'s fetch hangs, after the load ended.
+// Mutation-check: drop the `send_cancelled` branch from `run_lifecycle_script`
+// and the teardown is `error`.
+TEST_F (ScriptSendRequestStopTest, AStopDoesNotWaitOutATeardownScriptFetch) {
+    start_single_request (
+    { { "lifecycleElements",
+    json::array ({ hanging_script ("el_teardown", "script.teardown") }) } },
+    STOP_CASE_TIMEOUT_MS);
+
+    ASSERT_TRUE (stop_once_a_fetch_hangs ()) << "the Stop waited on the fetch";
+
+    const auto run = stored_run ();
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (lifecycle_outcome (*run, "teardown"), "skipped") << run->summary;
+}
+
 // The sequential runner's own inputs. Mutation-checks: drop `.cancel = ...`
 // from `execute_scenario_run`'s `script_send` and the run is still registered
 // at the deadline; drop the `send_cancelled` branch from
