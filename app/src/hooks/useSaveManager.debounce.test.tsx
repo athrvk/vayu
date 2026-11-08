@@ -31,7 +31,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useSaveManager } from "./useSaveManager";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -74,7 +74,7 @@ function deferred() {
 describe("the auto-save delay as a debounce", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useClientSettingsStore.setState({ autoSave: { enabled: true, delayMs: 5000 } });
 	});
 

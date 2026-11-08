@@ -9,31 +9,25 @@
  */
 
 /**
- * The Dock's "Unsaved changes" line reads only `useSaveStore`'s store-wide
- * `status`, never a context's own `hasPendingChanges` (see save-store.ts) -
- * so a registered context that never touches `status` is invisible to it.
- * `AuthTab`, `InfoTab` and `ScriptTab` register through this hook and never
- * called `markPendingSave`/`completeSaveThenIdle` themselves (#1483): every
- * collection editor could sit dirty for as long as the app ran without the
- * Dock ever saying so.
+ * The Dock's "Unsaved changes" line is derived from what each id reports to
+ * `useSaveStore`, never from a context's own `hasPendingChanges` (see
+ * save-store.ts) - so a registered context that reports nothing is invisible
+ * to it. `AuthTab`, `InfoTab` and `ScriptTab` register through this hook and
+ * reported nothing themselves (#1483): every collection editor could sit dirty
+ * for as long as the app ran without the Dock ever saying so.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SaveBlockedError } from "@/lib/elements";
 import { useToastStore } from "@/stores/toast-store";
 import { act, renderHook } from "@testing-library/react";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
 import { useDraftSaveContext } from "./useDraftSaveContext";
 import { useEntityDraft } from "./useEntityDraft";
 
 beforeEach(() => {
-	useSaveStore.setState({
-		status: "idle",
-		lastErrorMessage: null,
-		contexts: new Map(),
-		activeContextId: null,
-	});
+	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 });
 
@@ -91,11 +85,40 @@ describe("useDraftSaveContext's Dock status wiring", () => {
 	it("never mistakes a different entity's abandoned edit for a completed save", () => {
 		// Mutation check: dropping the `prev.id === id` guard turns this "saved" -
 		// as if switching away from a dirty draft with no save in between were
-		// itself a save. Left "pending" is the safer of the two wrong answers.
+		// itself a save. The switch reseeds the draft, so the abandoned edit no
+		// longer exists to be unsaved.
 		const { rerender } = mount({ id: "a", isDirty: true });
 		expect(useSaveStore.getState().status).toBe("pending");
 
 		rerender({ id: "b", isDirty: false });
+
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("stops counting the draft as unsaved once the editor unmounts", () => {
+		// Mutation check: dropping the discard on teardown leaves the Dock on
+		// "Unsaved changes" for a draft nothing can save any more.
+		const { unmount } = mount({ id: "a", isDirty: true });
+
+		unmount();
+
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("keeps the draft counted when only its name changes", () => {
+		const { rerender } = renderHook(
+			({ name }: { name: string }) =>
+				useDraftSaveContext({
+					id: "a",
+					name,
+					isDirty: true,
+					isActive: true,
+					save: () => Promise.resolve(),
+				}),
+			{ initialProps: { name: "Acme auth" } }
+		);
+
+		rerender({ name: "Acme Corp auth" });
 
 		expect(useSaveStore.getState().status).toBe("pending");
 	});
@@ -163,12 +186,7 @@ describe("a discarded draft is not a save (#1931)", () => {
 	});
 
 	it("leaves another editor's unsaved edit showing", () => {
-		useSaveStore.getState().registerContext({
-			id: "sibling",
-			name: "Sibling",
-			save: () => Promise.resolve(),
-			hasPendingChanges: true,
-		});
+		useSaveStore.getState().reportPending("sibling");
 		const { result } = mountEditor("stored");
 		act(() => result.current.setDraft("edited"));
 
@@ -272,6 +290,17 @@ describe("useDraftSaveContext's save verdict", () => {
 
 		expect(useSaveStore.getState().status).toBe("error");
 		expect(useSaveStore.getState().lastErrorMessage).toContain("boom");
+		expect(useToastStore.getState().toasts).toHaveLength(1);
+	});
+
+	it("is toasted once when the store's flush runs it", async () => {
+		// The hook reports the failure and resolves with the verdict, so the
+		// store has nothing left to publish.
+		mount({ id: "a", isDirty: true }, () => Promise.reject(new Error("boom")));
+
+		await act(() => useSaveStore.getState().flushAll());
+
+		expect(useToastStore.getState().toasts).toHaveLength(1);
 	});
 
 	it("reports a resolved save as saved", async () => {
@@ -296,6 +325,8 @@ describe("how a draft save's rejection is reported (#2423)", () => {
 		expect(useSaveStore.getState().lastErrorMessage).toBe(
 			"Couldn't save Test editor - The disk holding Vayu's data is full"
 		);
+		// Mutation check: reporting the failure without its cause clears this.
+		expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
 	});
 
 	it("is a plain failure for any other rejection", async () => {

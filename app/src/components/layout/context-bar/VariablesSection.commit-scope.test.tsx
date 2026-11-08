@@ -35,7 +35,7 @@ import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import type { Collection, Environment, ResolvedVariable, VariableValue } from "@/types";
 
 type Handlers = { onError: (e: unknown) => void; onSettled: () => void };
@@ -179,7 +179,7 @@ beforeEach(() => {
 	environmentMutate.mockReset();
 	collectionMutate.mockReset();
 	useToastStore.setState({ toasts: [] });
-	useSaveStore.getState().reset();
+	resetSaveStoreForTests();
 	resolved = {};
 });
 

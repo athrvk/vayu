@@ -25,9 +25,9 @@
  * back in a tooltip (`lastErrorMessage`) rather than truncated inline - so the
  * toast is still the first word on a failure, and the Dock is the standing one.
  *
- * What this file guards: `failSave` is what eight call sites reach, and it is
- * the only thing that turns them into both a toast and the Dock's line. If that
- * link breaks, every one of those failures goes unreported.
+ * What this file guards: `reportFailed` is what every failing save reaches, and
+ * it is the only thing that turns one into both a toast and the Dock's line. If
+ * that link breaks, every one of those failures goes unreported.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -37,6 +37,7 @@ import { TooltipProvider } from "@/components/ui";
 import { TIMING } from "@/config/timing";
 import { Dock } from "./Dock";
 import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 
 // The Dock prints the app version, which Vite `define`s at build time; vitest
 // does not, so without this the component throws before it renders anything.
@@ -66,7 +67,7 @@ const liveSaveLine = () =>
 	document.querySelector("[data-slot='dock-save-status']")?.textContent?.trim() ?? null;
 
 beforeEach(() => {
-	useSaveStore.setState({ status: "idle", lastErrorMessage: null });
+	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 });
 
@@ -74,14 +75,14 @@ afterEach(cleanup);
 
 describe("save failure reporting", () => {
 	it("turns a failure into a toast carrying the reason", () => {
-		useSaveStore.getState().failSave("database is locked");
+		useSaveStore.getState().reportFailed("request-1", "database is locked");
 		const [toast] = useToastStore.getState().toasts;
 		expect(toast?.message).toBe("database is locked");
 		expect(toast?.variant).toBe("error");
 	});
 
 	it("still records the status, which the Dock reads", () => {
-		useSaveStore.getState().failSave("disk full");
+		useSaveStore.getState().reportFailed("request-1", "disk full");
 		expect(useSaveStore.getState().status).toBe("error");
 	});
 
@@ -90,7 +91,7 @@ describe("save failure reporting", () => {
 		// in a `title`. Both the toast and the Dock's tooltip have room for the
 		// whole thing.
 		const long = "database is locked: attempt 3 of 3 failed after 5000ms, giving up";
-		useSaveStore.getState().failSave(long);
+		useSaveStore.getState().reportFailed("request-1", long);
 		expect(useToastStore.getState().toasts[0]?.message).toBe(long);
 		expect(useSaveStore.getState().lastErrorMessage).toBe(long);
 	});
@@ -117,7 +118,7 @@ describe("save failure reporting", () => {
 });
 
 /**
- * `pending` was the same defect one field over: `markPendingSave` set it on
+ * `pending` was the same defect one field over: the store set it on
  * every edit and no surface rendered it. That is harmless while auto-save is
  * on - the status resolves itself within the delay - but auto-save is a
  * setting, and with it off nothing in the app said "unsaved" at all. The tab
@@ -137,9 +138,9 @@ describe("unsaved work is visible", () => {
 	});
 
 	it("is reachable from the store the editors actually call", () => {
-		// The seam: if `markPendingSave` stops setting "pending", the Dock case
+		// The seam: if `reportPending` stops deriving "pending", the Dock case
 		// above renders for nothing.
-		useSaveStore.getState().markPendingSave();
+		useSaveStore.getState().reportPending("request-1");
 		expect(useSaveStore.getState().status).toBe("pending");
 	});
 

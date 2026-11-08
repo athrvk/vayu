@@ -6,304 +6,392 @@
  */
 
 /**
- * The store holds one status for the whole app, so the rule is that only the
- * context which set a status clears it.
- *
- * `completeSaveThenIdle` is where that rule lives for a *success*, and it has
- * two halves. The status check keeps its reset off anything another surface
- * published in the meantime - the failure case below is what the Dock looked
- * like before: blank, next to a toast about a failure that had just happened.
- * The generation check keeps it off a *later* save's "saved", which is the half
- * `useSaveManager` used to hand-roll by clearing its own timer before arming the
- * next one; the four other callers never had it at all.
+ * The Dock's `status` is derived from what every id reported about its own edit
+ * (#3350), so no surface can clear another's failure and each failure is
+ * published once, by whoever saw it fail.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { TIMING } from "@/config/timing";
 import { ApiError } from "@/services/http-client";
-import { useSaveStore, type SaveOutcome } from "./save-store";
+import { resetSaveStoreForTests, useSaveStore, type SaveOutcome } from "./save-store";
 import { useToastStore } from "./toast-store";
 
-/** A registered context, dirty or clean, with a `save` nothing in here calls. */
-function registerContext(id: string, hasPendingChanges: boolean) {
-	useSaveStore.getState().registerContext({
-		id,
-		name: id,
-		save: () => Promise.resolve(),
-		hasPendingChanges,
-	});
+const store = () => useSaveStore.getState();
+const status = () => store().status;
+const toasts = () => useToastStore.getState().toasts;
+
+const diskFull = () =>
+	new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full");
+
+/** A registered context, dirty or clean, whose `save` resolves with `save`'s result. */
+function registerContext(
+	id: string,
+	hasPendingChanges: boolean,
+	save: () => Promise<SaveOutcome | void> = () => Promise.resolve()
+) {
+	store().registerContext({ id, name: id, save, hasPendingChanges });
 }
 
-describe("completeSaveThenIdle", () => {
+beforeEach(() => {
+	resetSaveStoreForTests();
+	useToastStore.setState({ toasts: [] });
+});
+
+describe("the derived status", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useToastStore.setState({ toasts: [] });
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it("shows 'saved' and returns to idle once nothing else has happened", () => {
-		useSaveStore.getState().completeSaveThenIdle();
-		expect(useSaveStore.getState().status).toBe("saved");
+	it("follows one id from pending through saving to saved, then idle", () => {
+		store().reportPending("a");
+		expect(status()).toBe("pending");
+		store().reportSaving("a");
+		expect(status()).toBe("saving");
+		store().reportSaved("a");
+		expect(status()).toBe("saved");
 
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS - 1);
-		expect(useSaveStore.getState().status).toBe("saved");
-
+		expect(status()).toBe("saved");
 		vi.advanceTimersByTime(1);
-		expect(useSaveStore.getState().status).toBe("idle");
+		expect(status()).toBe("idle");
 	});
 
-	it("leaves a failure another context published on screen", () => {
-		useSaveStore.getState().completeSaveThenIdle();
+	it("keeps a failure on one id through every kind of activity on another", () => {
+		// Mutation check: deriving from the most recent report instead of from
+		// every id turns this into "saved", then "idle".
+		store().reportFailed("a", "Couldn't save - database is locked");
 
-		useSaveStore.getState().failSave("delete failed");
+		for (const report of [
+			() => store().reportPending("b"),
+			() => store().reportSaving("b"),
+			() => store().reportSaved("b"),
+			() => store().discard("b"),
+		]) {
+			report();
+			expect(status()).toBe("error");
+			expect(store().lastErrorMessage).toBe("Couldn't save - database is locked");
+		}
+
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
-
-		expect(useSaveStore.getState().status).toBe("error");
+		expect(status()).toBe("error");
 	});
 
-	it("leaves a 'pending' from an edit made since", () => {
-		// "Unsaved changes" in the Dock is the only thing in the app that says so
-		// when auto-save is off, and it is not this save's to clear.
-		useSaveStore.getState().completeSaveThenIdle();
+	it("ends the failure once that id saves", () => {
+		store().reportFailed("a", "boom");
+		store().reportSaved("a");
 
-		useSaveStore.getState().markPendingSave();
-		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+		expect(status()).toBe("saved");
+		expect(store().lastErrorMessage).toBeNull();
+	});
 
-		expect(useSaveStore.getState().status).toBe("pending");
+	it("ranks a failure over a save in flight over an unsent edit over a recent save", () => {
+		store().reportSaved("d");
+		store().reportPending("c");
+		expect(status()).toBe("pending");
+		store().reportSaving("b");
+		expect(status()).toBe("saving");
+		store().reportFailed("a", "boom");
+		expect(status()).toBe("error");
+	});
+
+	it("describes the newest failure, and the older one once the newer is saved", () => {
+		store().reportFailed("a", "first");
+		store().reportFailed("b", "second");
+		expect(store().lastErrorMessage).toBe("second");
+
+		store().reportFailed("a", "first, again");
+		expect(store().lastErrorMessage).toBe("first, again");
+
+		store().reportSaved("a");
+		expect(store().lastErrorMessage).toBe("second");
+	});
+
+	it("does not demote a failure to pending on a further edit, but a retry in flight does", () => {
+		store().reportFailed("a", "boom");
+		store().reportPending("a");
+		expect(status()).toBe("error");
+
+		store().reportSaving("a");
+		expect(status()).toBe("saving");
+	});
+
+	it("shows saved only once no other id holds an edit", () => {
+		store().reportPending("request-1");
+		store().reportSaved("collection-tree-rename");
+		expect(status()).toBe("pending");
+
+		store().reportSaved("request-1");
+		expect(status()).toBe("saved");
 	});
 
 	it("does not let an earlier save cut a later one's indicator short", () => {
-		useSaveStore.getState().completeSaveThenIdle();
+		store().reportSaved("a");
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS / 2);
 
-		// A second save lands while the first indicator is still up. It gets the
-		// full duration, measured from itself.
-		useSaveStore.getState().completeSaveThenIdle();
+		store().reportSaved("b");
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS / 2);
-		expect(useSaveStore.getState().status).toBe("saved");
+		expect(status()).toBe("saved");
 
 		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS / 2);
-		expect(useSaveStore.getState().status).toBe("idle");
+		expect(status()).toBe("idle");
+	});
+
+	it("ends the saved indicator when an edit is made since, and does not bring it back on a discard", () => {
+		store().reportSaved("a");
+		store().reportPending("b");
+		store().discard("b");
+
+		expect(status()).toBe("idle");
+	});
+
+	it("keeps an id's report after it unregisters, until that id is settled", () => {
+		registerContext("request-a", true);
+		store().reportFailed("request-a", "boom");
+
+		store().unregisterContext("request-a");
+		expect(status()).toBe("error");
+
+		store().discard("request-a");
+		expect(status()).toBe("idle");
+	});
+
+	it("records whether a failure was the engine's 507", () => {
+		store().reportFailed("a", "Couldn't save - full", diskFull());
+		expect(store().lastErrorDiskFull).toBe(true);
+
+		store().reportFailed("b", "Couldn't save - busy", new ApiError(503, "unavailable", "busy"));
+		expect(store().lastErrorDiskFull).toBe(false);
+
+		store().reportSaved("b");
+		expect(store().lastErrorDiskFull).toBe(true);
+	});
+
+	it("raises one toast per reported failure", () => {
+		store().reportFailed("a", "boom");
+
+		expect(toasts()).toHaveLength(1);
+		expect(toasts()[0]).toMatchObject({ message: "boom", variant: "error" });
 	});
 });
 
-/**
- * The Dock shows one status for the whole app, so "Saved" is a claim about the
- * editor and not about the round trip that just returned. `runSave` has held
- * that rule since #1381 for the contexts that go through it; the collection
- * tree's renames go through nothing, and published their success straight onto
- * the shared status - "Saved", over a Tests script the user had not saved.
- */
-describe("completeSaveThenIdle with other unsaved work on screen", () => {
+describe("discard", () => {
+	it("withdraws an id's edit without claiming it saved", () => {
+		store().reportPending("a");
+		store().discard("a");
+
+		expect(status()).toBe("idle");
+	});
+
+	it("withdraws a failure the discarded edit left", () => {
+		store().reportFailed("a", "boom");
+		store().discard("a");
+
+		expect(status()).toBe("idle");
+		expect(store().lastErrorMessage).toBeNull();
+	});
+
+	it("leaves another id's edit showing", () => {
+		store().reportPending("a");
+		store().reportPending("b");
+		store().discard("a");
+
+		expect(status()).toBe("pending");
+	});
+});
+
+describe("runSave, through triggerSave", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useToastStore.setState({ toasts: [] });
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it("reports 'pending', not 'saved', for a direct writer while a context is dirty", () => {
-		registerContext("request-1", true);
+	const trigger = (id: string, save: () => Promise<SaveOutcome | void>) => {
+		registerContext(id, true, save);
+		store().setActiveContext(id);
+		return store().triggerSave();
+	};
 
-		// The shape of a sidebar rename: no registered context of its own.
-		useSaveStore.getState().startSaving();
-		useSaveStore.getState().completeSaveThenIdle();
+	it("reports a silent success as saved", async () => {
+		await trigger("settings", () => Promise.resolve());
 
-		expect(useSaveStore.getState().status).toBe("pending");
-
-		// And it stays that way - the dirty context clears it when it writes.
-		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
-		expect(useSaveStore.getState().status).toBe("pending");
+		expect(status()).toBe("saved");
 	});
 
-	it("still reports 'saved' for a direct writer when nothing else is dirty", () => {
-		// The control: a guard that never completes would pass the case above.
-		registerContext("request-1", false);
-
-		useSaveStore.getState().startSaving();
-		useSaveStore.getState().completeSaveThenIdle();
-
-		expect(useSaveStore.getState().status).toBe("saved");
-
-		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
-		expect(useSaveStore.getState().status).toBe("idle");
-	});
-
-	it("does not hold a context's own success against it", () => {
-		// A registered context's entry is refreshed by an effect, so it still
-		// reads dirty at the moment it reports the write that cleaned it. Naming
-		// itself is what keeps that from reading as "somebody else is dirty".
-		registerContext("request-1", true);
-
-		useSaveStore.getState().completeSaveThenIdle("request-1");
-
-		expect(useSaveStore.getState().status).toBe("saved");
-	});
-
-	it("clears a 'pending' it invented once the lagging registry catches up", () => {
-		// Two surfaces finishing within a render of each other: each reads the
-		// other's not-yet-refreshed entry as dirty, so both report `pending` over
-		// an editor that holds nothing. Left alone that would describe nothing
-		// until the next save.
-		registerContext("request-1", true);
-		useSaveStore.getState().completeSaveThenIdle("settings");
-		expect(useSaveStore.getState().status).toBe("pending");
-
-		registerContext("request-1", false);
-		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
-
-		expect(useSaveStore.getState().status).toBe("idle");
-	});
-
-	it("holds another context's unsaved work against a context's own success", () => {
-		registerContext("request-1", true);
-		registerContext("settings", true);
-
-		useSaveStore.getState().completeSaveThenIdle("settings");
-
-		expect(useSaveStore.getState().status).toBe("pending");
-	});
-});
-
-/**
- * `flushAll` is what the quit/window-close path (#1489) and a tab close read
- * to decide whether closing would discard something - it used to resolve to
- * `undefined` regardless of what happened, so a down or hung engine at quit
- * looked identical to a clean save.
- */
-describe("discardPendingSave", () => {
-	beforeEach(() => {
-		useSaveStore.setState({
-			status: "idle",
-			lastErrorMessage: null,
-			contexts: new Map(),
-			activeContextId: null,
+	it("publishes a failure once when the context reported it and then rejected", async () => {
+		// The variables editor's shape: it reports its own failure, worded its
+		// own way, then rejects. The toast store folds identical messages into
+		// one, so only differing wording shows the second toast. Mutation check:
+		// dropping the "already reported" test in the rejection path raises it.
+		await trigger("variables", () => {
+			store().reportFailed("variables", "database is locked");
+			return Promise.reject(new Error("database is locked"));
 		});
+
+		expect(toasts()).toHaveLength(1);
+		expect(status()).toBe("error");
+		expect(store().lastErrorMessage).toBe("database is locked");
 	});
 
-	it("takes the Dock from pending back to idle", () => {
-		registerContext("a", true);
-		useSaveStore.getState().markPendingSave();
+	it("publishes a rejection the context did not report", async () => {
+		await trigger("settings", () => Promise.reject(new Error("offline")));
 
-		useSaveStore.getState().discardPendingSave("a");
-
-		expect(useSaveStore.getState().status).toBe("idle");
+		expect(toasts()).toHaveLength(1);
+		expect(store().lastErrorMessage).toBe("Couldn't save - offline");
 	});
 
-	it("clears an error left by the discarded edit's failed save", () => {
-		registerContext("a", true);
-		useSaveStore.setState({ status: "error", lastErrorMessage: "boom" });
+	it("publishes a rejection again when only an earlier save had reported a failure", async () => {
+		store().reportFailed("settings", "Couldn't save - the first time");
+		await trigger("settings", () => Promise.reject(new Error("the second time")));
 
-		useSaveStore.getState().discardPendingSave("a");
-
-		expect(useSaveStore.getState().status).toBe("idle");
-		expect(useSaveStore.getState().lastErrorMessage).toBeNull();
+		expect(toasts()).toHaveLength(2);
+		expect(store().lastErrorMessage).toBe("Couldn't save - the second time");
 	});
 
-	it("leaves the status to another context that still holds an edit", () => {
-		registerContext("a", true);
-		registerContext("b", true);
-		useSaveStore.getState().markPendingSave();
+	it("leaves the publication of a returned failure verdict to the context", async () => {
+		await trigger("inbox", () => {
+			store().reportFailed("inbox", "Couldn't apply");
+			return Promise.resolve("failed");
+		});
 
-		useSaveStore.getState().discardPendingSave("a");
-
-		expect(useSaveStore.getState().status).toBe("pending");
+		expect(toasts()).toHaveLength(1);
 	});
 
-	it("leaves a save in flight or just landed alone", () => {
-		registerContext("a", true);
-		for (const status of ["saving", "saved"] as const) {
-			useSaveStore.setState({ status });
-			useSaveStore.getState().discardPendingSave("a");
-			expect(useSaveStore.getState().status).toBe(status);
-		}
+	it("does not paint saved over a failure a silent context reported", async () => {
+		await trigger("settings", () => {
+			store().reportFailed("settings", "boom");
+			return Promise.resolve();
+		});
+
+		expect(status()).toBe("error");
+	});
+
+	it("clears an earlier failure when the context saves cleanly this time", async () => {
+		// The entity-switch flush's re-registered draft (#1489): its save is the
+		// raw saver, which reports nothing, so the store's verdict is what clears
+		// the failure that put it back in the registry.
+		store().reportFailed("request-a", "Couldn't save - offline");
+		await trigger("request-a", () => Promise.resolve());
+
+		expect(status()).toBe("saved");
+		expect(store().unsaved.has("request-a")).toBe(false);
 	});
 });
 
 describe("flushAll", () => {
-	beforeEach(() => {
-		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useToastStore.setState({ toasts: [] });
-	});
-
 	it("reports nothing when nothing is dirty", async () => {
 		registerContext("request-1", false);
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 0,
-			failed: 0,
-			pending: 0,
-		});
+		await expect(store().flushAll()).resolves.toEqual({ saved: 0, failed: 0, pending: 0 });
 	});
 
 	it("counts every dirty context that saved clean", async () => {
 		registerContext("request-1", true);
 		registerContext("settings", true);
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 2,
-			failed: 0,
-			pending: 0,
-		});
+		await expect(store().flushAll()).resolves.toEqual({ saved: 2, failed: 0, pending: 0 });
 	});
 
 	it("counts a rejecting save as failed, not saved", async () => {
 		registerContext("request-1", true);
-		useSaveStore.getState().registerContext({
-			id: "settings",
-			name: "settings",
-			save: () => Promise.reject(new Error("network error")),
-			hasPendingChanges: true,
-		});
+		registerContext("settings", true, () => Promise.reject(new Error("network error")));
 
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 1,
-			failed: 1,
-			pending: 0,
-		});
+		await expect(store().flushAll()).resolves.toEqual({ saved: 1, failed: 1, pending: 0 });
 	});
 
 	it("counts a context that resolves 'final' as failed, so the quit prompt still asks (#1889)", async () => {
-		useSaveStore.getState().registerContext({
-			id: "request-1",
-			name: "request-1",
-			save: () => {
-				useSaveStore.getState().failSave("Couldn't save - bad request");
-				return Promise.resolve("final");
-			},
-			hasPendingChanges: true,
+		registerContext("request-1", true, () => {
+			store().reportFailed("request-1", "Couldn't save - bad request");
+			return Promise.resolve("final");
 		});
 
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 0,
-			failed: 1,
-			pending: 0,
+		await expect(store().flushAll()).resolves.toEqual({ saved: 0, failed: 1, pending: 0 });
+	});
+
+	it("counts a context that resolves 'pending' as pending, not saved", async () => {
+		// A save the editor declined to send (`SaveBlockedError`) is neither a
+		// success nor a failure, and the quit prompt must not call it either.
+		registerContext("request-1", true, () => Promise.resolve("pending"));
+
+		await expect(store().flushAll()).resolves.toEqual({ saved: 0, failed: 0, pending: 1 });
+		expect(status()).toBe("pending");
+	});
+
+	it("counts a silent context that reported pending as pending", async () => {
+		registerContext("variables", true, async () => {
+			await Promise.resolve();
+			store().reportPending("variables");
+		});
+		registerContext("settings", true);
+
+		await expect(store().flushAll()).resolves.toEqual({ saved: 1, failed: 0, pending: 1 });
+		expect(status()).toBe("pending");
+	});
+
+	it("gives each context its own verdict when two save in the same tick", async () => {
+		registerContext("request-1", true, async () => {
+			await Promise.resolve();
+			return "saved";
+		});
+		registerContext("settings", true, () => {
+			store().reportFailed("settings", "engine down");
+			return Promise.resolve();
+		});
+
+		await expect(store().flushAll()).resolves.toEqual({ saved: 1, failed: 1, pending: 0 });
+		expect(status()).toBe("error");
+	});
+
+	it("fills in saved for a context that reports it but publishes nothing", async () => {
+		registerContext("draft", true, () => Promise.resolve("saved"));
+		store().reportPending("draft");
+
+		await store().flushAll();
+
+		expect(status()).toBe("saved");
+	});
+
+	describe("a draft the entity-switch flush put back after it failed (#1489)", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("is clean once a flush saves it, and the Dock goes back to idle", async () => {
+			// Mutation check: judging the silent save by the earlier failure still
+			// on the id (rather than by what it reported during this save) leaves
+			// the Dock on "Not saved" here.
+			store().reportFailed("request-a", "Couldn't save - offline");
+			registerContext("request-a", true);
+
+			await expect(store().flushAll()).resolves.toEqual({ saved: 1, failed: 0, pending: 0 });
+
+			expect(status()).toBe("saved");
+			vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+			expect(status()).toBe("idle");
 		});
 	});
 
 	describe("naming the cause of a failure (#2423)", () => {
-		const registerOutcome = (id: string, outcome: SaveOutcome) => {
-			useSaveStore.getState().registerContext({
-				id,
-				name: id,
-				save: () => {
-					useSaveStore.getState().failSave(`Couldn't save ${id}`);
-					return Promise.resolve(outcome);
-				},
-				hasPendingChanges: true,
+		const registerOutcome = (id: string, outcome: SaveOutcome) =>
+			registerContext(id, true, () => {
+				store().reportFailed(id, `Couldn't save ${id}`);
+				return Promise.resolve(outcome);
 			});
-		};
 
 		it("carries 'disk-full' when it explains the only failure", async () => {
 			registerOutcome("request-1", "disk-full");
 
-			await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			await expect(store().flushAll()).resolves.toEqual({
 				saved: 0,
 				failed: 1,
 				pending: 0,
@@ -315,7 +403,7 @@ describe("flushAll", () => {
 			registerOutcome("request-1", "disk-full");
 			registerOutcome("request-2", "disk-full");
 
-			await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+			await expect(store().flushAll()).resolves.toEqual({
 				saved: 0,
 				failed: 2,
 				pending: 0,
@@ -327,7 +415,7 @@ describe("flushAll", () => {
 			registerOutcome("request-1", "disk-full");
 			registerOutcome("request-2", "failed");
 
-			const result = await useSaveStore.getState().flushAll();
+			const result = await store().flushAll();
 
 			expect(result).toEqual({ saved: 0, failed: 2, pending: 0 });
 			expect(result).not.toHaveProperty("reason");
@@ -337,27 +425,15 @@ describe("flushAll", () => {
 			registerOutcome("request-1", "disk-full");
 			registerOutcome("request-2", "final");
 
-			expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
+			expect(await store().flushAll()).not.toHaveProperty("reason");
 		});
 
 		it("keeps the cause when the failure sits beside a saved or pending context", async () => {
-			// Each reports its own verdict: a silent context would be judged by the
-			// shared status, which the failing sibling has already set to "error".
-			useSaveStore.getState().registerContext({
-				id: "request-1",
-				name: "request-1",
-				save: () => Promise.resolve("saved"),
-				hasPendingChanges: true,
-			});
-			useSaveStore.getState().registerContext({
-				id: "settings",
-				name: "settings",
-				save: () => Promise.resolve("pending"),
-				hasPendingChanges: true,
-			});
+			registerContext("request-1", true, () => Promise.resolve("saved"));
+			registerContext("settings", true, () => Promise.resolve("pending"));
 			registerOutcome("request-2", "disk-full");
 
-			expect(await useSaveStore.getState().flushAll()).toEqual({
+			expect(await store().flushAll()).toEqual({
 				saved: 1,
 				failed: 1,
 				pending: 1,
@@ -365,229 +441,139 @@ describe("flushAll", () => {
 			});
 		});
 
-		describe("a context whose save rejects", () => {
-			const rejectWith = (id: string, error: Error) =>
-				useSaveStore.getState().registerContext({
-					id,
-					name: id,
-					save: () => Promise.reject(error),
-					hasPendingChanges: true,
-				});
+		it("is disk-full when a rejection is the engine's 507", async () => {
+			// Mutation check: reading the cause from anything but the error the
+			// save rejected with drops both the flag and the reason.
+			registerContext("request-1", true, () => Promise.reject(diskFull()));
 
-			it("is disk-full when the engine answered 507", async () => {
-				rejectWith(
-					"request-1",
-					new ApiError(
-						507,
-						"insufficient_storage",
-						"The disk holding Vayu's data is full"
-					)
-				);
+			await expect(store().flushAll()).resolves.toEqual({
+				saved: 0,
+				failed: 1,
+				pending: 0,
+				reason: "disk-full",
+			});
+			expect(store().lastErrorDiskFull).toBe(true);
+		});
 
-				await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-					saved: 0,
-					failed: 1,
-					pending: 0,
-					reason: "disk-full",
-				});
+		it("names no cause for any other rejection", async () => {
+			registerContext("request-1", true, () =>
+				Promise.reject(new ApiError(503, "unavailable", "busy"))
+			);
+
+			const result = await store().flushAll();
+
+			expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+			expect(result).not.toHaveProperty("reason");
+			expect(store().lastErrorDiskFull).toBe(false);
+		});
+
+		it("is disk-full when a silent context reported the 507 as its cause (#2685)", async () => {
+			registerContext("settings", true, () => {
+				store().reportFailed("settings", "Couldn't save settings", diskFull());
+				return Promise.resolve();
 			});
 
-			it("names no cause for any other rejection", async () => {
-				rejectWith("request-1", new ApiError(503, "unavailable", "busy"));
-
-				const result = await useSaveStore.getState().flushAll();
-
-				expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
-				expect(result).not.toHaveProperty("reason");
+			await expect(store().flushAll()).resolves.toEqual({
+				saved: 0,
+				failed: 1,
+				pending: 0,
+				reason: "disk-full",
 			});
 		});
 
-		describe("a context that publishes its failure through failSave and resolves (#2685)", () => {
-			const diskFull = () =>
-				new ApiError(507, "insufficient_storage", "The disk holding Vayu's data is full");
-
-			const registerSilent = (id: string, cause?: unknown) =>
-				useSaveStore.getState().registerContext({
-					id,
-					name: id,
-					save: () => {
-						useSaveStore.getState().failSave(`Couldn't save ${id}`, cause);
-						return Promise.resolve();
-					},
-					hasPendingChanges: true,
-				});
-
-			it("is disk-full when failSave was handed the 507", async () => {
-				registerSilent("settings", diskFull());
-
-				await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-					saved: 0,
-					failed: 1,
-					pending: 0,
-					reason: "disk-full",
-				});
+		it("is failed, with no cause, when a silent context reported no cause", async () => {
+			registerContext("settings", true, () => {
+				store().reportFailed("settings", "Couldn't save settings");
+				return Promise.resolve();
 			});
 
-			it("is failed, with no cause, when failSave was handed none", async () => {
-				registerSilent("settings");
+			const result = await store().flushAll();
 
-				const result = await useSaveStore.getState().flushAll();
-
-				expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
-				expect(result).not.toHaveProperty("reason");
-			});
-
-			it("is failed, with no cause, when failSave was handed any other error", async () => {
-				registerSilent("settings", new ApiError(503, "unavailable", "busy"));
-
-				expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
-			});
-
-			it("drops the cause when a later cause-less failure replaces it", async () => {
-				useSaveStore.getState().failSave("Couldn't save", diskFull());
-				expect(useSaveStore.getState().lastErrorDiskFull).toBe(true);
-
-				registerSilent("settings");
-				const result = await useSaveStore.getState().flushAll();
-
-				expect(useSaveStore.getState().lastErrorDiskFull).toBe(false);
-				expect(result).not.toHaveProperty("reason");
-			});
-
-			it("clears the cause on reset", () => {
-				useSaveStore.getState().failSave("Couldn't save", diskFull());
-
-				useSaveStore.getState().reset();
-
-				expect(useSaveStore.getState().lastErrorDiskFull).toBe(false);
-			});
+			expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+			expect(result).not.toHaveProperty("reason");
 		});
 
 		it("has no 'reason' key when nothing failed", async () => {
 			registerContext("request-1", true);
 
-			expect(await useSaveStore.getState().flushAll()).not.toHaveProperty("reason");
+			expect(await store().flushAll()).not.toHaveProperty("reason");
 		});
 	});
+});
 
-	it("counts a context that resolves 'pending' as pending, not saved", async () => {
-		// A save the editor declined to send (`SaveBlockedError`) is neither a
-		// success nor a failure, and the quit prompt must not call it either.
-		useSaveStore.getState().registerContext({
-			id: "request-1",
-			name: "request-1",
-			save: () => {
-				useSaveStore.getState().markPendingSave();
-				return Promise.resolve("pending");
-			},
-			hasPendingChanges: true,
+/**
+ * The unkeyed wrappers keep the old shared-status behaviour for the callers
+ * #3350's second half has not moved yet, inside one slot of their own. These
+ * cases go with them.
+ */
+describe("the unkeyed wrappers", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("cannot clear a keyed failure", () => {
+		store().reportFailed("request-1", "boom");
+
+		store().startSaving();
+		store().completeSaveThenIdle();
+		store().setStatus("idle");
+
+		expect(status()).toBe("error");
+	});
+
+	it("reports pending for a direct writer while a silent context is dirty", () => {
+		registerContext("settings", true);
+
+		store().startSaving();
+		store().completeSaveThenIdle();
+
+		expect(status()).toBe("pending");
+	});
+
+	it("does not hold a context's own success against it", () => {
+		registerContext("settings", true);
+
+		store().completeSaveThenIdle("settings");
+
+		expect(status()).toBe("saved");
+	});
+
+	it("clears a pending it invented once the lagging registry catches up", () => {
+		registerContext("settings", true);
+		store().completeSaveThenIdle("variables");
+		expect(status()).toBe("pending");
+
+		registerContext("settings", false);
+		vi.advanceTimersByTime(TIMING.SAVED_STATUS_DURATION_MS);
+
+		expect(status()).toBe("idle");
+	});
+
+	it("clears only a pending with setStatus('idle'), never a failure", () => {
+		store().markPendingSave();
+		store().setStatus("idle");
+		expect(status()).toBe("idle");
+
+		store().failSave("boom");
+		store().setStatus("idle");
+		expect(status()).toBe("error");
+	});
+
+	it("judges a silent context by a failure it published unkeyed during its save", async () => {
+		registerContext("settings", true, () => {
+			store().failSave("Couldn't save settings", diskFull());
+			return Promise.resolve();
 		});
 
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
+		await expect(store().flushAll()).resolves.toEqual({
 			saved: 0,
-			failed: 0,
-			pending: 1,
-		});
-		expect(useSaveStore.getState().status).toBe("pending");
-	});
-
-	it("counts a context that reports nothing but published 'pending' as pending", async () => {
-		useSaveStore.getState().registerContext({
-			id: "settings",
-			name: "settings",
-			save: () => {
-				useSaveStore.getState().markPendingSave();
-				return Promise.resolve();
-			},
-			hasPendingChanges: true,
-		});
-
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 0,
-			failed: 0,
-			pending: 1,
-		});
-	});
-
-	it("gives each context its own verdict when two save in the same tick", async () => {
-		// The status is one slot: the failing context publishes "error" while the
-		// other is still resolving, and reading the slot back charged the failure
-		// to both.
-		useSaveStore.getState().registerContext({
-			id: "request-1",
-			name: "request-1",
-			save: async () => {
-				await Promise.resolve();
-				return "saved";
-			},
-			hasPendingChanges: true,
-		});
-		useSaveStore.getState().registerContext({
-			id: "settings",
-			name: "settings",
-			save: () => {
-				useSaveStore.getState().failSave("engine down");
-				return Promise.resolve("failed");
-			},
-			hasPendingChanges: true,
-		});
-
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 1,
 			failed: 1,
 			pending: 0,
+			reason: "disk-full",
 		});
-		expect(useSaveStore.getState().status).toBe("error");
-	});
-
-	it("does not read one context's invented 'pending' as another's own", async () => {
-		// Each success is held against the other, still-dirty context, so the
-		// first to resolve leaves "pending" behind for the second to find.
-		useSaveStore.getState().registerContext({
-			id: "draft",
-			name: "draft",
-			save: () => Promise.resolve("saved"),
-			hasPendingChanges: true,
-		});
-		registerContext("settings", true);
-
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 2,
-			failed: 0,
-			pending: 0,
-		});
-	});
-
-	it("still counts a genuine 'pending' when a sibling void context saved first", async () => {
-		registerContext("settings", true);
-		useSaveStore.getState().registerContext({
-			id: "variables",
-			name: "variables",
-			save: async () => {
-				await Promise.resolve();
-				useSaveStore.getState().markPendingSave();
-			},
-			hasPendingChanges: true,
-		});
-
-		await expect(useSaveStore.getState().flushAll()).resolves.toEqual({
-			saved: 1,
-			failed: 0,
-			pending: 1,
-		});
-		expect(useSaveStore.getState().status).toBe("pending");
-	});
-
-	it("fills in 'saved' for a context that reports it but publishes nothing", async () => {
-		useSaveStore.getState().registerContext({
-			id: "draft",
-			name: "draft",
-			save: () => Promise.resolve("saved"),
-			hasPendingChanges: true,
-		});
-
-		await useSaveStore.getState().flushAll();
-
-		expect(useSaveStore.getState().status).toBe("saved");
 	});
 });

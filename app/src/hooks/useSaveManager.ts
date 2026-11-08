@@ -11,13 +11,18 @@
  * Centralized auto-save manager that:
  * - Handles debounced auto-save for any saveable entity
  * - Registers with centralized save store for app-wide Ctrl/Cmd+S
- * - Updates centralized save status for UI feedback
+ * - Reports its own edit's state to the save store, which the Dock reads
  * - Manages save queue and prevents duplicate saves
  */
 
 import { useEffect, useRef, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
+import {
+	isFailedOutcome,
+	useSaveStore,
+	type SaveContext,
+	type SaveOutcome,
+} from "@/stores/save-store";
 import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
@@ -27,12 +32,47 @@ import { isDiskFullError } from "@/lib/disk-full";
 import { isFinalError } from "@/lib/query-client";
 
 /**
- * The registry id this hook saves under. Three places in this file need it -
- * the registration, the `hasPendingChanges` update, and the success this hook
- * reports for itself - and a fourth spelling of the same template string is how
- * the three drift apart.
+ * The id this hook registers and reports under. Every registration, update and
+ * report in this file needs it, and a second spelling of the template string is
+ * how they drift apart.
  */
 const saveContextId = (entityId: string) => `request-${entityId}`;
+
+/**
+ * Where an entity-switch or unmount flush leaves its edit once the pane that
+ * held it is gone. A failure goes back in the registry so the reconnect flush
+ * (#1479) and the quit flush (#1489) can retry it, and that retry retires the
+ * entry once it lands - left registered dirty, every later reconnect would
+ * re-send the stale draft. A save the editor held back has nothing left to
+ * send it (the provider reseeds from the next entity), so its id stops
+ * counting as unsaved. Either way, a pane that came back to the entity owns
+ * the id again and is left alone.
+ */
+function settleGoodbyeFlush(
+	contextId: string,
+	name: string,
+	save: () => Promise<void>,
+	outcome: SaveOutcome | void
+) {
+	const store = useSaveStore.getState();
+	if (store.contexts.has(contextId)) return;
+	if (outcome === "pending") {
+		store.discard(contextId);
+		return;
+	}
+	if (!isFailedOutcome(outcome)) return;
+	const retry: SaveContext = {
+		id: contextId,
+		name,
+		hasPendingChanges: true,
+		save: async () => {
+			await save();
+			const { contexts, unregisterContext } = useSaveStore.getState();
+			if (contexts.get(contextId) === retry) unregisterContext(contextId);
+		},
+	};
+	store.registerContext(retry);
+}
 
 interface UseSaveManagerOptions {
 	/** Unique identifier for this save context (e.g., request ID) */
@@ -76,11 +116,10 @@ export function useSaveManager({
 	enabled = true,
 }: UseSaveManagerOptions): UseSaveManagerReturn {
 	const status = useSaveStore((s) => s.status);
-	const markPendingSave = useSaveStore((s) => s.markPendingSave);
-	const startSaving = useSaveStore((s) => s.startSaving);
-	const completeSaveThenIdle = useSaveStore((s) => s.completeSaveThenIdle);
-	const failSave = useSaveStore((s) => s.failSave);
-	const reset = useSaveStore((s) => s.reset);
+	const reportPending = useSaveStore((s) => s.reportPending);
+	const reportSaving = useSaveStore((s) => s.reportSaving);
+	const reportSaved = useSaveStore((s) => s.reportSaved);
+	const reportFailed = useSaveStore((s) => s.reportFailed);
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
 	const updateContext = useSaveStore((s) => s.updateContext);
@@ -179,11 +218,12 @@ export function useSaveManager({
 	// between, which is the right trade against reporting a save that never
 	// happened.
 	//
-	// The verdict is returned as well as published: `status` is one slot shared
-	// with every other surface, so a caller that needs to know what became of
-	// *this* save (`flushAll`) cannot read it back from there.
+	// The verdict is returned as well as reported: `status` is derived from
+	// every surface's reports, so a caller that needs to know what became of
+	// *this* save (`flushAll`, the retry) cannot read it back from there.
 	const performSave = useCallback((): Promise<SaveOutcome | void> => {
 		if (!entityId) return Promise.resolve();
+		const contextId = saveContextId(entityId);
 
 		// Bind the saver now, not when the queue reaches us. An entity switch
 		// flushes from its effect cleanup, which runs before the next render
@@ -196,7 +236,7 @@ export function useSaveManager({
 		const savedGeneration = changeTokenRef.current;
 
 		const run = saveQueueRef.current.then(async (): Promise<SaveOutcome> => {
-			startSaving();
+			reportSaving(contextId);
 			try {
 				await save();
 				// "Saved" is a claim about the editor, not about the round trip.
@@ -206,24 +246,26 @@ export function useSaveManager({
 				// edit nobody had persisted. The caller re-arms the save; this
 				// only refuses to mislabel it.
 				if (changeTokenRef.current !== savedGeneration) {
-					markPendingSave();
+					reportPending(contextId);
 					return "pending";
 				}
-				completeSaveThenIdle(saveContextId(entityId));
+				reportSaved(contextId);
 				return "saved";
 			} catch (error) {
 				if (error instanceof SaveBlockedError) {
 					// Not a failure - the caller chose not to send. Report the same
 					// "still dirty, nothing in flight" state a plain unsaved edit
 					// has, so the status bar reads correctly and `attemptAutoSave`
-					// (which checks for `"error"`) does not arm a retry against a
-					// payload that will not have changed by the next tick.
-					markPendingSave();
+					// does not arm a retry against a payload that will not have
+					// changed by the next tick.
+					reportPending(contextId);
 					return "pending";
 				}
 				console.error("Save failed:", error);
-				failSave(
-					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save"
+				reportFailed(
+					contextId,
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
+					error
 				);
 
 				// A 4xx is the engine's verdict on this payload, not a hiccup - a
@@ -244,7 +286,7 @@ export function useSaveManager({
 		});
 		saveQueueRef.current = run;
 		return run;
-	}, [entityId, startSaving, completeSaveThenIdle, markPendingSave, failSave, queryClient]);
+	}, [entityId, reportSaving, reportSaved, reportPending, reportFailed, queryClient]);
 
 	/**
 	 * The auto-save path specifically, not every `performSave` caller.
@@ -257,18 +299,19 @@ export function useSaveManager({
 	 * this wrapper.
 	 *
 	 * `performSave` swallows its own errors and always resolves, so a failure
-	 * is read back from the store status it just published rather than from a
-	 * rejection; the outcome only says whether that failure is worth retrying.
+	 * is read from the verdict it returns rather than from a rejection. Never
+	 * from the store's `status`: that is every surface's at once, and another
+	 * surface's failure is not this save's to retry.
 	 */
 	const attemptAutoSave = useCallback(async () => {
 		const outcome = await performSave();
-		if (useSaveStore.getState().status !== "error") {
+		if (!isFailedOutcome(outcome)) {
 			retryAttemptRef.current = 0;
 			clearRetry();
 			return;
 		}
 		// The engine rejected this payload (#1889) and would again: re-sending it
-		// only re-toasts. The status stays "error" so the Dock keeps saying "Not
+		// only re-toasts. The failure stays reported so the Dock keeps saying "Not
 		// saved", and the next edit re-arms the debounce above.
 		if (outcome === "final") {
 			retryAttemptRef.current = 0;
@@ -329,15 +372,13 @@ export function useSaveManager({
 		updateContext(contextId, { hasPendingChanges: hasChanges, save: performSave });
 	}, [entityId, enabled, hasChanges, performSave, updateContext]);
 
-	// Reset on entity change; flush pending edits for the *previous* entity in
-	// the cleanup. Cleanups run before the new render's ref-update effects, so
+	// Flush pending edits for the *previous* entity on an entity change or
+	// unmount. Cleanups run before the new render's ref-update effects, so
 	// performSave (keyed on the old entityId via useCallback) still sees the
 	// old onSaveRef - an edit still inside the auto-save delay when you switch
-	// is saved, not dropped. (The delay is the user's setting, default 5s; this
-	// said "<3s", the value of a dead constant in `config/timing.ts` that the
-	// hook never read. That constant is gone.)
+	// is saved, not dropped. Nothing is reset on the way in: each id's report
+	// is its own, so the new entity starts clean without clearing anyone's.
 	useEffect(() => {
-		reset();
 		return () => {
 			if (timeoutRef.current) {
 				clearTimeout(timeoutRef.current);
@@ -348,28 +389,17 @@ export function useSaveManager({
 			// so a failure here reports once and does not arm a new one - there
 			// is no pane left to retry into once this cleanup has run.
 			clearRetry();
-			if (entityId && enabledRef.current && hasChangesRef.current) {
-				// The sibling registration effect has already unregistered this
-				// context by the time this runs, so a failure here has nowhere left
-				// to be retried from (#1489) - `flushAll`'s reconnect trigger (#1479)
-				// and the quit flush both walk the registry, not the unmounted pane.
-				// Re-registering under the same id puts the draft back where either
-				// can find it; a clean save needs nothing put back.
-				const contextId = saveContextId(entityId);
-				const save = onSaveRef.current;
-				void performSave().then(() => {
-					if (useSaveStore.getState().status === "error") {
-						registerContext({
-							id: contextId,
-							name: contextName || "Request",
-							save,
-							hasPendingChanges: true,
-						});
-					}
-				});
-			}
+			if (!entityId || !enabledRef.current || !hasChangesRef.current) return;
+			// The sibling registration effect has already unregistered this
+			// context by the time this runs, so what the flush leaves behind is
+			// settled outside the registry.
+			const save = onSaveRef.current;
+			const name = contextName || "Request";
+			void performSave().then((outcome) =>
+				settleGoodbyeFlush(saveContextId(entityId), name, save, outcome)
+			);
 		};
-	}, [entityId, reset, performSave, clearRetry, contextName, registerContext]);
+	}, [entityId, performSave, clearRetry, contextName]);
 
 	// Force save (for manual triggers)
 	const forceSave = useCallback(async () => {
@@ -398,7 +428,7 @@ export function useSaveManager({
 
 		// Mark as pending regardless - the "unsaved changes" state (and manual
 		// save via Cmd+S) still applies even when auto-save is turned off.
-		markPendingSave();
+		reportPending(saveContextId(entityId));
 
 		// A new edit supersedes a retry a prior failure scheduled: the timer
 		// armed below covers saving it, so the stale one would only race a
@@ -433,7 +463,7 @@ export function useSaveManager({
 		hasChanges,
 		changeToken,
 		entityId,
-		markPendingSave,
+		reportPending,
 		attemptAutoSave,
 		autoSaveEnabled,
 		autoSaveDelayMs,

@@ -35,7 +35,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { useSaveManager } from "./useSaveManager";
 import { useClientSettingsStore } from "@/stores";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 function wrapper({ children }: { children: ReactNode }) {
@@ -68,7 +68,7 @@ function mountManager(onSave: () => Promise<void>) {
 describe("the auto-save delay chosen in Settings", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useClientSettingsStore.setState({ autoSave: { enabled: true, delayMs: 5000 } });
 	});
 
@@ -140,7 +140,7 @@ describe("the auto-save delay chosen in Settings", () => {
 describe("turning auto-save off in Settings", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useClientSettingsStore.setState({ autoSave: { enabled: false, delayMs: 5000 } });
 	});
 

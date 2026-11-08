@@ -13,7 +13,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ApiError } from "@/services/http-client";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import SettingsMain from "./SettingsMain";
 
@@ -102,7 +102,7 @@ describe("a settings write refused at quit", () => {
 	beforeEach(() => {
 		mutateAsync.mockClear();
 		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 

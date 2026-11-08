@@ -30,7 +30,7 @@ import { VariablesSection } from "./VariablesSection";
 import { TooltipProvider } from "@/components/ui";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { ApiError } from "@/services/http-client";
 import type { ResolvedVariable } from "@/types";
 
@@ -112,7 +112,7 @@ describe("VariablesSection - a rejected variable edit", () => {
 	beforeEach(() => {
 		globalsMutate.mockReset();
 		useToastStore.setState({ toasts: [] });
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 	});
 
 	it("toasts the engine's reason and puts the stored value back", () => {
@@ -167,7 +167,7 @@ describe("VariablesSection - a variable edit the engine answered 507 at quit (#2
 	beforeEach(() => {
 		globalsMutate.mockReset();
 		useToastStore.setState({ toasts: [] });
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 	});
 
 	/** Edit and blur with the write held in flight, then start the quit-time flush. */

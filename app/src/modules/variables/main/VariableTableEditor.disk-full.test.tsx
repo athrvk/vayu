@@ -13,7 +13,7 @@ import { render, fireEvent, screen, act } from "@testing-library/react";
 
 import { ApiError } from "@/services/http-client";
 import { TooltipProvider } from "@/components/ui";
-import { useSaveStore } from "@/stores/save-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import VariableTableEditor from "./VariableTableEditor";
 import type { Collection, VariableValue } from "@/types";
@@ -129,7 +129,7 @@ describe("a variable save refused at quit", () => {
 	beforeEach(() => {
 		updateCollection.mockClear();
 		useSaveStore.setState({ status: "idle", contexts: new Map(), activeContextId: null });
-		useSaveStore.getState().reset();
+		resetSaveStoreForTests();
 		useToastStore.setState({ toasts: [] });
 	});
 

@@ -25,6 +25,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
@@ -71,7 +72,7 @@ function renderTree() {
 beforeEach(() => {
 	deleteRequest.mockReset();
 	createCollection.mockReset();
-	useSaveStore.getState().reset();
+	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1"]) });
 });
