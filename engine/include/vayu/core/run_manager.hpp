@@ -34,6 +34,7 @@
 #include "vayu/core/load_strategy.hpp"
 #include "vayu/core/metrics_collector.hpp"
 #include "vayu/core/monitor.hpp"
+#include "vayu/core/run_phase.hpp"
 #include "vayu/core/scenario_plan.hpp"
 #include "vayu/core/schema_validation.hpp"
 #include "vayu/core/threshold_eval.hpp"
@@ -162,8 +163,9 @@ size_t max_ticks = constants::server::DEFAULT_MAX_LIVE_TICKS) {
  * `LOAD_STREAM_TIMEOUT_GRACE_MS` later (`curl_utils.cpp`), so a drain sized by
  * the timeout cancels a healthy stream long before its cap. A single-request
  * run is one or the other; a collection run can be both, which is
- * `collection_natural_end_drain_ms`. A user Stop does not drain at all and
- * never reads this.
+ * `collection_natural_end_drain_ms`. A Stop that latches while sending does
+ * not drain at all and never reads this; one that lands in the drain cancels
+ * it (`RunContext::request_stop`, #3341).
  */
 [[nodiscard]] inline int64_t
 natural_end_drain_ms (const std::optional<vayu::StreamBounds>& stream_bounds, int timeout_ms) {
@@ -413,8 +415,56 @@ struct RunContext {
     // follows, nothing for a step that sends what it was planned with. Empty
     // for a single-request run.
     std::vector<std::optional<size_t>> step_auth_refresh;
+    /// The cancel flag every strategy loop, think wait and refresh watchdog
+    /// polls. Written only by @ref request_stop, after the latch, so a reader
+    /// that sees it set finds the Stop latched too. It says "stop sending",
+    /// never what the run's outcome is: that is @ref stop_decides_outcome.
     std::atomic<bool> should_stop{ false };
     std::atomic<bool> is_running{ false };
+
+    /**
+     * @brief Ask the run to stop, from any thread (#3341).
+     *
+     * Safe to repeat: only the first call latches, but every call re-reads
+     * the phase, so one made after the worker reached the drain still cancels
+     * the event loop. The first call latches the phase it lands in; each
+     * call then raises `should_stop`
+     * and wakes the closed-loop controller. In the drain or later it also
+     * cancels the event loop, so a Stop cuts a natural-end drain short
+     * instead of waiting out its deadline; earlier, the strategy sees
+     * `should_stop` and the worker picks the cancelling stop itself. Never
+     * blocks: `EventLoop::cancel` only stores and wakes, so holding
+     * `event_loop_mtx` across it (what keeps the loop alive) is safe.
+     */
+    void request_stop ();
+
+    /// Moves the run's phase forward; see `RunPhase`. The run's worker only.
+    void advance_phase (RunPhase next) noexcept {
+        phase_latch_.advance (next);
+    }
+
+    /// Where the worker is now. No production code branches on it; tests wait
+    /// on it to know a run reached its drain.
+    [[nodiscard]] RunPhase phase () const noexcept {
+        return phase_latch_.phase ();
+    }
+
+    /// True when a Stop latched before the strategy returned on its own: the
+    /// run ends Stopped, its threshold verdict cannot fail it, and its
+    /// sending window is what it measured to the Stop. A Stop that lands in
+    /// the drain or later leaves the run's own end standing.
+    [[nodiscard]] bool stop_decides_outcome () const noexcept {
+        const auto latched = phase_latch_.stop_phase ();
+        return latched && *latched <= RunPhase::sending;
+    }
+
+    /// True once any Stop has latched, whatever phase it landed in: what
+    /// makes a cancelled transfer the user's cancellation rather than an
+    /// error.
+    [[nodiscard]] bool stop_was_requested () const noexcept {
+        return phase_latch_.stop_phase ().has_value ();
+    }
+
     nlohmann::json config;
     // Monotonic reading (`steady_clock`, milliseconds) at the instant load
     // began: stamped by the worker beside the final report's `test_start`,
@@ -1186,6 +1236,9 @@ struct RunContext {
      * writes through.
      */
     void join_aux_threads ();
+
+    private:
+    RunPhaseLatch phase_latch_;
 };
 
 /**
@@ -1790,8 +1843,8 @@ class RunManager {
      * The daemon's `Database`, `RunManager` and curl global state are torn down
      * in `main`'s scope exit while a run worker may still be writing metrics
      * through references to all three. This is the ordered drain that has to
-     * happen first: signal `should_stop` on every active run, wait for them to
-     * settle, then join.
+     * happen first: `request_stop` every active run (which cuts a drain in
+     * progress short), wait for them to settle, then join.
      *
      * `grace` bounds the *wait*, not the join. A worker that has not settled by
      * then is logged and still joined, because letting go of it is precisely

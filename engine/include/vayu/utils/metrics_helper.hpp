@@ -46,10 +46,13 @@ class MetricsHelper {
      * Creates a JSON response for a stopped run with summary metrics.
      * @param run_id The unique identifier of the run.
      * @param summary The computed summary metrics.
+     * @param status The run's status as the caller knows it: a Stop that
+     *        landed after the run's own end does not make it `stopped`.
      * @return JSON object with status, runId, and summary.
      */
-    static nlohmann::json
-    create_stop_response (const std::string& run_id, const RunSummary& summary);
+    static nlohmann::json create_stop_response (const std::string& run_id,
+    const RunSummary& summary,
+    const std::string& status);
 
     /**
      * Creates a JSON response for an inactive run.

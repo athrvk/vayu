@@ -202,9 +202,10 @@ double duration_s) {
 }
 
 nlohmann::json MetricsHelper::create_stop_response (const std::string& run_id,
-const RunSummary& summary) {
+const RunSummary& summary,
+const std::string& status) {
     nlohmann::json response;
-    response["status"]  = "stopped";
+    response["status"]  = status;
     response["runId"]   = run_id;
     response["summary"] = { { "totalRequests", summary.total_requests },
         { "errors", summary.errors }, { "httpErrors", summary.errors - summary.no_response },

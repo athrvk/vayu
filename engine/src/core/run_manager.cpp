@@ -1051,16 +1051,29 @@ void RunContext::compile_step_elements (const nlohmann::json& run_config) {
 }
 
 RunContext::~RunContext () {
-    should_stop = true;
-    // Wake the closed-loop controller so it observes should_stop without
-    // waiting out its `CONTROLLER_TICK_MS` safety-net timeout before the
-    // join below.
-    notify_refill ();
+    request_stop ();
     // The worker joins these itself before it returns; the join here only
     // covers a context destroyed before its worker ever ran. The *worker*
     // thread is owned by RunManager (run_workers_), never by the context - see
     // the declaration for why.
     join_aux_threads ();
+}
+
+void RunContext::request_stop () {
+    const RunPhase observed = phase_latch_.latch_stop ();
+    should_stop.store (true);
+    // Wakes the closed-loop controller so it sees should_stop without waiting
+    // out its `CONTROLLER_TICK_MS` safety-net timeout.
+    notify_refill ();
+    // Before the drain the strategy is still submitting, and a cancelled loop
+    // consumes nothing, so its producer would block on a full queue.
+    if (observed < RunPhase::draining) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock (event_loop_mtx);
+    if (event_loop) {
+        event_loop->cancel ();
+    }
 }
 
 void RunContext::join_aux_threads () {
@@ -1116,6 +1129,7 @@ void RunManager::retain_run (const std::string& run_id) {
         if (it == active_runs_.end ())
             return;
         it->second->completed_at_ms.store (now_ms ());
+        it->second->advance_phase (RunPhase::settled);
         it->second->settled.store (true, std::memory_order_release);
         retained               = it->second;
         retained_runs_[run_id] = it->second;
@@ -1274,8 +1288,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     // of them is waited on, so the grace period is shared rather than serial.
     auto active = get_all_active_runs ();
     for (const auto& context : active) {
-        context->should_stop = true;
-        context->notify_refill ();
+        context->request_stop ();
     }
 
     if (!active.empty ()) {
@@ -2383,13 +2396,14 @@ struct SendingWindow {
  * return, and @p completed_at_send_end, both read before the drain that @p
  * total_duration_s includes. An `iterations` run that reached its own end gets
  * the whole run instead (`returns_at_send_deadline` says why); a stopped one
- * returned when it saw the Stop, so its measured window stands.
+ * returned when it saw the Stop, so its measured window stands. A Stop that
+ * landed after the strategy returned ended no sending, so it changes nothing.
  */
 SendingWindow sending_window (const RunContext& context,
 double measured_s,
 size_t completed_at_send_end,
 double total_duration_s) {
-    if (context.should_stop || returns_at_send_deadline (context.config)) {
+    if (context.stop_decides_outcome () || returns_at_send_deadline (context.config)) {
         return { measured_s, completed_at_send_end };
     }
     return { total_duration_s, std::nullopt };
@@ -2505,11 +2519,12 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // A stopped run keeps reporting Stopped regardless of verdict (issue
     // #1497's failRun judges only a run that reached its own natural end);
     // a completed run whose config asked `thresholds.failRun: true` and
-    // whose budgets it missed is judged too. The move keeps the end_time
-    // stamped before cleanup.
+    // whose budgets it missed is judged too, a Stop during its drain
+    // included. The move keeps the end_time stamped before cleanup.
+    const bool stopped = context->stop_decides_outcome ();
     vayu::RunStatus final_status =
-    context->should_stop ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
-    if (!context->should_stop && summary_stored && inputs.thresholds &&
+    stopped ? vayu::RunStatus::Stopped : vayu::RunStatus::Completed;
+    if (!stopped && summary_stored && inputs.thresholds &&
     inputs.thresholds->failed > 0 && thresholds_fail_run (context->config)) {
         final_status = vayu::RunStatus::Failed;
     }
@@ -2625,6 +2640,7 @@ RunManager& manager) {
         .count ();
         context->load_start_steady_ms.store (load_start_ms);
         context->metrics_collector->set_load_start (load_start_ms);
+        context->advance_phase (RunPhase::sending);
         std::shared_ptr<ScenarioLoadState> scenario_state;
 
         try {
@@ -2645,28 +2661,33 @@ RunManager& manager) {
             manager.retain_run (context->run_id);
             return;
         }
-        // Before the drain below, which sends nothing.
+        // Before the drain below, which sends nothing. From here a Stop no
+        // longer decides the outcome; it only cuts the drain short.
+        context->advance_phase (RunPhase::draining);
         const auto send_end                = std::chrono::steady_clock::now ();
         const size_t completed_at_send_end = context->total_requests ();
 
         // How the run lets go of the event loop depends on why it is ending.
         //
-        // A user stop must stop *sending*: draining the queued backlog would
-        // keep the target under load after the stop was requested, and waiting
-        // on in-flight transfers hands the stop's latency to the upstream.
-        // stop(false) discards the backlog and cancels what is in flight.
+        // A Stop that latched while sending must stop *sending*: draining the
+        // queued backlog would keep the target under load after the stop was
+        // requested, and waiting on in-flight transfers hands the stop's
+        // latency to the upstream. stop(false) discards the backlog and
+        // cancels what is in flight.
         //
         // The natural end of the duration still lets genuine in-flight requests
         // settle, but not forever: a request that has outlived its own bound
         // (`natural_end_drain_ms`) is never going to answer, and waiting on it
-        // pins the run in `running` with no way out.
+        // pins the run in `running` with no way out. A Stop that lands during
+        // that drain cancels it (`request_stop`), whether it reaches the loop
+        // before this stop() or while it blocks.
         //
         // Both reads are deliberately NOT under event_loop_mtx: this thread is
         // the one that published the pointer, so they are ordered by program
         // order, and stop() blocks for the whole drain - during which the
         // metrics thread must keep ticking through active_transfer_count(),
         // which takes that lock every tick.
-        if (context->should_stop) {
+        if (context->stop_decides_outcome ()) {
             context->event_loop->stop (false);
         } else {
             // A collection run's streams are its steps' (#3235), beside the
@@ -2677,6 +2698,7 @@ RunManager& manager) {
             natural_end_drain_ms (context->stream_bounds, timeout_ms);
             context->event_loop->stop (true, std::chrono::milliseconds (drain_ms));
         }
+        context->advance_phase (RunPhase::summarising);
 
         // Record test end time immediately (before cleanup overhead)
         auto test_end = std::chrono::steady_clock::now ();

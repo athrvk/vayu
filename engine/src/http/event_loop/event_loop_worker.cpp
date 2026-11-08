@@ -281,8 +281,9 @@ void EventLoopWorker::start () {
     if (running.exchange (true)) {
         return;
     }
-    stop_requested = false;
-    thread         = std::thread (&EventLoopWorker::run_loop, this);
+    // Before the thread exists, so its construction publishes the reset.
+    mode.store (WorkerMode::run, std::memory_order_relaxed);
+    thread = std::thread (&EventLoopWorker::run_loop, this);
 }
 
 void EventLoopWorker::stop (bool wait_for_pending, std::chrono::milliseconds drain_timeout) {
@@ -290,22 +291,20 @@ void EventLoopWorker::stop (bool wait_for_pending, std::chrono::milliseconds dra
         return;
     }
 
-    // Tell run_loop whether to drain the pending queue before exiting, and by
-    // when it must give up if it does. Both must be stored before
-    // stop_requested so the worker reads a consistent view.
-    drain_on_stop.store (wait_for_pending, std::memory_order_relaxed);
-    const bool bounded =
-    wait_for_pending && drain_timeout > std::chrono::milliseconds::zero ();
-    drain_deadline_ticks.store (bounded ?
-    (std::chrono::steady_clock::now () + drain_timeout).time_since_epoch ().count () :
-    0,
-    std::memory_order_relaxed);
-    stop_requested.store (true, std::memory_order_release);
-    queue_has_items.store (true, std::memory_order_release);
-    queue_has_items.notify_one ();
-    // The worker may be parked in curl_multi_poll driving transfers that will
-    // never answer; without this a cancel waits out the poll timeout per pass.
-    curl_multi_wakeup (multi_handle);
+    if (wait_for_pending) {
+        const bool bounded = drain_timeout > std::chrono::milliseconds::zero ();
+        drain_deadline_ticks.store (bounded ?
+        (std::chrono::steady_clock::now () + drain_timeout).time_since_epoch ().count () :
+        0,
+        std::memory_order_relaxed);
+        // Only from `run`: a cancel() that got here first stands.
+        WorkerMode expected = WorkerMode::run;
+        mode.compare_exchange_strong (expected, WorkerMode::drain,
+        std::memory_order_release, std::memory_order_relaxed);
+    } else {
+        mode.store (WorkerMode::cancel, std::memory_order_release);
+    }
+    wake ();
 
     if (thread.joinable ()) {
         thread.join ();
@@ -314,14 +313,27 @@ void EventLoopWorker::stop (bool wait_for_pending, std::chrono::milliseconds dra
     running = false;
 
     // Worker has exited - we are now the sole SPSC consumer. Cancel whatever it
-    // left behind: on stop(false) that is the whole backlog, on a drain that
-    // hit its deadline it is what was still queued, and on a completed drain it
-    // is nothing. Doing it unconditionally means no path can leak an unanswered
-    // callback or an unsatisfied promise.
+    // left behind: on stop(false) or cancel() that is the whole backlog, on a
+    // drain that hit its deadline it is what was still queued, and on a
+    // completed drain it is nothing. Doing it unconditionally means no path
+    // can leak an unanswered callback or an unsatisfied promise.
     std::unique_ptr<TransferData> data;
     while (pending_queue.pop (data)) {
         complete_as_cancelled (*data);
     }
+}
+
+void EventLoopWorker::cancel () {
+    mode.store (WorkerMode::cancel, std::memory_order_release);
+    wake ();
+}
+
+void EventLoopWorker::wake () {
+    queue_has_items.store (true, std::memory_order_release);
+    queue_has_items.notify_one ();
+    // The worker may be parked in curl_multi_poll driving transfers that will
+    // never answer; without this a cancel waits out the poll timeout per pass.
+    curl_multi_wakeup (multi_handle);
 }
 
 bool EventLoopWorker::drain_deadline_passed () const {
@@ -470,7 +482,7 @@ void EventLoopWorker::wait_for_work (int still_running) {
         return;
     }
 
-    if (stop_requested) {
+    if (mode.load (std::memory_order_acquire) != WorkerMode::run) {
         return;
     }
 
@@ -485,9 +497,12 @@ void EventLoopWorker::wait_for_work (int still_running) {
     if (pending_queue.read_available () == 0) {
         queue_has_items.wait (false, std::memory_order_acquire);
     }
-    // Re-arm the flag for the next park once the queue is empty again.
+    // Re-arm the flag for the next park once the queue is empty again. An
+    // exchange rather than a store: one that consumes wake()'s `true` acquires
+    // the mode stored before it, so the next pass cannot read a stale `run`
+    // and park with nothing left to wake it.
     if (pending_queue.read_available () == 0) {
-        queue_has_items.store (false, std::memory_order_release);
+        (void)queue_has_items.exchange (false, std::memory_order_acq_rel);
     }
 }
 
@@ -526,38 +541,28 @@ void EventLoopWorker::run_loop () {
         }
     }
 
-    // Core loop optimized for latency and throughput.
-    // When drain_on_stop=true (stop(true)): keep running until pending queue
-    // AND active transfers are both empty, or until the drain deadline passes.
-    // When drain_on_stop=false (stop(false)): cancel the in-flight transfers at
-    // once and exit; the pending queue is left for the caller to cancel after
-    // join(), avoiding a concurrent SPSC consumer race on Windows.
-    while (!stop_requested ||
-    (drain_on_stop.load (std::memory_order_relaxed) && !pending_queue.empty ()) ||
-    !active_transfers.empty ()) {
-        // A stop that is not draining - or a drain that has run out of time -
-        // must not sit here waiting on transfers the upstream may never answer.
-        // Cancel them and leave; stop() cancels anything still queued once it
-        // is the sole consumer of the queue.
-        if (stop_requested.load (std::memory_order_acquire) &&
-        (!drain_on_stop.load (std::memory_order_relaxed) || drain_deadline_passed ())) {
+    // Core loop optimized for latency and throughput. `mode` is read once per
+    // pass (see WorkerMode for what each value asks of it).
+    for (;;) {
+        const WorkerMode current = mode.load (std::memory_order_acquire);
+        // A cancel, or a drain that has run out of time, must not sit here
+        // waiting on transfers the upstream may never answer.
+        if (current == WorkerMode::cancel ||
+        (current == WorkerMode::drain && drain_deadline_passed ())) {
             cancel_active_transfers ();
-            break;
+            return;
         }
-
-        bool did_work = false;
+        if (current == WorkerMode::drain && pending_queue.empty () &&
+        active_transfers.empty ()) {
+            return;
+        }
 
         // 1. Process pending queue (Lock-free Consumer).
         // Use atomic load for the active-count check (lock-free hot path). The
         // check is "loose": a data race only leads to trying to add and finding
         // the map full, which is fine.
         size_t local_active = current_active_count.load (std::memory_order_relaxed);
-        // When stop(false) is in progress, skip new work so the queue remains
-        // untouched for the caller's post-join cancel drain.
-        if (!stop_requested.load (std::memory_order_acquire) ||
-        drain_on_stop.load (std::memory_order_acquire)) {
-            did_work = submit_pending_transfers (local_active);
-        }
+        bool did_work = submit_pending_transfers (local_active);
 
         // 2. Drive CURL state machine
         int still_running = 0;

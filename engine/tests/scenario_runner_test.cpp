@@ -1978,7 +1978,7 @@ TEST_F (ScenarioRunnerTest, AStopIsHonouredBetweenStepsNotAfterTheIteration) {
     // it after a whole iteration on a stalled runner.
     ASSERT_TRUE (
     vayu::tests::wait_until ([&] () { return !server_->requests ().empty (); }));
-    context->should_stop = true;
+    context->request_stop ();
 
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);
 
@@ -2116,7 +2116,7 @@ TEST_F (ScenarioRunnerTest, AStopEndsAnInFlightStreamingStepPromptly) {
     vayu::tests::wait_until ([&] () { return !server_->requests ().empty (); }));
 
     const auto stopped_at = std::chrono::steady_clock::now ();
-    context->should_stop  = true;
+    context->request_stop ();
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);
     const auto took = std::chrono::steady_clock::now () - stopped_at;
 

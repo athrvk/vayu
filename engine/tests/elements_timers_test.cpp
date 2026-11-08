@@ -741,7 +741,7 @@ TEST_F (ElementsTimersRunnerTest, AStopMidTimerPacingWaitEndsTheRunPromptly) {
     // that it cannot possibly have finished that wait on its own.
     std::this_thread::sleep_for (std::chrono::milliseconds (150));
     const auto stop_requested = std::chrono::steady_clock::now ();
-    context->should_stop      = true;
+    context->request_stop ();
 
     ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds> (

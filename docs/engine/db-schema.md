@@ -1549,6 +1549,13 @@ retention never prunes. A graceful shutdown waits for that worker, and a daemon 
 before the write lands leaves the row to startup reconciliation (below). A refused move
 is logged (run id, the statuses named, the one found) and answered, never thrown.
 
+A load run's phase (`setup`, `sending`, `draining`, `summarising`, `settled`; #3341)
+is in-memory state of the active run (`core/run_phase.hpp`) and is not stored: `status`
+is the only column that records where a run is, and the phase adds no column and no
+schema version. What a Stop meant is visible only in the terminal `status` it left
+(`stopped` when it decided the outcome; a Stop in the natural-end drain leaves the
+run's own `completed` or `failed`).
+
 Every status write after the insert goes through it, each naming its real edge. A load
 or collection run is inserted `pending` and a design send `running`. A worker moves
 `pending` to `running` as it starts and `running` to its terminal status as it ends; a
