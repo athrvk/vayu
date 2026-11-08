@@ -9,15 +9,16 @@
  */
 
 /**
- * The reader for `specTabTarget` (issue #680).
+ * The reader for the `spec` nav intent (issues #680, #3355).
  *
  * The import dialog's Sync choice sets it and opens the collection; without
  * this effect the user lands on Info and has to find the Spec tab themselves -
  * which is the written-but-never-read defect CLAUDE.md names, and one no
  * store-level test can see.
  *
- * The clear is asserted too: a target left set would send the user to Spec every
- * time they opened that collection afterwards.
+ * Taking it is asserted too: an intent left set would send the user to Spec every
+ * time they opened that collection afterwards, and the store drops one the
+ * next navigation leaves unconsumed.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -69,7 +70,7 @@ beforeEach(() => {
 	useTabsStore.setState({
 		openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
 		activeTabId: "t1",
-		specTabTarget: null,
+		navIntent: null,
 	});
 	// The Spec case below persists "c1"'s tab as "spec" - unmounting does not
 	// clear it, so a later case reusing "c1" would otherwise open on Spec
@@ -84,18 +85,43 @@ describe("a collection pointed at its Spec tab", () => {
 		expect(screen.queryByText("spec panel")).toBeNull();
 	});
 
-	it("opens on Spec, and consumes the target", () => {
-		useTabsStore.setState({ specTabTarget: "c1" });
+	it("opens on Spec, and takes the intent", () => {
+		useTabsStore.setState({ navIntent: { kind: "spec", target: "c1" } });
 		render(<CollectionDetail />);
 		expect(screen.getByText("spec panel")).toBeInTheDocument();
-		expect(useTabsStore.getState().specTabTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 	});
 
-	it("ignores a target naming a different collection", () => {
-		useTabsStore.setState({ specTabTarget: "c2" });
+	it("ignores an intent naming a different collection", () => {
+		useTabsStore.setState({ navIntent: { kind: "spec", target: "c2" } });
 		render(<CollectionDetail />);
 		expect(screen.getByText("info panel")).toBeInTheDocument();
-		// Still pending: the collection it names has not been on screen yet.
-		expect(useTabsStore.getState().specTabTarget).toBe("c2");
+		expect(screen.queryByText("spec panel")).toBeNull();
+		// Not this screen's to take; the store clears it when the navigation moves on.
+		expect(useTabsStore.getState().navIntent).toEqual({ kind: "spec", target: "c2" });
+	});
+
+	it.each([["compare"], ["dataRow"]] as const)(
+		"ignores a %s intent naming this collection's id",
+		(kind) => {
+			useTabsStore.setState({
+				navIntent:
+					kind === "compare"
+						? { kind, target: "c1" }
+						: { kind, target: "c1", rowIndex: 0 },
+			});
+			render(<CollectionDetail />);
+			expect(screen.getByText("info panel")).toBeInTheDocument();
+			expect(screen.queryByText("spec panel")).toBeNull();
+			expect(useTabsStore.getState().navIntent?.kind).toBe(kind);
+		}
+	);
+
+	it("does not open on Spec for an intent a later navigation superseded", () => {
+		useTabsStore.getState().openCollectionSpecTab("c1");
+		useTabsStore.getState().openTab({ type: "collection", entityId: "c1" });
+		render(<CollectionDetail />);
+		expect(screen.getByText("info panel")).toBeInTheDocument();
+		expect(screen.queryByText("spec panel")).toBeNull();
 	});
 });

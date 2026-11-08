@@ -24,17 +24,17 @@ beforeEach(() => {
 
 describe("openRunComparison", () => {
 	beforeEach(() => {
-		useTabsStore.setState({ compareRunTarget: null });
+		useTabsStore.setState({ navIntent: null });
 	});
 
 	it("opens the run's tab and hands its report the request for the comparison", () => {
 		useTabsStore.getState().openRunComparison("run_a");
 
-		const { openTabs, activeTabId, compareRunTarget } = useTabsStore.getState();
+		const { openTabs, activeTabId, navIntent } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(1);
 		expect(openTabs[0]).toMatchObject({ type: "run", entityId: "run_a" });
 		expect(activeTabId).toBe(openTabs[0].id);
-		expect(compareRunTarget).toBe("run_a");
+		expect(navIntent).toEqual({ kind: "compare", target: "run_a" });
 	});
 
 	it("focuses a run tab that is already open, still carrying the request", () => {
@@ -43,17 +43,17 @@ describe("openRunComparison", () => {
 
 		useTabsStore.getState().openRunComparison("run_a");
 
-		const { openTabs, activeTabId, compareRunTarget } = useTabsStore.getState();
+		const { openTabs, activeTabId, navIntent } = useTabsStore.getState();
 		expect(openTabs).toHaveLength(2);
 		expect(openTabs.find((t) => t.id === activeTabId)?.entityId).toBe("run_a");
-		expect(compareRunTarget).toBe("run_a");
+		expect(navIntent).toEqual({ kind: "compare", target: "run_a" });
 	});
 
-	it("is consumed once, so a later visit opens on the report", () => {
+	it("is taken once, so a later visit opens on the report", () => {
 		useTabsStore.getState().openRunComparison("run_a");
-		useTabsStore.getState().clearCompareRunTarget();
+		useTabsStore.getState().takeNavIntent("compare", "run_a");
 
-		expect(useTabsStore.getState().compareRunTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 	});
 
 	it("is session-scoped: a request in flight is not written to storage", () => {

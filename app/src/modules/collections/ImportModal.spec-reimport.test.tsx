@@ -214,7 +214,7 @@ beforeEach(() => {
 	state.documents = new Map();
 	state.imported = [];
 	useImportModalStore.setState({ isOpen: true });
-	useTabsStore.setState({ openTabs: [], activeTabId: null, specTabTarget: null });
+	useTabsStore.setState({ openTabs: [], activeTabId: null, navIntent: null });
 });
 
 describe("importing a document a collection is already bound to", () => {
@@ -283,7 +283,9 @@ describe("importing a document a collection is already bound to", () => {
 		await pressImport();
 		fireEvent.click(within(await fork()).getByRole("button", { name: /Sync instead/i }));
 
-		await waitFor(() => expect(useTabsStore.getState().specTabTarget).toBe("col_1"));
+		await waitFor(() =>
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "spec", target: "col_1" })
+		);
 		expect(useTabsStore.getState().openTabs).toEqual([
 			expect.objectContaining({ type: "collection", entityId: "col_1" }),
 		]);

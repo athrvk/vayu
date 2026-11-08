@@ -198,7 +198,7 @@ function openPicker() {
 
 beforeEach(() => {
 	useDataFileStore.setState({ locations: {} });
-	useTabsStore.setState({ dataRowTarget: null });
+	useTabsStore.setState({ navIntent: null });
 });
 
 afterEach(() => {
@@ -766,7 +766,7 @@ describe("arriving from a failed step", () => {
 
 		// What `openRequestWithDataRow` leaves behind for this tab: the request
 		// is already open, and the row is the half `openTab` cannot carry.
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 105 } });
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex: 105 } });
 		renderBar(execute, CONTRACT, "req_a");
 
 		const row = await screen.findByRole("row", { name: /user105@example\.test/ });
@@ -786,10 +786,10 @@ describe("arriving from a failed step", () => {
 		expect(execute).toHaveBeenCalledWith({ id: "105", email: "user105@example.test" });
 	});
 
-	it("consumes the target, so a later visit opens on nothing", async () => {
+	it("takes the intent, so a later visit opens on nothing", async () => {
 		rememberFile();
 		stubReadDataFile(async () => csvBytes(bigCsv(30)));
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 25 } });
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex: 25 } });
 		renderBar(
 			vi.fn(async () => {}),
 			CONTRACT,
@@ -797,13 +797,13 @@ describe("arriving from a failed step", () => {
 		);
 
 		await screen.findByRole("row", { name: /user25@example\.test/ });
-		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 	});
 
 	it("leaves a target for a different request alone", async () => {
 		rememberFile();
 		stubReadDataFile(async () => csvBytes(bigCsv(30)));
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_b", rowIndex: 4 } });
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_b", rowIndex: 4 } });
 		renderBar(
 			vi.fn(async () => {}),
 			CONTRACT,
@@ -813,16 +813,34 @@ describe("arriving from a failed step", () => {
 		// Not this tab's navigation: the list stays shut and the target waits for
 		// the tab it names.
 		expect(screen.queryByLabelText(/send with a row by number/i)).toBeNull();
-		expect(useTabsStore.getState().dataRowTarget).toEqual({
-			requestId: "req_b",
+		expect(useTabsStore.getState().navIntent).toEqual({
+			kind: "dataRow",
+			target: "req_b",
 			rowIndex: 4,
 		});
 	});
 
-	it("clears a target for a request that cannot bind rows at all", () => {
-		// No contract in scope, so there is no picker to open. The target must
-		// still be consumed, or it fires on the next request that has one.
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 2 } });
+	it.each([["spec"], ["compare"]] as const)(
+		"leaves a %s intent naming this request's id alone",
+		async (kind) => {
+			rememberFile();
+			stubReadDataFile(async () => csvBytes(bigCsv(30)));
+			useTabsStore.setState({ navIntent: { kind, target: "req_a" } });
+			renderBar(
+				vi.fn(async () => {}),
+				CONTRACT,
+				"req_a"
+			);
+
+			expect(screen.queryByLabelText(/send with a row by number/i)).toBeNull();
+			expect(useTabsStore.getState().navIntent).toEqual({ kind, target: "req_a" });
+		}
+	);
+
+	it("takes the intent of a request that cannot bind rows at all", () => {
+		// No contract in scope, so there is no picker to open. The intent must
+		// still be taken, so it does not wait for a later render that can bind.
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex: 2 } });
 		renderBar(
 			vi.fn(async () => {}),
 			undefined,
@@ -830,7 +848,7 @@ describe("arriving from a failed step", () => {
 		);
 
 		expect(caret()).toBeNull();
-		expect(useTabsStore.getState().dataRowTarget).toBeNull();
+		expect(useTabsStore.getState().navIntent).toBeNull();
 	});
 });
 
@@ -866,7 +884,7 @@ describe("the grid's keyboard model", () => {
 		stubReadDataFile(async () => csvBytes(bigCsv(count)));
 		const execute = vi.fn(async () => {});
 		if (rowIndex !== null) {
-			useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex } });
+			useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex } });
 		}
 		renderBar(execute, CONTRACT, "req_a");
 		if (rowIndex === null) openPicker();
@@ -1056,7 +1074,7 @@ describe("a row the file no longer has", () => {
 		rememberFile();
 		stubReadDataFile(async () => csvBytes(bigCsv(30)));
 		const execute = vi.fn(async () => {});
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 500 } });
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex: 500 } });
 		renderBar(execute, CONTRACT, "req_a");
 
 		await screen.findByRole("row", { name: /user0@example\.test/ });
@@ -1075,7 +1093,7 @@ describe("a row the file no longer has", () => {
 		rememberFile();
 		stubReadDataFile(async () => csvBytes(bigCsv(30)));
 		const execute = vi.fn(async () => {});
-		useTabsStore.setState({ dataRowTarget: { requestId: "req_a", rowIndex: 25 } });
+		useTabsStore.setState({ navIntent: { kind: "dataRow", target: "req_a", rowIndex: 25 } });
 		renderBar(execute, CONTRACT, "req_a");
 
 		await screen.findByRole("row", { name: /user25@example\.test/ });

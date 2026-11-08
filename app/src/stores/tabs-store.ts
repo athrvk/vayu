@@ -46,6 +46,33 @@ export interface TabLocation {
 }
 
 /**
+ * What a navigation asks of the screen it opens, beyond which tab to show.
+ * `target` is the id of the entity the intent is for (collection, request or
+ * run), and the matching tab is `intentTab`.
+ */
+export type NavIntent =
+	| { kind: "spec"; target: string }
+	| { kind: "dataRow"; target: string; rowIndex: number }
+	| { kind: "compare"; target: string };
+
+const INTENT_TAB_TYPE: Record<NavIntent["kind"], TabType> = {
+	spec: "collection",
+	dataRow: "request",
+	compare: "run",
+};
+
+function intentTab(intent: NavIntent): TabLocation {
+	return { type: INTENT_TAB_TYPE[intent.kind], entityId: intent.target };
+}
+
+/** The intent, if the tab it names is still among `tabs`; otherwise `null`. */
+function intentIfOpen(intent: NavIntent | null, tabs: readonly Tab[]): NavIntent | null {
+	if (!intent) return null;
+	const named = intentTab(intent);
+	return tabs.some((t) => sameLocation(t, named)) ? intent : null;
+}
+
+/**
  * Exported because `response-store`'s cache bound is derived from it: that
  * store retains the open tabs' responses plus an equal tail, and a guard there
  * fails if the two numbers drift apart.
@@ -99,51 +126,27 @@ interface TabsState {
 	 */
 	tabFocusedAt: Record<string, number>;
 	/**
-	 * A collection whose **Spec** tab something outside the collection screen has
-	 * pointed at, or `null` (issue #680).
+	 * The one in-flight hand-off from a navigation to the screen it opened, or
+	 * `null` (issues #680, #730, #2164, #3355).
 	 *
-	 * A collection tab picks its own sub-tab, and `openTab` can only say which
-	 * collection to show - so the one navigation that points *into* a collection
-	 * (the import dialog offering Sync for a document already bound) needs
-	 * somewhere to say which section it meant. `CollectionDetail` reads it when
-	 * the named collection is on screen and clears it, so it survives the tab
-	 * being opened for the first time and never fires twice.
+	 * `openTab` can only name a tab, and three navigations need to say more: which
+	 * sub-tab a collection opens on (`spec`), which data row a request's Send binds
+	 * (`dataRow`), and whether a run's report opens on its comparison (`compare`).
+	 * That state lives in the destination screen, so the navigation leaves a
+	 * `NavIntent` here and the screen takes it with `takeNavIntent`, once.
 	 *
-	 * Session-scoped like `tabFocusedAt` (absent from `partialize`): it is one
-	 * navigation in flight, and a persisted copy would jump a user to the Spec
-	 * tab on the next launch for a choice they made yesterday.
+	 * It belongs to the navigation that issued it, not to the entity it names. Every
+	 * activation that does not itself issue one (`openTab`, `focusTab`, `goBack`,
+	 * `goForward`, `focusAdjacentTab`) clears it, and so does closing the tab it
+	 * names, so a screen that never mounted to take it cannot fire it on a later
+	 * visit. A consumer that finds nothing for its own kind and target does nothing.
+	 *
+	 * Session-scoped (absent from `partialize`): it is one navigation in flight, and
+	 * a persisted copy would jump a user to a Spec tab, a data row or a comparison
+	 * for a choice made in a previous launch. A data row in particular points into a
+	 * file whose rows are deliberately never persisted.
 	 */
-	specTabTarget: string | null;
-	/**
-	 * A request something outside the builder has pointed at a data row of, or
-	 * `null` (issue #730).
-	 *
-	 * The same shape of navigation as `specTabTarget` and for the same reason:
-	 * `openTab` can only name a request, and which row a Send should bind is
-	 * state the UrlBar holds. A failed step of a collection run is the one
-	 * caller today - "reproduce this step" means its request *and* the row that
-	 * iteration bound, and the second half has nowhere else to travel.
-	 *
-	 * Session-scoped (absent from `partialize`): it is one navigation in
-	 * flight, and it points into a data file whose rows are deliberately never
-	 * persisted - a remembered index would name a different row in a file that
-	 * has since changed.
-	 */
-	dataRowTarget: { requestId: string; rowIndex: number } | null;
-	/**
-	 * A load run whose report something outside it has asked to open on its
-	 * comparison with another run, or `null` (issue #2164).
-	 *
-	 * The same shape of navigation as `specTabTarget`: `openTab` can only name
-	 * the run, and whether its report opens on the compare view is state
-	 * `LoadTestDetail` holds. The History row's "Compare with…" is the caller.
-	 * `LoadTestDetail` acts on it when that run is on screen and clears it.
-	 *
-	 * Session-scoped (absent from `partialize`): one navigation in flight, and
-	 * a persisted copy would open yesterday's report on a comparison nobody asked
-	 * for today.
-	 */
-	compareRunTarget: string | null;
+	navIntent: NavIntent | null;
 	/**
 	 * Every place the user has been in this session, oldest first, with
 	 * `navIndex` marking where they are in it (issue #1245).
@@ -177,25 +180,28 @@ interface TabsState {
 	navIndex: number;
 
 	openTab: (tab: Omit<Tab, "id">) => void;
-	/** Show a collection, on its Spec tab - see `specTabTarget`. */
+	/** Show a collection, on its Spec tab - a `spec` intent. */
 	openCollectionSpecTab: (collectionId: string) => void;
-	/** Consume `specTabTarget`, once the collection screen has acted on it. */
-	clearSpecTabTarget: () => void;
 	/**
 	 * Show a request, with one row of its collection's data file selected for
-	 * Send-with-row - see `dataRowTarget`.
+	 * Send-with-row - a `dataRow` intent.
 	 *
 	 * A negative or non-integer index is refused rather than stored: it can only
 	 * come from a malformed trace, and a picker asked to select row -1 would
 	 * open on nothing with no way to tell that from a file that failed to read.
 	 */
 	openRequestWithDataRow: (requestId: string, rowIndex: number) => void;
-	/** Consume `dataRowTarget`, once the request builder has acted on it. */
-	clearDataRowTarget: () => void;
-	/** Show a load run's report on its comparison view - see `compareRunTarget`. */
+	/** Show a load run's report on its comparison view - a `compare` intent. */
 	openRunComparison: (runId: string) => void;
-	/** Consume `compareRunTarget`, once the run's report has acted on it. */
-	clearCompareRunTarget: () => void;
+	/**
+	 * Take the pending intent if it is of this `kind` and names `target`, clearing
+	 * it; `null` and no change otherwise. The screen that owns the target calls
+	 * this once it renders for it, whether or not it can act on what it gets.
+	 */
+	takeNavIntent: <K extends NavIntent["kind"]>(
+		kind: K,
+		target: string
+	) => Extract<NavIntent, { kind: K }> | null;
 	closeTab: (tabId: string) => void;
 	/**
 	 * Close every tab except one - the strip's "Close Others".
@@ -379,20 +385,25 @@ function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<str
  *
  * The history itself is left alone. A closed tab is still somewhere the user has
  * been, and Back is what puts it back (#1245); only a *deleted* entity leaves
- * the history, which is `closeTabsForEntities`' own concern.
+ * the history, which is `closeTabsForEntities`' own concern. A pending
+ * `navIntent` is the opposite: it goes with the tab it names.
  */
 function closeTabs(
-	state: Pick<TabsState, "openTabs" | "activeTabId" | "tabFocusedAt" | "navHistory" | "navIndex">,
+	state: Pick<
+		TabsState,
+		"openTabs" | "activeTabId" | "tabFocusedAt" | "navHistory" | "navIndex" | "navIntent"
+	>,
 	closing: ReadonlySet<string>
 ): Partial<TabsState> | null {
 	const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = state;
 	const remaining = openTabs.filter((t) => !closing.has(t.id));
 	if (remaining.length === openTabs.length) return null;
+	const navIntent = intentIfOpen(state.navIntent, remaining);
 
 	// The tab in view is staying, so nothing has to take its place.
 	const activeIndex = openTabs.findIndex((t) => t.id === activeTabId);
 	if (activeIndex === -1 || !closing.has(openTabs[activeIndex].id)) {
-		return { openTabs: remaining };
+		return { openTabs: remaining, navIntent };
 	}
 
 	/*
@@ -409,6 +420,7 @@ function closeTabs(
 				activeTabId: open.id,
 				tabFocusedAt: stampFocus(tabFocusedAt, remaining, open.id),
 				navIndex: i,
+				navIntent,
 			};
 		}
 	}
@@ -422,10 +434,11 @@ function closeTabs(
 	 * other path here holds - and what was just closed stays behind it.
 	 */
 	const survivor = nearestSurvivor(openTabs, activeIndex, closing);
-	if (!survivor) return { openTabs: remaining, activeTabId: null };
+	if (!survivor) return { openTabs: remaining, activeTabId: null, navIntent };
 	return {
 		openTabs: remaining,
 		activeTabId: survivor.id,
+		navIntent,
 		tabFocusedAt: stampFocus(tabFocusedAt, remaining, survivor.id),
 		...recordVisit(navHistory, navIndex, {
 			type: survivor.type,
@@ -642,110 +655,132 @@ function makeId() {
 		: Math.random().toString(36).slice(2);
 }
 
+/**
+ * Show a tab, opening it if it is not already open, and leave `intent` pending
+ * for the screen it lands on - or clear whatever was pending when there is none.
+ *
+ * One `set` for the tab and the intent together: the destination screen reads
+ * the intent on the very render the tab becomes active, and an intent set in a
+ * separate step would either miss that render or be cleared by this activation.
+ * Every other path that makes a tab active clears the intent instead (`openTab`
+ * through here with `null`, `focusTab` directly), which is what ends one whose
+ * screen never took it.
+ */
+function activateTab(
+	get: () => TabsState,
+	set: (partial: Partial<TabsState>) => void,
+	tabDef: Omit<Tab, "id">,
+	intent: NavIntent | null
+): void {
+	const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = get();
+	// One location for both branches below: a singleton that retargets
+	// shows what was asked for, not what it was showing.
+	const visited = recordVisit(navHistory, navIndex, {
+		type: tabDef.type,
+		entityId: tabDef.entityId,
+	});
+
+	// Dedupe: singletons and entity-keyed tabs
+	const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
+	const existing = openTabs.find((t) =>
+		isSingleton
+			? t.type === tabDef.type
+			: t.type === tabDef.type && t.entityId === tabDef.entityId
+	);
+	if (existing) {
+		// Only a singleton can reach this branch with a different
+		// entityId - the entity-keyed lookup above matched on it.
+		const tabs =
+			existing.entityId === tabDef.entityId
+				? openTabs
+				: openTabs.map((t) =>
+						t.id === existing.id ? { ...t, entityId: tabDef.entityId } : t
+					);
+		set({
+			openTabs: tabs,
+			activeTabId: existing.id,
+			tabFocusedAt: stampFocus(tabFocusedAt, tabs, existing.id),
+			navIntent: intent,
+			...visited,
+		});
+		return;
+	}
+
+	const newTab: Tab = { ...tabDef, id: makeId() };
+	const tabs = [...openTabs, newTab];
+
+	// LRU eviction when over cap. Nothing is flushed on the way out:
+	// the selector refuses a dirty tab, so there is no flush to run -
+	// and had there been one, `void ctx.save()` would have dropped the
+	// rejection. Eviction simply never takes unsaved work.
+	if (tabs.length > MAX_OPEN_TABS) {
+		const evictIndex = leastRecentlyFocusedIndex(
+			tabs,
+			newTab.id,
+			activeTabId,
+			tabFocusedAt,
+			useSaveStore.getState().contexts
+		);
+		if (evictIndex !== -1) tabs.splice(evictIndex, 1);
+	}
+
+	set({
+		openTabs: tabs,
+		activeTabId: newTab.id,
+		tabFocusedAt: stampFocus(tabFocusedAt, tabs, newTab.id),
+		navIntent: intent,
+		...visited,
+	});
+}
+
 export const useTabsStore = create<TabsState>()(
 	persist(
 		(set, get) => ({
 			openTabs: [],
 			activeTabId: null,
 			tabFocusedAt: {},
-			specTabTarget: null,
-			dataRowTarget: null,
-			compareRunTarget: null,
+			navIntent: null,
 			navHistory: [],
 			navIndex: -1,
 
-			openTab: (tabDef) => {
-				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = get();
-				// One location for both branches below: a singleton that retargets
-				// shows what was asked for, not what it was showing.
-				const visited = recordVisit(navHistory, navIndex, {
-					type: tabDef.type,
-					entityId: tabDef.entityId,
-				});
+			openTab: (tabDef) => activateTab(get, set, tabDef, null),
 
-				// Dedupe: singletons and entity-keyed tabs
-				const isSingleton = SINGLETON_TYPES.includes(tabDef.type);
-				const existing = openTabs.find((t) =>
-					isSingleton
-						? t.type === tabDef.type
-						: t.type === tabDef.type && t.entityId === tabDef.entityId
-				);
-				if (existing) {
-					// Only a singleton can reach this branch with a different
-					// entityId - the entity-keyed lookup above matched on it.
-					const tabs =
-						existing.entityId === tabDef.entityId
-							? openTabs
-							: openTabs.map((t) =>
-									t.id === existing.id ? { ...t, entityId: tabDef.entityId } : t
-								);
-					set({
-						openTabs: tabs,
-						activeTabId: existing.id,
-						tabFocusedAt: stampFocus(tabFocusedAt, tabs, existing.id),
-						...visited,
-					});
-					return;
-				}
+			openCollectionSpecTab: (collectionId) =>
+				activateTab(
+					get,
+					set,
+					{ type: "collection", entityId: collectionId },
+					{ kind: "spec", target: collectionId }
+				),
 
-				const newTab: Tab = { ...tabDef, id: makeId() };
-				let tabs = [...openTabs, newTab];
-
-				// LRU eviction when over cap. Nothing is flushed on the way out:
-				// the selector refuses a dirty tab, so there is no flush to run -
-				// and had there been one, `void ctx.save()` would have dropped the
-				// rejection. Eviction simply never takes unsaved work.
-				if (tabs.length > MAX_OPEN_TABS) {
-					const evictIndex = leastRecentlyFocusedIndex(
-						tabs,
-						newTab.id,
-						activeTabId,
-						tabFocusedAt,
-						useSaveStore.getState().contexts
-					);
-					if (evictIndex !== -1) tabs.splice(evictIndex, 1);
-				}
-
-				set({
-					openTabs: tabs,
-					activeTabId: newTab.id,
-					tabFocusedAt: stampFocus(tabFocusedAt, tabs, newTab.id),
-					...visited,
-				});
-			},
-
-			// The target is set before the tab opens, not after: opening focuses
-			// the collection screen, which reads the target on that same render.
-			openCollectionSpecTab: (collectionId) => {
-				set({ specTabTarget: collectionId });
-				get().openTab({ type: "collection", entityId: collectionId });
-			},
-
-			clearSpecTabTarget: () => set({ specTabTarget: null }),
-
-			// Target first, tab second, for the reason `openCollectionSpecTab`
-			// sets its own: opening focuses the builder, which reads the target on
-			// that same render.
 			openRequestWithDataRow: (requestId, rowIndex) => {
 				if (!Number.isInteger(rowIndex) || rowIndex < 0) {
 					throw new RangeError(
 						`Cannot open a request at data row ${rowIndex} - a row index is a non-negative integer.`
 					);
 				}
-				set({ dataRowTarget: { requestId, rowIndex } });
-				get().openTab({ type: "request", entityId: requestId });
+				activateTab(
+					get,
+					set,
+					{ type: "request", entityId: requestId },
+					{ kind: "dataRow", target: requestId, rowIndex }
+				);
 			},
 
-			clearDataRowTarget: () => set({ dataRowTarget: null }),
+			openRunComparison: (runId) =>
+				activateTab(
+					get,
+					set,
+					{ type: "run", entityId: runId },
+					{ kind: "compare", target: runId }
+				),
 
-			// Target first, tab second, for the reason `openCollectionSpecTab` sets
-			// its own.
-			openRunComparison: (runId) => {
-				set({ compareRunTarget: runId });
-				get().openTab({ type: "run", entityId: runId });
+			takeNavIntent: (kind, target) => {
+				const intent = get().navIntent;
+				if (intent?.kind !== kind || intent.target !== target) return null;
+				set({ navIntent: null });
+				return intent as Extract<NavIntent, { kind: typeof kind }>;
 			},
-
-			clearCompareRunTarget: () => set({ compareRunTarget: null }),
 
 			// A dirty tab with nowhere for its unmount flush to land is a silent
 			// loss (#1489): `useSaveManager`'s cleanup fires the save anyway, its
@@ -840,7 +875,8 @@ export const useTabsStore = create<TabsState>()(
 				const { clearEntity } = useTabSelectionStore.getState();
 				for (const id of ids) clearEntity(id);
 
-				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex } = get();
+				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex, navIntent } =
+					get();
 				const shouldClose = (t: TabLocation) =>
 					t.entityId !== null &&
 					ids.has(t.entityId) &&
@@ -896,7 +932,12 @@ export const useTabsStore = create<TabsState>()(
 					}
 				}
 
-				set({ openTabs: remaining, activeTabId: nextActiveId, ...navigation });
+				set({
+					openTabs: remaining,
+					activeTabId: nextActiveId,
+					navIntent: intentIfOpen(navIntent, remaining),
+					...navigation,
+				});
 			},
 
 			focusTab: (tabId) => {
@@ -906,6 +947,7 @@ export const useTabsStore = create<TabsState>()(
 					set({
 						activeTabId: tabId,
 						tabFocusedAt: stampFocus(tabFocusedAt, openTabs, tabId),
+						navIntent: null,
 						...recordVisit(navHistory, navIndex, {
 							type: tab.type,
 							entityId: tab.entityId,

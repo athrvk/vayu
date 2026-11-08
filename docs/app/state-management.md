@@ -56,9 +56,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   openTabs: Tab[]                        // Each tab has unique id, type, and optional entityId
   activeTabId: string | null
   tabFocusedAt: Record<string, number>   // Tab id -> when it was last focused (epoch ms)
-  specTabTarget: string | null           // Collection whose Spec tab something pointed at
-  dataRowTarget: { requestId, rowIndex } | null  // Request a repro pointed at, and the row
-  compareRunTarget: string | null        // Load run whose report a History row asked to open on its comparison
+  navIntent: NavIntent | null            // What the navigation in flight asked of the screen it opened (session-only)
   navHistory: TabLocation[]              // Visited locations this session, oldest first
   navIndex: number                       // Cursor into navHistory; -1 before anything is visited
 }
@@ -118,33 +116,33 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   list by yesterday's attention, and an empty map falls back to strip order.
   Entries for closed tabs are dropped on the next focus rather than in every
   close path - nothing reads a stamp for a tab that is not open
-- Pointing *into* a collection: `openTab` can only name a collection, and a
-  collection tab picks its own sub-tab, so `specTabTarget` is where the one
-  navigation that means a *section* says which. The import dialog sets it when a
-  re-import is answered with Sync (issue #680); `CollectionDetail` opens on Spec
-  when the named collection is on screen and clears it, so it survives the tab
-  opening for the first time and never fires twice. Session-scoped like
-  `tabFocusedAt` - a persisted copy would jump the user to Spec on the next
-  launch for a choice they made yesterday
-- Pointing *into* a request the same way: `dataRowTarget` carries the data row a
-  navigation meant, because `openTab` can only name a request and which row
-  Send-with-row binds is state the UrlBar holds. A failed step of a collection
-  run sets it through `openRequestWithDataRow` (issue #730) - "reproduce this
-  step" means its request *and* the row that iteration bound - and the UrlBar
-  selects the row, opens the picker on it and clears the target, whether or not
-  the request can bind rows at all: a target left standing would fire on the
-  next request that can. Session-scoped like `specTabTarget`, and doubly so -
-  it points into a data file whose rows are deliberately never persisted, so a
-  remembered index would name a different row in a file that has since changed.
-  A non-integer or negative index throws rather than being stored
-- Pointing *into* a load run's report the same way: `compareRunTarget` carries the
-  run whose report should open on its compare view, because `openTab` can only name
-  the run. The History row's "Compare with…" sets it through `openRunComparison(runId)`
-  (issue #2164); `LoadTestDetail` opens the view when that run's report is on screen
-  and clears the target, so it holds whether the tab was opened by the row or was
-  already open, and fires once. Session-scoped like `specTabTarget`, absent from
-  `partialize`: a persisted copy would open yesterday's report on a comparison
-  nobody asked for today
+- Pointing *into* a screen: `navIntent` is the one hand-off from a navigation
+  to the screen it opened, because `openTab` can only name a tab. It is a
+  `NavIntent` - `{ kind: "spec" | "dataRow" | "compare", target, ... }`, with
+  `target` the id of the collection, request or run it is for - and at most one
+  is pending. `openCollectionSpecTab(collectionId)` issues `spec`: the import
+  dialog's Sync for an already-bound document (issue #680), which
+  `CollectionDetail` answers by opening on Spec. `openRequestWithDataRow` issues
+  `dataRow`, carrying the `rowIndex` a failed step of a collection run bound
+  (issue #730): "reproduce this step" means its request *and* the row, and the
+  UrlBar selects the row and opens the picker on it. A non-integer or negative
+  index throws rather than being stored. `openRunComparison(runId)` issues
+  `compare`, the History row's "Compare with…" (issue #2164), which
+  `LoadTestDetail` answers by opening the run's report on its compare view
+- A screen takes its intent with `takeNavIntent(kind, target)`, which returns it
+  and clears it only when both match - another kind or another target gets
+  `null` and leaves it pending - so it fires once, on the screen it was for. The
+  UrlBar takes its own whether or not the request can bind rows. The intent
+  belongs to the navigation that issued it (issue #3355), not to the entity it
+  names: the tab and the intent are set in one `set`, so the screen sees both on
+  the same render, and any later `openTab`, `focusTab`, `focusAdjacentTab`,
+  `goBack` or `goForward` replaces or clears it, as does closing the tab it
+  names (a single close, a bulk close or `closeTabsForEntities`). An intent
+  whose screen never rendered therefore cannot fire on a later visit. Session-
+  scoped like `tabFocusedAt` (absent from `partialize`): a persisted copy would
+  jump the user to Spec, a data row or a comparison for a choice made in a
+  previous launch, and a data row points into a file whose rows are deliberately
+  never persisted
 - Navigation history (issue #1245): `navHistory` is a `TabLocation` per visit
   (a `Tab` without its instance id, so a closed tab's place survives it), with
   `navIndex` as the cursor - `-1` before anything is visited. `openTab` and
@@ -157,7 +155,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   whose tab is still open, falling back to the old left-neighbour rule, and
   leaves the closed location ahead of the cursor so Forward can reopen it;
   `closeTabsForEntities` prunes history entries for deleted entities, so Back
-  never lands on one. Session-scoped like `tabFocusedAt` and `specTabTarget`
+  never lands on one. Session-scoped like `tabFocusedAt` and `navIntent`
   (absent from `partialize`), and NOT persisted: tabs *are* restored across
   launches, and a persisted history would offer a Back that walks yesterday's
   route through today's window

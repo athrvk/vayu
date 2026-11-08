@@ -105,7 +105,7 @@ const baselinePage = {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useTabsStore.setState({ compareRunTarget: null });
+	useTabsStore.setState({ navIntent: null });
 	mocked.getRun.mockResolvedValue(run());
 	mocked.listRuns.mockResolvedValue(baselinePage);
 	mocked.getRunReport.mockResolvedValue(report());
