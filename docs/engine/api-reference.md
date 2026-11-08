@@ -10662,8 +10662,9 @@ makes that element's `missing` a failed step. `deferred` (issue #2144) counts a
 `script.post` element left to the replay above: it does run, later, and its
 assertions are the step's `tests`. `skipped` counts every other `skipped`
 outcome: a disabled element, an un-inlined `script.pre` (no replay to go to), a
-controller's skip, and an optional `extract.json` over a body it could not
-read.
+controller's skip, an optional `extract.json` over a body it could not
+read, and an inline `script.*` whose `pm.sendRequest` the run's Stop cancelled
+(#3371), whose tests and throw are then counted nowhere.
 
 A `script.pre` or `script.post` that ran inline also says why it failed and
 what it logged (#3127), since a load run keeps no trace to read it from:
@@ -12905,7 +12906,8 @@ id (#3101) are two rows, each with its own counts and `origin`. `deferred` (issu
 counts the submissions an un-inlined `script.post` was left to the completion replay on:
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is every other skip: a disabled element, an un-inlined
-`script.pre`, or an optional `extract.json` over a body it could not read. Absent, not `[]`, for a run that declared no
+`script.pre`, an optional `extract.json` over a body it could not read, or an inline
+`script.*` whose `pm.sendRequest` the run's Stop cancelled (#3371). Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and

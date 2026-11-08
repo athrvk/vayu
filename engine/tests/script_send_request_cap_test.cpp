@@ -671,6 +671,13 @@ class ScriptSendRequestRunTest : public ::testing::Test {
 
     /// A one-step scenario run against `/ok` whose step carries @p element.
     void run_scenario_step (const json& element) {
+        start_scenario_step (element);
+        await_finish ();
+    }
+
+    /// The same run, started and left running, with @p timeout_ms as its
+    /// `timeout`.
+    void start_scenario_step (const json& element, int timeout_ms = RUN_TIMEOUT_MS) {
         auto execution = std::make_shared<vayu::core::ScenarioExecution> ();
         execution->request.source        = "collection";
         execution->request.collection_id = "col_1";
@@ -682,14 +689,14 @@ class ScriptSendRequestRunTest : public ::testing::Test {
         step.elements           = vayu::tests::compiled_elements ({ element });
         step.request.method     = vayu::HttpMethod::GET;
         step.request.url        = server_->ok_url ();
-        step.request.timeout_ms = RUN_TIMEOUT_MS;
+        step.request.timeout_ms = timeout_ms;
         step.stored_url         = step.request.url;
         execution->plan.steps.push_back (std::move (step));
 
-        json config = load_payload ();
+        json config       = load_payload ();
+        config["timeout"] = timeout_ms;
         config["scenario"] = { { "source", "collection" }, { "collectionId", "col_1" } };
         start_load_run (config, execution);
-        await_finish ();
     }
 
     /**
@@ -986,6 +993,49 @@ std::string lifecycle_outcome (const vayu::db::Run& run, const std::string& phas
     return summary.at (pointer).get<std::string> ();
 }
 
+/// The row an element-outcome array under @p pointer in the stored summary
+/// gives the element @p id, null when there is none.
+json element_row (const vayu::db::Run& run, const std::string& pointer, const std::string& id) {
+    const auto summary = json::parse (run.summary, nullptr, false);
+    const auto at      = json::json_pointer (pointer);
+    if (!summary.is_object () || !summary.contains (at) || !summary.at (at).is_array ()) {
+        return nullptr;
+    }
+    for (const auto& row : summary.at (at)) {
+        if (row.value ("id", "") == id) {
+            return row;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * A script that fetches @p url, asserts it answered and throws with what came
+ * back: were its cancelled fetch a verdict, it would count both a failed
+ * assertion and a script error.
+ */
+std::string fetch_asserting (const std::string& url) {
+    return "let outcome = 'the callback never ran'; "
+           "pm.sendRequest('" +
+    url +
+    "', function (err, res) { "
+    "  outcome = err ? err.code + ' ' + err.message : 'answered ' + res.code; "
+    "}); "
+    "pm.test('the fetch answered', function () { "
+    "  pm.expect(outcome.indexOf('answered ')).to.equal(0); "
+    "}); "
+    "throw new Error('the fetch answered: ' + outcome);";
+}
+
+/// The cut-short element's row says it ran once and was neither an error nor
+/// a failure.
+void expect_skipped_row (const json& row, const std::string& summary) {
+    ASSERT_TRUE (row.is_object ()) << summary;
+    EXPECT_EQ (row.value ("skipped", 0), 1) << summary;
+    EXPECT_EQ (row.value ("error", -1), 0) << summary;
+    EXPECT_EQ (row.value ("failed", -1), 0) << summary;
+}
+
 class ScriptSendRequestStopTest : public ScriptSendRequestRunTest {
     protected:
     void SetUp () override {
@@ -999,8 +1049,13 @@ class ScriptSendRequestStopTest : public ScriptSendRequestRunTest {
     /// the shape of a setup that cannot go on without its answer: were its
     /// cancelled fetch a failure, it would fail the run.
     [[nodiscard]] json hanging_setup () const {
-        return vayu::tests::script_element_json ("el_setup", "script.setup",
-        fetch_reporting (server_->hang_url ()), /*inline_script=*/true);
+        return hanging_script ("el_setup", "script.setup");
+    }
+
+    /// An element of @p kind that fetches `/hang`, asserts and throws.
+    [[nodiscard]] json hanging_script (const std::string& id, const std::string& kind) const {
+        return vayu::tests::script_element_json (id, kind,
+        fetch_asserting (server_->hang_url ()), /*inline_script=*/true);
     }
 };
 
@@ -1023,12 +1078,14 @@ TEST_F (ScriptSendRequestStopTest, AStopDoesNotWaitOutASetupScriptFetch) {
 }
 
 // An inline step script runs on the run's sending thread, which the Stop waits
-// on before the run can end. Mutation-check: drop `context->script_send.cancel
-// = ...` from `configure_event_loop`.
+// on before the run can end, and the script it cut short is `skipped`, not the
+// error and failed assertion it would otherwise report. Mutation-checks: drop
+// `context->script_send.cancel = ...` from `configure_event_loop` and the run
+// is still registered at the deadline; drop the `send_cancelled` return from
+// `run_step_script` (script_kinds.cpp) and the row counts an error.
 TEST_F (ScriptSendRequestStopTest, AStopDoesNotWaitOutAnInlineScriptFetch) {
     start_single_request (
-    { { "requestElements",
-    json::array ({ reporting_element ("script.pre", server_->hang_url ()) }) } },
+    { { "requestElements", json::array ({ hanging_script ("el_script", "script.pre") }) } },
     STOP_CASE_TIMEOUT_MS);
 
     ASSERT_TRUE (stop_once_a_fetch_hangs ()) << "the Stop waited on the fetch";
@@ -1036,6 +1093,29 @@ TEST_F (ScriptSendRequestStopTest, AStopDoesNotWaitOutAnInlineScriptFetch) {
     const auto run = stored_run ();
     ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Stopped) << run->summary;
+    expect_skipped_row (element_row (*run, "/elements", "el_script"), run->summary);
+}
+
+// The scenario shape's completion hook, where an inline `script.post` runs on
+// an event-loop worker: the step it cut short is neither errored nor failed,
+// and the run made no assertion. Mutation-check: drop the `send_cancelled`
+// return from `run_step_script` and the step is `errored`, with one failed
+// assertion.
+TEST_F (ScriptSendRequestStopTest, AnInlineStepScriptTheStopCutShortIsNoVerdict) {
+    start_scenario_step (hanging_script ("el_script", "script.post"), STOP_CASE_TIMEOUT_MS);
+
+    ASSERT_TRUE (stop_once_a_fetch_hangs ()) << "the Stop waited on the fetch";
+
+    const auto run = stored_run ();
+    ASSERT_HAS_VALUE (run);
+    const auto summary = json::parse (run->summary, nullptr, false);
+    ASSERT_TRUE (summary.contains ("scenario")) << run->summary;
+    const auto& scenario = summary.at ("scenario");
+    EXPECT_EQ (scenario.value ("errored", -1), 0) << run->summary;
+    EXPECT_EQ (scenario.value ("failed", -1), 0) << run->summary;
+    EXPECT_FALSE (scenario.contains ("assertions")) << run->summary;
+    expect_skipped_row (
+    element_row (*run, "/scenario/steps/0/elements", "el_script"), run->summary);
 }
 
 // The sequential runner's own inputs. Mutation-checks: drop `.cancel = ...`
