@@ -31,6 +31,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
@@ -187,6 +188,45 @@ const std::vector<std::string>& series);
  */
 [[nodiscard]] std::optional<std::string> scrape_failure_cause (
 const vayu::Result<vayu::Response>& sent);
+
+/// Whether the run's end cancelled the scrape (`RunContext::aux_cancel`): no
+/// answer, and no failure either, since it says nothing about the endpoint.
+/// Asked before `scrape_failure_cause`, which reads a cancel as a failure.
+[[nodiscard]] bool scrape_cancelled (const vayu::Result<vayu::Response>& sent);
+
+/// The endpoint answered its last scrape, a no-match included.
+struct MonitorHealthy {
+    bool operator== (const MonitorHealthy&) const = default;
+};
+/// Failing, below the backoff threshold.
+struct MonitorFailing {
+    bool operator== (const MonitorFailing&) const = default;
+
+    /// Failed scrapes in a row, fewer than `FAILURES_BEFORE_BACKOFF`.
+    int consecutive = 1;
+};
+/// `FAILURES_BEFORE_BACKOFF` failures in a row: scraping at twice the interval
+/// until the endpoint answers.
+struct MonitorBackedOff {
+    bool operator== (const MonitorBackedOff&) const = default;
+};
+
+/**
+ * @brief Where the scrape loop stands with its endpoint (#3343).
+ *
+ * Closed, so the cadence and the one backoff log line both follow from which
+ * of the three it is and no flag beside it can disagree. Any answer returns it
+ * to `MonitorHealthy`; a failure moves it on through `after_scrape_failure`.
+ */
+using MonitorBackoff = std::variant<MonitorHealthy, MonitorFailing, MonitorBackedOff>;
+
+/// The state one more failed scrape leaves @p state in.
+[[nodiscard]] MonitorBackoff after_scrape_failure (const MonitorBackoff& state);
+
+/// The cadence @p state scrapes at: @p interval_ms, doubled up to
+/// `MAX_INTERVAL_MS` while backed off. Doubled once, not per failure, so a
+/// recovered endpoint is noticed within twice the interval, not minutes later.
+[[nodiscard]] int scrape_interval_ms (const MonitorBackoff& state, int interval_ms);
 
 /**
  * @brief The stored `monitor_samples.payload` object, returned verbatim as one

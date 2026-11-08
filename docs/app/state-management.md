@@ -1465,9 +1465,10 @@ The downloaded update whose build-provenance attestation did not verify (issue
 }
 ```
 
-**Non-persisted.** `useAppUpdate` writes it from `onUpdateVerificationFailed` and
-clears it on the next `update:available` or `update:downloaded`. It is a store
-rather than hook state because the banner receives the event for the whole
+**Non-persisted.** `useAppUpdate` writes it from every download state it receives
+(`update:state`, and `getUpdateState()` on mount, so a reload keeps it): `refused`
+sets it and any other state clears it. It is a store
+rather than hook state because the banner receives the state for the whole
 session while `UpdatesCard` mounts only when Settings opens, and a per-instance
 hook would show it nothing. Both read it with a selector.
 

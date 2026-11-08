@@ -146,7 +146,8 @@ export const collectionPageSchema = pagedEnvelopeSchema(
 );
 
 /**
- * `get_run_report`: `partial` and `note` appear only while the run is unfinished.
+ * `get_run_report`: `partial` and `note` appear only while the run is unfinished
+ * (or has a status Vayu does not recognise, which adds `unknownStatus` too).
  * `summary.partial` and `summary.summaryMissing` are a different statement, made
  * of a failed run whose counts the engine could not fully record (#2895).
  */
@@ -155,6 +156,7 @@ export const runReportSchema = z.looseObject({
 	summary: z.looseObject({ partial: optBool, summaryMissing: optBool }).optional(),
 	results: anyList,
 	partial: optBool,
+	unknownStatus: optBool,
 	note: optStr,
 });
 
@@ -162,6 +164,7 @@ export const runStatusSchema = z.looseObject({
 	id: nullStr,
 	status: nullStr,
 	terminal: optBool,
+	unknownStatus: optBool,
 	progress: nullNum,
 	nextStep: optStr,
 });

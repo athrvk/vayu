@@ -9712,7 +9712,9 @@ fixes:
 
 Neither fails the run. After five consecutive failures the engine logs once
 and backs off to twice the configured interval until a scrape is answered; a
-no-match is an answer, so it ends the backoff rather than extending it.
+no-match is an answer, so it ends the backoff rather than extending it. A
+scrape still in flight when the run ends is cancelled rather than waited out,
+and counts as neither.
 
 Three of the limits are settings rather than constants: `intervalMs` defaults to
 **`monitorIntervalMs`** when the block omits it, the `series` ceiling is
@@ -13105,9 +13107,11 @@ while it ran - a header-placed, expiring token with `autoRefreshToken` on (see
 entry in `refreshes` is when a renewal landed, in seconds from the run's start.
 `refreshFailures` plus a `lastError` string is the other half of the answer: the
 run kept sending the credential it had, so 401s in `statusCodes` from that point
-on are explained here rather than by the target. The section is **absent** for a
-run that could never refresh, which is not the same claim as a run that watched
-and never needed to (that one reports an empty `refreshes` array). A collection
+on are explained here rather than by the target. A renewal still in flight when
+the run ends is cancelled rather than waited out, and is not a failure. The
+section is **absent** for a run that could never refresh, which is not the same
+claim as a run that watched and never needed to (that one reports an empty
+`refreshes` array). A collection
 load run that keeps several tokens current (one per distinct cache key its steps
 send, #3199) reports them in this one shape: every renewal in `refreshes`, in
 order of `atSeconds`, `refreshFailures` summed, and `lastError` the most recent

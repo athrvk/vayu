@@ -329,6 +329,10 @@ in are Shift-dragging the file onto the taskbar button or Open with > Choose ano
 buffered until the renderer reports `did-finish-load`, because the earliest of
 them arrives before there is a window at all, and a dropped document that
 vanished into a cold start would look like the app ignoring the double-click.
+They are held again whenever a window is created (the macOS Dock rebuilding a
+closed one) or the main frame starts loading a new document (a reload after a crash or an
+unresponsive renderer; a subframe or same-document navigation does not count), so an intent offered before the new page mounts waits for its
+`did-finish-load` instead of going to a page with no subscriber (#3339).
 Main carries the path and never reads the file, but it does record the path as
 one the user opened (`electron/file-grants.ts`, #2357); the renderer reads it
 back through the gated `specFile:read` channel the import batch already uses,
@@ -767,9 +771,9 @@ See [Variable resolution](app/variable-resolution.md) for the rules.
   the public-good trusted root (refreshed over TUF by
   `electron/sigstore-trusted-root.ts`), and found
   the signer to be `release.yml` in `athrvk/vayu` at the tag `v<version>` with a
-  SLSA v1 subject naming that digest. `update:downloaded`, restart-to-install
-  and the quit-time install all wait for it; a failure sends
-  `update:verificationFailed` instead and the file is never installed. Any
+  SLSA v1 subject naming that digest. The `verified` download state, restart-to-install
+  and the quit-time install all wait for it; a failure moves the state to
+  `refused` and the file is never installed. Any
   failure, including a network one, refuses: there is no path that accepts after
   an error. Both requests, the attestation lookup and the TUF refresh, go
   through the one injected `fetch` (Electron's `net.fetch`), so both follow the
