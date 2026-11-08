@@ -14,7 +14,8 @@
 
 import { useCallback, useEffect } from "react";
 import { detectCommand, importCommand } from "@/services/curl/parseCurl";
-import { useToastStore } from "@/stores";
+import { useTabsStore, useToastStore } from "@/stores";
+import { focusRequestUrl } from "@/components/layout/region-focus";
 import { droppedFlagsNotice } from "../../utils/paste-disclosure";
 import { useRequestBuilderContext } from "../../context";
 import VariableInput from "@/components/shared/VariableInput";
@@ -46,6 +47,20 @@ export default function UrlInput({ className }: UrlInputProps) {
 		},
 		[request.params, request.url, updateField]
 	);
+
+	/*
+	 * A request created blank asked for the caret here (#3400). The field mounts
+	 * after the tab opens, so the ask travels as a nav intent and is answered on
+	 * the render that has both the intent and this field, once.
+	 */
+	const focusRequested = useTabsStore(
+		(s) => s.navIntent?.kind === "focusUrl" && s.navIntent.target === request.id
+	);
+	const takeNavIntent = useTabsStore((s) => s.takeNavIntent);
+	useEffect(() => {
+		if (!focusRequested || !request.id) return;
+		if (takeNavIntent("focusUrl", request.id)) focusRequestUrl();
+	}, [focusRequested, request.id, takeNavIntent]);
 
 	/** Replace the request with what a curl/wget command describes. */
 	const importIntoRequest = useCallback(

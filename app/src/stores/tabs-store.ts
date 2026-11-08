@@ -53,12 +53,14 @@ export interface TabLocation {
 export type NavIntent =
 	| { kind: "spec"; target: string }
 	| { kind: "dataRow"; target: string; rowIndex: number }
-	| { kind: "compare"; target: string };
+	| { kind: "compare"; target: string }
+	| { kind: "focusUrl"; target: string };
 
 const INTENT_TAB_TYPE: Record<NavIntent["kind"], TabType> = {
 	spec: "collection",
 	dataRow: "request",
 	compare: "run",
+	focusUrl: "request",
 };
 
 function intentTab(intent: NavIntent): TabLocation {
@@ -127,11 +129,12 @@ interface TabsState {
 	tabFocusedAt: Record<string, number>;
 	/**
 	 * The one in-flight hand-off from a navigation to the screen it opened, or
-	 * `null` (issues #680, #730, #2164, #3355).
+	 * `null` (issues #680, #730, #2164, #3355, #3400).
 	 *
-	 * `openTab` can only name a tab, and three navigations need to say more: which
+	 * `openTab` can only name a tab, and four navigations need to say more: which
 	 * sub-tab a collection opens on (`spec`), which data row a request's Send binds
-	 * (`dataRow`), and whether a run's report opens on its comparison (`compare`).
+	 * (`dataRow`), whether a run's report opens on its comparison (`compare`), and
+	 * whether a request opens with its URL field focused (`focusUrl`).
 	 * That state lives in the destination screen, so the navigation leaves a
 	 * `NavIntent` here and the screen takes it with `takeNavIntent`, once.
 	 *
@@ -193,6 +196,11 @@ interface TabsState {
 	openRequestWithDataRow: (requestId: string, rowIndex: number) => void;
 	/** Show a load run's report on its comparison view - a `compare` intent. */
 	openRunComparison: (runId: string) => void;
+	/**
+	 * Show a request with the caret in its URL field - a `focusUrl` intent. For a
+	 * request just created blank, where the next thing the user does is type.
+	 */
+	openRequestFocusingUrl: (requestId: string) => void;
 	/**
 	 * Take the pending intent if it is of this `kind` and names `target`, clearing
 	 * it; `null` and no change otherwise. The screen that owns the target calls
@@ -773,6 +781,14 @@ export const useTabsStore = create<TabsState>()(
 					set,
 					{ type: "run", entityId: runId },
 					{ kind: "compare", target: runId }
+				),
+
+			openRequestFocusingUrl: (requestId) =>
+				activateTab(
+					get,
+					set,
+					{ type: "request", entityId: requestId },
+					{ kind: "focusUrl", target: requestId }
 				),
 
 			takeNavIntent: (kind, target) => {

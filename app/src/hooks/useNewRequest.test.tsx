@@ -58,6 +58,44 @@ describe("useNewRequest", () => {
 		});
 	});
 
+	describe("where focus goes once the request is open", () => {
+		beforeEach(() => {
+			mocks.createRequest.mockResolvedValue({ id: "r1" });
+		});
+
+		function activeTab() {
+			const { openTabs, activeTabId } = useTabsStore.getState();
+			return openTabs.find((t) => t.id === activeTabId);
+		}
+
+		it("asks for the URL field on a blank request", async () => {
+			const { result } = renderHook(() => useNewRequest());
+			act(() => result.current.newRequest());
+			await waitFor(() =>
+				expect(activeTab()).toMatchObject({ type: "request", entityId: "r1" })
+			);
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "focusUrl", target: "r1" });
+		});
+
+		it("asks for nothing on a request created from a preset", async () => {
+			const { result } = renderHook(() => useNewRequest());
+			act(() =>
+				result.current.newRequest({ name: "Demo", method: "GET", url: "https://x.test" })
+			);
+			await waitFor(() =>
+				expect(activeTab()).toMatchObject({ type: "request", entityId: "r1" })
+			);
+			expect(useTabsStore.getState().navIntent).toBeNull();
+		});
+
+		it("asks for the URL field when the caller names the collection", async () => {
+			const { result } = renderHook(() => useNewRequest());
+			act(() => result.current.newRequest(undefined, { collectionId: "c1" }));
+			await waitFor(() => expect(activeTab()).toMatchObject({ entityId: "r1" }));
+			expect(useTabsStore.getState().navIntent).toEqual({ kind: "focusUrl", target: "r1" });
+		});
+	});
+
 	describe("the create payload", () => {
 		beforeEach(() => {
 			mocks.createRequest.mockResolvedValue({ id: "r1" });

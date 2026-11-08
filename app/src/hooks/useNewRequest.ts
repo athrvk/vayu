@@ -127,6 +127,7 @@ export interface UseNewRequestReturn {
 
 export function useNewRequest(): UseNewRequestReturn {
 	const openTab = useTabsStore((s) => s.openTab);
+	const openRequestFocusingUrl = useTabsStore((s) => s.openRequestFocusingUrl);
 	const showToast = useToastStore((s) => s.showToast);
 	const lastCollectionId = useSessionStore((s) => s.lastCollectionId);
 	const { data: collections = [] } = useCollectionsQuery();
@@ -153,14 +154,18 @@ export function useNewRequest(): UseNewRequestReturn {
 					method: preset?.method ?? "GET",
 					url: preset?.url ?? "",
 				});
-				openTab({ type: "request", entityId: newRequest.id });
+				// A blank request is waiting to be typed into; a preset one arrives filled
+				// in, and its caller (a demo, an import, a saved run) may have a reason to
+				// keep focus where it is.
+				if (preset) openTab({ type: "request", entityId: newRequest.id });
+				else openRequestFocusingUrl(newRequest.id);
 			} catch (error) {
 				// Without this the click looks dead - the old code only logged.
 				console.error("Failed to create new request:", error);
 				showToast(createFailedMessage(error), "error");
 			}
 		},
-		[createRequestMutation, openTab, showToast]
+		[createRequestMutation, openTab, openRequestFocusingUrl, showToast]
 	);
 
 	const newRequest = useCallback(
