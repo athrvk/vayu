@@ -70,6 +70,7 @@ import {
 	EngineNotReadyError,
 	EnginePortInUseError,
 	defaultSidecarSystem,
+	type EngineLifecycle,
 	type SidecarSystem,
 } from "./sidecar";
 import {
@@ -131,17 +132,24 @@ function stubPlatform(platform: NodeJS.Platform) {
 	Object.defineProperty(process, "platform", { value: platform, configurable: true });
 }
 
+/** Each test's fake systems, retired after it so nothing they drive outlives it. */
+const liveSystems: Array<{ retired: boolean }> = [];
+
 /**
  * A fake OS: which PIDs are alive, whether anything answers on the port, and
- * what got spawned. `sleep` resolves immediately - the waits under test are
- * ordering, not duration.
+ * what got spawned. `sleep` takes one macrotask turn - the waits under test are
+ * ordering, not duration - so a `slow` engine's watch, which keeps polling after
+ * `start()` has returned, cannot starve the test of the event loop. Once the
+ * test is over it never resolves, which parks that watch for good.
  */
 function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 	const state = {
 		alivePids: new Set<number>(),
 		healthy: false,
 		spawned: [] as FakeChild[],
+		retired: false,
 	};
+	liveSystems.push(state);
 
 	const system: SidecarSystem = {
 		spawnEngine: vi.fn(() => {
@@ -165,7 +173,12 @@ function fakeSystem(overrides: Partial<SidecarSystem> = {}) {
 		probeHealth: vi.fn(async () => state.healthy),
 		requestShutdown: vi.fn(async () => true),
 		isPortFree: vi.fn(async () => !state.healthy),
-		sleep: vi.fn(async () => {}),
+		sleep: vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					if (!state.retired) setImmediate(resolve);
+				})
+		),
 		...overrides,
 	};
 
@@ -197,6 +210,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const system of liveSystems.splice(0)) system.retired = true;
 	rmSync(fake.userData, { recursive: true, force: true });
 	vi.restoreAllMocks();
 });
@@ -932,12 +946,17 @@ describe("EngineSidecar - an engine that dies at spawn", () => {
 	it("doubles the poll interval up to the ceiling and spends the whole budget", async () => {
 		const { system, state } = fakeSystem();
 		spawnsAndDies(state, system, () => {});
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		// The budget's sleeps, before the watch on the slow engine adds its own.
+		let slept: number[] = [];
+		sidecar.onLifecycle((lifecycle) => {
+			if (lifecycle.kind === "slow") {
+				slept = vi.mocked(system.sleep).mock.calls.map(([ms]) => ms);
+			}
+		});
 
-		await expect(new EngineSidecar([TEST_PORT], system).start()).rejects.toBeInstanceOf(
-			EngineNotReadyError
-		);
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EngineNotReadyError);
 
-		const slept = vi.mocked(system.sleep).mock.calls.map(([ms]) => ms as number);
 		expect(slept.slice(0, 4)).toEqual([50, 100, 200, 400]);
 		expect(slept.every((ms) => ms <= ENGINE_HEALTH_POLL_MAX_INTERVAL_MS)).toBe(true);
 		expect(slept[slept.length - 1]).toBe(ENGINE_HEALTH_POLL_MAX_INTERVAL_MS);
@@ -1022,6 +1041,257 @@ describe("EngineSidecar - restart racing quit", () => {
 
 		await expect(sidecar.restart(0)).rejects.toThrow(/shutting down/i);
 		expect(system.spawnEngine).toHaveBeenCalledOnce();
+	});
+});
+
+/*
+ * #3336: one lifecycle, changed in one place and published, and one queue that
+ * start, stop, restart and shutdown share. Each case names its mutation check.
+ */
+describe("EngineSidecar - lifecycle", () => {
+	function recordLifecycle(sidecar: EngineSidecar): EngineLifecycle["kind"][] {
+		const kinds: EngineLifecycle["kind"][] = [];
+		sidecar.onLifecycle((lifecycle) => kinds.push(lifecycle.kind));
+		return kinds;
+	}
+
+	/** Settles the first time the lifecycle enters `kind`. */
+	function lifecycleReaches(
+		sidecar: EngineSidecar,
+		kind: EngineLifecycle["kind"]
+	): Promise<EngineLifecycle> {
+		return new Promise((resolve) => {
+			const unsubscribe = sidecar.onLifecycle((lifecycle) => {
+				if (lifecycle.kind !== kind) return;
+				unsubscribe();
+				resolve(lifecycle);
+			});
+		});
+	}
+
+	it("walks from idle through the port choice and the spawn to ready", async () => {
+		const { system } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		expect(sidecar.getLifecycle()).toEqual({ kind: "idle" });
+		const kinds = recordLifecycle(sidecar);
+
+		await sidecar.start();
+
+		expect(kinds).toEqual(["choosingPort", "spawning", "ready"]);
+		expect(sidecar.getLifecycle()).toEqual({ kind: "ready" });
+	});
+
+	// Mutation check: return a fresh `enqueue` from every `restart()` call
+	// instead of the pending one, and three engines are spawned.
+	it("joins a restart requested while one is running, and spawns one engine for both", async () => {
+		const { system } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+
+		const first = sidecar.restart(0);
+		const second = sidecar.restart(0);
+		await Promise.all([first, second]);
+
+		expect(second).toBe(first);
+		// The first start's, and one for the two restarts.
+		expect(system.spawnEngine).toHaveBeenCalledTimes(2);
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	// Mutation check: have `start()` and `restart()` call `runStart` /
+	// `runRestart` directly rather than through `enqueue`, and the restart stops
+	// the child the first start is polling, which rejects that start.
+	it("lets the first start finish when a restart arrives during its health poll", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		// The first engine misses its first probe, so the start is mid-poll when
+		// the restart is asked for.
+		let missedOnce = false;
+		vi.mocked(system.probeHealth).mockImplementation(async () => {
+			if (state.spawned.length === 1 && !missedOnce) {
+				missedOnce = true;
+				return false;
+			}
+			return state.healthy;
+		});
+		// A real engine leaves once it has accepted POST /shutdown.
+		vi.mocked(system.requestShutdown).mockImplementation(async () => {
+			state.spawned[state.spawned.length - 1]?.exit();
+			return true;
+		});
+		// A macrotask turn per sleep: a restart running beside the start, rather
+		// than after it, has stopped the child by the start's next probe.
+		let restarting: Promise<void> | undefined;
+		vi.mocked(system.sleep).mockImplementation(async () => {
+			restarting ??= sidecar.restart(0);
+			await new Promise((resolve) => setImmediate(resolve));
+		});
+
+		await expect(sidecar.start()).resolves.toBeUndefined();
+		expect(restarting).toBeDefined();
+		await restarting;
+
+		expect(system.spawnEngine).toHaveBeenCalledTimes(2);
+		// The restart stopped the first engine, after its start was done.
+		expect(system.requestShutdown).toHaveBeenCalledOnce();
+		expect(sidecar.getLifecycle()).toEqual({ kind: "ready" });
+	});
+
+	// Mutation check: drop the `readyAfterSlowHooks` loop in `transition()` and
+	// the hook is never called.
+	it("runs the ready-after-slow hook when a slow engine answers", async () => {
+		const { system } = fakeSystem();
+		let answering = false;
+		system.probeHealth = vi.fn(async () => answering);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		const onReadyAfterSlow = vi.fn();
+		sidecar.onReadyAfterSlow(onReadyAfterSlow);
+		const ready = lifecycleReaches(sidecar, "ready");
+
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EngineNotReadyError);
+		expect(sidecar.getLifecycle()).toEqual({ kind: "slow" });
+		expect(onReadyAfterSlow).not.toHaveBeenCalled();
+
+		answering = true;
+		await ready;
+
+		expect(onReadyAfterSlow).toHaveBeenCalledOnce();
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	// Mutation check: drop the `transition(crash)` in `childLeft` and the
+	// lifecycle stays `ready` over a dead engine.
+	it("publishes a crash, with the exit status and the engine's last words, after ready", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+		const kinds = recordLifecycle(sidecar);
+
+		state.spawned[0].stderr.emit("data", "database disk image is malformed\n");
+		state.spawned[0].emit("exit", null, "SIGSEGV");
+
+		expect(sidecar.getLifecycle()).toEqual({
+			kind: "crashed",
+			code: null,
+			signal: "SIGSEGV",
+			stderrTail: ["database disk image is malformed"],
+			error: null,
+		});
+		expect(kinds).toEqual(["crashed"]);
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("publishes a crash for a child error after ready", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+
+		state.spawned[0].emit("error", new Error("read EPIPE"));
+
+		expect(sidecar.getLifecycle()).toMatchObject({ kind: "crashed", error: "read EPIPE" });
+		expect(sidecar.isRunning()).toBe(false);
+	});
+
+	it("publishes a crash for a slow engine that dies, and stops watching it", async () => {
+		const { system, state } = fakeSystem();
+		system.probeHealth = vi.fn(async () => false);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		const onReadyAfterSlow = vi.fn();
+		sidecar.onReadyAfterSlow(onReadyAfterSlow);
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EngineNotReadyError);
+
+		state.spawned[0].emit("exit", 3, null);
+
+		expect(sidecar.getLifecycle()).toMatchObject({ kind: "crashed", code: 3 });
+		expect(onReadyAfterSlow).not.toHaveBeenCalled();
+	});
+
+	it("publishes a crash for an engine that dies before it answers", async () => {
+		const { system, state } = fakeSystem();
+		system.probeHealth = vi.fn(async () => false);
+		vi.mocked(system.spawnEngine).mockImplementation(() => {
+			const child = new FakeChild();
+			state.spawned.push(child);
+			child.say("cannot open shared object file");
+			child.exit(127);
+			return child as unknown as ChildProcess;
+		});
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+
+		await expect(sidecar.start()).rejects.toThrow(/exit code 127/);
+
+		expect(sidecar.getLifecycle()).toEqual({
+			kind: "crashed",
+			code: 127,
+			signal: null,
+			stderrTail: ["cannot open shared object file"],
+			error: null,
+		});
+	});
+
+	it("goes back to idle when a start fails before it has a child", async () => {
+		const { system } = fakeSystem();
+		system.isPortFree = vi.fn(async () => false);
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+
+		await expect(sidecar.start()).rejects.toBeInstanceOf(EnginePortInUseError);
+
+		expect(sidecar.getLifecycle()).toEqual({ kind: "idle" });
+	});
+
+	// Mutation check: drop the `CHILD_EXPECTED_STATES` test in `childLeft`, so
+	// every exit of the current child is a crash, and the stops here publish one.
+	it("publishes no crash for a restart or a stop it was asked for", async () => {
+		const { system } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+		const kinds = recordLifecycle(sidecar);
+
+		await sidecar.restart(0);
+		await sidecar.stop();
+
+		expect(kinds).toEqual([
+			"replacing",
+			"choosingPort",
+			"spawning",
+			"ready",
+			"stopping",
+			"stopped",
+		]);
+	});
+
+	// Mutation check: drop the `this.process !== child` return in `childLeft`
+	// and the old engine's exit drops the new one's handle and reads as a crash.
+	it("publishes no crash for the previous engine's exit landing after a restart", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		await sidecar.start();
+		await sidecar.restart(0);
+
+		state.spawned[0].emit("exit", 0, null);
+
+		expect(sidecar.getLifecycle()).toEqual({ kind: "ready" });
+		expect(sidecar.isRunning()).toBe(true);
+	});
+
+	// Mutation check: drop the `shuttingDown` guard at the top of `transition()`
+	// and the start that was already polling publishes `ready` after `stopping`.
+	it("leaves stopping only for stopped once the app is quitting", async () => {
+		const { system, state } = fakeSystem();
+		const sidecar = new EngineSidecar([TEST_PORT], system);
+		const kinds = recordLifecycle(sidecar);
+		// The quit lands while the start's health probe is out.
+		let quitting: Promise<void> | undefined;
+		vi.mocked(system.probeHealth).mockImplementation(async () => {
+			if (state.spawned.length > 0) quitting ??= sidecar.shutdown();
+			return state.healthy;
+		});
+
+		await sidecar.start();
+		await quitting;
+
+		expect(kinds).toEqual(["choosingPort", "spawning", "stopping", "stopped"]);
+		expect(sidecar.isRunning()).toBe(false);
 	});
 });
 
