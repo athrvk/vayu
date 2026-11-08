@@ -83,6 +83,7 @@ beforeEach(() => {
 		engineError: null,
 		engineStartWindow: null,
 		pendingRestart: false,
+		engineRestarting: false,
 		restartRequiredKeys: [],
 	});
 	restartEngine.mockResolvedValue({ success: true });

@@ -18,6 +18,7 @@ import {
 	usePrefetchCollectionsAndRequests,
 	usePrefetchRuns,
 } from "./queries";
+import { useEngineLifecycle } from "./hooks/useEngineLifecycle";
 import { useElectronTheme } from "./hooks/useElectronTheme";
 import { useActiveEnvironmentRestore } from "./hooks/useActiveEnvironmentRestore";
 import { useActiveEnvironmentGuard } from "./hooks/useActiveEnvironmentGuard";
@@ -52,6 +53,11 @@ function App() {
 
 	// Initialize health check with automatic polling
 	useHealthQuery();
+
+	// How the engine's process left, when it left on its own: the Dock explains
+	// it and offers Restart (#3336). After the health poll, which opens the
+	// start window the hook's stale-snapshot guard compares against.
+	useEngineLifecycle();
 
 	// Drop a persisted environment id whose environment the engine no longer has
 	// - it would otherwise keep riding on every composed payload.

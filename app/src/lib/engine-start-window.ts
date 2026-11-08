@@ -34,11 +34,12 @@ import { TIMING } from "@/config/timing";
  * instead called every restart a failure, since an engine had answered - the one
  * this one replaced (#1227).
  *
- * Derived in the renderer rather than pushed from the main process. `sidecar.ts`
- * knows more precisely - it holds the child handle and raises
- * `EngineNotReadyError` on the same budget - but `preload.ts` exposes no
- * engine-status channel, and adding one to say something the renderer's own poll
- * already knows would be a second source of truth for one label.
+ * Derived in the renderer, and this poll is the only thing that classifies. The
+ * main process does push its sidecar's lifecycle (`engine:lifecycle`,
+ * `hooks/useEngineLifecycle`), but as facts: `engineCrash` explains an
+ * unreachable engine and lets the Dock offer Restart, and never writes
+ * `engineStatus`. A second writer would have two sources for one label, one of
+ * them a push that can arrive before or after the poll that confirms it.
  */
 export function engineStatusAfterFailedPoll(
 	windowOpenedAt: number | null,

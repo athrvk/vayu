@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 
@@ -49,7 +49,7 @@ function stubElectron(result: { success: boolean; error?: string }): void {
 beforeEach(() => {
 	vi.clearAllMocks();
 	useToastStore.setState({ showToast });
-	useEngineStore.setState({ engineStartWindow: null });
+	useEngineStore.setState({ engineStartWindow: null, engineRestarting: false });
 });
 
 afterEach(() => {
@@ -142,5 +142,50 @@ describe("useEngineRestart", () => {
 		// explains that; an OS notification about it would be noise.
 		expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "warning" }));
 		expect(mockNotifyPost).not.toHaveBeenCalled();
+	});
+
+	it("runs one restart at a time across every instance of the hook", async () => {
+		// The Dock's button and the Settings banner each call the hook (#3336).
+		let answer: (result: { success: boolean; error?: string }) => void = () => undefined;
+		const restartEngine = vi.fn(
+			() => new Promise<{ success: boolean; error?: string }>((resolve) => (answer = resolve))
+		);
+		(window as unknown as { electronAPI?: unknown }).electronAPI = { restartEngine };
+		const dock = renderHook(() => useEngineRestart(), { wrapper });
+		const banner = renderHook(() => useEngineRestart(), { wrapper });
+
+		let first: Promise<void> = Promise.resolve();
+		await act(async () => {
+			first = dock.result.current.restart();
+		});
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+
+		// The other surface sees it in flight, and a second click starts nothing.
+		expect(banner.result.current.isRestarting).toBe(true);
+		// Not awaited: with no guard these would wait on the answer held below.
+		await act(async () => {
+			void banner.result.current.restart();
+			void dock.result.current.restart();
+		});
+		expect(restartEngine).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			answer({ success: false, error: "port 9876 still in use" });
+			await first;
+		});
+		expect(dock.result.current.isRestarting).toBe(false);
+		expect(banner.result.current.isRestarting).toBe(false);
+	});
+
+	it("lets the next restart run once the last one has ended", async () => {
+		stubElectron({ success: false, error: "port 9876 still in use" });
+		const { result } = renderHook(() => useEngineRestart(), { wrapper });
+
+		for (let attempt = 1; attempt <= 2; attempt++) {
+			await act(async () => {
+				await result.current.restart();
+			});
+			expect(window.electronAPI?.restartEngine).toHaveBeenCalledTimes(attempt);
+		}
 	});
 });

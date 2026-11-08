@@ -14,6 +14,7 @@ import {
 	useLayoutStore,
 	useSaveStore,
 	useTabsStore,
+	type EngineCrash,
 	// Aliased: `EngineStatus` is the component below, and the type is what it
 	// switches on.
 	type EngineStatus as EngineConnectionStatus,
@@ -23,12 +24,14 @@ import {
 	ICON_MOTION,
 	Tooltip,
 	TooltipContent,
+	TooltipHint,
 	TooltipTrigger,
 	TooltipValue,
 } from "@/components/ui";
 import { ENGINE_BASE_URL } from "@/config/network";
 import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
+import { describeEngineCrash, engineCrashOutput } from "@/lib/engine-crash";
 import { ResponsePositionButton } from "./ResponsePositionButton";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
@@ -46,24 +49,50 @@ const ENGINE_STATUS_LABEL: Record<EngineConnectionStatus, string> = {
 };
 
 /**
+ * What the engine's process did, as the tooltip reads it: the sentence, then the
+ * last of what it printed, which is usually the reason the code only points at.
+ */
+function EngineCrashDetail({ crash }: { crash: EngineCrash }) {
+	const output = engineCrashOutput(crash);
+	return (
+		<>
+			<span className="block">{describeEngineCrash(crash)}</span>
+			{output && (
+				<TooltipHint className="mt-1 block whitespace-pre-wrap break-all font-mono">
+					{output}
+				</TooltipHint>
+			)}
+		</>
+	);
+}
+
+/**
  * What the connection light's tooltip says, or null when it has nothing to say.
  *
  * Connected, it names the engine's address: the engine may be on a fallback
  * port (#2118), and `vayu-cli --daemon` or `VAYU_ENGINE_URL` have to be given
  * that address. Unreachable, it is the reason: the main process's own sentence
- * when it has one (it is written for the user), else what the transport said.
- * Starting is quiet.
+ * when it has one (it is written for the user), then how the engine's process
+ * left (#3336), else what the transport said. Starting is quiet.
+ *
+ * `troubled` is the caller's judgement that there is a reason to read; a crash
+ * the sidecar reported ahead of the poll that confirms it counts.
  */
 function engineStatusDetail(
 	status: EngineConnectionStatus,
+	troubled: boolean,
 	startFailure: string | null,
+	crash: EngineCrash | null,
 	engineError: string | null
 ): ReactNode {
-	if (status === "connected") {
-		return <TooltipValue hint="Engine address">{ENGINE_BASE_URL}</TooltipValue>;
+	if (!troubled) {
+		return status === "connected" ? (
+			<TooltipValue hint="Engine address">{ENGINE_BASE_URL}</TooltipValue>
+		) : null;
 	}
-	if (status !== "unreachable") return null;
-	return startFailure ?? engineError;
+	if (startFailure) return startFailure;
+	if (crash) return <EngineCrashDetail crash={crash} />;
+	return engineError;
 }
 
 /**
@@ -91,12 +120,16 @@ function engineStatusDetail(
  *
  * A start failure the main process reports (every engine port held, #2118)
  * also offers Retry, because the sentence tells the user to press it and the
- * Dock is where they are reading it.
+ * Dock is where they are reading it. An engine that left on its own (#3336)
+ * offers Restart for the same reason, and names how it left; the light itself
+ * stays the health poll's word, so the button can appear a poll before the
+ * light turns.
  */
 function EngineStatus() {
 	const engineStatus = useEngineStore((s) => s.engineStatus);
 	const engineError = useEngineStore((s) => s.engineError);
 	const engineStartFailure = useEngineStore((s) => s.engineStartFailure);
+	const engineCrash = useEngineStore((s) => s.engineCrash);
 
 	/*
 	 * `status-success-text`: not the general `success-text`, and not the bare
@@ -128,12 +161,18 @@ function EngineStatus() {
 		</>
 	);
 
-	const detail = engineStatusDetail(engineStatus, engineStartFailure, engineError);
-	if (!detail) {
-		return <span className={className}>{label}</span>;
-	}
-
-	const status = (
+	// Not while starting: a restart in flight is the crash's successor, and
+	// "Starting…" is quiet by design.
+	const troubled =
+		engineStatus === "unreachable" || (engineCrash !== null && engineStatus !== "starting");
+	const detail = engineStatusDetail(
+		engineStatus,
+		troubled,
+		engineStartFailure,
+		engineCrash,
+		engineError
+	);
+	const status = detail ? (
 		<Tooltip>
 			<TooltipTrigger asChild>
 				<span
@@ -160,14 +199,20 @@ function EngineStatus() {
 				<p className="max-w-3xs whitespace-normal break-words">{detail}</p>
 			</TooltipContent>
 		</Tooltip>
+	) : (
+		<span className={className}>{label}</span>
 	);
 
-	if (!engineStartFailure) return status;
+	if (!engineStartFailure && !engineCrash) return status;
 
 	return (
 		<>
 			{status}
-			<EngineRestartButton idleLabel="Retry" busyLabel="Retrying…" />
+			{engineStartFailure ? (
+				<EngineRestartButton idleLabel="Retry" busyLabel="Retrying…" />
+			) : (
+				<EngineRestartButton idleLabel="Restart" busyLabel="Restarting…" />
+			)}
 		</>
 	);
 }

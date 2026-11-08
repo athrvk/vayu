@@ -6,7 +6,7 @@
  */
 
 // Engine store
-export { useEngineStore, type EngineStatus } from "./engine-store";
+export { useEngineStore, type EngineCrash, type EngineStatus } from "./engine-store";
 
 // Domain stores
 export { useDashboardStore, deriveRunProgress, runOwnSloMs } from "./dashboard-store";
