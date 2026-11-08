@@ -1020,6 +1020,13 @@ stays at the setting plus the grace.
 `stream()`'s `AbortError`, never with the timeout's "Couldn't reach Vayu's
 engine in time.", and a signal that is already aborted puts nothing on the wire.
 
+That is all Cancel does: it stops the renderer waiting. The engine's
+`POST /execute` handler never checks for a client disconnect, so a request
+already sent still reaches its target and the engine finishes and records the
+run. The builder's and the History copy's send paths therefore invalidate the
+Recent sends, History and variable queries for a cancelled send as they do for
+an answered one; only the response is dropped.
+
 `startLoadTest` takes rows too, as a **top-level `data`** array (issue #993):
 the load dialog's file picker parses the file and sends the same array it
 previewed, and the engine binds one row per request the run sends. Omitted when

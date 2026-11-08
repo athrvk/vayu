@@ -18,8 +18,8 @@
  * a state the builder can reach, since the second Send is what closes the
  * first's. It closes the feed, not the run: the engine's consumer worker keeps
  * going until the stream's own end rule, so a feed taken over from another
- * request is remembered in `replacedFeeds` for that request's pane to say so
- * (#3352).
+ * request is remembered in `replacedFeeds` for that request's pane to say so,
+ * once the new stream has actually started (#3352).
  *
  * It also holds the *request* the stream belongs to, not only the run. The
  * builder is one provider reused across request tabs, so "are these rows mine?"
@@ -45,6 +45,12 @@
 import { create } from "zustand";
 import type { LeftOutElement } from "@/lib/elements";
 import type { StreamEndReason, StreamEvent, StreamOpen } from "@/types";
+
+/** A run whose live feed was dropped for another request's stream. */
+interface DisplacedFeed {
+	requestId: string;
+	runId: string;
+}
 
 interface ExecutionEventsState {
 	/** The request whose Send started this stream, or null when none has. */
@@ -85,13 +91,24 @@ interface ExecutionEventsState {
 	replacedFeeds: Readonly<Record<string, string>>;
 
 	/**
+	 * A live stream another request's Send emptied the feed of, held until that
+	 * Send's stream starts: `startStream` moves it into `replacedFeeds`. A send
+	 * that never opens a stream therefore takes nothing over, and the entry
+	 * waits for whichever stream does start next.
+	 */
+	displaced: DisplacedFeed | null;
+
+	/**
 	 * Empty the feed for a stream `requestId` is about to start. A live stream
-	 * of a different request is recorded in `replacedFeeds` first.
+	 * of a different request becomes `displaced`; `startStream` records it.
 	 */
 	handOver: (requestId: string | null) => void;
 	/** Drop `requestId`'s `replacedFeeds` entry: its own Send supersedes it. */
 	forgetReplaced: (requestId: string) => void;
-	/** Begin a stream: clears any previous one's rows, then starts streaming. */
+	/**
+	 * Begin a stream: clears any previous one's rows, then starts streaming, and
+	 * records the `displaced` feed unless this request is the one it belonged to.
+	 */
 	startStream: (params: {
 		requestId: string | null;
 		runId: string;
@@ -103,7 +120,7 @@ interface ExecutionEventsState {
 	addEvents: (runId: string, events: StreamEvent[]) => void;
 	endStream: (runId: string, reason: StreamEndReason, totalEvents: number | null) => void;
 	setError: (runId: string, error: string | null) => void;
-	/** Forget everything, `replacedFeeds` included. */
+	/** Forget everything, `replacedFeeds` and `displaced` included. */
 	clear: () => void;
 }
 
@@ -111,6 +128,7 @@ interface ExecutionEventsState {
 type StreamFields = Omit<
 	ExecutionEventsState,
 	| "replacedFeeds"
+	| "displaced"
 	| "handOver"
 	| "forgetReplaced"
 	| "startStream"
@@ -134,25 +152,36 @@ const EMPTY = {
 	leftOut: [],
 } satisfies StreamFields;
 
-/** `replacedFeeds` once the stream in `s` gives way to one `nextRequestId` starts. */
-function feedsAfterHandOver(
+/** The feed to hold once the stream in `s` gives way to one `nextRequestId` starts. */
+function displacedByHandOver(
 	s: ExecutionEventsState,
 	nextRequestId: string | null
-): ExecutionEventsState["replacedFeeds"] {
+): DisplacedFeed | null {
 	// An ended stream's run is already stored, and a request's own re-send is
-	// not another request taking over.
+	// not another request taking over. What was already waiting stays: the
+	// send that displaced it may have failed to open.
 	if (!s.isStreaming || !s.requestId || !s.runId || s.requestId === nextRequestId) {
-		return s.replacedFeeds;
+		return s.displaced;
 	}
-	return { ...s.replacedFeeds, [s.requestId]: s.runId };
+	return { requestId: s.requestId, runId: s.runId };
+}
+
+/** `replacedFeeds` once a stream for `requestId` has started over `s.displaced`. */
+function feedsAfterStart(
+	s: ExecutionEventsState,
+	requestId: string | null
+): ExecutionEventsState["replacedFeeds"] {
+	if (!s.displaced || s.displaced.requestId === requestId) return s.replacedFeeds;
+	return { ...s.replacedFeeds, [s.displaced.requestId]: s.displaced.runId };
 }
 
 export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
 	...EMPTY,
 	replacedFeeds: {},
+	displaced: null,
 
 	handOver: (requestId) =>
-		set((s) => ({ ...EMPTY, replacedFeeds: feedsAfterHandOver(s, requestId) })),
+		set((s) => ({ ...EMPTY, displaced: displacedByHandOver(s, requestId) })),
 
 	forgetReplaced: (requestId) =>
 		set((s) => {
@@ -162,7 +191,16 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
 		}),
 
 	startStream: ({ requestId, runId, eventsUrl, leftOut = [] }) =>
-		set({ ...EMPTY, requestId, runId, eventsUrl, leftOut, isStreaming: true }),
+		set((s) => ({
+			...EMPTY,
+			requestId,
+			runId,
+			eventsUrl,
+			leftOut,
+			isStreaming: true,
+			displaced: null,
+			replacedFeeds: feedsAfterStart(s, requestId),
+		})),
 
 	/*
 	 * Every writer below is addressed to a run, and a write for a run this store
@@ -200,5 +238,5 @@ export const useExecutionEventsStore = create<ExecutionEventsState>((set) => ({
 
 	setError: (runId, error) => set((s) => (s.runId === runId ? { error } : s)),
 
-	clear: () => set({ ...EMPTY, replacedFeeds: {} }),
+	clear: () => set({ ...EMPTY, replacedFeeds: {}, displaced: null }),
 }));

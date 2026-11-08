@@ -277,23 +277,8 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					signal
 				);
 
-				if (!result) return null;
-
-				if (result.errorCode === "AUTH_REQUIRED") {
-					showToast(
-						"This request needs an OAuth 2.0 token. Open the Auth tab to get one.",
-						"error"
-					);
-				} else if (result.errorCode === "AUTH_FAILED") {
-					// Same engine message, same relabelling as the builder's send path.
-					showToast(
-						result.errorMessage
-							? humanizeOAuth2Error(result.errorMessage)
-							: "Couldn't get an OAuth 2.0 token. Check the Auth tab's token settings.",
-						"error"
-					);
-				}
-
+				// Before the cancelled-send exit: Cancel only stops the renderer
+				// waiting, so the engine still runs and records the replay (#3352).
 				// A resend is a new run, so History has to hear about it.
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.lists() });
 				queryClient.invalidateQueries({ queryKey: queryKeys.runs.count() });
@@ -310,6 +295,23 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
 					queryClient.invalidateQueries({ queryKey: queryKeys.collections.all });
+				}
+
+				if (!result) return null;
+
+				if (result.errorCode === "AUTH_REQUIRED") {
+					showToast(
+						"This request needs an OAuth 2.0 token. Open the Auth tab to get one.",
+						"error"
+					);
+				} else if (result.errorCode === "AUTH_FAILED") {
+					// Same engine message, same relabelling as the builder's send path.
+					showToast(
+						result.errorMessage
+							? humanizeOAuth2Error(result.errorMessage)
+							: "Couldn't get an OAuth 2.0 token. Check the Auth tab's token settings.",
+						"error"
+					);
 				}
 
 				// Shared with the builder's own send path - see execute-mapping.ts

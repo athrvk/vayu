@@ -421,6 +421,47 @@ describe("the streaming send branch", () => {
 			expect(replaced()).toEqual({ B: "run_B" });
 		});
 
+		it.each<[string, () => Promise<StreamStartResult | null>]>([
+			[
+				"refuses the stream",
+				async (): Promise<StreamStartResult> => ({
+					ok: false,
+					response: {
+						status: 0,
+						statusText: "Error",
+						headers: {},
+						body: "refused",
+						size: 0,
+						time: 0,
+					},
+				}),
+			],
+			["is cancelled before it answers", async (): Promise<StreamStartResult | null> => null],
+			[
+				"throws",
+				async (): Promise<StreamStartResult> => {
+					throw new Error("engine down");
+				},
+			],
+		])("leaves the live feed with no note when the new stream %s", async (_name, failing) => {
+			const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+			const { rerender } = render(renderFor("B", startedAs("run_B")));
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			rerender(renderFor("A", failing));
+
+			// Mutation check: record in `handOver` again and B's pane claims
+			// a stream took its feed over although A's never opened.
+			await act(async () => {
+				await ctx().executeRequest();
+			});
+			expect(replaced()).toEqual({});
+			// The old feed is still dropped, as before.
+			expect(useExecutionEventsStore.getState().runId).toBeNull();
+			logged.mockRestore();
+		});
+
 		it("forgets the record when that request streams again", async () => {
 			const { rerender } = render(renderFor("B", startedAs("run_B")));
 			await act(async () => {

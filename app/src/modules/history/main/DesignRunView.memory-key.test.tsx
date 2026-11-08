@@ -28,6 +28,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DesignRunView from "./DesignRunView";
+import { queryKeys } from "@/queries/keys";
 import type { Run } from "@/types";
 
 const executeRequest = vi.fn();
@@ -90,6 +91,7 @@ function renderView() {
 			<DesignRunView run={run} />
 		</QueryClientProvider>
 	);
+	return client;
 }
 
 describe("DesignRunView - the copy declares which run it is", () => {
@@ -120,5 +122,25 @@ describe("DesignRunView - the copy's send can be cancelled", () => {
 
 		expect(executeRequest).toHaveBeenCalledTimes(1);
 		expect(executeRequest.mock.calls[0][2]).toBe(cancel.signal);
+	});
+
+	it("still tells History about the run, because the engine records it", async () => {
+		composeRequest.mockResolvedValue({ method: "GET", url: "https://api.example.test/" });
+		executeRequest.mockResolvedValue(null);
+		const client = renderView();
+		const invalidate = vi.spyOn(client, "invalidateQueries");
+
+		await (
+			providerProps.onExecute as (
+				r: unknown,
+				dataRow: undefined,
+				signal: AbortSignal
+			) => Promise<unknown>
+		)(providerProps.initialRequest, undefined, new AbortController().signal);
+
+		// Mutation check: put the `if (!result) return null` exit back above
+		// the invalidations and a cancelled replay leaves History stale.
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.lists() });
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.count() });
 	});
 });
