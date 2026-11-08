@@ -39,9 +39,6 @@ const ACCELERATOR_KEY_NAMES: Readonly<Record<string, string>> = {
 	"+": "Plus",
 	"←": "Left",
 	"→": "Right",
-	"↑": "Up",
-	"↓": "Down",
-	"↵": "Return",
 };
 
 /**
