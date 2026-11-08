@@ -69,6 +69,14 @@ describe("modifier rendering on macOS", () => {
 		expect(formatChord({ mod: true, alt: true, key: "I" })).toBe("⌥⌘I");
 		expect(formatChord({ key: "↵" })).toBe("↵");
 	});
+
+	it("puts a literal Control key first, in the canonical ⌃⌥⇧⌘ order", async () => {
+		const { formatChord } = await loadWithPlatform("MacIntel");
+		expect(formatChord({ mod: true, ctrl: true, key: "F" })).toBe("⌃⌘F");
+		expect(formatChord({ mod: true, ctrl: true, alt: true, shift: true, key: "F" })).toBe(
+			"⌃⌥⇧⌘F"
+		);
+	});
 });
 
 describe("modifier rendering off macOS", () => {
@@ -79,6 +87,12 @@ describe("modifier rendering off macOS", () => {
 		expect(formatChord({ mod: true, shift: true, key: "E" })).toBe("Ctrl+Shift+E");
 		expect(formatChord({ mod: true, alt: true, key: "I" })).toBe("Ctrl+Alt+I");
 		expect(formatChord({ key: "↵" })).toBe("↵");
+	});
+
+	it("prints Ctrl once when a chord carries both mod and a literal Control", async () => {
+		const { formatChord } = await loadWithPlatform("Win32");
+		expect(formatChord({ mod: true, ctrl: true, key: "F" })).toBe("Ctrl+F");
+		expect(formatChord({ ctrl: true, key: "F" })).toBe("Ctrl+F");
 	});
 });
 

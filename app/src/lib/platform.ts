@@ -53,6 +53,13 @@ export interface Chord {
 	mod?: ChordMod;
 	shift?: boolean;
 	alt?: boolean;
+	/**
+	 * A literal Control key on macOS, where `mod` is ⌘ - what ⌃⌘F, the system
+	 * full-screen toggle, needs. Display only: `matchesChord`, `chordKeybinding`
+	 * and `dispatchChord` do not read it, so a chord carrying it must never reach
+	 * a live handler (it would answer to ⌘F instead).
+	 */
+	ctrl?: boolean;
 	/** The final key, e.g. "E", "," or "↵". Always what is *displayed*. */
 	key: string;
 	/**
@@ -88,11 +95,22 @@ export interface Chord {
  * read this; `formatChord` joins it for the single-string surfaces. Both come
  * from the one `Chord`, so no display site spells a modifier itself.
  */
-export function chordKeys({ mod, shift, alt, key }: Chord): string[] {
+export function chordKeys({ mod, ctrl, shift, alt, key }: Chord): string[] {
 	if (isMac) {
-		return [...(alt ? ["⌥"] : []), ...(shift ? ["⇧"] : []), ...(mod ? ["⌘"] : []), key];
+		return [
+			...(ctrl ? ["⌃"] : []),
+			...(alt ? ["⌥"] : []),
+			...(shift ? ["⇧"] : []),
+			...(mod ? ["⌘"] : []),
+			key,
+		];
 	}
-	return [...(mod ? ["Ctrl"] : []), ...(shift ? ["Shift"] : []), ...(alt ? ["Alt"] : []), key];
+	return [
+		...(mod || ctrl ? ["Ctrl"] : []),
+		...(shift ? ["Shift"] : []),
+		...(alt ? ["Alt"] : []),
+		key,
+	];
 }
 
 /**
