@@ -924,7 +924,7 @@ TEST_F (MidRunRefreshTest, AStopDoesNotWaitOutARefreshInFlight) {
     ASSERT_TRUE (vayu::tests::wait_until ([&] { return idp.hits () > 0; }))
     << "the watchdog never asked for a refresh";
 
-    context->should_stop = true;
+    context->request_stop ();
     context->notify_refill ();
     const bool settled =
     vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; });

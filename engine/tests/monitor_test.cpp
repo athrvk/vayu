@@ -853,7 +853,7 @@ TEST_F (MonitorRunTest, AStopDoesNotWaitOutAScrapeInFlight) {
     vayu::tests::wait_until ([&] { return server->hang_count () > 0; }))
     << "the monitor never scraped";
 
-    context->should_stop = true;
+    context->request_stop ();
     context->notify_refill ();
     const bool settled =
     vayu::tests::wait_until ([&] { return manager.get_run (run_id) == nullptr; });
