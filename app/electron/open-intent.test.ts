@@ -248,6 +248,36 @@ describe("createOpenIntents", () => {
 		expect(os.granted).toEqual(["/docs/b.yaml"]);
 	});
 
+	/*
+	 * #3339: a new window (macOS `activate`) or a reload leaves the previous page's
+	 * `ready` standing, so an intent offered before the next page mounts went to a
+	 * send that returned true and reached nobody. Mutation check: make `notReady`
+	 * a no-op and it reddens.
+	 */
+	it("holds an intent offered after the page went away and delivers it once on the next ready", () => {
+		const os = harness();
+		os.intents.ready();
+		os.intents.notReady();
+		os.intents.offer({ kind: "collection", collectionId: "c1" });
+		expect(os.sent).toEqual([]);
+		os.intents.ready();
+		os.intents.ready();
+		expect(os.sent).toEqual([{ kind: "collection", collectionId: "c1" }]);
+	});
+
+	/*
+	 * Mutation check: clear `pending` in `notReady` and an intent waiting from a
+	 * cold launch is lost when the first page starts loading.
+	 */
+	it("keeps the intents already waiting when the page goes away", () => {
+		const os = harness();
+		os.intents.offer({ kind: "import", path: "a.json" });
+		os.intents.notReady();
+		expect(os.sent).toEqual([]);
+		os.intents.ready();
+		expect(os.sent).toEqual([{ kind: "import", path: "a.json" }]);
+	});
+
 	it("delivers each waiting intent once", () => {
 		const os = harness();
 		os.intents.offer({ kind: "import", path: "a.json" });

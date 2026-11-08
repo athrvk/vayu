@@ -269,4 +269,32 @@ describe("startup ordering", () => {
 		expect(argvAt).toBeGreaterThan(-1);
 		expect(argvAt).toBeGreaterThan(windowAt);
 	});
+
+	it("holds open intents again for every window and every page load (#3339)", () => {
+		// `ready` is set by `did-finish-load` and nothing else clears it, so a new
+		// window or a reload would send an intent to a page with no subscriber.
+		// Mutation check: delete either `notReady` call and this reddens.
+		const bodyAt = main.indexOf("\nfunction createWindow() {");
+		const bodyEnd = main.indexOf("\n}\n", bodyAt);
+		const body = main.slice(bodyAt, bodyEnd);
+		expect(bodyAt).toBeGreaterThan(-1);
+		expect(body.length).toBeGreaterThan(0);
+
+		const loadAt = body.indexOf("mainWindow.loadURL(");
+		const startLoadingAt = body.indexOf('webContents.on("did-start-loading"');
+		const readyAt = body.indexOf("openIntents.ready();");
+
+		// Before the first line that can start a page, so the first load is seen.
+		expect(body).toContain("openIntents.notReady();");
+		expect(body.indexOf("openIntents.notReady();")).toBeLessThan(
+			body.indexOf("new BrowserWindow(")
+		);
+		expect(startLoadingAt).toBeGreaterThan(-1);
+		expect(startLoadingAt).toBeLessThan(loadAt);
+		expect(body.indexOf("openIntents.notReady();", startLoadingAt)).toBeGreaterThan(
+			startLoadingAt
+		);
+		expect(body.indexOf("openIntents.notReady();", startLoadingAt)).toBeLessThan(loadAt);
+		expect(readyAt).toBeGreaterThan(loadAt);
+	});
 });

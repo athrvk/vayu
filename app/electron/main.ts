@@ -566,6 +566,10 @@ function createWindow() {
 	// replaces cannot make the new renderer look unreachable.
 	rendererRecovery.noteRendererAlive();
 	quitFlow.reset();
+	// The new page has no subscriber until its `did-finish-load`; an intent
+	// offered meanwhile waits instead of going to the window this one replaces
+	// (#3339).
+	openIntents.notReady();
 
 	// Load persisted window state
 	const windowState = loadWindowState({
@@ -669,6 +673,12 @@ function createWindow() {
 	// `legacyStorage`, read before this window and written by its preload.
 	const rendererUrl = isDev ? DEV_SERVER_URL : APP_ENTRY_URL;
 	installWindowNavigationGuard(mainWindow.webContents, rendererUrl);
+	// Every load starts a page with no subscriber yet, a crash or unresponsive
+	// reload included, and nothing tells the main process before the page can
+	// speak (#3339). Registered ahead of the load so the first one is seen.
+	mainWindow.webContents.on("did-start-loading", () => {
+		openIntents.notReady();
+	});
 	mainWindow.loadURL(rendererUrl);
 
 	mainWindow.on("page-title-updated", (event) => {
@@ -1905,7 +1915,8 @@ app.whenReady().then(async () => {
 	// A cold launch carries its request on its own command line - a document
 	// double-clicked with Vayu not running, or a Jump List task that started it
 	// (#1364). Offered after the window exists so `openIntents` has something to
-	// focus; delivery still waits for the renderer's `did-finish-load`.
+	// focus; delivery waits for the renderer's `did-finish-load`, and waits again
+	// for any window `activate` builds or page that reloads afterwards.
 	openIntents.offerArgv(process.argv);
 
 	// Awaited, not fired and forgotten: the proxy bridge below talks to the

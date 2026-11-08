@@ -26,7 +26,10 @@
  * raises `open-file` before `whenReady` resolves - that is the whole point of
  * the event - and there is no window to send to, let alone a mounted store. So
  * intents queue, and {@link OpenIntents.ready} flushes them when the renderer
- * says it has loaded.
+ * says it has loaded. That holds again whenever the page goes away: a new
+ * window or a reload calls {@link OpenIntents.notReady}, and an intent offered
+ * before the next `ready` waits rather than going to a page with no subscriber
+ * (#3339).
  *
  * This side does not read the file. It decides the path is worth offering - the
  * extension allowlist is `spec-file.ts`'s own, imported rather than restated -
@@ -141,6 +144,11 @@ export interface OpenIntents {
 	offerArgv(argv: readonly string[]): void;
 	/** The renderer has loaded; deliver what has been waiting. */
 	ready(): void;
+	/**
+	 * The page that was ready is going away (a new window, a reload): hold
+	 * intents again until the next `ready`. Intents already waiting stay queued.
+	 */
+	notReady(): void;
 }
 
 export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
@@ -148,13 +156,17 @@ export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 	/** Whether the renderer has said it can act on one. See the header. */
 	let loaded = false;
 
+	function notReady(): void {
+		loaded = false;
+	}
+
 	function deliver(intent: OpenIntent): void {
 		if (deps.send(intent)) return;
 		// A send that found no window is a renderer that is not there after all -
 		// on macOS the app outlives its window, and `activate` builds a new one.
 		// Queue the intent and wait to be told again, rather than dropping the
 		// file the user just double-clicked.
-		loaded = false;
+		notReady();
 		pending.push(intent);
 	}
 
@@ -179,5 +191,7 @@ export function createOpenIntents(deps: OpenIntentDeps): OpenIntents {
 			const waiting = pending.splice(0, pending.length);
 			for (const intent of waiting) deliver(intent);
 		},
+
+		notReady,
 	};
 }
