@@ -37,6 +37,7 @@ import {
 	type ServiceStopGuard,
 	type ServiceStopPrompt,
 } from "./service-stop-guard";
+import type { NavigationDetails } from "./renderer-watch";
 
 // main.ts creates windows and starts the engine at import time, so the wiring
 // itself can only be read. Everything above this line would still pass with the
@@ -316,12 +317,12 @@ describe("registerRunningServicesIpc", () => {
 	class RendererStub {
 		id = 1;
 		private destroyed: Array<() => void> = [];
-		private reloaded: Array<() => void> = [];
+		private reloaded: Array<(details: NavigationDetails) => void> = [];
 		once(_event: "destroyed", listener: () => void) {
 			this.destroyed.push(listener);
 			return this;
 		}
-		on(_event: "did-start-loading", listener: () => void) {
+		on(_event: "did-start-navigation", listener: (details: NavigationDetails) => void) {
 			this.reloaded.push(listener);
 			return this;
 		}
@@ -329,7 +330,9 @@ describe("registerRunningServicesIpc", () => {
 			for (const listener of this.destroyed) listener();
 		}
 		reload() {
-			for (const listener of this.reloaded) listener();
+			for (const listener of this.reloaded) {
+				listener({ isMainFrame: true, isSameDocument: false });
+			}
 		}
 	}
 

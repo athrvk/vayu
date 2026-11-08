@@ -67,12 +67,8 @@ import { createNotifier, registerNotifyIpc } from "./notify.js";
 import { createRunProgress, registerRunProgressIpc } from "./run-progress.js";
 import { createOsIcon, registerOsIconIpc } from "./os-icon.js";
 import { installAccentBridge, accentHexToColorScheme } from "./accent-color.js";
-import {
-	createOpenIntents,
-	isImportableFile,
-	OPEN_INTENT_CHANNEL,
-	startsMainFramePage,
-} from "./open-intent.js";
+import { createOpenIntents, isImportableFile, OPEN_INTENT_CHANNEL } from "./open-intent.js";
+import { startsMainFramePage } from "./main-frame-page.js";
 import { createServiceStopGuard, registerRunningServicesIpc } from "./service-stop-guard.js";
 import { installWindowNavigationGuard } from "./window-navigation.js";
 import { APP_SCHEME_PRIVILEGES, createAppProtocolHandler } from "./app-protocol.js";
