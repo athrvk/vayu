@@ -325,6 +325,20 @@ interface SaveHandlers {
 }
 
 /**
+ * Runs a mutation and reports through both of TanStack's channels. The per-call
+ * callbacks fire as the mutation settles, but only while its observer has
+ * listeners, so never once the editor has unmounted; the promise always
+ * settles. The caller acts on whichever arrives first.
+ */
+function sendThrough<V>(
+	mutateAsync: (variables: V, options: SaveHandlers) => Promise<unknown>,
+	variables: V,
+	handlers: SaveHandlers
+): void {
+	mutateAsync(variables, handlers).then(() => handlers.onSuccess(), handlers.onError);
+}
+
+/**
  * A save, bound to its entity when it is asked for. `send` is null when the
  * entity is gone; `snapshot` is what the save is computed from if the editor
  * has moved to another entity before the save's turn comes.
@@ -606,12 +620,12 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 
 	// Bound when a save is asked for, not when its turn comes, so a save waiting
 	// behind another still writes the entity it was asked for.
-	const mutateGlobals = updateGlobalsMutation.mutate;
-	const mutateEnvironment = updateEnvironmentMutation.mutate;
-	const mutateCollection = updateCollectionMutation.mutate;
+	const mutateGlobals = updateGlobalsMutation.mutateAsync;
+	const mutateEnvironment = updateEnvironmentMutation.mutateAsync;
+	const mutateCollection = updateCollectionMutation.mutateAsync;
 	const send = useMemo((): SaveTarget["send"] => {
 		if (type === "globals") {
-			return (variables, handlers) => mutateGlobals({ variables }, handlers);
+			return (variables, handlers) => sendThrough(mutateGlobals, { variables }, handlers);
 		}
 		if (type === "environment") {
 			if (!environment) return null;
@@ -620,11 +634,13 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			// value back would let a variable edit re-activate this environment
 			// from a stale read - deactivating whichever one the engine actually
 			// holds. Only the switch writes it.
-			return (variables, handlers) => mutateEnvironment({ id, name, variables }, handlers);
+			return (variables, handlers) =>
+				sendThrough(mutateEnvironment, { id, name, variables }, handlers);
 		}
 		if (!collection) return null;
 		const { id, name } = collection;
-		return (variables, handlers) => mutateCollection({ id, name, variables }, handlers);
+		return (variables, handlers) =>
+			sendThrough(mutateCollection, { id, name, variables }, handlers);
 	}, [type, environment, collection, mutateGlobals, mutateEnvironment, mutateCollection]);
 
 	/** A landed save: advance the editor to it, if the editor still holds its rows. */
@@ -646,42 +662,56 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 	);
 
 	/**
-	 * Sends one save and hands its verdict to `settle`, exactly once, from inside
-	 * the mutation's callback - so the next queued save starts there and then,
-	 * not a microtask later. A failure is reported here, once; `runSave` in the
-	 * store takes that report as already published.
+	 * Sends one save and hands its verdict to `settle`, exactly once, as soon as
+	 * the mutation answers - so the next queued save starts there and then. A
+	 * failure is reported here, once; `runSave` in the store takes that report
+	 * as already published. A throw before the request goes out is a failure
+	 * like any other, so the queue is never left waiting on a save that is not
+	 * in flight.
 	 */
 	const startSave = useCallback(
 		(target: SaveTarget, settle: (outcome: SaveOutcome) => void) => {
 			const { contextId: id, send: sendTo } = target;
+			let settled = false;
+			const finish = (outcome: SaveOutcome) => {
+				if (settled) return;
+				settled = true;
+				settle(outcome);
+			};
+			const fail = (error: unknown) => {
+				if (settled) return;
+				reportFailed(
+					id,
+					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
+					error
+				);
+				finish(saveFailureOutcome(error));
+			};
 			if (!sendTo) {
 				reportFailed(id, `Couldn't save - this ${target.scope} no longer exists`);
-				settle("final");
+				finish("final");
 				return;
 			}
-			const live = id === seededContextRef.current;
-			const plan = planSave(live ? readLive() : target.snapshot);
-			if (live) {
-				if (plan.rows !== variablesRef.current) {
-					variablesRef.current = plan.rows;
-					setVariables(plan.rows);
+			try {
+				const live = id === seededContextRef.current;
+				const plan = planSave(live ? readLive() : target.snapshot);
+				if (live) {
+					if (plan.rows !== variablesRef.current) {
+						variablesRef.current = plan.rows;
+						setVariables(plan.rows);
+					}
+					setConflicts(plan.conflicts);
 				}
-				setConflicts(plan.conflicts);
+				reportSaving(id);
+				sendTo(plan.payload, {
+					onSuccess: () => {
+						if (!settled) finish(landSave(id, plan));
+					},
+					onError: fail,
+				});
+			} catch (error) {
+				fail(error);
 			}
-			reportSaving(id);
-			sendTo(plan.payload, {
-				onSuccess: () => settle(landSave(id, plan)),
-				onError: (error) => {
-					reportFailed(
-						id,
-						error instanceof Error
-							? `Couldn't save - ${error.message}`
-							: "Couldn't save",
-						error
-					);
-					settle(saveFailureOutcome(error));
-				},
-			});
 		},
 		[readLive, reportSaving, reportFailed, landSave]
 	);

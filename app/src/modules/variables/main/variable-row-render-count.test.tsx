@@ -63,8 +63,12 @@ vi.mock("@/queries", () => ({
 		isPending: false,
 	}),
 	useUpdateCollectionMutation: () => ({
-		mutate: (...args: unknown[]) => updateCollection(...args),
-		mutateAsync: vi.fn(),
+		mutate: vi.fn(),
+		// Answers through the per-call callbacks, as a mounted mutation does.
+		mutateAsync: (...args: unknown[]) => {
+			updateCollection(...args);
+			return new Promise(() => {});
+		},
 	}),
 }));
 

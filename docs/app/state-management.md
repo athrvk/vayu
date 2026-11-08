@@ -1939,7 +1939,13 @@ diff against the advanced baseline no longer names the first save's keys. Two
 saves in flight could land out of order and leave `baselineRef` at the older
 map, so a later external write was compared against the wrong pre-image; and a
 second `mutate` on one TanStack mutation stops the first call's callbacks from
-firing, so that save's promise never settled. If the editor switches entity
+firing, so that save's promise never settled. Those per-call callbacks also
+never fire once the editor has unmounted (TanStack runs them only while the
+observer has listeners), so a save settles from `mutateAsync`'s promise as well,
+whichever answers first: a save in flight at unmount still settles, and the one
+queued behind it still goes out. A throw before the request is sent settles the
+save as a failure, so the queue is never left waiting on nothing. If the editor
+switches entity
 before a waiting save starts, the save computes from the snapshot taken when it
 was asked for and, when it lands, touches nothing of the scope now on screen. A
 save for an environment or collection that is no longer there reports

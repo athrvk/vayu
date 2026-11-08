@@ -54,8 +54,12 @@ vi.mock("@/queries", () => ({
 	useGlobalsQuery: () => ({ data: undefined, isLoading: false, error: null }),
 	useUpdateGlobalsMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 	useUpdateEnvironmentMutation: () => ({
-		mutate: (...args: unknown[]) => updateEnvironment(...args),
-		mutateAsync: vi.fn(),
+		mutate: vi.fn(),
+		// Answers through the per-call callbacks, as a mounted mutation does.
+		mutateAsync: (...args: unknown[]) => {
+			updateEnvironment(...args);
+			return new Promise(() => {});
+		},
 	}),
 	useSetActiveEnvironmentMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -65,9 +69,12 @@ vi.mock("@/queries", () => ({
 		isPending: false,
 	}),
 	useUpdateCollectionMutation: () => ({
-		mutate: (...args: unknown[]) =>
-			updateCollection(...(args as Parameters<typeof updateCollection>)),
-		mutateAsync: vi.fn(),
+		mutate: vi.fn(),
+		// Answers through the per-call callbacks, as a mounted mutation does.
+		mutateAsync: (...args: unknown[]) => {
+			updateCollection(...(args as Parameters<typeof updateCollection>));
+			return new Promise(() => {});
+		},
 	}),
 }));
 
@@ -185,6 +192,31 @@ describe("two saves asked for back to back", () => {
 		// And a genuine write elsewhere to the same key still is one.
 		rerenderWith(collectionOf({ host: variable("agent.example", 1000, false) }));
 		expect(screen.getByText(/changed elsewhere: host/i)).toBeInTheDocument();
+	});
+});
+
+describe("a save that throws before it is sent", () => {
+	/*
+	 * Mutation check: drop the try/catch in `startSave` and this reds - the
+	 * throw leaves a save "in flight" that never settles, so the next one only
+	 * queues and is never sent.
+	 */
+	it("fails, and does not hold up the next save", () => {
+		mount(collectionOf({ host: variable("example.com", 1000) }));
+		updateCollection.mockImplementationOnce(() => {
+			throw new Error("serialiser broke");
+		});
+		// The throw reaches React's event handler only if `startSave` lets it out.
+		const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		typeAndLeave(valueFields()[0], "example.org");
+		expect(store().status).toBe("error");
+		expect(store().lastErrorMessage).toBe("Couldn't save - serialiser broke");
+
+		typeAndLeave(valueFields()[0], "example.net");
+		expect(sent).toHaveLength(1);
+		expect(lastSent().variables.host.value).toBe("example.net");
+		quiet.mockRestore();
 	});
 });
 
