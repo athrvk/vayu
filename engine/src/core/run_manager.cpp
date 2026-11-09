@@ -172,11 +172,17 @@ struct ReplayFailures {
  * `pm.request` writeback) is a second, distinct failure and is recorded
  * alongside them, never dropped just because the tests that did run are
  * counted - the same distinction `script_errored` draws in the design path.
+ *
+ * A script whose `pm.sendRequest` the run's Stop cancelled is not tallied at
+ * all: the run ended under it, so it judged nothing (#3371).
  */
 template <typename RecordFailure>
 void tally_replay_result (const vayu::ScriptResult& result,
 ScriptValidationTotals& totals,
 RecordFailure&& record_failure) {
+    if (result.send_cancelled) {
+        return;
+    }
     if (!result.tests.empty ()) {
         for (const auto& test : result.tests) {
             if (test.passed) {
@@ -1536,6 +1542,10 @@ int default_max_per_host) {
     context->script_send.default_headers = loop_config.default_headers;
     context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
     context->script_send.request_timeout_ms = timeout_ms;
+    // Stop and shutdown both raise `should_stop` (#3371). Not `aux_cancel`:
+    // the worker raises that at every end before the replay and teardown run,
+    // and their sends must still go out after a natural end.
+    context->script_send.cancel = &context->should_stop;
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
@@ -1734,7 +1744,8 @@ std::vector<vayu::http::AuthRefreshPlan> credentials) {
  * payload's absent method and url. What it arms here is the refresh of the
  * OAuth 2.0 tokens its steps were planned with.
  *
- * @return false when the payload cannot be built - the caller fails the run.
+ * @return false when the payload cannot be built - the caller ends the run,
+ *         Stopped when a Stop decided it and Failed otherwise.
  */
 bool build_load_request (vayu::db::Database& db,
 vayu::db::Database* db_ptr,
@@ -1770,11 +1781,19 @@ vayu::Request& request) {
     // here so no caller of the run reaches one the policy refuses (#2521).
     const auto& target_policy       = context->target_policy;
     const bool credentials_at_start = credentials_resolve_at_start (*context);
+    // A Stop or shutdown ends a token request in flight here (#3371).
     auto built = vayu::http::build_request (config, db_ptr, timeout_ms,
     credentials_at_start ? vayu::http::AuthResolution::Defer :
                            context->load_auth.auth_resolution (),
-    target_policy ? &*target_policy : nullptr);
+    target_policy ? &*target_policy : nullptr, &context->should_stop);
     if (!built.ok) {
+        // The cancelled request answers as an auth failure; the Stop is what
+        // ended it, so the caller ends the run Stopped and nothing failed.
+        if (context->stop_decides_outcome ()) {
+            vayu::utils::log_info ("run", "Load test stopped before its request was built",
+            { { "runId", context->run_id } });
+            return false;
+        }
         vayu::utils::log_error ("run",
         built.parse_failed ? std::string ("Load test: invalid request format") :
                              "Load test auth resolution failed: " + built.error_message,
@@ -2608,8 +2627,9 @@ RunManager& manager) {
 
         vayu::Request request;
         if (!build_load_request (db, db_ptr, config, context, timeout_ms, request)) {
-            db.transition_run_status (context->run_id,
-            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
+            db.transition_run_status (context->run_id, { vayu::RunStatus::Running },
+            context->stop_decides_outcome () ? vayu::RunStatus::Stopped :
+                                               vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
             manager.retain_run (context->run_id);

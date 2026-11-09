@@ -270,6 +270,10 @@ struct ContextData {
     /// `ScriptContext::cancel`.
     const std::atomic<bool>* cancel = nullptr;
 
+    /// Set when @ref cancel ended a `pm.sendRequest`; copied onto
+    /// `ScriptResult::send_cancelled`.
+    bool send_cancelled = false;
+
     /// Whether `pm.execution` may record an intent at all - see
     /// `ScriptContext::in_scenario`.
     bool in_scenario = false;

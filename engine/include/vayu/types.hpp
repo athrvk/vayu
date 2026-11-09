@@ -1517,6 +1517,11 @@ struct ScriptResult {
     /// where no fold stamped one, read as the request's own.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::string error_scope{};
+    /// True when `ScriptContext::cancel` ended one of this script's
+    /// `pm.sendRequest` calls: in a run that is the run's Stop, so the
+    /// script's outcome is no verdict on it (#3371). Read by the load
+    /// replay's tally and by `script.setup` / `script.teardown`.
+    bool send_cancelled = false;
 };
 
 // ============================================================================

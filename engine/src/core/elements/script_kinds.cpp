@@ -21,7 +21,8 @@
  * `core/elements`, which knows nothing about scripting beyond
  * `vayu::ScriptResult`'s shape. The element's own outcome is about this one
  * script: `error` when it threw, `failed` when it ran and only a `pm.test`
- * assertion did not hold, `ok` otherwise (#2663). The step's verdict is
+ * assertion did not hold, `skipped` when the run's Stop cancelled its
+ * `pm.sendRequest` (#3371), `ok` otherwise (#2663). The step's verdict is
  * separate - a script's assertions travel inside the step's `ScriptResult`,
  * folded beside every other level's (`fold_script_result`).
  *
@@ -150,11 +151,16 @@ std::vector<ElementMessage> script_messages (const vayu::ScriptResult& result) {
     return messages;
 }
 
+constexpr const char* SEND_CANCELLED_MESSAGE =
+"the run was stopped before this script's pm.sendRequest answered";
+
 /// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
 /// is about this one script, the slot about the whole step. A thrown script is
 /// `error`; one that ran and failed only assertions is `failed`, with the
 /// first failure as its message, because `success` alone cannot tell the two
-/// apart (#2663).
+/// apart (#2663). One whose `pm.sendRequest` the run's Stop cancelled is
+/// `skipped` and stays out of the slot, so no tally counts its tests or its
+/// throw (#3371).
 void run_step_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 vayu::ScriptResult& slot,
@@ -166,6 +172,11 @@ const char* unbound_message) {
         return;
     }
     auto result = runner (script);
+    if (result.send_cancelled) {
+        ctx.outcome_status  = "skipped";
+        ctx.outcome_message = SEND_CANCELLED_MESSAGE;
+        return;
+    }
     if (script_threw (result)) {
         ctx.outcome_status  = "error";
         ctx.outcome_message = result.error_message;
@@ -217,6 +228,30 @@ class ScriptPostElement final : public Element {
     std::string script_;
 };
 
+/// `script.setup` / `script.teardown`'s shared `apply`. A script whose
+/// `pm.sendRequest` the run's Stop cancelled is `skipped`: the run ended
+/// under it, which says nothing about the script (#3371).
+void run_lifecycle_script (ElementContext& ctx,
+const std::function<vayu::ScriptResult (const std::string&)>& runner,
+const std::string& script,
+const char* unbound_message) {
+    if (!runner) {
+        ctx.outcome_status  = "error";
+        ctx.outcome_message = unbound_message;
+        return;
+    }
+    auto result = runner (script);
+    if (result.send_cancelled) {
+        ctx.outcome_status  = "skipped";
+        ctx.outcome_message = SEND_CANCELLED_MESSAGE;
+        return;
+    }
+    ctx.outcome_status = result.success ? "ok" : "error";
+    if (!result.success) {
+        ctx.outcome_message = result.error_message;
+    }
+}
+
 class ScriptSetupElement final : public Element {
     public:
     explicit ScriptSetupElement (const nlohmann::json& config)
@@ -228,16 +263,7 @@ class ScriptSetupElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        if (!ctx.run_setup_script) {
-            ctx.outcome_status  = "error";
-            ctx.outcome_message = "no setup script runner bound";
-            return;
-        }
-        auto result        = ctx.run_setup_script (script_);
-        ctx.outcome_status = result.success ? "ok" : "error";
-        if (!result.success) {
-            ctx.outcome_message = result.error_message;
-        }
+        run_lifecycle_script (ctx, ctx.run_setup_script, script_, "no setup script runner bound");
     }
 
     private:
@@ -255,16 +281,8 @@ class ScriptTeardownElement final : public Element {
     }
 
     void apply (ElementContext& ctx) override {
-        if (!ctx.run_teardown_script) {
-            ctx.outcome_status  = "error";
-            ctx.outcome_message = "no teardown script runner bound";
-            return;
-        }
-        auto result        = ctx.run_teardown_script (script_);
-        ctx.outcome_status = result.success ? "ok" : "error";
-        if (!result.success) {
-            ctx.outcome_message = result.error_message;
-        }
+        run_lifecycle_script (ctx, ctx.run_teardown_script, script_,
+        "no teardown script runner bound");
     }
 
     private:

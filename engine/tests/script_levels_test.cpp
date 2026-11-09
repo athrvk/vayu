@@ -428,6 +428,35 @@ TEST_F (ScriptLevelFold, AnOutcomesLongMessageIsCut) {
     std::string (MAX_BYTES, 'x') + std::string (vayu::utils::kLoggedTextTruncationMarker));
 }
 
+// #3371: a script whose `pm.sendRequest` the run's Stop cancelled is no verdict,
+// so its throw and its failed test reach neither its outcome nor the step's
+// slot, while an earlier level's result stays. Mutation check: drop the
+// `send_cancelled` return from `run_step_script` and the outcome is `error`
+// with the throw and the failed test folded in.
+TEST_F (ScriptLevelFold, AScriptTheStopCutShortIsSkippedAndLeftOutOfTheStep) {
+    vayu::ScriptResult cut_short = asserted ("the fetch answered", false);
+    cut_short.error_message    = "Error: the fetch answered: Request cancelled";
+    cut_short.send_cancelled   = true;
+    answers["collection_post"] = asserted ("collection passes", true);
+    answers["request_post"]    = cut_short;
+
+    const auto outcomes = run (Phase::StepAfter,
+    json::array ({ script_element ("script.post", "collection_post", "collection"),
+    script_element ("script.post", "request_post", "request") }));
+
+    ASSERT_EQ (outcomes.size (), 2u);
+    EXPECT_EQ (outcomes[0].status, "ok");
+    EXPECT_EQ (outcomes[1].status, "skipped");
+    EXPECT_EQ (outcomes[1].message.value_or (""),
+    "the run was stopped before this script's pm.sendRequest answered");
+    EXPECT_TRUE (outcomes[1].messages.empty ());
+    ASSERT_EQ (post.tests.size (), 1u);
+    EXPECT_EQ (post.tests[0].name, "collection passes");
+    EXPECT_TRUE (post.success);
+    EXPECT_TRUE (post.error_message.empty ());
+    ASSERT_EQ (post.console_output.size (), 1u);
+}
+
 // ============================================================================
 // Send parity: `POST /execute` runs the same elements and reports the same
 // levels a collection run does.

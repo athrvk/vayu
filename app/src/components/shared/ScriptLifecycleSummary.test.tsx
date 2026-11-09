@@ -70,4 +70,52 @@ describe("ScriptLifecycleSummary", () => {
 		expect(screen.getByText("Setup")).toBeTruthy();
 		expect(screen.getByText("Teardown")).toBeTruthy();
 	});
+
+	describe("a script the run's Stop cancelled (#3371)", () => {
+		const STOPPED = "the run was stopped before this script's pm.sendRequest answered";
+
+		it.each([
+			["setup", "script.setup"],
+			["teardown", "script.teardown"],
+		] as const)(
+			"shows a skipped %s in the muted tone, with its message and no footnote",
+			(phase, kind) => {
+				render(
+					<ScriptLifecycleSummary
+						lifecycle={{
+							[phase]: [outcome({ kind, outcome: "skipped", message: STOPPED })],
+						}}
+					/>
+				);
+				const message = screen.getByText(STOPPED);
+				expect(message.className).toContain("text-muted-foreground");
+				expect(message.className).not.toContain("text-destructive-text");
+				expect(screen.queryByText(/does not change the run's status/)).toBeNull();
+			}
+		);
+
+		it("falls back to Skipped when the engine sent no message", () => {
+			render(
+				<ScriptLifecycleSummary lifecycle={{ setup: [outcome({ outcome: "skipped" })] }} />
+			);
+			const label = screen.getByText("Skipped");
+			expect(label.className).toContain("text-muted-foreground");
+		});
+
+		it("keeps the footnote when a skipped row sits beside a real failure", () => {
+			render(
+				<ScriptLifecycleSummary
+					lifecycle={{
+						setup: [outcome({ outcome: "skipped", message: STOPPED })],
+						teardown: [
+							outcome({ kind: "script.teardown", outcome: "error", message: "boom" }),
+						],
+					}}
+				/>
+			);
+			expect(screen.getByText(STOPPED).className).toContain("text-muted-foreground");
+			expect(screen.getByText("boom").className).toContain("text-destructive-text");
+			expect(screen.getByText(/does not change the run's status/)).toBeTruthy();
+		});
+	});
 });

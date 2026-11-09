@@ -992,6 +992,12 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     vayu::http::Client client (client_config);
     auto sent = client.send (request);
 
+    const auto error_code =
+    sent.is_error () ? sent.error ().code : sent.value ().error_code;
+    if (error_code == vayu::ErrorCode::Cancelled) {
+        data->send_cancelled = true;
+    }
+
     JSValue err = JS_NULL;
     JSValue res = JS_NULL;
     if (sent.is_error ()) {

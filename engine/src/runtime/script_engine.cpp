@@ -1385,7 +1385,8 @@ class ScriptEngine::Impl {
         // Carried even when the script threw afterwards: the caller decides
         // what an instruction from a script that then failed is worth. The
         // scenario runner ignores it for an errored step (issue #2526).
-        result.control = std::move (ctx_data.control);
+        result.control        = std::move (ctx_data.control);
+        result.send_cancelled = ctx_data.send_cancelled;
 
         // Check if any tests failed
         for (const auto& test : result.tests) {

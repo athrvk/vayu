@@ -442,6 +442,24 @@ Manages the lifecycle of load test runs:
   timeout (#3343): a cancelled transfer ends at its next libcurl progress tick,
   about a second, and counts as neither a failed scrape nor a failed refresh.
   `should_stop` is not that flag because a natural end never sets it.
+- **The run's own thread carries `should_stop`** (#3371): every
+  `pm.sendRequest` a load run's scripts make (`script.setup` /
+  `script.teardown`, the inline step scripts, the deferred replay), and a
+  sequential collection run's setup and teardown, takes it through
+  `ScriptSendInputs::cancel`, and a single-request run's start-of-run token
+  request takes it through `build_request`, because Stop and shutdown both
+  raise it and both wait on that thread. A sequential run's step scripts take
+  it only on a streaming step, through `ExchangeInputs::cancel`
+  (`scenario_runner.cpp`), so on an ordinary step their send waits out its
+  timeout (#3397). The auxiliary threads keep `aux_cancel`: a replay or
+  teardown after a natural end must still send. A call it cancels is the run
+  ending, never a failure: a cancelled token request ends the run `Stopped`; a
+  lifecycle or inline step script whose send it cancelled is `skipped` (so a
+  cut-short setup does not fail the run), and an inline one's tests and throw
+  stay out of the step's result, so no tally counts them; the replay leaves
+  such a sample untallied (`ScriptResult::send_cancelled`). A Stop latched
+  before the replay leaves the flag raised, so the replay's and teardown's
+  sends after a Stop are cancelled at once: a Stop abandons them.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the
