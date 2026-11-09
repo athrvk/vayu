@@ -114,6 +114,13 @@ describe("parseCompleteFrame", () => {
 		});
 	});
 
+	it("keeps a daemon shutdown as itself rather than reading it as an error", () => {
+		expect(parseCompleteFrame({ reason: "shutdown", totalEvents: 3 })).toEqual({
+			reason: "shutdown",
+			totalEvents: 3,
+		});
+	});
+
 	it("reports a reason it cannot read as an error rather than inventing one", () => {
 		// The tab says why every stream ended; "the engine said something I
 		// could not read" is closer to an error than to a clean close.

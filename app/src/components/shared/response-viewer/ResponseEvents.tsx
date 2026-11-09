@@ -100,7 +100,8 @@ export interface ResponseEventsProps {
  * What each termination means, in the user's terms.
  *
  * `completed` is the only one where the *server* decided; every other reason is
- * a bound this side applied, and a reader has to be able to tell "the stream
+ * a bound this side applied or the engine going down (`shutdown`, which is not
+ * the user's `stopped`), and a reader has to be able to tell "the stream
  * finished" from "we stopped listening" - they lead to different next actions.
  */
 const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }> = {
@@ -123,6 +124,10 @@ const END_REASON_NOTE: Record<StreamEndReason, { title: string; detail: string }
 	idleTimeout: {
 		title: "Stream went quiet",
 		detail: "Nothing arrived for the idle timeout, so the stream was closed. The connection may have been dropped upstream without being closed.",
+	},
+	shutdown: {
+		title: "Vayu's engine shut down",
+		detail: "Vayu's engine shut down, so the stream was closed. The server may have had more to send. What arrived before then is here.",
 	},
 	error: {
 		title: "Stream ended in an error",

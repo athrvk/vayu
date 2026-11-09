@@ -22,10 +22,11 @@
  *
  * Two disciplines this file exists to hold:
  *
- * - **Every stream ends, and says why.** Server close, user stop, a named cap
- *   (`maxStreamEvents`, `maxStreamDurationMs`) or the idle timeout - never "the
- *   whole-transfer timeout happened to fire". `SseEndReason` is that statement,
- *   and it reaches the relay's `event: complete` and the run's trace alike.
+ * - **Every stream ends, and says why.** Server close, user stop, engine
+ *   shutdown, a named cap (`maxStreamEvents`, `maxStreamDurationMs`), the idle
+ *   timeout or a failed transfer - never "the whole-transfer timeout happened
+ *   to fire". `SseEndReason` is that statement, and it reaches the relay's
+ *   `event: complete` and the run's trace alike.
  * - **Nothing here is unbounded.** The parser caps the frame it assembles, the
  *   ring caps what it retains, the trace caps what it stores, and the manager
  *   joins every worker it started. `SseStreamManager` is therefore declared
@@ -68,6 +69,9 @@ enum class SseEndReason : std::uint8_t {
     Completed,
     /// `POST /runs/:id/stop`.
     Stopped,
+    /// The engine shut down under the stream (`SseStreamManager::shutdown`),
+    /// which no user asked for.
+    Shutdown,
     /// `maxStreamEvents` reached.
     MaxEvents,
     /// `maxStreamDurationMs` elapsed.
@@ -201,8 +205,15 @@ class SseStreamContext {
         return closed_.load (std::memory_order_acquire);
     }
 
-    /// Set by `POST /runs/:id/stop`; read by the transfer's progress callback.
-    std::atomic<bool> should_stop{ false };
+    /// Ask the transfer to end for a user's `POST /runs/:id/stop`.
+    void request_stop ();
+    /// Ask the transfer to end because the engine is shutting down.
+    void request_shutdown ();
+    /// The end a stop request asked for, read by the transfer's progress
+    /// callback and before each redirected hop. The first request wins, so a
+    /// shutdown after a Stop the transfer has not read yet does not rewrite why
+    /// the user's stream ended.
+    [[nodiscard]] std::optional<SseEndReason> requested_end () const;
 
     /// Record why the stream ended, without closing it, so the completion
     /// callback can read `end_reason()` while `closed()` is still false. The
@@ -213,7 +224,8 @@ class SseStreamContext {
     /// Idempotent, and an end already recorded wins over @p reason, which is
     /// therefore the fallback for a stream that never recorded one.
     void close (SseEndReason reason);
-    /// The recorded end; `Completed` until one is recorded.
+    /// The recorded end. Before one is recorded it is `Error`, logged, because
+    /// an end nobody recorded is not known to be a completion.
     [[nodiscard]] SseEndReason end_reason () const;
     /// 0 while running; stamped at `close()`.
     [[nodiscard]] int64_t completed_at_ms () const {
@@ -253,6 +265,8 @@ class SseStreamContext {
     std::atomic<int64_t> total_events_{ 0 };
     /// Guarded by `mutex_`; empty until `record_end` or `close`.
     std::optional<SseEndReason> end_reason_;
+    /// Guarded by `mutex_`; empty until `request_stop` or `request_shutdown`.
+    std::optional<SseEndReason> requested_end_;
     /// Guarded by `mutex_`; capped at `limits.max_stored_events`.
     std::vector<nlohmann::json> stored_;
 
@@ -422,11 +436,12 @@ class SseStreamManager {
     [[nodiscard]] std::size_t size () const;
 
     /**
-     * Stop every live stream and **join** its worker, then refuse to start
-     * another. Terminal and idempotent, exactly like `RunManager::shutdown()`:
-     * a manager that has drained cannot be reopened, because the caller drains
-     * only when the `Database` and `CookieJar` its workers hold are about to
-     * go away, and a stream started after that has nothing left to write to.
+     * End every live stream as `Shutdown` and **join** its worker, then refuse
+     * to start another. Terminal and idempotent, exactly like
+     * `RunManager::shutdown()`: a manager that has drained cannot be reopened,
+     * because the caller drains only when the `Database` and `CookieJar` its
+     * workers hold are about to go away, and a stream started after that has
+     * nothing left to write to.
      *
      * Called by `Server::stop()` and by the destructor. Draining an idle
      * manager returns immediately.

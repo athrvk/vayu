@@ -967,7 +967,9 @@ inline, which only wakes the daemon's main loop; the teardown cannot overtake
 the response, because stopping the server joins the worker that is writing it.
 The daemon then stops the server (and with it every mock server, inbox, mock
 issuer and OAuth callback listener, a paced answer going out at once and a
-callback's token exchange cancelled), stops and joins active runs (a run still
+callback's token exchange cancelled), ends and joins every streaming design run
+(the run ends `stopped` and its trace's `endReason` is `shutdown`, never a
+user's `stopped`, #3342), stops and joins active runs (a run still
 sending ends `stopped`; one in its natural-end drain has the drain cut short, its
 in-flight transfers counted as `cancelled`, and keeps its own end, as for
 [a Stop](#post-runsrunidstop), issue #3341), refreshes the
@@ -7978,16 +7980,18 @@ EventSource specification requires (issue #1917); without that the first line's
 field name would carry the mark and the first event would be lost. One mark is
 dropped, however its three bytes are split across reads, and only at the start.
 
-**Every stream ends, and the run says why.** Five terminations, never "the
+**Every stream ends, and the run says why.** Seven terminations, never "the
 timeout happened to fire":
 
 | Reason | What happened |
 |--------|---------------|
 | `completed` | The server closed the stream |
 | `stopped` | [`POST /runs/:runId/stop`](#post-runsrunidstop) |
+| `shutdown` | The engine shut down under the stream ([`POST /shutdown`](#post-shutdown) or a signal), which no user asked for (#3342). The run ends `stopped`, as a load run still sending does; this reason is what tells it from a user's Stop |
 | `maxStreamEvents` | The event cap was reached; the list ends exactly at the cap, however the server packed events into writes (an unterminated event behind the last one is not flushed) |
 | `maxStreamDurationMs` | The duration cap elapsed, counted from the first hop of a redirect chain |
 | `idleTimeout` | Nothing arrived for `sseIdleTimeoutMs` on a made connection; a header line counts as arriving, and each redirect hop's own connect is bounded by the connect deadline below, not counted as silence. The stream ends within a couple of seconds of the setting (the engine checks about once a second) |
+| `error` | The transfer failed (a refused or timed-out connect, TLS, a protocol error, a redirect the chain refused); the run ends `failed` with the error fields set. Also what an end nobody recorded reads as, which the engine logs, since it is not known to be a completion |
 
 The whole-transfer `timeout` is deliberately **not** applied to a stream - it
 would kill a healthy one mid-flight. Two deadlines apply instead: connecting
@@ -11863,17 +11867,22 @@ data: {"runId":"run_1234567890","reason":"completed","totalEvents":128}
 ```
 
 - `open` is published once, as soon as the response's header block arrives, so
-  even a late consumer learns what the stream connected to. With
-  `followRedirects` on it describes the hop the stream ends at: a redirect the
-  stream follows publishes no `open`, and its body is neither an event nor
-  counted.
+  even a late consumer learns what the stream connected to. A reply with no
+  body (a `204`, a bodiless `401`, an empty `200`) still publishes it, with its
+  status, before `complete` (#3342). With `followRedirects` on it describes the
+  hop the stream ends at: a redirect the stream follows publishes no `open`, and
+  its body is neither an event nor counted. Neither does an interim `1xx` (a
+  `100 Continue`) nor a proxy's answer to `CONNECT`: a tunnel refused there
+  ends the stream as `error` with no `open`. A stream that failed before any
+  response arrived has none either, and neither does one that ends on a
+  redirect the engine refuses to follow (too many hops, an unsendable scheme).
 - `message` carries one upstream event: its `event` name (`message` when the
   origin sent none), its `data` (multiple `data:` lines joined with `\n`), the
   origin's own `id:` as **`sourceId`**, and `receivedAt`. An event larger than
   `sseMaxEventBytes` is stored as a prefix and says so in band, with
   `dataTruncated: true` and `dataBytes` (the size as sent) - never silently cut.
-- `complete`'s `reason` is one of `completed`, `stopped`, `maxStreamEvents`,
-  `maxStreamDurationMs`, `idleTimeout`, `error`; see
+- `complete`'s `reason` is one of `completed`, `stopped`, `shutdown`,
+  `maxStreamEvents`, `maxStreamDurationMs`, `idleTimeout`, `error`; see
   [POST /execute](#post-execute). No frame carries the exchange's `warnings`
   (issue #3315): they are on the stored trace, which the report already holds
   when `complete` arrives.
@@ -12349,7 +12358,9 @@ outcome, and `running` when it landed after the run's own end (the `draining`
 phase), where the worker has not yet written the `completed` or `failed` it will
 end with. `running` there is accurate rather than a failure to stop: the drain
 is already cancelled, and the terminal status follows once the worker writes
-it.
+it. When the worker has not settled within the 5s, the answer also carries
+`message`: `"Stop signalled; the run had not settled within the 5s grace
+period; read the report"` (#3342); a run that settled carries none.
 ```json
 {
   "status": "stopped",
@@ -12390,12 +12401,20 @@ send's exchange still completes and its result is stored, under a row that stays
 
 **A streaming design run** (`POST /execute` with `"stream": true`) is stopped
 here too: the endpoint asks its consumer worker to end the transfer, waits up to
-the same 5s, and answers `{"runId": ..., "status": "stopped", "message":
-"Stream stopped", "totalEvents": N}`. The worker owns the terminal write, so the
-run reaches `stopped` with its trace and its true event count together; the
-stream's `complete` event carries `"reason": "stopped"`. A stream that had
-already terminated keeps the reason it recorded rather than being rewritten as a
-user stop.
+the same 5s, and answers `{"runId": ..., "status": ..., "message": ...,
+"totalEvents": N}`. The worker owns the terminal write, so the run reaches its
+status with its trace and its true event count together, and `status` is the
+one it stored (#3342):
+
+| `status` | `message` | When |
+|----------|-----------|------|
+| `stopped` | `Stream stopped` | The transfer read the stop; the stream's `complete` event carries `"reason": "stopped"` |
+| `completed` | `The stream had already ended` | The server had closed the stream, or a cap had ended it, before the transfer read the stop (its post-request script was still running) |
+| `failed` | `The stream failed before the stop took effect` | The transfer had already failed |
+| `running` | `Stop signalled; the run had not settled within the 5s grace period; read the report` | The worker had not stored a result within the 5s, usually a slow post-request script; the stop still stands |
+
+A stream that had already terminated keeps the reason it recorded rather than
+being rewritten as a user stop.
 
 #### Stopping a collection run
 
@@ -12431,7 +12450,8 @@ sending and decides the outcome: the run ends `stopped`.
 **The summary is absent when the worker has not stored one** within the 5s,
 or could not store it. The answer is then
 `{"status": "<stored status>", "runId": ..., "message": "Stop signalled; read
-the report"}`, usually with `status` `running`. The stop still stands: read the
+the report"}`, usually with `status` `running`; when the 5s ran out, `message`
+says so, as for a load run above. The stop still stands: read the
 run's report once it reports a terminal status. A scenario **load** run is a
 `load` run and answers from its collector as above.
 

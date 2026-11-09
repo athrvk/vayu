@@ -1887,6 +1887,7 @@ vayu::core::RunManager* live_runs = nullptr);
  * collector. A sequential collection run (`RunType::Scenario`) feeds no
  * collector, so it answers from the summary its worker stores before clearing
  * `is_running`, and with no `summary` at all while none is stored (#2822).
+ * Either way a wait that ran out is named in `message` (#3342).
  */
 nlohmann::json stop_active_run_response (vayu::db::Database& db,
 vayu::core::RunContext& context,

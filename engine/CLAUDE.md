@@ -720,9 +720,12 @@ logged as a warning: it means a client skipped composition.
   managers) and answers `202 {runId, eventsUrl}`; `GET /runs/:runId/events`
   relays a bounded ring of parsed events and the completed trace carries a
   bounded `events` node. Every stream ends by a rule that can name itself
-  (server close, `POST /runs/:id/stop`, `maxStreamEvents`,
-  `maxStreamDurationMs`, the idle timeout), never a whole-transfer deadline,
-  which this path deliberately does not set. `stream` with `transient` is a
+  (server close, `POST /runs/:id/stop`, an engine shutdown, `maxStreamEvents`,
+  `maxStreamDurationMs`, the idle timeout, a failed transfer), never a
+  whole-transfer deadline, which this path deliberately does not set. A
+  shutdown is `SseEndReason::Shutdown` (`request_shutdown`), never a user's
+  `Stopped`, though both leave the row `stopped` (#3342); an end read before
+  one is recorded is `Error`, never `Completed`. `stream` with `transient` is a
   `400`. A final hop that is not `text/event-stream` also keeps its bytes as
   the body, up to `maxDesignResponseBodyBytes`, and every stream's trace
   carries its wire count as `response.bodyBytes`, which `cap_trace_bodies`

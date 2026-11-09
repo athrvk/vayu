@@ -2102,6 +2102,17 @@ const std::atomic<bool>* cancel) {
     return std::nullopt;
 }
 
+/// The status a stream's run row ends with. A shutdown ends it `stopped`, as
+/// it ends a load run still sending; the trace's `endReason` is what tells it
+/// from a user's Stop (#3342).
+vayu::RunStatus stream_run_status (vayu::http::SseEndReason end,
+const vayu::Response& response) {
+    if (end == vayu::http::SseEndReason::Stopped || end == vayu::http::SseEndReason::Shutdown) {
+        return vayu::RunStatus::Stopped;
+    }
+    return response.has_error () ? vayu::RunStatus::Failed : vayu::RunStatus::Completed;
+}
+
 /**
  * The streaming half of a design send (issue #573).
  *
@@ -2282,13 +2293,7 @@ void run_streaming_execution (RouteContext& ctx, httplib::Response& res, DesignS
         std::vector<vayu::core::ElementOutcome> element_outcomes =
         std::move (pre_element_outcomes);
         record.events = vayu::http::stream_trace_node (context);
-        if (context.end_reason () == vayu::http::SseEndReason::Stopped) {
-            record.status = vayu::RunStatus::Stopped;
-        } else if (response.has_error ()) {
-            record.status = vayu::RunStatus::Failed;
-        } else {
-            record.status = vayu::RunStatus::Completed;
-        }
+        record.status = stream_run_status (context.end_reason (), response);
 
         const bool has_element_output = elements && !elements->empty ();
         const bool has_script_output  = has_element_output ||

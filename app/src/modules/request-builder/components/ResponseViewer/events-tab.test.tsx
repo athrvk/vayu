@@ -31,7 +31,7 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { useExecutionEventsStore } from "@/stores";
 import type { ResponseState } from "../../types";
-import type { StreamEvent } from "@/types";
+import { STREAM_END_REASONS, type StreamEndReason, type StreamEvent } from "@/types";
 
 // Monaco does not run under jsdom; the body panel is not what this asserts on.
 vi.mock("@/components/ui", async (importOriginal) => ({
@@ -209,6 +209,49 @@ describe("the Events tab", () => {
 		openEventsTab();
 
 		expect(screen.getByText(/stream went quiet/i)).toBeTruthy();
+	});
+
+	// Typed on the union, so a reason added without a title here fails type-check;
+	// the render is what proves `ResponseEvents` has a note for it.
+	const END_REASON_TITLES: Record<StreamEndReason, string> = {
+		completed: "Stream closed by the server",
+		stopped: "Stream stopped",
+		maxStreamEvents: "Event limit reached",
+		maxStreamDurationMs: "Duration limit reached",
+		idleTimeout: "Stream went quiet",
+		shutdown: "Vayu's engine shut down",
+		error: "Stream ended in an error",
+	};
+
+	it("holds a title for exactly the reasons the app accepts", () => {
+		expect(Object.keys(END_REASON_TITLES).sort()).toEqual([...STREAM_END_REASONS].sort());
+	});
+
+	it.each(STREAM_END_REASONS)("shows a note when the stream ended as %s", (reason) => {
+		state.response = okResponse({
+			events: [event("a")],
+			totalEvents: 1,
+			eventsTruncated: false,
+			streamEndReason: reason,
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText(END_REASON_TITLES[reason])).toBeTruthy();
+	});
+
+	it("says a daemon shutdown ended the stream, not the user", () => {
+		state.response = okResponse({
+			events: [event("a")],
+			totalEvents: 1,
+			eventsTruncated: false,
+			streamEndReason: "shutdown",
+		});
+		renderViewer();
+		openEventsTab();
+
+		expect(screen.getByText(/engine shut down, so the stream was closed/i)).toBeTruthy();
+		expect(screen.queryByText(/you stopped/i)).toBeNull();
 	});
 
 	it("discloses a capped list rather than letting the row count read as the total", () => {

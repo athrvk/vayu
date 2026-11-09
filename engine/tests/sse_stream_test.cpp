@@ -39,6 +39,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "proxy_server.hpp"
 #include "silent_listener.hpp"
 #include "temp_database.hpp"
 #include "timed_out_after.hpp"
@@ -155,6 +156,9 @@ class StreamServer {
         // test reads back off `/scripted`.
         svr_.Get ("/aside", [this] (const httplib::Request&, httplib::Response& res) {
             aside_count_.fetch_add (1);
+            while (aside_held_.load () && !stopping_.load ()) {
+                std::this_thread::sleep_for (std::chrono::milliseconds (5));
+            }
             res.set_content (R"({"ok":true})", "application/json");
         });
 
@@ -201,6 +205,17 @@ class StreamServer {
             }
             res.set_content (body.chunks.front (), body.content_type);
         });
+
+        // Headers and no body at all, whatever `bodiless ()` set: a 204, a
+        // bodiless 401, an empty 200. A POST is answered the same way, after
+        // the `100 Continue` httplib sends a request that expects one.
+        const auto bodiless = [this] (const httplib::Request& req, httplib::Response& res) {
+            note_request (req);
+            res.status = bodiless_status_.load ();
+            res.set_header ("X-Fixture", "bodiless");
+        };
+        svr_.Get ("/bodiless", bodiless);
+        svr_.Post ("/bodiless", bodiless);
 
         svr_.Get ("/silent", [this] (const httplib::Request&, httplib::Response& res) {
             res.set_header ("X-Fixture", "silent");
@@ -261,6 +276,16 @@ class StreamServer {
         return aside_count_.load ();
     }
 
+    /// Hold every `/aside` answer until `release_aside ()`, so a script that
+    /// sends one is parked at a point the test chooses. Counted on arrival.
+    void hold_aside () {
+        aside_held_.store (true);
+    }
+
+    void release_aside () {
+        aside_held_.store (false);
+    }
+
     /// Make `/token` take @p ms to answer. Set before the request.
     void delay_token (int ms) {
         token_delay_ms_ = ms;
@@ -311,6 +336,11 @@ class StreamServer {
     /// Make `/hop` wait @p ms before it answers. Set before the request.
     void delay_hop (int ms) {
         hop_delay_ms_ = ms;
+    }
+
+    /// The status `/bodiless` answers from now on.
+    void bodiless (int status) {
+        bodiless_status_.store (status);
     }
 
     /// Redirects `/hop` has answered or is answering.
@@ -373,9 +403,11 @@ class StreamServer {
     Canned hop_reply_{ 302, "application/json", { R"({"hop":"first"})" } };
     Canned canned_;
     std::atomic<int> hop_delay_ms_{ 0 };
+    std::atomic<int> bodiless_status_{ 204 };
     std::atomic<int> hop_count_{ 0 };
     std::atomic<int> received_count_{ 0 };
     std::atomic<int> aside_count_{ 0 };
+    std::atomic<bool> aside_held_{ false };
     std::atomic<int> token_delay_ms_{ 0 };
     std::atomic<int> token_count_{ 0 };
 };
@@ -679,7 +711,7 @@ TEST (SseConsumer, StopsMidStreamWhenAsked) {
         while (context.total_events () < 2) {
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
         }
-        context.should_stop.store (true);
+        context.request_stop ();
     });
     vayu::http::consume_sse_stream (
     spec_for (server.url ("/endless"), brisk_limits ()), context);
@@ -799,10 +831,10 @@ TEST (SseConsumer, ARedirectHopThatNeverConnectsIsATimeoutErrorNotIdle) {
 
 // The 302 is itself shaped as an event stream, so a body that reached the
 // stream would publish an `open` for the redirect, dispatch its event and count
-// its bytes. Mutation checks: publish the `open` frame per hop (ahead of the
-// `discard` return, `announced` reset in `begin_response_hop`) and two frames
-// are published; drop the `discard` return and the redirect's event and its
-// `open` are recorded.
+// its bytes. Mutation checks: announce at the end of every header block (drop
+// the `discard` condition in `stream_header_callback`) and two frames are
+// published; drop the `discard` return in `stream_write_callback` and the
+// redirect's event is recorded.
 TEST (SseConsumer, AFollowedRedirectsBodyIsNoPartOfTheStream) {
     StreamServer server;
     server.hop_body ("text/event-stream", "data: from-the-redirect\n\n");
@@ -1044,6 +1076,70 @@ TEST (SseConsumer, TheFinalHopsContentTypeDecides) {
 }
 
 // ---------------------------------------------------------------------------
+// The `open` frame without a body (#3342)
+//
+// A reply that ends at its headers still opens, once, with its status: the
+// frame is announced at the end of the final header block, not at a body byte.
+// ---------------------------------------------------------------------------
+
+// Mutation check: announce from the first body byte again (the write
+// callback) and every case publishes no `open`.
+TEST (SseConsumer, AReplyWithNoBodyStillOpensOnceWithItsStatus) {
+    for (const int status : { 204, 401, 200 }) {
+        SCOPED_TRACE (status);
+        StreamServer server;
+        server.bodiless (status);
+        SseStreamContext context ("run_test", brisk_limits ());
+        const auto response = vayu::http::consume_sse_stream (
+        spec_for (server.url ("/bodiless"), brisk_limits ()), context);
+
+        EXPECT_EQ (context.end_reason (), SseEndReason::Completed) << response.error_message;
+        EXPECT_EQ (response.status_code, status);
+        const auto opens = open_frames (context);
+        ASSERT_EQ (opens.size (), 1u);
+        EXPECT_EQ (opens[0]["statusCode"], status);
+        EXPECT_EQ (opens[0]["headers"]["x-fixture"], "bodiless");
+    }
+}
+
+// The `100 Continue` a typed `Expect` draws is a header block of its own, and
+// not the stream's answer. Mutation check: drop the interim condition in
+// `stream_header_callback` and the one frame reads 100.
+TEST (SseConsumer, AnInterimResponseIsNotTheStreamsOpen) {
+    StreamServer server;
+    server.bodiless (204);
+    auto spec           = spec_for (server.url ("/bodiless"), brisk_limits ());
+    spec.request.method = vayu::HttpMethod::POST;
+    spec.request.body.mode    = vayu::BodyMode::Text;
+    spec.request.body.content = "payload";
+    spec.request.headers      = { { "Expect", "100-continue" } };
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (response.status_code, 204) << response.error_message;
+    const auto opens = open_frames (context);
+    ASSERT_EQ (opens.size (), 1u);
+    EXPECT_EQ (opens[0]["statusCode"], 204);
+}
+
+// A proxy's answer to CONNECT is the tunnel's, not the stream's: this one
+// refuses with a 407, which must not open the stream. Mutation check: drop
+// `CURLOPT_SUPPRESS_CONNECT_HEADERS` and the refusal publishes an `open` of 407.
+TEST (SseConsumer, AProxysConnectAnswerIsNotTheStreamsOpen) {
+    vayu::tests::MockProxy proxy;
+    auto spec = spec_for ("https://127.0.0.1:1/events", brisk_limits ());
+    spec.transport.proxy_mode = vayu::http::ProxyMode::Manual;
+    spec.transport.proxy_url  = proxy.url ();
+    SseStreamContext context ("run_test", brisk_limits ());
+    const auto response = vayu::http::consume_sse_stream (spec, context);
+
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+    EXPECT_EQ (response.error_code, vayu::ErrorCode::ProxyError) << response.error_message;
+    EXPECT_EQ (proxy.count (), 1u);
+    EXPECT_TRUE (open_frames (context).empty ());
+}
+
+// ---------------------------------------------------------------------------
 // The ring
 // ---------------------------------------------------------------------------
 
@@ -1104,6 +1200,28 @@ TEST (SseRing, ARecordedEndIsReadBeforeTheCloseAndWinsOverIt) {
     EXPECT_NE (context.completed_at_ms (), 0);
     EXPECT_EQ (context.end_reason (), SseEndReason::Idle)
     << "the close's fallback replaced the end the stream recorded";
+}
+
+// An end nobody recorded is not known to be a completion (#3342). Mutation
+// check: default `end_reason ()` to `Completed` again and this fails.
+TEST (SseRing, AnUnrecordedEndReadsAsAnError) {
+    SseStreamContext context ("run_test", vayu::http::SseLimits{});
+    EXPECT_EQ (context.end_reason (), SseEndReason::Error);
+}
+
+// A shutdown after a Stop the transfer has not read yet leaves the user's
+// reason standing, and the other order leaves the shutdown's.
+TEST (SseRing, TheFirstStopRequestWins) {
+    SseStreamContext stopped ("run_test", vayu::http::SseLimits{});
+    EXPECT_FALSE (stopped.requested_end ().has_value ());
+    stopped.request_stop ();
+    stopped.request_shutdown ();
+    EXPECT_EQ (stopped.requested_end (), SseEndReason::Stopped);
+
+    SseStreamContext drained ("run_test", vayu::http::SseLimits{});
+    drained.request_shutdown ();
+    drained.request_stop ();
+    EXPECT_EQ (drained.requested_end (), SseEndReason::Shutdown);
 }
 
 TEST (SseRing, DisclosesATruncatedEventInBand) {
@@ -1258,7 +1376,9 @@ TEST (SseStreamManagerTest, ShutdownJoinsEveryWorkerAndIsTerminalAndIdempotent) 
     EXPECT_TRUE (completed.load ()) << "shutdown returned while the worker was "
                                        "still in its completion callback";
     EXPECT_EQ (manager.size (), 0u);
-    EXPECT_EQ (context->end_reason (), SseEndReason::Stopped);
+    // A drain is no user's Stop (#3342). Mutation check: signal the drain
+    // with `request_stop ()` again and this reads Stopped.
+    EXPECT_EQ (context->end_reason (), SseEndReason::Shutdown);
 
     // Terminal, like RunManager's: a drain happens because the state the
     // workers write through is going away, so a stream started afterwards
@@ -1290,8 +1410,8 @@ TEST (SseStreamManagerTest, SweepsOnlyFinishedStreamsPastTheirRetention) {
 
 // The context closes only once `on_complete` has returned, so a relay cannot
 // write `event: complete` before the run row exists, and the callback already
-// reads the true end reason (#3239). Stopped rather than a server close,
-// because `Completed` is also what an unrecorded end reads as. Mutation check:
+// reads the true end reason (#3239). Stopped rather than a server close, so
+// the reason read inside is one only the transfer could have recorded. Mutation check:
 // close the context in `consume_sse_stream` again and `closed()` is true while
 // the callback is held.
 TEST (SseStreamManagerTest, ClosesOnlyAfterTheCompletionCallbackReturns) {
@@ -1627,6 +1747,7 @@ class StreamExecuteTest : public ::testing::Test {
         mock_server_manager_, *manager_, run_summary_cache_ });
         vayu::http::routes::register_execution_routes (*ctx_);
         vayu::http::routes::register_event_stream_routes (*ctx_);
+        vayu::http::routes::register_run_routes (*ctx_);
         svr_.set_write_timeout (60, 0);
         port_   = svr_.bind_to_any_port ("127.0.0.1");
         thread_ = std::thread ([this] () { svr_.listen_after_bind (); });
@@ -1662,11 +1783,14 @@ class StreamExecuteTest : public ::testing::Test {
         origin_->pace (2);
     }
 
-    /// Send @p payload as a streaming execute of @p path on the origin and
-    /// return the run id it created.
+    /// Send @p payload as a streaming execute of @p path on the origin, or of
+    /// the payload's own `url` when it names one, and return the run id it
+    /// created.
     std::string start (json payload, const std::string& path = "/scripted") {
         payload["method"] = "GET";
-        payload["url"]    = origin_->url (path);
+        if (!payload.contains ("url")) {
+            payload["url"] = origin_->url (path);
+        }
         payload["stream"] = true;
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
@@ -1689,6 +1813,19 @@ class StreamExecuteTest : public ::testing::Test {
         httplib::Client client ("127.0.0.1", port_);
         client.set_read_timeout (20, 0);
         auto response = client.Post ("/execute", payload.dump (), "application/json");
+        EXPECT_TRUE (response);
+        if (!response) {
+            return json::object ();
+        }
+        EXPECT_EQ (response->status, 200) << response->body;
+        return json::parse (response->body);
+    }
+
+    /// `POST /runs/:runId/stop`'s answer for @p run_id.
+    json stop (const std::string& run_id) const {
+        httplib::Client client ("127.0.0.1", port_);
+        client.set_read_timeout (20, 0);
+        auto response = client.Post ("/runs/" + run_id + "/stop", "", "application/json");
         EXPECT_TRUE (response);
         if (!response) {
             return json::object ();
@@ -2722,6 +2859,94 @@ TEST_F (StreamExecuteTest, TheCompleteFrameMeansTheReportIsStored) {
 }
 
 // ---------------------------------------------------------------------------
+// Stopping a stream that has already ended (#3342)
+//
+// The transfer reads the stop flag only while it runs, so a stream the server
+// closed or that failed is past it when a Stop arrives during its post-request
+// script. Each script here is parked in a `pm.sendRequest` to the held `/aside`
+// until the route has signalled the stop, which puts the Stop between the
+// transfer's end and the row write every time. Mutation check: answer
+// `stopped` for every settled stream in `stream_stop_response` again and both
+// tests fail.
+// ---------------------------------------------------------------------------
+
+class StreamStopTest : public StreamExecuteTest {
+    protected:
+    /// Stop @p run_id while its post-request script is parked, then let the
+    /// script go, and return the answer.
+    json stop_while_the_script_is_parked (const std::string& run_id) {
+        if (!vayu::tests::wait_until (
+            [this] () { return origin_->aside_requests () == 1; })) {
+            ADD_FAILURE () << "the post-request script never reached /aside";
+            origin_->release_aside ();
+            return json::object ();
+        }
+        auto answer = std::async (
+        std::launch::async, [this, run_id] () { return stop (run_id); });
+        const auto stream = manager_->get (run_id);
+        EXPECT_TRUE (vayu::tests::wait_until (
+        [&stream] () { return stream && stream->requested_end ().has_value (); }))
+        << "the route never signalled the stop";
+        origin_->release_aside ();
+        return answer.get ();
+    }
+
+    /// A payload whose post-request script sends to the held `/aside`.
+    json parked_script_payload () const {
+        const std::string script =
+        "pm.sendRequest('" + origin_->url ("/aside") + "', function () {});";
+        return { { "elements", script_elements ("", script) },
+            { "allowScriptRequests", true } };
+    }
+};
+
+TEST_F (StreamStopTest, AStopAfterTheServerEndedTheStreamAnswersCompleted) {
+    serve (2);
+    origin_->hold_aside ();
+    const auto run_id = start (parked_script_payload ());
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto body = stop_while_the_script_is_parked (run_id);
+    EXPECT_EQ (body.value ("status", ""), "completed") << body.dump ();
+    EXPECT_EQ (body.value ("message", ""), "The stream had already ended")
+    << body.dump ();
+    EXPECT_EQ (body.value ("totalEvents", -1), 2) << body.dump ();
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Completed);
+}
+
+TEST_F (StreamStopTest, AStopAfterTheStreamFailedAnswersFailed) {
+    serve (0);
+    origin_->hold_aside ();
+    json payload      = parked_script_payload ();
+    payload["url"]    = "http://127.0.0.1:1/nothing";
+    const auto run_id = start (payload);
+    ASSERT_FALSE (run_id.empty ());
+
+    const auto body = stop_while_the_script_is_parked (run_id);
+    EXPECT_EQ (body.value ("status", ""), "failed") << body.dump ();
+    const auto run = db_->get_run (run_id);
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Failed);
+}
+
+// The Stop the transfer does read still answers what it decided.
+TEST_F (StreamStopTest, AStopOfALiveStreamAnswersStopped) {
+    origin_           = std::make_unique<StreamServer> ();
+    const auto run_id = start (json::object (), "/endless");
+    ASSERT_FALSE (run_id.empty ());
+    const auto stream = manager_->get (run_id);
+    ASSERT_NE (stream, nullptr);
+    ASSERT_TRUE (vayu::tests::wait_until (
+    [&stream] () { return stream->total_events () >= 1; }));
+
+    const auto body = stop (run_id);
+    EXPECT_EQ (body.value ("status", ""), "stopped") << body.dump ();
+    EXPECT_EQ (body.value ("message", ""), "Stream stopped") << body.dump ();
+}
+
+// ---------------------------------------------------------------------------
 // `persistVariables: false` (#1904), on both transports
 //
 // An extractor writing the globals and a post-request script writing the
@@ -2945,8 +3170,17 @@ TEST (SseServerShutdownTest, StoppingTheServerDrainsALiveStream) {
         // joined rather than left running - and left running is what would put
         // it inside curl while `curl_global_cleanup` ran, and inside `db`
         // while the daemon destroyed it.
-        EXPECT_FALSE (db->get_results (run_id).empty ())
+        const auto results = db->get_results (run_id);
+        ASSERT_FALSE (results.empty ())
         << "server.stop() returned with the stream's worker still running";
+
+        // Recorded as the engine's end, not a user's Stop (#3342), on a row
+        // that ends `stopped` as a load run still sending does.
+        const auto trace = json::parse (results[0].trace_data);
+        EXPECT_EQ (trace["events"]["endReason"], "shutdown") << trace.dump (2);
+        const auto run = db->get_run (run_id);
+        ASSERT_HAS_VALUE (run);
+        EXPECT_EQ (run->status, vayu::RunStatus::Stopped);
     }
 
     db.reset ();

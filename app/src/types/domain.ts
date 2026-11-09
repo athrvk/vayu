@@ -1420,26 +1420,31 @@ export interface StepTestTally {
 }
 
 /**
- * Why a streaming run's event stream ended (issue #573).
- *
- * Every stream ends by a rule that can name itself - the engine never reports
- * "the timeout happened to fire" - and the same six words reach the relay's
- * `complete` frame and the stored trace. `"completed"` is the only one that
- * means the *server* closed the stream; the rest are bounds this side applied,
- * which is why the Events tab says which one fired rather than just stopping.
+ * Every {@link StreamEndReason}: the one list the union, the relay's `complete`
+ * frame parser and the Events tab's note table are all held to.
  */
-export type StreamEndReason =
-	"completed" | "stopped" | "maxStreamEvents" | "maxStreamDurationMs" | "idleTimeout" | "error";
-
-/** Every {@link StreamEndReason}, for exhaustiveness checks and narrowing. */
-export const STREAM_END_REASONS: readonly StreamEndReason[] = [
+export const STREAM_END_REASONS = [
 	"completed",
 	"stopped",
 	"maxStreamEvents",
 	"maxStreamDurationMs",
 	"idleTimeout",
+	"shutdown",
 	"error",
 ] as const;
+
+/**
+ * Why a streaming run's event stream ended (issue #573).
+ *
+ * Every stream ends by a rule that can name itself - the engine never reports
+ * "the timeout happened to fire" - and the same words reach the relay's
+ * `complete` frame and the stored trace. `"completed"` is the only one that
+ * means the *server* closed the stream; the rest are bounds this side applied
+ * or a stop the user did not ask for (`"shutdown"`: the engine itself went
+ * down, #3342), which is why the Events tab says which one fired rather than
+ * just stopping.
+ */
+export type StreamEndReason = (typeof STREAM_END_REASONS)[number];
 
 /**
  * One event from a `text/event-stream` upstream, as both the live relay
