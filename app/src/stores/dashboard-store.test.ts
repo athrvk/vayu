@@ -530,7 +530,9 @@ const phase = () => useDashboardStore.getState().phase;
  *
  * Mutation check: drop the `isRunInProgress` guard in `setFinalReport` and the
  * first two cases redden - the phase becomes `finished`. Map "failed" to
- * "completed" again and the failed case reddens (#1932).
+ * "completed" again and the failed case reddens (#1932). Let a confirmed Stop
+ * override the report again (`finishedKindFor`) and the Stop cases redden
+ * (#3367).
  */
 describe("dashboard-store setFinalReport", () => {
 	beforeEach(() => {
@@ -560,11 +562,21 @@ describe("dashboard-store setFinalReport", () => {
 		expect(isDashboardRunLive(phase())).toBe(false);
 	});
 
-	it("keeps a stop the user asked for as stopped, even if the report says failed", () => {
-		useDashboardStore.getState().stopRun("r");
-		useDashboardStore.getState().setFinalReport("r", reportWith("failed"));
-		expect(dashboardRunEnding(phase())).toBe("stopped");
-	});
+	// The engine's recorded status wins over the user's Stop, so the dashboard
+	// reads the run as History and the report do (#3367). A Stop that landed
+	// after the run's own verdict leaves that verdict standing.
+	it.each(["failed", "completed", "stopped"] as const)(
+		"settles a run the engine confirmed stopped as the report's %s",
+		(status) => {
+			useDashboardStore.getState().stopRun("r");
+			expect(dashboardRunEnding(phase())).toBe("stopped");
+
+			useDashboardStore.getState().setFinalReport("r", reportWith(status));
+
+			expect(dashboardRunEnding(phase())).toBe(status);
+			expect(isDashboardRunLive(phase())).toBe(false);
+		}
+	);
 
 	it("takes a report with no status as final", () => {
 		useDashboardStore.getState().setFinalReport("r", reportWith());
@@ -649,6 +661,57 @@ describe("dashboard-store phase transitions", () => {
 });
 
 /*
+ * A Stop the engine answered `completed` or `failed` arrived after the run had
+ * finished (#3367). The note outlives `handleStop`, so the store holds it for
+ * the finished view; `startRun` clears it with the rest of the run.
+ *
+ * Mutation check: drop the `streamLost` branch of `noteLateStop` and the
+ * lost-stream case reddens; drop the reset from `startRun` and the next-run
+ * case reddens.
+ */
+describe("dashboard-store noteLateStop", () => {
+	const late = () => useDashboardStore.getState().stopArrivedLate;
+
+	beforeEach(() => useDashboardStore.getState().startRun("r"));
+
+	it("starts clear and records the late Stop without moving a streaming run", () => {
+		expect(late()).toBe(false);
+
+		useDashboardStore.getState().noteLateStop("r");
+
+		expect(late()).toBe(true);
+		expect(phase()).toEqual({ phase: "streaming" });
+	});
+
+	it("awaits the report from a lost stream, which nothing will close", () => {
+		useDashboardStore.getState().streamLost("r", "The connection closed.");
+
+		useDashboardStore.getState().noteLateStop("r");
+
+		expect(late()).toBe(true);
+		expect(phase()).toEqual({ phase: "awaitingReport", stopped: false });
+		expect(isDashboardRunLive(phase())).toBe(true);
+	});
+
+	it("is kept for a run whose report already landed", () => {
+		useDashboardStore.getState().setFinalReport("r", reportWith("completed"));
+
+		useDashboardStore.getState().noteLateStop("r");
+
+		expect(late()).toBe(true);
+		expect(phase()).toMatchObject({ phase: "finished", kind: "completed" });
+	});
+
+	it("is cleared by the next run", () => {
+		useDashboardStore.getState().noteLateStop("r");
+
+		useDashboardStore.getState().startRun("r2");
+
+		expect(late()).toBe(false);
+	});
+});
+
+/*
  * Every reader of "is the run still going" asks this one function (#3351): the
  * header's pill and Stop, the keep-awake prompt, the URL bar and the builder's
  * guard. A lost stream is live, because the engine keeps executing the run.
@@ -693,6 +756,7 @@ describe("dashboard-store writes addressed to a run", () => {
 		["streamClosed", STREAMING, (s) => s.streamClosed("old")],
 		["streamOpened", LOST, (s) => s.streamOpened("old")],
 		["stopRun", STREAMING, (s) => s.stopRun("old")],
+		["noteLateStop", STREAMING, (s) => s.noteLateStop("old")],
 		["setStopping", STREAMING, (s) => s.setStopping("old", true)],
 		["addMetricsBatch", STREAMING, (s) => s.addMetricsBatch("old", [tick(1)])],
 		[

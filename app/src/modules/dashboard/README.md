@@ -23,7 +23,11 @@ ways; until then the live view stays, with the report fetch's Retry.
   the same memo reason). The pill and Stop come from two primitives, `live` and
   `endedAs`, which `index.tsx` derives from the store's `phase` through `isDashboardRunLive` and
   `dashboardRunEnding` (#3351): Running with Stop while the run may still be executing - a lost
-  stream included, beside its Reconnect callout - and the run's ending after. A report
+  stream included, beside its Reconnect callout - and the run's ending after: the report's own
+  status once it lands, "stopped" only from the engine's confirmed Stop before that (#3367). Stop
+  reads the engine's answer: `stopped` ends the run as the user's, `completed` / `failed` mean the
+  run had already finished, so the run settles on that status and the finished view carries one
+  line saying the Stop came late, and `running` changes nothing. A report
   fetch that keeps finding the run still running gives up to that same callout rather than
   to the report's Retry, so the pill and Stop stay while the engine generates load. Reconnect
   and the re-attach on mount ask `canReattachLoadRun` (`stores/run-gate.ts`): while a collection
