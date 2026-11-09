@@ -358,6 +358,9 @@ struct ReportExtras {
     // lost" about a run nothing counted, or as a setting an older run never had.
     std::optional<size_t> steps_not_run;
     std::optional<bool> stop_on_error;
+    // Design-mode scenario runs only, and only from a summary written since
+    // #3397: the steps a Stop cut short, the fifth outcome beside the four.
+    std::optional<size_t> steps_stopped;
     // Load-mode scenario runs only. `virtual_users` is what `concurrency` meant
     // for this run; `iterations_abandoned` is how many a step with no response
     // (or a jump the run could not honour) ended before the plan's last step,
@@ -857,6 +860,9 @@ void apply_summary_scenario (const nlohmann::json& summary, ReportExtras& extras
         if (scenario.contains ("steps_not_run") && scenario["steps_not_run"].is_number ()) {
             extras.steps_not_run = scenario["steps_not_run"].get<size_t> ();
         }
+        if (scenario.contains ("stopped") && scenario["stopped"].is_number ()) {
+            extras.steps_stopped = scenario["stopped"].get<size_t> ();
+        }
         read_optional_bool (scenario, "stop_on_error", extras.stop_on_error);
         // Load-mode only: the design-mode runner writes neither, and a load run
         // stores no per-step `results` rows at all - the breakdown *is* how a
@@ -1096,10 +1102,11 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
 
 /**
  * A terminal collection (sequential scenario) run's `resultSummary` (#2954):
- * how many steps passed, failed, were skipped and errored, and the budget
- * verdict, read from the stored `summary.scenario` block. The four counts are
- * disjoint (api-reference, "Outcomes"), and `errored` is kept beside `failed`
- * because a run whose steps only errored would otherwise read clean.
+ * how many steps passed, failed, were skipped, errored and were stopped
+ * (#3397), and the budget verdict, read from the stored `summary.scenario`
+ * block. The counts are disjoint (api-reference, "Outcomes"), and `errored` is
+ * kept beside `failed` because a run whose steps only errored would otherwise
+ * read clean.
  *
  * Each key is omitted when the summary does not record it, never zeroed. A
  * summary with no `scenario` object answers an empty object, which the caller
@@ -1120,6 +1127,7 @@ nlohmann::json build_scenario_result_summary (const std::string& summary_json) {
     copy_optional_number (scenario, "failed", outcome, "failed");
     copy_optional_number (scenario, "skipped", outcome, "skipped");
     copy_optional_number (scenario, "errored", outcome, "errored");
+    copy_optional_number (scenario, "stopped", outcome, "stopped");
     record_verdict (summary, outcome);
     return outcome;
 }
@@ -1918,6 +1926,9 @@ nlohmann::json build_scenario_report_section (const ReportExtras& extras) {
     }
     if (extras.stop_on_error) {
         section["stopOnError"] = *extras.stop_on_error;
+    }
+    if (extras.steps_stopped) {
+        section["stopped"] = *extras.steps_stopped;
     }
     // Added only when the run actually has them, so a design-mode run's
     // section keeps the exact shape the app already renders.

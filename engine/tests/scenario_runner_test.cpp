@@ -43,6 +43,7 @@
 
 #include "basic_auth_pair.hpp"
 #include "log_capture.hpp"
+#include "mock_server.hpp"
 #include "oauth_token_server.hpp"
 #include "optional_assert.hpp"
 #include "task_queue.hpp"
@@ -336,6 +337,14 @@ class ScenarioRunnerTest : public ::testing::Test {
         db_->save_request (*row);
     }
 
+    /// Give the seeded request @p id its own @p timeout_ms over the run's.
+    void set_request_timeout (const std::string& id, int timeout_ms) {
+        auto row = db_->get_request (id);
+        ASSERT_HAS_VALUE (row) << id;
+        row->timeout_ms = timeout_ms;
+        db_->save_request (*row);
+    }
+
     /// The variables stored on collection @p id now.
     vayu::Environment stored_collection_variables (const std::string& id) {
         auto row = db_->get_collection (id);
@@ -618,6 +627,23 @@ class ScenarioRunnerTest : public ::testing::Test {
         }
         ADD_FAILURE () << "Run " << run_id << " never reached a terminal status";
         return vayu::RunStatus::Failed;
+    }
+
+    /// Stop @p run_id once @p in_flight holds, the sign its step is waiting on
+    /// a peer, and answer how long it then took to end, which must be Stopped.
+    std::chrono::steady_clock::duration stop_once (const std::string& run_id,
+    const std::function<bool ()>& in_flight) {
+        auto context = manager_.get_run (run_id);
+        if (!context) {
+            ADD_FAILURE () << "run " << run_id << " ended before its step was in flight";
+            return {};
+        }
+        EXPECT_TRUE (vayu::tests::wait_until (in_flight))
+        << "the step never reached its peer";
+        const auto stopped_at = std::chrono::steady_clock::now ();
+        context->request_stop ();
+        EXPECT_EQ (await_terminal (run_id), vayu::RunStatus::Stopped);
+        return std::chrono::steady_clock::now () - stopped_at;
     }
 
     /// The run's context, whether or not it has finished.
@@ -2125,6 +2151,162 @@ TEST_F (ScenarioRunnerTest, AStopEndsAnInFlightStreamingStepPromptly) {
 }
 
 // ============================================================================
+// A Stop cuts an ordinary step short (#3397)
+// ============================================================================
+
+/// The hanging step's own timeout in the Stop cases: what a Stop that does not
+/// reach its transfer waits out, inside `/hang`'s 30 s hold.
+constexpr int HANGING_STEP_TIMEOUT_MS = 20000;
+/// Healthy, a Stop settles about a second after it lands (libcurl's progress
+/// cadence); broken, it waits out `HANGING_STEP_TIMEOUT_MS`. Between the two.
+constexpr auto STOP_SETTLES_WITHIN = std::chrono::seconds (10);
+
+// A Stop ends an ordinary step's transfer as it ends a stream's, and the step
+// it cut short is `stopped`: in no failure tally, no request the report
+// counts, and the step after it is neither sent nor stored. Mutation checks:
+// put back the `stream_bounds` condition on `inputs.cancel` in
+// `run_step_exchange` and the bound fails with the step `errored` at its
+// timeout; answer `Errored` for every error in `classify_step` and the step
+// is `errored`.
+TEST_F (ScenarioRunnerTest, AStopEndsAnInFlightStepAsStoppedNotFailed) {
+    const vayu::tests::SlowMockServer upstream;
+    seed_collection ("col_1");
+    seed_request ("req_hang", 0, "", "", "", upstream.hang_url ());
+    set_request_timeout ("req_hang", HANGING_STEP_TIMEOUT_MS);
+    seed_request ("req_after", 1, "/ok");
+
+    const auto run_id = start (/*iterations=*/1);
+    const auto took =
+    stop_once (run_id, [&upstream] () { return upstream.hang_count () > 0; });
+    EXPECT_LT (took, STOP_SETTLES_WITHIN);
+
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "the step after the stopped one ran";
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u) << "only the stopped step is stored";
+    EXPECT_EQ (traces[0].value ("outcome", ""), "stopped") << traces[0].dump ();
+    EXPECT_FALSE (traces[0].contains ("stepsNotRun")) << traces[0].dump ();
+
+    const auto summary   = summary_of (run_id);
+    const auto& scenario = summary.at ("scenario");
+    EXPECT_EQ (scenario.value ("steps_executed", -1), 1) << scenario.dump ();
+    EXPECT_EQ (scenario.value ("stopped", -1), 1) << scenario.dump ();
+    for (const char* key : { "passed", "failed", "skipped", "errored", "steps_not_run" }) {
+        EXPECT_EQ (scenario.value (key, -1), 0) << key << ": " << scenario.dump ();
+    }
+    EXPECT_EQ (summary.value ("total_requests", -1), 0) << summary.dump ();
+    EXPECT_EQ (summary.at ("status_codes"), json::object ()) << summary.dump ();
+
+    const auto frames = step_frames (context_for (run_id));
+    ASSERT_EQ (frames.size (), 1u);
+    EXPECT_NE (frames[0].find (R"("outcome":"stopped")"), std::string::npos)
+    << frames[0];
+}
+
+// `stopOnError` reads errors, and a stopped step is none: it ends the run, not
+// an iteration, so it costs no `stepsNotRun`. Mutation check: answer `Errored`
+// for every error in `classify_step` and the step reports one position lost.
+TEST_F (ScenarioRunnerTest, AStoppedStepCostsNoStepsUnderStopOnError) {
+    const vayu::tests::SlowMockServer upstream;
+    seed_collection ("col_1");
+    seed_request ("req_hang", 0, "", "", "", upstream.hang_url ());
+    set_request_timeout ("req_hang", HANGING_STEP_TIMEOUT_MS);
+    seed_request ("req_after", 1, "/ok");
+
+    const auto run_id = start_stopping_on_error (/*iterations=*/1);
+    EXPECT_LT (
+    stop_once (run_id, [&upstream] () { return upstream.hang_count () > 0; }),
+    STOP_SETTLES_WITHIN);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    EXPECT_EQ (traces[0].value ("outcome", ""), "stopped") << traces[0].dump ();
+    EXPECT_FALSE (traces[0].contains ("stepsNotRun")) << traces[0].dump ();
+    const auto scenario = summary_of (run_id).at ("scenario");
+    EXPECT_EQ (scenario.value ("steps_not_run", -1), 0) << scenario.dump ();
+    EXPECT_EQ (scenario.value ("errored", -1), 0) << scenario.dump ();
+}
+
+// A stopped step ends the run before anything that reads a finished step, so
+// the transaction it is the last member of does not close on it, as an
+// errored pass or otherwise. Mutation check: drop the `Stopped` early return
+// in `run_iteration` and `checkout` closes once with one error.
+TEST_F (ScenarioRunnerTest, AStoppedStepClosesNoTransaction) {
+    const vayu::tests::SlowMockServer upstream;
+    seed_collection ("col_1");
+    seed_collection_with_elements ("folder_1", "col_1",
+    json::array ({ { { "id", "el_txn" }, { "kind", "control.transaction" },
+    { "enabled", true }, { "config", { { "name", "checkout" } } } } }));
+    seed_request ("req_hang", 0, "", "", "", upstream.hang_url ());
+    set_request_timeout ("req_hang", HANGING_STEP_TIMEOUT_MS);
+    move_request ("req_hang", "folder_1");
+    recursive_ = true;
+
+    const auto run_id = start (/*iterations=*/1);
+    EXPECT_LT (
+    stop_once (run_id, [&upstream] () { return upstream.hang_count () > 0; }),
+    STOP_SETTLES_WITHIN);
+
+    const auto scenario = summary_of (run_id).at ("scenario");
+    EXPECT_EQ (scenario.value ("stopped", -1), 1) << scenario.dump ();
+    EXPECT_FALSE (scenario.contains ("transactions")) << scenario.dump ();
+}
+
+// A full store keeps failures first, and a stopped step is none: it does not
+// displace the success stored before it. Mutation check: keep `Stopped` first
+// in `kept_before_successes` and the stored row is the stopped one.
+TEST_F (ScenarioRunnerTest, AStoppedStepTakesNoSuccessesPlaceInAFullStore) {
+    const vayu::tests::SlowMockServer upstream;
+    set_config ("maxScenarioStoredSteps", "1");
+    seed_collection ("col_1");
+    seed_request ("req_ok", 0, "/ok");
+    seed_request ("req_hang", 1, "", "", "", upstream.hang_url ());
+    set_request_timeout ("req_hang", HANGING_STEP_TIMEOUT_MS);
+
+    const auto run_id = start (/*iterations=*/1);
+    EXPECT_LT (
+    stop_once (run_id, [&upstream] () { return upstream.hang_count () > 0; }),
+    STOP_SETTLES_WITHIN);
+
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    EXPECT_EQ (traces[0].value ("outcome", ""), "passed") << traces[0].dump ();
+    EXPECT_EQ (summary_of (run_id).at ("scenario").value ("steps_dropped", -1), 1);
+}
+
+// The late OAuth 2.0 token request a step's script defers (#2473) takes the
+// Stop too, and the step it cut short is `stopped`, though the token request
+// reports the cancel as a network error. Mutation check: drop the
+// `oauth2_network_error` half of `ended_by_cancel` (scenario_runner.cpp) and
+// the step is `errored`.
+TEST_F (ScenarioRunnerTest, AStopDuringALateTokenRequestStopsTheStep) {
+    const vayu::tests::MockTokenServer tokens;
+    seed_collection ("col_1");
+    seed_environment ("env_1", R"({"secret":{"value":"stored","enabled":true}})");
+    const json auth = { { "mode", "oauth2" },
+        { "config",
+        { { "grantType", "client_credentials" },
+        { "accessTokenUrl", tokens.url ("/token-hang") }, { "clientId", "cid" },
+        { "clientSecret", "{{secret}}" }, { "credentialsPlacement", "body" } } } };
+    seed_request ("req_a", 0, "/ok", "pm.environment.set('secret', 'from-script');",
+    "", "", "", "", "", auth.dump ());
+    set_request_timeout ("req_a", HANGING_STEP_TIMEOUT_MS);
+
+    const auto run_id = start (/*iterations=*/1, "env_1");
+    EXPECT_LT (stop_once (run_id, [&tokens] () { return tokens.hits () > 0; }),
+    STOP_SETTLES_WITHIN);
+
+    EXPECT_TRUE (server_->requests ().empty ())
+    << "the step was sent without its token";
+    const auto traces = stored_traces (run_id);
+    ASSERT_EQ (traces.size (), 1u);
+    EXPECT_EQ (traces[0].value ("outcome", ""), "stopped") << traces[0].dump ();
+    const auto scenario = summary_of (run_id).at ("scenario");
+    EXPECT_EQ (scenario.value ("stopped", -1), 1) << scenario.dump ();
+    EXPECT_EQ (scenario.value ("errored", -1), 0) << scenario.dump ();
+}
+
+// ============================================================================
 // Bounded step storage
 // ============================================================================
 
@@ -2534,8 +2716,10 @@ TEST_F (ScenarioRunnerTest, StepOutcomesAreDisjointAndSumToStepsExecuted) {
     EXPECT_EQ (count ("skipped"), 2u) << scenario.dump ();
     EXPECT_EQ (count ("failed"), 2u) << scenario.dump ();
     EXPECT_EQ (count ("errored"), 0u) << scenario.dump ();
+    EXPECT_EQ (count ("stopped"), 0u) << scenario.dump ();
     EXPECT_EQ (count ("passed"), 2u) << scenario.dump ();
-    EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") + count ("skipped"),
+    EXPECT_EQ (count ("passed") + count ("failed") + count ("errored") +
+    count ("skipped") + count ("stopped"),
     count ("steps_executed"));
     // Every step that was not skipped sent, so the steps that ran and the
     // skipped ones are the whole of `steps_executed`.
@@ -2917,10 +3101,11 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     inputs.iterations_requested = 4;
     inputs.iterations_completed = 3;
     inputs.steps_executed       = 11;
-    inputs.passed               = 8;
+    inputs.passed               = 7;
     inputs.failed               = 2;
     inputs.skipped              = 0;
     inputs.errored              = 1;
+    inputs.stopped              = 1;
     inputs.steps_stored         = 5;
     inputs.steps_dropped        = 6;
     inputs.steps_not_run        = 7;
@@ -2943,10 +3128,11 @@ TEST (ScenarioSummaryPayload, CarriesTheKeysTheReportReadsPlusTheScenarioTallies
     EXPECT_EQ (scenario["iterations"].get<size_t> (), 4u);
     EXPECT_EQ (scenario["iterations_completed"].get<size_t> (), 3u);
     EXPECT_EQ (scenario["steps_executed"].get<size_t> (), 11u);
-    EXPECT_EQ (scenario["passed"].get<size_t> (), 8u);
+    EXPECT_EQ (scenario["passed"].get<size_t> (), 7u);
     EXPECT_EQ (scenario["failed"].get<size_t> (), 2u);
     EXPECT_EQ (scenario["skipped"].get<size_t> (), 0u);
     EXPECT_EQ (scenario["errored"].get<size_t> (), 1u);
+    EXPECT_EQ (scenario["stopped"].get<size_t> (), 1u);
     EXPECT_EQ (scenario["steps_stored"].get<size_t> (), 5u);
     EXPECT_EQ (scenario["steps_dropped"].get<size_t> (), 6u);
     EXPECT_EQ (scenario["steps_not_run"].get<size_t> (), 7u);

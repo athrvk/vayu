@@ -612,9 +612,8 @@ struct ExchangeInputs {
     /// acquires (issue #2683): `POST /execute` passes its `DisconnectWatch`'s
     /// flag, which `Server::stop()` and the caller hanging up both raise
     /// (#3383), so neither waits on the transfer. The scenario runner passes
-    /// `RunContext::should_stop` for a streaming step alone (#3235), whose
-    /// transfer only a cap or a stop ends; null leaves all three
-    /// uncancellable, as its other steps are.
+    /// `RunContext::should_stop` for every step (#3397), which a Stop and an
+    /// engine shutdown both raise; null leaves all three uncancellable.
     const std::atomic<bool>* cancel = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by

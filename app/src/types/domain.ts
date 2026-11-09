@@ -1296,15 +1296,19 @@ export interface RunConfigSnapshot {
  * a pass: it asserted nothing. The four exist from the first release of the
  * runner even though nothing produces `skipped` yet, so neither the wire shape
  * nor a summary that counts them has to widen later.
+ *
+ * `stopped` is a step a Stop or an engine shutdown cut short (#3397). It ends
+ * the run, and is no error: it is in no failure count.
  */
-export type StepOutcome = "passed" | "failed" | "skipped" | "errored";
+export type StepOutcome = "passed" | "failed" | "skipped" | "errored" | "stopped";
 
-/** The four outcomes as a value, in the order a run summary reads them. */
+/** The outcomes as a value, in the order a run summary reads them. */
 export const STEP_OUTCOMES: readonly StepOutcome[] = [
 	"passed",
 	"failed",
 	"skipped",
 	"errored",
+	"stopped",
 ] as const;
 
 /**
@@ -2084,10 +2088,11 @@ export interface LoadResultSummary {
 
 /**
  * A **terminal collection run's** list row, read engine-side from the stored
- * `summary.scenario` block (#2954). The four counts are disjoint outcomes of the
+ * `summary.scenario` block (#2954). The counts are disjoint outcomes of the
  * run's steps, and `errored` sits beside `failed` because a run whose steps only
- * errored would otherwise read clean. Every key is absent when the run did not
- * record it, never zeroed; a row still pending or running has no
+ * errored would otherwise read clean. `stopped` (#3397) is a step a Stop cut
+ * short. Every key is absent when the run did not record it (a summary stored
+ * before `stopped` has none), never zeroed; a row still pending or running has no
  * `resultSummary` at all, and `verdict` is present only when the run declared
  * budgets.
  *
@@ -2100,6 +2105,7 @@ export interface CollectionResultSummary {
 	failed?: number;
 	skipped?: number;
 	errored?: number;
+	stopped?: number;
 	verdict?: "passed" | "failed";
 }
 
@@ -3787,7 +3793,7 @@ export interface RunReport {
 		/** Step executions the run performed, whether or not their rows survived. */
 		stepsExecuted: number;
 		/**
-		 * The four outcomes below are disjoint and sum to `stepsExecuted` on both
+		 * The outcomes below (four on a load run, plus `stopped` on a collection run) are disjoint and sum to `stepsExecuted` on both
 		 * run kinds (#2824). A load run counts them per step execution under the
 		 * collection run's definition; engine 0.45.0 and earlier stored the old
 		 * load meaning (`failed` was the steps' `httpErrors`, and `passed` still
@@ -3809,6 +3815,13 @@ export interface RunReport {
 		 * sum of the steps' `noResponse`: `iterationsAbandoned` is the abort count.
 		 */
 		errored: number;
+		/**
+		 * Steps a Stop or an engine shutdown cut short (#3397), a collection run's
+		 * alone. In no failure count; `passed + failed + errored + skipped +
+		 * stopped = stepsExecuted`. Absent from a report stored before it, which
+		 * reads as `0`.
+		 */
+		stopped?: number;
 		/**
 		 * A scenario *load* run's exact assertion population (#2820): every
 		 * `assert.*` outcome, required `extract.*` miss and inline `pm.test` call,

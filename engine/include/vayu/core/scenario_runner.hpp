@@ -47,7 +47,7 @@ namespace vayu::core {
 /**
  * @brief How one step execution ended.
  *
- * All four exist from the start even though nothing produces `Skipped` until
+ * The first four exist from the start even though nothing produces `Skipped` until
  * flow control lands (phase 4): the summary and the SSE wire shape must not
  * need widening later, and a skipped step counted as a pass is precisely the
  * false-pass class issue #180 exists to eliminate.
@@ -57,8 +57,21 @@ namespace vayu::core {
  * transport failure, a timeout, a script that threw). It ends the iteration
  * only when the run asked for `stopOnError`, as in Postman and Newman; the
  * runner's own flow-control refusals end it either way (issue #2526).
+ *
+ * `Stopped` is a step the run's Stop, or an engine shutdown, cut short (#3397):
+ * its transfer, or the late OAuth 2.0 token request ahead of it, answered the
+ * cancel. It says nothing about the request, so it is in no failure tally, is
+ * no reason for `stopOnError` to count positions lost, and takes no failure's
+ * place in the bounded step store. Only the sequential runner produces it: a
+ * load run drops a stop-cancelled step from every step tally instead (#2136).
  */
-enum class StepOutcome : std::uint8_t { Passed, Failed, Skipped, Errored };
+enum class StepOutcome : std::uint8_t {
+    Passed,
+    Failed,
+    Skipped,
+    Errored,
+    Stopped
+};
 
 [[nodiscard]] const char* to_string (StepOutcome outcome);
 
@@ -378,8 +391,10 @@ struct ScenarioSummaryInputs {
     size_t failed               = 0;
     size_t skipped              = 0;
     size_t errored              = 0;
-    size_t steps_stored         = 0;
-    size_t steps_dropped        = 0;
+    /// `StepOutcome::Stopped`: with the four above, every step executed.
+    size_t stopped       = 0;
+    size_t steps_stored  = 0;
+    size_t steps_dropped = 0;
     /// Summed over the run: every iteration an errored step ended adds what
     /// that cost (`StepRecord::steps_not_run`), and no other end adds anything.
     size_t steps_not_run = 0;

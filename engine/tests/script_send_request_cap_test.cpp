@@ -711,9 +711,11 @@ class ScriptSendRequestRunTest : public ::testing::Test {
         await_finish ();
     }
 
-    /// The same run, started and left running.
+    /// The same run, started and left running, its step carrying
+    /// @p step_element when one is given.
     void start_sequential_collection (const json& collection_elements,
-    const json& payload_members = json::object ()) {
+    const json& payload_members = json::object (),
+    const json& step_element    = nullptr) {
         vayu::db::Collection collection;
         collection.id         = "col_1";
         collection.name       = "Collection col_1";
@@ -734,6 +736,9 @@ class ScriptSendRequestRunTest : public ::testing::Test {
         step.request.method = vayu::HttpMethod::GET;
         step.request.url    = server_->ok_url ();
         step.stored_url     = step.request.url;
+        if (!step_element.is_null ()) {
+            step.elements = vayu::tests::compiled_elements ({ step_element });
+        }
         execution->plan.steps.push_back (std::move (step));
 
         json config = { { "scenario",
@@ -1148,6 +1153,38 @@ TEST_F (ScriptSendRequestStopTest, ASequentialStopDoesNotWaitOutASetupScriptFetc
     ASSERT_HAS_VALUE (run);
     EXPECT_EQ (run->status, vayu::RunStatus::Stopped) << run->summary;
     EXPECT_EQ (lifecycle_outcome (*run, "setup"), "skipped") << run->summary;
+}
+
+// A sequential step's own pre-request script (#3397): the Stop ends its fetch
+// and the step's send, the script it cut short is `skipped`, and the step is
+// `stopped`, neither errored nor failed. Mutation-checks: put back the
+// `stream_bounds` condition on `inputs.cancel` in `run_step_exchange`
+// (scenario_runner.cpp) and the run is still registered at the deadline; drop
+// the `send_cancelled` return from `run_step_script` and the element's row is
+// an error.
+TEST_F (ScriptSendRequestStopTest, ASequentialStopDoesNotWaitOutAStepScriptFetch) {
+    start_sequential_collection (json::array (), { { "timeout", STOP_CASE_TIMEOUT_MS } },
+    hanging_script ("el_script", "script.pre"));
+
+    ASSERT_TRUE (stop_once_a_fetch_hangs ()) << "the Stop waited on the fetch";
+
+    const auto run = stored_run ();
+    ASSERT_HAS_VALUE (run);
+    EXPECT_EQ (run->status, vayu::RunStatus::Stopped) << run->summary;
+    const auto summary = json::parse (run->summary, nullptr, false);
+    ASSERT_TRUE (summary.contains ("scenario")) << run->summary;
+    const auto& scenario = summary.at ("scenario");
+    EXPECT_EQ (scenario.value ("stopped", -1), 1) << run->summary;
+    EXPECT_EQ (scenario.value ("errored", -1), 0) << run->summary;
+    EXPECT_EQ (scenario.value ("failed", -1), 0) << run->summary;
+
+    const auto rows = db_->get_results (RUN_ID);
+    ASSERT_EQ (rows.size (), 1u);
+    const auto trace = json::parse (rows[0].trace_data);
+    EXPECT_EQ (trace.value ("outcome", ""), "stopped") << rows[0].trace_data;
+    ASSERT_TRUE (trace.contains ("elements")) << rows[0].trace_data;
+    const auto& element = trace.at ("elements").at (0);
+    EXPECT_EQ (element.value ("outcome", ""), "skipped") << rows[0].trace_data;
 }
 
 } // namespace

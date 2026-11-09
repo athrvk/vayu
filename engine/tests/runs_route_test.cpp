@@ -692,23 +692,25 @@ TEST_F (RunsRouteTest, ScenarioReportKeepsEveryStoredStepPastTheSampleCap) {
 }
 
 // What a collection run's errors cost and whether it stopped on them (issue
-// #2526) reach the report's `scenario` section, and a summary that recorded
-// neither - a scenario load run's, or one written before the issue - grows
-// neither rather than a `0` and a `false` nobody measured.
-// Mutation check: drop the `stepsNotRun` write in `build_scenario_report_section`
-// and the first half fails.
+// #2526), and the steps a Stop cut short (#3397), reach the report's
+// `scenario` section, and a summary that recorded none of them - a scenario
+// load run's, or one written before the issues - grows none rather than a `0`
+// and a `false` nobody measured.
+// Mutation check: drop the `stepsNotRun` or the `stopped` write in
+// `build_scenario_report_section` and the first half fails.
 TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenStored) {
     seed ({ .id = "run_design_seq", .type = vayu::RunType::Scenario });
     db_->update_run_summary ("run_design_seq",
     nlohmann::json{ { "scenario",
                     { { "iterations", 2 }, { "steps_executed", 4 }, { "errored", 2 },
-                    { "steps_not_run", 3 }, { "stop_on_error", true } } } }
+                    { "stopped", 1 }, { "steps_not_run", 3 }, { "stop_on_error", true } } } }
     .dump ());
     auto [status, body] = vayu::http::routes::run_report_response (*db_, "run_design_seq");
     ASSERT_EQ (status, 200);
     ASSERT_TRUE (body.contains ("scenario")) << body.dump ();
     EXPECT_EQ (body["scenario"]["stepsNotRun"], 3);
     EXPECT_EQ (body["scenario"]["stopOnError"], true);
+    EXPECT_EQ (body["scenario"]["stopped"], 1);
 
     seed ({ .id = "run_older_seq", .type = vayu::RunType::Scenario });
     db_->update_run_summary ("run_older_seq",
@@ -720,6 +722,7 @@ TEST_F (RunsRouteTest, ScenarioReportCarriesStepsNotRunAndStopOnErrorOnlyWhenSto
     ASSERT_TRUE (older.contains ("scenario")) << older.dump ();
     EXPECT_FALSE (older["scenario"].contains ("stepsNotRun"));
     EXPECT_FALSE (older["scenario"].contains ("stopOnError"));
+    EXPECT_FALSE (older["scenario"].contains ("stopped"));
 }
 
 // A scenario load run's exact assertion population (#2820) reaches the report's
@@ -3706,13 +3709,15 @@ std::string counted_scenario_summary (size_t passed,
 size_t failed,
 size_t skipped,
 size_t errored,
-const json& thresholds = json ()) {
+const json& thresholds = json (),
+size_t stopped         = 0) {
     vayu::core::ScenarioSummaryInputs inputs;
     inputs.passed         = passed;
     inputs.failed         = failed;
     inputs.skipped        = skipped;
     inputs.errored        = errored;
-    inputs.steps_executed = passed + failed + skipped + errored;
+    inputs.stopped        = stopped;
+    inputs.steps_executed = passed + failed + skipped + errored + stopped;
     inputs.duration_s     = 2.0;
     inputs.status_codes   = { { 200, passed } };
     if (failed > 0) {
@@ -3730,12 +3735,14 @@ const json& thresholds = json ()) {
 }
 
 // A finished collection run says how its steps went on its own row (#2954): the
-// four disjoint outcomes, `errored` included because a run whose steps only
-// errored would otherwise read clean. A zero stored is a zero reported - the
-// run recorded it - and no budget declared means no `verdict`.
+// five disjoint outcomes, `errored` included because a run whose steps only
+// errored would otherwise read clean, and `stopped` (#3397) because a stopped
+// run's counts would otherwise not add up. A zero stored is a zero reported -
+// the run recorded it - and no budget declared means no `verdict`.
 // Mutation check: restore the Load-only gate (`carries_result_summary`) and
 // every row here loses its `resultSummary`; drop the `errored` copy in
-// `build_scenario_result_summary` and the second row fails.
+// `build_scenario_result_summary` and the second row fails; drop the
+// `stopped` copy and every row fails.
 TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
     seed ({ .id = "run_clean", .type = vayu::RunType::Scenario, .start_time = 1 });
     db_->update_run_summary ("run_clean", counted_scenario_summary (4, 0, 0, 0));
@@ -3746,17 +3753,29 @@ TEST_F (RunsRouteTest, TerminalCollectionRowCarriesItsStepCounts) {
     .status     = vayu::RunStatus::Failed,
     .start_time = 3 });
     db_->update_run_summary ("run_only_errored", counted_scenario_summary (0, 0, 0, 2));
+    seed ({ .id = "run_stopped",
+    .type       = vayu::RunType::Scenario,
+    .status     = vayu::RunStatus::Stopped,
+    .start_time = 4 });
+    db_->update_run_summary ("run_stopped",
+    counted_scenario_summary (2, 0, 0, 0, json (), /*stopped=*/1));
 
     auto [status, body] =
     vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
     ASSERT_EQ (status, 200);
 
     EXPECT_EQ (row_of (body, "run_clean")["resultSummary"],
-    (json{ { "passed", 4 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 0 } }));
+    (json{ { "passed", 4 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 0 },
+    { "stopped", 0 } }));
     EXPECT_EQ (row_of (body, "run_mixed")["resultSummary"],
-    (json{ { "passed", 5 }, { "failed", 2 }, { "skipped", 1 }, { "errored", 3 } }));
+    (json{ { "passed", 5 }, { "failed", 2 }, { "skipped", 1 }, { "errored", 3 },
+    { "stopped", 0 } }));
     EXPECT_EQ (row_of (body, "run_only_errored")["resultSummary"],
-    (json{ { "passed", 0 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 2 } }));
+    (json{ { "passed", 0 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 2 },
+    { "stopped", 0 } }));
+    EXPECT_EQ (row_of (body, "run_stopped")["resultSummary"],
+    (json{ { "passed", 2 }, { "failed", 0 }, { "skipped", 0 }, { "errored", 0 },
+    { "stopped", 1 } }));
 }
 
 // The verdict is read exactly as a load row reads it: present only when the

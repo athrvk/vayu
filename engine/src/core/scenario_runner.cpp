@@ -46,6 +46,18 @@ int64_t runner_now_ms () {
 }
 
 /**
+ * Whether the exchange's error is the run's cancel landing (#3397): its
+ * transfer answered `Cancelled`, or the late OAuth 2.0 token request ahead of
+ * it was cancelled, which `acquire_token` reports as the network failure it
+ * cannot tell a cancel from (`transport_failure` in `oauth_client.cpp`). Read
+ * only while a Stop is latched, so a token endpoint that is down stays an error.
+ */
+bool ended_by_cancel (const vayu::http::routes::ExchangeOutcome& exchange) {
+    return exchange.response.error_code == vayu::ErrorCode::Cancelled ||
+    exchange.refusal_code == "oauth2_network_error";
+}
+
+/**
  * Decide what one exchange amounts to, onto @p record's outcome and error.
  *
  * The order is deliberate: a step that did not complete is `Errored` whatever
@@ -54,10 +66,15 @@ int64_t runner_now_ms () {
  * are different facts and only the first one means the run learned something.
  * Each slot holds every level's scripts folded together (#2522), so a throw or
  * a failed test at the collection or a folder counts as the request's would.
+ * A step the run's Stop cut short is `Stopped` rather than `Errored` (#3397).
  */
-void classify_step (const vayu::http::routes::ExchangeOutcome& exchange, StepRecord& record) {
+void classify_step (const vayu::http::routes::ExchangeOutcome& exchange,
+bool stop_requested,
+StepRecord& record) {
     if (exchange.response.has_error ()) {
-        record.outcome = StepOutcome::Errored;
+        record.outcome = stop_requested && ended_by_cancel (exchange) ?
+        StepOutcome::Stopped :
+        StepOutcome::Errored;
         record.error   = exchange.response.error_message;
         return;
     }
@@ -354,6 +371,7 @@ const char* to_string (StepOutcome outcome) {
     case StepOutcome::Failed: return "failed";
     case StepOutcome::Skipped: return "skipped";
     case StepOutcome::Errored: return "errored";
+    case StepOutcome::Stopped: return "stopped";
     }
     return "unknown";
 }
@@ -536,8 +554,9 @@ nlohmann::json build_scenario_summary_payload (const ScenarioSummaryInputs& inpu
         { "iterations_completed", inputs.iterations_completed },
         { "steps_executed", inputs.steps_executed }, { "passed", inputs.passed },
         { "failed", inputs.failed }, { "skipped", inputs.skipped },
-        { "errored", inputs.errored }, { "steps_stored", inputs.steps_stored },
-        { "steps_dropped", inputs.steps_dropped }, { "steps_not_run", inputs.steps_not_run },
+        { "errored", inputs.errored }, { "stopped", inputs.stopped },
+        { "steps_stored", inputs.steps_stored }, { "steps_dropped", inputs.steps_dropped },
+        { "steps_not_run", inputs.steps_not_run },
         // Stored beside the counts it qualifies, as `failOnSchemaError` is
         // beside its tally: "1 errored, 0 not run" is a different run with it.
         { "stop_on_error", inputs.stop_on_error } };
@@ -704,12 +723,9 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.rng             = &ctx.context->rng;
     inputs.timers_override = &ctx.context->timers_override;
     inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
-    // A stop ends a streaming step's transfer (#3235): its own timeout bounds
-    // only the connect phase, so nothing else would end it before a cap. An
-    // ordinary step is left to finish within its timeout, as it always was.
-    if (step.request.stream_bounds) {
-        inputs.cancel = &ctx.context->should_stop;
-    }
+    // Stop and shutdown end the step's transfer, its late token request and
+    // its scripts' `pm.sendRequest` (#3397), never waiting out a timeout.
+    inputs.cancel = &ctx.context->should_stop;
     // `metric.record` and `pm.metrics` (issue #1500) record into this run's
     // own collector - a design send binds neither and reports "not
     // available here" instead.
@@ -785,7 +801,7 @@ ScenarioSummaryInputs& summary) {
         record.outcome = StepOutcome::Errored;
         record.error   = data_bind_error;
     } else {
-        classify_step (exchange, record);
+        classify_step (exchange, ctx.context->stop_was_requested (), record);
     }
     record.status_code       = exchange.response.status_code;
     record.status_text       = exchange.response.status_text;
@@ -793,8 +809,11 @@ ScenarioSummaryInputs& summary) {
     record.unresolved_tokens = count_distinct (exchange.unresolved_tokens);
     // The assertions this step made (issue #724), for the frame a
     // live watcher reads. A step whose row could not bind ran no
-    // script and gets no tally - `exchange` is the default one.
-    record.tests = tally_tests (exchange.pre_script_result, exchange.post_script_result);
+    // script and gets no tally - `exchange` is the default one. Nor does a
+    // stopped step: a test script judging a cancelled send is no verdict.
+    if (record.outcome != StepOutcome::Stopped) {
+        record.tests = tally_tests (exchange.pre_script_result, exchange.post_script_result);
+    }
     // `step.before` and `step.after`'s outcomes (issue #1514); the caller
     // (`run_iteration`) appends `step.between`'s onto this same vector.
     record.elements = exchange.element_outcomes;
@@ -804,8 +823,9 @@ ScenarioSummaryInputs& summary) {
     // row would not bind produced no response, and a `checked:
     // false` verdict for them would be reporting on a request
     // nobody made - the same reading that erases `response` from
-    // their trace below.
-    if (exchange.sent) {
+    // their trace below. A stopped step's send was cut short, so it
+    // brought back nothing to judge either.
+    if (exchange.sent && record.outcome != StepOutcome::Stopped) {
         record.validation = validate_step_response (ctx.execution->spec,
         ctx.schema_index, step, exchange.response, ctx.context->run_id);
         if (record.validation) {
@@ -906,6 +926,20 @@ size_t count_steps_not_run (const std::vector<bool>& attempted, size_t position)
     return static_cast<size_t> (std::count (after, attempted.end (), false));
 }
 
+/// Whether the bounded store keeps a step of @p outcome first: every step that
+/// did not pass, except one the run's Stop cut short, which is no failure for
+/// a reader to find (#3397).
+bool kept_before_successes (StepOutcome outcome) {
+    switch (outcome) {
+    case StepOutcome::Passed:
+    case StepOutcome::Stopped: return false;
+    case StepOutcome::Failed:
+    case StepOutcome::Skipped:
+    case StepOutcome::Errored: return true;
+    }
+    return true;
+}
+
 /**
  * What the step leaves behind: its trace, the run's tallies, the stored row and
  * the live frame.
@@ -987,8 +1021,9 @@ ScenarioStepStore& store) {
     // refused at the wire's edge (the residual pass, the file rule, the
     // pre-send gate) is an errored request with no duration, so it is counted
     // but not timed; a transport failure that ran keeps its duration, the
-    // load path's population (#2384).
-    if (exchange.sent) {
+    // load path's population (#2384). A stopped step is in neither, as a load
+    // run's stop-cancelled request is not (#2136, #3397).
+    if (exchange.sent && record.outcome != StepOutcome::Stopped) {
         coverage.record (step.index, record.status_code);
         ++summary.status_codes[record.status_code];
         // Every stream that ended, success or failure, as the load path counts
@@ -1013,6 +1048,7 @@ ScenarioStepStore& store) {
     case StepOutcome::Failed: ++summary.failed; break;
     case StepOutcome::Skipped: ++summary.skipped; break;
     case StepOutcome::Errored: ++summary.errored; break;
+    case StepOutcome::Stopped: ++summary.stopped; break;
     }
 
     vayu::db::Result row;
@@ -1027,7 +1063,7 @@ ScenarioStepStore& store) {
     // U+FFFD instead of throwing (store_result does the same).
     row.trace_data =
     record.trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
-    store.add (std::move (row), record.outcome != StepOutcome::Passed);
+    store.add (std::move (row), kept_before_successes (record.outcome));
 
     ctx.context->append_tick (
     build_step_payload (record, ctx.context->published_count.load ()));
@@ -1181,6 +1217,14 @@ TransactionHistograms& transactions) {
 
         StepRecord record =
         record_step (step_ctx, step, exchange, data_bind_error, summary);
+
+        // The Stop cut this step short (#3397) and ends the run: nothing that
+        // reads a finished step (`step.between`, flow control, `stopOnError`'s
+        // count of positions lost, a transaction's close) reads this one.
+        if (record.outcome == StepOutcome::Stopped) {
+            store_step_record (step_ctx, step, exchange, record, coverage, summary, store);
+            return 0;
+        }
 
         // `step.between` (issue #1514): `timer.think` and anything else
         // phased here run after this step's own outcome is decided - so a
