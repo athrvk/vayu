@@ -118,7 +118,7 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   close path - nothing reads a stamp for a tab that is not open
 - Pointing *into* a screen: `navIntent` is the one hand-off from a navigation
   to the screen it opened, because `openTab` can only name a tab. It is a
-  `NavIntent` - `{ kind: "spec" | "dataRow" | "compare", target, ... }`, with
+  `NavIntent` - `{ kind: "spec" | "dataRow" | "compare" | "focusUrl", target, ... }`, with
   `target` the id of the collection, request or run it is for - and at most one
   is pending. `openCollectionSpecTab(collectionId)` issues `spec`: the import
   dialog's Sync for an already-bound document (issue #680), which
@@ -128,7 +128,13 @@ Manages all open tabs (welcome, request, collection, dashboard, run, variables, 
   UrlBar selects the row and opens the picker on it. A non-integer or negative
   index throws rather than being stored. `openRunComparison(runId)` issues
   `compare`, the History row's "Compare with…" (issue #2164), which
-  `LoadTestDetail` answers by opening the run's report on its compare view
+  `LoadTestDetail` answers by opening the run's report on its compare view.
+  `openRequestFocusingUrl(requestId)` issues `focusUrl` for a request just
+  created blank (issue #3400): ⌘N, the palette command, the Launcher tile and
+  the sidebar's "+" all leave the caret in the new request's URL field, which
+  `UrlInput` answers once it mounts - the builder mounts after the tab opens, so
+  a focus call made with it would find no field. A request created from a preset
+  (the demo, an import, a saved agent run) issues none
 - A screen takes its intent with `takeNavIntent(kind, target)`, which returns it
   and clears it only when both match - another kind or another target gets
   `null` and leaves it pending - so it fires once, on the screen it was for. The

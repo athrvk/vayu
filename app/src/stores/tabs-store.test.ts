@@ -743,6 +743,7 @@ describe("navIntent", () => {
 		["spec", "collection", () => useTabsStore.getState().openCollectionSpecTab("x")],
 		["dataRow", "request", () => useTabsStore.getState().openRequestWithDataRow("x", 4)],
 		["compare", "run", () => useTabsStore.getState().openRunComparison("x")],
+		["focusUrl", "request", () => useTabsStore.getState().openRequestFocusingUrl("x")],
 	] as const;
 
 	it.each(issuers)("a %s intent is issued with the tab it names active", (kind, type, issue) => {
