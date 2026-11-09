@@ -1446,7 +1446,10 @@ in step or could enumerate them.
   the list the Export menu draws (`Save "<tab>" as JSON`, `Copy "<tab>" as Markdown`; available only while a mounted menu fills
   `exportRun`, no chord) - plus one command per settings section, **generated** from `app-panels.ts` and `engine-categories.ts` so
   a section added there appears here without an edit and cannot be named differently. A section's
-  description is its `substringKeywords` entry, never words in `keywords` (#3322).
+  description is its `substringKeywords` entry, never words in `keywords` (#3322). **Save is
+  offered only on a request, collection, settings or variables tab** (`SAVEABLE_TAB_TYPES`) - the
+  tabs whose surface registers a save context; on a run, dashboard, welcome, inbox or mock-server
+  tab there is nothing to save and the row is absent (#3402).
 - **`context.ts`** - `baseCommandContext()`, the React-free snapshot for a caller that is not a
   render (the native-menu bridge). `hooks/useCommandContext.ts` is the full version.
 - **`live-surfaces.ts`** - the channel a *mounted feature* contributes a surface through. Four

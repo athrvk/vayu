@@ -26,7 +26,7 @@ import { baseCommandContext } from "./context";
 import { tabElementId } from "@/components/layout/tab-aria";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
 import { SEND_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
-import { useImportModalStore, useTabsStore, useSaveStore } from "@/stores";
+import { useImportModalStore, useTabsStore, useSaveStore, type TabType } from "@/stores";
 import { useSettingsStore } from "@/modules/settings/settings-store";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
@@ -477,6 +477,38 @@ describe("performing", () => {
 		};
 		commandById("run-collection").perform(ctx);
 		expect(runs).toEqual([COLLECTION]);
+	});
+});
+
+/*
+ * Save is offered only where a surface registers a save context (#3402).
+ * Mutation check: restore `ctx.activeTab !== null` as the gate and the
+ * unavailable cases red.
+ */
+describe("the save command's availability", () => {
+	const tabWith = (type: TabType): CommandContext => ({
+		...fullContext(),
+		activeTab: { id: "t1", type, entityId: null },
+	});
+	const saveIsOffered = (ctx: CommandContext) =>
+		availableCommands(ctx).some((c) => c.id === "save");
+
+	it.each<TabType>(["request", "collection", "settings", "variables"])(
+		"is offered on a %s tab",
+		(type) => {
+			expect(saveIsOffered(tabWith(type))).toBe(true);
+		}
+	);
+
+	it.each<TabType>(["run", "dashboard", "welcome", "inbox", "mock-server"])(
+		"is not offered on a %s tab",
+		(type) => {
+			expect(saveIsOffered(tabWith(type))).toBe(false);
+		}
+	);
+
+	it("is not offered with no tab open", () => {
+		expect(saveIsOffered({ ...fullContext(), activeTab: null })).toBe(false);
 	});
 });
 
