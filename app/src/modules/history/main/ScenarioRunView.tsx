@@ -13,7 +13,7 @@
  * **Not `LoadTestDetail`.** A scenario run's `results[]` are step executions of
  * *different* requests, so the load report's percentiles and status
  * distribution would describe a sequence as though it were one request
- * repeated. The number a reader wants here is per step, and the four outcomes.
+ * repeated. The number a reader wants here is per step, and the outcomes.
  *
  * **Two sources, one list** (see `scenario-steps.ts`). While the run streams,
  * rows come from the `step` SSE events; once it is over, from the stored
@@ -237,8 +237,8 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * Which outcome the list is showing, or all of them (issue #730).
 	 *
 	 * The chips above are the control rather than a filter bar beside them: the
-	 * four numbers a reader already reads to find out that eleven steps failed
-	 * are the same four they then want the list narrowed to. Held here and not
+	 * outcome counts a reader already reads to find out that eleven steps failed
+	 * are the same counts they then want the list narrowed to. Held here and not
 	 * in the URL or the store - it is a way of looking at this tab, and a
 	 * remembered one would hide steps from the next reader of it.
 	 */

@@ -3793,7 +3793,7 @@ export interface RunReport {
 		/** Step executions the run performed, whether or not their rows survived. */
 		stepsExecuted: number;
 		/**
-		 * The four outcomes below are disjoint and sum to `stepsExecuted` on both
+		 * The outcomes below (four on a load run, plus `stopped` on a collection run) are disjoint and sum to `stepsExecuted` on both
 		 * run kinds (#2824). A load run counts them per step execution under the
 		 * collection run's definition; engine 0.45.0 and earlier stored the old
 		 * load meaning (`failed` was the steps' `httpErrors`, and `passed` still

@@ -1581,7 +1581,7 @@ It holds **one** run. A scenario is sequential and the app starts one at a time,
 {
   runId: string | null       // The run being streamed, or null
   steps: ScenarioStepRow[]   // Reported so far, in plan order
-  summary: StepListSummary   // The four outcome counts, plus how many steps are
+  summary: StepListSummary   // The outcome counts, plus how many steps are
                              // past the first pass and how many bound a data row
   appendEpoch: number        // Moves whenever the list changed by anything other
                              // than growing at its end

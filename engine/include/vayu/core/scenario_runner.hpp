@@ -47,7 +47,7 @@ namespace vayu::core {
 /**
  * @brief How one step execution ended.
  *
- * All four exist from the start even though nothing produces `Skipped` until
+ * The first four exist from the start even though nothing produces `Skipped` until
  * flow control lands (phase 4): the summary and the SSE wire shape must not
  * need widening later, and a skipped step counted as a pass is precisely the
  * false-pass class issue #180 exists to eliminate.
