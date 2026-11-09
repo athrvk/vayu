@@ -73,6 +73,7 @@ import {
 	useLayoutStore,
 	useSaveStore,
 	useTabsStore,
+	type TabType,
 } from "@/stores";
 import { closeTabFromKeyboard } from "@/components/layout/tab-focus";
 import { APP_SETTINGS_PANELS } from "@/modules/settings/main/app-panels";
@@ -81,6 +82,18 @@ import { navigateHistory } from "@/lib/navigate-history";
 import { runExportActions, runExportVerb } from "@/lib/run-export-formats";
 import { openSettingsTab, revealSettingsCategory } from "./reveal-settings";
 import type { Command, CommandContext } from "./types";
+
+/**
+ * The tab types whose surface registers a save context. Any other tab has
+ * nothing to save, and `triggerSave` would write some other tab's dirty
+ * context or nothing at all (#3402).
+ */
+const SAVEABLE_TAB_TYPES: ReadonlySet<TabType> = new Set([
+	"request",
+	"collection",
+	"settings",
+	"variables",
+]);
 
 /** Where the active tab sits in the strip, or -1 when none is active. */
 function activeTabIndex(ctx: CommandContext): number {
@@ -321,7 +334,7 @@ const ACTION_COMMANDS: readonly Command[] = [
 		// The Shell's handler raises the same flag on this chord: the mounted
 		// surface owns what saving means, and both routes ask it the same way.
 		shortcut: SAVE_CHORD,
-		available: (ctx) => ctx.activeTab !== null,
+		available: (ctx) => ctx.activeTab !== null && SAVEABLE_TAB_TYPES.has(ctx.activeTab.type),
 		perform: () => useSaveStore.getState().triggerSave(),
 	},
 	{
