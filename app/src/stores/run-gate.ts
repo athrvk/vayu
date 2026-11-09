@@ -6,17 +6,21 @@
  */
 
 /**
- * Whether a load run may start now, the one answer every entry point asks
- * (#3351): the request builder, the Run Collection dialog and a run an MCP
- * agent started. The engine sets no limit on concurrent runs; this is the
- * renderer's policy, and it holds because both live surfaces read one stream.
+ * Whether a run may start now, the one answer every user-started entry point
+ * asks (#3351, #3381): the request builder, and the Run Collection dialog for a
+ * load run and for a sequence alike. The engine sets no limit on concurrent
+ * runs; this is the renderer's policy, and it holds because one live run owns
+ * the live view.
  *
- * Two stores answer it, not one. `sseClient` holds a single `EventSource`, so
- * a load run attaching takes the stream from a collection run as surely as
- * from another load run, and the run it took keeps executing on the engine
- * with no live view. A collection run's own start is not gated: it takes the
- * stream from a live load run openly, through the dashboard's lost-stream
- * callout (#1417).
+ * Two stores answer it, not one. `sseClient` holds a single `EventSource`, so a
+ * run attaching takes the stream from the live run, load or sequence, and the
+ * run it took keeps executing on the engine with no live view. The refusal
+ * names the live run and offers to stop it (`useStopLiveRun`).
+ *
+ * A run an MCP agent started is asked the same question but never refused: the
+ * engine already has it, so when the gate is shut the app attaches nothing and
+ * says so (`useRunWatchers`). The names say "load run" from before the gate
+ * covered both kinds.
  */
 
 import { useMemo } from "react";

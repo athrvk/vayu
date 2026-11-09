@@ -175,7 +175,10 @@ describe("Stop that cannot reach the engine", () => {
 
 		await waitFor(() =>
 			expect(useToastStore.getState().toasts).toEqual([
-				expect.objectContaining({ message: "Engine unreachable", variant: "error" }),
+				expect.objectContaining({
+					message: "Couldn't stop the run - Engine unreachable",
+					variant: "error",
+				}),
 			])
 		);
 		expect(loadTestService.stopMonitoring).not.toHaveBeenCalled();

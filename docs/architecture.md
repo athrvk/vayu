@@ -254,15 +254,17 @@ from the moment the main process reports it (`startedRun` on
 dashboard tab later attaches nothing new - `startMonitoring` is idempotent for a
 run already being watched. One indicator is all the OS gives an application, and
 one run is all the renderer watches: the SSE client is a singleton. A load run
-is refused before it starts while another run holds the stream, and an agent's
-load run is not adopted while another run is live (the single-run gate,
-`canStartLoadRun` in `app/src/stores/run-gate.ts`, #3351). The one start left
-ungated is a collection run over a live load run: it closes the load run's
-stream - and tells its service so, which hands the displaced run's wake lock
-back and gives up its bar rather than leaving both standing (issue #1417). The lock is the half with a visible outcome: the incoming
-run claims the indicator before it connects, so the bar is transferred rather
-than cleared, and the displaced run's release - named by the run it speaks for -
-finds nothing of its own left to wipe. The
+is refused before it starts while another run holds the stream, and so is a
+collection run; the refusal names the live run and offers to stop it. An agent's
+run, of either kind, is not adopted while another run is live (the single-run
+gate, `canStartLoadRun` in `app/src/stores/run-gate.ts`, #3351, #3381). The
+renderer's own starts are all gated, so a stream is taken from a live run only
+as a backstop: the new run closes the old one's stream - and tells its service
+so, which hands the displaced run's wake lock back and gives up its bar rather
+than leaving both standing (issue #1417). The lock is the half with a visible
+outcome: the incoming run claims the indicator before it connects, so the bar is
+transferred rather than cleared, and the displaced run's release - named by the
+run it speaks for - finds nothing of its own left to wipe. The
 superseded run is not stopped and posts no notification: it is still running in
 the engine, so the dashboard keeps it live under its lost-stream callout, and
 its row reaches a terminal status on the next list read rather than through a

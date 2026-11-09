@@ -10,11 +10,12 @@
  * navigation, the way `LoadTestService` does for a load run.
  *
  * The two share `sseClient`, which is a singleton holding one `EventSource`,
- * so they cannot stream at once - starting a scenario run stops whatever the
- * client was attached to. That is the engine's model too (a run at a time from
- * this app), not a limitation introduced here. The takeover is a hand-off
- * rather than a silent close (issue #1417): the displaced service is told, and
- * `handleSuperseded` gives up what that run was holding.
+ * so they cannot stream at once - attaching stops whatever the client was
+ * attached to. The app's own starts and an agent's run wait on `run-gate`
+ * (#3351, #3381) so that does not happen in normal use; the hand-off stays as
+ * the backstop, and it is a hand-off rather than a silent close (issue #1417):
+ * the displaced service is told, and `handleSuperseded` gives up what that run
+ * was holding.
  *
  * Step events are buffered and committed on the live-refresh cadence, the same
  * throttle `LoadTestService` puts on its ticks (issue #1153). This file used to
@@ -261,7 +262,7 @@ class ScenarioRunService {
 	}
 
 	/**
-	 * A load run took the shared stream client (issue #1417).
+	 * Another run took the shared stream client (issue #1417).
 	 *
 	 * Before this existed the takeover was silent: `sseClient.connect` closed
 	 * the socket and no terminal path ran, so the wake lock stayed held for the

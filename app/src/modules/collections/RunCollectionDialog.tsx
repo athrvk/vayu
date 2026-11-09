@@ -101,7 +101,7 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { resolveLoadTestLimits } from "@/constants/load-test";
-import { Callout, NumberField } from "@/components/shared";
+import { Callout, NumberField, StopRunButton } from "@/components/shared";
 import {
 	useCollectionsQuery,
 	useFullCollectionRequests,
@@ -118,6 +118,7 @@ import {
 } from "@/stores";
 import { loadTestService, scenarioRunService } from "@/services";
 import { describeDataSchemaDiff, describeUnboundReferences } from "@/services/data-files";
+import { useStopLiveRun } from "@/hooks/useStopLiveRun";
 import { useDeclaredDataFile } from "@/hooks/useDeclaredDataFile";
 import { runDataFileName } from "@/lib/run-data-file";
 import { useDataContractWriter } from "@/hooks/useDataContractWriter";
@@ -459,10 +460,11 @@ export default function RunCollectionDialog({
 	const settingsValid = loadTest
 		? !profileError && !streamCapsError && !dataFileError && !budgetsError
 		: iterationsValid && !streamCapsError && !dataFileError && !budgetsError;
-	// A load run waits for the run that holds the live stream (`canStartLoadRun`,
-	// #3351); a sequence takes the stream openly and is not held.
+	// Any run, load or sequence, waits for the live run that holds the stream
+	// (`canStartLoadRun`, #3351, #3381); Stop in the callout is the way through.
 	const loadRunGate = useCanStartLoadRun();
-	const heldBy = loadTest && !loadRunGate.ok ? loadRunGate.running : null;
+	const heldBy = loadRunGate.ok ? null : loadRunGate.running;
+	const { stop: stopHeldRun, isStopping: isStoppingHeldRun } = useStopLiveRun();
 	const canRun = settingsValid && !oauthGated && !heldBy;
 
 	/*
@@ -1035,19 +1037,25 @@ export default function RunCollectionDialog({
 							severity="blocking"
 							title={runningRunSentence(heldBy)}
 							action={
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => {
-										openTab(runningRunTab(heldBy));
-										onOpenChange(false);
-									}}
-								>
-									View run
-								</Button>
+								<div className="flex gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => {
+											openTab(runningRunTab(heldBy));
+											onOpenChange(false);
+										}}
+									>
+										View run
+									</Button>
+									<StopRunButton
+										onStop={() => void stopHeldRun(heldBy)}
+										isStopping={isStoppingHeldRun}
+									/>
+								</div>
 							}
 						>
-							Stop it or let it finish before starting a load test.
+							Stop it or let it finish before starting another run.
 						</Callout>
 					)}
 
