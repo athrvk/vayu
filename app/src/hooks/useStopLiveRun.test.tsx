@@ -38,7 +38,9 @@ describe("useStopLiveRun", () => {
 	// Mutation check: delete the `stopMonitoring()` call and the stream stays
 	// attached to a run the engine has stopped.
 	it("stops the dashboard's run, detaches its stream and settles the store", async () => {
-		const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+		const stopRun = vi
+			.spyOn(apiService, "stopRun")
+			.mockResolvedValue({ status: "stopped" } as never);
 		const detach = vi.spyOn(loadTestService, "stopMonitoring").mockImplementation(() => {});
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 		useDashboardStore.getState().startRun("run_dash");
@@ -81,11 +83,28 @@ describe("useStopLiveRun", () => {
 		expect(useDashboardStore.getState().isStopping).toBe(false);
 	});
 
+	// Mutation check: call `stopMonitoring()` for every answer and a run that had
+	// already finished is announced as stopped.
+	it("records a Stop that arrived after the run finished and leaves the stream to settle it", async () => {
+		vi.spyOn(apiService, "stopRun").mockResolvedValue({ status: "completed" } as never);
+		const detach = vi.spyOn(loadTestService, "stopMonitoring").mockImplementation(() => {});
+		useDashboardStore.getState().startRun("run_dash");
+		const { result } = renderHook(() => useStopLiveRun());
+
+		await act(() => result.current.stop(DASHBOARD_RUN));
+
+		expect(detach).not.toHaveBeenCalled();
+		expect(useDashboardStore.getState().stopArrivedLate).toBe(true);
+		expect(isDashboardRunLive(useDashboardStore.getState().phase)).toBe(true);
+	});
+
 	// Mutation check: route every kind through the dashboard path and the
 	// collection run is stopped without its caches refreshed (or, worse, the
 	// dashboard's unrelated run is detached).
 	it("stops a run no dashboard owns and refreshes what History shows of it", async () => {
-		const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+		const stopRun = vi
+			.spyOn(apiService, "stopRun")
+			.mockResolvedValue({ status: "stopped" } as never);
 		const detach = vi.spyOn(loadTestService, "stopMonitoring").mockImplementation(() => {});
 		const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
 		useDashboardStore.getState().startRun("run_dash");
@@ -126,7 +145,7 @@ describe("useStopLiveRun", () => {
 			expect(result.current.isStopping).toBe(false);
 
 			stopRun.mockClear();
-			stopRun.mockResolvedValue({} as never);
+			stopRun.mockResolvedValue({ status: "stopped" } as never);
 			act(() => toast.action?.onClick());
 			await waitFor(() => expect(stopRun).toHaveBeenCalledWith(run.runId));
 		}

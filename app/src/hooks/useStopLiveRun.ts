@@ -8,27 +8,40 @@
 import { useCallback, useState } from "react";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/queries/keys";
-import { apiService } from "@/services/api";
-import { loadTestService } from "@/services/load-test-service";
+import { apiService, loadTestService } from "@/services";
+import { isRunTerminal } from "@/lib/run-status";
 import { useDashboardStore } from "@/stores/dashboard-store";
 import type { RunningRun } from "@/stores/run-gate";
 import { useToastStore } from "@/stores/toast-store";
 
 /**
- * The dashboard's run: the dashboard shows Stopping, the stream is detached,
- * and the store settles the run as stopped, none of which the engine's answer
- * does by itself. The dashboard's `isStopping` is store state because its
- * header reads it, so it is raised and lowered here, not in the hook.
+ * The dashboard's run: what the engine's answer to Stop means for the
+ * dashboard (#3367), by the answer's `status` (`load_stop_status` in
+ * `runs.cpp`). The dashboard's `isStopping` is store state because its header
+ * reads it, so it is raised and lowered here, not in the hook.
+ *
+ * - `stopped`: the Stop took effect. Release the stream, which posts the
+ *   "stopped" notification, and await the report as stopped.
+ * - `completed` / `failed`: the run had finished when Stop arrived. The stream
+ *   or the report fetch settles it with its real status, so `stopMonitoring`
+ *   (an unconditional "stopped" notification) stays out of it
+ *   (`settleOnStoredReport` is the precedent); only the late Stop is recorded.
+ * - `running`, or a status this client does not know: the strategy returned on
+ *   its own and the run ends by its own verdict. Nothing changes.
  */
 async function stopDashboardRun(runId: string): Promise<void> {
-	const { setStopping, stopRun } = useDashboardStore.getState();
-	setStopping(runId, true);
+	const store = useDashboardStore.getState();
+	store.setStopping(runId, true);
 	try {
-		await apiService.stopRun(runId);
-		loadTestService.stopMonitoring();
-		stopRun(runId);
+		const { status } = await apiService.stopRun(runId);
+		if (status === "stopped") {
+			loadTestService.stopMonitoring();
+			useDashboardStore.getState().stopRun(runId);
+		} else if (isRunTerminal(status)) {
+			useDashboardStore.getState().noteLateStop(runId);
+		}
 	} finally {
-		setStopping(runId, false);
+		useDashboardStore.getState().setStopping(runId, false);
 	}
 }
 

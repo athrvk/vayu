@@ -448,10 +448,12 @@ Manages the lifecycle of load test runs:
   sequential collection run's setup and teardown, takes it through
   `ScriptSendInputs::cancel`, and a single-request run's start-of-run token
   request takes it through `build_request`, because Stop and shutdown both
-  raise it and both wait on that thread. A sequential run's step scripts take
-  it only on a streaming step, through `ExchangeInputs::cancel`
-  (`scenario_runner.cpp`), so on an ordinary step their send waits out its
-  timeout (#3397). The auxiliary threads keep `aux_cancel`: a replay or
+  raise it and both wait on that thread. A sequential run's every step takes
+  it too, through `ExchangeInputs::cancel` (`run_step_exchange`, #3397): the
+  step's send, its late OAuth 2.0 token request and its scripts'
+  `pm.sendRequest`, so Stop and shutdown end the step in flight at the next
+  progress tick instead of after its timeout, and the runner records that
+  step as `stopped`, never `errored`. The auxiliary threads keep `aux_cancel`: a replay or
   teardown after a natural end must still send. A call it cancels is the run
   ending, never a failure: a cancelled token request ends the run `Stopped`; a
   lifecycle or inline step script whose send it cancelled is `skipped` (so a
@@ -1110,7 +1112,7 @@ its path or rows, and every step's stored row and `step` event keeps
 `dataRowIndex`, so which row a wrapped pass re-used stays answerable without
 storing the row itself.
 
-A step's outcome is `passed`, `failed`, `skipped` or `errored`, counted
+A step's outcome is `passed`, `failed`, `skipped`, `errored` or `stopped`, counted
 separately everywhere - a skipped step counted as a pass is the false-pass class
 this project has already spent an issue eliminating. An `errored` step ends its
 iteration unless the only thing wrong was a script that threw after the exchange
@@ -1122,8 +1124,11 @@ runner's own refusals (an unresolved or ambiguous target, the cycle cap) end
 the iteration, and the run option `stopOnError: true` makes every `errored`
 step end it. Either way the
 next iteration still runs and the run still reaches `completed`; an iteration
-an error ended reports what it cost as `stepsNotRun`. A stop is honoured
-**between steps**.
+an error ended reports what it cost as `stepsNotRun`. A stop ends the step in
+flight and is otherwise honoured **between steps**: the step it cut short is
+`stopped` (#3397), a fifth outcome in no failure tally, which ends the run
+without counting `stepsNotRun`, reading flow control or closing a
+transaction.
 
 **Flow control is design-mode only.** A script returns an intent -
 `pm.execution.setNextRequest(name)`, `setNextRequest(null)`,
@@ -1472,8 +1477,8 @@ deadline; only the flag's spelling is shared, through `read_stream_flag`. A
 sequential collection run's streaming step is the other design-side sender
 (#3235): `Client::send` honours `stream_bounds` with the load path's rules
 (whole-transfer timeout the cap plus the grace, a cap ending it as a success),
-the runner passes it `RunContext::should_stop` as its cancel so a stop ends the
-stream once answered, its step trace gains the `events` node parsed back from
+the runner passes it `RunContext::should_stop` as its cancel, as it does for
+every step (#3397), so a stop ends the stream once answered, its step trace gains the `events` node parsed back from
 the body (`buffered_stream_events_node`), and its completion feeds the run's
 `MetricsCollector`, whose `stream_totals` the sequential summary stores through
 the same `build_stream_summary_payload` a load run's uses.

@@ -118,9 +118,11 @@ export type FinishedKind = TerminalRunStatus;
  * - `streamLost`: the stream ended (an error, a drop, a collection run taking
  *   the client) while the engine still runs the load test; `message` is the
  *   dashboard's callout body, and Reconnect is the way back.
- * - `awaitingReport`: the stream closed, or the user stopped the run, and the
- *   stored report is on its way. `stopped` is the user's Stop, which decides
- *   the run's ending whatever the report says.
+ * - `awaitingReport`: the stream closed, or the engine confirmed the user's
+ *   Stop, and the stored report is on its way. `stopped` is that confirmation:
+ *   it drops the Running pill and Stop at once, but the report's own status
+ *   still decides how the run ends (a Stop that raced the run's own verdict
+ *   leaves it failed or completed, as History shows it).
  * - `reportError`: the report fetch gave up; Retry returns to `awaitingReport`.
  * - `finished`: the report landed, and `kind` is how the run ended.
  */
@@ -139,10 +141,10 @@ export type DashboardPhase =
  *
  * A lost stream is live: the engine keeps running the load test, so the pill
  * still says Running beside the lost-stream callout. Awaiting the report is
- * live until the report says otherwise, unless the user's Stop ended it. A
- * failed report fetch is not: the stream had already closed, and holding the
- * builder on a read that cannot answer would lock out every new run until the
- * engine did.
+ * live until the report says otherwise, unless the engine confirmed the
+ * user's Stop. A failed report fetch is not: the stream had already closed, and
+ * holding the builder on a read that cannot answer would lock out every new
+ * run until the engine did.
  */
 export function isDashboardRunLive(phase: DashboardPhase): boolean {
 	switch (phase.phase) {
@@ -158,8 +160,8 @@ export function isDashboardRunLive(phase: DashboardPhase): boolean {
 
 /**
  * How the run ended as far as the dashboard knows: the report's kind once it
- * landed, "stopped" from the user's Stop before it, and null while neither has
- * happened. Never set while {@link isDashboardRunLive} is true.
+ * landed, "stopped" from the engine's confirmed Stop before it, and null while
+ * neither has happened. Never set while {@link isDashboardRunLive} is true.
  */
 export function dashboardRunEnding(phase: DashboardPhase): FinishedKind | null {
 	if (phase.phase === "finished") return phase.kind;
@@ -170,13 +172,14 @@ export function dashboardRunEnding(phase: DashboardPhase): FinishedKind | null {
 }
 
 /**
- * The kind a finished run settles in. A stop the user asked for stays
- * "stopped" whatever the report says; otherwise the engine's own status
- * decides, so a failed run is not shown as a neutral "completed" (#1932).
+ * The kind a finished run settles in: the engine's recorded status, so the
+ * dashboard reads the run as History and the report do - a failed run is not
+ * a neutral "completed" (#1932), and a Stop that landed after the run's own
+ * verdict does not rewrite it (#3367).
  */
-function finishedKindFor(phase: DashboardPhase, reportStatus: string | undefined): FinishedKind {
-	if (dashboardRunEnding(phase) === "stopped" || reportStatus === "stopped") return "stopped";
-	return reportStatus === "failed" ? "failed" : "completed";
+function finishedKindFor(reportStatus: string | undefined): FinishedKind {
+	if (reportStatus === "stopped" || reportStatus === "failed") return reportStatus;
+	return "completed";
 }
 
 /**
@@ -237,6 +240,12 @@ interface DashboardState {
 	monitorSamples: MonitorSample[];
 	/** A Stop request for the held run is in flight. */
 	isStopping: boolean;
+	/**
+	 * The engine answered the user's Stop with a terminal status other than
+	 * `stopped`: the run had already finished when it arrived (#3367). The
+	 * finished view says so, because the Stop the user pressed did nothing.
+	 */
+	stopArrivedLate: boolean;
 	// Config and request info (available during live streaming)
 	loadTestConfig: LoadTestRunConfig | null;
 	requestInfo: LoadTestRequestInfo | null;
@@ -301,8 +310,14 @@ interface DashboardState {
 		config: LoadTestRunConfig,
 		requestInfo: LoadTestRequestInfo | null
 	) => void;
-	/** The engine accepted the user's Stop: the run awaits its report as stopped. */
+	/** The engine confirmed the user's Stop took effect: the run awaits its report as stopped. */
 	stopRun: (runId: string) => void;
+	/**
+	 * The engine answered the user's Stop with `completed` or `failed`: the run
+	 * finished first. Records it for the finished view, and from a lost stream,
+	 * which nothing will close, awaits the report instead.
+	 */
+	noteLateStop: (runId: string) => void;
 	/** The stream attached (or re-attached, which is Reconnect) to a live run. */
 	streamOpened: (runId: string) => void;
 	/** The stream ended while the engine still runs the load test. */
@@ -323,6 +338,7 @@ interface DashboardState {
 
 const IDLE: DashboardPhase = { phase: "idle" };
 const STREAMING: DashboardPhase = { phase: "streaming" };
+const AWAITING_LIVE: DashboardPhase = { phase: "awaitingReport", stopped: false };
 
 /**
  * Apply `next` to the state when it holds `runId`; otherwise return the state
@@ -375,6 +391,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	historicalMetrics: [],
 	monitorSamples: [],
 	isStopping: false,
+	stopArrivedLate: false,
 	loadTestConfig: null,
 	requestInfo: null,
 	sourceRequestId: null,
@@ -393,6 +410,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			historicalMetrics: [],
 			monitorSamples: [],
 			isStopping: false,
+			stopArrivedLate: false,
 			loadTestConfig: config ?? null,
 			requestInfo: requestInfo ?? null,
 			sourceRequestId: sourceRequestId ?? null,
@@ -416,6 +434,16 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			)
 		),
 
+	// Written for a run that may already be `finished`: the Stop can land after
+	// the stream's own close settled it, and the note is for exactly that view.
+	noteLateStop: (runId) =>
+		set((state) =>
+			forRun(state, runId, (s) => ({
+				stopArrivedLate: true,
+				...(s.phase.phase === "streamLost" ? { phase: AWAITING_LIVE } : {}),
+			}))
+		),
+
 	// Live phases only: a stream re-attached to a run that has settled or been
 	// stopped must not raise it back to Running.
 	streamOpened: (runId) =>
@@ -435,9 +463,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 	streamClosed: (runId) =>
 		set((state) =>
 			forRun(state, runId, (s) =>
-				s.phase.phase === "streaming"
-					? { phase: { phase: "awaitingReport", stopped: false } }
-					: s
+				s.phase.phase === "streaming" ? { phase: AWAITING_LIVE } : s
 			)
 		),
 
@@ -531,7 +557,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 			if (state.currentRunId !== runId || isRunInProgress(report.metadata?.status)) {
 				return state;
 			}
-			const kind = finishedKindFor(state.phase, report.metadata?.status);
+			const kind = finishedKindFor(report.metadata?.status);
 			return { phase: { phase: "finished", kind, report } };
 		}),
 

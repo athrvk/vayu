@@ -50,8 +50,9 @@ const STILL_RUNNING_MESSAGE =
 /**
  * The report kept saying the run is live after every attempt. A live run ends
  * on the lost-stream callout: the engine is still generating load, so the pill
- * and Stop stay, and Reconnect is the way on. A run the user stopped is not
- * raised back to live; its fetch failed like any other, and Retry stays.
+ * and Stop stay, and Reconnect is the way on. A run whose Stop the engine
+ * confirmed is not raised back to live; its fetch failed like any other, and
+ * Retry stays.
  */
 function giveUpOnLiveReport(runId: string): void {
 	const { phase, streamLost, reportFailed } = useDashboardStore.getState();
@@ -81,6 +82,7 @@ export default function LoadTestDashboard() {
 	const isStopping = useDashboardStore((s) => s.isStopping);
 	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
 	const requestInfo = useDashboardStore((s) => s.requestInfo);
+	const stopArrivedLate = useDashboardStore((s) => s.stopArrivedLate);
 	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
 	const reportFailed = useDashboardStore((s) => s.reportFailed);
 	const retryReport = useDashboardStore((s) => s.retryReport);
@@ -340,6 +342,13 @@ export default function LoadTestDashboard() {
 					exportRequestUrl={report.metadata?.requestUrl}
 					exportRequestMethod={report.metadata?.requestMethod}
 				/>
+				{stopArrivedLate && (
+					<div className="enter-fade px-5 pt-3 shrink-0">
+						<Callout severity="info">
+							The run had already finished when Stop arrived.
+						</Callout>
+					</div>
+				)}
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />
 				</div>

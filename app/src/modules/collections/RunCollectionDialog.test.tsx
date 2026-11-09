@@ -147,9 +147,15 @@ vi.mock("@/queries/file-bindings", async (importOriginal) => ({
 
 const startMonitoring = vi.fn();
 const startLoadMonitoring = vi.fn();
-vi.mock("@/services", () => ({
+// The real `apiService`, so a test spies on the engine call `useStopLiveRun` makes.
+vi.mock("@/services", async () => ({
+	apiService: (await vi.importActual<typeof import("@/services/api")>("@/services/api"))
+		.apiService,
 	scenarioRunService: { startMonitoring: (id: string) => startMonitoring(id) },
-	loadTestService: { startMonitoring: (id: string) => startLoadMonitoring(id) },
+	loadTestService: {
+		startMonitoring: (id: string) => startLoadMonitoring(id),
+		stopMonitoring: () => {},
+	},
 }));
 
 const COLLECTION = {
@@ -832,7 +838,9 @@ describe("while another run holds the live stream", () => {
 		const stopButton = () => screen.getByRole("button", { name: /^stop/i });
 
 		it("stops the dashboard's run and reopens Run once it has settled", async () => {
-			const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+			const stopRun = vi
+				.spyOn(apiService, "stopRun")
+				.mockResolvedValue({ status: "stopped" } as never);
 			useDashboardStore.getState().startRun("run_live");
 			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
@@ -844,7 +852,9 @@ describe("while another run holds the live stream", () => {
 		});
 
 		it("asks the engine to stop a collection run and leaves Run shut until its stream ends", async () => {
-			const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+			const stopRun = vi
+				.spyOn(apiService, "stopRun")
+				.mockResolvedValue({ status: "stopped" } as never);
 			useScenarioRunStore.getState().startRun("coll_live");
 			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
@@ -878,7 +888,7 @@ describe("while another run holds the live stream", () => {
 			expect(runButton().disabled).toBe(true);
 			expect(useDashboardStore.getState().currentRunId).toBe("run_live");
 
-			stopRun.mockResolvedValue({} as never);
+			stopRun.mockResolvedValue({ status: "stopped" } as never);
 			act(() => useToastStore.getState().toasts[0]?.action?.onClick());
 			await waitFor(() => expect(runButton().disabled).toBe(false));
 		});

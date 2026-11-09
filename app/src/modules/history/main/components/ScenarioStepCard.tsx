@@ -85,13 +85,16 @@ import { stepsNotRunText, tallyTests, type ScenarioStepRow } from "../scenario-s
  * `skipped` has its own state and its own chip and is never dressed as a pass:
  * a step the runner did not execute asserted nothing. `failed` is a test
  * assertion that did not hold - the response itself may well be a `200`, which
- * is exactly why the state cannot be derived from the status code.
+ * is exactly why the state cannot be derived from the status code. `stopped` is
+ * a step the run's Stop cut short (#3397): no failure, so it takes the Stopped
+ * glyph the run's own status wears rather than the error tick.
  */
 const OUTCOME_STATE: Record<StepOutcome, ExchangeState> = {
 	passed: "success",
 	failed: "error",
 	skipped: "skipped",
 	errored: "error",
+	stopped: "stopped",
 };
 
 /** Chip tint per outcome. `-fill` under a white label, per the token rules. */
@@ -100,6 +103,7 @@ const OUTCOME_CHIP: Record<StepOutcome, string> = {
 	failed: "bg-status-error-fill text-white",
 	skipped: "bg-muted text-muted-foreground",
 	errored: "bg-status-error-fill text-white",
+	stopped: "bg-status-stopped-fill text-white",
 };
 
 export interface ScenarioStepCardProps {
@@ -163,10 +167,13 @@ function ScenarioStepCard({
 	// The step's own failure text: a test assertion that did not hold, or the
 	// error that stopped the step. A live row has none until its stored row
 	// arrives, which is why the shell renders without one rather than blank.
-	const error = step.result?.error;
+	// A stopped step's stored error is the cancel ("Request cancelled"), which
+	// the Stopped chip already says and a red Error block would contradict.
+	const error = step.outcome === "stopped" ? undefined : step.result?.error;
 	// A skipped step sent nothing: the stored row's status 0 and latency 0 are
-	// storage values, not a status and a time (#2824).
-	const sent = step.outcome !== "skipped";
+	// storage values, not a status and a time (#2824). A stopped step's send was
+	// cut short, so its 0 is no status and its latency no response time (#3397).
+	const answered = step.outcome !== "skipped" && step.outcome !== "stopped";
 	const notRun = stepsNotRunText(step.stepsNotRun);
 
 	// "Iteration 2 · Row 3". The row is shown whenever the run had a data set,
@@ -264,9 +271,9 @@ function ScenarioStepCard({
 				) : undefined
 			}
 			state={OUTCOME_STATE[step.outcome]}
-			statusCode={sent ? step.statusCode : undefined}
+			statusCode={answered ? step.statusCode : undefined}
 			statusText={step.result?.statusText}
-			latencyMs={sent ? step.latencyMs : undefined}
+			latencyMs={answered ? step.latencyMs : undefined}
 			timestamp={context}
 			error={error}
 			details={

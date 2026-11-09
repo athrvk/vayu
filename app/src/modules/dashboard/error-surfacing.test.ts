@@ -41,10 +41,8 @@ const { mockGetRunReport, mockStartMonitoring, mockIsMonitoring, mockStopRun, he
 		mockStopRun: vi.fn(),
 		headerProps: [] as Record<string, unknown>[],
 	}));
-// What the real service, and `useStopLiveRun`, reach the engine through.
-vi.mock("@/services/api", () => ({
-	apiService: { getRunReport: mockGetRunReport, stopRun: mockStopRun },
-}));
+// What the real service reaches the engine through.
+vi.mock("@/services/api", () => ({ apiService: { getRunReport: mockGetRunReport } }));
 vi.mock("@/services/sse-client", () => ({
 	sseClient: { connect: vi.fn(), disconnect: vi.fn() },
 }));
@@ -129,7 +127,7 @@ describe("dashboard error surfacing", () => {
 		mockGetRunReport.mockReset();
 		mockStartMonitoring.mockReset();
 		mockIsMonitoring.mockReset().mockReturnValue(true);
-		mockStopRun.mockReset().mockResolvedValue(undefined);
+		mockStopRun.mockReset().mockResolvedValue({ runId: "run_stop", status: "stopped" });
 		headerProps.length = 0;
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -13,7 +13,7 @@
  * **Not `LoadTestDetail`.** A scenario run's `results[]` are step executions of
  * *different* requests, so the load report's percentiles and status
  * distribution would describe a sequence as though it were one request
- * repeated. The number a reader wants here is per step, and the four outcomes.
+ * repeated. The number a reader wants here is per step, and the outcomes.
  *
  * **Two sources, one list** (see `scenario-steps.ts`). While the run streams,
  * rows come from the `step` SSE events; once it is over, from the stored
@@ -105,14 +105,26 @@ const EMPTY_SUMMARY: StepListSummary = emptyStepSummary();
  * Chip tint per outcome, matching the step rows.
  *
  * `skipped` has its own entry rather than sharing `passed`'s: the whole point
- * of the four-number summary is that a step which never ran is not a pass.
+ * of the summary is that a step which never ran is not a pass.
  */
 const COUNT_CHIP: Record<StepOutcome, string> = {
 	passed: "bg-status-success-fill text-white",
 	failed: "bg-status-error-fill text-white",
 	skipped: "bg-muted text-muted-foreground",
 	errored: "bg-status-error-fill text-white",
+	stopped: "bg-status-stopped-fill text-white",
 };
+
+/**
+ * Whether the count chip for `outcome` is drawn: the first four always, zeros
+ * included, but `stopped` only for a run a Stop cut short (#3397). Zero is the
+ * answer for nearly every run, and a chip reading "0 stopped" on each of them
+ * is noise; it stays while it is the active filter, so the control that is
+ * pressed never vanishes under the reader.
+ */
+function showsCountChip(outcome: StepOutcome, count: number, isActive: boolean): boolean {
+	return outcome !== "stopped" || count > 0 || isActive;
+}
 
 export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const { data: report, isLoading } = useRunReportQuery(run.id);
@@ -225,8 +237,8 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	 * Which outcome the list is showing, or all of them (issue #730).
 	 *
 	 * The chips above are the control rather than a filter bar beside them: the
-	 * four numbers a reader already reads to find out that eleven steps failed
-	 * are the same four they then want the list narrowed to. Held here and not
+	 * outcome counts a reader already reads to find out that eleven steps failed
+	 * are the same counts they then want the list narrowed to. Held here and not
 	 * in the URL or the store - it is a way of looking at this tab, and a
 	 * remembered one would hide steps from the next reader of it.
 	 */
@@ -366,9 +378,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					/>
 				</div>
 
-				{/* All four, always, including the zeros. A summary that hides the
-				    outcomes nobody hit reads differently run to run, and the point
-				    of the row is that these are four separate numbers.
+				{/* The first four always, including the zeros. A summary that hides
+				    the outcomes nobody hit reads differently run to run, and the
+				    point of the row is that these are separate numbers. `stopped`
+				    joins them only when a Stop cut a step short.
 
 				    Each is also the filter for its own outcome (issue #730): a
 				    reader who has just read "11 failed" wants those eleven, and
@@ -378,6 +391,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				<span className="flex items-center gap-1.5 sm:ml-auto">
 					{STEP_OUTCOMES.map((outcome) => {
 						const isActive = outcomeFilter === outcome;
+						if (!showsCountChip(outcome, counts[outcome], isActive)) return null;
 						return (
 							<button
 								key={outcome}

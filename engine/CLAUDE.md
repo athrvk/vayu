@@ -745,8 +745,8 @@ logged as a warning: it means a client skipped composition.
   whichever is longer (`collection_natural_end_drain_ms`). A sequential run sends
   the step through `Client`, which honours `stream_bounds` by the same rules
   through the one `StreamTally` (`http/stream_tally.hpp`) both drivers keep;
-  its stop ends the stream (`ExchangeInputs::cancel` is `should_stop` for a
-  streaming step alone) and its summary stores the load path's `stream`
+  its stop ends the stream (`ExchangeInputs::cancel` is `should_stop` for
+  every step, #3397) and its summary stores the load path's `stream`
   section (`build_stream_summary_payload`). Reaching a cap is a
   successful completion; the byte cap (`maxResponseBodyBytes`) stays an error.
   The report gains a `stream` section, absent for runs that did not stream. A
@@ -795,9 +795,12 @@ logged as a warning: it means a client skipped composition.
   carries `RunContext::aux_cancel` (#3343), which `join_aux_threads` sets
   before it joins, so Stop, shutdown and a natural end never wait out its
   timeout; a transfer the run's own thread makes (a script's
-  `pm.sendRequest`, the start-of-run token request) carries `should_stop`
-  instead, through `ScriptSendInputs::cancel` and `build_request` (#3371),
-  and what it cancels is the run ending, never a failure. A buffered
+  `pm.sendRequest`, the start-of-run token request, every sequential step's
+  send and late token request) carries `should_stop` instead, through
+  `ScriptSendInputs::cancel`, `build_request` (#3371) and
+  `ExchangeInputs::cancel` (#3397), and what it cancels is the run ending,
+  never a failure: a sequential step it cut short is `StepOutcome::Stopped`,
+  in no failure tally. A buffered
   `POST /execute` carries `server_stopping` through a
   **`DisconnectWatch`** (`http/disconnect_watch.hpp`, #3383): its one flag
   also rises when the caller hangs up (`Request::is_connection_closed`, polled

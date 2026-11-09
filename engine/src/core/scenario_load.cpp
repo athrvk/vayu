@@ -1342,6 +1342,9 @@ class ScenarioLoadDriver {
                 state.steps.record_unsent (step_index);
             }
             return;
+        // `classify_execution` never answers it: a step the Stop cancelled
+        // never reaches `finish_step` (`finish_without_response`, #2136).
+        case StepOutcome::Stopped: return;
         }
     }
 
