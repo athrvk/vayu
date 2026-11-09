@@ -20,9 +20,10 @@
  * persists - a node environment has no `localStorage` for it to seed from.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { COMMANDS, availableCommands, commandById } from "./registry";
 import { baseCommandContext } from "./context";
+import { tabElementId } from "@/components/layout/tab-aria";
 import { commandTitle, type Command, type CommandContext, type CommandSurfaces } from "./types";
 import { SEND_CHORD, TOGGLE_DRAWER_CHORD } from "@/constants/shortcuts";
 import { useImportModalStore, useTabsStore, useSaveStore } from "@/stores";
@@ -297,6 +298,52 @@ describe("performing", () => {
 
 		commandById("close-tab").perform(ctx);
 		expect(useTabsStore.getState().openTabs).toHaveLength(0);
+	});
+
+	/*
+	 * The close runs the chord's own path (#3401): the closed tab's element is
+	 * the focused one, and a bare store close leaves focus on `<body>`. The
+	 * strip is two stand-in buttons - the replacement tab under the id the strip
+	 * gives it, and the "+" button.
+	 */
+	describe("close-tab focus", () => {
+		function mountStrip(tabIds: string[]) {
+			const strip = document.createElement("div");
+			for (const id of tabIds) {
+				const tab = document.createElement("button");
+				tab.id = tabElementId(id);
+				strip.append(tab);
+			}
+			const plus = document.createElement("button");
+			plus.dataset.tabNew = "";
+			strip.append(plus);
+			document.body.append(strip);
+			return { strip, plus };
+		}
+
+		afterEach(() => document.body.replaceChildren());
+
+		it("leaves focus on the tab that replaces the closed one", () => {
+			useTabsStore.getState().openTab({ type: "welcome", entityId: null });
+			const first = useTabsStore.getState().activeTabId!;
+			useTabsStore.getState().openTab({ type: "settings", entityId: null });
+			mountStrip([first]);
+
+			commandById("close-tab").perform(baseCommandContext());
+
+			expect(useTabsStore.getState().activeTabId).toBe(first);
+			expect(document.activeElement).toBe(document.getElementById(tabElementId(first)));
+		});
+
+		it("leaves focus on the New tab button when the last tab closes", () => {
+			useTabsStore.getState().openTab({ type: "settings", entityId: null });
+			const { plus } = mountStrip([]);
+
+			commandById("close-tab").perform(baseCommandContext());
+
+			expect(useTabsStore.getState().openTabs).toHaveLength(0);
+			expect(document.activeElement).toBe(plus);
+		});
 	});
 
 	/*
