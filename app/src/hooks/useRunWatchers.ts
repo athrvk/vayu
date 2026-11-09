@@ -20,8 +20,8 @@
  * The fix is deliberately not a second copy of the run lifecycle in the main
  * process: main says only *that* a run started and which service owns it
  * (`startedRun` on the `mcp:data-changed` event), and the renderer enters the
- * one path that already means "watch this run". As for any other load run,
- * that path is open only while `canStartLoadRun` says so (#3351).
+ * one path that already means "watch this run". As for any other run, that
+ * path is open only while `canStartLoadRun` says so (#3351, #3381).
  *
  * Mounted once in `App.tsx`, beside `useMcpDataInvalidation`, for the same
  * reason: the event names a run, not a screen, and a listener that came and went
@@ -38,6 +38,7 @@ import { canStartLoadRun } from "@/stores/run-gate";
 import { useTabsStore } from "@/stores/tabs-store";
 import { useToastStore } from "@/stores/toast-store";
 import { loadConfigFromSnapshot, requestInfoFromSnapshot } from "@/lib/run-config-snapshot";
+import type { StartedRun } from "@/types/domain";
 
 /**
  * Give the dashboard the config an agent's run was started with, read from the
@@ -80,22 +81,30 @@ function adoptLoadRun(runId: string): void {
 }
 
 /**
- * The agent's load run arrived while another run holds the stream
- * (`canStartLoadRun`, #3351). The engine has already started it, so refusing
- * is not on offer; what the app declines is taking the dashboard from the run
- * the user is watching. The agent's run executes unwatched, its History row
- * converges on the runs poll, and the toast is how the user hears of it.
+ * The agent's run arrived while another run holds the live view
+ * (`canStartLoadRun`, #3351, #3381), whatever its kind. The engine has already
+ * started it, so refusing is not on offer; what the app declines is taking the
+ * view from the run the user is watching. The agent's run executes with no
+ * live view, its History row converges on the runs poll, and the toast is how
+ * the user hears of it.
  */
-function announceUnwatchedLoadRun(runId: string): void {
+function announceUnwatchedRun(runId: string): void {
 	useToastStore.getState().showToast({
-		message: "An agent started a load test while another run is live, so it has no live view.",
-		variant: "warning",
+		message:
+			"An agent started a run in the background and it will be in History when it finishes.",
+		variant: "info",
 		action: {
 			label: "View run",
-			altText: "Open the agent's load test",
+			altText: "Open the agent's run",
 			onClick: () => useTabsStore.getState().openTab({ type: "run", entityId: runId }),
 		},
 	});
+}
+
+/** Attach the app's live view to an agent's run, by the service that owns its kind. */
+function adoptRun(started: StartedRun): void {
+	if (started.kind === "load") adoptLoadRun(started.runId);
+	else scenarioRunService.startMonitoring(started.runId);
 }
 
 export function useRunWatchers(): void {
@@ -107,12 +116,8 @@ export function useRunWatchers(): void {
 			// baseline change, a delete - and none of them is something to attach
 			// a stream to.
 			if (!started) return;
-			if (started.kind !== "load") {
-				scenarioRunService.startMonitoring(started.runId);
-				return;
-			}
-			if (canStartLoadRun().ok) adoptLoadRun(started.runId);
-			else announceUnwatchedLoadRun(started.runId);
+			if (canStartLoadRun().ok) adoptRun(started);
+			else announceUnwatchedRun(started.runId);
 		});
 	}, []);
 }

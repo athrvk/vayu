@@ -29,7 +29,9 @@ import {
 	useScenarioRunStore,
 	useSessionStore,
 	useTabsStore,
+	useToastStore,
 } from "@/stores";
+import { apiService } from "@/services/api";
 import { DEFAULT_LOAD_TEST_CEILINGS } from "@/constants/load-test";
 import { STORAGE_KEYS } from "@/constants/storage-keys";
 import type { Collection, Environment, OAuth2Config, Request, RequestAuth } from "@/types";
@@ -183,6 +185,7 @@ beforeEach(() => {
 	// A load run started by an earlier case would hold the gate shut.
 	useDashboardStore.setState({ currentRunId: null, phase: { phase: "idle" }, requestInfo: null });
 	useScenarioRunStore.setState({ runId: null, isStreaming: false });
+	useToastStore.setState({ toasts: [] });
 	useSessionStore.setState({ activeEnvironmentId: null });
 	useClientSettingsStore.getState().setLoadTestCeilings({ ...DEFAULT_LOAD_TEST_CEILINGS });
 	localStorage.removeItem(STORAGE_KEYS.LAST_LOAD_TEST_CONFIG);
@@ -716,8 +719,8 @@ describe("running the sequence as a load test", () => {
 });
 
 /*
- * One load run owns the live stream at a time, whichever surface starts it
- * (#3351). The engine sets no limit, so refusing here, before `POST /runs`,
+ * One live run owns the live view, whichever surface starts a run of either
+ * kind (#3351, #3381). The engine sets no limit, so refusing here, before `POST /runs`,
  * is the only place the dialog can: once the engine has the run, it runs.
  * Mutation check: drop `!heldBy` from `canRun` and the refusal cases send a
  * second run, which then took the dashboard from the first without a word.
@@ -791,13 +794,94 @@ describe("while another run holds the live stream", () => {
 		expect(mutate).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not hold a sequence, which takes the stream openly", () => {
-		useDashboardStore.getState().startRun("run_live");
+	it("lets a sequence start when no run is live", () => {
 		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
 
 		expect(screen.queryByText(/is already running/)).toBeNull();
 		fireEvent.click(runButton());
 		expect(mutate).toHaveBeenCalledTimes(1);
+	});
+
+	/*
+	 * #3381: the gate no longer asks which mode the dialog is in. Mutation
+	 * check: put `loadTest &&` back on `heldBy` and both cases send a second run.
+	 */
+	it.each([
+		{
+			name: "a load run",
+			hold: () => useDashboardStore.getState().startRun("run_live"),
+			sentence: "A load test is already running.",
+		},
+		{
+			name: "a sequence run",
+			hold: () => useScenarioRunStore.getState().startRun("coll_live"),
+			sentence: "A collection run is already running.",
+		},
+	])("refuses a sequence while $name is live", ({ hold, sentence }) => {
+		hold();
+		render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+		expect(screen.getByText(sentence)).toBeTruthy();
+		expect(runButton().disabled).toBe(true);
+		fireEvent.click(runButton());
+		expect(mutate).not.toHaveBeenCalled();
+	});
+
+	describe("Stop in the callout", () => {
+		afterEach(() => vi.restoreAllMocks());
+		const stopButton = () => screen.getByRole("button", { name: /^stop/i });
+
+		it("stops the dashboard's run and reopens Run once it has settled", async () => {
+			const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+			useDashboardStore.getState().startRun("run_live");
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+			fireEvent.click(stopButton());
+
+			await waitFor(() => expect(stopRun).toHaveBeenCalledWith("run_live"));
+			await waitFor(() => expect(runButton().disabled).toBe(false));
+			expect(screen.queryByText(/is already running/)).toBeNull();
+		});
+
+		it("asks the engine to stop a collection run and leaves Run shut until its stream ends", async () => {
+			const stopRun = vi.spyOn(apiService, "stopRun").mockResolvedValue({} as never);
+			useScenarioRunStore.getState().startRun("coll_live");
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+			fireEvent.click(stopButton());
+
+			await waitFor(() => expect(stopRun).toHaveBeenCalledWith("coll_live"));
+			// The run is over when the engine's `complete` frame says so, not when
+			// the request is answered.
+			await waitFor(() => expect(stopButton().hasAttribute("disabled")).toBe(false));
+			expect(runButton().disabled).toBe(true);
+			act(() => useScenarioRunStore.setState({ isStreaming: false }));
+			expect(runButton().disabled).toBe(false);
+		});
+
+		it("keeps Run shut and offers a retry when the stop fails", async () => {
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const stopRun = vi
+				.spyOn(apiService, "stopRun")
+				.mockRejectedValue(new Error("unreachable"));
+			useDashboardStore.getState().startRun("run_live");
+			render(<RunCollectionDialog collection={COLLECTION} onOpenChange={vi.fn()} />);
+
+			fireEvent.click(stopButton());
+
+			await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+			expect(useToastStore.getState().toasts[0]).toMatchObject({
+				variant: "error",
+				message: "Couldn't stop the run - unreachable",
+				action: { label: "Try again" },
+			});
+			expect(runButton().disabled).toBe(true);
+			expect(useDashboardStore.getState().currentRunId).toBe("run_live");
+
+			stopRun.mockResolvedValue({} as never);
+			act(() => useToastStore.getState().toasts[0]?.action?.onClick());
+			await waitFor(() => expect(runButton().disabled).toBe(false));
+		});
 	});
 });
 

@@ -37,6 +37,7 @@ import LoadTestDetail from "@/modules/history/main/LoadTestDetail";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 import { DashboardHeader, MetricsView } from "./components";
 import { useCollectionRunTarget } from "./hooks/useCollectionRunTarget";
+import { useStopLiveRun } from "@/hooks/useStopLiveRun";
 import { TIMING } from "@/config/timing";
 import { durationSeconds } from "@/constants/load-test";
 import { isRunInProgress, isRunTerminal } from "@/lib/run-status";
@@ -80,11 +81,10 @@ export default function LoadTestDashboard() {
 	const isStopping = useDashboardStore((s) => s.isStopping);
 	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
 	const requestInfo = useDashboardStore((s) => s.requestInfo);
-	const stopRun = useDashboardStore((s) => s.stopRun);
 	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
 	const reportFailed = useDashboardStore((s) => s.reportFailed);
 	const retryReport = useDashboardStore((s) => s.retryReport);
-	const setStopping = useDashboardStore((s) => s.setStopping);
+	const { stop: stopLiveRun } = useStopLiveRun();
 
 	const live = isDashboardRunLive(phase);
 	const awaitingReport = phase.phase === "awaitingReport";
@@ -212,46 +212,11 @@ export default function LoadTestDashboard() {
 	// useCallback, not a plain arrow: this is DashboardHeader's onStop prop, and
 	// DashboardHeader is memo'd below - a fresh function identity every tick
 	// would defeat that memo the same way an inline object prop would (#1714).
-	//
-	// `attemptStop` is a named function expression, not the useCallback arrow
-	// itself, so the retry toast's `onClick` can call it by name: a `const`
-	// referencing itself inside its own initializer trips
-	// react-hooks/immutability (the value "is accessed before it is
-	// declared"), where a named function's self-reference is ordinary,
-	// hoisted-within-itself JavaScript.
-	const handleStop = useCallback(
-		async function attemptStop() {
-			if (currentRunId) {
-				setStopping(currentRunId, true);
-				try {
-					await apiService.stopRun(currentRunId);
-					loadTestService.stopMonitoring();
-					stopRun(currentRunId);
-				} catch (error) {
-					// The button re-enables and the run keeps streaming, so without
-					// this the click is indistinguishable from one that did nothing.
-					// A toast rather than the report Callout: this is the outcome of
-					// an action the user just took, not a state of the page.
-					console.error("Failed to stop run:", error);
-					showToast({
-						message: error instanceof Error ? error.message : "Couldn't stop the run",
-						variant: "error",
-						// The run is still generating load, so the retry is the whole
-						// point of telling them. Chasing the Stop button back down in
-						// the header is a worse version of the same click.
-						action: {
-							label: "Try again",
-							altText: "Try stopping the run again",
-							onClick: () => void attemptStop(),
-						},
-					});
-				} finally {
-					setStopping(currentRunId, false);
-				}
-			}
-		},
-		[currentRunId, setStopping, stopRun, showToast]
-	);
+	// The stop, its error toast and the retry are `useStopLiveRun`'s, shared with
+	// the Run Collection dialog's Stop (#3381).
+	const handleStop = useCallback(async () => {
+		if (currentRunId) await stopLiveRun({ kind: "load", runId: currentRunId, label: null });
+	}, [currentRunId, stopLiveRun]);
 
 	// While a collection run streams, Reconnect would take its stream, so it
 	// opens that run and says why instead, as the builder's Load test does.

@@ -41,8 +41,10 @@ const { mockGetRunReport, mockStartMonitoring, mockIsMonitoring, mockStopRun, he
 		mockStopRun: vi.fn(),
 		headerProps: [] as Record<string, unknown>[],
 	}));
-// What the real service reaches the engine through.
-vi.mock("@/services/api", () => ({ apiService: { getRunReport: mockGetRunReport } }));
+// What the real service, and `useStopLiveRun`, reach the engine through.
+vi.mock("@/services/api", () => ({
+	apiService: { getRunReport: mockGetRunReport, stopRun: mockStopRun },
+}));
 vi.mock("@/services/sse-client", () => ({
 	sseClient: { connect: vi.fn(), disconnect: vi.fn() },
 }));

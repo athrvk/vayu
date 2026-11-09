@@ -270,7 +270,7 @@ class LoadTestService {
 	}
 
 	/**
-	 * A collection run took the shared stream client (issue #1417).
+	 * Another run took the shared stream client (issue #1417).
 	 *
 	 * Before this existed the takeover was silent: `sseClient.connect` closed
 	 * the socket and no terminal path ran, so the wake lock stayed held for the

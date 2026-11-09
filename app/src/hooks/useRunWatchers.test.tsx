@@ -196,12 +196,12 @@ describe("useRunWatchers", () => {
 
 	/*
 	 * The engine has already started the agent's run, so the app cannot refuse
-	 * it; what it refuses is taking the dashboard from the run the user is
-	 * watching (#3351). Mutation check: drop the `canStartLoadRun()` test from
-	 * the listener and every case here reddens - the live run is replaced and
-	 * nothing is said.
+	 * it; what it refuses is taking the live view from the run the user is
+	 * watching, for either kind of run (#3351, #3381). Mutation check: drop the
+	 * `canStartLoadRun()` test from the listener and every case here reddens -
+	 * the live run is replaced and nothing is said.
 	 */
-	describe("an agent's load run while another run is live", () => {
+	describe("an agent's run while another run is live", () => {
 		const LIVE_RUNS = [
 			{
 				name: "a streaming load run",
@@ -221,30 +221,43 @@ describe("useRunWatchers", () => {
 				hold: () => useScenarioRunStore.getState().startRun("run_live"),
 			},
 		];
+		const KINDS = ["load", "collection"] as const;
+		const CASES = LIVE_RUNS.flatMap((live) => KINDS.map((kind) => ({ ...live, kind })));
 
-		it.each(LIVE_RUNS)("leaves $name watched and announces the agent's", ({ hold }) => {
-			const load = vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
-			const getRun = vi.spyOn(apiService, "getRun").mockResolvedValue(runRow("run_agent"));
-			hold();
-			const before = useDashboardStore.getState();
-			const { emit } = mounted();
+		it.each(CASES)(
+			"leaves $name watched and announces the agent's $kind run",
+			({ hold, kind }) => {
+				const load = vi
+					.spyOn(loadTestService, "startMonitoring")
+					.mockImplementation(() => {});
+				const scenario = vi
+					.spyOn(scenarioRunService, "startMonitoring")
+					.mockImplementation(() => {});
+				const getRun = vi
+					.spyOn(apiService, "getRun")
+					.mockResolvedValue(runRow("run_agent"));
+				hold();
+				const before = useDashboardStore.getState();
+				const { emit } = mounted();
 
-			emit({ entity: "run", startedRun: { runId: "run_agent", kind: "load" } });
+				emit({ entity: "run", startedRun: { runId: "run_agent", kind } });
 
-			expect(load).not.toHaveBeenCalled();
-			expect(getRun).not.toHaveBeenCalled();
-			const after = useDashboardStore.getState();
-			expect(after.currentRunId).toBe(before.currentRunId);
-			expect(after.phase).toBe(before.phase);
-			const toasts = useToastStore.getState().toasts;
-			expect(toasts).toHaveLength(1);
-			expect(toasts[0]).toMatchObject({
-				variant: "warning",
-				message:
-					"An agent started a load test while another run is live, so it has no live view.",
-				action: { label: "View run" },
-			});
-		});
+				expect(load).not.toHaveBeenCalled();
+				expect(scenario).not.toHaveBeenCalled();
+				expect(getRun).not.toHaveBeenCalled();
+				const after = useDashboardStore.getState();
+				expect(after.currentRunId).toBe(before.currentRunId);
+				expect(after.phase).toBe(before.phase);
+				const toasts = useToastStore.getState().toasts;
+				expect(toasts).toHaveLength(1);
+				expect(toasts[0]).toMatchObject({
+					variant: "info",
+					message:
+						"An agent started a run in the background and it will be in History when it finishes.",
+					action: { label: "View run" },
+				});
+			}
+		);
 
 		it("opens the agent's run from the toast", () => {
 			vi.spyOn(loadTestService, "startMonitoring").mockImplementation(() => {});
