@@ -127,7 +127,7 @@ describe("dashboard error surfacing", () => {
 		mockGetRunReport.mockReset();
 		mockStartMonitoring.mockReset();
 		mockIsMonitoring.mockReset().mockReturnValue(true);
-		mockStopRun.mockReset().mockResolvedValue(undefined);
+		mockStopRun.mockReset().mockResolvedValue({ runId: "run_stop", status: "stopped" });
 		headerProps.length = 0;
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -49,13 +49,37 @@ const STILL_RUNNING_MESSAGE =
 /**
  * The report kept saying the run is live after every attempt. A live run ends
  * on the lost-stream callout: the engine is still generating load, so the pill
- * and Stop stay, and Reconnect is the way on. A run the user stopped is not
- * raised back to live; its fetch failed like any other, and Retry stays.
+ * and Stop stay, and Reconnect is the way on. A run whose Stop the engine
+ * confirmed is not raised back to live; its fetch failed like any other, and
+ * Retry stays.
  */
 function giveUpOnLiveReport(runId: string): void {
 	const { phase, streamLost, reportFailed } = useDashboardStore.getState();
 	if (isDashboardRunLive(phase)) streamLost(runId, STILL_RUNNING_MESSAGE);
 	else reportFailed(runId, "Vayu's engine still reports this run as running.");
+}
+
+/**
+ * What the engine's answer to Stop means for the dashboard (#3367), by the
+ * answer's `status` (`load_stop_status` in `runs.cpp`):
+ *
+ * - `stopped`: the Stop took effect. Release the stream, which posts the
+ *   "stopped" notification, and await the report as stopped.
+ * - `completed` / `failed`: the run had finished when Stop arrived. The stream
+ *   or the report fetch settles it with its real status, so `stopMonitoring`
+ *   (an unconditional "stopped" notification) stays out of it
+ *   (`settleOnStoredReport` is the precedent); only the late Stop is recorded.
+ * - `running`, or a status this client does not know: the strategy returned on
+ *   its own and the run ends by its own verdict. Nothing changes.
+ */
+function applyStopAnswer(runId: string, status: string): void {
+	const store = useDashboardStore.getState();
+	if (status === "stopped") {
+		loadTestService.stopMonitoring();
+		store.stopRun(runId);
+		return;
+	}
+	if (isRunTerminal(status)) store.noteLateStop(runId);
 }
 
 /**
@@ -80,7 +104,7 @@ export default function LoadTestDashboard() {
 	const isStopping = useDashboardStore((s) => s.isStopping);
 	const loadTestConfig = useDashboardStore((s) => s.loadTestConfig);
 	const requestInfo = useDashboardStore((s) => s.requestInfo);
-	const stopRun = useDashboardStore((s) => s.stopRun);
+	const stopArrivedLate = useDashboardStore((s) => s.stopArrivedLate);
 	const setFinalReport = useDashboardStore((s) => s.setFinalReport);
 	const reportFailed = useDashboardStore((s) => s.reportFailed);
 	const retryReport = useDashboardStore((s) => s.retryReport);
@@ -224,9 +248,8 @@ export default function LoadTestDashboard() {
 			if (currentRunId) {
 				setStopping(currentRunId, true);
 				try {
-					await apiService.stopRun(currentRunId);
-					loadTestService.stopMonitoring();
-					stopRun(currentRunId);
+					const { status } = await apiService.stopRun(currentRunId);
+					applyStopAnswer(currentRunId, status);
 				} catch (error) {
 					// The button re-enables and the run keeps streaming, so without
 					// this the click is indistinguishable from one that did nothing.
@@ -250,7 +273,7 @@ export default function LoadTestDashboard() {
 				}
 			}
 		},
-		[currentRunId, setStopping, stopRun, showToast]
+		[currentRunId, setStopping, showToast]
 	);
 
 	// While a collection run streams, Reconnect would take its stream, so it
@@ -375,6 +398,13 @@ export default function LoadTestDashboard() {
 					exportRequestUrl={report.metadata?.requestUrl}
 					exportRequestMethod={report.metadata?.requestMethod}
 				/>
+				{stopArrivedLate && (
+					<div className="enter-fade px-5 pt-3 shrink-0">
+						<Callout severity="info">
+							The run had already finished when Stop arrived.
+						</Callout>
+					</div>
+				)}
 				<div className="flex-1 min-h-0 overflow-hidden">
 					<LoadTestDetail key={currentRunId} report={report} runId={currentRunId} />
 				</div>
