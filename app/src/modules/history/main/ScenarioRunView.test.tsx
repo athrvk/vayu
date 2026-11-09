@@ -256,6 +256,45 @@ describe("outcomes", () => {
 	});
 
 	/**
+	 * #3397. A step a Stop cut short has its own chip beside the four, drawn only
+	 * for a run that has one: "0 stopped" on every other run is noise.
+	 */
+	it("draws a stopped chip for a run a Stop cut short, and none otherwise", () => {
+		const summary = {
+			iterations: 1,
+			iterationsCompleted: 0,
+			stepsExecuted: 3,
+			passed: 2,
+			failed: 0,
+			skipped: 0,
+			errored: 0,
+			stepsStored: 3,
+			stepsDropped: 0,
+		};
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed"), storedStep(0, 2, "stopped", { name: "Cut" })],
+			scenario: { ...summary, stopped: 1 },
+		});
+		const { unmount } = render(<ScenarioRunView run={RUN} />);
+
+		expect(outcomeCount("stopped")).toContain("1");
+		// A stopped step is in no failure chip.
+		expect(outcomeCount("failed")).toContain("0");
+		expect(outcomeCount("errored")).toContain("0");
+		unmount();
+
+		// A summary stored before `stopped` existed has no key at all.
+		reportQuery.data = report({
+			results: [storedStep(0, 0, "passed")],
+			scenario: summary,
+		});
+		render(<ScenarioRunView run={RUN} />);
+
+		expect(document.querySelector('[data-outcome-count="stopped"]')).toBeNull();
+		expect(outcomeCount("passed")).toContain("2");
+	});
+
+	/**
 	 * Issue #726. Thinning drops passing rows only, so tallying the rows makes
 	 * the `passed` chip mean something different per run size - and disagree
 	 * with the step total in the same header strip.

@@ -50,6 +50,7 @@ import {
 	MinusCircle,
 } from "lucide-react";
 
+import { RUN_STATUS } from "@/components/shared/run-status";
 import { Button, Collapsible, CollapsibleContent } from "@/components/ui";
 import { isErrorStatus } from "@/constants/http-status";
 import { formatLatency } from "@/lib/format-number";
@@ -67,15 +68,17 @@ import type { ResolvedTimingPhase } from "./timing-phases";
  * assertion that did not hold over a perfectly good `200`, and `skipped` is a
  * step that never ran at all. Deriving either from the status code would make
  * the first read as a success and the second as a connection failure, so a
- * caller that knows the outcome states it instead.
+ * caller that knows the outcome states it instead. A `stopped` step was cut
+ * short by the run's Stop (#3397): its cancelled transfer is no failure either.
  */
-export type ExchangeState = "success" | "error" | "slow" | "skipped";
+export type ExchangeState = "success" | "error" | "slow" | "skipped" | "stopped";
 
 const STATE_ICON: Record<ExchangeState, typeof CheckCircle2> = {
 	success: CheckCircle2,
 	error: AlertCircle,
 	slow: Clock,
 	skipped: MinusCircle,
+	stopped: RUN_STATUS.stopped.icon,
 };
 
 const STATE_TINT: Record<ExchangeState, string> = {
@@ -83,6 +86,7 @@ const STATE_TINT: Record<ExchangeState, string> = {
 	error: "text-destructive-text",
 	slow: "text-status-stopped-text",
 	skipped: "text-muted-foreground",
+	stopped: RUN_STATUS.stopped.text,
 };
 
 export interface SampledExchangeProps {

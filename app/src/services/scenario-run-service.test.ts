@@ -31,7 +31,7 @@ const mockStartRun = vi.fn();
 const mockAddSteps = vi.fn();
 const mockSetPlan = vi.fn();
 /** The fold the store keeps beside the rows; the notification body reads it. */
-const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0 };
+const stepCounts = { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 };
 vi.mock("@/stores/scenario-run-store", () => ({
 	useScenarioRunStore: {
 		getState: () => ({
@@ -476,7 +476,7 @@ describe("ScenarioRunService", () => {
 
 	describe("system notifications (issue #1358)", () => {
 		afterEach(() => {
-			Object.assign(stepCounts, { passed: 0, failed: 0, skipped: 0, errored: 0 });
+			Object.assign(stepCounts, { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 });
 		});
 
 		it("posts the run's outcome counts when the stream closes", async () => {
@@ -501,6 +501,17 @@ describe("ScenarioRunService", () => {
 
 			expect(mockNotifyPost).toHaveBeenCalledWith(
 				expect.objectContaining({ body: "3 passed, 0 failed, 1 errored, 2 skipped" })
+			);
+		});
+
+		it("names a stopped step as stopped, not as a failure (#3397)", async () => {
+			Object.assign(stepCounts, { passed: 2, failed: 0, stopped: 1 });
+			scenarioRunService.startMonitoring("run_14b");
+
+			await closeStream();
+
+			expect(mockNotifyPost).toHaveBeenCalledWith(
+				expect.objectContaining({ body: "2 passed, 0 failed, 1 stopped" })
 			);
 		});
 

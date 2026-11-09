@@ -133,7 +133,7 @@ export interface ScenarioStepRow {
  * states to keep in step.
  */
 export interface StepListFilter {
-	/** The outcome chip that is pressed, or `null` for all four. */
+	/** The outcome chip that is pressed, or `null` for all of them. */
 	outcome: StepOutcome | null;
 	/** What was typed in the search box; untrimmed, as the field holds it. */
 	query: string;
@@ -482,7 +482,7 @@ export function stepRowsFromReport(report: RunReport | undefined): ScenarioStepR
  */
 export interface StepListSummary {
 	/**
-	 * The four outcomes.
+	 * The outcomes, each its own number.
 	 *
 	 * `skipped` is its own number and is never folded into `passed`. A step the
 	 * runner skipped did not assert anything, and reporting it as a pass is the
@@ -501,7 +501,7 @@ export interface StepListSummary {
 /** The summary of a list with nothing in it. */
 export function emptyStepSummary(): StepListSummary {
 	return {
-		counts: { passed: 0, failed: 0, skipped: 0, errored: 0 },
+		counts: { passed: 0, failed: 0, skipped: 0, errored: 0, stopped: 0 },
 		iterationSteps: 0,
 		dataBoundSteps: 0,
 	};
@@ -531,7 +531,7 @@ function cloneStepSummary(summary: StepListSummary): StepListSummary {
  */
 function applyStepRow(summary: StepListSummary, row: ScenarioStepRow, sign: 1 | -1): void {
 	// A row whose outcome the engine did not name must not silently land in one
-	// of the four buckets - `stepRowFromResult` has already decided what an
+	// of the buckets - `stepRowFromResult` has already decided what an
 	// unstamped row counts as.
 	if (row.outcome in summary.counts) summary.counts[row.outcome] += sign;
 	if (row.iteration > 0) summary.iterationSteps += sign;
@@ -552,7 +552,7 @@ export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSumma
 }
 
 /**
- * The run's four outcome totals as the engine counted them, or `null` when the
+ * The run's outcome totals as the engine counted them, or `null` when the
  * report cannot say (a live run before its report arrives, or a sidecar older
  * than these fields).
  *
@@ -564,14 +564,15 @@ export function summarizeSteps(steps: readonly ScenarioStepRow[]): StepListSumma
  * beside a header claiming 6,000 steps. The stored-row count stays the list's
  * own disclosure line (`thinningDisclosure`); the chips read the truth here.
  *
- * All four are read defensively: an older report typed as carrying them may
- * omit one at runtime, and a partial read is worse than falling back to the
- * rows wholesale.
+ * The first four are read defensively: an older report typed as carrying them
+ * may omit one at runtime, and a partial read is worse than falling back to the
+ * rows wholesale. `stopped` (#3397) is the exception: a report stored before it
+ * has none, and that is a run with nothing stopped, not an unreadable one.
  */
 export function outcomeCountsFromReport(report: RunReport | undefined): OutcomeCounts | null {
 	const scenario = report?.scenario;
 	if (!scenario) return null;
-	const { passed, failed, skipped, errored } = scenario;
+	const { passed, failed, skipped, errored, stopped } = scenario;
 	if (
 		typeof passed !== "number" ||
 		typeof failed !== "number" ||
@@ -580,7 +581,7 @@ export function outcomeCountsFromReport(report: RunReport | undefined): OutcomeC
 	) {
 		return null;
 	}
-	return { passed, failed, skipped, errored };
+	return { passed, failed, skipped, errored, stopped: typeof stopped === "number" ? stopped : 0 };
 }
 
 /**

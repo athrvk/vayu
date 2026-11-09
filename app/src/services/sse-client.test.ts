@@ -448,8 +448,8 @@ describe("parseStepEvent", () => {
 		});
 	});
 
-	it("accepts each of the four outcomes", () => {
-		for (const outcome of ["passed", "failed", "skipped", "errored"]) {
+	it("accepts each outcome, a step a Stop cut short (#3397) included", () => {
+		for (const outcome of ["passed", "failed", "skipped", "errored", "stopped"]) {
 			const step = parseStepEvent({ iteration: 0, stepIndex: 0, outcome });
 			expect(step?.outcome).toBe(outcome);
 		}

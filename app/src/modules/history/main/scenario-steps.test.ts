@@ -125,6 +125,21 @@ function append(steps: ScenarioStepRow[], event: ScenarioStepEvent): ScenarioSte
 }
 
 describe("foldStepEvents, one event at a time", () => {
+	it("counts a stopped step under stopped and under no failure (#3397)", () => {
+		const { summary } = foldStepEvents({ steps: [], summary: emptyStepSummary() }, [
+			event(0, 0, "passed"),
+			event(0, 1, "stopped"),
+		]).fold;
+
+		expect(summary.counts).toEqual({
+			passed: 1,
+			failed: 0,
+			skipped: 0,
+			errored: 0,
+			stopped: 1,
+		});
+	});
+
 	it("appends steps in the order they arrive", () => {
 		let steps: ScenarioStepRow[] = [];
 		steps = append(steps, event(0, 0));
@@ -274,7 +289,13 @@ describe("foldStepEvents, a batch at a time", () => {
 		const second = fold(first, [event(0, 1, "failed"), event(0, 2, "passed")]);
 
 		expect(second.summary).toEqual(summarizeSteps(second.steps));
-		expect(second.summary.counts).toEqual({ passed: 2, failed: 1, skipped: 0, errored: 0 });
+		expect(second.summary.counts).toEqual({
+			passed: 2,
+			failed: 1,
+			skipped: 0,
+			errored: 0,
+			stopped: 0,
+		});
 	});
 
 	it("returns the fold itself when every event in the batch is an idempotent replay", () => {
@@ -401,12 +422,13 @@ describe("summarizeSteps", () => {
 		expect(counts.skipped).toBe(2);
 	});
 
-	it("counts all four outcomes independently", () => {
+	it("counts every outcome independently", () => {
 		const steps = [
 			{ ...event(0, 0, "passed") },
 			{ ...event(0, 1, "failed") },
 			{ ...event(0, 2, "skipped") },
 			{ ...event(0, 3, "errored") },
+			{ ...event(0, 4, "stopped") },
 		];
 
 		expect(summarizeSteps(steps).counts).toEqual({
@@ -414,11 +436,18 @@ describe("summarizeSteps", () => {
 			failed: 1,
 			skipped: 1,
 			errored: 1,
+			stopped: 1,
 		});
 	});
 
 	it("is all zeros for an empty list", () => {
-		expect(summarizeSteps([]).counts).toEqual({ passed: 0, failed: 0, skipped: 0, errored: 0 });
+		expect(summarizeSteps([]).counts).toEqual({
+			passed: 0,
+			failed: 0,
+			skipped: 0,
+			errored: 0,
+			stopped: 0,
+		});
 	});
 });
 
@@ -447,7 +476,42 @@ describe("outcomeCountsFromReport", () => {
 		);
 
 		// 5,990, not the 4,990 the 5,000 kept rows would tally.
-		expect(counts).toEqual({ passed: 5_990, failed: 10, skipped: 0, errored: 0 });
+		expect(counts).toEqual({
+			passed: 5_990,
+			failed: 10,
+			skipped: 0,
+			errored: 0,
+			stopped: 0,
+		});
+	});
+
+	/**
+	 * #3397. `stopped` is the one count a stored summary may lack and still be
+	 * readable: a summary written before the engine counted it is a run with
+	 * nothing stopped, where a missing `errored` is an unreadable report.
+	 */
+	it.each([
+		["records stopped", 1, 1],
+		["reads a summary stored before stopped as 0", undefined, 0],
+	])("%s", (_name, stored, expected) => {
+		const counts = outcomeCountsFromReport(
+			report({
+				scenario: {
+					iterations: 1,
+					iterationsCompleted: 1,
+					stepsExecuted: 3,
+					passed: 2,
+					failed: 0,
+					skipped: 0,
+					errored: 0,
+					...(stored === undefined ? {} : { stopped: stored }),
+					stepsStored: 3,
+					stepsDropped: 0,
+				},
+			})
+		);
+
+		expect(counts).toEqual({ passed: 2, failed: 0, skipped: 0, errored: 0, stopped: expected });
 	});
 
 	it("is null for a report that carries no scenario summary", () => {

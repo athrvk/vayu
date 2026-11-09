@@ -105,14 +105,26 @@ const EMPTY_SUMMARY: StepListSummary = emptyStepSummary();
  * Chip tint per outcome, matching the step rows.
  *
  * `skipped` has its own entry rather than sharing `passed`'s: the whole point
- * of the four-number summary is that a step which never ran is not a pass.
+ * of the summary is that a step which never ran is not a pass.
  */
 const COUNT_CHIP: Record<StepOutcome, string> = {
 	passed: "bg-status-success-fill text-white",
 	failed: "bg-status-error-fill text-white",
 	skipped: "bg-muted text-muted-foreground",
 	errored: "bg-status-error-fill text-white",
+	stopped: "bg-status-stopped-fill text-white",
 };
+
+/**
+ * Whether the count chip for `outcome` is drawn: the first four always, zeros
+ * included, but `stopped` only for a run a Stop cut short (#3397). Zero is the
+ * answer for nearly every run, and a chip reading "0 stopped" on each of them
+ * is noise; it stays while it is the active filter, so the control that is
+ * pressed never vanishes under the reader.
+ */
+function showsCountChip(outcome: StepOutcome, count: number, isActive: boolean): boolean {
+	return outcome !== "stopped" || count > 0 || isActive;
+}
 
 export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 	const { data: report, isLoading } = useRunReportQuery(run.id);
@@ -366,9 +378,10 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 					/>
 				</div>
 
-				{/* All four, always, including the zeros. A summary that hides the
-				    outcomes nobody hit reads differently run to run, and the point
-				    of the row is that these are four separate numbers.
+				{/* The first four always, including the zeros. A summary that hides
+				    the outcomes nobody hit reads differently run to run, and the
+				    point of the row is that these are separate numbers. `stopped`
+				    joins them only when a Stop cut a step short.
 
 				    Each is also the filter for its own outcome (issue #730): a
 				    reader who has just read "11 failed" wants those eleven, and
@@ -378,6 +391,7 @@ export default function ScenarioRunView({ run }: ScenarioRunViewProps) {
 				<span className="flex items-center gap-1.5 sm:ml-auto">
 					{STEP_OUTCOMES.map((outcome) => {
 						const isActive = outcomeFilter === outcome;
+						if (!showsCountChip(outcome, counts[outcome], isActive)) return null;
 						return (
 							<button
 								key={outcome}
