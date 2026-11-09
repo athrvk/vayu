@@ -197,6 +197,27 @@ describe.each([["win32"], ["linux"]])("app icon on %s", (platform) => {
 		expect(appMenu).not.toHaveBeenCalled();
 	});
 
+	it("does not open it when Alt is held through a wheel turn (#3403)", async () => {
+		// Alt+scroll is Monaco's fast scroll. Monaco stops the wheel event's
+		// propagation when it scrolls, so this child swallows the event the way the
+		// editor does; only a capturing listener on `window` still hears it.
+		await renderFor(platform);
+		const editor = document.createElement("div");
+		editor.addEventListener("wheel", (e) => e.stopPropagation());
+		document.body.appendChild(editor);
+		fireEvent.keyDown(window, { key: "Alt" });
+		fireEvent.wheel(editor, { deltaY: 100 });
+		fireEvent.keyUp(window, { key: "Alt" });
+		expect(appMenu).not.toHaveBeenCalled();
+	});
+
+	it("still opens it on a plain tap after an earlier wheel turn", async () => {
+		await renderFor(platform);
+		fireEvent.wheel(document.body, { deltaY: 100 });
+		tapAlt();
+		expect(appMenu).toHaveBeenCalledTimes(1);
+	});
+
 	it("stays shut while a dialog owns the window", async () => {
 		// Window-level chords fire wherever focus is, including inside an open
 		// dialog (#935).
@@ -214,6 +235,26 @@ describe.each([["win32"], ["linux"]])("app icon on %s", (platform) => {
 		fireEvent.keyDown(window, { key: APP_MENU_CHORD.key });
 		tapAlt();
 		expect(appMenu).not.toHaveBeenCalled();
+	});
+
+	it("removes its capturing wheel listener once the bar is gone", async () => {
+		// Removal matches on the capture flag, so a remove without it would leave
+		// the listener on `window` for good.
+		const add = vi.spyOn(window, "addEventListener");
+		const remove = vi.spyOn(window, "removeEventListener");
+		try {
+			await renderFor(platform);
+			const added = add.mock.calls.filter(([type]) => type === "wheel");
+			expect(added).toEqual([
+				["wheel", expect.any(Function), { capture: true, passive: true }],
+			]);
+			cleanup();
+			const removed = remove.mock.calls.filter(([type]) => type === "wheel");
+			expect(removed).toEqual([["wheel", added[0][1], { capture: true }]]);
+		} finally {
+			add.mockRestore();
+			remove.mockRestore();
+		}
 	});
 
 	it("follows the spec's 16px icon at a 16px inset", async () => {
@@ -280,5 +321,15 @@ describe("app icon on macOS", () => {
 		fireEvent.keyDown(window, { key: APP_MENU_CHORD.key });
 		tapAlt();
 		expect(appMenu).not.toHaveBeenCalled();
+	});
+
+	it("registers no wheel listener", async () => {
+		const add = vi.spyOn(window, "addEventListener");
+		try {
+			await renderFor("darwin");
+			expect(add.mock.calls.filter(([type]) => type === "wheel")).toEqual([]);
+		} finally {
+			add.mockRestore();
+		}
 	});
 });

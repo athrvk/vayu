@@ -191,15 +191,20 @@ function AppIcon() {
 		const cancel = () => altTap.cancel();
 		window.addEventListener("keydown", onKeyDown);
 		window.addEventListener("keyup", onKeyUp);
-		// Alt+Tab moves focus before the keyup lands, and a pointer press mid-hold
-		// is not a tap either.
+		// Alt+Tab moves focus before the keyup lands, and a pointer press or a wheel
+		// turn mid-hold is not a tap either (#3403: Alt+scroll is Monaco's fast
+		// scroll). The wheel listener captures because Monaco stops the event's
+		// propagation when it scrolls, so a bubble listener on `window` never
+		// hears the turn that matters.
 		window.addEventListener("blur", cancel);
 		window.addEventListener("pointerdown", cancel);
+		window.addEventListener("wheel", cancel, { capture: true, passive: true });
 		return () => {
 			window.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("keyup", onKeyUp);
 			window.removeEventListener("blur", cancel);
 			window.removeEventListener("pointerdown", cancel);
+			window.removeEventListener("wheel", cancel, { capture: true });
 		};
 	}, [openAppMenu]);
 

@@ -23,7 +23,7 @@
 export interface AltTapWatcher {
 	keydown(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey">): void;
 	keyup(event: Pick<KeyboardEvent, "key">): void;
-	/** Focus left, or the pointer took over: the press is no longer a tap. */
+	/** Focus left, or the pointer or wheel took over: the press is no longer a tap. */
 	cancel(): void;
 }
 
