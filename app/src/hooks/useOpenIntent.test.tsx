@@ -15,8 +15,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook } from "@testing-library/react";
-import { useTabsStore, useImportModalStore } from "@/stores";
+import { renderHook, act } from "@testing-library/react";
+import { useTabsStore, useImportModalStore, useLayoutStore } from "@/stores";
 import { matchesChord, NEW_REQUEST_CHORD } from "@/constants/shortcuts";
 import type { OpenIntent } from "@/types/electron";
 
@@ -83,6 +83,80 @@ describe("useOpenIntent", () => {
 		// carries the wrong modifier would satisfy neither half.
 		expect(seen).toHaveLength(1);
 		expect(matchesChord(seen[0], NEW_REQUEST_CHORD)).toBe(true);
+	});
+
+	/*
+	 * #3404: `Shell` drops the chord while a dialog is up, so an OS request
+	 * that arrives then used to vanish. Mutation check: dispatch the chord
+	 * immediately and the first assertion (nothing yet) reddens.
+	 */
+	it("holds New Request until the open dialog closes, then runs it once", async () => {
+		const seen: KeyboardEvent[] = [];
+		const listener = (event: Event) => seen.push(event as KeyboardEvent);
+		window.addEventListener("keydown", listener);
+		const dialog = document.createElement("div");
+		dialog.setAttribute("data-slot", "dialog-content");
+		dialog.setAttribute("data-state", "open");
+		document.body.appendChild(dialog);
+		const { open } = mounted();
+
+		open({ kind: "newRequest" });
+		expect(seen).toHaveLength(0);
+
+		await act(async () => {
+			dialog.setAttribute("data-state", "closed");
+			await Promise.resolve();
+		});
+		window.removeEventListener("keydown", listener);
+		dialog.remove();
+
+		expect(seen).toHaveLength(1);
+		expect(matchesChord(seen[0], NEW_REQUEST_CHORD)).toBe(true);
+	});
+
+	it("closes the palette first, and runs New Request once it is gone", async () => {
+		const seen: KeyboardEvent[] = [];
+		const listener = (event: Event) => seen.push(event as KeyboardEvent);
+		window.addEventListener("keydown", listener);
+		const palette = document.createElement("div");
+		palette.setAttribute("data-slot", "dialog-content");
+		palette.setAttribute("data-state", "open");
+		document.body.appendChild(palette);
+		useLayoutStore.setState({ paletteOpen: true });
+		const { open } = mounted();
+
+		open({ kind: "newRequest" });
+		expect(useLayoutStore.getState().paletteOpen).toBe(false);
+		expect(seen).toHaveLength(0);
+
+		await act(async () => {
+			palette.remove();
+			await Promise.resolve();
+		});
+		window.removeEventListener("keydown", listener);
+
+		expect(seen).toHaveLength(1);
+	});
+
+	it("drops a held New Request when the hook unmounts", async () => {
+		const seen: KeyboardEvent[] = [];
+		const listener = (event: Event) => seen.push(event as KeyboardEvent);
+		window.addEventListener("keydown", listener);
+		const dialog = document.createElement("div");
+		dialog.setAttribute("data-slot", "dialog-content");
+		dialog.setAttribute("data-state", "open");
+		document.body.appendChild(dialog);
+		const { open, unmount } = mounted();
+
+		open({ kind: "newRequest" });
+		unmount();
+		await act(async () => {
+			dialog.remove();
+			await Promise.resolve();
+		});
+		window.removeEventListener("keydown", listener);
+
+		expect(seen).toHaveLength(0);
 	});
 
 	it("opens the collection tab for a collection intent", () => {

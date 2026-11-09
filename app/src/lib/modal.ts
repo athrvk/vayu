@@ -33,3 +33,34 @@ export function isModalOpen(): boolean {
 	}
 	return false;
 }
+
+/**
+ * Run `callback` once no modal is up, immediately if none is now. Returns a
+ * cancel function that drops a callback still waiting.
+ *
+ * There is no close event to subscribe to for the reason `isModalOpen` reads
+ * the DOM, so this watches the same DOM: a dialog leaves by unmounting or by
+ * flipping `data-state` to `closed` for its exit animation, and the observer
+ * sees both. It is for work the OS or a timer started that a dialog must not
+ * eat - an OS New request intent arrives as a chord `Shell` refuses under a
+ * dialog (#3404) - and not for chords a person pressed over one, which stay
+ * dropped (#935).
+ */
+export function whenNoModal(callback: () => void): () => void {
+	if (!isModalOpen()) {
+		callback();
+		return () => {};
+	}
+	const observer = new MutationObserver(() => {
+		if (isModalOpen()) return;
+		observer.disconnect();
+		callback();
+	});
+	observer.observe(document.body, {
+		childList: true,
+		subtree: true,
+		attributes: true,
+		attributeFilter: ["data-state"],
+	});
+	return () => observer.disconnect();
+}
