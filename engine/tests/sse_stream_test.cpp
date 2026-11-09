@@ -16,6 +16,10 @@
  * and the one-watcher claim are only meaningful over a socket.
  */
 
+// First, before anything that includes <httplib.h>: see the header. Needed
+// for `proxy_server.hpp`, whose forwarder builds an `httplib::Client` from a URL.
+#include "vayu/http/httplib_client_url.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
