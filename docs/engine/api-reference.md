@@ -10260,7 +10260,7 @@ outcome; `failOnSchemaError: true` on the run makes a schema failure fail a step
 that passed everything else. The run's rollup is
 [`schemaValidation`](#get-runsrunidreport) in the report.
 
-**Outcomes** are `passed`, `failed`, `skipped` and `errored`:
+**Outcomes** are `passed`, `failed`, `skipped`, `errored` and `stopped`:
 
 | Outcome | Meaning | Effect on the iteration |
 |---------|---------|-------------------------|
@@ -10269,14 +10269,18 @@ that passed everything else. The run's rollup is
 | `errored`, step | The step did not run clean: the pre-request or test script threw, at any level (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
 | `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` (or `control.switch` / `control.loop`) target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
+| `stopped` | A Stop (`POST /runs/:id/stop`) or an engine shutdown cut the step short (#3397): its transfer, the late OAuth 2.0 token request ahead of it, or one of its scripts' `pm.sendRequest` was cancelled. The row carries the cancelled response (status `0`, `Request cancelled`). | **Ends the run.** No later step is sent or stored, and the step is no error: not in `errored`, `failed`, `stepsNotRun`, the status distribution, coverage or the assertion tally. |
 
 Either kind of `errored` is the same outcome on the row, in the summary's
 `errored` count and on the `step` frame, with the error in `results.error`; the
 table's split is only about what the iteration does next. An HTTP error status
 is not an outcome: a step that answered 4xx or 5xx with every assertion holding
-is `passed`, and the summary's `failedRequests` counts it. The four outcomes
-are disjoint and sum to `stepsExecuted`, a skipped step included, and a
-[scenario load run](#scenario-load-runs) reports them under the same
+is `passed`, and the summary's `failedRequests` counts it. The five outcomes
+are disjoint and sum to `stepsExecuted`, a skipped step included
+(`passed + failed + errored + skipped + stopped`; a summary stored before
+#3397 has no `stopped` and reads it as `0`). A step that completed before the
+Stop landed keeps the outcome it earned. A
+[scenario load run](#scenario-load-runs) reports the other four under the same
 arithmetic and reads a step's flow control the same way: a no-response step
 and a thrown inline script are `errored` (#2947), a step that errored has its
 own jump (`control.switch`, `control.loop`) dropped, and a jump the run cannot
@@ -10320,14 +10324,18 @@ step ends its iteration, the positions after it that the iteration had not
 already attempted. It rides the step row (and the `step` frame) that ended the
 iteration when it is above zero, and the report's `scenario.stepsNotRun` sums it over the run. An
 iteration that ends any other way adds nothing: `setNextRequest(null)` and a
-forward jump are a script's decision, not a loss, and a stop is the user's.
+forward jump are a script's decision, not a loss, and a stop is the user's:
+a `stopped` step adds nothing under `stopOnError` either.
 `iterationsCompleted` keeps its meaning - an iteration an error ended still
 completed.
 
 A run whose steps failed still reaches `completed`: the outcome of the work is
 in the steps, and only the runner itself failing makes the run `failed`. A stop
-is honoured **between steps**, so a `stopped` run does not finish the iteration
-it was in.
+ends the step in flight - its send, its late token request and its scripts'
+`pm.sendRequest` all carry the run's stop as their cancel, so it lands within
+about a second rather than after a request timeout - and is otherwise honoured
+**between steps**, so a `stopped` run does not finish the iteration it was in.
+An engine shutdown stops an active run the same way.
 
 **A step's scripts can redirect the sequence.** `pm.execution.setNextRequest(name)`
 runs a named request next instead of the one that follows, `setNextRequest(null)`
@@ -10589,7 +10597,8 @@ the same pipeline time into the run's latency as into the step's, so the run's
 
 At the top of the section, `passed`, `failed`, `skipped` and `errored` are the
 collection run's outcomes (Outcomes under [Scenario runs](#scenario-runs),
-#2824), counted per step execution and disjoint. `errored` is an execution that
+#2824), counted per step execution and disjoint. A load run has no `stopped`:
+a step its Stop cancelled is in no count at all (#2136). `errored` is an execution that
 got no response, one whose inline `script.pre` or `script.post` threw (a
 thrown error, a script timeout, a refused `pm.request` write-back, an inline
 `pm.execution` call; #2947), or one that set a jump the run could not honour
@@ -11645,7 +11654,7 @@ data: {"event":"complete","runId":"run_1234567890","status":"completed"}
 `status` carries the same three values and the same absent-means-ask rule as on
 the metrics stream above.
 
-`outcome` is one of `passed`, `failed`, `skipped`, `errored` - see
+`outcome` is one of `passed`, `failed`, `skipped`, `errored`, `stopped` - see
 [Scenario runs](#scenario-runs). `dataRowIndex` is present only for a run with
 `data`, on the same terms as on the stored row, so a step reads the same live
 and after a reload. `stepsNotRun` follows the same rule: present only on the
@@ -11669,7 +11678,8 @@ so a step read live and the same step read back from the report name one
 request, and a client watching a run can offer the way back to it before the
 rows are written. One id is constant-size, which is why it rides the frame where
 the assertion list does not; absent when the plan step names no stored request,
-because an empty id is not a request. A scenario
+because an empty id is not a request. A `stopped` step carries no `tests` and
+no `validation`: what its scripts made of a cancelled send is no verdict. A scenario
 run publishes no `metrics` ticks:
 its work is sequential, so per-tick aggregates would be a rate of one request at
 a time rather than anything about the sequence.
@@ -12135,18 +12145,18 @@ stored status-code distribution, and is omitted when no distribution is stored.
 A **collection run's** row (`type: "scenario"`) carries one once it is terminal
 too (#2954), read from the `scenario` block of the stored summary under the
 same rule: nothing for a `pending` or `running` row, nothing for a terminal row
-whose summary is not stored yet. The four counts are the step
+whose summary is not stored yet. The five counts are the step
 [outcomes](#scenario-runs), which are disjoint:
 
 | Key | Meaning |
 |-----|---------|
-| `passed`, `failed`, `skipped`, `errored` | How many steps ended each way, the report's `scenario.passed` / `failed` / `skipped` / `errored`. `errored` is a step whose script threw or whose exchange did not complete, kept apart from `failed` so a run whose steps only errored does not read clean |
+| `passed`, `failed`, `skipped`, `errored`, `stopped` | How many steps ended each way, the report's `scenario.passed` / `failed` / `skipped` / `errored` / `stopped`. `errored` is a step whose script threw or whose exchange did not complete, kept apart from `failed` so a run whose steps only errored does not read clean; `stopped` is a step a Stop or a shutdown cut short (#3397), absent for a run stored before it |
 | `verdict` | As on a load row: the run's verdict against its declared `thresholds`, absent when it declared none, and as stored even for a `stopped` run |
 
 Each key is omitted when the stored summary does not record it, never zeroed,
 and a stored summary with no `scenario` object (a run stored before collection
 runs wrote one) adds no `resultSummary`. A clean four-step run reads
-`"resultSummary": { "passed": 4, "failed": 0, "skipped": 0, "errored": 0 }`:
+`"resultSummary": { "passed": 4, "failed": 0, "skipped": 0, "errored": 0, "stopped": 0 }`:
 the zeros are recorded counts. The load figures (`rps`, `p95Ms`, `errorRate`)
 are not on this row; the report has them.
 
@@ -13178,6 +13188,7 @@ failure of any of them.
   "iterations": 3, "iterationsCompleted": 3, "stepsExecuted": 6,
   "passed": 4, "failed": 1, "skipped": 0, "errored": 1,
   "stepsStored": 6, "stepsDropped": 0, "stepsNotRun": 0, "stopOnError": false,
+  "stopped": 0,
   "transactions": [
     { "name": "checkout", "count": 3, "errors": 0,
       "latency": { "min": 8.1, "p50": 14.2, "p90": 22.0, "p95": 26.5, "p99": 33.0, "max": 55.4 } }
@@ -13187,7 +13198,8 @@ failure of any of them.
 
 `stepsStored` versus `stepsExecuted` is the honest reading of `results[]`: a run
 that filled `maxScenarioStoredSteps` reports fewer rows than it ran, with every
-non-passing step among the ones kept. On a collection run (design mode)
+failed, errored and skipped step among the ones kept (a `stopped` one is kept
+like a success). On a collection run (design mode)
 `stepsExecuted` counts **steps** and `summary.totalRequests` counts **requests
 sent** (issue #2822): a step the plan skipped (`control.if`,
 `control.throughput`, `pm.execution.skipRequest()`) is a step and not a request,
@@ -13205,7 +13217,8 @@ run in which every step was skipped reports `totalRequests` `0` and an empty
 execution, disjoint, with an HTTP error status that no assertion rejected
 counted as `passed` and in `summary.failedRequests`. `stepsExecuted` is every
 step reached, a skipped one included, so in both
-`passed + failed + errored + skipped = stepsExecuted`. A scenario load run's
+`passed + failed + errored + skipped + stopped = stepsExecuted`, `stopped`
+read as `0` where it is absent. A scenario load run's
 `steps[].executed` counts every execution that was not `skipped`, so there the sum of
 `steps[].executed`, plus `skipped`, also equals `stepsExecuted`; a collection
 run has no `steps` array. A scenario load run stored by engine 0.45.0 or
@@ -13221,7 +13234,11 @@ plan, not a complete one with an error in it. `stopOnError` is the run's own
 setting, echoed because the same counts describe a different run under it.
 Both are written by a collection run (design mode) only: a scenario load run's
 section carries neither, and a summary stored before issue #2526 carries
-neither either.
+neither either. `stopped` (#3397) is the steps a Stop or a shutdown cut short,
+which no failure count includes and which take no failure's place among the
+kept rows; it is likewise a collection run's alone, absent for a scenario load
+run (whose stop-cancelled steps are in no count) and for a summary stored
+before it.
 
 `assertions` (#2820) is the other way round: a scenario load run's alone,
 `{ passed, failed }` over the exact population (every `assert.*` outcome,

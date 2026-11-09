@@ -1844,7 +1844,7 @@ this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`
-/ `failed` / `skipped` / `errored` and the same `thresholds` verdict
+/ `failed` / `skipped` / `errored` / `stopped` and the same `thresholds` verdict
 (`build_scenario_result_summary`, #2954), held in the same cache, which is
 sound for the same reason: each `update_run_summary` writer stores the summary before the
 terminal status, and nothing rewrites it after. **A change that writes the
@@ -1865,7 +1865,7 @@ four keys `apply_run_summary` reads plus everything sequence-shaped under
   },
   "scenario": {
     "iterations": 3, "iterations_completed": 3, "steps_executed": 6,
-    "passed": 4, "failed": 0, "skipped": 1, "errored": 1,
+    "passed": 4, "failed": 0, "skipped": 1, "errored": 1, "stopped": 0,
     "steps_stored": 6, "steps_dropped": 0, "steps_not_run": 0,
     "stop_on_error": false
   }
@@ -1885,7 +1885,13 @@ and a summary with no `status_codes` key (a run stored before the issue, whose
 HTTP/2 and negotiated something older, the load summary's key and unit, always
 written (a `0` is a run that counted and saw none, a missing key a run stored
 before the issue). `rps` is requests sent over `test_duration`. `steps_dropped` is what
-that cap thinned - always successes, never a failure. `steps_not_run` is the
+that cap thinned - always successes or `stopped` steps, never a failure.
+`stopped` (#3397) counts the steps a Stop or an engine shutdown cut short; with
+`passed`, `failed`, `skipped` and `errored` it sums to `steps_executed`, and a
+stopped step is in neither `total_requests` nor `status_codes`, as a load run's
+stop-cancelled request is not. A summary stored before the issue has no
+`stopped` (read as `0`), and the report and the list row then leave it out.
+`steps_not_run` is the
 plan positions errors cost (issue #2526): for every iteration an `errored` step
 ended, the positions after it the iteration had not attempted; an iteration
 that `setNextRequest(null)`, a jump or a stop ended adds nothing.
@@ -2315,7 +2321,7 @@ than assuming all eight are there and flat (`engineMs` aside, above):
 | Design mode (`record_design_result` in `execution.cpp`) | all eight keys flat, unconditionally - the same set the live `/execute` response carries, so a restored response shows exactly what the live one did (a skipped phase is stored as `0`) - plus flat **`engineMs`** for a buffered send, the one value the live `timing.engineMs` returned; absent for a streaming send, an auth-failure row and any row stored before #2132. Written on **every** single request, alongside a nested `request` object plus either `response` (success) or `error_type` / `error_message` (failure). The `response` node carries `headers` (the folded, lower-cased map), `headerLines` (#2460: the lossless `{name, value}` list in wire order with `Set-Cookie` per line, written only when non-empty - absent on a load sample and on any row stored before the field, so a reader falls back to `headers`), `redirects` (#2461: the followed 3xx hops as `{status, statusText, headerLines, url, schemeDowngrade}` - `url` the request that hop answered with its credential query values blanked, `schemeDowngrade` true when it went over `https` and the next hop over `http` (#2949) - written only when non-empty - absent when nothing was followed and on any row stored before the field; a hop stored before #2949 lacks `url` and `schemeDowngrade`), `body`, `httpVersion` - the negotiated protocol, `""` when nothing was negotiated, same convention as the live `/execute` response (see [POST /execute](api-reference.md#post-execute)) - and `httpVersionDowngraded`, true when the request asked for HTTP/2 and got something older; a row written before either field existed simply has no such key, so `restore-response.ts` must default both. Rows written by older engines omitted zero-valued phases and all of `totalMs`/`wireMs`/`queueWaitMs`, so readers must default missing keys (perceived total also lives in the `latency_ms` column). |
 | Load run, script validation (`store_validation_failures` in `run_manager.cpp`) | not a captured request: the one synthetic row the post-run replay of the un-inlined `script.post` elements leaves when an assertion failed (`status_code` 0, `error` `Script validation failures`; none is written for a run that failed nothing). `trace_data` is `{failures, failureCounts, failuresDistinct, totalFailed, totalPassed}`. `failures` holds each **distinct** failure message once, in first-seen order, at most 10 (`MAX_FAILURE_MESSAGES`); a scenario step's name prefixes it (`step name: assertion: message`) and is part of its identity. `failureCounts` is parallel to `failures`: how many times each failed across the sampled responses. `failuresDistinct` is every distinct message the replay saw, kept or not, so `failuresDistinct - len(failures)` were turned away. `totalFailed` / `totalPassed` count assertions, each occurrence once, so the counts sum to `totalFailed` unless messages were turned away. `failureCounts` and `failuresDistinct` are absent on a row stored before #3127, which also repeated a message once per sample; a reader falls back to a count of 1 each. The number of responses replayed is the report's `testValidation.samplesTested`, not stored here. `trace.failures` is the only field that tells the row from a captured sample. |
 
-| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored`), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that did not pass is kept and successes fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
+| Scenario run, one row per step execution (`core/scenario_runner.cpp`) | the design-mode writer's trace exactly - it *is* `build_result_trace` - plus five keys naming the step: `iteration` (0-based), `stepIndex`, `stepName`, `requestId` and `outcome` (`passed` / `failed` / `skipped` / `errored` / `stopped`, the last a step a Stop or shutdown cut short, #3397), and a sixth, **`dataRowIndex`**, present only for a run given `scenario.data` - the row that iteration bound, which is the only record of *which* row a wrapped pass re-used. The rows themselves are never stored; the snapshot keeps the row count (`dataRowCount`) plus the file's name and content hash (`dataFileName`, `dataFileHash`), never its path or rows. A `skipped` row - a pre-request script called `pm.execution.skipRequest()` - carries the `request` node and **no `response`**, because nothing was sent; `restore-response.ts` already answers `null` for that shape rather than building a hollow 0-byte response. Bodies are capped the same way. The row count is bounded by **`maxScenarioStoredSteps`** (config, `data_retention`, default 5000; `0` = unlimited), biased so that every step that failed, errored or was skipped is kept and successes, with `stopped` steps, fill the remainder - what was thinned is reported in `runs.summary`, never silently. |
 
 A **streaming** design run (`POST /execute` with `"stream": true`, issue #573)
 adds one node the others never carry: **`events`**, holding `items` (the first

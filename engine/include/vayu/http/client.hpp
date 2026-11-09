@@ -194,16 +194,17 @@ struct ClientConfig {
      * `RouteContext::server_stopping` (a buffered `POST /execute` through its
      * `DisconnectWatch`, which its caller hanging up raises too, #3383), so
      * `Server::stop()` can end those transfers before it joins the handler
-     * threads rather than waiting out whatever timeout a request typed. The
-     * flag must outlive the transfer.
+     * threads rather than waiting out whatever timeout a request typed. Set
+     * from `RunContext::should_stop` for every step of a sequential collection
+     * run and its scripts' `pm.sendRequest` (#3397), which a Stop and an
+     * engine shutdown both raise. The flag must outlive the transfer.
      *
      * Read from libcurl's progress callback, which runs about once a second
      * while a transfer waits on a silent peer, so a cancel lands within about
      * that. The response reports `ErrorCode::Cancelled` - except for a bounded
      * stream the server has answered, which the cancel *ends* rather than
      * fails: a collection run's stop, the way `POST /runs/:id/stop` ends a
-     * design stream (#3235). Set from `RunContext::should_stop` by the
-     * sequential runner's streaming steps.
+     * design stream (#3235).
      */
     const std::atomic<bool>* cancel = nullptr;
 };
