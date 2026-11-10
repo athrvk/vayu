@@ -9,13 +9,15 @@
  * MCP data-change invalidation.
  *
  * An MCP tool call mutates the engine from the Electron main process, so the
- * renderer's caches have no way to notice: `refetchOnWindowFocus` is off
- * app-wide (see `lib/query-client.ts`), and until now nothing crossed the
- * process boundary. The main process sends one `mcp:data-changed` per family a
- * successful call touched; this maps that family to the query keys that read it.
+ * renderer's caches have no way to notice on their own: `refetchOnWindowFocus`
+ * is off app-wide (see `lib/query-client.ts`). The main process sends one
+ * `mcp:data-changed` per family a successful call touched; this maps that
+ * family to the query keys that read it. The engine's change feed maps its
+ * events onto the same families (`lib/change-feed-invalidation.ts`, #3420), so
+ * this is the one key table for both.
  *
- * Invalidation only - no engine data rides over IPC, so there is exactly one
- * path by which a row reaches the UI and it is the query layer.
+ * Invalidation only - no engine data rides over IPC or the feed, so there is
+ * exactly one path by which a row reaches the UI and it is the query layer.
  */
 
 import type { QueryClient } from "@tanstack/react-query";

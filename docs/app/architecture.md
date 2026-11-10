@@ -270,6 +270,10 @@ sections themselves.
   - **A load run that is superseded or dropped is still running, and the dashboard says so** (issue #1925). Both paths leave the dashboard in its running layout with the Stop button, under the "Lost the live metrics stream" callout, whose Reconnect calls `loadTestService.startMonitoring` for the same run and resumes the ticks, unless a collection run is streaming, whose stream it would take (`canReattachLoadRun`, #3351). It never shows Completed: `setFinalReport` refuses a report whose `metadata.status` is `running` or `pending`, whichever caller fetched it
   - Metrics go to `dashboard-store` (via `loadTestService`); steps go to `scenario-run-store` (via `scenarioRunService`)
 
+- **`change-feed-service.ts`**: The engine's change feed (`GET /changes`, issue #3420), one stream for the app's life
+  - Every committed write of a collection, request, example, environment, the globals or a trash entry, whoever made it, becomes an invalidation of the query keys that read it (`lib/change-feed-invalidation.ts`, through the MCP families of `lib/mcp-invalidation.ts`), coalesced over 200ms and held while a mutation is in flight
+  - Reconnects on its own backoff and resumes by `?lastEventId=`, the inbox stream's shape; a `reset` refetches everything the feed covers. Opened by `useChangeFeed` only while the engine is connected. See `state-management.md`
+
 - **`http-client.ts`**: Low-level fetch wrapper
   - Request/response transformation
   - Error handling and timeout management
@@ -281,6 +285,7 @@ sections themselves.
 - **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects for previews (the engine resolves what is sent)
 - **`useSaveManager()`**: Auto-save orchestration with debouncing
 - **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button
+- **`useChangeFeed()`**: Mounted once in `App.tsx`; holds the change feed open while the engine is connected
 
 ## Data Flow
 

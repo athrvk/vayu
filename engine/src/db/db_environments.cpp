@@ -54,6 +54,9 @@ void Database::save_environment (const Environment& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Saving environment",
     { { "id", e.id }, { "name", e.name }, { "isActive", e.is_active } });
+    // The environments a save deactivates publish nothing of their own: the
+    // flag is read off the list, which this change already sends a client to.
+    const ChangeOp op = upsert_op<Environment> (impl_->storage, e.id);
     impl_->storage.transaction ([&] {
         if (e.is_active) {
             deactivate_other_environments_locked (e.id);
@@ -61,6 +64,7 @@ void Database::save_environment (const Environment& e) {
         impl_->storage.replace (e);
         return true; // Commit
     });
+    changes_.publish (environment_change (e.id, op));
 }
 
 // Deleted rows are excluded here rather than at each caller (#2970), the
@@ -89,15 +93,20 @@ void Database::delete_environment (const std::string& id) {
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
+    bool deleted = false;
     impl_->storage.transaction ([&] {
         for (auto& environment : impl_->storage.get_all<Environment> (where (
              c (&Environment::id) == id && is_null (&Environment::deleted_at)))) {
             environment.deleted_at = stamp;
             environment.is_active  = false;
             impl_->storage.update (environment);
+            deleted = true;
         }
         return true; // Commit
     });
+    if (deleted) {
+        changes_.publish (environment_change (id, ChangeOp::Delete));
+    }
 }
 
 TrashOutcome Database::restore_environment_locked (const TrashEntry& entry) {
@@ -109,6 +118,7 @@ TrashOutcome Database::restore_environment_locked (const TrashEntry& entry) {
         }
         return true; // Commit
     });
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info (
     "db", "Restored environment from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
@@ -125,7 +135,9 @@ void Database::purge_environment_locked (const std::string& id) {
 void Database::save_globals (const Globals& g) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Saving globals");
+    const ChangeOp op = upsert_op<Globals> (impl_->storage, g.id);
     impl_->storage.replace (g);
+    changes_.publish (Change{ ChangeKind::Globals, op, g.id, std::nullopt, std::nullopt });
 }
 
 std::optional<Globals> Database::get_globals () {

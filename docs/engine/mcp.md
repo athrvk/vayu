@@ -160,6 +160,18 @@ node dist-electron/mcp/cli.js
 Configuration comes from environment variables (see [Configuration](#configuration)),
 since there is no Settings UI. It still requires a running engine.
 
+**An open Vayu window sees a stdio session's writes.** The CLI runs in its own
+process, so it has no `mcp:data-changed` channel to the renderer (see
+[Lifecycle & IPC](#lifecycle--ipc)). It does not need one for
+the rows the UI edits: the engine publishes every committed write of a
+collection, a request, an example, an environment, the globals or a trash entry
+on its change feed (`GET /changes`, issue #3420), whoever made it, and the app
+follows that feed. A request a Zed session edits therefore shows in the tab
+that has it open, and a field the user was editing there is kept and flagged
+as a conflict rather than overwritten. What the feed does not carry - runs,
+cookies, engine config, local services, the OAuth token cache - reaches an
+open window on its own polls, or on the next read.
+
 The CLI sets `host: "cli"` on its tool context (the app sets `"app"`), and every
 sentence that sends the user somewhere to lift a refusal reads it, so a guard in
 a stdio session names the variable that lifts it and never a Settings screen or
@@ -2980,7 +2992,11 @@ app-wide), so a request an agent created used to stay invisible in the
 collection tree until some unrelated mutation happened to refetch the lists.
 Each tool declares the data families it changes (`invalidates` in `tools/*.tools.ts`)
 and `dispatchTool` - the single dispatch path - sends one `mcp:data-changed` per
-family after a call that did **not** return an error. The event names a family
+family after a call that did **not** return an error. (The rows the engine's
+change feed covers reach the renderer that way too, from any writer: see
+[the stdio CLI](#stdio-cli-zed--headless--ci). This channel is what carries the
+rest, and a write it and the feed both report is invalidated twice, which costs
+a refetch and nothing else.) The event names a family
 (`collection`, `collectionRow`, `request`, `environment`, `run`, `cookie`,
 `config`, `service`, `oauth`, `clientCertificate`, `variables`)
 plus the `collectionId` / `requestId` / `runId` / `inboxId` / `mockId` the call

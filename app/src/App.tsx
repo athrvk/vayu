@@ -33,6 +33,7 @@ import { useOsIcon } from "./hooks/useOsIcon";
 import { useOpenIntent } from "./hooks/useOpenIntent";
 import { useWindowFileDrop } from "./hooks/useWindowFileDrop";
 import { useMcpDataInvalidation } from "./hooks/useMcpDataInvalidation";
+import { useChangeFeed } from "./hooks/useChangeFeed";
 import { useFileBindingMirror } from "./hooks/useFileBindingMirror";
 import { useLegacyFileBindingImport } from "./hooks/useLegacyFileBindingImport";
 import { useDataFileLocationMirror } from "./hooks/useDataFileLocationMirror";
@@ -125,6 +126,10 @@ function App() {
 	// An agent writing over MCP mutates the engine from the main process, which
 	// no query can see. This is the channel that tells the cache to refetch.
 	useMcpDataInvalidation();
+	// Every other writer - the stdio MCP server, a script against the engine,
+	// another window - reaches the cache through the engine's change feed,
+	// which reports each committed write whoever made it (#3420).
+	useChangeFeed();
 
 	// Each collection's spec-file and data-file binding rides its engine row
 	// (#2765); the stores that index them by id follow the collections list.

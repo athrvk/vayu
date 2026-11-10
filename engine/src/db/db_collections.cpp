@@ -47,18 +47,22 @@ void Database::create_collection (const Collection& c) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
     "db", "Creating collection", { { "id", c.id }, { "name", c.name } });
+    const ChangeOp op = upsert_op<Collection> (impl_->storage, c.id);
     impl_->storage.replace (c);
+    changes_.publish (collection_change (c, op));
 }
 
 void Database::rebind_collection (const Collection& collection) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Rebinding collection", { { "id", collection.id } });
+    const ChangeOp op = upsert_op<Collection> (impl_->storage, collection.id);
     impl_->storage.transaction ([&] {
         impl_->storage.replace (collection);
         impl_->storage.remove_all<DeclinedOperation> (
         where (c (&DeclinedOperation::collection_id) == collection.id));
         return true; // Commit
     });
+    changes_.publish (collection_change (collection, op));
 }
 
 std::vector<Collection> Database::get_collections () {
@@ -264,6 +268,10 @@ const std::optional<std::string>& declined_under) {
     // Only rows that are still live are stamped. A row an earlier delete
     // already took keeps that delete's stamp, so restoring this collection
     // leaves it in the trash - as its own root, since its owner is live again.
+    // The cascade publishes one change, on the root, and only when this call
+    // stamps it: a root already in the trash changes nothing.
+    const auto live_root = impl_->storage.get_all<Collection> (
+    where (c (&Collection::id) == id && is_null (&Collection::deleted_at)));
     impl_->storage.transaction ([&] {
         for (const auto& collection_id : subtree) {
             for (auto& request : impl_->storage.get_all<Request> (
@@ -285,6 +293,9 @@ const std::optional<std::string>& declined_under) {
         }
         return true; // Commit
     });
+    if (!live_root.empty ()) {
+        changes_.publish (collection_change (live_root.front (), ChangeOp::Delete));
+    }
 
     // No spec-document sweep here, deliberately: a stamped collection still
     // binds its document, and reclaiming it now would leave a restore pointing
@@ -624,6 +635,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info ("db", "Restored request from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
@@ -663,6 +675,13 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
         }
         return true; // Commit
     });
+    // One change for the cohort, on the root, which a re-parent moved to the
+    // tree root.
+    Change restored = trash_change (entry, ChangeOp::Restore);
+    if (reparented) {
+        restored.collection_id.reset ();
+    }
+    changes_.publish (std::move (restored));
 
     vayu::utils::log_info ("db", "Restored collection from trash",
     { { "id", entry.id }, { "subCollections", entry.collections },
@@ -704,26 +723,21 @@ const std::string& id) {
 void Database::purge_trash_entry_locked (const TrashEntry& entry) {
     if (entry.kind == "collection") {
         purge_collection_locked (entry.id);
-        return;
-    }
-    if (entry.kind == "request") {
+    } else if (entry.kind == "request") {
         purge_request_locked (entry.id);
-        return;
-    }
-    if (entry.kind == "environment") {
+    } else if (entry.kind == "environment") {
         purge_environment_locked (entry.id);
-        return;
-    }
-    if (entry.kind == "example") {
+    } else if (entry.kind == "example") {
         purge_example_locked (entry.id);
-        return;
-    }
-    if (entry.kind == "clientCertificate") {
+    } else if (entry.kind == "clientCertificate") {
         purge_client_certificate_locked (entry.id);
-        return;
+    } else {
+        throw std::logic_error (
+        "Trash entry '" + entry.id + "' has unknown kind '" + entry.kind + "'");
     }
-    throw std::logic_error (
-    "Trash entry '" + entry.id + "' has unknown kind '" + entry.kind + "'");
+    // The one place both an explicit purge and retention destroy an entry,
+    // so each publishes exactly once; a collection's cascade rides on its root.
+    changes_.publish (trash_change (entry, ChangeOp::Purge));
 }
 
 std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
@@ -814,6 +828,7 @@ const std::vector<Request>& requests) {
     " collections, " + std::to_string (requests.size ()) + " requests");
 
     retry_on_busy ("apply reorder", 5, std::chrono::milliseconds (100), [&] {
+        std::vector<Change> moved;
         impl_->storage.transaction ([&] {
             // A deleted row does not exist to this batch (issue #988): the
             // caller is repositioning the tree it can see, and writing the row
@@ -826,6 +841,7 @@ const std::vector<Request>& requests) {
                     throw MissingRowError ("Collection", row.id);
                 }
                 impl_->storage.update (row);
+                moved.push_back (collection_change (row, ChangeOp::Update));
             }
             for (const auto& row : requests) {
                 if (impl_->storage.count<Request> (where (
@@ -833,9 +849,11 @@ const std::vector<Request>& requests) {
                     throw MissingRowError ("Request", row.id);
                 }
                 impl_->storage.update (row);
+                moved.push_back (request_change (row, ChangeOp::Update));
             }
             return true; // Commit
         });
+        changes_.publish (std::move (moved));
     });
 }
 

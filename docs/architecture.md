@@ -122,6 +122,40 @@ Manager                              Engine
    │◄───────────────────────────────────┤
 ```
 
+### Change Feed
+
+The engine's stored rows have more writers than the Manager: the stdio MCP CLI,
+`vayu-cli`, a script against the API, a second window. So the Manager holds one
+Server-Sent Events stream for its whole life, `GET /changes`, on which the
+engine publishes one event per committed write of a collection, a request, an
+example, an environment, the globals or a trash entry, whoever made it (issue
+#3420). The event names the row and the operation and carries no row data:
+the Manager refetches what it names through its query layer, so a row still
+reaches the UI by exactly one path.
+
+```
+Manager                              Engine
+   │                                    │
+   │  GET /changes[?lastEventId=N]      │
+   ├───────────────────────────────────►│
+   │                                    │
+   │  event: ready (or reset)           │
+   │◄───────────────────────────────────┤
+   │                                    │
+   │  event: change                     │
+   │  data: {kind, id, op, ...}         │
+   │◄───────────────────────────────────┤
+   │                          (repeated) │
+```
+
+A dropped stream reconnects from the last id it saw and the engine replays what
+was missed; a resume the engine can no longer cover (too far behind, or an id
+from before an engine restart) opens with `reset` instead, and the Manager
+refetches everything the feed describes. The stream is open only while the
+health poll says the engine is connected. The renderer side is described in
+[State management](app/state-management.md), and the route in the
+[API reference](engine/api-reference.md#change-feed).
+
 ### Load Test Flow
 
 ```

@@ -23,6 +23,7 @@
 
 #include <sqlite_orm/sqlite_orm.h>
 
+#include "vayu/db/change_feed.hpp"
 #include "vayu/db/recovery.hpp"
 #include "vayu/types.hpp"
 
@@ -790,6 +791,20 @@ class Database {
      */
     void with_lock (const std::function<void ()>& fn); // database.cpp
 
+    /**
+     * @brief What `GET /changes` relays (issue #3420): one event per committed
+     *        write of a collection, request, example, environment, the globals
+     *        or a trash entry. See `db/change_feed.hpp` for when one is
+     *        published and what a cascade publishes.
+     *
+     * Every public write of those kinds publishes here and nothing else does;
+     * the startup repair passes rewrite rows before the engine listens, when
+     * no stream can be open and a resume from an earlier process resets.
+     */
+    ChangeFeed& change_feed () {
+        return changes_;
+    }
+
     // db_environments.cpp. The reads see live rows only (#2970): every
     // composition, script scope and export reaches an environment through
     // `get_environment`, so a trashed one is missing to all of them at once.
@@ -1381,6 +1396,10 @@ class Database {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
+    /// `change_feed`. Published to with the DB mutex held, after the write's
+    /// own transaction has committed (`db/change_feed.hpp`).
+    ChangeFeed changes_{ change_feed_id_base_now () };
+
     /**
      * @brief Whether the database at @p path opens and carries this build's
      *        schema - or is corrupt, or could not be examined at all: the
@@ -1588,8 +1607,10 @@ class Database {
      *
      * Same scope rule as @ref verify_spec_sync_rows_locked - mutex held, inside
      * the transaction, after the verification.
+     *
+     * @return the changes the batch publishes once its transaction commits.
      */
-    void write_spec_sync_batch_locked (const SpecSyncBatch& batch); // db_specs.cpp
+    std::vector<Change> write_spec_sync_batch_locked (const SpecSyncBatch& batch); // db_specs.cpp
 
     /**
      * @brief Run @p fn under the DB mutex, retrying on a SQLite busy/locked error.

@@ -982,6 +982,25 @@ constexpr size_t MAX_ALLOWED_ORIGIN_LENGTH = 512;
 } // namespace inbox
 
 /**
+ * @brief The workspace change feed, `GET /changes` (issue #3420)
+ *
+ * Rails, not settings: both bound what the engine holds for clients it cannot
+ * see, and neither changes what a client is told, only when it is told to
+ * refetch everything instead of one row.
+ */
+namespace change_feed {
+/// Events kept for a `Last-Event-ID` resume. An interactive session writes a
+/// handful a minute, so a reconnect after any ordinary outage replays; an
+/// import or a sync larger than this sends a reader that was behind a `reset`,
+/// which costs it the same refetch the bulk write would have asked for anyway.
+constexpr std::size_t MAX_RETAINED_EVENTS = 1024;
+/// Streams read at once. Each parks a management-API pool thread (at least 8,
+/// growing to 4x), and the route needs no id, so a page's no-cors `fetch`
+/// could otherwise take every thread. One app window holds one stream.
+constexpr int MAX_READERS = 8;
+} // namespace change_feed
+
+/**
  * @brief Script validation configuration
  */
 namespace script_validation {

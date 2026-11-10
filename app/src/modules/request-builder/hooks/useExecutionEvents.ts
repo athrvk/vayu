@@ -34,6 +34,7 @@
 
 import { useEffect, useRef } from "react";
 import { API_ENDPOINTS } from "@/config/api-endpoints";
+import { streamRetryDelayMs } from "@/lib/stream-backoff";
 import { createThrottledBatcher } from "@/services/throttled-batcher";
 import { useExecutionEventsStore } from "@/stores";
 import {
@@ -55,18 +56,17 @@ export const EXECUTION_EVENTS_RETRY_MAX_MS = 5000;
  * The first step has to outlast the engine's stale-claim window - the previous
  * consumer's claim is held until two keep-alive intervals have passed without a
  * write - because a reconnect inside it is refused with a 409. The app cannot
- * read that setting, so the backoff doubles rather than guessing it. Jitter
- * keeps several watchers from retrying in lockstep.
+ * read that setting, so the backoff doubles rather than guessing it.
  */
 export function executionEventsRetryDelayMs(
 	attempt: number,
 	random: () => number = Math.random
 ): number {
-	const step = Math.min(
-		EXECUTION_EVENTS_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1),
-		EXECUTION_EVENTS_RETRY_MAX_MS
+	return streamRetryDelayMs(
+		attempt,
+		{ baseMs: EXECUTION_EVENTS_RETRY_BASE_MS, maxMs: EXECUTION_EVENTS_RETRY_MAX_MS },
+		random
 	);
-	return Math.round(step + random() * step * 0.5);
 }
 
 /** Narrow one relay `open` payload, or reject it. */

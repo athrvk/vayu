@@ -54,7 +54,9 @@ void Database::save_request (const Request& r) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
     "db", "Saving request", { { "id", r.id }, { "name", r.name } });
+    const ChangeOp op = upsert_op<Request> (impl_->storage, r.id);
     impl_->storage.replace (r);
+    changes_.publish (request_change (r, op));
 }
 
 std::optional<Request> Database::get_request (const std::string& id) {
@@ -226,6 +228,7 @@ const std::optional<std::string>& declined_under) {
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
+    std::optional<Change> deleted;
     impl_->storage.transaction ([&] {
         for (auto& request : impl_->storage.get_all<Request> (
              where (c (&Request::id) == id && is_null (&Request::deleted_at)))) {
@@ -234,9 +237,13 @@ const std::optional<std::string>& declined_under) {
             if (declined_under) {
                 record_declined_operation_locked (*declined_under, request);
             }
+            deleted = request_change (request, ChangeOp::Delete);
         }
         return true; // Commit
     });
+    if (deleted) {
+        changes_.publish (std::move (*deleted));
+    }
 }
 
 void Database::record_declined_operation_locked (const std::string& collection_id,
@@ -282,7 +289,9 @@ void Database::save_request_example (const RequestExample& e) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Saving request example",
     { { "id", e.id }, { "requestId", e.request_id } });
+    const ChangeOp op = upsert_op<RequestExample> (impl_->storage, e.id);
     impl_->storage.replace (e);
+    changes_.publish (example_change (e, op));
 }
 
 namespace {
@@ -368,14 +377,19 @@ void Database::delete_request_example (const std::string& id) {
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
+    std::optional<Change> deleted;
     impl_->storage.transaction ([&] {
         for (auto& example : impl_->storage.get_all<RequestExample> (where (
              c (&RequestExample::id) == id && is_null (&RequestExample::deleted_at)))) {
             example.deleted_at = stamp;
             impl_->storage.update (example);
+            deleted = example_change (example, ChangeOp::Delete);
         }
         return true; // Commit
     });
+    if (deleted) {
+        changes_.publish (std::move (*deleted));
+    }
 }
 
 bool Database::request_is_absent_locked (const std::string& request_id) {
@@ -414,6 +428,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info ("db", "Restored example from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
@@ -445,6 +460,8 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
     row.postman_response.reset ();
     row.updated_at = now;
     impl_->storage.replace (row);
+    // Gone from every read, which is what a client sees of a delete.
+    changes_.publish (example_change (row, ChangeOp::Delete));
 }
 
 // ============================================================================
@@ -472,6 +489,9 @@ const std::vector<SpecDocument>& specs) {
     std::to_string (specs.size ()) + " specs");
 
     retry_on_busy ("apply import", 5, std::chrono::milliseconds (100), [&] {
+        // One change per row: an import larger than the feed's ring sends a
+        // reader that was behind a `reset`, the refetch it needs anyway.
+        std::vector<Change> imported;
         impl_->storage.transaction ([&] {
             // Ahead of the collections, which may bind them - the same
             // owner-before-referrer order the rest of this transaction keeps.
@@ -479,14 +499,20 @@ const std::vector<SpecDocument>& specs) {
                 impl_->storage.replace (s);
             }
             for (const auto& c : collections) {
+                imported.push_back (
+                collection_change (c, upsert_op<Collection> (impl_->storage, c.id)));
                 impl_->storage.replace (c);
             }
             for (const auto& r : requests) {
+                imported.push_back (
+                request_change (r, upsert_op<Request> (impl_->storage, r.id)));
                 impl_->storage.replace (r);
             }
             // After the requests they belong to, so the rows land in owner
             // order like everything else here.
             for (const auto& x : examples) {
+                imported.push_back (
+                example_change (x, upsert_op<RequestExample> (impl_->storage, x.id)));
                 impl_->storage.replace (x);
             }
             for (const auto& e : environments) {
@@ -497,10 +523,13 @@ const std::vector<SpecDocument>& specs) {
                 if (e.is_active) {
                     deactivate_other_environments_locked (e.id);
                 }
+                imported.push_back (environment_change (
+                e.id, upsert_op<Environment> (impl_->storage, e.id)));
                 impl_->storage.replace (e);
             }
             return true; // Commit
         });
+        changes_.publish (std::move (imported));
     });
 }
 
