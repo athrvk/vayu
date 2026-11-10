@@ -19,7 +19,7 @@ import {
 	queryRowsOf,
 	syncPathRows,
 } from "./path-variables";
-import { encodeQueryComponent } from "./query-encoding";
+import { encodeQueryComponent, splitFragment } from "./query-encoding";
 
 /** Whether a query built from rows percent-encodes them - see `writeQueryRow`. */
 export interface UrlEncodeOptions {
@@ -53,13 +53,14 @@ interface UrlQuerySplit {
  * glued to it would never reach the server.
  */
 function splitQuery(url: string): UrlQuerySplit {
-	const view = maskTokens(url);
-	const hash = view.indexOf("#");
-	const end = hash === -1 ? url.length : hash;
-	const fragment = url.slice(end);
-	const queryStart = view.slice(0, end).indexOf("?");
-	if (queryStart === -1) return { base: url.slice(0, end), query: null, fragment };
-	return { base: url.slice(0, queryStart), query: url.slice(queryStart + 1, end), fragment };
+	const { base: beforeFragment, fragment } = splitFragment(url);
+	const queryStart = maskTokens(beforeFragment).indexOf("?");
+	if (queryStart === -1) return { base: beforeFragment, query: null, fragment };
+	return {
+		base: beforeFragment.slice(0, queryStart),
+		query: beforeFragment.slice(queryStart + 1),
+		fragment,
+	};
 }
 
 /**

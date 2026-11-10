@@ -24,6 +24,7 @@
  */
 
 import { compactObject, readCompactJson, type JsonNode } from "./compact-json";
+import { splitFragment } from "@/modules/request-builder/utils/query-encoding";
 
 /** `constants::request_body::MAX_JSON_DEPTH`: a JSON-RPC call nested deeper is left as typed. */
 const ENGINE_MAX_JSON_DEPTH = 128;
@@ -149,9 +150,7 @@ export function graphqlGetQuery(content: string): string | undefined {
  */
 export function urlWithQuery(url: string, query: string): string {
 	if (query === "") return url;
-	const hash = url.indexOf("#");
-	const target = hash === -1 ? url : url.slice(0, hash);
-	const fragment = hash === -1 ? "" : url.slice(hash);
+	const { base: target, fragment } = splitFragment(url);
 	let separator = "";
 	if (!target.includes("?")) separator = "?";
 	else if (target !== "" && !target.endsWith("?") && !target.endsWith("&")) separator = "&";

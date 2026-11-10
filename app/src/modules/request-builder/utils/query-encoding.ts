@@ -88,6 +88,47 @@ export function encodeQueryComponent(text: string, part: QueryPart): string {
 }
 
 /**
+ * @p url cut at its fragment, the first `#` outside a `{{...}}` token, so
+ * `{{a#b}}` is not one. `fragment` runs from the `#` on, or is "" when there is
+ * none. The one rule the query split (`url.ts`), the "Sends" line and the
+ * snippet's appended query parameter share; libcurl never sends a fragment.
+ */
+export function splitFragment(url: string): { base: string; fragment: string } {
+	const hash = maskTokens(url).indexOf("#");
+	if (hash === -1) return { base: url, fragment: "" };
+	return { base: url.slice(0, hash), fragment: url.slice(hash) };
+}
+
+/**
+ * @p text without the spaces and tabs a paste leaves around a credential, only
+ * the ends: the engine's `trimmed_credential` (`auth_resolver.cpp`), which is
+ * `trim_optional_whitespace`, not `String.prototype.trim`.
+ */
+export function trimCredential(text: string): string {
+	return text.replace(/^[ \t]+|[ \t]+$/g, "");
+}
+
+/**
+ * @p url with `key=value` appended to its query, before any fragment: the
+ * engine's `append_query_param` (`auth_resolver.cpp`), which writes an API
+ * key's query placement. Key and value are trimmed first, as the engine does; a
+ * key left empty writes nothing, an empty value writes `key=`. Both go through
+ * Postman's query rule, or as typed when @p encode is false
+ * (`disableUrlEncoding`).
+ */
+export function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
+	const name = trimCredential(key);
+	if (name === "") return url;
+	const text = trimCredential(value);
+	const pair = encode
+		? `${encodeQueryComponent(name, "key")}=${encodeQueryComponent(text, "value")}`
+		: `${name}=${text}`;
+	const { base, fragment } = splitFragment(url);
+	const separator = maskTokens(base).includes("?") ? "&" : "?";
+	return `${base}${separator}${pair}${fragment}`;
+}
+
+/**
  * Which part of a URL a point in its text sits in (issues #1773, #2465), the
  * engine's `core::UrlComponent`. `head` is the scheme and the authority;
  * `headSeparator` is the head just after a `:` or `/`, where a `/` continues a

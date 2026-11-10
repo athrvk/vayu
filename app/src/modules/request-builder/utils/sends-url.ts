@@ -7,7 +7,7 @@
 
 /**
  * The URL a request sends, as the Params panel's "Sends" line and the request
- * tab's title both read it (#2637).
+ * tab's title both read it (#2637): the URL that reaches the server (#3425).
  *
  * Path rows are substituted first, each value resolved then encoded as compose
  * does (#1764) - or raw under `disableUrlEncoding` (#1765) - and only then is
@@ -15,6 +15,14 @@
  * encoded by that part's rule and the literal text around it made sendable
  * (#1773, #2465). Two surfaces that resolved this separately disagreed about
  * `a b`: one drew `%20` and the other a space.
+ *
+ * Then what only the wire adds or drops (#3425): an API key placed in the query
+ * is appended, as the engine's `append_query_param` does, and the fragment is
+ * cut, because libcurl never sends it. The key is the request's *effective*
+ * auth - `inherit` already walked by the caller - and the tab title leaves it
+ * out, so a title never carries a credential. The cut applies to both: a
+ * fragment is never part of what is sent. Only an API key is appended; an OAuth
+ * 2.0 token placed in the query, and a GraphQL GET's query, are not shown.
  *
  * A name `POST /compose` reports in `deferredVariables` (#2521) is left written
  * as `{{name}}`: a pre-request script runs before the send and may change what
@@ -39,18 +47,53 @@ import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 import { deferredNamesIn, tokenName } from "@/lib/deferred-note";
 import type { KeyValueEntry, Request } from "@/types";
 import { answeringPathRows, composePathParams, substitutePathVariables } from "./path-variables";
-import { resolveUrlTemplate } from "./query-encoding";
+import {
+	appendQueryParam,
+	resolveUrlTemplate,
+	splitFragment,
+	trimCredential,
+} from "./query-encoding";
 
 /** The members of a request the sent URL is a function of. */
-export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding">;
+export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding"> & {
+	/**
+	 * The effective auth, `resolveAuthForSend`'s record: `inherit` already walked.
+	 * Only an API key placed in the query changes the URL. Omitted by the tab
+	 * title, which must stay free of credentials.
+	 */
+	auth?: Record<string, unknown>;
+};
 
 type Resolve = (input: string) => string;
+
+/** An API key's two halves as written, before `{{token}}`s are resolved. */
+interface QueryKey {
+	key: string;
+	value: string;
+}
 
 interface SendsInput {
 	url: string;
 	rows: KeyValueEntry[];
 	encode: boolean;
 	deferred: readonly string[];
+	queryKey: QueryKey | null;
+}
+
+const stringField = (record: Record<string, unknown>, name: string): string => {
+	const value = record[name];
+	return typeof value === "string" ? value : "";
+};
+
+/**
+ * The API key the engine appends to the query, or null: only mode `apikey` with
+ * `in: "query"` and a key that is not blank (the engine writes nothing for one).
+ */
+function queryKeyOf(auth: SendsUrlInput["auth"]): QueryKey | null {
+	if (!auth || auth.mode !== "apikey" || auth.in !== "query") return null;
+	const key = stringField(auth, "key");
+	if (trimCredential(key) === "") return null;
+	return { key, value: stringField(auth, "value") };
 }
 
 function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsInput {
@@ -59,6 +102,7 @@ function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsI
 		rows: composePathParams(request.params),
 		encode: !request.disableUrlEncoding,
 		deferred,
+		queryKey: queryKeyOf(request.auth),
 	};
 }
 
@@ -141,11 +185,20 @@ function fieldResolverLeaving(resolve: ResolveField, names: ReadonlySet<string>)
 	};
 }
 
-function resolveSends({ url, rows, encode, deferred }: SendsInput, resolveAll: Resolve): string {
+function resolveSends(
+	{ url, rows, encode, deferred, queryKey }: SendsInput,
+	resolveAll: Resolve
+): string {
 	const resolve = leaveDeferred(resolveAll, deferred);
-	return resolveUrlTemplate(substitutePathVariables(url, rows, resolve, { encode }), resolve, {
-		encode,
-	});
+	const resolved = resolveUrlTemplate(
+		substitutePathVariables(url, rows, resolve, { encode }),
+		resolve,
+		{ encode }
+	);
+	const { base } = splitFragment(resolved);
+	// No URL, no line: an appended `?k=v` would hide that the request has none.
+	if (queryKey === null || base.trim() === "") return base;
+	return appendQueryParam(base, resolve(queryKey.key), resolve(queryKey.value), encode);
 }
 
 /**
@@ -161,14 +214,16 @@ export function resolveSendsUrl(
 }
 
 /**
- * The text the sent URL is built from that can hold a `{{token}}`: the URL and
- * the values of the path rows the line substitutes, no others.
+ * The text the sent URL is built from that can hold a `{{token}}`: the URL, the
+ * values of the path rows the line substitutes and an API key placed in the
+ * query, no others.
  */
 function sendsTemplates(request: SendsUrlInput): string[] {
 	const pathValues = answeringPathRows(request.url, composePathParams(request.params)).flatMap(
 		(row) => (typeof row.value === "string" ? [row.value] : [])
 	);
-	return [request.url, ...pathValues];
+	const queryKey = queryKeyOf(request.auth);
+	return [request.url, ...pathValues, ...(queryKey ? [queryKey.key, queryKey.value] : [])];
 }
 
 /**

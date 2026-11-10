@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCollectionAncestors } from "@/queries/collections";
 import { useRequestBuilderContext } from "../../../context";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
@@ -37,6 +38,7 @@ import {
 	isNoOpParamsEdit,
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
+import { resolveAuthForSend } from "../../../utils/auth-resolution";
 import { displayPathRows, isPathRow, pathRowsOf, queryRowsOf } from "../../../utils/path-variables";
 import {
 	deferredNamesInSends,
@@ -143,17 +145,28 @@ export default function ParamsPanel() {
 	// (`POST /compose`'s `deferredVariables`, read from the Code section's cache
 	// entry), and is drawn as written rather than as its stored value (#2741).
 	// Only a URL with a `{{token}}` asks: a literal one never pays a compose.
-	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(request));
-	const deferred = deferredNamesInSends(request, engineDeferred);
+	//
+	// The auth is the effective one, `inherit` walked: a key a folder places in
+	// the query is on the wire, so it is on the line and masked below (#3425).
+	const ancestors = useCollectionAncestors(request.collectionId);
+	const auth = resolveAuthForSend(request.auth, ancestors);
+	const sends = {
+		url: request.url,
+		params: request.params,
+		disableUrlEncoding: request.disableUrlEncoding,
+		auth,
+	};
+	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(sends));
+	const deferred = deferredNamesInSends(sends, engineDeferred);
 	const resolvedUrl = stableResolvedUrl(
 		request.id ?? "new",
-		sendsCacheInput(request, deferred),
+		sendsCacheInput(sends, deferred),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
 	// `{{$randomInt}}` stays what it rolled) and only what is drawn is hidden.
 	const sendsText = createSecretMasker(
-		collectSecrets(getAllVariables(), request.auth),
+		collectSecrets(getAllVariables(), auth),
 		true,
 		undefined,
 		SECRET_UI_MASK

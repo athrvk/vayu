@@ -8,9 +8,12 @@
 import { describe, it, expect } from "vitest";
 import {
 	advanceUrlComponent,
+	appendQueryParam,
 	encodeAtUrlComponent,
 	encodeUrlAsPostman,
 	resolveUrlTemplate,
+	splitFragment,
+	trimCredential,
 	type UrlComponent,
 } from "./query-encoding";
 
@@ -135,6 +138,64 @@ describe("resolveUrlTemplate", () => {
 	it("leaves an unresolved token verbatim for a snippet", () => {
 		expect(resolveUrlTemplate("{{base}}/a b/{{id}}", (token) => token, { encode: true })).toBe(
 			"{{base}}/a%20b/{{id}}"
+		);
+	});
+});
+
+describe("splitFragment", () => {
+	it("cuts at the first #, which the fragment keeps", () => {
+		expect(splitFragment("http://h/p?q=1#a#b")).toEqual({
+			base: "http://h/p?q=1",
+			fragment: "#a#b",
+		});
+		expect(splitFragment("http://h/p")).toEqual({ base: "http://h/p", fragment: "" });
+	});
+
+	it("does not read a # inside a {{token}} as the fragment", () => {
+		expect(splitFragment("http://h/{{a#b}}?q=1#f")).toEqual({
+			base: "http://h/{{a#b}}?q=1",
+			fragment: "#f",
+		});
+		expect(splitFragment("http://h/{{a#b}}").fragment).toBe("");
+	});
+});
+
+describe("trimCredential", () => {
+	it("trims spaces and tabs at the ends only, as the engine does", () => {
+		expect(trimCredential(" \t a b \t")).toBe("a b");
+		// `String.prototype.trim` would take these; the engine's does not.
+		expect(trimCredential("\nv\n")).toBe("\nv\n");
+	});
+});
+
+describe("appendQueryParam", () => {
+	it("opens the query with ?, or joins it with &", () => {
+		expect(appendQueryParam("http://h/p", "k", "v", true)).toBe("http://h/p?k=v");
+		expect(appendQueryParam("http://h/p?a=1", "k", "v", true)).toBe("http://h/p?a=1&k=v");
+	});
+
+	it("writes the pair before the fragment, never after it", () => {
+		expect(appendQueryParam("http://h/p#f", "k", "v", true)).toBe("http://h/p?k=v#f");
+		expect(appendQueryParam("http://h/p?a=1#f", "k", "v", true)).toBe("http://h/p?a=1&k=v#f");
+	});
+
+	it("reads a ? or # inside a token as text, not structure", () => {
+		expect(appendQueryParam("http://h/{{a?b}}", "k", "v", true)).toBe("http://h/{{a?b}}?k=v");
+		expect(appendQueryParam("http://h/{{a#b}}", "k", "v", true)).toBe("http://h/{{a#b}}?k=v");
+	});
+
+	it("trims both halves, writes nothing for an empty key and `key=` for an empty value", () => {
+		expect(appendQueryParam("http://h/p", " k ", "\tv ", true)).toBe("http://h/p?k=v");
+		expect(appendQueryParam("http://h/p", "  ", "v", true)).toBe("http://h/p");
+		expect(appendQueryParam("http://h/p", "k", " ", true)).toBe("http://h/p?k=");
+	});
+
+	it("encodes by Postman's query rule, or writes both as typed", () => {
+		expect(appendQueryParam("http://h/p", "k=1", "s3cr et&x", true)).toBe(
+			"http://h/p?k%3D1=s3cr%20et%26x"
+		);
+		expect(appendQueryParam("http://h/p", "k=1", "s3cr et&x", false)).toBe(
+			"http://h/p?k=1=s3cr et&x"
 		);
 	});
 });
