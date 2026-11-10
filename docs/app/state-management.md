@@ -2867,7 +2867,10 @@ writing without pause is still shown every 200ms. A flush waits while
 refetches after the PUT's own answer is in the detail cache, where structural
 sharing makes the refetch a no-op for the open tab, and an event arriving while
 a reorder is in flight cannot refetch the lists from under the drop's
-optimistic draw. The in-app MCP channel stays a second producer for the in-app
+optimistic draw. The wait is bounded by `CHANGE_FEED_MUTATION_HOLD_MAX_MS` (5s):
+those two writes are one local round trip, so a mutation still pending past it
+is a hung or long one (an import, a spec sync, an OAuth sign-in), and the batch,
+a `reset` included, lands anyway rather than waiting for it. The in-app MCP channel stays a second producer for the in-app
 server's writes, so those are invalidated twice; an invalidation twice over is
 a refetch, never a wrong answer.
 

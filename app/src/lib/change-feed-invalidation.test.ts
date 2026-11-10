@@ -17,6 +17,7 @@ import { queryKeys } from "@/queries/keys";
 import type { Request, RequestSummary } from "@/types";
 import {
 	CHANGE_FEED_COALESCE_MS,
+	CHANGE_FEED_MUTATION_HOLD_MAX_MS,
 	FeedInvalidationBatch,
 	invalidateFeedDomain,
 	invalidationsForChange,
@@ -310,6 +311,42 @@ describe("FeedInvalidationBatch", () => {
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS * 5);
 		expect(keys()).toEqual([]);
 
+		release();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(countOf(keys(), queryKeys.requests.detail("req_1"))).toBe(1);
+	});
+
+	it("flushes anyway once a mutation has hung past the hold's bound, a reset included", async () => {
+		const { queryClient, keys } = spiedClient();
+		const batch = new FeedInvalidationBatch(queryClient);
+		let release!: () => void;
+		// An import or a spec sync the engine is slow to answer.
+		const observer = new MutationObserver(queryClient, {
+			mutationFn: () => new Promise<void>((resolve) => (release = resolve)),
+		});
+		void observer.mutate();
+
+		batch.add(invalidationsForChange(queryClient, requestChange)!);
+		batch.addReset();
+		await vi.advanceTimersByTimeAsync(
+			CHANGE_FEED_COALESCE_MS + CHANGE_FEED_MUTATION_HOLD_MAX_MS - 1
+		);
+		expect(keys()).toEqual([]);
+
+		await vi.advanceTimersByTimeAsync(1);
+		expect(queryClient.isMutating()).toBe(1);
+		expect(countOf(keys(), queryKeys.requests.all)).toBe(1);
+
+		// The hung write settling later is not a second flush of the same batch.
+		release();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(countOf(keys(), queryKeys.requests.all)).toBe(1);
+
+		// And the next change is held afresh, not let through by the earlier bound.
+		void observer.mutate();
+		batch.add(invalidationsForChange(queryClient, requestChange)!);
+		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS * 5);
+		expect(countOf(keys(), queryKeys.requests.detail("req_1"))).toBe(0);
 		release();
 		await vi.advanceTimersByTimeAsync(0);
 		expect(countOf(keys(), queryKeys.requests.detail("req_1"))).toBe(1);

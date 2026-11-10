@@ -173,6 +173,17 @@ export function invalidateFeedDomain(queryClient: QueryClient): void {
  */
 export const CHANGE_FEED_COALESCE_MS = 200;
 
+/**
+ * The longest a flush waits on in-flight mutations before it lands anyway.
+ *
+ * The writes the hold is for - an autosave PUT, a drop's `POST /reorder` - are
+ * one local round trip, tens of milliseconds. A mutation that is still pending
+ * after this long is not one of them but a hung or long write (an import, a
+ * spec sync, an OAuth sign-in), and every change any other client made, a
+ * `reset` included, would otherwise wait for it.
+ */
+export const CHANGE_FEED_MUTATION_HOLD_MAX_MS = 5_000;
+
 /** One key per family and scope, so a burst on one row is one invalidation. */
 function familyKey(event: McpDataChangedEvent): string {
 	return `${event.entity}|${event.collectionId ?? ""}|${event.requestId ?? ""}`;
@@ -182,18 +193,21 @@ function familyKey(event: McpDataChangedEvent): string {
  * Coalesces the feed's invalidations and applies them outside any mutation.
  *
  * A flush waits while a mutation is in flight because the feed reports the
- * app's own writes too. The autosave PUT's echo then refetches after the PUT's
- * own answer has been stored, and reads the row it wrote; a write by someone
- * else arriving mid-reorder cannot refetch the lists from under the drop's
- * optimistic draw, which `useReorderMutation` cancelled the in-flight reads to
- * protect.
+ * app's own writes too, and protects two things by it. The autosave PUT's echo
+ * refetches after the PUT's own answer has been stored, and reads the row it
+ * wrote. A write by someone else arriving mid-reorder cannot refetch the lists
+ * from under the drop's optimistic draw, which `useReorderMutation` cancelled
+ * the in-flight reads to protect. The wait is bounded by
+ * {@link CHANGE_FEED_MUTATION_HOLD_MAX_MS}, past which neither write is the
+ * one in flight.
  */
 export class FeedInvalidationBatch {
 	private families = new Map<string, McpDataChangedEvent>();
 	private trash = false;
 	private reset = false;
 	private timer: ReturnType<typeof setTimeout> | null = null;
-	private stopWaiting: (() => void) | null = null;
+	/** Waiting on in-flight mutations; what arrives meanwhile joins the held flush. */
+	private holding = false;
 
 	constructor(readonly queryClient: QueryClient) {}
 
@@ -211,15 +225,16 @@ export class FeedInvalidationBatch {
 
 	private arm(): void {
 		// A batch already timed, or waiting on a mutation, takes this change with it.
-		if (this.timer !== null || this.stopWaiting !== null) return;
+		if (this.timer !== null || this.holding) return;
 		this.timer = setTimeout(() => {
 			this.timer = null;
 			this.flush();
 		}, CHANGE_FEED_COALESCE_MS);
 	}
 
-	private flush(): void {
-		if (this.queryClient.isMutating() > 0) {
+	/** @p force: the hold's bound has passed, so flush whatever is mutating. */
+	private flush(force = false): void {
+		if (!force && this.queryClient.isMutating() > 0) {
 			this.flushWhenMutationsSettle();
 			return;
 		}
@@ -236,16 +251,22 @@ export class FeedInvalidationBatch {
 	}
 
 	/**
-	 * Flush once nothing is mutating. A mutation reaches the cache's `success`
-	 * state only after its `onSuccess` and `onSettled` have run, so the flush
-	 * follows the mutation's own cache writes.
+	 * Flush once nothing is mutating, or once the hold's bound has passed. A
+	 * mutation reaches the cache's `success` state only after its `onSuccess`
+	 * and `onSettled` have run, so the flush follows the mutation's own cache
+	 * writes.
 	 */
 	private flushWhenMutationsSettle(): void {
-		this.stopWaiting = this.queryClient.getMutationCache().subscribe(() => {
-			if (this.queryClient.isMutating() > 0) return;
-			this.stopWaiting?.();
-			this.stopWaiting = null;
-			this.flush();
+		const done = (force: boolean) => {
+			unsubscribe();
+			clearTimeout(bound);
+			this.holding = false;
+			this.flush(force);
+		};
+		const unsubscribe = this.queryClient.getMutationCache().subscribe(() => {
+			if (this.queryClient.isMutating() === 0) done(false);
 		});
+		const bound = setTimeout(() => done(true), CHANGE_FEED_MUTATION_HOLD_MAX_MS);
+		this.holding = true;
 	}
 }
