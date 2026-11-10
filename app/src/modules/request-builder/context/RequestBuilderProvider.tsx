@@ -275,8 +275,8 @@ export default function RequestBuilderProvider({
 		response && request.id ? request.id : null
 	);
 	const [restoredResponse, setRestoredResponse] = useState<ResponseState | null>(null);
-	// A stream this request holds, live or finished and not yet swapped for its
-	// stored trace, owns the pane: the last design run must not fill it meanwhile.
+	// A stream this request holds, live or finished until another Send or a clear,
+	// owns the pane: the last design run must not fill it meanwhile.
 	const holdsStream = useExecutionEventsStore(
 		(s) => !!s.runId && !!s.requestId && s.requestId === request.id
 	);
@@ -1167,6 +1167,10 @@ export default function RequestBuilderProvider({
 				const send = sendTracker.begin(memoryKey);
 				setLocalResponse(null);
 				if (executingId) useResponseStore.getState().clearResponse(executingId);
+				// The pane is now this Send's to fill. Marked answered here, not when
+				// the stream opens: a last-design query still loading would otherwise
+				// resolve inside the wait for the `202` and fill the earlier run (#3421).
+				if (executingId) setRestoredFor(executingId);
 				// The previous stream's rows belong to the send that is being
 				// replaced. Cleared here rather than on arrival of the first event,
 				// so a stream that never opens does not leave the last one on screen.

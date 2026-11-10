@@ -49,6 +49,7 @@ import type {
 const lastDesign = vi.hoisted(() => ({
 	run: undefined as { id: string } | undefined,
 	report: undefined as unknown,
+	isLoading: false,
 }));
 
 vi.mock("@/hooks", () => ({
@@ -79,7 +80,7 @@ vi.mock("@/queries", () => ({
 	useUpdateCollectionMutation: () => ({ mutate: vi.fn() }),
 	useEnvironmentsQuery: () => ({ data: [] }),
 	useUpdateEnvironmentMutation: () => ({ mutate: vi.fn() }),
-	useLastDesignRunQuery: () => ({ ...lastDesign, isLoading: false }),
+	useLastDesignRunQuery: () => ({ ...lastDesign }),
 	// The provider reads the engine data caps for Send-with-row's row cap
 	// (`useDataFileLimits`); empty entries leave it on the seeds.
 	useConfigQuery: () => ({ data: { entries: [] } }),
@@ -182,6 +183,7 @@ describe("the streaming send branch", () => {
 		useExecutionEventsStore.getState().clear();
 		lastDesign.run = undefined;
 		lastDesign.report = undefined;
+		lastDesign.isLoading = false;
 		invalidateQueries.mockClear();
 		getRunReport.mockReset();
 		getRun.mockReset();
@@ -396,15 +398,12 @@ describe("the streaming send branch", () => {
 			time: 5,
 		});
 
-		const { rerender } = render(renderFor("A", declined));
+		render(renderFor("A", declined));
 		expect(ctx().response?.body).toBe("STORED");
 
 		await act(async () => {
 			await ctx().executeRequest();
 		});
-		expect(ctx().response).toBeNull();
-
-		rerender(renderFor("A", declined));
 		expect(ctx().response).toBeNull();
 	});
 
@@ -431,6 +430,35 @@ describe("the streaming send branch", () => {
 			await ctx().executeRequest();
 		});
 		expect(ctx().response).toBeNull();
+	});
+
+	it("does not fill the pane from a design run that loads while the 202 is pending (#3421)", async () => {
+		// Nothing stored, so the restore is still waiting on the query when Send
+		// clears the pane; the query then answers before the engine does.
+		let answer!: (r: StreamStartResult) => void;
+		const pending = () => new Promise<StreamStartResult>((r) => (answer = r));
+		lastDesign.isLoading = true;
+		const { rerender } = render(renderFor("A", pending));
+		expect(ctx().response).toBeNull();
+
+		await act(async () => {
+			void ctx().executeRequest();
+		});
+		lastDesign.isLoading = false;
+		lastDesign.run = { id: "run_old" };
+		lastDesign.report = reportWithEvents("OLD design run");
+
+		// Mutation check: drop `setRestoredFor(executingId)` from the provider's
+		// stream branch and this render fills the pane with the old design run.
+		rerender(renderFor("A", pending));
+		expect(ctx().response).toBeNull();
+		expect(ctx().isExecuting).toBe(true);
+
+		await act(async () => {
+			answer({ ok: true, runId: "run_1", eventsUrl: "/runs/run_1/events" });
+		});
+		expect(ctx().response).toBeNull();
+		expect(ctx().isStreaming).toBe(true);
 	});
 
 	it("does not restore the last design run while the request holds a stream (#3421)", () => {
