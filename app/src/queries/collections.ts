@@ -143,7 +143,7 @@ export function invalidateAllRequestLists(queryClient: QueryClient): void {
  * already showing. An uncached one yields `undefined`: nothing on screen is
  * displaying it.
  */
-function ownerOfRequest(queryClient: QueryClient, requestId: string): string | undefined {
+export function ownerOfRequest(queryClient: QueryClient, requestId: string): string | undefined {
 	for (const [, rows] of queryClient.getQueriesData<RequestSummary[]>({
 		queryKey: queryKeys.requests.lists(),
 	})) {
