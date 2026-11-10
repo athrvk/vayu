@@ -75,6 +75,23 @@ describe("UrlInput param sync", () => {
 		]);
 	});
 
+	it("lists a key typed before an existing one first, as the URL does (#3426)", () => {
+		// Mutation check: appending new keys after the kept rows gives [y, z].
+		const params: KeyValueItem[] = [{ id: "1", key: "y", value: "1", enabled: true }];
+		const { updateField } = renderUrlInput("https://x/y?y=1", params);
+
+		fireEvent.change(screen.getByLabelText("Request URL"), {
+			target: { value: "https://x/y?z=2&y=1" },
+		});
+
+		const paramsCall = updateField.mock.calls.find(([field]) => field === "params");
+		const merged = paramsCall![1] as KeyValueItem[];
+		expect(merged.map(({ id, key }) => [id, key])).toEqual([
+			[expect.any(String), "z"],
+			["1", "y"],
+		]);
+	});
+
 	it("clearing the query string drops enabled rows and keeps disabled ones", () => {
 		// Mutation check: restoring the `newParams.length > 0` guard skips the
 		// params update entirely here, leaving the stale enabled row in place.

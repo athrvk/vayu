@@ -114,12 +114,108 @@ describe("mergeParamsFromUrl", () => {
 		]);
 	});
 
-	it("appends a brand-new key at the end with a fresh id", () => {
+	it("gives a brand-new key a fresh id", () => {
 		const existing = [item("1", "a", "1", true)];
 		const merged = mergeParamsFromUrl(existing, "https://x/y?a=1&z=9", "https://x/y");
 		expect(merged[0].id).toBe("1");
 		expect(merged[1]).toMatchObject({ key: "z", value: "9", enabled: true });
 		expect(merged[1].id).not.toBe("1");
+	});
+
+	describe("row order (#3426)", () => {
+		const keys = (rows: readonly KeyValueItem[]) =>
+			rows.map(({ key, enabled }) => (enabled ? key : `${key}!`));
+
+		it("follows the URL when a key is typed before an existing one", () => {
+			// Mutation check: appending new keys after the kept rows gives [y, z].
+			const existing = [item("1", "y", "1", true, { description: "keep" })];
+			const merged = mergeParamsFromUrl(existing, "https://x/y?z=2&y=1", "https://x/y?y=1");
+			expect(keys(merged)).toEqual(["z", "y"]);
+			expect(merged[1]).toMatchObject({ id: "1", description: "keep" });
+			expect(merged[0].id).not.toBe("1");
+		});
+
+		it("rebuilds the typed URL, so a table edit does not reorder it", () => {
+			const typed = "https://x/y?z=2&y=1";
+			const merged = mergeParamsFromUrl([item("1", "y", "1")], typed, "https://x/y?y=1");
+			const edited = merged.map((row) => (row.key === "z" ? { ...row, value: "3" } : row));
+			expect(buildUrlWithParams(typed, edited)).toBe("https://x/y?z=3&y=1");
+		});
+
+		it("reorders existing rows to match a URL that swaps them", () => {
+			const existing = [item("1", "a", "1"), item("2", "b", "2")];
+			const merged = mergeParamsFromUrl(
+				existing,
+				"https://x/y?b=2&a=1",
+				"https://x/y?a=1&b=2"
+			);
+			expect(merged.map((row) => row.id)).toEqual(["2", "1"]);
+		});
+
+		it("pairs duplicate keys in order, by position among the same key", () => {
+			const existing = [item("1", "a", "1"), item("2", "a", "2")];
+			const merged = mergeParamsFromUrl(
+				existing,
+				"https://x/y?a=7&b=0&a=8",
+				"https://x/y?a=1&a=2"
+			);
+			expect(merged.map(({ id, key, value }) => [id, key, value])).toEqual([
+				["1", "a", "7"],
+				[expect.any(String), "b", "0"],
+				["2", "a", "8"],
+			]);
+		});
+
+		it("keeps a disabled row after the enabled row that preceded it", () => {
+			// Mutation check: pushing disabled rows to the end gives [z, a, c, b!].
+			const existing = [item("1", "a", "1"), item("2", "b", "2", false), item("3", "c", "3")];
+			const merged = mergeParamsFromUrl(
+				existing,
+				"https://x/y?z=0&c=3&a=1",
+				"https://x/y?a=1&c=3"
+			);
+			expect(keys(merged)).toEqual(["z", "c", "a", "b!"]);
+		});
+
+		it("keeps a disabled row first when no enabled row preceded it", () => {
+			const existing = [item("1", "b", "2", false), item("2", "a", "1")];
+			const merged = mergeParamsFromUrl(existing, "https://x/y?z=0&a=1", "https://x/y?a=1");
+			expect(keys(merged)).toEqual(["b!", "z", "a"]);
+		});
+
+		it("anchors a disabled row to the nearest surviving predecessor when its own was dropped", () => {
+			// Mutation check: anchoring to the dropped row loses the slot and the
+			// row falls to the head instead of after `a`.
+			const existing = [
+				item("1", "a", "1"),
+				item("2", "gone", "x"),
+				item("3", "b", "2", false),
+				item("4", "c", "3"),
+			];
+			const merged = mergeParamsFromUrl(
+				existing,
+				"https://x/y?c=3&a=1",
+				"https://x/y?a=1&gone=x&c=3"
+			);
+			expect(keys(merged)).toEqual(["c", "a", "b!"]);
+		});
+
+		it("keeps disabled rows of one slot in their existing order", () => {
+			const existing = [
+				item("1", "a", "1"),
+				item("2", "d1", "", false),
+				item("3", "d2", "", false),
+			];
+			const merged = mergeParamsFromUrl(existing, "https://x/y?z=0&a=1", "https://x/y?a=1");
+			expect(keys(merged)).toEqual(["z", "a", "d1!", "d2!"]);
+		});
+
+		it("leaves disabled rows in place when the whole query is cleared", () => {
+			const existing = [item("1", "a", "1"), item("2", "b", "2", false), item("3", "c", "3")];
+			expect(
+				keys(mergeParamsFromUrl(existing, "https://x/y", "https://x/y?a=1&c=3"))
+			).toEqual(["b!"]);
+		});
 	});
 
 	it("takes the URL's = with its value (#1772)", () => {
@@ -228,11 +324,13 @@ describe("the query as written", () => {
 
 	it("merges the URL's query as written", () => {
 		const existing = [item("1", "q", "old")];
-		expect(mergeParamsFromUrl(existing, URL, URL)[0]).toMatchObject({
-			id: "1",
-			key: "q",
-			value: "a%20b",
-		});
+		expect(mergeParamsFromUrl(existing, URL, URL).find((row) => row.key === "q")).toMatchObject(
+			{
+				id: "1",
+				key: "q",
+				value: "a%20b",
+			}
+		);
 	});
 });
 

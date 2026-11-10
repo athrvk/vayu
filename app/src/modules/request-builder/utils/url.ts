@@ -221,9 +221,15 @@ export function paramsFromUrl(url: string): KeyValueItem[] {
  * A disabled row is invisible in the URL by design (`buildUrlWithParams` skips it),
  * so a wholesale replace with `parseQueryParams(url)` deletes every disabled
  * row on the next keystroke, and typing the query away leaves nothing to
- * remove the enabled rows it used to carry (issue #1482). Existing rows keep
- * their position, id, description and `source`; a key the URL no longer
- * carries is dropped, and a key new to the URL is appended at the end.
+ * remove the enabled rows it used to carry (issue #1482). Enabled rows follow
+ * the URL's pair order and keep their id, description and `source`; a key the
+ * URL no longer carries is dropped, and a key new to the URL gets a fresh row
+ * where it stands. Following the URL is what keeps the Params table's own
+ * rebuild (`buildUrlWithParams`, row order) from reordering the URL on the
+ * next table edit (issue #3426).
+ *
+ * A disabled row has no place in the URL, so it keeps its slot after the
+ * enabled row that preceded it (see `disabledRowsByAnchor`).
  *
  * Path rows (issue #1764) follow the URL's `:name` segments by their own rule,
  * `syncPathRows`, which reads `previousUrl` to tell an edit of those segments
@@ -235,27 +241,66 @@ export function mergeParamsFromUrl(
 	previousUrl: string
 ): KeyValueItem[] {
 	const fromUrl = parseQueryParams(url);
-	const consumed = new Array(fromUrl.length).fill(false);
+	const queryRows = queryRowsOf(existing);
+	const claimedBy = claimUrlPairs(queryRows, fromUrl);
+	const disabledAfter = disabledRowsByAnchor(queryRows, new Set(claimedBy));
 
-	const merged: KeyValueItem[] = [];
-	for (const row of queryRowsOf(existing)) {
-		if (!row.enabled) {
-			merged.push(row);
-			continue;
+	const merged: KeyValueItem[] = [...(disabledAfter.get(null) ?? [])];
+	fromUrl.forEach((pair, i) => {
+		const row = claimedBy[i];
+		if (!row) {
+			merged.push(pair);
+			return;
 		}
-		const matchIndex = fromUrl.findIndex((p, i) => !consumed[i] && p.key === row.key);
-		if (matchIndex === -1) continue; // the URL no longer carries this key
-		consumed[matchIndex] = true;
 		const { valueless: _was, ...rest } = row;
-		const { value, valueless } = fromUrl[matchIndex];
-		merged.push({ ...rest, value, ...(valueless && { valueless }) });
-	}
-
-	fromUrl.forEach((p, i) => {
-		if (!consumed[i]) merged.push(p);
+		const { value, valueless } = pair;
+		merged.push(
+			{ ...rest, value, ...(valueless && { valueless }) },
+			...(disabledAfter.get(row) ?? [])
+		);
 	});
 
 	return [...merged, ...syncPathRows(pathRowsOf(existing), url, previousUrl)];
+}
+
+/**
+ * For each pair of the URL, the enabled row that carries it (the first
+ * unclaimed pair with the row's key, rows taken in order), or `undefined` for
+ * a pair no row carries.
+ */
+function claimUrlPairs(
+	rows: readonly KeyValueItem[],
+	fromUrl: readonly KeyValueItem[]
+): (KeyValueItem | undefined)[] {
+	const claimedBy = new Array<KeyValueItem | undefined>(fromUrl.length).fill(undefined);
+	for (const row of rows) {
+		if (!row.enabled) continue;
+		const i = fromUrl.findIndex((pair, at) => !claimedBy[at] && pair.key === row.key);
+		if (i !== -1) claimedBy[i] = row;
+	}
+	return claimedBy;
+}
+
+/**
+ * Each disabled row, grouped under the nearest enabled row before it that the
+ * URL still carries (`null` when none, so it leads the list). An enabled row
+ * the URL dropped cannot anchor anything, so what followed it falls back to the
+ * row before it. Order within a group is the existing order.
+ */
+function disabledRowsByAnchor(
+	rows: readonly KeyValueItem[],
+	surviving: ReadonlySet<KeyValueItem | undefined>
+): Map<KeyValueItem | null, KeyValueItem[]> {
+	const groups = new Map<KeyValueItem | null, KeyValueItem[]>();
+	let anchor: KeyValueItem | null = null;
+	for (const row of rows) {
+		if (row.enabled) {
+			if (surviving.has(row)) anchor = row;
+			continue;
+		}
+		groups.set(anchor, [...(groups.get(anchor) ?? []), row]);
+	}
+	return groups;
 }
 
 /** decodeURIComponent that leaves `{{var}}` tokens (and malformed input) untouched. */
