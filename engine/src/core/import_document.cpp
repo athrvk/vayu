@@ -1844,21 +1844,25 @@ std::optional<std::string> pm_stored_response (const json& saved) {
     return std::make_optional (std::move (text));
 }
 
-/// A saved response whose numeric `code` is not a final HTTP status: a 1xx
-/// interim response, `0`, `600`, or a fraction. An example is a final answer a
-/// mock serves, so `POST /import/apply` refuses one (#3117) and the import
-/// leaves it out rather than failing the whole document over it. A `code` that
-/// is not a number at all is not judged here - the example imports as a 200.
-bool is_unservable_response_code (const json* code) {
+/// The status a saved response documents, or nothing when its `code` is not one
+/// a mock can serve. A `code` that is absent or not a number is not judged: the
+/// example imports as a 200, which is what Postman shows for one. A number must
+/// be an integer value from 200 to 599 - `404.0` and `4.04e2` are, `200.5` is
+/// not, and neither a 1xx interim response, `0` nor `600`. `POST /import/apply`
+/// refuses an out-of-range status (#3117) and ignores a non-integer one, storing
+/// the default 200, so an unservable code is left out here rather than failing
+/// the document or becoming a different status. The status is returned as an
+/// `int`, because the apply reads only a JSON integer.
+std::optional<int> saved_response_status (const json* code) {
     namespace limits = vayu::core::constants::request_example;
     if (code == nullptr || !code->is_number ()) {
-        return false;
-    }
-    if (!code->is_number_integer ()) {
-        return true;
+        return 200;
     }
     const double value = code->get<double> ();
-    return value < limits::MIN_STATUS || value > limits::MAX_STATUS;
+    if (value != std::trunc (value) || value < limits::MIN_STATUS || value > limits::MAX_STATUS) {
+        return std::nullopt;
+    }
+    return static_cast<int> (value);
 }
 
 /**
@@ -1883,8 +1887,8 @@ json pm_examples (const json* item, PostmanCounts& counts) {
             counts.skipped_malformed += 1;
             continue;
         }
-        const json* code = prop (saved, "code");
-        if (is_unservable_response_code (code)) {
+        const std::optional<int> status = saved_response_status (prop (saved, "code"));
+        if (!status) {
             counts.skipped_malformed += 1;
             continue;
         }
@@ -1900,11 +1904,8 @@ json pm_examples (const json* item, PostmanCounts& counts) {
         const std::string* body = as_str (prop (saved, "body"));
         out.push_back (
         { { "name", name == nullptr || name->is_null () ? "Example" : as_string (name) },
-        { "status",
-        code != nullptr && code->is_number () && std::isfinite (code->get<double> ()) ?
-        *code :
-        json (200) },
-        { "headers", std::move (headers) }, { "body", body == nullptr ? "" : *body },
+        { "status", *status }, { "headers", std::move (headers) },
+        { "body", body == nullptr ? "" : *body },
         // Only from the recorded header. Postman also writes
         // `_postman_previewlanguage`, but that is an editor mode rather
         // than a media type.

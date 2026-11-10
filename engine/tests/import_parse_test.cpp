@@ -3408,12 +3408,17 @@ int skipped_count (const json& meta, const std::string& kind) {
 
 } // namespace
 
-/// A saved response whose code is not a final status is an answer
-/// `POST /import/apply` refuses as an example (#3117, #3424), so the import
-/// leaves it out and counts it rather than failing the document. The 1xx pair is
-/// the interim responses; `0` and `600` are outside the range from either end,
-/// and `200.5` is no status at all. Mutation check: narrowing the predicate back
-/// to 1xx keeps the `0`, `600` and `200.5` rows (and so a 400 on apply).
+/// A saved response whose code is not a final status is one the import leaves
+/// out and counts rather than failing the document (#3117, #3424): `POST
+/// /import/apply` refuses a code outside 200-599 and ignores a fractional one,
+/// storing it as the default 200, so the example would fail the apply or
+/// document a different status. The 1xx pair is the interim responses; `0` and
+/// `600` are outside the range from either end, `200.5` and `600.0` are no
+/// servable status, and `404.0` and `2e2` are whole numbers that Postman's own
+/// export can write for a status, so they import as the integers 404 and 200.
+/// Mutation check: narrowing the predicate back to 1xx keeps the `0`, `600`,
+/// `200.5` and `600.0` rows; testing `is_number_integer` instead of the value
+/// drops the `404.0` and `2e2` rows.
 TEST (PostmanImport, LeavesOutASavedResponseWhoseCodeIsNotAFinalStatus) {
     const ImportParse parsed = parse_postman_items (
     R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
@@ -3422,15 +3427,22 @@ TEST (PostmanImport, LeavesOutASavedResponseWhoseCodeIsNotAFinalStatus) {
                      {"name":"zero","code":0,"body":""},
                      {"name":"past","code":600,"body":""},
                      {"name":"fraction","code":200.5,"body":""},
+                     {"name":"floatPast","code":600.0,"body":""},
                      {"name":"ok","code":200,"body":"{}"},
+                     {"name":"whole","code":404.0,"body":""},
+                     {"name":"exponent","code":2e2,"body":""},
                      {"name":"edge","code":599,"body":""}]})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& examples =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
-    ASSERT_EQ (examples.size (), 2u);
-    EXPECT_EQ (examples[0].at ("status"), 200);
-    EXPECT_EQ (examples[1].at ("status"), 599);
-    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 5);
+    ASSERT_EQ (examples.size (), 4u);
+    const std::vector<int> expected = { 200, 404, 200, 599 };
+    for (size_t index = 0; index < expected.size (); ++index) {
+        // The apply reads a status only as a JSON integer.
+        EXPECT_TRUE (examples[index].at ("status").is_number_integer ()) << index;
+        EXPECT_EQ (examples[index].at ("status").get<int> (), expected[index]) << index;
+    }
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 6);
 }
 
 /// A `code` that is not a number is not judged: the example imports as the 200

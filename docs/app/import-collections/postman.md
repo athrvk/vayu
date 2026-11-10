@@ -210,7 +210,7 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 | Postman (`item.response[]` entry) | Vayu `ExampleDraft` | Notes |
 |-----------------------------------|---------------------|-------|
 | `name` | `name` | fallback `"Example"` |
-| `code` | `status` | a numeric `code` must be an integer from `200` to `599`; anything else (a `1xx` interim response, `0`, `600`, a fraction) is not an answer a mock can serve and `POST /import/apply` refuses it, so that saved response is left out and counted as `malformed_item` while the request still imports (issue #3424). A `code` that is not a number, or is absent, is `200`, which is what Postman shows for a saved response with no code |
+| `code` | `status` | a numeric `code` must be a whole number from `200` to `599` (`404.0` and `4.04e2` both import as the integer `404`); anything else (a `1xx` interim response, `0`, `600`, a fraction) is not a status a mock can serve - `POST /import/apply` refuses one outside the range and ignores a fraction, storing the default `200` - so that saved response is left out and counted as `malformed_item` while the request still imports (issue #3424). A `code` that is not a number, or is absent, is `200`, which is what Postman shows for a saved response with no code |
 | `header[]` | `headers` | via `map_key_values` - source order and duplicates (`Set-Cookie`) preserved |
 | `body` | `body` | stored verbatim |
 | `header[]` `Content-Type` | `contentType` | `""` when the recorded response carried none |
