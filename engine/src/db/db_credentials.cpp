@@ -93,14 +93,21 @@ void Database::delete_client_certificate (const std::string& id) {
     const int64_t stamp = std::chrono::duration_cast<std::chrono::milliseconds> (
     std::chrono::system_clock::now ().time_since_epoch ())
                           .count ();
+    bool deleted = false;
     impl_->storage.transaction ([&] {
         for (auto& certificate : impl_->storage.get_all<ClientCertificate> (where (
              c (&ClientCertificate::id) == id && is_null (&ClientCertificate::deleted_at)))) {
             certificate.deleted_at = stamp;
             impl_->storage.update (certificate);
+            deleted = true;
         }
         return true; // Commit
     });
+    // On the feed because the trash is: a client's trash list now holds it.
+    if (deleted) {
+        impl_->changes.publish (Change{ ChangeKind::ClientCertificate,
+        ChangeOp::Delete, id, std::nullopt, std::nullopt });
+    }
 }
 
 std::expected<TrashOutcome, RestoreFailure>
@@ -122,6 +129,7 @@ Database::restore_client_certificate_locked (const TrashEntry& entry) {
     // Clears the stamp and nothing else, so the row comes back as it went in.
     certificate.deleted_at.reset ();
     impl_->storage.update (certificate);
+    impl_->changes.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info (
     "db", "Restored client certificate from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };

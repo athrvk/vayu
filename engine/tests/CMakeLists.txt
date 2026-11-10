@@ -66,6 +66,7 @@ add_executable(vayu_tests
     sse_load_stream_test.cpp
     load_stream_events_test.cpp
     sse_stream_test.cpp
+    change_feed_test.cpp
     server_bind_test.cpp
     server_gate_test.cpp
     httplib_resolver_test.cpp
@@ -407,6 +408,7 @@ vayu_embed_windows_manifest(vayu_tests)
 set(vayu_scratch_database_suites
     AuthRefreshTuningTest
     AuthResolverOAuth2Test
+    ChangeFeedDatabaseTest
     ClientCertificateDbTest
     CollectMetrics
     BinaryBodyLoadRun

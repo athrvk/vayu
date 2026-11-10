@@ -633,12 +633,64 @@ inline auto make_vayu_storage (const std::string& path) {
 using Storage = decltype (make_vayu_storage (std::string{}));
 
 // ============================================================================
+// Change-feed events (issue #3420) - what each write publishes once it commits
+// ============================================================================
+
+/// What a `replace` of @p id is about to do: `Create` when no row carries the
+/// id yet, stamped rows included. The caller holds the DB mutex.
+template <typename Row>
+ChangeOp upsert_op (Storage& storage, const std::string& id) {
+    using namespace sqlite_orm;
+    return storage.count<Row> (where (c (&Row::id) == id)) == 0 ? ChangeOp::Create :
+                                                                  ChangeOp::Update;
+}
+
+inline Change collection_change (const Collection& row, ChangeOp op) {
+    Change change{ ChangeKind::Collection, op, row.id, std::nullopt, std::nullopt };
+    // An empty parent is the tree root, which `get_requests_in_subtree` reads
+    // the same way.
+    if (row.parent_id && !row.parent_id->empty ()) {
+        change.collection_id = row.parent_id;
+    }
+    return change;
+}
+
+inline Change request_change (const Request& row, ChangeOp op) {
+    return Change{ ChangeKind::Request, op, row.id, row.collection_id, std::nullopt };
+}
+
+inline Change example_change (const RequestExample& row, ChangeOp op) {
+    return Change{ ChangeKind::Example, op, row.id, std::nullopt, row.request_id };
+}
+
+inline Change environment_change (const std::string& id, ChangeOp op) {
+    return Change{ ChangeKind::Environment, op, id, std::nullopt, std::nullopt };
+}
+
+/// The change a restore or purge of @p entry publishes: the entry's own kind,
+/// and the row it hung under where that kind names one.
+inline Change trash_change (const TrashEntry& entry, ChangeOp op) {
+    Change change{ change_kind_of_trash_entry (entry.kind), op, entry.id,
+        std::nullopt, std::nullopt };
+    if (change.kind == ChangeKind::Example) {
+        change.request_id = entry.parent_id;
+    } else if (change.kind == ChangeKind::Collection || change.kind == ChangeKind::Request) {
+        change.collection_id = entry.parent_id;
+    }
+    return change;
+}
+
+// ============================================================================
 // Database Implementation (PImpl pattern)
 // ============================================================================
 
 struct Database::Impl {
     Storage storage;
     std::recursive_mutex mutex;
+
+    /// `Database::change_feed`. Published to with `mutex` held, after the
+    /// write's own transaction has committed (`db/change_feed.hpp`).
+    ChangeFeed changes{ change_feed_id_base_now () };
 
     /// A second, read-only connection to the same file, for the one read that
     /// must not wait on `mutex` (`Database::get_run_snapshot`, #2679). WAL lets
