@@ -870,10 +870,11 @@ Notes:
   names no `mockExampleId`, exactly like the bodyType-without-body refusal
   above, and the change only takes effect the next time `start_mock_server`
   runs - a running mock's route table is a snapshot, not a live view of the
-  request. A `mockExampleId` that later stops resolving (the example was
-  deleted or suppressed after the write) is not refused retroactively; the
-  mock server falls back to `"first"` at serve time, same as a `fixed` mode
-  pointed at an example that never existed.
+  request. Deleting the example it names (`delete_request_example`, or the
+  Examples tab) clears `mockExampleId` engine-side (issue #3422). One that
+  stops resolving another way is not refused retroactively; the mock server
+  falls back to `"first"` at serve time, same as a `fixed` mode pointed at an
+  example that never existed.
 - **A skipped certificate check has to leave a record** (issue #795). The
   *stored* `verifySSL: false` is writable over MCP; a *per-call* one is not.
   `run_request` declares `verifySSL` only so that `false` is refused by name -

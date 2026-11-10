@@ -1439,6 +1439,35 @@ TEST_F (TrashTest, RestoringAnExampleServesItByteForByteAsBefore) {
     EXPECT_FALSE (entry_for ("exa_1").has_value ()) << "it has left the trash";
 }
 
+// #3422: the delete cleared the request's `mockExampleId`; bringing the example
+// back is not choosing it again, so the pointer stays clear and the request is
+// not rewritten by the restore.
+TEST_F (TrashTest, RestoringTheFixedMockExampleDoesNotPointTheRequestAtItAgain) {
+    make_collection ("col_1", "API");
+    make_request ("req_1", "col_1");
+    make_user_example ("exa_1", "req_1");
+    auto pointed = db_->get_request ("req_1");
+    ASSERT_HAS_VALUE (pointed);
+    pointed->mock_response_mode = "fixed";
+    pointed->mock_example_id    = "exa_1";
+    db_->save_request (*pointed);
+    ASSERT_EQ (routes::delete_request_example_response (*db_, "req_1", "exa_1").first, 200);
+    const auto cleared = db_->get_request ("req_1");
+    ASSERT_HAS_VALUE (cleared);
+    ASSERT_FALSE (cleared->mock_example_id.has_value ());
+
+    auto [status, body] = routes::trash_restore_response (*db_, "exa_1");
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto request = db_->get_request ("req_1");
+    ASSERT_HAS_VALUE (request);
+    EXPECT_FALSE (request->mock_example_id.has_value ());
+    EXPECT_EQ (request->mock_response_mode, "fixed");
+    EXPECT_EQ (request->updated_at, cleared->updated_at);
+    EXPECT_NE (served_example ("req_1", "exa_1"), "")
+    << "the example itself is back";
+}
+
 // Mutation check: drop the `request_is_absent_locked` refusal from
 // `restore_example_locked` and the restore answers 200 under a trashed request.
 TEST_F (TrashTest, RestoringAnExampleUnderATrashedRequestIsRefused) {

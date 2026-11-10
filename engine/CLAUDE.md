@@ -695,6 +695,9 @@ logged as a warning: it means a client skipped composition.
   on response **status**, which survives a reworded description. **Deleting a
   user's example moves it to the Trash** (`deleted_at`, #2971) instead: the
   same reads filter the stamp, and the trash lists, restores and purges it.
+  Either delete clears the request's `mock_example_id` when it named the
+  example, through `save_request` with a bumped `updated_at`, inside the
+  delete's lock (#3422); a restore does not set it again.
   An example imported from Postman keeps the saved response it came from in
   **`postman_response`** (schema version 2): the entry as JSON text in source
   member order, `name`/`body` as `null` placeholders. An import writes it, and
