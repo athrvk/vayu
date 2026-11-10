@@ -49,7 +49,7 @@ void Database::create_collection (const Collection& c) {
     "db", "Creating collection", { { "id", c.id }, { "name", c.name } });
     const ChangeOp op = upsert_op<Collection> (impl_->storage, c.id);
     impl_->storage.replace (c);
-    impl_->changes.publish (collection_change (c, op));
+    changes_.publish (collection_change (c, op));
 }
 
 void Database::rebind_collection (const Collection& collection) {
@@ -62,7 +62,7 @@ void Database::rebind_collection (const Collection& collection) {
         where (c (&DeclinedOperation::collection_id) == collection.id));
         return true; // Commit
     });
-    impl_->changes.publish (collection_change (collection, op));
+    changes_.publish (collection_change (collection, op));
 }
 
 std::vector<Collection> Database::get_collections () {
@@ -294,7 +294,7 @@ const std::optional<std::string>& declined_under) {
         return true; // Commit
     });
     if (!live_root.empty ()) {
-        impl_->changes.publish (collection_change (live_root.front (), ChangeOp::Delete));
+        changes_.publish (collection_change (live_root.front (), ChangeOp::Delete));
     }
 
     // No spec-document sweep here, deliberately: a stamped collection still
@@ -635,7 +635,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    impl_->changes.publish (trash_change (entry, ChangeOp::Restore));
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info ("db", "Restored request from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
@@ -681,7 +681,7 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
     if (reparented) {
         restored.collection_id.reset ();
     }
-    impl_->changes.publish (std::move (restored));
+    changes_.publish (std::move (restored));
 
     vayu::utils::log_info ("db", "Restored collection from trash",
     { { "id", entry.id }, { "subCollections", entry.collections },
@@ -737,7 +737,7 @@ void Database::purge_trash_entry_locked (const TrashEntry& entry) {
     }
     // The one place both an explicit purge and retention destroy an entry,
     // so each publishes exactly once; a collection's cascade rides on its root.
-    impl_->changes.publish (trash_change (entry, ChangeOp::Purge));
+    changes_.publish (trash_change (entry, ChangeOp::Purge));
 }
 
 std::optional<TrashOutcome> Database::purge_deleted (const std::string& id) {
@@ -853,7 +853,7 @@ const std::vector<Request>& requests) {
             }
             return true; // Commit
         });
-        impl_->changes.publish (std::move (moved));
+        changes_.publish (std::move (moved));
     });
 }
 

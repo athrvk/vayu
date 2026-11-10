@@ -105,7 +105,7 @@ void Database::delete_client_certificate (const std::string& id) {
     });
     // On the feed because the trash is: a client's trash list now holds it.
     if (deleted) {
-        impl_->changes.publish (Change{ ChangeKind::ClientCertificate,
+        changes_.publish (Change{ ChangeKind::ClientCertificate,
         ChangeOp::Delete, id, std::nullopt, std::nullopt });
     }
 }
@@ -129,7 +129,7 @@ Database::restore_client_certificate_locked (const TrashEntry& entry) {
     // Clears the stamp and nothing else, so the row comes back as it went in.
     certificate.deleted_at.reset ();
     impl_->storage.update (certificate);
-    impl_->changes.publish (trash_change (entry, ChangeOp::Restore));
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info (
     "db", "Restored client certificate from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };

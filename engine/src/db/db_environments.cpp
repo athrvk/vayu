@@ -64,7 +64,7 @@ void Database::save_environment (const Environment& e) {
         impl_->storage.replace (e);
         return true; // Commit
     });
-    impl_->changes.publish (environment_change (e.id, op));
+    changes_.publish (environment_change (e.id, op));
 }
 
 // Deleted rows are excluded here rather than at each caller (#2970), the
@@ -105,7 +105,7 @@ void Database::delete_environment (const std::string& id) {
         return true; // Commit
     });
     if (deleted) {
-        impl_->changes.publish (environment_change (id, ChangeOp::Delete));
+        changes_.publish (environment_change (id, ChangeOp::Delete));
     }
 }
 
@@ -118,7 +118,7 @@ TrashOutcome Database::restore_environment_locked (const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    impl_->changes.publish (trash_change (entry, ChangeOp::Restore));
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info (
     "db", "Restored environment from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
@@ -137,8 +137,7 @@ void Database::save_globals (const Globals& g) {
     vayu::utils::log_debug ("db", "Saving globals");
     const ChangeOp op = upsert_op<Globals> (impl_->storage, g.id);
     impl_->storage.replace (g);
-    impl_->changes.publish (
-    Change{ ChangeKind::Globals, op, g.id, std::nullopt, std::nullopt });
+    changes_.publish (Change{ ChangeKind::Globals, op, g.id, std::nullopt, std::nullopt });
 }
 
 std::optional<Globals> Database::get_globals () {

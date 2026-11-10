@@ -801,7 +801,9 @@ class Database {
      * the startup repair passes rewrite rows before the engine listens, when
      * no stream can be open and a resume from an earlier process resets.
      */
-    ChangeFeed& change_feed (); // database.cpp
+    ChangeFeed& change_feed () {
+        return changes_;
+    }
 
     // db_environments.cpp. The reads see live rows only (#2970): every
     // composition, script scope and export reaches an environment through
@@ -1393,6 +1395,10 @@ class Database {
     private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /// `change_feed`. Published to with the DB mutex held, after the write's
+    /// own transaction has committed (`db/change_feed.hpp`).
+    ChangeFeed changes_{ change_feed_id_base_now () };
 
     /**
      * @brief Whether the database at @p path opens and carries this build's

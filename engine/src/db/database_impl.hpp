@@ -688,10 +688,6 @@ struct Database::Impl {
     Storage storage;
     std::recursive_mutex mutex;
 
-    /// `Database::change_feed`. Published to with `mutex` held, after the
-    /// write's own transaction has committed (`db/change_feed.hpp`).
-    ChangeFeed changes{ change_feed_id_base_now () };
-
     /// A second, read-only connection to the same file, for the one read that
     /// must not wait on `mutex` (`Database::get_run_snapshot`, #2679). WAL lets
     /// it read the last commit while a write holds `mutex`. Declared after

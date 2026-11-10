@@ -320,7 +320,7 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
             written = write_spec_sync_batch_locked (batch);
             return true; // Commit
         });
-        impl_->changes.publish (std::move (written));
+        changes_.publish (std::move (written));
     });
 
     // The binding moved off whatever it named before, and a sync is the one

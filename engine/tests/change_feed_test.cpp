@@ -242,16 +242,18 @@ TEST_F (ChangeFeedDatabaseTest, ACascadePublishesOneChangeOnTheRootItNamed) {
     EXPECT_EQ (vayu::db::change_json (events.front ().change),
     json ({ { "kind", "collection" }, { "id", "col_root" }, { "op", "delete" } }));
 
-    before = db_->change_feed ().last_id ();
-    ASSERT_TRUE (db_->restore_deleted ("col_root").has_value ());
+    before              = db_->change_feed ().last_id ();
+    const auto restored = db_->restore_deleted ("col_root");
+    ASSERT_HAS_VALUE (restored);
     events = published_since (before);
     ASSERT_EQ (events.size (), 1U);
     EXPECT_EQ (events.front ().change.op, ChangeOp::Restore);
     EXPECT_EQ (events.front ().change.id, "col_root");
 
     db_->delete_collection ("col_root");
-    before = db_->change_feed ().last_id ();
-    ASSERT_TRUE (db_->purge_deleted ("col_root").has_value ());
+    before            = db_->change_feed ().last_id ();
+    const auto purged = db_->purge_deleted ("col_root");
+    ASSERT_HAS_VALUE (purged);
     events = published_since (before);
     ASSERT_EQ (events.size (), 1U);
     EXPECT_EQ (events.front ().change.op, ChangeOp::Purge);

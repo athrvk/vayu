@@ -138,10 +138,6 @@ void Database::with_lock (const std::function<void ()>& fn) {
     fn ();
 }
 
-ChangeFeed& Database::change_feed () {
-    return impl_->changes;
-}
-
 // ============================================================================
 // Busy-retry helper - every retried write in the db_*.cpp files goes through it
 // ============================================================================

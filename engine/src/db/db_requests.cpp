@@ -56,7 +56,7 @@ void Database::save_request (const Request& r) {
     "db", "Saving request", { { "id", r.id }, { "name", r.name } });
     const ChangeOp op = upsert_op<Request> (impl_->storage, r.id);
     impl_->storage.replace (r);
-    impl_->changes.publish (request_change (r, op));
+    changes_.publish (request_change (r, op));
 }
 
 std::optional<Request> Database::get_request (const std::string& id) {
@@ -242,7 +242,7 @@ const std::optional<std::string>& declined_under) {
         return true; // Commit
     });
     if (deleted) {
-        impl_->changes.publish (std::move (*deleted));
+        changes_.publish (std::move (*deleted));
     }
 }
 
@@ -291,7 +291,7 @@ void Database::save_request_example (const RequestExample& e) {
     { { "id", e.id }, { "requestId", e.request_id } });
     const ChangeOp op = upsert_op<RequestExample> (impl_->storage, e.id);
     impl_->storage.replace (e);
-    impl_->changes.publish (example_change (e, op));
+    changes_.publish (example_change (e, op));
 }
 
 namespace {
@@ -388,7 +388,7 @@ void Database::delete_request_example (const std::string& id) {
         return true; // Commit
     });
     if (deleted) {
-        impl_->changes.publish (std::move (*deleted));
+        changes_.publish (std::move (*deleted));
     }
 }
 
@@ -428,7 +428,7 @@ const TrashEntry& entry) {
         }
         return true; // Commit
     });
-    impl_->changes.publish (trash_change (entry, ChangeOp::Restore));
+    changes_.publish (trash_change (entry, ChangeOp::Restore));
     vayu::utils::log_info ("db", "Restored example from trash", { { "id", entry.id } });
     return TrashOutcome{ entry, false };
 }
@@ -461,7 +461,7 @@ void Database::suppress_request_example (const std::string& id, int64_t now) {
     row.updated_at = now;
     impl_->storage.replace (row);
     // Gone from every read, which is what a client sees of a delete.
-    impl_->changes.publish (example_change (row, ChangeOp::Delete));
+    changes_.publish (example_change (row, ChangeOp::Delete));
 }
 
 // ============================================================================
@@ -529,7 +529,7 @@ const std::vector<SpecDocument>& specs) {
             }
             return true; // Commit
         });
-        impl_->changes.publish (std::move (imported));
+        changes_.publish (std::move (imported));
     });
 }
 
