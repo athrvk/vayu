@@ -108,9 +108,9 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					{/*
 					 * A restored run's body may be only the slice the engine kept
 					 * (`maxTraceBodyBytes`), and a mock serves an example as though it
-					 * were a whole response. Said before the save, not after - and the
-					 * default name carries it onto the row, which is the only part the
-					 * panel shows once this dialog is gone.
+					 * were a whole response. Said before the save, not after - the row
+					 * carries it afterwards as the "Partial body" chip, which is the
+					 * only part the panel shows once this dialog is gone.
 					 */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="This body is not the whole response">
@@ -118,6 +118,21 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept when
 							the run was stored, and that is what gets saved. Re-send the request
 							first to keep the complete body.
+						</Callout>
+					)}
+
+					{/*
+					 * The other way a body ends up partial, and not exclusive with the
+					 * one above (issue #3422): the engine stopped reading at
+					 * `maxDesignResponseBodyBytes`, so a re-send reads the same amount
+					 * and the remedy is the setting, as in the viewer's own notice.
+					 */}
+					{response.bodyCapped && (
+						<Callout severity="warning" title="This body was capped while reading">
+							Only the first {formatSize(response.size || heldBodySize(response))} of
+							this response was read - Vayu&apos;s engine stops a Send there, so
+							re-sending reads the same amount, and that is what gets saved. Raise Max
+							Send response body in Settings to read more.
 						</Callout>
 					)}
 

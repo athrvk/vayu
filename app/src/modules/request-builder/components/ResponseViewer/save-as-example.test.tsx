@@ -39,7 +39,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useExecutionEventsStore } from "@/stores";
@@ -187,6 +187,55 @@ describe("save response as example", () => {
 		await waitFor(() => expect(screen.queryByLabelText(/^name/i)).toBeNull());
 	});
 
+	it("stores one row per received header line, in the server's case and order (#3422)", async () => {
+		// The folded map lowercases names and joins a repeated one, which is what
+		// a pair of `Set-Cookie` lines looks like in it: one row, one cookie.
+		state.response = okResponse({
+			headers: {
+				"content-type": "application/json",
+				"set-cookie": "a=1, b=2",
+				"x-dup": "one, two",
+			},
+			headerLines: [
+				{ name: "Set-Cookie", value: "a=1; Path=/" },
+				{ name: "Content-Type", value: "application/json" },
+				{ name: "X-Dup", value: "one" },
+				{ name: "Set-Cookie", value: "b=2; HttpOnly" },
+				{ name: "X-Dup", value: "two" },
+			],
+		});
+		renderViewer();
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		const payload = createRequestExample.mock.calls[0][1];
+		expect(payload.headers).toEqual([
+			{ key: "Set-Cookie", value: "a=1; Path=/", enabled: true },
+			{ key: "Content-Type", value: "application/json", enabled: true },
+			{ key: "X-Dup", value: "one", enabled: true },
+			{ key: "Set-Cookie", value: "b=2; HttpOnly", enabled: true },
+			{ key: "X-Dup", value: "two", enabled: true },
+		]);
+		// Still the first Content-Type row, found whatever its case.
+		expect(payload.contentType).toBe("application/json");
+	});
+
+	it("falls back to the folded map for a response with no recorded lines", async () => {
+		state.response = okResponse({ headerLines: undefined });
+		renderViewer();
+
+		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].headers).toEqual([
+			{ key: "Content-Type", value: "application/json", enabled: true },
+			{ key: "X-Request-Id", value: "abc", enabled: true },
+		]);
+	});
+
 	it("keeps a response with no Content-Type honest rather than guessing one", async () => {
 		state.response = okResponse({ headers: { "X-Request-Id": "abc" } });
 		renderViewer();
@@ -251,6 +300,48 @@ describe("save response as example", () => {
 		renderViewer();
 
 		openDialog();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].bodyTruncated).toBe(false);
+	});
+
+	// A read stopped at the Send cap (#3422) leaves a partial body too, and the
+	// remedy differs from storage truncation, so the callout is its own and the
+	// two are not exclusive.
+	it("stores a read-capped body as truncated and says how to read more", async () => {
+		state.response = okResponse({ bodyCapped: true });
+		renderViewer();
+
+		openDialog();
+		const dialog = within(screen.getByRole("dialog"));
+		expect(dialog.getByText(/capped while reading/i)).toBeTruthy();
+		expect(dialog.getByText(/Raise Max Send response body in Settings/)).toBeTruthy();
+		// Storage truncation's callout does not fire, and its re-send advice would
+		// be wrong here: a re-send reads the same amount.
+		expect(dialog.queryByText(/not the whole response/i)).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
+
+		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));
+		expect(createRequestExample.mock.calls[0][1].bodyTruncated).toBe(true);
+	});
+
+	it("shows both callouts for a body that is capped and stored truncated", () => {
+		state.response = okResponse({ bodyCapped: true, bodyTruncated: true, bodyBytes: 4096 });
+		renderViewer();
+
+		openDialog();
+		const dialog = within(screen.getByRole("dialog"));
+		expect(dialog.getByText(/capped while reading/i)).toBeTruthy();
+		expect(dialog.getByText(/not the whole response/i)).toBeTruthy();
+	});
+
+	it("sends bodyTruncated false for a response whose read was not capped", async () => {
+		state.response = okResponse({ bodyCapped: false });
+		renderViewer();
+
+		openDialog();
+		expect(within(screen.getByRole("dialog")).queryByText(/capped while reading/i)).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: /save example/i }));
 
 		await waitFor(() => expect(createRequestExample).toHaveBeenCalledTimes(1));

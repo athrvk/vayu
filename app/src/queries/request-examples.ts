@@ -76,6 +76,13 @@ export function useCreateRequestExampleMutation() {
  * spec-sync tombstone - and the mutation cannot tell which, so it invalidates
  * `trash.all` either way; for a tombstone that costs one refetch of a list
  * that comes back unchanged.
+ *
+ * The delete can also clear the request's `mockExampleId` when it named this
+ * row (#3422), but the request's detail is not invalidated here: the engine
+ * publishes that request write and the example's own on the change feed, which
+ * the app's `useChangeFeed` maps onto the request detail and lists
+ * (`change-feed-invalidation.ts`). Until it lands, the Examples tab's selector
+ * already shows the first example for a pointer that names a missing one.
  */
 export function useDeleteRequestExampleMutation() {
 	const queryClient = useQueryClient();
