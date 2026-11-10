@@ -6,10 +6,21 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { PHASE_TIPS } from "@/components/shared/response-viewer/phase-tips";
+import type { RedirectHop } from "@/types/domain";
 import ResponseTimingTab from "./ResponseTimingTab";
 import type { ResponseTiming } from "../../types";
+
+const hop = (status: number): RedirectHop => ({ status, statusText: "Found", headerLines: [] });
+
+/** The text of the tooltip the named phase's info dot opens. */
+async function tipFor(label: string): Promise<string | null> {
+	const dot = within(screen.getByText(label)).getByRole("button", { name: "More information" });
+	fireEvent.focus(dot);
+	return (await screen.findByRole("tooltip")).textContent;
+}
 
 const sample: ResponseTiming = {
 	totalMs: 1011,
@@ -128,5 +139,46 @@ describe("ResponseTimingTab", () => {
 		renderTab({ timing: zero });
 		// Every phase share is 0% - at least the five legend rows render it.
 		expect(screen.getAllByText("0%").length).toBeGreaterThanOrEqual(5);
+	});
+
+	describe("after redirects", () => {
+		it("says the phases are summed over every request made", () => {
+			renderTab({ timing: sample, redirects: [hop(301), hop(302)] });
+			// Two redirects followed, then the answering request: three requests.
+			expect(
+				screen.getByText(
+					"Phases are summed over 3 requests: 2 redirects and the final response."
+				)
+			).toBeInTheDocument();
+		});
+
+		it("counts a single redirect as two requests", () => {
+			renderTab({ timing: sample, redirects: [hop(302)] });
+			expect(
+				screen.getByText(
+					"Phases are summed over 2 requests: 1 redirect and the final response."
+				)
+			).toBeInTheDocument();
+		});
+
+		it("shows no note without redirects, empty or absent", () => {
+			const { unmount } = renderTab({ timing: sample });
+			expect(screen.queryByText(/Phases are summed/)).not.toBeInTheDocument();
+			unmount();
+			renderTab({ timing: sample, redirects: [] });
+			expect(screen.queryByText(/Phases are summed/)).not.toBeInTheDocument();
+		});
+
+		it("explains TTFB as a sum over the chain, not one server's wait", async () => {
+			renderTab({ timing: sample, redirects: [hop(302)] });
+			const tip = await tipFor("TTFB");
+			expect(tip).toMatch(/summed over every request/);
+			expect(tip).not.toBe(PHASE_TIPS.ttfb);
+		});
+
+		it("keeps the shared TTFB tip for a single request", async () => {
+			renderTab({ timing: sample });
+			expect(await tipFor("TTFB")).toBe(PHASE_TIPS.ttfb);
+		});
 	});
 });

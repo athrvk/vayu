@@ -8985,7 +8985,12 @@ because curl 8.23 counts a wait again each time the transfer is passed over),
 and `queueWaitMs = totalMs - wireMs` is everything before the wire: the
 generator's own queue and that slot wait. The phases are measured after the
 slot wait too, so `firstByteMs` is the target's own. A design send has no
-slot to wait for, so its `queueWaitMs` stays a sliver.
+slot to wait for, so its `queueWaitMs` stays a sliver. Over a followed redirect
+chain the phase fields accumulate: every hop's libcurl timers are summed
+(`add_phase_times`), so `firstByteMs` is then the sum of each hop's wait, not
+one server's, and `dnsMs`, `connectMs`, `tlsMs` and `downloadMs` are sums the
+same way. The app's Timing tab says so when the response's `redirects` is
+non-empty.
 
 **`timing.engineMs` is Vayu's own cost for the exchange** ([#2132](https://github.com/athrvk/vayu/issues/2132)),
 the ninth key and the only one a buffered `/execute` alone carries. It is the

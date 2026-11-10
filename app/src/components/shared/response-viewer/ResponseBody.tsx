@@ -101,7 +101,10 @@ export default function ResponseBody({
 		// Bytes with no text view never reach the editor, whatever the header
 		// says: the funnel already decided there is no text (`isText`).
 		if (rawBytes && !rawBytes.isText) return isNonTextType(declared) ? declared : "binary";
-		return declared;
+		// A binary header over a body the engine sent as UTF-8 (no `rawBytes`, or
+		// `isText`) is text under a misleading label (#3427): the bytes are
+		// readable, so the editor shows them. Image and PDF keep their pane.
+		return declared === "binary" ? "text" : declared;
 	}, [headers, bodyRaw, body, isLargeBody, rawBytes]);
 
 	const canPreview = detectedType === "html";
