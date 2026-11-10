@@ -8638,7 +8638,8 @@ a design answer, an empty array when there is nothing to say, so a client can
 tell "no warnings" from an engine too old to warn. The stored
 `trace_data` carries it at the top level, beside `clientCertificate` and not
 inside `response`, because a send that failed before any header block
-arrived has no `response` node and can still have warned; it is written only when non-empty, so a row
+arrived has no `response` node and can still have warned; it is written
+only when non-empty, so a row
 stored before the field reads as having none. A load-run sample records none.
 Codes are listed here as the engine starts producing them:
 

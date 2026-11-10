@@ -1951,8 +1951,7 @@ sent, without that credential. It is also the sentence for a request whose own
 (issue #3202). The key is **absent** when there is nothing to say, on the live
 body and in the stored trace alike; the trace holds it on `trace.request`, so a
 failed exchange that received no header block, and so has no `response` node,
-still has it, and a streaming send
-carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
+still has it, and a streaming send carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
 both set `ResponseState.authNotice` (an empty string reads as absent), held
 together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
 warning `Callout` between the status band and the tabs, so it shows on every
