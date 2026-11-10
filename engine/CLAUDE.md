@@ -469,7 +469,9 @@ answer and that the route changes nothing. Anything that writes, starts,
 stops, deletes or sends is a `POST`, `PUT` or `DELETE`, which a page can only
 send with an `Origin`. An SSE route's single-reader claim (`/runs/:id/events`,
 `/inbox/:id/live`) lasts as long as the connection reading it and needs an id
-a page cannot know. The gate is deliberately not widened to `Sec-Fetch-Mode`.
+a page cannot know; `/changes` needs none, so its streams are capped instead
+(`change_feed::MAX_READERS`), which bounds the pool threads a page can park.
+The gate is deliberately not widened to `Sec-Fetch-Mode`.
 
 Key endpoints:
 
@@ -480,6 +482,7 @@ Key endpoints:
 | POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
 | GET | `/runs/:runId/events` | SSE relay of a streaming request's events (`POST /execute` with `stream: true`) |
+| GET | `/changes` | SSE change feed (#3420): one `change` event per committed write of a collection, request, example, environment, the globals or a trash entry, published by `Database` after the write's own transaction commits (`db/change_feed.hpp`; a cascade is one event on its root); opens with `ready` or `reset`, resumes by `Last-Event-ID` within a bounded ring, `reset` past it; no claim, at most `change_feed::MAX_READERS` streams |
 | GET | `/runs/:runId/metrics` | Historical time-series (JSON) for a run; `maxPoints` folds it server-side |
 | GET | `/runs/:runId/monitor` | The server-vitals samples scraped during the run (#2611), same envelope; `maxPoints` folds it server-side too, each series to its bucket max (`MonitorSampleBucket`) |
 | DELETE | `/runs` | Clear run history (#2429): every run except pinned baselines and runs still `running`/`pending`, through retention's batched pass (`Database::clear_runs`); answers `{deleted, keptPinned, deletedIds}`. `DELETE /runs/:runId` still deletes whatever it names, pinned or not |

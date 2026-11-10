@@ -303,6 +303,40 @@ the reason to stderr and exits **1** (#983). It was `listen()` before, which fol
 serve loop and reports failure only through a `return false` on a detached thread - so a taken port
 printed the listening banner, unwound through the graceful-shutdown path and exited 0.
 
+### Change feed
+
+`GET /changes` (#3420, [api-reference.md](api-reference.md#get-changes)) tells every client about
+every committed write of a collection, request, example, environment, the globals or a trash entry,
+so a row one client changed (the stdio MCP server, `vayu-cli`, a script, a second window) does not
+stay stale in another's cache. `Database` owns the feed (`engine/include/vayu/db/change_feed.hpp`)
+and is its only producer: each public write of those kinds publishes once its own transaction has
+committed, from inside the method, with the DB mutex still held.
+
+Three rules make that the whole story:
+
+- **No write runs inside another's transaction.** Every multi-row write (`import_apply`,
+  `apply_reorder`, `spec_sync_apply`, a cascade) is one transaction inside one method, and
+  `with_lock` holds the mutex without opening one. So "after its own commit" is "committed": a
+  batch collects its rows' changes while it writes and publishes them only once the transaction
+  returns, so a rollback (a `MissingRowError` half-way through a reorder) publishes nothing, and a
+  busy retry publishes once, for the attempt that landed. A write inside a `with_lock` composite
+  that later throws stays committed, and so does its event.
+- **No public write calls another**, so nothing publishes twice; a cascade publishes one change, on
+  the root it was asked about.
+- **Publishing is an append under the feed's own small mutex**, a leaf lock: it is taken with the
+  DB mutex held, which numbers events in commit order, and nothing holding it takes the DB mutex or
+  touches a socket. The relay reads the ring under that mutex alone, so a stream never waits on the
+  DB mutex and never holds it.
+
+The feed is a bounded ring (`change_feed::MAX_RETAINED_EVENTS`); a reader whose resume point it no
+longer covers is sent a `reset` and refetches everything. It owns no thread: each stream is a
+management-API handler polling the ring on the relay cadence `GET /runs/:id/events` uses, at most
+`change_feed::MAX_READERS` at once, and it ends on `server_stopping` like every other relay. The
+feed lives in the `Database`, which outlives `Server::stop()`'s handler join, so nothing has to be
+drained before it. The startup repair passes rewrite rows before the engine listens and publish
+nothing; a client resuming from an earlier process is reset anyway, because ids start from the
+process's start time.
+
 ### Event Loop (`curl_multi`)
 
 The event loop manages concurrent HTTP request execution using libcurl's multi interface.
@@ -1739,7 +1773,7 @@ consumers drained** (`Server::stop()` sets the flag every handler reads as
 `RouteContext::server_stopping`, which cancels each outbound transfer a
 handler is making - the `/execute` send and its `pm.sendRequest`s, an OAuth
 token request, an import fetch, a connection test - and ends each SSE relay
-(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`); it shuts the OAuth
+(`/runs/:id/live`, `/runs/:id/events`, `/inbox/:id/live`, `/changes`); it shuts the OAuth
 authorization manager down, which cancels an embedded completion's token
 exchange, made on a management handler, through its attempt (#3347); it then
 closes the listener and joins its accept loop's thread, which returns only

@@ -1,27 +1,41 @@
 /**
  * @file tests/change_feed_test.cpp
- * @brief The workspace change feed (issue #3420): the ring and its resume
- *        rule, and what each `Database` write publishes and when.
+ * @brief The workspace change feed, `GET /changes` (issue #3420): the ring and
+ *        its resume rule, what each `Database` write publishes and when, and
+ *        the SSE route that relays it.
+ *
+ * Mutation checks, each named at the test that catches it: drop the publish
+ * from `save_request`; publish a reorder's rows as they are written instead of
+ * after the commit; drop `stopping` from the relay loop.
  */
 
 #include <gtest/gtest.h>
+#include <httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/core/run_manager.hpp"
 #include "vayu/db/change_feed.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/server.hpp"
+#include "vayu/utils/parse.hpp"
 
 #include "optional_assert.hpp"
 #include "temp_database.hpp"
+#include "wait_until.hpp"
 
 namespace {
 
@@ -401,6 +415,404 @@ TEST_F (ChangeFeedDatabaseTest, ATombstoneAndACertificateDeleteEachPublishOne) {
     ASSERT_EQ (events.size (), 1U);
     EXPECT_EQ (events.front ().change.kind, ChangeKind::ClientCertificate);
     EXPECT_EQ (events.front ().change.op, ChangeOp::Delete);
+}
+
+// ---------------------------------------------------------------------------
+// The route
+// ---------------------------------------------------------------------------
+
+/// A port nothing holds once this returns, for a `Server` to bind. The holder
+/// listens so that `stop` closes its socket, as `server_bind_test.cpp`'s does.
+int released_port () {
+    httplib::Server holder;
+    const int port = holder.bind_to_any_port ("127.0.0.1");
+    std::thread listener ([&holder] () { holder.listen_after_bind (); });
+    holder.wait_until_ready ();
+    holder.stop ();
+    listener.join ();
+    return port;
+}
+
+/// One SSE frame as a reader sees it.
+struct Frame {
+    std::string event;
+    std::optional<int64_t> id;
+    std::string data;
+};
+
+/// Every complete frame in @p text, keep-alive comments left out.
+std::vector<Frame> parse_frames (std::string_view text) {
+    std::vector<Frame> frames;
+    for (std::size_t end = text.find ("\n\n"); end != std::string_view::npos;
+    end                  = text.find ("\n\n")) {
+        Frame frame;
+        std::string_view block = text.substr (0, end);
+        text.remove_prefix (end + 2);
+        while (!block.empty ()) {
+            const auto line_end = block.find ('\n');
+            const auto line     = block.substr (0, line_end);
+            block = line_end == std::string_view::npos ? std::string_view{} :
+                                                         block.substr (line_end + 1);
+            const auto field_value = [&line] (std::string_view field) {
+                return line.substr (field.size ());
+            };
+            if (line.starts_with ("event: ")) {
+                frame.event = field_value ("event: ");
+            } else if (line.starts_with ("id: ")) {
+                frame.id =
+                vayu::utils::parse_number<int64_t> (field_value ("id: "));
+            } else if (line.starts_with ("data: ")) {
+                frame.data = field_value ("data: ");
+            }
+        }
+        if (!frame.event.empty ()) {
+            frames.push_back (std::move (frame));
+        }
+    }
+    return frames;
+}
+
+/// A client reading `GET /changes` on a thread of its own until it is
+/// destroyed, which hangs up.
+class FeedReader {
+    public:
+    /// Past the 15s keep-alive, so an idle stream is never read as broken.
+    static constexpr int READ_TIMEOUT_S = 40;
+
+    FeedReader (int port, std::string path, httplib::Headers headers = {})
+    : client_ ("127.0.0.1", port) {
+        client_.set_read_timeout (READ_TIMEOUT_S, 0);
+        thread_ = std::thread (
+        [this, path = std::move (path), headers = std::move (headers)] () {
+            static_cast<void> (
+            client_.Get (path, headers, [this] (const char* data, size_t length) {
+                const std::lock_guard<std::mutex> lock (mutex_);
+                text_.append (data, length);
+                return true;
+            }));
+        });
+    }
+
+    ~FeedReader () {
+        hang_up ();
+    }
+
+    FeedReader (const FeedReader&)            = delete;
+    FeedReader& operator= (const FeedReader&) = delete;
+    FeedReader (FeedReader&&)                 = delete;
+    FeedReader& operator= (FeedReader&&)      = delete;
+
+    /// Close the connection and wait for the reading thread.
+    void hang_up () {
+        client_.stop ();
+        if (thread_.joinable ()) {
+            thread_.join ();
+        }
+    }
+
+    [[nodiscard]] std::vector<Frame> frames () const {
+        const std::lock_guard<std::mutex> lock (mutex_);
+        return parse_frames (text_);
+    }
+
+    /// The first @p count frames, once that many have arrived; fewer, with
+    /// the failure recorded, when they never do.
+    std::vector<Frame> await_frames (std::size_t count) const {
+        const bool arrived =
+        vayu::tests::wait_until ([&] () { return frames ().size () >= count; });
+        auto read = frames ();
+        if (!arrived) {
+            ADD_FAILURE () << "expected " << count << " frames, read " << read.size ();
+        }
+        return read;
+    }
+
+    private:
+    httplib::Client client_;
+    std::thread thread_;
+    mutable std::mutex mutex_;
+    std::string text_;
+};
+
+class ChangeFeedRouteTest : public ChangeFeedDatabaseTest {
+    protected:
+    void SetUp () override {
+        ChangeFeedDatabaseTest::SetUp ();
+        port_ = released_port ();
+        ASSERT_GT (port_, 0);
+        server_ = std::make_unique<vayu::http::Server> (*db_, run_manager_, port_);
+        ASSERT_TRUE (server_->start ());
+    }
+
+    void TearDown () override {
+        server_->stop ();
+        server_.reset ();
+        ChangeFeedDatabaseTest::TearDown ();
+    }
+
+    /// The JSON answer to one call, which must succeed.
+    json call (const std::string& method, const std::string& path, const json& body = nullptr) {
+        httplib::Client client ("127.0.0.1", port_);
+        const std::string text = body.is_null () ? std::string{} : body.dump ();
+        httplib::Result result = method == "POST" ?
+        client.Post (path, text, "application/json") :
+        method == "PUT" ? client.Put (path, text, "application/json") :
+                          client.Delete (path);
+        if (!result) {
+            ADD_FAILURE () << method << " " << path << ": "
+                           << httplib::to_string (result.error ());
+            return nullptr;
+        }
+        EXPECT_GE (result->status, 200)
+        << method << " " << path << ": " << result->body;
+        EXPECT_LT (result->status, 300)
+        << method << " " << path << ": " << result->body;
+        return json::parse (result->body, nullptr, false);
+    }
+
+    /// Runs @p write and checks it published exactly one change, naming
+    /// @p kind, @p op and @p id. Answers the body @p write returned.
+    template <typename Write>
+    json expect_one_change (const char* what, ChangeKind kind, ChangeOp op, Write&& write) {
+        const auto before = db_->change_feed ().last_id ();
+        json body         = write ();
+        const auto events = published_since (before);
+        EXPECT_EQ (events.size (), 1U) << what;
+        if (events.size () == 1) {
+            EXPECT_EQ (events.front ().change.kind, kind) << what;
+            EXPECT_EQ (events.front ().change.op, op) << what;
+        }
+        return body;
+    }
+
+    std::string last_change_id () {
+        const auto read = db_->change_feed ().since (db_->change_feed ().last_id () - 1);
+        return read.events.empty () ? std::string{} : read.events.back ().change.id;
+    }
+
+    vayu::core::RunManager run_manager_;
+    std::unique_ptr<vayu::http::Server> server_;
+    int port_ = 0;
+};
+
+// Every route that writes one row publishes one change for it, and a cascade
+// publishes one for its root. Mutation check: drop the publish from
+// `save_request`, and the request create and update both publish nothing.
+TEST_F (ChangeFeedRouteTest, EveryWriteRoutePublishesExactlyOneChange) {
+    const auto collection = expect_one_change ("create collection",
+    ChangeKind::Collection, ChangeOp::Create,
+    [&] { return call ("POST", "/collections", { { "name", "API" } }); });
+    const std::string col = collection.value ("id", "");
+    ASSERT_FALSE (col.empty ());
+    expect_one_change ("update collection", ChangeKind::Collection, ChangeOp::Update, [&] {
+        return call ("PUT", "/collections/" + col, { { "name", "Renamed" } });
+    });
+
+    const auto request =
+    expect_one_change ("create request", ChangeKind::Request, ChangeOp::Create, [&] {
+        return call ("POST", "/requests",
+        { { "collectionId", col }, { "name", "Ping" }, { "method", "GET" },
+        { "url", "https://example.test/ping" } });
+    });
+    const std::string req = request.value ("id", "");
+    ASSERT_FALSE (req.empty ());
+    EXPECT_EQ (last_change_id (), req);
+    expect_one_change ("update request", ChangeKind::Request, ChangeOp::Update,
+    [&] { return call ("PUT", "/requests/" + req, { { "method", "POST" } }); });
+    expect_one_change ("reorder", ChangeKind::Request, ChangeOp::Update, [&] {
+        return call ("POST", "/reorder",
+        { { "moves",
+        json::array ({ { { "type", "request" }, { "id", req }, { "order", 3 } } }) } });
+    });
+
+    const auto example =
+    expect_one_change ("create example", ChangeKind::Example, ChangeOp::Create, [&] {
+        return call ("POST", "/requests/" + req + "/examples",
+        { { "name", "200" }, { "origin", "user" } });
+    });
+    const std::string exa = example.value ("id", "");
+    ASSERT_FALSE (exa.empty ());
+    expect_one_change ("update example", ChangeKind::Example, ChangeOp::Update, [&] {
+        return call ("PUT", "/requests/" + req + "/examples/" + exa, { { "name", "OK" } });
+    });
+    expect_one_change ("delete example", ChangeKind::Example, ChangeOp::Delete,
+    [&] { return call ("DELETE", "/requests/" + req + "/examples/" + exa); });
+    expect_one_change ("restore example", ChangeKind::Example, ChangeOp::Restore,
+    [&] { return call ("POST", "/trash/" + exa + "/restore"); });
+
+    const auto environment = expect_one_change ("create environment",
+    ChangeKind::Environment, ChangeOp::Create,
+    [&] { return call ("POST", "/environments", { { "name", "Dev" } }); });
+    const std::string env  = environment.value ("id", "");
+    ASSERT_FALSE (env.empty ());
+    expect_one_change (
+    "update environment", ChangeKind::Environment, ChangeOp::Update, [&] {
+        return call ("PUT", "/environments/" + env, { { "name", "Staging" } });
+    });
+    expect_one_change ("delete environment", ChangeKind::Environment,
+    ChangeOp::Delete, [&] { return call ("DELETE", "/environments/" + env); });
+    expect_one_change ("purge environment", ChangeKind::Environment,
+    ChangeOp::Purge, [&] { return call ("DELETE", "/trash/" + env); });
+
+    const ChangeOp globals_op =
+    db_->get_globals ().has_value () ? ChangeOp::Update : ChangeOp::Create;
+    expect_one_change ("save globals", ChangeKind::Globals, globals_op, [&] {
+        return call ("POST", "/globals", { { "variables", json::object () } });
+    });
+
+    expect_one_change ("delete request", ChangeKind::Request, ChangeOp::Delete,
+    [&] { return call ("DELETE", "/requests/" + req); });
+    expect_one_change ("restore request", ChangeKind::Request, ChangeOp::Restore,
+    [&] { return call ("POST", "/trash/" + req + "/restore"); });
+    expect_one_change ("delete collection", ChangeKind::Collection,
+    ChangeOp::Delete, [&] { return call ("DELETE", "/collections/" + col); });
+    expect_one_change ("restore collection", ChangeKind::Collection, ChangeOp::Restore,
+    [&] { return call ("POST", "/trash/" + col + "/restore"); });
+
+    expect_one_change ("import", ChangeKind::Collection, ChangeOp::Create, [&] {
+        return call ("POST", "/import/apply",
+        { { "collections",
+        json::array ({ { { "tempId", "c1" }, { "name", "Imported" } } }) } });
+    });
+}
+
+// Mutation check: drop the publish from `save_request`, and the change frame
+// never arrives.
+TEST_F (ChangeFeedRouteTest, AStreamOpensReadyThenRelaysAChangeAsItCommits) {
+    make_collection ("col_1");
+    make_request ("req_1", "col_1");
+    const auto newest = db_->change_feed ().last_id ();
+
+    FeedReader reader (port_, "/changes");
+    const auto opening = reader.await_frames (1);
+    ASSERT_EQ (opening.size (), 1U);
+    EXPECT_EQ (opening.front ().event, "ready");
+    EXPECT_EQ (opening.front ().id, newest);
+    EXPECT_EQ (json::parse (opening.front ().data), json ({ { "lastEventId", newest } }));
+
+    call ("PUT", "/requests/req_1", { { "name", "Renamed" } });
+    const auto frames = reader.await_frames (2);
+    ASSERT_EQ (frames.size (), 2U);
+    EXPECT_EQ (frames[1].event, "change");
+    EXPECT_EQ (frames[1].id, newest + 1);
+    EXPECT_EQ (json::parse (frames[1].data),
+    json ({ { "kind", "request" }, { "id", "req_1" }, { "op", "update" },
+    { "collectionId", "col_1" } }));
+}
+
+TEST_F (ChangeFeedRouteTest, AResumeReplaysTheChangesMissedWhileAway) {
+    make_collection ("col_1");
+    const auto seen = db_->change_feed ().last_id ();
+    make_request ("req_1", "col_1");
+    make_request ("req_2", "col_1");
+
+    FeedReader reader (port_, "/changes", { { "Last-Event-ID", std::to_string (seen) } });
+    const auto frames = reader.await_frames (3);
+    ASSERT_EQ (frames.size (), 3U);
+    EXPECT_EQ (frames[0].event, "ready");
+    EXPECT_EQ (frames[0].id, seen);
+    EXPECT_EQ (frames[1].id, seen + 1);
+    EXPECT_EQ (json::parse (frames[1].data).value ("id", ""), "req_1");
+    EXPECT_EQ (frames[2].id, seen + 2);
+    EXPECT_EQ (json::parse (frames[2].data).value ("id", ""), "req_2");
+}
+
+TEST_F (ChangeFeedRouteTest, AReaderTooFarBehindIsToldToResetAndThenTails) {
+    const auto seen = db_->change_feed ().last_id ();
+    std::vector<Change> flood (
+    feed_constants::MAX_RETAINED_EVENTS + 1, request_change ("req_flood"));
+    db_->change_feed ().publish (std::move (flood));
+    const auto newest = db_->change_feed ().last_id ();
+
+    FeedReader reader (port_, "/changes?lastEventId=" + std::to_string (seen));
+    const auto opening = reader.await_frames (1);
+    ASSERT_EQ (opening.size (), 1U);
+    EXPECT_EQ (opening.front ().event, "reset");
+    EXPECT_EQ (opening.front ().id, newest);
+
+    make_collection ("col_after");
+    const auto frames = reader.await_frames (2);
+    ASSERT_EQ (frames.size (), 2U);
+    EXPECT_EQ (frames[1].event, "change");
+    EXPECT_EQ (frames[1].id, newest + 1);
+}
+
+// A connected reader that falls a whole ring behind between two polls is told
+// so mid-stream, rather than handed a gap.
+TEST_F (ChangeFeedRouteTest, AConnectedReaderOverrunByABulkWriteIsToldToReset) {
+    FeedReader reader (port_, "/changes");
+    ASSERT_EQ (reader.await_frames (1).size (), 1U);
+
+    // One publish, so the relay sees the whole flood or none of it.
+    db_->change_feed ().publish (std::vector<Change> (
+    feed_constants::MAX_RETAINED_EVENTS + 1, request_change ("req_flood")));
+    const auto frames = reader.await_frames (2);
+    ASSERT_EQ (frames.size (), 2U);
+    EXPECT_EQ (frames[1].event, "reset");
+    EXPECT_EQ (frames[1].id, db_->change_feed ().last_id ());
+}
+
+TEST_F (ChangeFeedRouteTest, AMalformedLastEventIdIsRefused) {
+    httplib::Client client ("127.0.0.1", port_);
+    const auto result =
+    client.Get ("/changes", httplib::Headers{ { "Last-Event-ID", "soon" } });
+    ASSERT_TRUE (result) << httplib::to_string (result.error ());
+    EXPECT_EQ (result->status, 400);
+    EXPECT_EQ (json::parse (result->body)["error"].value ("code", ""), "invalid_last_event_id");
+}
+
+TEST_F (ChangeFeedRouteTest, AFeedWithEveryReaderSlotTakenRefusesAnother) {
+    for (int slot = 0; slot < feed_constants::MAX_READERS; ++slot) {
+        ASSERT_TRUE (db_->change_feed ().try_add_reader ());
+    }
+    httplib::Client client ("127.0.0.1", port_);
+    const auto refused = client.Get ("/changes");
+    ASSERT_TRUE (refused) << httplib::to_string (refused.error ());
+    EXPECT_EQ (refused->status, 503);
+    EXPECT_EQ (json::parse (refused->body)["error"].value ("code", ""), "change_feed_full");
+    EXPECT_EQ (refused->get_header_value ("Retry-After"),
+    std::to_string (vayu::core::constants::sse::RELAY_KEEPALIVE_MS / 1000));
+
+    db_->change_feed ().remove_reader ();
+    FeedReader reader (port_, "/changes");
+    EXPECT_EQ (reader.await_frames (1).size (), 1U)
+    << "a freed slot did not admit a stream";
+}
+
+TEST_F (ChangeFeedRouteTest, EveryOpenStreamReceivesTheSameChange) {
+    FeedReader first (port_, "/changes");
+    FeedReader second (port_, "/changes");
+    ASSERT_EQ (first.await_frames (1).size (), 1U);
+    ASSERT_EQ (second.await_frames (1).size (), 1U);
+
+    make_collection ("col_1");
+    const auto one   = first.await_frames (2);
+    const auto other = second.await_frames (2);
+    ASSERT_EQ (one.size (), 2U);
+    ASSERT_EQ (other.size (), 2U);
+    EXPECT_EQ (one[1].id, other[1].id);
+    EXPECT_EQ (one[1].data, other[1].data);
+}
+
+// A stream ends when the server stops instead of holding the handler join
+// open for as long as its client reads (#2683). Healthy: within one 50ms
+// poll. Mutation check: drop `stopping` from the relay loop, and `stop()`
+// returns only once the reader hangs up after the 20s wait.
+TEST_F (ChangeFeedRouteTest, StopEndsAStreamItsClientIsStillReading) {
+    FeedReader reader (port_, "/changes");
+    ASSERT_EQ (reader.await_frames (1).size (), 1U);
+
+    auto stopped =
+    std::async (std::launch::async, [this] () { server_->stop (); });
+    const bool returned = vayu::tests::wait_until ([&stopped] () {
+        return stopped.wait_for (std::chrono::seconds (0)) == std::future_status::ready;
+    });
+    if (!returned) {
+        reader.hang_up (); // What lets a broken stop() return at all.
+    }
+    stopped.get ();
+    EXPECT_TRUE (returned)
+    << "stop() did not end a change stream still being read";
 }
 
 } // namespace

@@ -279,6 +279,7 @@ add_executable(vayu_tests
     ../src/http/routes/mock_issuer.cpp
     ../src/http/routes/inbox.cpp
     ../src/http/routes/events.cpp
+    ../src/http/routes/changes.cpp
     ../src/http/routes/mock_server.cpp
     ../src/http/routes/elements.cpp
     ../src/http/managed_listener.cpp
@@ -409,6 +410,7 @@ set(vayu_scratch_database_suites
     AuthRefreshTuningTest
     AuthResolverOAuth2Test
     ChangeFeedDatabaseTest
+    ChangeFeedRouteTest
     ClientCertificateDbTest
     CollectMetrics
     BinaryBodyLoadRun
