@@ -27,10 +27,10 @@ include(CMakePackageConfigHelpers)
 # 4. If any interfaces have been removed since the last public release, then set age to 0.
 
 set(HDR_SOVERSION_CURRENT   6)
-set(HDR_SOVERSION_AGE       1)
-set(HDR_SOVERSION_REVISION  3)
+set(HDR_SOVERSION_REVISION  5)
+set(HDR_SOVERSION_AGE       4)
 
-set(HDR_VERSION ${HDR_SOVERSION_CURRENT}.${HDR_SOVERSION_AGE}.${HDR_SOVERSION_REVISION})
+set(HDR_VERSION ${HDR_SOVERSION_CURRENT}.${HDR_SOVERSION_REVISION}.${HDR_SOVERSION_AGE})
 set(HDR_SOVERSION ${HDR_SOVERSION_CURRENT})
 option(HDR_LOG_REQUIRED "HDR Logging component required" ON)
 
@@ -52,6 +52,21 @@ if(UNIX)
         -Wpedantic
         $<$<COMPILE_LANGUAGE:C>:-Wmissing-prototypes>)
     add_definitions(-D_GNU_SOURCE)
+endif()
+
+option(HDR_HISTOGRAM_CORE_ONLY "Build only the minimal static core (record + percentile); no logging, recorder, zlib or threads" OFF)
+option(HDR_HISTOGRAM_DISABLE_AVX2 "Disable the runtime AVX2 percentile-scan dispatch (force the scalar scan)" OFF)
+if(HDR_HISTOGRAM_DISABLE_AVX2)
+    add_compile_definitions(HDR_DISABLE_AVX2)
+endif()
+
+# A core-only build depends on nothing but libc/libm: skip zlib/thread discovery
+# and the full library, tests, examples and packaging below.
+if(HDR_HISTOGRAM_CORE_ONLY)
+    set(HDR_LOG_ENABLED "FALSE")
+    add_subdirectory(include)
+    add_subdirectory(src)
+    return()
 endif()
 
 find_package(ZLIB)
@@ -112,6 +127,11 @@ if(${ZLIB_FOUND})
     set(PC_REQUIRES_PRIVATE_ZLIB "zlib")
 else()
     set(PC_REQUIRES_PRIVATE_ZLIB "")
+endif()
+if(HAVE_LIBATOMIC)
+    set(PC_LIBS_PRIVATE_ATOMIC "-latomic")
+else()
+    set(PC_LIBS_PRIVATE_ATOMIC "")
 endif()
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.pc.in

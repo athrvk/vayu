@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -37,9 +38,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #include HDR_MALLOC_INCLUDE
-
-/* Private prototypes useful for the logger */
-int32_t counts_index_for(const struct hdr_histogram* h, int64_t value);
+#include "hdr_histogram_internal.h" /* counts_index_for */
 
 
 #define FAIL_AND_CLEANUP(label, error_name, error) \
@@ -101,6 +100,10 @@ const char* hdr_strerror(int errnum)
             return "Truncated value found when decoding";
         case HDR_ENCODED_INPUT_TOO_LONG:
             return "The encoded input exceeds the size of the histogram";
+        case HDR_INVALID_WORD_SIZE:
+            return "Invalid word size";
+        case HDR_NEGATIVE_COUNT_INVALID:
+            return "Negative bucket count in decoded histogram";
         default:
             return strerror(errnum);
     }
@@ -265,31 +268,51 @@ int hdr_encode_compressed(
 /* ##     ## ##       ##    ## ##     ## ##     ##  ##  ##   ### ##    ##  */
 /* ########  ########  ######   #######  ########  #### ##    ##  ######   */
 
-static void apply_to_counts_16(struct hdr_histogram* h, const int16_t* counts_data, const int32_t counts_limit)
+static int apply_to_counts_16(struct hdr_histogram* h, const int16_t* counts_data, const int32_t counts_limit)
 {
     int i;
     for (i = 0; i < counts_limit; i++)
     {
-        h->counts[i] = be16toh(counts_data[i]);
+        /* Counts are non-negative (matches Java's signed words). be16toh() is unsigned, so
+           a word with the top bit set used to decode as a large positive; now rejected. */
+        int16_t count = (int16_t)be16toh(counts_data[i]);
+        if (count < 0)
+        {
+            return HDR_NEGATIVE_COUNT_INVALID;
+        }
+        h->counts[i] = count;
     }
+    return 0;
 }
 
-static void apply_to_counts_32(struct hdr_histogram* h, const int32_t* counts_data, const int32_t counts_limit)
+static int apply_to_counts_32(struct hdr_histogram* h, const int32_t* counts_data, const int32_t counts_limit)
 {
     int i;
     for (i = 0; i < counts_limit; i++)
     {
-        h->counts[i] = be32toh(counts_data[i]);
+        int32_t count = (int32_t)be32toh(counts_data[i]);
+        if (count < 0)
+        {
+            return HDR_NEGATIVE_COUNT_INVALID;
+        }
+        h->counts[i] = count;
     }
+    return 0;
 }
 
-static void apply_to_counts_64(struct hdr_histogram* h, const int64_t* counts_data, const int32_t counts_limit)
+static int apply_to_counts_64(struct hdr_histogram* h, const int64_t* counts_data, const int32_t counts_limit)
 {
     int i;
     for (i = 0; i < counts_limit; i++)
     {
-        h->counts[i] = be64toh(counts_data[i]);
+        int64_t count = (int64_t)be64toh(counts_data[i]);
+        if (count < 0)
+        {
+            return HDR_NEGATIVE_COUNT_INVALID;
+        }
+        h->counts[i] = count;
     }
+    return 0;
 }
 
 static int apply_to_counts_zz(struct hdr_histogram* h, const uint8_t* counts_data, const int32_t data_limit)
@@ -338,16 +361,13 @@ static int apply_to_counts(
     switch (word_size)
     {
         case 2:
-            apply_to_counts_16(h, (const int16_t*) counts_data, counts_limit);
-            return 0;
+            return apply_to_counts_16(h, (const int16_t*) counts_data, counts_limit);
 
         case 4:
-            apply_to_counts_32(h, (const int32_t*) counts_data, counts_limit);
-            return 0;
+            return apply_to_counts_32(h, (const int32_t*) counts_data, counts_limit);
 
         case 8:
-            apply_to_counts_64(h, (const int64_t*) counts_data, counts_limit);
-            return 0;
+            return apply_to_counts_64(h, (const int64_t*) counts_data, counts_limit);
 
         case 1:
             return apply_to_counts_zz(h, counts_data, counts_limit);
@@ -401,6 +421,12 @@ static int hdr_decode_compressed_v0(
     }
 
     word_size = word_size_from_cookie(be32toh(encoding_flyweight.cookie));
+    /* V0 counts are fixed-width; word_size==1 routes to the zig-zag reader whose
+       LEB128 lookahead reads past the unpadded V0 buffer (OOB read) */
+    if (word_size != 2 && word_size != 4 && word_size != 8)
+    {
+        FAIL_AND_CLEANUP(cleanup, result, HDR_INVALID_WORD_SIZE);
+    }
     lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
     highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
     significant_figures = be32toh(encoding_flyweight.significant_figures);
@@ -428,9 +454,15 @@ static int hdr_decode_compressed_v0(
         FAIL_AND_CLEANUP(cleanup, result, HDR_INFLATE_FAIL);
     }
 
-    apply_to_counts(h, word_size, counts_array, h->counts_len);
+    if ((result = apply_to_counts(h, word_size, counts_array, h->counts_len)) != 0)
+    {
+        goto cleanup;
+    }
 
-    hdr_reset_internal_counters(h);
+    if (!hdr_reset_internal_counters_checked(h))
+    {
+        FAIL_AND_CLEANUP(cleanup, result, EOVERFLOW);
+    }
     h->normalizing_index_offset = 0;
     h->conversion_ratio = 1.0;
 
@@ -440,7 +472,7 @@ cleanup:
 
     if (result != 0)
     {
-        hdr_free(h);
+        hdr_close(h);
     }
     else if (NULL == *histogram)
     {
@@ -449,7 +481,7 @@ cleanup:
     else
     {
         hdr_add(*histogram, h);
-        hdr_free(h);
+        hdr_close(h); /* hdr_close: counts is a separate alloc; hdr_free leaks it */
     }
 
     return result;
@@ -499,6 +531,12 @@ static int hdr_decode_compressed_v1(
     }
 
     word_size = word_size_from_cookie(be32toh(encoding_flyweight.cookie));
+    /* V1 counts are fixed-width; word_size==1 routes to the zig-zag reader whose
+       LEB128 lookahead reads up to 9 bytes past the unpadded V1 buffer (OOB) */
+    if (word_size != 2 && word_size != 4 && word_size != 8)
+    {
+        FAIL_AND_CLEANUP(cleanup, result, HDR_INVALID_WORD_SIZE);
+    }
     counts_limit = be32toh(encoding_flyweight.payload_len) / word_size;
     lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
     highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
@@ -511,6 +549,13 @@ static int hdr_decode_compressed_v1(
         &h) != 0)
     {
         FAIL_AND_CLEANUP(cleanup, result, ENOMEM);
+    }
+
+    /* attacker-controlled counts_limit > counts_len -> apply_to_counts() heap OOB
+       write; also guards counts_array_len (= counts_limit*word_size) int32 overflow */
+    if (counts_limit < 0 || counts_limit > h->counts_len)
+    {
+        FAIL_AND_CLEANUP(cleanup, result, HDR_ENCODED_INPUT_TOO_LONG);
     }
 
     /* Give the temp uncompressed array a little bif of extra */
@@ -529,11 +574,25 @@ static int hdr_decode_compressed_v1(
         FAIL_AND_CLEANUP(cleanup, result, HDR_INFLATE_FAIL);
     }
 
-    apply_to_counts(h, word_size, counts_array, counts_limit);
+    if ((result = apply_to_counts(h, word_size, counts_array, counts_limit)) != 0)
+    {
+        goto cleanup;
+    }
 
     h->normalizing_index_offset = be32toh(encoding_flyweight.normalizing_index_offset);
+    /* Reduce a decoded offset into (-counts_len, counts_len): normalize_index applies
+       only a single +/-counts_len wrap, so an out-of-range offset (untrusted log input)
+       would index counts[] out of bounds on the offset-aware read paths. No-op for
+       valid logs, where |offset| < counts_len. */
+    if (h->normalizing_index_offset != 0)
+    {
+        h->normalizing_index_offset %= h->counts_len;
+    }
     h->conversion_ratio = int64_bits_to_double(be64toh(encoding_flyweight.conversion_ratio_bits));
-    hdr_reset_internal_counters(h);
+    if (!hdr_reset_internal_counters_checked(h))
+    {
+        FAIL_AND_CLEANUP(cleanup, result, EOVERFLOW);
+    }
 
 cleanup:
     (void)inflateEnd(&strm);
@@ -541,7 +600,7 @@ cleanup:
 
     if (result != 0)
     {
-        hdr_free(h);
+        hdr_close(h);
     }
     else if (NULL == *histogram)
     {
@@ -550,7 +609,7 @@ cleanup:
     else
     {
         hdr_add(*histogram, h);
-        hdr_free(h);
+        hdr_close(h);
     }
 
     return result;
@@ -601,6 +660,12 @@ static int hdr_decode_compressed_v2(
     }
 
     counts_limit = be32toh(encoding_flyweight.payload_len);
+    /* negative attacker-controlled payload_len -> tiny calloc but ~4GB avail_out
+       -> inflate writes past counts_array (heap OOB) */
+    if (counts_limit < 0)
+    {
+        FAIL_AND_CLEANUP(cleanup, result, EINVAL);
+    }
     lowest_discernible_value = be64toh(encoding_flyweight.lowest_discernible_value);
     highest_trackable_value = be64toh(encoding_flyweight.highest_trackable_value);
     significant_figures = be32toh(encoding_flyweight.significant_figures);
@@ -609,6 +674,14 @@ static int hdr_decode_compressed_v2(
     if (rc)
     {
         FAIL_AND_CLEANUP(cleanup, result, rc);
+    }
+
+    /* counts_limit is non-negative but still unbounded above: a tiny crafted log
+       can request a ~2GB alloc (resource exhaustion). Each of h->counts_len entries
+       encodes to at most MAX_BYTES_LEB128 bytes, so reject anything larger. */
+    if ((size_t) counts_limit > (size_t) MAX_BYTES_LEB128 * (size_t) h->counts_len)
+    {
+        FAIL_AND_CLEANUP(cleanup, result, HDR_ENCODED_INPUT_TOO_LONG);
     }
 
     /* Make sure there at least 9 bytes to read */
@@ -634,8 +707,19 @@ static int hdr_decode_compressed_v2(
     }
 
     h->normalizing_index_offset = be32toh(encoding_flyweight.normalizing_index_offset);
+    /* Reduce a decoded offset into (-counts_len, counts_len): normalize_index applies
+       only a single +/-counts_len wrap, so an out-of-range offset (untrusted log input)
+       would index counts[] out of bounds on the offset-aware read paths. No-op for
+       valid logs, where |offset| < counts_len. */
+    if (h->normalizing_index_offset != 0)
+    {
+        h->normalizing_index_offset %= h->counts_len;
+    }
     h->conversion_ratio = int64_bits_to_double(be64toh(encoding_flyweight.conversion_ratio_bits));
-    hdr_reset_internal_counters(h);
+    if (!hdr_reset_internal_counters_checked(h))
+    {
+        FAIL_AND_CLEANUP(cleanup, result, EOVERFLOW);
+    }
 
 cleanup:
     (void)inflateEnd(&strm);
@@ -643,7 +727,7 @@ cleanup:
 
     if (result != 0)
     {
-        hdr_free(h);
+        hdr_close(h);
     }
     else if (NULL == *histogram)
     {
@@ -652,7 +736,7 @@ cleanup:
     else
     {
         hdr_add(*histogram, h);
-        hdr_free(h);
+        hdr_close(h);
     }
 
     return result;
@@ -910,21 +994,24 @@ static void scan_log_format(struct hdr_log_reader* reader, const char* line)
     sscanf(line, format, &reader->major_version, &reader->minor_version);
 }
 
-static void scan_start_time(struct hdr_log_reader* reader, const char* line)
+static int scan_start_time(struct hdr_log_reader* reader, const char* line)
 {
     const char* format = "#[StartTime: %lf [^\n]";
     double timestamp = 0.0;
 
     if (sscanf(line, format, &timestamp) == 1)
     {
-        hdr_timespec_from_double(&reader->start_timestamp, timestamp);
+        /* a StartTime that does not fit tv_sec is an error, not a silent zero */
+        return hdr_timespec_from_double_checked(&reader->start_timestamp, timestamp);
     }
+
+    return 0;
 }
 
-static void scan_header_line(struct hdr_log_reader* reader, const char* line)
+static int scan_header_line(struct hdr_log_reader* reader, const char* line)
 {
     scan_log_format(reader, line);
-    scan_start_time(reader, line);
+    return scan_start_time(reader, line);
 }
 
 static bool validate_log_version(struct hdr_log_reader* reader)
@@ -939,6 +1026,7 @@ static bool validate_log_version(struct hdr_log_reader* reader)
 int hdr_log_read_header(struct hdr_log_reader* reader, FILE* file)
 {
     char line[HEADER_LINE_LENGTH]; /* TODO: check for overflow. */
+    int rc;
 
     bool parsing_header = true;
 
@@ -956,7 +1044,10 @@ int hdr_log_read_header(struct hdr_log_reader* reader, FILE* file)
                 return EIO;
             }
 
-            scan_header_line(reader, line);
+            if ((rc = scan_header_line(reader, line)) != 0)
+            {
+                return rc;
+            }
             break;
 
         case '"':
@@ -1025,15 +1116,17 @@ static int read_ahead_timestamp(FILE* f, hdr_timespec* timestamp, char expected_
 {
     int c;
     int is_seconds = 1;
-    long sec = 0;
+    hdr_timespec parsed = {0, 0};
     long nsec = 0;
     long nsec_multipler = 1000000000;
+    /* Use the destination width without modifying the caller on failure. */
+    const int64_t sec_max = (int64_t) (~(uint64_t) 0 >> (65 - sizeof(timestamp->tv_sec) * CHAR_BIT));
 
     while (EOF != (c = fgetc(f)))
     {
         if (expected_terminator == c)
         {
-            timestamp->tv_sec = sec;
+            timestamp->tv_sec = parsed.tv_sec;
             timestamp->tv_nsec = (nsec * nsec_multipler);
             return 1;
         }
@@ -1043,13 +1136,20 @@ static int read_ahead_timestamp(FILE* f, hdr_timespec* timestamp, char expected_
         }
         else if ('0' <= c && c <= '9')
         {
+            const int digit = c - '0';
             if (is_seconds)
             {
-                sec = (sec * 10) + (c - '0');
+                /* reject rather than overflow the accumulator on a crafted digit run */
+                if (parsed.tv_sec > (sec_max - digit) / 10)
+                {
+                    return 0;
+                }
+                parsed.tv_sec = parsed.tv_sec * 10 + digit;
             }
-            else
+            /* digits past nanosecond resolution are truncated; taking them would zero the multiplier */
+            else if (nsec_multipler > 1)
             {
-                nsec = (nsec * 10) + (c - '0');
+                nsec = (nsec * 10) + digit;
                 nsec_multipler /= 10;
             }
         }

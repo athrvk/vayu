@@ -5,6 +5,8 @@
 */
 
 #include <math.h>
+#include <limits.h>
+#include <errno.h>
 
 #include <hdr/hdr_time.h>
 
@@ -62,7 +64,7 @@ void hdr_getnow(hdr_timespec* ts)
     hdr_gettime(ts);
 }
 
-#elif defined(__linux__) || defined(__CYGWIN__) || defined(__OpenBSD__)
+#elif defined(__linux__) || defined(__CYGWIN__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__DragonFly__)
 
 
 void hdr_gettime(hdr_timespec* t)
@@ -87,11 +89,58 @@ double hdr_timespec_as_double(const hdr_timespec* t)
     return d + (t->tv_nsec / 1000000000.0);
 }
 
+int hdr_timespec_from_double_checked(hdr_timespec* t, double value)
+{
+    /* Bound by the destination: time_t on POSIX, long on Windows/Cygwin. */
+    const double limit = ldexp(1.0, (int) (sizeof(t->tv_sec) * CHAR_BIT) - 1);
+    double seconds = trunc(value);
+    long milliseconds;
+
+    /* converting a non-finite or out-of-range double to an integer is UB */
+    if (!isfinite(value))
+    {
+        return -EINVAL;
+    }
+    if (seconds >= limit || seconds < -limit)
+    {
+        return -ERANGE;
+    }
+
+    /* Round the original signed fraction, then normalize so tv_nsec stays in [0,1e9). */
+    milliseconds = (long) round((value - seconds) * 1000);
+    if (milliseconds == 1000)
+    {
+        /* rounded up to a whole second; carry rather than emit tv_nsec == 1e9 */
+        seconds += 1.0;
+        milliseconds = 0;
+    }
+    else if (milliseconds < 0)
+    {
+        seconds -= 1.0;
+        milliseconds += 1000;
+    }
+
+    /* the carry/borrow above can push seconds past the destination bound */
+    if (seconds >= limit || seconds < -limit)
+    {
+        return -ERANGE;
+    }
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+    t->tv_sec = (long) seconds;
+#else
+    t->tv_sec = (time_t) seconds;
+#endif
+    t->tv_nsec = milliseconds * 1000000;
+    return 0;
+}
+
 void hdr_timespec_from_double(hdr_timespec* t, double value)
 {
-    int seconds = (int) value;
-    int milliseconds = (int) round((value - seconds) * 1000);
-
-    t->tv_sec = seconds;
-    t->tv_nsec = milliseconds * 1000000;
+    /* thin wrapper over the checked variant; failure zeroes *t (unchanged behavior) */
+    if (hdr_timespec_from_double_checked(t, value) != 0)
+    {
+        t->tv_sec = 0;
+        t->tv_nsec = 0;
+    }
 }
