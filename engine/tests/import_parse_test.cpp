@@ -3408,21 +3408,46 @@ int skipped_count (const json& meta, const std::string& kind) {
 
 } // namespace
 
-/// A saved response coded 1xx is an interim answer `POST /import/apply` refuses
-/// as an example (#3117), so the import leaves it out and counts it rather than
-/// failing the document. Mutation check: dropping the skip keeps the 100 row.
-TEST (PostmanImport, LeavesOutASavedResponseCoded1xx) {
+/// A saved response whose code is not a final status is an answer
+/// `POST /import/apply` refuses as an example (#3117, #3424), so the import
+/// leaves it out and counts it rather than failing the document. The 1xx pair is
+/// the interim responses; `0` and `600` are outside the range from either end,
+/// and `200.5` is no status at all. Mutation check: narrowing the predicate back
+/// to 1xx keeps the `0`, `600` and `200.5` rows (and so a 400 on apply).
+TEST (PostmanImport, LeavesOutASavedResponseWhoseCodeIsNotAFinalStatus) {
     const ImportParse parsed = parse_postman_items (
     R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
          "response":[{"name":"continue","code":100,"body":""},
                      {"name":"upgrade","code":101,"body":""},
-                     {"name":"ok","code":200,"body":"{}"}]})j");
+                     {"name":"zero","code":0,"body":""},
+                     {"name":"past","code":600,"body":""},
+                     {"name":"fraction","code":200.5,"body":""},
+                     {"name":"ok","code":200,"body":"{}"},
+                     {"name":"edge","code":599,"body":""}]})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& examples =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
-    ASSERT_EQ (examples.size (), 1u);
+    ASSERT_EQ (examples.size (), 2u);
     EXPECT_EQ (examples[0].at ("status"), 200);
-    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 2);
+    EXPECT_EQ (examples[1].at ("status"), 599);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 5);
+}
+
+/// A `code` that is not a number is not judged: the example imports as the 200
+/// Postman shows for one with no code. Mutation check: dropping the is-a-number
+/// guard of the predicate counts the first row as malformed.
+TEST (PostmanImport, KeepsASavedResponseWhoseCodeIsNotANumberAsA200) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
+         "response":[{"name":"text","code":"OK","body":""},
+                     {"name":"none","body":""}]})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& examples =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
+    ASSERT_EQ (examples.size (), 2u);
+    EXPECT_EQ (examples[0].at ("status"), 200);
+    EXPECT_EQ (examples[1].at ("status"), 200);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 0);
 }
 
 /// An OpenAPI `101` (a WebSocket upgrade) documents a response no mock can
@@ -3442,31 +3467,6 @@ TEST (OpenApiImport, SkipsAnInterimResponseAndCountsIt) {
     EXPECT_EQ (skipped_count (meta, "example_no_status"), 1);
 }
 
-/// The fragment is the URL's, never a query value's: it is cut at the first
-/// `#` before the query is looked for, kept on the url, and the query joined
-/// before it. `url.hash` supplies it when `raw` has none. Mutation check:
-/// splitting at `?` first leaves `#{{search}}` in the last row's key; ignoring
-/// `url.hash` drops the `#top` of the no-raw shape.
-TEST (PostmanImport, KeepsAUrlFragmentOffTheQueryRows) {
-    const ImportParse parsed = parse_postman_items (
-    // A bare string with the query before the fragment (collection-v2.json).
-    R"j({"name":"Bare","request":{"method":"GET",
-            "url":"https://x.com/p?query=string&a=b&abcd#{{ search }}"}},
-        {"name":"Raw","request":{"method":"GET","url":{
-            "raw":"https://x.com/p?q=1&flag#top","query":[{"key":"q","value":"1"},{"key":"flag","value":null}]}}},
-        {"name":"RawOnly","request":{"method":"GET","url":{
-            "raw":"https://x.com/p#top?not=query"}}},
-        {"name":"NoRaw","request":{"method":"GET","url":{
-            "protocol":"https","host":["x","com"],"path":["p"],"hash":"top",
-            "query":[{"key":"q","value":"1"}]}}},
-        {"name":"HashBeyondRaw","request":{"method":"GET","url":{
-            "raw":"https://x.com/p?q=1","hash":"top"}}},
-        {"name":"HashAlreadyInRaw","request":{"method":"GET","url":{
-            "raw":"https://x.com/p#top","hash":"top"}}})j");
-    ASSERT_TRUE (parsed.ok ()) << parsed.error;
-    const json& requests = parsed.result.at ("collections")[0].at ("requests");
-
-    EXPECT_EQ (requests[0].at ("url"), "https://x.com/p?query=string&a=b&abcd#{{search}}");
 namespace {
 
 /// An OpenAPI 3.0 import of one `GET /r` operation carrying @p responses.
@@ -3569,6 +3569,31 @@ TEST (OpenApiImport, CountsAResponseWhoseMediaTypesDeclareNoExample) {
     EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 1);
 }
 
+/// The fragment is the URL's, never a query value's: it is cut at the first
+/// `#` before the query is looked for, kept on the url, and the query joined
+/// before it. `url.hash` supplies it when `raw` has none. Mutation check:
+/// splitting at `?` first leaves `#{{search}}` in the last row's key; ignoring
+/// `url.hash` drops the `#top` of the no-raw shape.
+TEST (PostmanImport, KeepsAUrlFragmentOffTheQueryRows) {
+    const ImportParse parsed = parse_postman_items (
+    // A bare string with the query before the fragment (collection-v2.json).
+    R"j({"name":"Bare","request":{"method":"GET",
+            "url":"https://x.com/p?query=string&a=b&abcd#{{ search }}"}},
+        {"name":"Raw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1&flag#top","query":[{"key":"q","value":"1"},{"key":"flag","value":null}]}}},
+        {"name":"RawOnly","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top?not=query"}}},
+        {"name":"NoRaw","request":{"method":"GET","url":{
+            "protocol":"https","host":["x","com"],"path":["p"],"hash":"top",
+            "query":[{"key":"q","value":"1"}]}}},
+        {"name":"HashBeyondRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p?q=1","hash":"top"}}},
+        {"name":"HashAlreadyInRaw","request":{"method":"GET","url":{
+            "raw":"https://x.com/p#top","hash":"top"}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& requests = parsed.result.at ("collections")[0].at ("requests");
+
+    EXPECT_EQ (requests[0].at ("url"), "https://x.com/p?query=string&a=b&abcd#{{search}}");
     EXPECT_EQ (requests[0].at ("params").size (), 3u);
     EXPECT_EQ (requests[0].at ("params")[2].at ("key"), "abcd");
     EXPECT_EQ (requests[1].at ("url"), "https://x.com/p?q=1&flag#top");

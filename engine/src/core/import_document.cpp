@@ -1844,15 +1844,21 @@ std::optional<std::string> pm_stored_response (const json& saved) {
     return std::make_optional (std::move (text));
 }
 
-/// A saved response coded 1xx. An example is a final answer a mock serves, so
-/// `POST /import/apply` refuses one (#3117) and the import leaves it out rather
-/// than failing the whole document over it.
-bool is_interim_response_code (const json* code) {
+/// A saved response whose numeric `code` is not a final HTTP status: a 1xx
+/// interim response, `0`, `600`, or a fraction. An example is a final answer a
+/// mock serves, so `POST /import/apply` refuses one (#3117) and the import
+/// leaves it out rather than failing the whole document over it. A `code` that
+/// is not a number at all is not judged here - the example imports as a 200.
+bool is_unservable_response_code (const json* code) {
+    namespace limits = vayu::core::constants::request_example;
     if (code == nullptr || !code->is_number ()) {
         return false;
     }
+    if (!code->is_number_integer ()) {
+        return true;
+    }
     const double value = code->get<double> ();
-    return value >= 100 && value < vayu::core::constants::request_example::MIN_STATUS;
+    return value < limits::MIN_STATUS || value > limits::MAX_STATUS;
 }
 
 /**
@@ -1878,7 +1884,7 @@ json pm_examples (const json* item, PostmanCounts& counts) {
             continue;
         }
         const json* code = prop (saved, "code");
-        if (is_interim_response_code (code)) {
+        if (is_unservable_response_code (code)) {
             counts.skipped_malformed += 1;
             continue;
         }
