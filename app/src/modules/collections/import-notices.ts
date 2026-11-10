@@ -146,9 +146,9 @@ const COPY: Partial<Record<string, Copy>> = {
 	},
 	example_no_media_type: {
 		tier: "note",
-		named: "example skipped (no usable media type)",
-		one: "1 example skipped (no usable media type)",
-		many: "{n} examples skipped (no usable media type)",
+		named: "example imported without a body (no usable media type)",
+		one: "1 example imported without a body (no usable media type)",
+		many: "{n} examples imported without a body (no usable media type)",
 	},
 	// Every vendor spec declares one on every operation (issue #710); nothing
 	// the user would send depends on it.

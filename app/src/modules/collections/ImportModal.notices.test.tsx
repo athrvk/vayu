@@ -234,7 +234,7 @@ describe("the import preview's notices", () => {
 		expect(screen.getByRole("button", { name: /^Import\b/i })).toBeEnabled();
 	});
 
-	it("says a response example had no usable media type, as a note and not a warning (#3424)", async () => {
+	it("says a response example was imported without a body, as a note and not a warning (#3424)", async () => {
 		stubParse(() =>
 			result({
 				collections: [
@@ -248,10 +248,36 @@ describe("the import preview's notices", () => {
 		);
 		preview();
 
-		const line = await screen.findByText("2 examples skipped (no usable media type)");
+		const line = await screen.findByText(
+			"2 examples imported without a body (no usable media type)"
+		);
 		// The request sends as documented; only a saved response lost its body.
 		expect(line.className).toContain("text-muted-foreground");
 		expect(line.className).not.toContain("text-warning-text");
+	});
+
+	it("names the requests whose example was imported without a body (#3424)", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Export report" })] }),
+				],
+				meta: {
+					format: "Swagger 2.0",
+					skipped: [
+						{ kind: "example_no_media_type", count: 1, requests: ["Export report"] },
+					],
+				},
+			})
+		);
+		preview();
+
+		expect(
+			await screen.findByText(
+				"Export report: example imported without a body (no usable media type)"
+			)
+		).toBeInTheDocument();
+		expect(screen.queryByText(/example skipped/)).toBeNull();
 	});
 
 	it("announces the preview through one status region and no alert (#2291)", async () => {

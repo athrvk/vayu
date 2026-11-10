@@ -360,6 +360,22 @@ bool same_value (const Json& left, const Json& right) {
     return nlohmann::json (left) == nlohmann::json (right);
 }
 
+/**
+ * Whether @p declared, a value the document wrote, is the example whose body
+ * was stored as @p body and reads back as @p value.
+ *
+ * A declared string is imported as the bytes it is (`example_body_text`), which
+ * `value` then reads back as JSON: a text example `"42"` is stored as `42` and
+ * would differ from the string the document declared, so a string also matches
+ * by its text (#3424). The one predicate `disposition_of` and `written_key_for`
+ * both ask, so the export neither rewrites such an example nor loses its mock
+ * key.
+ */
+bool declares_example (const Json& declared, const Json& value, const std::string& body) {
+    return same_value (declared, value) ||
+    (declared.is_string () && declared.get<std::string> () == body);
+}
+
 /** What one stored example is to the media object it would be written into. */
 enum class ExampleDisposition : std::uint8_t {
     Write,
@@ -382,14 +398,9 @@ ExportDirection direction) {
         return ExampleDisposition::Write;
     }
     const std::vector<const Json*> declared = declared_example_values (media);
-    // A declared string is imported as the bytes it is (`example_body_text`),
-    // which `value` then reads back as JSON: a text example `"42"` is stored as
-    // `42` and would differ from the string the document declared, so a string
-    // also matches by its text (#3424).
     const bool documented =
     std::any_of (declared.begin (), declared.end (), [&] (const Json* candidate) {
-        return same_value (*candidate, value) ||
-        (candidate->is_string () && candidate->get<std::string> () == example.body);
+        return declares_example (*candidate, value, example.body);
     });
     if (documented) {
         return ExampleDisposition::AlreadyDeclared;
@@ -640,22 +651,23 @@ ExportDirection direction) {
  * vendor extension has nothing to name there) or is not present at all.
  *
  * A value comparison, the same one `disposition_of` already makes
- * (`same_value`), rather than a key threaded through `write_named_examples` /
+ * (`declares_example`), rather than a key threaded through `write_named_examples` /
  * `add_named_examples`: the write pipeline already decides a value's key by
  * equality, so reading it back off the finished object costs one pass where a
  * second out-parameter on every layer down to `add_named_examples` would cost
  * several - and it answers the *already-declared* case too, where nothing
  * about the write pipeline touched this value at all.
  */
-std::optional<std::string> written_key_for (const Json& media, const Json& value) {
-    const auto map = media.find ("examples");
+std::optional<std::string> written_key_for (const Json& media, const ExportExample& target) {
+    const Json value = example_value (target.body);
+    const auto map   = media.find ("examples");
     if (map == media.end () || !map->is_object ()) {
         return std::nullopt;
     }
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const auto value_member = entry->find ("value");
         if (entry->is_object () && value_member != entry->end () &&
-        same_value (*value_member, value)) {
+        declares_example (*value_member, value, target.body)) {
             return entry.key ();
         }
     }
@@ -683,8 +695,7 @@ resolve_mock_key (const Json& responses, const ExportRequest& entry) {
         return std::nullopt;
     }
     const Json* media = declared_media_of (&*response, target.content_type);
-    return media == nullptr ? std::nullopt :
-                              written_key_for (*media, example_value (target.body));
+    return media == nullptr ? std::nullopt : written_key_for (*media, target);
 }
 
 /**

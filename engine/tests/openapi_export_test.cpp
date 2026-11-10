@@ -380,6 +380,9 @@ TEST (BoundExport, WritesNothingIntoADocumentNobodyEdited) {
     EXPECT_EQ (exported.notes.referenced_responses_left, 1);
 }
 
+// Mutation check: dropping the string-text match from `declares_example`
+// reads the 201 as news and rewrites its `"42"` as the number 42, so the
+// document differs from `content` and `examples_written` is not 0.
 TEST (BoundExport, WritesNothingForAnImportedTextExampleTheDocumentDeclares) {
     const std::string content           = R"({
       "openapi": "3.0.3",
@@ -406,6 +409,37 @@ TEST (BoundExport, WritesNothingForAnImportedTextExampleTheDocumentDeclares) {
     EXPECT_EQ (exported.document, json::parse (content));
     EXPECT_EQ (exported.notes.examples_written, 0);
     EXPECT_EQ (exported.notes.examples_already_declared, 3);
+}
+
+// A fixed mock target that is a declared text example reading back as JSON
+// (`"42"`) is still named by its `examples` key: `x-vayu-mock` is written beside
+// the untouched document. Mutation check: matching the target by value alone in
+// `written_key_for` leaves the operation with no `x-vayu-mock`.
+TEST (BoundExport, NamesAFixedMockTargetWhoseDeclaredTextExampleParsesAsJson) {
+    const std::string content           = R"({
+      "openapi": "3.0.3",
+      "info": { "title": "Ping", "version": "1" },
+      "paths": { "/ping": { "get": { "operationId": "ping", "responses": {
+        "200": { "description": "count", "content": { "text/plain": {
+          "examples": { "pong": { "value": "pong" }, "count": { "value": "42" } } } } }
+      } } } }
+    })";
+    std::vector<ExportRequest> requests = { bound_request (
+    "GET", "{{baseUrl}}/ping", "ping", "/ping") };
+    requests[0].examples                = {
+        with_key (imported (example ("200 - pong", 200, "pong", "text/plain")), "pong"),
+        with_key (imported (example ("200 - count", 200, "42", "text/plain")), "count")
+    };
+    requests[0].mock_response_mode = "fixed";
+    requests[0].mock_example_index = 1;
+
+    const Exported exported = export_json (requests, content);
+    EXPECT_EQ (exported.notes.examples_written, 0);
+    EXPECT_EQ (exported.notes.examples_already_declared, 2);
+    json expected = json::parse (content);
+    expected["paths"]["/ping"]["get"]["x-vayu-mock"] =
+    json::parse (R"({"mode":"fixed","example":"count"})");
+    EXPECT_EQ (exported.document, expected);
 }
 
 TEST (BoundExport, AddsAKeptResponseBesideTheDocumentsExamplesRatherThanOverThem) {

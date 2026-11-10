@@ -511,9 +511,10 @@ structural clones, and a second copy would drift. `example_no_status` is a fourt
 non-representability case: an OpenAPI response keyed `2XX` (or with a junk key) documents a
 real response, but an example is served under one status line and there is no honest value
 to pick, so it is counted rather than guessed at. `example_no_media_type` is the sibling for a
-3.x response whose `content` map yields no body: no JSON media type and none with a declared
-string or text-family example (a schema-only `text/csv`, say), so the example imports empty and
-the Preview says so as a note (issue #3424). `default_response` is the same skip for the
+response that documents a body and yields none, a 3.x `content` map or a 2.0 `examples` map or
+`schema`: no JSON type that yields one and no declared string or text-family example (a
+schema-only `text/csv`, say), so the example imports empty and the Preview says so as a note,
+"imported without a body" (issue #3424). `default_response` is the same skip for the
 `default` key, on a counter of its own (issue #710) because it is conformant and declared on
 nearly every operation of a vendor spec - the Preview does not show it at all, which is what
 keeps a 568-count line from burying the one warning that needs acting on. `external_ref` is the fifth, and the only

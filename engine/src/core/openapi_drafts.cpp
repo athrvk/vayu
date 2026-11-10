@@ -956,9 +956,21 @@ bool is_text_media_type (const std::string& key) {
 }
 
 /**
+ * Whether a declared example under media type @p key is served as the bytes it
+ * is: the example is a string, or the key is a text-family type. A media
+ * *range* (any key containing `*`, such as `text/*`) names no type, so it never
+ * becomes a literal `Content-Type` header; a `null` example is no example.
+ */
+bool is_text_example (const std::string& key, const json& value) {
+    if (value.is_null () || key.find ('*') != std::string::npos) {
+        return false;
+    }
+    return value.is_string () || is_text_media_type (key);
+}
+
+/**
  * The first non-JSON media type of @p content, in document order, whose declared
- * example is served as the bytes it is: the example is a string, or the media
- * type is a text-family one.
+ * example is served as the bytes it is (`is_text_example`).
  *
  * Only a *declared* example is read. A schema is sampled into JSON, and JSON
  * bytes under a `text/csv` or `text/html` media type document nothing the spec
@@ -968,10 +980,8 @@ std::optional<ExamplePayload> text_example_payload (const json& content) {
     for (auto entry = content.begin (); entry != content.end (); ++entry) {
         const DeclaredExampleValue declared =
         declared_example_value (as_record (&entry.value ()));
-        if (declared.value == nullptr || declared.value->is_null ()) {
-            continue;
-        }
-        if (declared.value->is_string () || is_text_media_type (entry.key ())) {
+        if (declared.value != nullptr &&
+        is_text_example (entry.key (), *declared.value)) {
             return ExamplePayload{ example_body_text (*declared.value),
                 entry.key (), declared.key };
         }
@@ -979,9 +989,9 @@ std::optional<ExamplePayload> text_example_payload (const json& content) {
     return std::nullopt;
 }
 
-/// What a 3.x response documents: its JSON media type when it has one, else the
-/// first text example. A `content` map with entries and neither is counted, so
-/// the preview says a documented response imported without its body.
+/// What a 3.x response documents: its JSON media type when that yields a body,
+/// else the first text example. A `content` map with entries and neither is
+/// counted, so the preview says a documented response imported without its body.
 std::optional<ExamplePayload>
 response_payload_v3 (const Sampler& sampler, const json& node, ImportTally* tally) {
     const json* content = as_record (prop (&node, "content"));
@@ -989,7 +999,10 @@ response_payload_v3 (const Sampler& sampler, const json& node, ImportTally* tall
         return std::nullopt;
     }
     if (const std::optional<std::string> type = find_json_media_type (*content)) {
-        return json_example_payload (sampler, *content, *type);
+        if (std::optional<ExamplePayload> json_payload =
+            json_example_payload (sampler, *content, *type)) {
+            return json_payload;
+        }
     }
     if (std::optional<ExamplePayload> text = text_example_payload (*content)) {
         return text;
@@ -1024,15 +1037,6 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
     return out;
 }
 
-/**
- * A 2.0 operation's documented responses.
- *
- * The 2.0 shape puts the payload on the response itself rather than under a
- * media-type map: `examples` is keyed by MIME type and holds the value
- * directly, and `schema` describes it. The media type comes from the
- * operation's `produces`, falling back to the document's, because a 2.0
- * response does not name its own.
- */
 /**
  * The JSON media type a 2.0 operation says it produces, if it says one.
  *
@@ -1070,15 +1074,15 @@ std::vector<std::string> produced_types (const json& document, const json* opera
 }
 
 /**
- * One 2.0 response's body: the example it documents, or a sample of its schema.
+ * A 2.0 response's JSON body: the example it documents, or a sample of its
+ * schema.
  *
  * `declared[contentType] ?? declared["application/json"]`, then `!== undefined` -
  * so an explicitly documented `null` is a body ("null"), while a `null` under
  * the produced type falls through to the plain one first.
  */
-std::optional<ExamplePayload> response_payload_v2 (const json& node,
-const Sampler& sampler,
-const std::string& content_type) {
+std::optional<ExamplePayload>
+json_payload_v2 (const json& node, const Sampler& sampler, const std::string& content_type) {
     if (const json* documented = as_record (prop (&node, "examples"))) {
         const json* value = prop (documented, content_type);
         if (value == nullptr || value->is_null ()) {
@@ -1096,6 +1100,71 @@ const std::string& content_type) {
     return ExamplePayload{ example_body_text (sampler.sample (schema)), content_type, {} };
 }
 
+/// The first entry of a 2.0 response's `examples`, in document order, that is
+/// served as the bytes it is (`is_text_example`), under its own key: `examples`
+/// is keyed by the MIME type, so the key is the media type whatever `produces`
+/// lists.
+std::optional<ExamplePayload> text_payload_v2 (const json& node) {
+    const json* documented = as_record (prop (&node, "examples"));
+    if (documented == nullptr) {
+        return std::nullopt;
+    }
+    for (auto entry = documented->begin (); entry != documented->end (); ++entry) {
+        if (is_text_example (entry.key (), entry.value ())) {
+            return ExamplePayload{ example_body_text (entry.value ()), entry.key (), {} };
+        }
+    }
+    return std::nullopt;
+}
+
+/// Whether a 2.0 response documents a body at all: an `examples` map with
+/// entries, or a schema - the same "something was declared" test as a 3.x
+/// response's non-empty `content`.
+bool documents_a_body_v2 (const json& node) {
+    const json* examples = as_record (prop (&node, "examples"));
+    return (examples != nullptr && !examples->empty ()) || truthy (prop (&node, "schema"));
+}
+
+/**
+ * What a 2.0 response documents, by the 3.x rule: a JSON body when there is a
+ * JSON type to give it (the operation's, else a JSON key of `examples`), else
+ * the first text example. A schema is sampled only into JSON, never into a
+ * non-JSON produced type, so a response that documents something yet yields no
+ * body is counted, and the preview says it imported without one.
+ */
+std::optional<ExamplePayload> response_payload_v2 (const json& node,
+const Sampler& sampler,
+const std::optional<std::string>& json_produced,
+ImportTally* tally) {
+    std::optional<std::string> json_type = json_produced;
+    if (const json* documented = as_record (prop (&node, "examples"));
+    !json_type && documented != nullptr) {
+        json_type = find_json_media_type (*documented);
+    }
+    if (json_type) {
+        if (std::optional<ExamplePayload> json_payload =
+            json_payload_v2 (node, sampler, *json_type)) {
+            return json_payload;
+        }
+    }
+    if (std::optional<ExamplePayload> text = text_payload_v2 (node)) {
+        return text;
+    }
+    if (documents_a_body_v2 (node)) {
+        tally_add (tally, "example_no_media_type");
+    }
+    return std::nullopt;
+}
+
+/**
+ * A 2.0 operation's documented responses.
+ *
+ * The 2.0 shape puts the payload on the response itself rather than under a
+ * media-type map: `examples` is keyed by MIME type and holds the value
+ * directly, and `schema` describes it. The JSON type comes from the
+ * operation's `produces`, falling back to the document's, because a 2.0
+ * response does not name its own.
+ */
 std::vector<DraftExample> examples_v2 (const json& document,
 const Sampler& sampler,
 const json* operation,
@@ -1106,16 +1175,14 @@ ImportTally* tally) {
         return out;
     }
 
-    const std::vector<std::string> produces = produced_types (document, operation);
-    const std::optional<std::string> json_produced = json_produced_type (produces);
-    const std::string content_type = json_produced.value_or (
-    produces.empty () ? std::string ("application/json") : produces.front ());
+    const std::optional<std::string> json_produced =
+    json_produced_type (produced_types (document, operation));
 
     for (auto entry = map->begin (); entry != map->end (); ++entry) {
         const json* response = sampler.deref (&entry.value ());
         auto example =
         response_example (entry.key (), response, tally, [&] (const json& node) {
-            return response_payload_v2 (node, sampler, content_type);
+            return response_payload_v2 (node, sampler, json_produced, tally);
         });
         if (example) {
             out.push_back (std::move (*example));

@@ -4343,7 +4343,7 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `unsupported_method` | A Postman custom HTTP verb (imported as `GET`), or an OpenAPI `trace` operation (dropped; `HttpMethod` has no `TRACE`) |
 | `malformed_spec` | An OpenAPI path item, `parameters` list or response whose shape the specification does not allow, stepped over so the rest of the file still imports |
 | `example_no_status` | An OpenAPI response key that is neither `default` nor a status from 200 to 599 (a `2XX` wildcard, a `1xx` interim response, junk) |
-| `example_no_media_type` | An OpenAPI 3.x response with a `content` map whose entries yield no body: no JSON media type, and none with a declared string or text-family (`text/*`, `*/xml`, `*/html`) example; the example imports without a body (#3424) |
+| `example_no_media_type` | An OpenAPI response that documents a body (a 3.x `content` map with entries, a 2.0 `examples` map or `schema`) and yields none: no JSON type that yields one, and no declared string or text-family (`text/*`, `*/xml`, `*/html`) example, a media range (a key containing `*`) never counting; the example imports without a body (#3424) |
 | `default_response` | An OpenAPI response keyed `default` - conformant, and counted as information rather than as a loss |
 | `external_ref` | A `$ref` into another file that a bundling pass could not reach (the request's `unresolvedRefs`) |
 | `duplicate_operation_id` | An OpenAPI `operationId` that an earlier operation already declared; the first keeps the id |

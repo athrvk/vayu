@@ -65,11 +65,11 @@ export interface SkippedItem {
 		 */
 		| "example_no_status"
 		/**
-		 * An OpenAPI 3.x response with a `content` map and no JSON media type, none
-		 * of whose media types declares an example to serve as text - a schema-only
-		 * `text/csv`, say. The example still imports, undocumented and with no body,
-		 * so the mock would answer it empty; counted so the preview says so
-		 * (issue #3424).
+		 * An OpenAPI response that documents a body (a 3.x `content` map with
+		 * entries, a 2.0 `examples` map or `schema`) yet yields none: no JSON media
+		 * type, and no declared example to serve as text - a schema-only `text/csv`,
+		 * say. The example still imports, undocumented and with no body, so the
+		 * mock would answer it empty; counted so the preview says so (issue #3424).
 		 */
 		| "example_no_media_type"
 		/**
