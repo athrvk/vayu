@@ -2827,6 +2827,75 @@ and the map above is a `Record` over the union so a new family fails to compile
 until it names a reader. The emitting side is documented in
 [`docs/engine/mcp.md`](../engine/mcp.md).
 
+**Writes from any client: the engine's change feed.** `mcp:data-changed` covers
+only the MCP server the app itself hosts. The stdio MCP CLI, `vayu-cli`, a
+script against the engine API and a second window write the same rows with no
+channel to this renderer, so an open request kept the version it had read
+until a reload, and Send sent it (#3420). The engine publishes one event per
+committed write of a collection, a request, an example, an environment, the
+globals or a trash entry on `GET /changes` (see
+[the API reference](../engine/api-reference.md#change-feed)), and
+`services/change-feed-service.ts` holds that stream for the app's life;
+`useChangeFeed()`, beside `useMcpDataInvalidation()` in `App.tsx`, opens it
+while the engine store says `connected` and closes it otherwise.
+`lib/change-feed-invalidation.ts` maps each event onto the families in the
+table above, so there is one key table for both producers:
+
+| Kind | Families | Why |
+|------|----------|-----|
+| `collection` | `collectionRow` for a `create` or `update`; `collection` for every other op, one this build does not know included | A delete, restore or purge is one event on the root for the whole subtree, which is the cascade `collection` takes coarsely |
+| `request` | `request`, with the event's `collectionId` and the request's id, once more with the collection the cache still holds it in when that differs | A move's event names only the destination; the source is read from the request's detail entry, then the tree's lists, when the event arrives (`ownerOfRequest`). An owner the cache never saw is in no list on screen |
+| `example` | `request` named by the example's `requestId`, narrowed the same way | What the MCP example tools declare: the Examples list sits under the request's detail key, and the family takes the Trash list |
+| `environment`, `globals` | `environment` | Globals ride on the environment family (#758) |
+| `clientCertificate` | `clientCertificate`, and `trash.all` | The feed carries only a certificate's delete, restore and purge, and no MCP tool declares this family alone, so its invalidator leaves the Trash list to `collection`; here nothing else would refetch it |
+
+A kind this build does not know is passed over (its id still moves the resume
+point), and so is a frame that does not parse. A `reset` (a resume the engine's
+ring no longer covers, an id from an engine process that has since restarted,
+or a reader that fell a whole ring behind) invalidates `collection`,
+`environment` and `clientCertificate` together, which between them reach every
+read a single event can. A resume's `ready` invalidates nothing, because the
+missed events follow it. A fresh subscription's `ready` (the first stream of the
+app's life, opened with no resume point) follows the launch's reads, so a write
+another client committed between the two is never reported; it re-reads what
+the open tabs show instead (`invalidateOpenRows`): `requests.details()` and
+`compose.all`, the two `staleTime: Infinity` reads a restored tab and Send
+depend on, and `collections.lists()`, `environments.all` and `globals.all`,
+what an open collection or environment tab reads. Each is one call, and only an
+observed entry is refetched; the rest are marked stale for their next mount.
+The request lists are left alone: the workspace-wide `GET /requests` is the
+launch's heaviest call, and the tree reads a name and a method from it, never
+what Send sends.
+
+**The feed reports the app's own writes too, so invalidations are coalesced and
+held.** `FeedInvalidationBatch` collects a burst into one invalidation per
+family and scope over `CHANGE_FEED_COALESCE_MS` (200ms), fixed from the first
+event rather than restarted by each, so a bulk import is one flush and a client
+writing without pause is still shown every 200ms. A flush waits while
+`queryClient.isMutating()` is above zero: the autosave PUT's echo then
+refetches after the PUT's own answer is in the detail cache, where structural
+sharing makes the refetch a no-op for the open tab, and an event arriving while
+a reorder is in flight cannot refetch the lists from under the drop's
+optimistic draw. The wait is bounded by `CHANGE_FEED_MUTATION_HOLD_MAX_MS` (5s):
+those two writes are one local round trip, so a mutation still pending past it
+is a hung or long one (an import, a spec sync, an OAuth sign-in), and the batch,
+a `reset` included, lands anyway rather than waiting for it. The in-app MCP channel stays a second producer for the in-app
+server's writes, so those are invalidated twice; an invalidation twice over is
+a refetch, never a wrong answer.
+
+The stream is the inbox stream's shape: every drop is closed and reconnected on
+the service's own backoff (`CHANGE_FEED_RETRY_BASE_MS` doubling to
+`CHANGE_FEED_RETRY_MAX_MS`, 15s, which is the `Retry-After` the engine sends
+with `503 change_feed_full`; an `EventSource` cannot read the status or the
+header), resuming by `?lastEventId=` from the last id seen. It never gives up,
+since nothing renders a stopped feed; the engine-status gate is what stops it
+asking a downed engine.
+
+An open request reaches the merge (#1436) through its detail key: a refetch
+delivers a new `fetchedRequest`, and the builder adopts the fields the user has
+not touched and keeps a touched one, with the incoming value in
+`fieldConflicts` (`RequestBuilder.change-feed.test.tsx`).
+
 **Retry policy:** the shared default is `shouldRetryQuery` (`lib/query-client.ts`),
 not a bare count. A 4xx from the engine is a verdict, not a hiccup - a 404 for a
 deleted row answers identically every time, so retrying it only delays the error
@@ -2846,7 +2915,7 @@ is how this section drifted before. The current shape:
 | Query | Policy |
 |-------|--------|
 | Collections, requests lists, environments, globals, runs list | `DEFAULT_STALE_TIME_MS` (30s) via the shared client |
-| Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once and mutations invalidate it |
+| Request detail (`requestDetailOptions`) | `staleTime: Infinity` - a restored tab reads it once; its own mutations and the change feed (a write by any other client) invalidate it |
 | Run detail, run report | `RUNS_STALE_TIME_MS` (5m); completed runs are immutable. While the run's status is `running` or `pending` the detail polls every 3s, and a report given that status is `staleTime: 0` and polls too (#1934) |
 | Run time series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |
 | Run monitor series (downsampled, one request) | `staleTime: Infinity`, `RUN_SERIES_GC_TIME_MS` (1m); `staleTime: 0` when given an in-progress status. Invalidated by `LoadTestService` when the run ends |

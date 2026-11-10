@@ -332,6 +332,7 @@ void Server::setup_routes () {
     routes::register_inbox_routes (*route_ctx_);
     routes::register_mock_server_routes (*route_ctx_);
     routes::register_event_stream_routes (*route_ctx_);
+    routes::register_change_feed_routes (*route_ctx_);
     routes::register_elements_routes (*route_ctx_);
 }
 

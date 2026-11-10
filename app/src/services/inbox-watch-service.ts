@@ -35,6 +35,7 @@
 
 import { API_ENDPOINTS } from "@/config/api-endpoints";
 import { queryClient } from "@/lib/query-client";
+import { streamRetryDelayMs } from "@/lib/stream-backoff";
 import { mergeCapture } from "@/queries/inbox";
 import { queryKeys } from "@/queries/keys";
 import { createCaptureNotifier, type CaptureNotifier } from "@/modules/inbox/capture-notifier";
@@ -126,15 +127,14 @@ export const MAX_INBOX_WATCH_STREAMS = 8;
  * `inboxLivePollIntervalMs` later - because a reconnect inside that window is
  * refused with a 409. The app cannot read that setting, so the backoff doubles
  * rather than guessing it: 400ms clears the 250ms default on the first attempt
- * and a raised cadence is covered within two or three. Jitter keeps several
- * watchers from retrying in lockstep.
+ * and a raised cadence is covered within two or three.
  */
 export function inboxLiveRetryDelayMs(attempt: number, random: () => number = Math.random): number {
-	const step = Math.min(
-		INBOX_LIVE_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1),
-		INBOX_LIVE_RETRY_MAX_MS
+	return streamRetryDelayMs(
+		attempt,
+		{ baseMs: INBOX_LIVE_RETRY_BASE_MS, maxMs: INBOX_LIVE_RETRY_MAX_MS },
+		random
 	);
-	return Math.round(step + random() * step * 0.5);
 }
 
 /**

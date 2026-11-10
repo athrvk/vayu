@@ -242,7 +242,8 @@ void Database::verify_spec_sync_rows_locked (const SpecSyncBatch& batch) {
     }
 }
 
-void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
+std::vector<Change> Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
+    std::vector<Change> written;
     // These deletes are **hard**, and stay hard now that every delete a person
     // makes is soft (issues #988, #1046 - owner decision). A sync is a
     // reconciliation to a document, not somebody removing a request, and it is
@@ -254,12 +255,23 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
     // them recoverable omits them here and calls `DELETE /requests/:id`. For
     // the same reason they record no declined operation (#3031): the document
     // dropped the operation, nobody declined it.
+    // A named row that is already gone publishes nothing: nothing changed.
     for (const auto& id : batch.deleted) {
+        for (auto& owner : impl_->storage.select (
+             &Request::collection_id, where (c (&Request::id) == id))) {
+            written.push_back (Change{ ChangeKind::Request, ChangeOp::Purge, id,
+            std::move (owner), std::nullopt });
+        }
         impl_->storage.remove_all<RequestExample> (
         where (c (&RequestExample::request_id) == id));
         impl_->storage.remove_all<Request> (where (c (&Request::id) == id));
     }
     for (const auto& id : batch.deleted_examples) {
+        for (auto& owner : impl_->storage.select (&RequestExample::request_id,
+             where (c (&RequestExample::id) == id))) {
+            written.push_back (Change{ ChangeKind::Example, ChangeOp::Purge, id,
+            std::nullopt, std::move (owner) });
+        }
         impl_->storage.remove_all<RequestExample> (where (c (&RequestExample::id) == id));
     }
     for (const auto id : batch.cleared_declines) {
@@ -269,18 +281,27 @@ void Database::write_spec_sync_batch_locked (const SpecSyncBatch& batch) {
 
     impl_->storage.replace (batch.spec);
     for (const auto& row : batch.new_collections) {
+        written.push_back (
+        collection_change (row, upsert_op<Collection> (impl_->storage, row.id)));
         impl_->storage.replace (row);
     }
     impl_->storage.update (batch.binding);
+    written.push_back (collection_change (batch.binding, ChangeOp::Update));
     for (const auto& row : batch.created) {
+        written.push_back (
+        request_change (row, upsert_op<Request> (impl_->storage, row.id)));
         impl_->storage.replace (row);
     }
     for (const auto& row : batch.updated) {
         impl_->storage.update (row);
+        written.push_back (request_change (row, ChangeOp::Update));
     }
     for (const auto& row : batch.examples) {
+        written.push_back (
+        example_change (row, upsert_op<RequestExample> (impl_->storage, row.id)));
         impl_->storage.replace (row);
     }
+    return written;
 }
 
 void Database::spec_sync_apply (const SpecSyncBatch& batch) {
@@ -293,11 +314,13 @@ void Database::spec_sync_apply (const SpecSyncBatch& batch) {
     { "newCollections", batch.new_collections.size () } });
 
     retry_on_busy ("apply spec sync", 5, std::chrono::milliseconds (100), [&] {
+        std::vector<Change> written;
         impl_->storage.transaction ([&] {
             verify_spec_sync_rows_locked (batch);
-            write_spec_sync_batch_locked (batch);
+            written = write_spec_sync_batch_locked (batch);
             return true; // Commit
         });
+        changes_.publish (std::move (written));
     });
 
     // The binding moved off whatever it named before, and a sync is the one

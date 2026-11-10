@@ -2150,6 +2150,7 @@ void register_cookie_routes (RouteContext& ctx);
 void register_mock_issuer_routes (RouteContext& ctx);
 void register_inbox_routes (RouteContext& ctx);
 void register_event_stream_routes (RouteContext& ctx);
+void register_change_feed_routes (RouteContext& ctx);
 void register_mock_server_routes (RouteContext& ctx);
 void register_elements_routes (RouteContext& ctx);
 

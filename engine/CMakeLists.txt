@@ -550,6 +550,7 @@ add_library(vayu_core STATIC
     src/utils/ordered_json.cpp
     src/utils/id.cpp
     src/utils/digest.cpp
+    src/db/change_feed.cpp
     src/db/database.cpp
     src/db/db_collections.cpp
     src/db/db_requests.cpp
@@ -847,6 +848,7 @@ if(VAYU_BUILD_ENGINE)
         src/http/routes/mock_issuer.cpp
         src/http/routes/inbox.cpp
         src/http/routes/events.cpp
+        src/http/routes/changes.cpp
         src/http/routes/mock_server.cpp
         src/http/routes/elements.cpp
     )

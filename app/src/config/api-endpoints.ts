@@ -53,6 +53,11 @@ export const API_ENDPOINTS = {
 	TRASH_RESTORE: (id: string) => `/trash/${id}/restore`,
 	TRASH_BY_ID: (id: string) => `/trash/${id}`,
 
+	// The workspace change feed (SSE, issue #3420): one event per committed
+	// write of a collection, request, example, environment, the globals or a
+	// trash entry, whoever made it. `services/change-feed-service.ts` holds it.
+	CHANGES: `/changes`,
+
 	// Saved example responses, nested under their request (issue #481). Nested
 	// rather than a top-level `/examples?requestId=` because an example is owned
 	// by exactly one request - the engine checks the owner before the example,

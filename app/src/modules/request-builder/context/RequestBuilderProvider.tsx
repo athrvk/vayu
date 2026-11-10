@@ -267,10 +267,19 @@ export default function RequestBuilderProvider({
 	 * The request the backend restore below has already answered for - null once
 	 * the provider is handed a different request, which is what lets a return to
 	 * an earlier request ask again. State rather than a ref because the restore
-	 * reads it while rendering.
+	 * reads it while rendering. A stored response adopted at mount counts as an
+	 * answer: otherwise the Send that clears the pane would be refilled from the
+	 * previous design run (#3421).
 	 */
-	const [restoredFor, setRestoredFor] = useState<string | null>(null);
+	const [restoredFor, setRestoredFor] = useState<string | null>(() =>
+		response && request.id ? request.id : null
+	);
 	const [restoredResponse, setRestoredResponse] = useState<ResponseState | null>(null);
+	// A stream this request holds, live or finished until another Send or a clear,
+	// owns the pane: the last design run must not fill it meanwhile.
+	const holdsStream = useExecutionEventsStore(
+		(s) => !!s.runId && !!s.requestId && s.requestId === request.id
+	);
 
 	/*
 	 * Load the response from the backend when nothing is cached locally and the
@@ -281,7 +290,13 @@ export default function RequestBuilderProvider({
 	 * replace it a frame later. Persisting to the response store is a write to
 	 * something outside React, so that half stays in the effect below.
 	 */
-	if (request.id && !response && !isLoadingLastRun && restoredFor !== request.id) {
+	if (
+		request.id &&
+		!response &&
+		!isLoadingLastRun &&
+		!holdsStream &&
+		restoredFor !== request.id
+	) {
 		setRestoredFor(request.id);
 		const restored = responseFromRunResult(
 			lastDesignRunReport?.results?.[0],
@@ -746,8 +761,6 @@ export default function RequestBuilderProvider({
 		(lastReset.id !== initialRequest.id || lastReset.initialResponse !== initialResponse)
 	) {
 		setLastReset({ id: initialRequest.id, collectionId, initialResponse });
-		// Let the backend restore run again for whatever request is now on screen.
-		setRestoredFor(null);
 		setRestoredResponse(null);
 		const seeded: RequestState = {
 			...createDefaultRequestState(),
@@ -769,7 +782,11 @@ export default function RequestBuilderProvider({
 		if (requestId) {
 			const stored = getResponse(requestId);
 			setLocalResponse(stored ? (stored as ResponseState) : null);
+			// Let the backend restore run again for the request now on screen,
+			// unless a stored response already answered for it (#3421).
+			setRestoredFor(stored ? requestId : null);
 		} else {
+			setRestoredFor(null);
 			/*
 			 * No id, so there is no stored response to restore - fall back to
 			 * the one handed in. Clearing it unconditionally (as it used to)
@@ -1150,6 +1167,10 @@ export default function RequestBuilderProvider({
 				const send = sendTracker.begin(memoryKey);
 				setLocalResponse(null);
 				if (executingId) useResponseStore.getState().clearResponse(executingId);
+				// The pane is now this Send's to fill. Marked answered here, not when
+				// the stream opens: a last-design query still loading would otherwise
+				// resolve inside the wait for the `202` and fill the earlier run (#3421).
+				if (executingId) setRestoredFor(executingId);
 				// The previous stream's rows belong to the send that is being
 				// replaced. Cleared here rather than on arrival of the first event,
 				// so a stream that never opens does not leave the last one on screen.
