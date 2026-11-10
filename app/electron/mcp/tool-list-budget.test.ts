@@ -182,6 +182,12 @@
  * and the key in both output schemas) added 270 B to every row, taking them to
  * 150,442 / 147,846 / 220,851 / 216,584 B; the four caps went to 150,500 /
  * 147,900 / 220,900 / 216,600.
+ *
+ * #3422's `headers` on `create_request_example` and `update_request_example`
+ * (ordered rows or a map, so an array schema beside the record, paid twice, and
+ * a sentence in each description) added 690 B to the writes-on rows, taking them
+ * to 221,541 / 217,274 B; those two caps went to 221,600 / 217,300 and the
+ * writes-off rows are untouched.
  */
 
 import { describe, it, expect } from "vitest";
@@ -203,8 +209,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_500 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_900 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 220_900 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 216_600 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_600 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -2873,6 +2873,129 @@ describe("document CRUD parity", () => {
 			expect(payload).toEqual({ status: 500 });
 		});
 
+		describe("headers as ordered rows (#3422)", () => {
+			const setCookies = [
+				{ key: "Set-Cookie", value: "a=1; Path=/" },
+				{ key: "Content-Type", value: "application/json" },
+				{ key: "Set-Cookie", value: "b=2; Path=/", enabled: false },
+			];
+			const forwarded = [
+				{ key: "Set-Cookie", value: "a=1; Path=/", enabled: true },
+				{ key: "Content-Type", value: "application/json", enabled: true },
+				{ key: "Set-Cookie", value: "b=2; Path=/", enabled: false },
+			];
+
+			test("create_request_example forwards the rows in order, a repeated key kept and enabled defaulting to true", async () => {
+				const client = fakeClient();
+				await dispatchTool(
+					"create_request_example",
+					{ requestId: "req_1", name: "cookies", headers: setCookies },
+					ctxWith(client, { allowWrites: true })
+				);
+				const [, payload] = callArgs(client.createRequestExample) as [
+					string,
+					Record<string, unknown>,
+				];
+				expect(payload.headers).toEqual(forwarded);
+			});
+
+			test("update_request_example replaces the list with the rows as given", async () => {
+				const client = fakeClient();
+				await dispatchTool(
+					"update_request_example",
+					{ requestId: "req_1", exampleId: "exa_1", headers: setCookies },
+					ctxWith(client, { allowWrites: true })
+				);
+				const [, , payload] = callArgs(client.updateRequestExample) as [
+					string,
+					string,
+					Record<string, unknown>,
+				];
+				expect(payload).toEqual({ headers: forwarded });
+			});
+
+			test("the map form still becomes one enabled row per name", async () => {
+				const client = fakeClient();
+				await dispatchTool(
+					"update_request_example",
+					{ requestId: "req_1", exampleId: "exa_1", headers: { "X-A": "1", "X-B": "2" } },
+					ctxWith(client, { allowWrites: true })
+				);
+				const [, , payload] = callArgs(client.updateRequestExample) as [
+					string,
+					string,
+					Record<string, unknown>,
+				];
+				expect(payload.headers).toEqual([
+					{ key: "X-A", value: "1", enabled: true },
+					{ key: "X-B", value: "2", enabled: true },
+				]);
+			});
+
+			test("an empty array clears the list rather than being dropped", async () => {
+				const client = fakeClient();
+				await dispatchTool(
+					"update_request_example",
+					{ requestId: "req_1", exampleId: "exa_1", headers: [] },
+					ctxWith(client, { allowWrites: true })
+				);
+				expect(callArgs(client.updateRequestExample)[2]).toEqual({ headers: [] });
+			});
+
+			test.each([
+				["a non-object row", ["Set-Cookie: a=1"], "row 0 must be an object"],
+				["a row without a value", [{ key: "X-A" }], "row 0 needs a string"],
+				["a numeric value", [{ key: "X-A", value: 1 }], "row 0 needs a string"],
+				[
+					"a non-boolean enabled",
+					[{ key: "X-A", value: "1", enabled: "no" }],
+					"row 0 has an",
+				],
+				["a bare string", "X-A: 1", "must be an array"],
+			])(
+				"a write with %s is refused before anything is sent",
+				async (_label, headers, message) => {
+					for (const tool of ["create_request_example", "update_request_example"]) {
+						const client = fakeClient();
+						const res = await dispatchTool(
+							tool,
+							{ requestId: "req_1", exampleId: "exa_1", name: "x", headers },
+							ctxWith(client, { allowWrites: true })
+						);
+						expect(res.isError, tool).toBe(true);
+						expect(firstText(res), tool).toContain(message);
+						expect(client.createRequestExample, tool).not.toHaveBeenCalled();
+						expect(client.updateRequestExample, tool).not.toHaveBeenCalled();
+					}
+				}
+			);
+
+			test("both tools' headers schema takes the rows or the map and refuses a malformed row", () => {
+				for (const name of ["create_request_example", "update_request_example"]) {
+					const schema = schemaOf(name, "headers");
+					expect(schema.safeParse(setCookies).success, `${name} rows`).toBe(true);
+					expect(schema.safeParse({ "X-A": "1" }).success, `${name} map`).toBe(true);
+					expect(schema.safeParse(undefined).success, `${name} omitted`).toBe(true);
+					expect(schema.safeParse([{ key: "X-A" }]).success, `${name} no value`).toBe(
+						false
+					);
+					expect(schema.safeParse(["X-A: 1"]).success, `${name} string row`).toBe(false);
+					expect(
+						schema.safeParse([{ key: "X-A", value: "1", enabled: "yes" }]).success,
+						name
+					).toBe(false);
+				}
+			});
+
+			test("the example tools' descriptions name the array form for repeated headers", () => {
+				for (const name of ["create_request_example", "update_request_example"]) {
+					const text = descriptionOf(TOOLS.find((t) => t.name === name));
+					expect(text, name).toContain("Set-Cookie");
+					expect(text, name).toContain("{key, value, enabled?}");
+				}
+			});
+		});
+
 		test("an update naming no field is refused rather than sent", async () => {
 			const client = fakeClient();
 			const res = await dispatchTool(
