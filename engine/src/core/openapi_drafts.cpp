@@ -958,7 +958,7 @@ bool is_text_media_type (const std::string& key) {
 /**
  * Whether a declared example under media type @p key is served as the bytes it
  * is: the example is a string, or the key is a text-family type. A media
- * *range* (any key containing `*`, such as `text/*`) names no type, so it never
+ * *range* (any key containing a wildcard, such as `text` over a star) names no type, so it never
  * becomes a literal `Content-Type` header; a `null` example is no example.
  */
 bool is_text_example (const std::string& key, const json& value) {
