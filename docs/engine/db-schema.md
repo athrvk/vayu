@@ -2425,7 +2425,9 @@ store timing/error envelopes, not bodies.
 
 That design-mode subset is what rebuilds the request builder's response pane (Timing tab included)
 after a restart - see `app/src/modules/request-builder/utils/restore-response.ts`, which surfaces
-`bodyTruncated`/`bodyBytes` as a "body truncated for storage" notice.
+`bodyTruncated`/`bodyBytes` as a "body truncated for storage" notice, and restores a failed
+exchange that kept its `response` node as the failed exchange with the server's headers beside its
+error.
 
 A design run has exactly one `results` row. `GET /runs/:runId` serves it (as `result`)
 alongside the run itself, in addition to `GET /runs/:runId/report`'s `results` array - the

@@ -1561,7 +1561,11 @@ export interface RunResultTrace {
 	thresholdMs?: number;
 	request_number?: number;
 	error_code?: number;
-	/** `to_string(ErrorCode)` - the same words a live `errorCode` uses. */
+	/**
+	 * `to_string(ErrorCode)` - the same words a live `errorCode` uses. A failure
+	 * after the server's header block arrived keeps `response` beside it (#3423),
+	 * so `response` is not a success flag.
+	 */
 	error_type?: string;
 	/** The load-test writer's failure text (`load_strategy.cpp`). */
 	message?: string;
@@ -1678,7 +1682,12 @@ export interface RunResultTrace {
 		body?: unknown;
 		/** Set by `store_result` when the response body exceeded `maxTraceBodyBytes`. */
 		bodyTruncated?: boolean;
-		/** The response body's original byte length, present only when truncated. */
+		/**
+		 * The response body's UTF-8 byte count, the original length when
+		 * `bodyTruncated` (the stored `body` is then a prefix). Written on every
+		 * response since #3423; a row stored before that has it only when truncated
+		 * or streamed, so a reader falls back to counting the body it holds.
+		 */
 		bodyBytes?: number;
 		/**
 		 * `body` is the bytes in base64, the same spelling the live answer's
