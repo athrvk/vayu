@@ -12,7 +12,7 @@
  * @brief `<httplib.h>` for a translation unit that builds an `httplib::Client`
  *        from a URL.
  *
- * cpp-httplib 0.63.0's `Client (scheme_host_port, ...)` throws on an
+ * cpp-httplib 0.65.0's `Client (scheme_host_port, ...)` throws on an
  * unsupported scheme and then falls back to an invalid client, under
  * `#ifndef CPPHTTPLIB_NO_EXCEPTIONS` / `#endif` rather than `#else`. With
  * exceptions on, the fallback cannot be reached, and MSVC's `/Od` build (the

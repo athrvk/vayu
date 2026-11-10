@@ -457,7 +457,7 @@ jobs:
       # job above fails the build if they drift. `SCCACHE_GHA_ENABLED` selects
       # the ref-scoped GHA backend, so the entries this compile produces land in
       # the master scope a tag build reads - the whole point of warming here.
-      VCPKG_COMMIT: '9a5dfef5d1a0438a7d24856a85bd60f309d355e9'
+      VCPKG_COMMIT: 'e529425f2f43d773d0a59517c8d89367d68bb7fd'
       VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
       SCCACHE_GHA_ENABLED: 'true'
 
