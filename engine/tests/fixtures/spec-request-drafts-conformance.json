@@ -644,15 +644,9 @@
             {
               "name": "201 - made",
               "status": 201,
-              "headers": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/xml",
-                  "enabled": true
-                }
-              ],
+              "headers": [],
               "body": "",
-              "contentType": "application/xml"
+              "contentType": ""
             }
           ]
         }

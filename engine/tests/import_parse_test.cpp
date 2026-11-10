@@ -3408,21 +3408,58 @@ int skipped_count (const json& meta, const std::string& kind) {
 
 } // namespace
 
-/// A saved response coded 1xx is an interim answer `POST /import/apply` refuses
-/// as an example (#3117), so the import leaves it out and counts it rather than
-/// failing the document. Mutation check: dropping the skip keeps the 100 row.
-TEST (PostmanImport, LeavesOutASavedResponseCoded1xx) {
+/// A saved response whose code is not a final status is one the import leaves
+/// out and counts rather than failing the document (#3117, #3424): `POST
+/// /import/apply` refuses a code outside 200-599 and ignores a fractional one,
+/// storing it as the default 200, so the example would fail the apply or
+/// document a different status. The 1xx pair is the interim responses; `0` and
+/// `600` are outside the range from either end, `200.5` and `600.0` are no
+/// servable status, and `404.0` and `2e2` are whole numbers that Postman's own
+/// export can write for a status, so they import as the integers 404 and 200.
+/// Mutation check: narrowing the predicate back to 1xx keeps the `0`, `600`,
+/// `200.5` and `600.0` rows; testing `is_number_integer` instead of the value
+/// drops the `404.0` and `2e2` rows.
+TEST (PostmanImport, LeavesOutASavedResponseWhoseCodeIsNotAFinalStatus) {
     const ImportParse parsed = parse_postman_items (
     R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
          "response":[{"name":"continue","code":100,"body":""},
                      {"name":"upgrade","code":101,"body":""},
-                     {"name":"ok","code":200,"body":"{}"}]})j");
+                     {"name":"zero","code":0,"body":""},
+                     {"name":"past","code":600,"body":""},
+                     {"name":"fraction","code":200.5,"body":""},
+                     {"name":"floatPast","code":600.0,"body":""},
+                     {"name":"ok","code":200,"body":"{}"},
+                     {"name":"whole","code":404.0,"body":""},
+                     {"name":"exponent","code":2e2,"body":""},
+                     {"name":"edge","code":599,"body":""}]})j");
     ASSERT_TRUE (parsed.ok ()) << parsed.error;
     const json& examples =
     parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
-    ASSERT_EQ (examples.size (), 1u);
+    ASSERT_EQ (examples.size (), 4u);
+    const std::vector<int> expected = { 200, 404, 200, 599 };
+    for (size_t index = 0; index < expected.size (); ++index) {
+        // The apply reads a status only as a JSON integer.
+        EXPECT_TRUE (examples[index].at ("status").is_number_integer ()) << index;
+        EXPECT_EQ (examples[index].at ("status").get<int> (), expected[index]) << index;
+    }
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 6);
+}
+
+/// A `code` that is not a number is not judged: the example imports as the 200
+/// Postman shows for one with no code. Mutation check: dropping the is-a-number
+/// guard of the predicate counts the first row as malformed.
+TEST (PostmanImport, KeepsASavedResponseWhoseCodeIsNotANumberAsA200) {
+    const ImportParse parsed = parse_postman_items (
+    R"j({"name":"R","request":{"method":"GET","url":"https://x.com"},
+         "response":[{"name":"text","code":"OK","body":""},
+                     {"name":"none","body":""}]})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& examples =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
+    ASSERT_EQ (examples.size (), 2u);
     EXPECT_EQ (examples[0].at ("status"), 200);
-    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 2);
+    EXPECT_EQ (examples[1].at ("status"), 200);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 0);
 }
 
 /// An OpenAPI `101` (a WebSocket upgrade) documents a response no mock can
@@ -3440,6 +3477,244 @@ TEST (OpenApiImport, SkipsAnInterimResponseAndCountsIt) {
     const json& meta = parsed.result.at ("meta");
     EXPECT_EQ (meta.at ("exampleCount"), 1);
     EXPECT_EQ (skipped_count (meta, "example_no_status"), 1);
+}
+
+namespace {
+
+/// An OpenAPI 3.0 import of one `GET /r` operation carrying @p responses.
+ImportParse parse_responses (const std::string& responses) {
+    return parse_import (R"j({"openapi":"3.0.0","info":{"title":"T","version":"1"},
+        "paths":{"/r":{"get":{"operationId":"r","responses":)j" +
+    responses + "}}}}",
+    {}, {});
+}
+
+/// The one example of @p status on the first request, which must exist.
+const nlohmann::ordered_json& example_of_status (const ImportParse& parsed, int status) {
+    static const nlohmann::ordered_json missing = nlohmann::ordered_json::object ();
+    for (const nlohmann::ordered_json& example :
+    first_request (parsed.result.at ("collections")[0]).at ("examples")) {
+        if (example.at ("status") == status) {
+            return example;
+        }
+    }
+    ADD_FAILURE () << "no example with status " << status;
+    return missing;
+}
+
+} // namespace
+
+/// A response documented only in a text media type is an example with that
+/// body under that media type (#3424), where the importer used to store an empty
+/// body with no content type and the mock answered an empty `text/plain`. The
+/// body is the string as written; a media type with parameters keeps them; an
+/// `examples` map is read through its first entry. Mutation check: restoring
+/// the JSON-only return gives all four rows an empty body and no content type.
+TEST (OpenApiImport, ImportsATextResponseExampleWithItsBodyAndContentType) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"pong","content":{"text/plain":{"example":"pong"}}},
+        "404":{"description":"gone","content":{"text/html; charset=utf-8":{
+            "examples":{"page":{"value":"<h1>Gone</h1>"}}}}},
+        "500":{"description":"oops","content":{"application/xml":{"example":"<e/>"}}},
+        "503":{"description":"busy","content":{"text/csv":{"example":42}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& ok = example_of_status (parsed, 200);
+    EXPECT_EQ (ok.at ("body"), "pong");
+    EXPECT_EQ (ok.at ("contentType"), "text/plain");
+    EXPECT_EQ (header_pairs (ok.at ("headers")),
+    (HeaderPairs{ { "Content-Type", "text/plain" } }));
+
+    const nlohmann::ordered_json& gone = example_of_status (parsed, 404);
+    EXPECT_EQ (gone.at ("body"), "<h1>Gone</h1>");
+    EXPECT_EQ (gone.at ("contentType"), "text/html; charset=utf-8");
+    EXPECT_EQ (gone.at ("specExampleKey"), "page");
+
+    EXPECT_EQ (example_of_status (parsed, 500).at ("body"), "<e/>");
+    EXPECT_EQ (example_of_status (parsed, 500).at ("contentType"), "application/xml");
+    // A text-family type takes a non-string example as the JSON text it is.
+    EXPECT_EQ (example_of_status (parsed, 503).at ("body"), "42");
+    EXPECT_EQ (example_of_status (parsed, 503).at ("contentType"), "text/csv");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 0);
+}
+
+/// A JSON media type keeps precedence over a text one declared before it, and a
+/// media type with no declared example is passed over for the next one that has
+/// one. Mutation check: trying the text media types before the JSON one gives
+/// the 200 the `plain` body.
+TEST (OpenApiImport, PrefersJsonThenTheFirstMediaTypeThatDeclaresAnExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"both","content":{
+            "text/plain":{"example":"plain"},
+            "application/json":{"example":{"ok":true}}}},
+        "201":{"description":"later","content":{
+            "image/png":{"schema":{"type":"string","format":"byte"}},
+            "text/plain":{"example":"made"}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    EXPECT_EQ (example_of_status (parsed, 200).at ("contentType"), "application/json");
+    EXPECT_EQ (example_of_status (parsed, 200).at ("body"), "{\n  \"ok\": true\n}");
+    EXPECT_EQ (example_of_status (parsed, 201).at ("contentType"), "text/plain");
+    EXPECT_EQ (example_of_status (parsed, 201).at ("body"), "made");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 0);
+}
+
+/// A response whose only media types declare no example is counted, never
+/// given a body: a schema is sampled into JSON, and JSON bytes under `text/csv`
+/// document nothing the spec said. The example still imports, undocumented, as
+/// a `204` does. A `content` map with no entries lost nothing and is not
+/// counted. Mutation check: dropping the tally leaves the count at 0.
+TEST (OpenApiImport, CountsAResponseWhoseMediaTypesDeclareNoExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"csv","content":{
+            "text/csv":{"schema":{"type":"string"}},
+            "application/pdf":{"schema":{"type":"string","format":"binary"}}}},
+        "204":{"description":"empty"},
+        "205":{"description":"none","content":{}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& csv = example_of_status (parsed, 200);
+    EXPECT_EQ (csv.at ("body"), "");
+    EXPECT_EQ (csv.at ("contentType"), "");
+    EXPECT_TRUE (csv.at ("headers").empty ());
+    EXPECT_EQ (parsed.result.at ("meta").at ("exampleCount"), 3);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 1);
+}
+
+/// A JSON media type that yields nothing (an empty media object) does not end
+/// the search: the text example beside it is imported, and with none the
+/// response is counted rather than silently bodiless. Mutation check: returning
+/// the JSON result directly gives the 200 an empty body and leaves the count 0.
+TEST (OpenApiImport, FallsThroughFromAnEmptyJsonMediaTypeToATextExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"pong","content":{
+            "application/json":{},
+            "text/plain":{"example":"pong"}}},
+        "201":{"description":"bare","content":{"application/json":{}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    EXPECT_EQ (example_of_status (parsed, 200).at ("body"), "pong");
+    EXPECT_EQ (example_of_status (parsed, 200).at ("contentType"), "text/plain");
+    EXPECT_EQ (example_of_status (parsed, 201).at ("body"), "");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 1);
+}
+
+/// A media range is not a media type: `*/*` and `text/*` never become a literal
+/// `Content-Type`, so the example under one is passed over for a named type
+/// and, with none, counted. Mutation check: dropping the `*` guard of
+/// `is_text_example` imports the 202 under `text/*` and the 203 under `*/*`.
+TEST (OpenApiImport, NeverTakesAMediaRangeAsTheContentTypeOfAnExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "202":{"description":"named","content":{
+            "*/*":{"example":"any"},
+            "text/*":{"example":"text"},
+            "text/plain":{"example":"plain"}}},
+        "203":{"description":"ranges","content":{
+            "*/*":{"example":"any"},
+            "text/*":{"example":"text"}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    EXPECT_EQ (example_of_status (parsed, 202).at ("body"), "plain");
+    EXPECT_EQ (example_of_status (parsed, 202).at ("contentType"), "text/plain");
+    EXPECT_EQ (example_of_status (parsed, 203).at ("body"), "");
+    EXPECT_EQ (example_of_status (parsed, 203).at ("contentType"), "");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 1);
+}
+
+namespace {
+
+/// A Swagger 2.0 import of one `GET /r` operation whose `responses` is
+/// @p responses, with @p operation_members (`"produces":[...],`, or empty)
+/// leading the operation.
+ImportParse parse_swagger_responses (const std::string& operation_members,
+const std::string& responses) {
+    return parse_import (R"j({"swagger":"2.0","info":{"title":"T","version":"1"},
+        "paths":{"/r":{"get":{"operationId":"r",)j" +
+    operation_members + R"j("responses":)j" + responses + "}}}}",
+    {}, {});
+}
+
+} // namespace
+
+/// A 2.0 text example imports under the key it is declared under, whatever
+/// `produces` lists first: beside a JSON type, with no `produces` at all, under
+/// a type that is not the first one, and under a key that carries parameters.
+/// Mutation check: restoring the single `produces.front()` content type leaves
+/// the first three rows with an empty body (and the fourth under the wrong
+/// type); reading only the produced key does the same.
+TEST (SwaggerImport, ImportsATextResponseExampleUnderTheKeyItIsDeclaredUnder) {
+    struct Row {
+        std::string produces;
+        std::string examples;
+        std::string body;
+        std::string content_type;
+    };
+    const std::vector<Row> rows = {
+        { R"j("produces":["application/json","text/plain"],)j",
+        R"j({"text/plain":"pong"})j", "pong", "text/plain" },
+        { "", R"j({"text/plain":"pong"})j", "pong", "text/plain" },
+        { R"j("produces":["text/plain","application/xml"],)j",
+        R"j({"application/xml":"<e/>"})j", "<e/>", "application/xml" },
+        { R"j("produces":["text/plain"],)j", R"j({"text/plain; charset=utf-8":"pong"})j",
+        "pong", "text/plain; charset=utf-8" },
+        // A non-string example under a text-family key is the JSON text it is.
+        { R"j("produces":["text/csv"],)j", R"j({"text/csv":42})j", "42", "text/csv" },
+    };
+    for (const Row& row : rows) {
+        const ImportParse parsed = parse_swagger_responses (row.produces,
+        R"j({"200":{"description":"ok","examples":)j" + row.examples + "}}");
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        const nlohmann::ordered_json& example = example_of_status (parsed, 200);
+        EXPECT_EQ (example.at ("body"), row.body) << row.examples;
+        EXPECT_EQ (example.at ("contentType"), row.content_type) << row.examples;
+        EXPECT_EQ (header_pairs (example.at ("headers")),
+        (HeaderPairs{ { "Content-Type", row.content_type } }));
+        EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 0);
+    }
+}
+
+/// The JSON type keeps precedence in 2.0 as in 3.x: a JSON example beats a text
+/// one declared before it, a schema is sampled under the JSON type, and a JSON
+/// example under a key `produces` does not list is still JSON under its own key.
+/// Mutation check: trying the text examples first gives the first row the
+/// `plain` body.
+TEST (SwaggerImport, KeepsTheJsonTypeAheadOfATextExample) {
+    const ImportParse both =
+    parse_swagger_responses (R"j("produces":["application/json","text/plain"],)j",
+    R"j({"200":{"examples":{"text/plain":"plain","application/json":{"ok":true}}},
+         "201":{"schema":{"type":"string"},"examples":{"text/plain":"plain"}}})j");
+    ASSERT_TRUE (both.ok ()) << both.error;
+    EXPECT_EQ (example_of_status (both, 200).at ("contentType"), "application/json");
+    EXPECT_EQ (example_of_status (both, 200).at ("body"), "{\n  \"ok\": true\n}");
+    EXPECT_EQ (example_of_status (both, 201).at ("contentType"), "application/json");
+    EXPECT_NE (example_of_status (both, 201).at ("body"), "plain");
+
+    const ImportParse unlisted = parse_swagger_responses (R"j("produces":["text/plain"],)j",
+    R"j({"200":{"examples":{"application/json":{"ok":true}}}})j");
+    ASSERT_TRUE (unlisted.ok ()) << unlisted.error;
+    EXPECT_EQ (example_of_status (unlisted, 200).at ("contentType"), "application/json");
+    EXPECT_EQ (example_of_status (unlisted, 200).at ("body"), "{\n  \"ok\": true\n}");
+    EXPECT_EQ (skipped_count (unlisted.result.at ("meta"), "example_no_media_type"), 0);
+}
+
+/// A 2.0 schema is sampled only into JSON: under `produces: [text/csv]` the
+/// sample would be JSON bytes labelled `text/csv`, so the response imports
+/// without a body and is counted. A media range key is no media type either.
+/// A response documenting nothing is no loss. Mutation check: sampling the
+/// schema under `produces.front()` gives the first row a body and the count 0;
+/// dropping the `*` guard imports the second row under `*/*`.
+TEST (SwaggerImport, CountsAResponseWhoseProducedTypesHaveNoUsableBody) {
+    const ImportParse parsed = parse_swagger_responses (R"j("produces":["text/csv"],)j",
+    R"j({"200":{"description":"csv","schema":{"type":"string"}},
+         "201":{"description":"any","examples":{"*/*":"x","text/*":"y"}},
+         "204":{"description":"empty"}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    for (const int status : { 200, 201, 204 }) {
+        EXPECT_EQ (example_of_status (parsed, status).at ("body"), "") << status;
+        EXPECT_EQ (example_of_status (parsed, status).at ("contentType"), "") << status;
+    }
+    EXPECT_EQ (parsed.result.at ("meta").at ("exampleCount"), 3);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 2);
 }
 
 /// The fragment is the URL's, never a query value's: it is cut at the first

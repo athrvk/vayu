@@ -139,8 +139,11 @@ Saved example responses (issue #481), from the half of the spec that says what c
 |--------------------------------|---------------------|-------|
 | the key | `status` | must be a three-digit `200`-`599` code |
 | `description` | `name` | `"{code} - {description}"`, or the bare code |
-| `examples[<media type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
-| `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json` |
+| `examples[<JSON type>]` → `sampleSchema(schema)` | `body` | documented example first, generated sample second - the same precedence this file already uses for a request body |
+| `op.produces` → `spec.produces` | `contentType`, and a single `Content-Type` header | a 2.0 response does not name its own media type; the JSON entry wins, and a spec that lists no `produces` at all is treated as `application/json`. A JSON key of `examples` supplies the JSON type when `produces` lists none |
+| with no JSON body: the first `examples` entry, in document order, whose value is a string or whose key is a `text/*`, `*/xml` or `*/html` type | `body` and `contentType` | a string is the body as written, anything else the JSON text of the value; the `examples` key, parameters included (`text/plain; charset=utf-8`), is the `Content-Type`, whatever `produces` lists first (issue #3424). A key containing `*` is a media range, never a `Content-Type`, and is not chosen |
+
+The schema is sampled only into JSON, the same rule as [OpenAPI 3.0](./openapi-v3.md#documented-responses): under `produces: [text/csv]` a schema-only response would be JSON bytes labelled `text/csv`, so it imports without a body and is counted as `example_no_media_type` - the same count a 3.x response with no usable `content` gets - which the preview words as an example imported without a body. A response that documents nothing (no `examples`, no `schema`) is not counted.
 
 A response that documents no body still imports (`204` is a real answer), and a key that is not a final numeric status (200-599) is skipped and counted: `default` as `default_response`, a wildcard, `1xx` or junk key as `example_no_status` - counted apart for the reason [OpenAPI 3.0](./openapi-v3.md#documented-responses) gives.
 

@@ -593,7 +593,8 @@ const nlohmann::ordered_json& document);
  *   them out.
  * - **@p tally is filled**, with the losses a document's shape forced -
  *   `malformed_spec`, `unsupported_method`, `cookie_param`, `unmapped_body`,
- *   and the two response kinds. The caller adds what it alone knows
+ *   and the three response kinds (`example_no_status`, `default_response`,
+ *   `example_no_media_type`). The caller adds what it alone knows
  *   (`unresolved_base_url`, `no_server_url`, `external_ref`) to the same tally.
  */
 [[nodiscard]] std::vector<SpecRequestDraft>
