@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { queryKeys } from "@/queries/keys";
 import type { Request, RequestSummary } from "@/types";
 import {
@@ -20,6 +20,7 @@ import {
 	CHANGE_FEED_MUTATION_HOLD_MAX_MS,
 	FeedInvalidationBatch,
 	invalidateFeedDomain,
+	invalidateOpenRows,
 	invalidationsForChange,
 	parseChangeFeedChange,
 	type ChangeFeedChange,
@@ -224,6 +225,63 @@ describe("invalidateFeedDomain", () => {
 		for (const change of Object.values(KINDS)) {
 			for (const key of keysFor(change)) expect(covered(key), JSON.stringify(key)).toBe(true);
 		}
+	});
+});
+
+describe("invalidateOpenRows", () => {
+	it("refetches an open tab's request and leaves the workspace's request lists alone", async () => {
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const readDetail = vi.fn(async () => ({ id: "req_1" }));
+		const readList = vi.fn(async () => []);
+		const readClosedTab = vi.fn(async () => ({ id: "req_2" }));
+		// An open request tab and an expanded collection: both observed.
+		const unsubscribe = [
+			new QueryObserver(queryClient, {
+				queryKey: queryKeys.requests.detail("req_1"),
+				queryFn: readDetail,
+				staleTime: Infinity,
+			}).subscribe(() => {}),
+			new QueryObserver(queryClient, {
+				queryKey: queryKeys.requests.listByCollection("col_1"),
+				queryFn: readList,
+			}).subscribe(() => {}),
+		];
+		// A request read once and no longer on screen.
+		await queryClient.fetchQuery({
+			queryKey: queryKeys.requests.detail("req_2"),
+			queryFn: readClosedTab,
+			staleTime: Infinity,
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect([readDetail, readList, readClosedTab].map((f) => f.mock.calls.length)).toEqual([
+			1, 1, 1,
+		]);
+
+		invalidateOpenRows(queryClient);
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(readDetail).toHaveBeenCalledTimes(2);
+		expect(readList).toHaveBeenCalledTimes(1);
+		// Not fetched now, but no longer served as fresh when it is next mounted.
+		expect(readClosedTab).toHaveBeenCalledTimes(1);
+		expect(queryClient.getQueryState(queryKeys.requests.detail("req_2"))?.isInvalidated).toBe(
+			true
+		);
+		for (const stop of unsubscribe) stop();
+	});
+
+	it("is what a batch's open-rows flag flushes, and a reset subsumes it", () => {
+		const { queryClient, keys } = spiedClient();
+		const batch = new FeedInvalidationBatch(queryClient);
+		batch.addOpenRows();
+		vi.advanceTimersByTime(CHANGE_FEED_COALESCE_MS);
+		expect(includesKey(keys(), queryKeys.requests.details())).toBe(true);
+		expect(includesKey(keys(), queryKeys.requests.all)).toBe(false);
+
+		batch.addOpenRows();
+		batch.addReset();
+		vi.advanceTimersByTime(CHANGE_FEED_COALESCE_MS);
+		expect(includesKey(keys(), queryKeys.requests.all)).toBe(true);
 	});
 });
 

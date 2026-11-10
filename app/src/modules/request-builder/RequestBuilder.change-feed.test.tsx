@@ -124,6 +124,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+/** The tab, open on `req_1`, and the change feed it follows, not yet serving. */
 function renderOpenRequest() {
 	const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	const wrapper = ({ children }: { children: ReactNode }) => (
@@ -131,9 +132,7 @@ function renderOpenRequest() {
 	);
 	render(<RequestBuilder />, { wrapper });
 	service.start(queryClient);
-	const feed = MockEventSource.instances[MockEventSource.instances.length - 1];
-	feed.emit("ready", 100, { lastEventId: 100 });
-	return feed;
+	return MockEventSource.instances[MockEventSource.instances.length - 1];
 }
 
 const shown = (testId: string) => screen.getByTestId(testId).textContent;
@@ -141,6 +140,7 @@ const shown = (testId: string) => screen.getByTestId(testId).textContent;
 describe("a write to the open request by another client", () => {
 	it("adopts an untouched field and keeps a typed one as a conflict", async () => {
 		const feed = renderOpenRequest();
+		feed.emit("ready", 100, { lastEventId: 100 });
 		expect(await screen.findByTestId("url")).toHaveProperty("textContent", STORED.url);
 
 		act(() => screen.getByText("type description").click());
@@ -161,5 +161,17 @@ describe("a write to the open request by another client", () => {
 		expect(shown("description")).toBe("my draft");
 		expect(shown("conflicts")).toBe("description");
 		expect(shown("conflict-description")).toBe("their description");
+	});
+
+	it("is caught up even when the write landed before the feed was listening", async () => {
+		// The launch window: the tab has read its request, the stream has not
+		// yet opened, and a write in between is one the feed never reports.
+		const feed = renderOpenRequest();
+		expect(await screen.findByTestId("url")).toHaveProperty("textContent", STORED.url);
+		stored = { ...STORED, url: "https://api.test/v2" };
+
+		act(() => feed.emit("ready", 100, { lastEventId: 100 }));
+
+		await waitFor(() => expect(shown("url")).toBe("https://api.test/v2"));
 	});
 });

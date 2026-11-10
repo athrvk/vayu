@@ -91,6 +91,8 @@ export class ChangeFeedService {
 
 	private connect(): void {
 		this.retryTimer = null;
+		// No resume point: nothing tells this stream what was written before it.
+		const fresh = this.lastEventId === "";
 		const query = this.lastEventId
 			? `?lastEventId=${encodeURIComponent(this.lastEventId)}`
 			: "";
@@ -99,7 +101,9 @@ export class ChangeFeedService {
 		// Each listener checks it is still the current source: a closed one can
 		// still deliver what it had already read.
 		source.addEventListener("ready", (event) => {
-			if (this.source === source) this.opened(event as MessageEvent);
+			if (this.source !== source) return;
+			this.opened(event as MessageEvent);
+			if (fresh) this.batch?.addOpenRows();
 		});
 		source.addEventListener("reset", (event) => {
 			if (this.source !== source) return;
@@ -115,12 +119,9 @@ export class ChangeFeedService {
 	}
 
 	/**
-	 * A `ready` or `reset`: the stream is serving. A `ready` asks for nothing
-	 * more. On a resume the missed events follow it. A fresh subscription opens
-	 * the moment the engine connects, beside the reads that connection starts
-	 * (the launch's, or the health poll's reconnect re-read), so re-reading
-	 * everything here would repeat the launch's heaviest call to cover a window
-	 * of those same few milliseconds.
+	 * A `ready` or `reset`: the stream is serving. On a resume the missed events
+	 * follow a `ready`. A fresh subscription's `ready` follows the app's first
+	 * reads, so the open tabs re-read their rows (`invalidateOpenRows`).
 	 */
 	private opened(event: MessageEvent): void {
 		this.attempts = 0;

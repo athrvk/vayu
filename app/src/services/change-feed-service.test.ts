@@ -130,11 +130,30 @@ describe("ChangeFeedService", () => {
 		expect(includesKey(queryKeys.requests.detail("req_1"))).toBe(true);
 	});
 
-	it("asks nothing of the cache for a fresh subscription's ready", async () => {
+	it("re-reads the open rows, and not the request lists, on a fresh subscription's ready", async () => {
 		service.start(queryClient);
 		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
-		expect(invalidated()).toEqual([]);
+
+		expect(includesKey(queryKeys.requests.details())).toBe(true);
+		expect(includesKey(queryKeys.compose.all)).toBe(true);
+		expect(includesKey(queryKeys.collections.lists())).toBe(true);
+		// The workspace-wide `GET /requests` and its per-collection lists.
+		expect(includesKey(queryKeys.requests.all)).toBe(false);
+		expect(includesKey(queryKeys.requests.lists())).toBe(false);
+		expect(includesKey(queryKeys.prefetch.allRequests())).toBe(false);
+	});
+
+	it("asks nothing of the cache for a resume's ready: the missed events follow it", async () => {
+		service.start(queryClient);
+		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
+		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
+		const before = invalidated().length;
+
+		await dropAndReconnect();
+		latest().emit("ready", FIRST_ID, { lastEventId: FIRST_ID });
+		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
+		expect(invalidated()).toHaveLength(before);
 	});
 
 	it("refetches everything the feed covers on a reset", async () => {
@@ -193,7 +212,7 @@ describe("ChangeFeedService", () => {
 
 		first.emit("change", FIRST_ID + 9, requestChange());
 		await vi.advanceTimersByTimeAsync(CHANGE_FEED_COALESCE_MS);
-		expect(invalidated()).toEqual([]);
+		expect(includesKey(queryKeys.requests.detail("req_1"))).toBe(false);
 		// Nor did its id become the resume point.
 		await dropAndReconnect();
 		expect(latest().url).toBe(`${FEED_URL}?lastEventId=${FIRST_ID}`);

@@ -24,6 +24,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { invalidateForMcpEvent } from "@/lib/mcp-invalidation";
 import { ownerOfRequest } from "@/queries/collections";
+import { invalidateCompositions } from "@/queries/compose-invalidation";
 import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent, McpDataEntity, Request } from "@/types";
 
@@ -162,6 +163,29 @@ export function invalidateFeedDomain(queryClient: QueryClient): void {
 }
 
 /**
+ * Re-read what the open tabs show of the feed's rows, and nothing wider: what a
+ * fresh subscription's `ready` asks for.
+ *
+ * The app's first reads go out as the window paints and the stream opens once
+ * the engine answers, so a write another client commits between the two is
+ * never reported. The request detail and the compositions are `staleTime:
+ * Infinity`, so a restored tab would keep the version it read and Send would
+ * send it; the collections, environments and globals lists are what an open
+ * collection or environment tab reads, and nothing refetches a mounted one.
+ * Each is one call, and only a read some surface is observing is refetched -
+ * the rest are marked stale for their next mount. Not the request lists: the
+ * workspace-wide `GET /requests` is the launch's heaviest call, and the tree
+ * reads a name and a method from it, never what Send sends.
+ */
+export function invalidateOpenRows(queryClient: QueryClient): void {
+	void queryClient.invalidateQueries({ queryKey: queryKeys.requests.details() });
+	invalidateCompositions(queryClient);
+	void queryClient.invalidateQueries({ queryKey: queryKeys.collections.lists() });
+	void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all });
+	void queryClient.invalidateQueries({ queryKey: queryKeys.globals.all });
+}
+
+/**
  * How long the first event of a burst waits for the rest.
  *
  * Four of the engine's 50ms relay polls (`RELAY_POLL_INTERVAL_MS`): a bulk
@@ -205,6 +229,7 @@ export class FeedInvalidationBatch {
 	private families = new Map<string, McpDataChangedEvent>();
 	private trash = false;
 	private reset = false;
+	private openRows = false;
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	/** Waiting on in-flight mutations; what arrives meanwhile joins the held flush. */
 	private holding = false;
@@ -214,6 +239,12 @@ export class FeedInvalidationBatch {
 	add(invalidation: FeedInvalidation): void {
 		for (const event of invalidation.families) this.families.set(familyKey(event), event);
 		if (invalidation.trash) this.trash = true;
+		this.arm();
+	}
+
+	/** What the open tabs show may be stale (see {@link invalidateOpenRows}). */
+	addOpenRows(): void {
+		this.openRows = true;
 		this.arm();
 	}
 
@@ -238,14 +269,16 @@ export class FeedInvalidationBatch {
 			this.flushWhenMutationsSettle();
 			return;
 		}
-		const { families, trash, reset } = this;
+		const { families, trash, reset, openRows } = this;
 		this.families = new Map();
 		this.trash = false;
 		this.reset = false;
+		this.openRows = false;
 		if (reset) {
 			invalidateFeedDomain(this.queryClient);
 			return;
 		}
+		if (openRows) invalidateOpenRows(this.queryClient);
 		for (const event of families.values()) invalidateForMcpEvent(this.queryClient, event);
 		if (trash) void this.queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 	}

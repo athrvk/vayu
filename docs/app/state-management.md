@@ -2854,9 +2854,18 @@ point), and so is a frame that does not parse. A `reset` (a resume the engine's
 ring no longer covers, an id from an engine process that has since restarted,
 or a reader that fell a whole ring behind) invalidates `collection`,
 `environment` and `clientCertificate` together, which between them reach every
-read a single event can. A `ready` invalidates nothing: on a resume the missed
-events follow it, and a fresh subscription opens as the engine connects,
-beside the reads that connection starts.
+read a single event can. A resume's `ready` invalidates nothing, because the
+missed events follow it. A fresh subscription's `ready` (the first stream of the
+app's life, opened with no resume point) follows the launch's reads, so a write
+another client committed between the two is never reported; it re-reads what
+the open tabs show instead (`invalidateOpenRows`): `requests.details()` and
+`compose.all`, the two `staleTime: Infinity` reads a restored tab and Send
+depend on, and `collections.lists()`, `environments.all` and `globals.all`,
+what an open collection or environment tab reads. Each is one call, and only an
+observed entry is refetched; the rest are marked stale for their next mount.
+The request lists are left alone: the workspace-wide `GET /requests` is the
+launch's heaviest call, and the tree reads a name and a method from it, never
+what Send sends.
 
 **The feed reports the app's own writes too, so invalidations are coalesced and
 held.** `FeedInvalidationBatch` collects a burst into one invalidation per
