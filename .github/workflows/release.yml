@@ -21,7 +21,7 @@ permissions:
 # `test-macos-x64` below) and a second copy of a pin is the one a bump forgets.
 # The publish jobs inherit these too; they compile nothing, so nothing reads them.
 env:
-  VCPKG_COMMIT: '9a5dfef5d1a0438a7d24856a85bd60f309d355e9'
+  VCPKG_COMMIT: 'e529425f2f43d773d0a59517c8d89367d68bb7fd'
   VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-archives,readwrite'
   SCCACHE_GHA_ENABLED: 'true'
   # v0.17.1's Windows leg reported 18 sccache "Cache errors" where v0.17.0

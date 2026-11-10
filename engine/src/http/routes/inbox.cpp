@@ -216,17 +216,17 @@ class AnyPathServer final : public httplib::Server {
         // override that reaches the callback.
         //
         // `serve_guarded` is 0.54.0's addition and is copied rather than
-        // dropped: `process_request` wraps only `routing()` in a try/catch, so
-        // an exception from a content provider, a post-routing, error, logging
-        // or expect-100 handler runs outside it, and the task queue calls the
-        // job with no catch of its own. Omitting the guard here would terminate
-        // the process on a throw from any of those - on the one listener that
-        // may bind past loopback.
-        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.63.0",
+        // dropped: `process_request` wraps only `routing()` and the hooks ahead
+        // of a WebSocket upgrade in a try/catch, so an exception from a content
+        // provider, a post-routing, error, logging or expect-100 handler runs
+        // outside it, and the task queue calls the job with no catch of its
+        // own. Omitting the guard here would terminate the process on a throw
+        // from any of those - on the one listener that may bind past loopback.
+        static_assert (std::string_view (CPPHTTPLIB_VERSION) == "0.65.0",
         "cpp-httplib moved: re-read Server::process_and_close_socket, "
         "confirm this override still mirrors it, then update this assert - "
         "or retire the mirror entirely if the release carries a public "
-        "request-setup hook (issue #1283). As of 0.63.0 it does not: "
+        "request-setup hook (issue #1283). As of 0.65.0 it does not: "
         "`set_pre_request_handler` is a `HandlerWithResponse`, which takes a "
         "`const Request&` and so cannot rewrite the path either.");
 

@@ -7,6 +7,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -75,11 +76,13 @@ class Logger {
     // 0 means unlimited. Config entry `maxLogFileBytes`.
     void set_max_file_bytes (int64_t bytes);
 
+    // Atomic because worker threads read it on every record and in a stream's
+    // debug callback, while tests (and nothing else after startup) change it.
     void set_verbosity (int level) {
-        verbosity_level_ = level;
+        verbosity_level_.store (level, std::memory_order_relaxed);
     }
     int get_verbosity () const {
-        return verbosity_level_;
+        return verbosity_level_.load (std::memory_order_relaxed);
     }
 
     // Force flush log file
@@ -119,7 +122,7 @@ class Logger {
 
     std::unique_ptr<std::ofstream> log_file_;
     std::mutex mutex_;
-    int verbosity_level_ = 0; // 0=warn/error, 1=info+, 2=debug+
+    std::atomic<int> verbosity_level_{ 0 }; // 0=warn/error, 1=info+, 2=debug+
     std::string log_dir_;
     std::string log_file_path_;
     std::string source_     = "engine";

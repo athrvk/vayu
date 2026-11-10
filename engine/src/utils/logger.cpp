@@ -208,7 +208,7 @@ void Logger::write (LogRecord&& record) {
     if (record.level >= file_level_) {
         write_to_file_locked (record, ts, thread_id, pid);
     }
-    if (should_print_to_console (record.level, verbosity_level_)) {
+    if (should_print_to_console (record.level, get_verbosity ())) {
         write_to_console_locked (record, ts);
     }
 }

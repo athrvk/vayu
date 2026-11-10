@@ -103,7 +103,8 @@ admit_management_request (const httplib::Request& req, httplib::Response& res, i
  * a setting changed while the server runs, so it is refused instead. Every
  * first-party client (the app, `vayu-cli`, the MCP server) sends
  * `Content-Length`. cpp-httplib already answers 400 for any
- * `Transfer-Encoding` that does not end in `chunked`.
+ * `Transfer-Encoding` that does not end in `chunked`, and since 0.65.0 501 for
+ * anything but a lone `chunked`, so that is the one coding that reaches here.
  */
 httplib::Server::HandlerResponse
 refuse_unbounded_body (const httplib::Request& req, httplib::Response& res) {
