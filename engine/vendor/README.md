@@ -33,13 +33,24 @@ guards it, so a re-vendor that loses it fails a test.
 | | |
 |---|---|
 | Upstream | <https://github.com/HdrHistogram/HdrHistogram_c> |
-| Version | 0.11.8 (`HDR_HISTOGRAM_VERSION` in `include/hdr/hdr_histogram_version.h`) |
-| Upstream commit | `8dcce8f68512fca460b171bccc3a5afce0048779` (the `0.11.8` tag, 2023-04-28) |
+| Version | 0.12.1 (`HDR_HISTOGRAM_VERSION` in `include/hdr/hdr_histogram_version.h`) |
+| Upstream commit | `30e9ce6ef5dcdc60f9270e1ca03c0966eaaf71d0` (the `0.12.1` tag, 2026-10-16) |
 | First vendored | 2026-01-24 (`3371c6ac7`) |
+| Current version since | 2026-11-10 (0.11.8 from 2026-01-24, `3371c6ac7`) |
 | Local patches | none |
 
 The tree is byte-identical to the upstream tag for every file it holds. Left
-out: `.github/` and `test/vendor/`.
+out: `.github/`, `.clusterfuzzlite/` (CI configuration), `.claude/` (a Claude
+Code skill for upstream's maintainers, which would load into sessions here)
+and `test/vendor/`.
+
+The build compiles seven of the library's sources (`engine/CMakeLists.txt`),
+with the no-op log stub, so zlib and the packed-histogram codec
+(`hdr_packed_histogram*.c`) are not linked. The AVX2 percentile scan needs no
+build flag: `hdr_histogram.c` compiles it under a per-function
+`target("avx2")` attribute and picks it at run time, on x86-64 GCC/Clang only
+(never MSVC). Nothing here needs `libatomic`, which upstream links only where
+64-bit atomics lower to library calls (32-bit ARM, RISC-V).
 
 ## Re-vendoring
 

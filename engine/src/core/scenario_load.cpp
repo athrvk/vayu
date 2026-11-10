@@ -263,10 +263,10 @@ MetricsCollector::Percentiles StepHistograms::percentiles (size_t step) const {
     p.p95   = ms (hdr_value_at_percentile (h, 95.0));
     p.p99   = ms (hdr_value_at_percentile (h, 99.0));
     p.p999  = ms (hdr_value_at_percentile (h, 99.9));
-    // An empty histogram reports min as INT64_MAX; reporting that as a latency
-    // would put a 9.2e15 ms floor on a step no VU ever reached.
-    p.min = h->total_count > 0 ? ms (hdr_min (h)) : 0.0;
-    p.max = h->total_count > 0 ? ms (hdr_max (h)) : 0.0;
+    // hdr_min is 0 on an empty histogram (before hdrhistogram 0.12 it was
+    // INT64_MAX), so a step no VU reached reports a zero floor.
+    p.min = ms (hdr_min (h));
+    p.max = ms (hdr_max (h));
     return p;
 }
 
