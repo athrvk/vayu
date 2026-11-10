@@ -1950,8 +1950,8 @@ sent, without that credential. It is also the sentence for a request whose own
 `Authorization` header was sent in place of an OAuth 2.0 token it never fetched
 (issue #3202). The key is **absent** when there is nothing to say, on the live
 body and in the stored trace alike; the trace holds it on `trace.request`, so a
-failed exchange with no `response` node still has it, and a streaming send
-carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
+failed exchange that received no header block, and so has no `response` node,
+still has it, and a streaming send carries it only there. `responseFromExecuteResult` and `responseFromRunResult`
 both set `ResponseState.authNotice` (an empty string reads as absent), held
 together by `auth-notice-funnels.test.ts`. `ResponseViewer` draws it as a
 warning `Callout` between the status band and the tabs, so it shows on every
@@ -1965,7 +1965,7 @@ show ([#3307](https://github.com/athrvk/vayu/issues/3307)), each as
 the send, and the message names a cookie by name, never by value. The live body
 **always** carries the array, `[]` when empty; the stored trace holds it at the
 top level of `trace` (beside `clientCertificate`, not under `response`) and only
-when non-empty, so a failed exchange with no `response` node still has it. A
+when non-empty, so a failed exchange that has no `response` node still has it. A
 streaming send's `202` carries none and no relay frame does either; its stored
 trace does, and the end-of-stream fetch of the run report (`responseFromRunResult`,
 the same swap that restores `events`) is what puts them on `ResponseState`, so the
@@ -2094,6 +2094,31 @@ Everything that takes the body *out* of the pane reads the text as received
 (`receivedBody`, `request-builder/utils/response-bytes.ts`) and not the indented
 copy: Copy, Download, Save as example and the Raw tab, which therefore print
 what the server sent.
+
+A body's size is a **UTF-8 byte count** everywhere it is recorded. The live
+`bodySize` is one, and the stored trace carries the same number as
+`trace.response.bodyBytes` on every response (#3423; the original length when
+`bodyTruncated`, and a stream's wire count), so `responseFromRunResult` takes
+`ResponseState.size` from it and the two funnels agree. A row stored before
+that has `bodyBytes` only when the body was cut or streamed, and the restore
+then counts the held text's UTF-8 bytes (`heldBodySize`, never `string.length`,
+which counts UTF-16 code units and reads a multibyte body smaller than it was).
+`json-body-funnels.test.ts` drives a non-ASCII body through both.
+
+**A failure after the server answered restores with the server's headers.** The
+engine stores `trace.response` beside `error_type` / `error_message` when the
+header block arrived before the transfer failed (an undecodable body, a
+timeout mid-body, a redirect limit), the way the live answer carries both.
+`responseFromRunResult` reads such a trace as the failed exchange - status 0,
+`errorCode`, `errorMessage`, so the pane is `ClientErrorView` as it was live -
+and keeps `headers`, `headerLines`, `redirects`, the protocol, the body and
+its size from the node (`responseHeadFromTrace`). A trace with an error and no
+`response` node keeps the shape it always had, `headers: {}`; a row with
+neither is `null`. Only the engine's own `error_type` / `error_message` mark
+the failure when a node is present: the result row's `error` column also holds
+a step's post-request script failure, for a response that did arrive.
+`header-lines-funnels.test.ts` holds the live and the restored failure
+together.
 
 A third limit is the renderer's alone and reaches no wire field:
 `LARGE_BODY_BYTES` (2MB, `shared/response-viewer/utils.ts`). Above it

@@ -982,16 +982,31 @@ TEST (CapTraceBodies, AStatedBodyBytesSurvivesTheCut) {
     EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5000u);
 }
 
-TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
-    // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
-    // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.
-    auto trace = make_trace ("x", std::string ("abc\xC3\xA9"));
+// A cap that lands inside a character keeps the text before it (#3423): the
+// lead byte left dangling would be dumped as U+FFFD, and a reopened body would
+// end in a character the server never sent. `bodyBytes` stays the whole
+// length. Mutation check: store `body.substr (0, max_body_bytes)` in
+// `cap_node_body` and the body reads "caf\xC3".
+TEST (CapTraceBodies, ACutInsideACharacterKeepsTheTextBeforeIt) {
+    auto trace = make_trace ("x", std::string ("caf\xC3\xA9")); // 5 bytes
 
     cap_trace_bodies (trace, 4);
 
+    EXPECT_EQ (trace["response"]["body"], "caf");
     EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
-    EXPECT_NO_THROW (
-    (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5u);
+    // A strict dump: what is stored is text, with nothing left to replace.
+    EXPECT_NO_THROW ((void)trace.dump ());
+}
+
+// A cut on a character boundary takes nothing more than the cap does.
+TEST (CapTraceBodies, ACutAfterAWholeCharacterKeepsIt) {
+    auto trace = make_trace ("x", std::string ("caf\xC3\xA9!")); // 6 bytes
+
+    cap_trace_bodies (trace, 5);
+
+    EXPECT_EQ (trace["response"]["body"], std::string ("caf\xC3\xA9"));
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 6u);
 }
 
 // A base64 body (issue #2458) is capped by what it decodes to, on a three-byte
@@ -1062,6 +1077,21 @@ TEST (CapTraceBodies, CapsTheRawRequestBodyAndKeepsTheHeaderBlockWhole) {
     // The node's own body is capped by the same limit, and its metadata is what
     // tells a reader this request's body is a stored slice.
     EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
+}
+
+// The wire message's body is cut on a character boundary too (#3423), so a
+// reopened raw view does not end in a U+FFFD the request never carried.
+// Mutation check: store `raw.substr (0, body_start + max_body_bytes)` in
+// `cap_node_raw_request` and the message ends in "caf\xC3".
+TEST (CapTraceBodies, CutsTheRawRequestBodyOnACharacterBoundary) {
+    auto trace = make_trace (std::string ("caf\xC3\xA9"), "x");
+    trace["request"]["rawRequest"] =
+    make_raw_request (std::string ("caf\xC3\xA9"));
+
+    cap_trace_bodies (trace, 4);
+
+    EXPECT_EQ (trace["request"]["rawRequest"], make_raw_request ("caf"));
+    EXPECT_NO_THROW ((void)trace.dump ());
 }
 
 TEST (CapTraceBodies, LeavesAnUnderCapRawRequestVerbatim) {

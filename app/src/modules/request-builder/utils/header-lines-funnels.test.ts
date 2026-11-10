@@ -113,6 +113,52 @@ describe("the restore funnel", () => {
 	});
 });
 
+describe("a failed exchange whose header block arrived (#3423)", () => {
+	// The engine reports every failure at status 0 and the live answer still
+	// carries what the server sent; the stored trace keeps the `response` node
+	// beside `error_type` so a reopened run shows the same headers.
+	const failedLive = () =>
+		executeResult({
+			status: 0,
+			statusText: "",
+			errorCode: "BAD_CONTENT_ENCODING",
+			errorMessage: "Response body could not be decoded",
+		});
+
+	const failedStored = () => {
+		const failed = runResult();
+		failed.statusCode = 0;
+		failed.statusText = "";
+		failed.trace = {
+			...failed.trace!,
+			error_type: "BAD_CONTENT_ENCODING",
+			error_message: "Response body could not be decoded",
+		};
+		return failed;
+	};
+
+	it("restores the header lines and the folded map beside the error", () => {
+		const restored = responseFromRunResult(failedStored());
+
+		expect(restored?.status).toBe(0);
+		expect(restored?.errorCode).toBe("BAD_CONTENT_ENCODING");
+		expect(restored?.headerLines).toEqual(LINES);
+		expect(restored?.headers).toEqual(FOLDED);
+	});
+
+	it("agrees with the live funnel on headers, lines and the error", () => {
+		const live = responseFromExecuteResult(failedLive());
+		const restored = responseFromRunResult(failedStored());
+
+		expect(live.headerLines).toEqual(LINES);
+		expect(restored?.status).toBe(live.status);
+		expect(restored?.headers).toEqual(live.headers);
+		expect(restored?.headerLines).toEqual(live.headerLines);
+		expect(restored?.errorCode).toBe(live.errorCode);
+		expect(restored?.errorMessage).toBe(live.errorMessage);
+	});
+});
+
 describe("funnel parity", () => {
 	it("agrees on a response with repeated headers", () => {
 		const live = responseFromExecuteResult(executeResult());

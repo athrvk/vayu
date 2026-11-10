@@ -409,6 +409,122 @@ describe("a run that failed before reaching the server", () => {
 	});
 });
 
+/**
+ * A failure after the server's header block arrived stores the `response` node
+ * beside `error_type` (#3423): an undecodable body, a timeout mid-body, a
+ * redirect limit. It restores as the failed exchange - status 0, so the pane is
+ * `ClientErrorView` - and keeps what the server sent, rather than reading the
+ * node as a success or dropping it for the error.
+ */
+describe("a run that failed after the server answered", () => {
+	const answeredThenFailed = () =>
+		sample({
+			statusCode: 0,
+			statusText: "",
+			trace: {
+				request: {
+					method: "GET",
+					url: "https://api.example.test/zip",
+					headers: {},
+					rawRequest:
+						"GET /zip HTTP/1.1\r\nHost: api.example.test\r\nX-Sent: yes\r\n\r\n",
+				},
+				response: {
+					headers: { "content-encoding": "gzip", "set-cookie": "a=1" },
+					headerLines: [
+						{ name: "Content-Encoding", value: "gzip" },
+						{ name: "Set-Cookie", value: "a=1" },
+					],
+					httpVersion: "HTTP/2",
+					httpVersionDowngraded: false,
+					body: "not gzip at all",
+					bodyBytes: 15,
+				},
+				error_type: "BAD_CONTENT_ENCODING",
+				error_message: "Response body could not be decoded",
+				firstByteMs: 30,
+			},
+		});
+
+	it("restores as the failed exchange, with the error the live funnel maps", () => {
+		const restored = responseFromRunResult(answeredThenFailed());
+
+		expect(restored?.status).toBe(0);
+		expect(restored?.errorCode).toBe("BAD_CONTENT_ENCODING");
+		expect(restored?.errorMessage).toBe("Response body could not be decoded");
+	});
+
+	it("keeps the server's headers, protocol, body and size beside the error", () => {
+		const restored = responseFromRunResult(answeredThenFailed());
+
+		expect(restored?.headers).toEqual({ "content-encoding": "gzip", "set-cookie": "a=1" });
+		expect(restored?.headerLines).toEqual([
+			{ name: "Content-Encoding", value: "gzip" },
+			{ name: "Set-Cookie", value: "a=1" },
+		]);
+		expect(restored?.httpVersion).toBe("HTTP/2");
+		expect(restored?.body).toBe("not gzip at all");
+		expect(restored?.size).toBe(15);
+	});
+
+	it("does not list the stored frame's lines as wire headers, as a live failure does not", () => {
+		const restored = responseFromRunResult(answeredThenFailed());
+
+		expect(restored?.rawRequest).toContain("X-Sent: yes");
+		expect(restored?.wireRequestHeaders).toBeUndefined();
+	});
+
+	it("lists the frame's lines for an answered exchange, so the test above is not vacuous", () => {
+		const ok = answeredThenFailed();
+		delete ok.trace!.error_type;
+		delete ok.trace!.error_message;
+
+		const restored = responseFromRunResult({ ...ok, statusCode: 200, statusText: "OK" });
+
+		expect(restored?.status).toBe(200);
+		expect(restored?.errorCode).toBeUndefined();
+		expect(restored?.wireRequestHeaders?.map(([name]) => name)).toContain("X-Sent");
+	});
+
+	it("leaves an error-only trace as it was: no headers, the message as the body", () => {
+		const restored = responseFromRunResult(
+			sample({
+				statusCode: 0,
+				trace: {
+					request: { method: "GET", url: "https://nope.example.test/", headers: {} },
+					error_type: "CONNECTION_FAILED",
+					error_message: "Could not connect to host",
+				},
+			})
+		);
+
+		expect(restored?.headers).toEqual({});
+		expect(restored?.headerLines).toBeUndefined();
+		expect(restored?.body).toBe("Could not connect to host");
+		expect(restored?.size).toBe(0);
+		expect(restored?.errorCode).toBe("CONNECTION_FAILED");
+	});
+
+	it("does not read a script failure on the result row as a failed exchange", () => {
+		// A step whose post-request script threw fills the row's `error` column
+		// for a response that arrived (`classify_step`): that pane is the response.
+		const restored = responseFromRunResult(sample({ error: "test: boom" }));
+
+		expect(restored?.status).toBe(200);
+		expect(restored?.errorCode).toBeUndefined();
+		expect(restored?.errorMessage).toBeUndefined();
+	});
+
+	it("still answers null for a skipped scenario step: a request, no response, no error", () => {
+		const skipped = sample({
+			statusCode: 0,
+			trace: { request: { method: "GET", url: "https://api.example.test/x", headers: {} } },
+		});
+
+		expect(responseFromRunResult(skipped)).toBeNull();
+	});
+});
+
 describe("timingFromTrace", () => {
 	it("treats an omitted phase as zero - older engines only wrote non-zero phases", () => {
 		// Reused connection: no TCP handshake, no TLS, so neither key was written.

@@ -1270,10 +1270,9 @@ std::optional<double> engine_ms) {
             trace["events"] = stream->events;
         }
 
-        // A capped body may split a UTF-8 sequence, and the raw response body can
-        // be arbitrary bytes - dump with error_handler_t::replace so a lone
-        // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
-        // the same guard).
+        // A header value off the wire, or the wire request's body, can carry a
+        // byte that is not UTF-8 - dump with error_handler_t::replace so it
+        // becomes U+FFFD instead of throwing (import.cpp uses the same guard).
         db_result.trace_data =
         trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
         db.add_result (db_result);

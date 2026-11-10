@@ -8720,10 +8720,11 @@ sentence a person reads. A warning never fails the send. It is always present on
 a design answer, an empty array when there is nothing to say, so a client can
 tell "no warnings" from an engine too old to warn. The stored
 `trace_data` carries it at the top level, beside `clientCertificate` and not
-inside `response`, because a send that failed has no `response` node and can
-still have warned; it is written only when non-empty, so a row stored before the
-field reads as having none. A load-run sample records none. Codes are listed
-here as the engine starts producing them:
+inside `response`, because a send that failed before any header block
+arrived has no `response` node and can still have warned; it is written
+only when non-empty, so a row
+stored before the field reads as having none. A load-run sample records none.
+Codes are listed here as the engine starts producing them:
 
 - `cookie_not_sent`: libcurl would not let the `Cookie` line pass 8190 bytes
   and left out the first jar cookie that did not fit, named in the message (the
@@ -12354,22 +12355,39 @@ step - its steps are read from the report's `results` array instead.
 }
 ```
 
+`trace.error_type` / `trace.error_message` are present when the exchange
+failed, and `trace.response` when it did not or when the failure came after a
+header block arrived (issue #3423): an undecodable body, a timeout mid-body,
+too many redirects. Such a failure is still reported at `statusCode` 0, and
+its trace keeps the `headers`, `headerLines`, `httpVersion` and `body` the live
+answer showed beside the error, so a client must not read the presence of
+`response` as success. A failure that received no header block (a refused
+connection, an unresolved host, a failed handshake) has no `trace.response`.
+A proxy's answer counts as a header block: a proxy's refusal, or headers on
+the tunnel it opened, are kept as the live answer shows them.
+
+Every `trace.response` carries `bodyBytes` (issue #3423), the body's length in
+bytes, which a client cannot recount from `body` because a JSON string's
+length is not its UTF-8 size. It is the length the engine held, which for a
+`bodyCapped` response is the prefix the read cap kept; a streaming run's is
+the body bytes the server delivered (issue #3238), which its `body` can be
+shorter than (an event stream stores none, any other reply at most
+`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A row
+stored before #3423 carries it only on a cut or streamed response.
+
 If the engine truncated a body for storage (over `maxTraceBodyBytes`), the
 affected `trace.request` and/or `trace.response` object carries
-`"bodyTruncated": true` and `"bodyBytes": <original length>`; its `body` then
-holds only the first `maxTraceBodyBytes` of the original. Absent when the body
-fit. Clients surface this as a "body truncated for storage" notice and re-send
-to fetch the whole body. A `trace.response` with `"bodyEncoding": "base64"`
-(see [`POST /execute`](#post-execute)) is measured in decoded bytes: its `body`
-is the base64 of the first `maxTraceBodyBytes` bytes rounded down to a multiple
+`"bodyTruncated": true`, and `trace.request` gains `"bodyBytes": <original
+length>`; a storage cut keeps the response's `bodyBytes` rather than
+restating it. Absent when the body fit. A text `body` then holds the first
+`maxTraceBodyBytes` bytes of the original, less an incomplete last UTF-8
+character the cut would leave, so it can be up to three bytes shorter and
+never ends in a U+FFFD the server did not send. Clients surface this as a
+"body truncated for storage" notice and re-send to fetch the whole body. A
+`trace.response` with `"bodyEncoding": "base64"` (see
+[`POST /execute`](#post-execute)) is measured in decoded bytes: its `body` is
+the base64 of the first `maxTraceBodyBytes` bytes rounded down to a multiple
 of three, so the slice still decodes, and `bodyBytes` counts decoded bytes.
-
-A streaming run's `trace.response` carries `bodyBytes` whether or not it was
-cut (issue #3238): the body bytes the server delivered, which its `body` can
-be shorter than (an event stream stores none, any other reply at most
-`maxDesignResponseBodyBytes`; see [`POST /execute`](#post-execute)). A storage
-cut keeps that count rather than restating it as the length held, so
-`bodyBytes` always means what arrived.
 
 `configSnapshot.body` is capped the same way, independently of the trace
 (issue #1486): `content` over `maxTraceBodyBytes` is cut to that length and the

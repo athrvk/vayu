@@ -1195,7 +1195,8 @@ struct Response {
      *
      * Not `body_size`, which is what `body` holds: an event stream holds no
      * body at all, and any other reply holds at most the design bound. The
-     * stored trace writes this as `response.bodyBytes`.
+     * stored trace writes this as `response.bodyBytes` in place of
+     * `body_size`, which every other response node carries there (#3423).
      */
     std::optional<std::size_t> stream_body_bytes;
 

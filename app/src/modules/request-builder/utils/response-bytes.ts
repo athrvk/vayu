@@ -220,14 +220,49 @@ export function receivedBody(response: Pick<ResponseState, "body" | "bodyRaw">):
 	return response.bodyRaw || response.body;
 }
 
+const isHighSurrogate = (unit: number) => unit >= 0xd800 && unit <= 0xdbff;
+// NaN, which `charCodeAt` answers past the end, is neither side of any range.
+const isLowSurrogate = (unit: number) => unit >= 0xdc00 && unit <= 0xdfff;
+
+/**
+ * The bytes `text` takes in UTF-8, which is what the engine counts for a body
+ * (`bodyBytes`, #3423) and what `string.length` is not: it counts UTF-16 code
+ * units, so a multibyte body reads smaller than it is.
+ *
+ * Counted in place rather than through `TextEncoder`, which would allocate a
+ * copy of a multi-megabyte body on every render of the pane that shows this.
+ * A lone surrogate counts as the three bytes of the U+FFFD an encoder writes
+ * for it, so this agrees with `Buffer.byteLength` on any string.
+ */
+export function utf8ByteLength(text: string): number {
+	let bytes = 0;
+	for (let i = 0; i < text.length; i++) {
+		const unit = text.charCodeAt(i);
+		if (unit < 0x80) {
+			bytes += 1;
+		} else if (unit < 0x800) {
+			bytes += 2;
+		} else if (isHighSurrogate(unit) && isLowSurrogate(text.charCodeAt(i + 1))) {
+			bytes += 4;
+			i++;
+		} else {
+			bytes += 3;
+		}
+	}
+	return bytes;
+}
+
 /**
  * How much body this response holds, for a notice that says "the first N".
  * The bytes when there are some: a base64 body's text is a decoding, or empty.
+ * Otherwise the received text's UTF-8 byte count, the unit every other size
+ * on the response is in. A stored row that predates `trace.response.bodyBytes`
+ * has no recorded size, so this is also what its restored `size` falls back to.
  */
 export function heldBodySize(
 	response: Pick<ResponseState, "body" | "bodyRaw" | "rawBytes">
 ): number {
-	return response.rawBytes?.data.length ?? receivedBody(response).length;
+	return response.rawBytes?.data.length ?? utf8ByteLength(receivedBody(response));
 }
 
 const PLAUSIBLE_EXTENSION = /^[a-z0-9]{1,8}$/;

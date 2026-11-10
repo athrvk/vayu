@@ -2571,8 +2571,8 @@ std::string sse_data_frame (std::size_t payload_bytes, char fill) {
 }
 
 // An event stream's bytes are its events: the body stays empty and
-// `bodyBytes` says how much arrived. Mutation check: drop the `bodyBytes`
-// write in `build_result_trace` and the key is absent.
+// `bodyBytes` says how much arrived. Mutation check: drop the stream's
+// `bodyBytes` write in `response_trace_node` and it reads 0, the held length.
 TEST_F (StreamExecuteTest, AnEventStreamStoresItsByteCountAndNoBody) {
     std::vector<std::string> chunks;
     std::size_t delivered = 0;

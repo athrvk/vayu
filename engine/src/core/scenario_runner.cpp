@@ -1058,9 +1058,9 @@ ScenarioStepStore& store) {
     row.status_text = record.status_text;
     row.latency_ms  = record.latency_ms;
     row.error       = record.error;
-    // A capped body may split a UTF-8 sequence and a response body
-    // can be arbitrary bytes, so a lone continuation byte becomes
-    // U+FFFD instead of throwing (store_result does the same).
+    // A header value off the wire, or the wire request's body, can carry
+    // a byte that is not UTF-8, which becomes U+FFFD instead of throwing
+    // (store_result does the same).
     row.trace_data =
     record.trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace);
     store.add (std::move (row), kept_before_successes (record.outcome));

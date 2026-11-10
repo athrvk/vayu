@@ -18,6 +18,7 @@ import {
 	extensionForContentType,
 	heldBodySize,
 	receivedBody,
+	utf8ByteLength,
 } from "./response-bytes";
 
 const base64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
@@ -203,6 +204,34 @@ describe("heldBodySize", () => {
 
 	it("counts the received text, not the longer indented copy", () => {
 		expect(heldBodySize({ body: '{\n  "a": 1\n}', bodyRaw: '{"a":1}' })).toBe(7);
+	});
+
+	it("counts UTF-8 bytes, which a multibyte body has more of than characters", () => {
+		const text = "café ".repeat(100);
+
+		expect(text.length).toBe(500);
+		expect(heldBodySize({ body: text })).toBe(600);
+	});
+});
+
+describe("utf8ByteLength", () => {
+	// Each case is checked against the platform's own encoder, so a miscount is
+	// a disagreement with what the engine counts, not with a number typed here.
+	it.each([
+		["empty", "", 0],
+		["ASCII", "abc", 3],
+		["two-byte (é)", "é", 2],
+		["three-byte (€, the BMP's top)", "€\uffff", 6],
+		["four-byte, a surrogate pair (U+1F600)", "\u{1F600}", 4],
+		["a pair beside text", "a\u{1F600}b", 6],
+		["a lone high surrogate, written as U+FFFD", "\ud83d", 3],
+		["a lone low surrogate, written as U+FFFD", "\ude00", 3],
+		["a high surrogate before a non-low unit", "\ud83dA", 4],
+		["a low then a high, which is not a pair", "\ude00\ud83d", 6],
+		["a high surrogate at the very end", "x\ud83d", 4],
+	])("counts %s", (_name, text, bytes) => {
+		expect(utf8ByteLength(text)).toBe(bytes);
+		expect(utf8ByteLength(text)).toBe(new TextEncoder().encode(text).length);
 	});
 });
 

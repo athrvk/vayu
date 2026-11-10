@@ -175,11 +175,11 @@ export function validationFromTrace(
  * week must still render. Same shape as the `trace.response?.httpVersion`
  * fallback below it.
  *
- * `trace.response?.httpVersion` is only present when a response was actually
- * received (`build_result_trace` omits the whole `response` node on an error
- * path, see execution.cpp) - so a run that never reached a server has nothing
- * here, and `buildRawRequest` falls back to its own HTTP/1.1 default, the same
- * as a pre-migration stored row.
+ * `trace.response?.httpVersion` is present whenever the engine received a
+ * header block (`build_result_trace`, #3423): a failure after one keeps the
+ * node beside its error, while a run that never reached a server has none, and
+ * `buildRawRequest` then falls back to its own HTTP/1.1 default, the same as a
+ * pre-migration stored row.
  *
  * `trace.request.sentHeaders` is the same preference one field over, for the
  * structured map (issue #664). The panel this fills is labelled as what was
@@ -195,7 +195,7 @@ export function validationFromTrace(
  * synthesizes a wire message for a row that stored none, and every such row
  * predates both fields.
  */
-function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
+function sentSide(trace: NonNullable<RunResultSample["trace"]>, answered: boolean) {
 	const request = trace.request;
 	if (!request) return { requestHeaders: {}, rawRequest: undefined };
 
@@ -207,12 +207,13 @@ function sentSide(trace: NonNullable<RunResultSample["trace"]>) {
 		// the folded record above is what the tab then lists.
 		requestHeaderLines: sentHeaderLines(request.sentHeaderLines),
 		// A property of what was sent, so it lives here and reaches the failed
-		// exchange too, which has no `response` node (issue #2474).
+		// exchange too (issue #2474).
 		authNotice: request.authNotice || undefined,
-		// Only the engine's own frame is parsed, and only for an exchange that got
-		// a response: the fallback below is fabricated, and a failed send's frame
-		// may be too (`wireRequestHeadersField`).
-		...wireRequestHeadersField(!!trace.response, request.rawRequest),
+		// Only the engine's own frame is parsed, and only for an exchange that was
+		// answered: the fallback below is fabricated, and a failed send's frame may
+		// be too, one that kept the server's headers included - the live funnel
+		// judges it by the same status (`wireRequestHeadersField`).
+		...wireRequestHeadersField(answered, request.rawRequest),
 		rawRequest:
 			request.rawRequest ||
 			buildRawRequest(
@@ -238,20 +239,104 @@ function clientCertificateFromTrace(trace: NonNullable<RunResultSample["trace"]>
 
 /**
  * The warnings the engine recorded for this exchange (issue #3307), or nothing.
- * Read from the trace's top level, so the failed exchange - which has no
- * `response` node and can still have warned - gets them too.
+ * Read from the trace's top level, so a failed exchange that received no
+ * headers - which has no `response` node and can still have warned - gets
+ * them too.
  */
 function warningsFromTrace(trace: NonNullable<RunResultSample["trace"]>) {
 	const warnings = receivedWarnings(trace.warnings);
 	return warnings ? { warnings } : {};
 }
 
+type StoredTrace = NonNullable<RunResultSample["trace"]>;
+
+/**
+ * The failure the engine recorded for this exchange, as the two fields the live
+ * funnel maps off the `/execute` body, or nothing when it did not fail.
+ *
+ * `error_type` uses the same words as the live `errorCode` (`to_string
+ * (ErrorCode)` in engine/include/vayu/types.hpp). @p fallbackMessage is the
+ * result row's own `error` column: older rows and the load-test writer fill it
+ * and not `error_message`. A caller that has a response node leaves it out,
+ * because a scenario step whose post-request script threw fills that column
+ * for an exchange that succeeded (`classify_step`), and its pane is the
+ * response, not the error view.
+ */
+function failureFromTrace(
+	trace: StoredTrace,
+	fallbackMessage?: string
+): Pick<ResponseState, "errorCode" | "errorMessage"> | undefined {
+	const errorMessage = trace.error_message || fallbackMessage;
+	if (!trace.error_type && !errorMessage) return undefined;
+	return { errorCode: trace.error_type, errorMessage };
+}
+
+/**
+ * What the stored `response` node says about the reply the server sent: its
+ * headers, redirects, protocol and body, with the byte count the pane shows.
+ * The same fields whether the exchange then succeeded or failed (#3423) - a
+ * failure after the header block arrived stores the node beside its error, so
+ * both read it through here.
+ *
+ * The stored trace keeps the body as an opaque string - the engine caps it
+ * on a character boundary, so what comes back is what the server sent, less
+ * whatever storage shortened. That string is the raw body, and it is carried
+ * through as `bodyRaw`; `body` is the same text formatted for Pretty by the
+ * live funnel's `paneBody`, so the pane for a send reads the same whether it
+ * arrived live or from History.
+ *
+ * A base64 one (issue #2458) goes through the live funnel's decoder, so
+ * both hold the same text and the same bytes.
+ *
+ * The stringify is for a trace that holds a parsed object instead of a
+ * string, which an older row can. Its original text is gone, so compact is
+ * the closest honest reconstruction, and `paneBody` indents it for the pane.
+ */
+function responseHeadFromTrace(node: NonNullable<StoredTrace["response"]>) {
+	const raw = node.body;
+	const headers = node.headers || {};
+	const decoded =
+		typeof raw === "string"
+			? decodeResponseBody({ bodyRaw: raw, bodyEncoding: node.bodyEncoding, headers })
+			: undefined;
+	const bodyRaw = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw);
+	const body = paneBody(bodyRaw);
+	const rawBytes = decoded?.bytes;
+
+	return {
+		headers,
+		// Same rule as the live funnel: an empty list is an absent one.
+		headerLines: receivedHeaderLines(node.headerLines),
+		redirects: receivedRedirects(node.redirects),
+		httpVersion: node.httpVersion,
+		httpVersionDowngraded: node.httpVersionDowngraded,
+		body,
+		bodyRaw,
+		...(rawBytes && { rawBytes }),
+		// `size` is what the pane's byte count shows. The engine records the
+		// body's UTF-8 byte count as `bodyBytes` on every response (#3423), and
+		// it is the original length when the body was truncated for storage, so
+		// it wins; a row stored before that has it only when cut, and falls back
+		// to the bytes of the stored slice.
+		size: node.bodyBytes ?? heldBodySize({ body, bodyRaw, rawBytes }),
+		bodyTruncated: node.bodyTruncated,
+		bodyBytes: node.bodyBytes,
+		// A second, separate fact about the same body (issue #1157): the live
+		// send this run recorded stopped *reading* at
+		// `maxDesignResponseBodyBytes`. Both can be true at once - the engine
+		// read a prefix, then storage shortened even that - and they are not the
+		// same notice, so neither is derived from the other.
+		bodyCapped: node.bodyCapped,
+	};
+}
+
 /**
  * Reconstruct a `ResponseState` from the last stored design-run result.
  *
  * Returns `null` when the result carries neither a response trace nor an error
- * (a run recorded before the exchange was captured) - the caller then leaves
- * the response pane empty rather than showing a hollow 0-byte response.
+ * (a run recorded before the exchange was captured, or a scenario step that
+ * was skipped) - the caller then leaves the response pane empty rather than
+ * showing a hollow 0-byte response.
  */
 export function responseFromRunResult(
 	result: RunResultSample | undefined,
@@ -260,104 +345,54 @@ export function responseFromRunResult(
 	const trace = result?.trace;
 	if (!result || !trace) return null;
 
-	const restoredFrom = { runId, at: new Date(result.timestamp).toISOString() };
+	const failure = failureFromTrace(trace, trace.response ? undefined : result.error);
+	if (!trace.response && !failure) return null;
 
-	/*
-	 * A request that never reached a server stores no `response` node -
-	 * `store_result` writes `error_type`/`error_message` instead. Mapping it to
-	 * the same status-0 shape a live failure produces is what lets the builder's
-	 * `ClientErrorView` render it, icon, hint and code included. `error_type`
-	 * uses the same words as the live `errorCode` (`to_string(ErrorCode)` in
-	 * engine/include/vayu/types.hpp).
-	 */
-	if (!trace.response) {
-		const errorMessage = trace.error_message || result.error;
-		if (!trace.error_type && !errorMessage) return null;
-
-		return {
-			status: 0,
-			statusText: result.statusText || "Error",
-			headers: {},
-			...sentSide(trace),
-			body: errorMessage || "",
-			size: 0,
-			time: result.latencyMs || 0,
-			timing: timingFromTrace(trace, result.latencyMs),
-			restoredFrom,
-			errorCode: trace.error_type,
-			errorMessage,
-			// A stream that failed still received whatever it received before it
-			// did, and the node is written on the failure path too.
-			...eventsFromTrace(trace),
-			...scriptsFromTrace(trace),
-			...elementsFromTrace(trace),
-			...validationFromTrace(trace),
-			...clientCertificateFromTrace(trace),
-			...warningsFromTrace(trace),
-		};
-	}
-
-	/*
-	 * The stored trace keeps the body as an opaque string - the engine caps it
-	 * on a raw byte boundary, so what comes back is what the server sent. That
-	 * string is the raw body, and it is carried through as `bodyRaw`; `body` is
-	 * the same text formatted for Pretty by the live funnel's `paneBody`, so the
-	 * pane for a send reads the same whether it arrived live or from History.
-	 *
-	 * A base64 one (issue #2458) goes through the live funnel's decoder, so
-	 * both hold the same text and the same bytes.
-	 *
-	 * The stringify is for a trace that holds a parsed object instead of a
-	 * string, which an older row can. Its original text is gone, so compact is
-	 * the closest honest reconstruction, and `paneBody` indents it for the pane.
-	 */
-	const raw = trace.response.body;
-	const headers = trace.response.headers || {};
-	const decoded =
-		typeof raw === "string"
-			? decodeResponseBody({
-					bodyRaw: raw,
-					bodyEncoding: trace.response.bodyEncoding,
-					headers,
-				})
-			: undefined;
-	const bodyRaw = decoded ? decoded.text : raw === undefined ? "" : JSON.stringify(raw);
-	const body = paneBody(bodyRaw);
-	const rawBytes = decoded?.bytes;
-
-	return {
-		status: result.statusCode || 0,
-		statusText: result.statusText || "",
-		headers,
-		// Same rule as the live funnel: an empty list is an absent one.
-		headerLines: receivedHeaderLines(trace.response.headerLines),
-		redirects: receivedRedirects(trace.response.redirects),
-		...sentSide(trace),
-		httpVersion: trace.response.httpVersion,
-		httpVersionDowngraded: trace.response.httpVersionDowngraded,
-		body,
-		bodyRaw,
-		...(rawBytes && { rawBytes }),
-		// `size` is what the pane's byte count shows. When the body was truncated
-		// for storage the stored slice is not the real size, so prefer the
-		// original `bodyBytes` the engine recorded and fall back to the slice.
-		size: trace.response.bodyBytes ?? heldBodySize({ body, bodyRaw, rawBytes }),
-		bodyTruncated: trace.response.bodyTruncated,
-		bodyBytes: trace.response.bodyBytes,
-		// A second, separate fact about the same body (issue #1157): the live
-		// send this run recorded stopped *reading* at
-		// `maxDesignResponseBodyBytes`. Both can be true at once - the engine
-		// read a prefix, then storage shortened even that - and they are not the
-		// same notice, so neither is derived from the other.
-		bodyCapped: trace.response.bodyCapped,
+	const common = {
 		time: result.latencyMs || 0,
 		timing: timingFromTrace(trace, result.latencyMs),
-		restoredFrom,
+		restoredFrom: { runId, at: new Date(result.timestamp).toISOString() },
+		// A stream that failed still received whatever it received before it
+		// did, and the node is written on the failure path too.
 		...eventsFromTrace(trace),
 		...scriptsFromTrace(trace),
 		...elementsFromTrace(trace),
 		...validationFromTrace(trace),
 		...clientCertificateFromTrace(trace),
 		...warningsFromTrace(trace),
+	};
+
+	/*
+	 * A request that never reached a server stores no `response` node -
+	 * `store_result` writes `error_type`/`error_message` instead. Mapping it to
+	 * the same status-0 shape a live failure produces is what lets the builder's
+	 * `ClientErrorView` render it, icon, hint and code included.
+	 */
+	if (!trace.response) {
+		return {
+			status: 0,
+			statusText: result.statusText || "Error",
+			headers: {},
+			...sentSide(trace, false),
+			body: failure?.errorMessage || "",
+			size: 0,
+			...failure,
+			...common,
+		};
+	}
+
+	/*
+	 * A failure after the server's header block arrived stores the node *and*
+	 * the error (#3423), as the live answer holds both: it is the failed
+	 * exchange - status 0, so `ClientErrorView` renders - that keeps the
+	 * server's headers and body the Headers tab and the notices read.
+	 */
+	return {
+		status: failure ? 0 : result.statusCode || 0,
+		statusText: failure ? result.statusText || "Error" : result.statusText || "",
+		...responseHeadFromTrace(trace.response),
+		...sentSide(trace, !failure),
+		...failure,
+		...common,
 	};
 }

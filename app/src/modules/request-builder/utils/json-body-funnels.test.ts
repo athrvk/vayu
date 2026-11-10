@@ -33,7 +33,10 @@ const live = (bodyRaw: string, parsed: unknown): SanityResult =>
 		body: parsed,
 		bodyRaw,
 		bodyEncoding: "utf8",
-		bodySize: bodyRaw.length,
+		// What the engine reports: bytes, not code units (`Buffer.byteLength` is
+		// the same count, and the one an all-ASCII fixture cannot tell from
+		// `length`).
+		bodySize: Buffer.byteLength(bodyRaw),
 		bodyCapped: false,
 	}) as unknown as SanityResult;
 
@@ -56,12 +59,37 @@ function paneFacts(r: ReturnType<typeof responseFromExecuteResult> | null) {
 
 const bigPad = "x".repeat(LARGE_BODY_BYTES + 16);
 
+describe("a response whose characters are not all one byte (#3423)", () => {
+	// 500 characters, 600 UTF-8 bytes: the live count and the recount of a row
+	// stored before `bodyBytes` must both be the bytes.
+	const received = "café ".repeat(100);
+
+	it("reports the byte count live and from a row that stored no bodyBytes", () => {
+		expect(received.length).toBe(500);
+		expect(Buffer.byteLength(received)).toBe(600);
+
+		const fromLive = responseFromExecuteResult(live(received, {}));
+		const fromStore = responseFromRunResult(stored(received));
+
+		expect(fromLive.size).toBe(600);
+		expect(fromStore?.size).toBe(600);
+	});
+
+	it("reports the engine's own count when the row has one", () => {
+		const row = stored(received);
+		row.trace!.response!.bodyBytes = 600;
+
+		expect(responseFromRunResult(row)?.size).toBe(600);
+	});
+});
+
 describe.each([
 	["order, a duplicate and a big integer", '{"z":1,"a":{"id":9007199254740993},"2":0,"a":5}'],
 	["an empty container and a scalar array", '{"o":{},"l":[],"n":[1,2.50,1e400]}'],
 	["a body over the display gate", `{"pad":"${bigPad}"}`],
 	["a JSON string", '"just a string"'],
 	["text that is not JSON", "plain words, not {json}"],
+	["multibyte characters", `{"name":"${"café ".repeat(100)}","face":"\u{1F600}"}`],
 ])("a JSON response: %s", (_name, received) => {
 	// The engine's parse differs from the text in exactly the ways above; no
 	// funnel may read it, so a value that cannot match the text is enough.
