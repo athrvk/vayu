@@ -20,9 +20,13 @@
  * is appended, as the engine's `append_query_param` does, and the fragment is
  * cut, because libcurl never sends it. The key is the request's *effective*
  * auth - `inherit` already walked by the caller - and the tab title leaves it
- * out, so a title never carries a credential. The cut applies to both: a
+ * out, so a title never carries the auth's API key. The cut applies to both: a
  * fragment is never part of what is sent. Only an API key is appended; an OAuth
  * 2.0 token placed in the query, and a GraphQL GET's query, are not shown.
+ *
+ * The line a caller draws carries that key's value, so the resolution also
+ * answers what it appended ({@link SendsResolved}): the caller masks that, and
+ * does not resolve the key again, which would reroll a generator in it.
  *
  * A name `POST /compose` reports in `deferredVariables` (#2521) is left written
  * as `{{name}}`: a pre-request script runs before the send and may change what
@@ -59,12 +63,26 @@ export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding
 	/**
 	 * The effective auth, `resolveAuthForSend`'s record: `inherit` already walked.
 	 * Only an API key placed in the query changes the URL. Omitted by the tab
-	 * title, which must stay free of credentials.
+	 * title, which never carries the auth's API key.
 	 */
 	auth?: Record<string, unknown>;
 };
 
 type Resolve = (input: string) => string;
+
+/** What the sent URL resolves to, and the one secret a caller must hide in it. */
+export interface SendsResolved {
+	url: string;
+	/**
+	 * The API key's value as it was appended, resolved and trimmed, or null when
+	 * nothing secret is on the line: no key appended, a blank value, or a
+	 * `{{token}}` text that resolved to itself (an unset name, or one a script
+	 * defers), which goes out as written and hides nothing. A key is a credential
+	 * whether or not its variable is marked secret, so the caller masks this
+	 * whatever the variable's flag says.
+	 */
+	secret: string | null;
+}
 
 /** An API key's two halves as written, before `{{token}}`s are resolved. */
 interface QueryKey {
@@ -185,10 +203,16 @@ function fieldResolverLeaving(resolve: ResolveField, names: ReadonlySet<string>)
 	};
 }
 
+/** @p sent unless it is blank or @p template's own `{{token}}` text, unresolved. */
+function secretOf(template: string, sent: string): string | null {
+	if (sent === "") return null;
+	return sent === trimCredential(template) && containsVariableToken(sent) ? null : sent;
+}
+
 function resolveSends(
 	{ url, rows, encode, deferred, queryKey }: SendsInput,
 	resolveAll: Resolve
-): string {
+): SendsResolved {
 	const resolve = leaveDeferred(resolveAll, deferred);
 	const resolved = resolveUrlTemplate(
 		substitutePathVariables(url, rows, resolve, { encode }),
@@ -197,8 +221,13 @@ function resolveSends(
 	);
 	const { base } = splitFragment(resolved);
 	// No URL, no line: an appended `?k=v` would hide that the request has none.
-	if (queryKey === null || base.trim() === "") return base;
-	return appendQueryParam(base, resolve(queryKey.key), resolve(queryKey.value), encode);
+	if (queryKey === null || base.trim() === "") return { url: base, secret: null };
+	const key = trimCredential(resolve(queryKey.key));
+	const value = trimCredential(resolve(queryKey.value));
+	// The fragment is cut after the append: under `disableUrlEncoding` a `#` in
+	// the key or value is written raw, and libcurl drops everything from it.
+	const sent = splitFragment(appendQueryParam(base, key, value, encode)).base;
+	return { url: sent, secret: key === "" ? null : secretOf(queryKey.value, value) };
 }
 
 /**
@@ -210,7 +239,7 @@ export function resolveSendsUrl(
 	resolve: Resolve,
 	deferred: readonly string[] = []
 ): string {
-	return resolveSends(sendsInput(request, deferred), resolve);
+	return resolveSends(sendsInput(request, deferred), resolve).url;
 }
 
 /**
@@ -251,14 +280,15 @@ export function sendsCacheInput(request: SendsUrlInput, deferred: readonly strin
 	return JSON.stringify(sendsInput(request, deferred));
 }
 
-const sendsResolvers = new WeakMap<Resolve, Resolve>();
+const sendsResolvers = new WeakMap<Resolve, (input: string) => SendsResolved>();
 
 /**
  * The cache's resolver for {@link sendsCacheInput} text. One wrapper per
  * `resolve`, so the cache's identity check on the resolver still means what it
- * says (`lib/dynamic-variable-cache.ts`).
+ * says (`lib/dynamic-variable-cache.ts`). It answers the URL with the secret
+ * the resolution appended, so the cache holds both from the one resolution.
  */
-export function sendsResolver(resolve: Resolve): Resolve {
+export function sendsResolver(resolve: Resolve): (input: string) => SendsResolved {
 	let wrapped = sendsResolvers.get(resolve);
 	if (!wrapped) {
 		wrapped = (input) => resolveSends(JSON.parse(input) as SendsInput, resolve);

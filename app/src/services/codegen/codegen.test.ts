@@ -863,6 +863,19 @@ describe("secret masking", () => {
 			expect(code).not.toContain("k-123");
 		});
 
+		it("masks the header a padded API-key name points at", () => {
+			const { code } = generateCurl(
+				{
+					...GET,
+					headers: { "x-tenant-key": "k-123" },
+					auth: { mode: "apikey", key: " \tX-Tenant-Key ", value: "", in: "header" },
+				},
+				{ secrets: [], mask: true }
+			);
+			expect(code).toContain(`-H 'x-tenant-key: ${SECRET_PLACEHOLDER}'`);
+			expect(code).not.toContain("k-123");
+		});
+
 		it("does not treat a query-located API key's name as a header", () => {
 			const { code } = generateCurl(
 				{

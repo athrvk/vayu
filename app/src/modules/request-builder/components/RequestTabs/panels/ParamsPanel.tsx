@@ -45,10 +45,17 @@ import {
 	sendsCacheInput,
 	sendsHasTokens,
 	sendsResolver,
+	type SendsResolved,
 } from "../../../utils/sends-url";
 import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
 import { deferredNote } from "@/lib/deferred-note";
-import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
+import { containsVariableToken } from "@/constants/variables";
+import {
+	SECRET_UI_MASK,
+	authSecrets,
+	collectSecrets,
+	createSecretMasker,
+} from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 
 /*
@@ -62,7 +69,7 @@ import { EmptyTableHint } from "./EmptyTableHint";
  * `lib/dynamic-variable-cache.ts` for why this is module scope and why it is
  * keyed by request id rather than by the URL text.
  */
-const stableResolvedUrl = createStableResolve();
+const stableResolvedUrl = createStableResolve<SendsResolved>();
 
 // Module constants for the path table's gates: `KeyValueEditor` keeps its
 // callbacks stable only while these are (issue #1716).
@@ -158,19 +165,25 @@ export default function ParamsPanel() {
 	};
 	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(sends));
 	const deferred = deferredNamesInSends(sends, engineDeferred);
-	const resolvedUrl = stableResolvedUrl(
+	const { url: resolvedUrl, secret: appendedKey } = stableResolvedUrl(
 		request.id ?? "new",
 		sendsCacheInput(sends, deferred),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
 	// `{{$randomInt}}` stays what it rolled) and only what is drawn is hidden.
-	const sendsText = createSecretMasker(
-		collectSecrets(getAllVariables(), auth),
-		true,
-		undefined,
-		SECRET_UI_MASK
-	).apply(resolvedUrl);
+	// The appended key is masked as the resolution sent it, never re-resolved
+	// here. The auth as written covers a literal credential; one that is a
+	// `{{token}}` is a template, not a secret, so it stays out and an unset or
+	// deferred name shows as the written text that is going out.
+	const secrets = [
+		...collectSecrets(getAllVariables(), undefined),
+		...authSecrets(auth).filter((text) => !containsVariableToken(text)),
+		...(appendedKey === null ? [] : [appendedKey]),
+	];
+	const sendsText = createSecretMasker(secrets, true, undefined, SECRET_UI_MASK).apply(
+		resolvedUrl
+	);
 	// The blank row to type into is derived where the rows are rendered, as the
 	// Headers tab does (`useHeadersManager`), because `request.params` does not
 	// carry it: a URL edit goes through `mergeParamsFromUrl`, which drops the

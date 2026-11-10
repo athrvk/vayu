@@ -111,10 +111,11 @@ export function trimCredential(text: string): string {
 /**
  * @p url with `key=value` appended to its query, before any fragment: the
  * engine's `append_query_param` (`auth_resolver.cpp`), which writes an API
- * key's query placement. Key and value are trimmed first, as the engine does; a
- * key left empty writes nothing, an empty value writes `key=`. Both go through
- * Postman's query rule, or as typed when @p encode is false
- * (`disableUrlEncoding`).
+ * key's query placement. The trim of both halves and the empty-key rule are
+ * `apply_api_key`'s, the engine function that calls it, and are done here so
+ * the Sends line and the snippet share them: a key left empty writes nothing,
+ * an empty value writes `key=`. Both go through Postman's query rule, or as
+ * typed when @p encode is false (`disableUrlEncoding`).
  */
 export function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
 	const name = trimCredential(key);

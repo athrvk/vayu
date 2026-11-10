@@ -755,11 +755,12 @@ export function headerEncodingNotes(
 /**
  * The header an API-key auth writes its key into, or none when it writes a
  * query parameter instead (that value is masked by value, like any secret).
+ * Left as written: `isSensitiveHeaderName` trims both names it compares.
  */
 function apiKeyHeaderName(auth: Record<string, unknown> | undefined): string | undefined {
 	if (!auth || asString(auth.mode) !== "apikey" || asString(auth.in) === "query")
 		return undefined;
-	return trimCredential(asString(auth.key)) || undefined;
+	return asString(auth.key) || undefined;
 }
 
 /**

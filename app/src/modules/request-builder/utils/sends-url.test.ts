@@ -169,6 +169,19 @@ describe("resolveSendsUrl, the URL that reaches the server (#3425)", () => {
 			);
 		});
 
+		it("cuts a `#` typed in the key or value under disableUrlEncoding, as libcurl does", () => {
+			expect(sendsWith("https://api.test/p", record(apiKey("k", "a#b")), true)).toBe(
+				"https://api.test/p?k=a"
+			);
+			expect(sendsWith("https://api.test/p?x=1", record(apiKey("k#1", "v")), true)).toBe(
+				"https://api.test/p?x=1&k"
+			);
+			// Encoded, the `#` is `%23` and stays.
+			expect(sendsWith("https://api.test/p", record(apiKey("k", "a#b")))).toBe(
+				"https://api.test/p?k=a%23b"
+			);
+		});
+
 		it("leaves a request with no URL with no URL", () => {
 			expect(sendsWith("", record(apiKey("k", "v")))).toBe("");
 		});
@@ -210,6 +223,60 @@ describe("resolveSendsUrl, the URL that reaches the server (#3425)", () => {
 				"https://api.test/p?api.test={{seg}}"
 			);
 		});
+	});
+});
+
+describe("the secret a Sends resolution appends (#3425)", () => {
+	const keyed = (key: string, value: string, url = "https://api.test/p") => ({
+		...sends(url),
+		auth: { mode: "apikey", key, value, in: "query" },
+	});
+	const secretOf = (
+		request: ReturnType<typeof keyed>,
+		vars: Record<string, string>,
+		deferred: readonly string[] = []
+	) => sendsResolver(resolverFor(vars))(sendsCacheInput(request, deferred)).secret;
+
+	it("is the resolved, trimmed value, whatever the variable that held it", () => {
+		expect(secretOf(keyed("k", "s3cr3t"), {})).toBe("s3cr3t");
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "abc" })).toBe("abc");
+		expect(secretOf(keyed("k", "pre-{{apiKey}}"), { apiKey: "abc" })).toBe("pre-abc");
+		// A value the trim shortens: the text on the line is not the variable's.
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "  abc \t" })).toBe("abc");
+	});
+
+	it("is the value that went onto the line, not a second resolution", () => {
+		let calls = 0;
+		const rolling = (text: string) => text.replace("{{$roll}}", () => `r${++calls}`);
+		const resolved = sendsResolver(rolling)(sendsCacheInput(keyed("k", "{{$roll}}")));
+		expect(resolved).toEqual({ url: "https://api.test/p?k=r1", secret: "r1" });
+		expect(calls).toBe(1);
+	});
+
+	it("is null when no key is appended or its value is blank", () => {
+		expect(secretOf(keyed("k", ""), {})).toBeNull();
+		expect(secretOf(keyed("k", " {{blank}} "), { blank: "" })).toBeNull();
+		expect(secretOf(keyed("  ", "v"), {})).toBeNull();
+		expect(secretOf(keyed("{{blank}}", "v"), { blank: " " })).toBeNull();
+		expect(secretOf(keyed("k", "v", ""), {})).toBeNull();
+		expect(
+			secretOf({ ...keyed("k", "v"), auth: { ...keyed("k", "v").auth, in: "header" } }, {})
+		).toBeNull();
+	});
+
+	it("is null for a `{{token}}` nothing resolved, which goes out as written", () => {
+		const request = keyed("k", "{{missing}}");
+		expect(sendsResolver((text) => text)(sendsCacheInput(request))).toEqual({
+			url: "https://api.test/p?k={{missing}}",
+			secret: null,
+		});
+		expect(secretOf(keyed("k", " pre-{{missing}} "), {})).toBeNull();
+		// A name a script defers stays written, so it is not a value either.
+		expect(secretOf(keyed("k", "{{token}}"), { token: "stored" }, ["token"])).toBeNull();
+	});
+
+	it("is the value when a variable's own text looks like a token", () => {
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "{{other}}" })).toBe("{{other}}");
 	});
 });
 
@@ -303,6 +370,14 @@ describe("sendsHasTokens and deferredNamesInSends read an API key placed in the 
 		]);
 	});
 
+	it("ignores a key with no name, which the engine writes nothing for", () => {
+		expect(sendsHasTokens(keyed(" \t", "{{secret}}"))).toBe(false);
+		expect(deferredNamesInSends(keyed("  ", "{{token}}"), ["token"])).toEqual([]);
+		expect(sendsCacheInput(keyed("  ", "v"))).toBe(
+			sendsCacheInput(sends("https://api.test/p"))
+		);
+	});
+
 	it("ignores a key that is not appended", () => {
 		expect(sendsHasTokens(keyed("k", "{{secret}}", "header"))).toBe(false);
 		expect(deferredNamesInSends(keyed("k", "{{token}}", "header"), ["token"])).toEqual([]);
@@ -391,14 +466,14 @@ describe("sendsResolver", () => {
 		const request = sends("https://api.test/users/:name/{{seg}}", [
 			pathRow("name", "{{tail}}"),
 		]);
-		expect(sendsResolver(resolve)(sendsCacheInput(request))).toBe(
+		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toBe(
 			resolveSendsUrl(request, resolve)
 		);
 	});
 
 	it("answers what resolveSendsUrl does for deferred names too", () => {
 		const request = sends("https://{{host}}/{{seg}}");
-		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"]))).toBe(
+		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"])).url).toBe(
 			resolveSendsUrl(request, resolve, ["seg"])
 		);
 		expect(resolveSendsUrl(request, resolve, ["seg"])).toBe("https://api.test/{{seg}}");
@@ -409,10 +484,12 @@ describe("sendsResolver", () => {
 			...sends("https://{{host}}/p#f"),
 			auth: { mode: "apikey", key: "k", value: "{{seg}}", in: "query" },
 		};
-		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"]))).toBe(
+		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"])).url).toBe(
 			resolveSendsUrl(request, resolve, ["seg"])
 		);
-		expect(sendsResolver(resolve)(sendsCacheInput(request))).toBe("https://api.test/p?k=a%20b");
+		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toBe(
+			"https://api.test/p?k=a%20b"
+		);
 	});
 
 	it("is one wrapper per resolver, so a cache comparing resolvers by identity holds", () => {
