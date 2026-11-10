@@ -33,7 +33,13 @@ import { fileBaseName } from "@/lib/file-path";
 import { noFile } from "@/lib/file-trust";
 import { paramsFromUrl, safeDecode } from "@/modules/request-builder/utils/url";
 import { autoHeaderToAdd } from "@/modules/request-builder/utils/auto-header";
-import { ACCEPT_HEADER, DEFAULT_MAX_REDIRECTS, SSE_ACCEPT } from "@/constants/request";
+import {
+	ACCEPT_HEADER,
+	DEFAULT_MAX_REDIRECTS,
+	MAX_REQUEST_TIMEOUT_MS,
+	MIN_REQUEST_TIMEOUT_MS,
+	SSE_ACCEPT,
+} from "@/constants/request";
 import { tokenize } from "./tokenize";
 // Re-exported rather than defined here: the main process asks the same question
 // of the clipboard, and a leaf module is what its test can import (#1359).
@@ -41,7 +47,13 @@ import { detectCommand } from "./detect-command";
 
 export { detectCommand };
 
-/** The subset of RequestState a curl/wget command can populate. */
+/**
+ * The subset of RequestState a curl/wget command can populate.
+ *
+ * `timeout` is the one optional field: a command with no `-m` / `-T` states no
+ * timeout, and an absent key lets the caller keep the request's own (or the
+ * `defaultTimeout` setting) where a `null` would clear it.
+ */
 export type ParsedRequest = Pick<
 	RequestState,
 	| "method"
@@ -59,7 +71,8 @@ export type ParsedRequest = Pick<
 	| "verifySSL"
 	| "followRedirects"
 	| "maxRedirects"
->;
+> &
+	Partial<Pick<RequestState, "timeout">>;
 
 // ============================================================================
 // The disclosure ledger (issue #708)
@@ -179,8 +192,6 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 		pointer: { category: NETWORK, anchor: "proxyUrl", label: "Proxy settings" },
 	},
 	"--connect-timeout": { what: "set a connection timeout" },
-	"-m": { what: "set a total request timeout" },
-	"--max-time": { what: "set a total request timeout" },
 	"--retry": { what: "retried on failure" },
 	"--resolve": { what: "pinned a hostname to an address" },
 	// Deliberately vaguer than the others: `-o` is curl's response file and
@@ -194,8 +205,6 @@ export const DROPPED_FLAG_INFO: Record<string, { what: string; pointer?: Disclos
 	"--output-document": { what: "wrote the response to a file" },
 	"-t": { what: "retried on failure" },
 	"--tries": { what: "retried on failure" },
-	"-T": { what: "set a total request timeout" },
-	"--timeout": { what: "set a total request timeout" },
 	"-P": { what: "chose a download directory" },
 	"--directory-prefix": { what: "chose a download directory" },
 };
@@ -271,6 +280,8 @@ interface Builder {
 	insecure: boolean; // curl -k / --insecure, wget --no-check-certificate
 	followRedirects: boolean; // curl -L / --location
 	maxRedirects: number; // curl --max-redirs
+	/** curl `-m` / wget `-T`, in ms; null when the command stated none we can carry. */
+	timeoutMs: number | null;
 	/**
 	 * Bare tokens the command line carried, in order - the URL is one of
 	 * these, but which one is not known until every token has been read
@@ -305,6 +316,7 @@ function newBuilder(): Builder {
 		// wget's opposite default.
 		followRedirects: false,
 		maxRedirects: DEFAULT_MAX_REDIRECTS,
+		timeoutMs: null,
 		dropped: [],
 	};
 }
@@ -325,8 +337,8 @@ function recordDropped(
 ): void {
 	if (b.dropped.some((entry) => entry.flag === flag)) return;
 	// `-T` is the one flag curl and wget disagree about (an upload vs. a
-	// timeout), so a call that already knows which one bypasses the shared
-	// table rather than risk the other command's description.
+	// timeout), so neither is in the shared table: a call that knows its own
+	// wording passes it in.
 	const info = override ?? DROPPED_FLAG_INFO[flag];
 	b.dropped.push({
 		flag,
@@ -455,6 +467,27 @@ function addCurlHeader(b: Builder, raw: string): void {
 		return;
 	}
 	addHeader(b, raw);
+}
+
+/**
+ * curl `-m` / `--max-time` and wget `-T` / `--timeout`: the whole-request limit,
+ * in seconds with decimals allowed (what the generated `--max-time` writes),
+ * stored as the request's `timeout` in ms inside the engine's range - it
+ * refuses anything outside with a 400.
+ *
+ * Zero is curl's "no limit" and the engine refuses 0, so it and any non-number
+ * import no timeout and are disclosed.
+ */
+function setTimeoutSeconds(b: Builder, flag: string, raw: string): void {
+	const seconds = Number.parseFloat(raw);
+	if (!(seconds > 0)) {
+		recordDropped(b, flag, {
+			what: "set a total timeout that is not a positive number of seconds",
+		});
+		return;
+	}
+	const ms = Math.round(seconds * 1000);
+	b.timeoutMs = Math.min(MAX_REQUEST_TIMEOUT_MS, Math.max(MIN_REQUEST_TIMEOUT_MS, ms));
 }
 
 function setBasicAuth(b: Builder, raw: string): void {
@@ -762,6 +795,7 @@ function resolve(b: Builder): CommandImport {
 			verifySSL: !b.insecure,
 			followRedirects: b.followRedirects,
 			maxRedirects: b.maxRedirects,
+			...(b.timeoutMs === null ? {} : { timeout: b.timeoutMs }),
 		},
 		dropped: b.dropped,
 	};
@@ -860,8 +894,6 @@ const CURL_SKIP_WITH_ARG = new Set([
 	"-w",
 	"--write-out",
 	"--connect-timeout",
-	"-m",
-	"--max-time",
 	"--retry",
 	"--cacert",
 	"--cert",
@@ -1073,6 +1105,10 @@ function parseCurl(argv: string[]): CommandImport {
 				// genuinely means `followRedirects: false`, not "unspecified".
 				b.followRedirects = true;
 				break;
+			case "-m":
+			case "--max-time":
+				setTimeoutSeconds(b, flag, value());
+				break;
 			case "--max-redirs": {
 				const n = Number.parseInt(value(), 10);
 				if (Number.isFinite(n)) b.maxRedirects = n;
@@ -1141,8 +1177,6 @@ const WGET_SKIP_WITH_ARG = new Set([
 	"--output-document",
 	"-t",
 	"--tries",
-	"-T",
-	"--timeout",
 	"-P",
 	"--directory-prefix",
 ]);
@@ -1214,6 +1248,10 @@ function parseWget(args: string[]): CommandImport {
 			// other is the drift this parser exists to avoid.
 			case "--no-check-certificate":
 				b.insecure = true;
+				break;
+			case "-T":
+			case "--timeout":
+				setTimeoutSeconds(b, flag, value());
 				break;
 			default:
 				if (WGET_SKIP_WITH_ARG.has(flag)) {

@@ -111,6 +111,22 @@ describe("the URL bar answers the menu's import", () => {
 		expect(setRequest.mock.calls[0][0].disabledSystemHeaders).toEqual(["accept"]);
 	});
 
+	it("hands the builder the command's total timeout, and none when it states none (#3426)", () => {
+		const { setRequest, send } = renderUrlInput();
+
+		act(() => {
+			send({ type: "import-command", text: "curl --max-time 2.5 https://api.example.com/a" });
+		});
+		act(() => {
+			send({ type: "import-command", text: "curl https://api.example.com/b" });
+		});
+
+		expect(setRequest.mock.calls[0][0].timeout).toBe(2500);
+		// An absent key, not null: setRequest merges, so a request's own timeout
+		// survives a paste that never mentioned one.
+		expect(setRequest.mock.calls[1][0]).not.toHaveProperty("timeout");
+	});
+
 	it("leaves the request alone for a command that does not parse", () => {
 		const { setRequest, send } = renderUrlInput();
 

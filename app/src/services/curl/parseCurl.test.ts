@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, test } from "vitest";
+import { MAX_REQUEST_TIMEOUT_MS, MIN_REQUEST_TIMEOUT_MS } from "@/constants/request";
 import { chromeBashCopy, chromeCmdCopy } from "./chrome-copy.testkit";
 import { DROPPED_FLAG_INFO, detectCommand, importCommand, parseCommand } from "./parseCurl";
 
@@ -639,6 +640,70 @@ describe("parseCommand - curl -k is the verifySSL setting", () => {
 		const parsed = parseCommand("curl -k -X POST https://internal.example.com/orders");
 		expect(parsed?.url).toBe("https://internal.example.com/orders");
 		expect(parsed?.method).toBe("POST");
+	});
+});
+
+/**
+ * `-m` / `--max-time` and wget's `-T` / `--timeout` bound the whole request,
+ * which is the stored `timeout` (#3426). Seconds on the command line, ms
+ * stored, and the engine's range is enforced here because it refuses a value
+ * outside it with a 400.
+ */
+describe("parseCommand - the total timeout", () => {
+	test.each([
+		["curl --max-time 5 https://x.com", 5000],
+		["curl -m 5 https://x.com", 5000],
+		["curl -m5 https://x.com", 5000],
+		["curl -m 2.5 https://x.com", 2500],
+		["curl --max-time=5 https://x.com", 5000],
+		["curl --max-time 0.0001 https://x.com", MIN_REQUEST_TIMEOUT_MS],
+		["curl --max-time 999999999 https://x.com", MAX_REQUEST_TIMEOUT_MS],
+		["wget -T 10 https://x.com", 10_000],
+		["wget --timeout 10 https://x.com", 10_000],
+		["wget --timeout=2.5 https://x.com", 2500],
+		["wget -T 999999999 https://x.com", MAX_REQUEST_TIMEOUT_MS],
+	])("%s becomes %i ms, with nothing disclosed", (command, ms) => {
+		const imported = importCommand(command)!;
+		expect(imported.request.timeout).toBe(ms);
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped).toEqual([]);
+	});
+
+	test.each([
+		["curl -m 0 https://x.com", "-m"],
+		["curl --max-time 0 https://x.com", "--max-time"],
+		["curl --max-time -3 https://x.com", "--max-time"],
+		["curl --max-time soon https://x.com", "--max-time"],
+		["curl --max-time=soon https://x.com", "--max-time"],
+		["wget -T 0 https://x.com", "-T"],
+		["wget --timeout=soon https://x.com", "--timeout"],
+	])("%s states no timeout and is disclosed", (command, flag) => {
+		const imported = importCommand(command)!;
+		expect(imported.request).not.toHaveProperty("timeout");
+		expect(imported.request.url).toBe("https://x.com");
+		expect(imported.dropped.map((entry) => entry.flag)).toEqual([flag]);
+	});
+
+	test("a command with no timeout flag leaves the key absent, so a request keeps its own", () => {
+		expect(importCommand("curl https://x.com")!.request).not.toHaveProperty("timeout");
+		expect(importCommand("wget https://x.com")!.request).not.toHaveProperty("timeout");
+	});
+
+	test("--connect-timeout is still a connection timeout this request has no field for", () => {
+		const imported = importCommand("curl --connect-timeout 5 https://x.com")!;
+		expect(imported.request).not.toHaveProperty("timeout");
+		expect(imported.dropped.map((entry) => entry.flag)).toEqual(["--connect-timeout"]);
+	});
+
+	test("curl -T stays an upload, and wget -T alone is the timeout", () => {
+		const upload = importCommand("curl -T /d/a.bin https://x.com/f")!;
+		expect(upload.request.bodyMode).toBe("binary");
+		expect(upload.request.method).toBe("PUT");
+		expect(upload.request).not.toHaveProperty("timeout");
+
+		const wget = importCommand("wget -T 7 https://x.com/f")!;
+		expect(wget.request.bodyMode).toBe("none");
+		expect(wget.request.timeout).toBe(7000);
 	});
 });
 
