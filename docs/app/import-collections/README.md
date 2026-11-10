@@ -481,7 +481,7 @@ they already have their own segments in the count line.
 
 **`SkippedItem`** - `{ kind: "websocket" | "grpc" | "api_spec" | "unit_test" | "file_body" |
 "malformed_item" | "unsupported_method" | "malformed_spec" | "example_no_status" |
-"default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
+"example_no_media_type" | "default_response" | "external_ref" | "duplicate_operation_id" | "cookie_param" |
 "unmapped_body" | "unresolved_base_url" | "no_server_url" | "unsupported_auth" | "oauth2_dropped_field" |
 "oauth2_state_regenerated" | "oauth2_unmapped_param" |
 "url_without_raw" | "variable_metadata", count, requests?, names? }`.
@@ -510,7 +510,10 @@ counted via `ImportTally`, shared by both OpenAPI dialects: they are
 structural clones, and a second copy would drift. `example_no_status` is a fourth
 non-representability case: an OpenAPI response keyed `2XX` (or with a junk key) documents a
 real response, but an example is served under one status line and there is no honest value
-to pick, so it is counted rather than guessed at. `default_response` is the same skip for the
+to pick, so it is counted rather than guessed at. `example_no_media_type` is the sibling for a
+3.x response whose `content` map yields no body: no JSON media type and none with a declared
+string or text-family example (a schema-only `text/csv`, say), so the example imports empty and
+the Preview says so as a note (issue #3424). `default_response` is the same skip for the
 `default` key, on a counter of its own (issue #710) because it is conformant and declared on
 nearly every operation of a vendor spec - the Preview does not show it at all, which is what
 keeps a 568-count line from burying the one warning that needs acting on. `external_ref` is the fifth, and the only

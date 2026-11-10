@@ -144,6 +144,12 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 example skipped (no status code)",
 		many: "{n} examples skipped (no status code)",
 	},
+	example_no_media_type: {
+		tier: "note",
+		named: "example skipped (no usable media type)",
+		one: "1 example skipped (no usable media type)",
+		many: "{n} examples skipped (no usable media type)",
+	},
 	// Every vendor spec declares one on every operation (issue #710); nothing
 	// the user would send depends on it.
 	default_response: HIDDEN,

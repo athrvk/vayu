@@ -382,8 +382,15 @@ ExportDirection direction) {
         return ExampleDisposition::Write;
     }
     const std::vector<const Json*> declared = declared_example_values (media);
-    const bool documented = std::any_of (declared.begin (), declared.end (),
-    [&] (const Json* candidate) { return same_value (*candidate, value); });
+    // A declared string is imported as the bytes it is (`example_body_text`),
+    // which `value` then reads back as JSON: a text example `"42"` is stored as
+    // `42` and would differ from the string the document declared, so a string
+    // also matches by its text (#3424).
+    const bool documented =
+    std::any_of (declared.begin (), declared.end (), [&] (const Json* candidate) {
+        return same_value (*candidate, value) ||
+        (candidate->is_string () && candidate->get<std::string> () == example.body);
+    });
     if (documented) {
         return ExampleDisposition::AlreadyDeclared;
     }

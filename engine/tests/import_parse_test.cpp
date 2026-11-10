@@ -3467,6 +3467,108 @@ TEST (PostmanImport, KeepsAUrlFragmentOffTheQueryRows) {
     const json& requests = parsed.result.at ("collections")[0].at ("requests");
 
     EXPECT_EQ (requests[0].at ("url"), "https://x.com/p?query=string&a=b&abcd#{{search}}");
+namespace {
+
+/// An OpenAPI 3.0 import of one `GET /r` operation carrying @p responses.
+ImportParse parse_responses (const std::string& responses) {
+    return parse_import (R"j({"openapi":"3.0.0","info":{"title":"T","version":"1"},
+        "paths":{"/r":{"get":{"operationId":"r","responses":)j" +
+    responses + "}}}}",
+    {}, {});
+}
+
+/// The one example of @p status on the first request, which must exist.
+const nlohmann::ordered_json& example_of_status (const ImportParse& parsed, int status) {
+    static const nlohmann::ordered_json missing = nlohmann::ordered_json::object ();
+    for (const nlohmann::ordered_json& example :
+    first_request (parsed.result.at ("collections")[0]).at ("examples")) {
+        if (example.at ("status") == status) {
+            return example;
+        }
+    }
+    ADD_FAILURE () << "no example with status " << status;
+    return missing;
+}
+
+} // namespace
+
+/// A response documented only in a text media type is an example with that
+/// body under that media type (#3424), where the importer used to store an empty
+/// body with no content type and the mock answered an empty `text/plain`. The
+/// body is the string as written; a media type with parameters keeps them; an
+/// `examples` map is read through its first entry. Mutation check: restoring
+/// the JSON-only return gives all four rows an empty body and no content type.
+TEST (OpenApiImport, ImportsATextResponseExampleWithItsBodyAndContentType) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"pong","content":{"text/plain":{"example":"pong"}}},
+        "404":{"description":"gone","content":{"text/html; charset=utf-8":{
+            "examples":{"page":{"value":"<h1>Gone</h1>"}}}}},
+        "500":{"description":"oops","content":{"application/xml":{"example":"<e/>"}}},
+        "503":{"description":"busy","content":{"text/csv":{"example":42}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& ok = example_of_status (parsed, 200);
+    EXPECT_EQ (ok.at ("body"), "pong");
+    EXPECT_EQ (ok.at ("contentType"), "text/plain");
+    EXPECT_EQ (header_pairs (ok.at ("headers")),
+    (HeaderPairs{ { "Content-Type", "text/plain" } }));
+
+    const nlohmann::ordered_json& gone = example_of_status (parsed, 404);
+    EXPECT_EQ (gone.at ("body"), "<h1>Gone</h1>");
+    EXPECT_EQ (gone.at ("contentType"), "text/html; charset=utf-8");
+    EXPECT_EQ (gone.at ("specExampleKey"), "page");
+
+    EXPECT_EQ (example_of_status (parsed, 500).at ("body"), "<e/>");
+    EXPECT_EQ (example_of_status (parsed, 500).at ("contentType"), "application/xml");
+    // A text-family type takes a non-string example as the JSON text it is.
+    EXPECT_EQ (example_of_status (parsed, 503).at ("body"), "42");
+    EXPECT_EQ (example_of_status (parsed, 503).at ("contentType"), "text/csv");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 0);
+}
+
+/// A JSON media type keeps precedence over a text one declared before it, and a
+/// media type with no declared example is passed over for the next one that has
+/// one. Mutation check: trying the text media types before the JSON one gives
+/// the 200 the `plain` body.
+TEST (OpenApiImport, PrefersJsonThenTheFirstMediaTypeThatDeclaresAnExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"both","content":{
+            "text/plain":{"example":"plain"},
+            "application/json":{"example":{"ok":true}}}},
+        "201":{"description":"later","content":{
+            "image/png":{"schema":{"type":"string","format":"byte"}},
+            "text/plain":{"example":"made"}}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    EXPECT_EQ (example_of_status (parsed, 200).at ("contentType"), "application/json");
+    EXPECT_EQ (example_of_status (parsed, 200).at ("body"), "{\n  \"ok\": true\n}");
+    EXPECT_EQ (example_of_status (parsed, 201).at ("contentType"), "text/plain");
+    EXPECT_EQ (example_of_status (parsed, 201).at ("body"), "made");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 0);
+}
+
+/// A response whose only media types declare no example is counted, never
+/// given a body: a schema is sampled into JSON, and JSON bytes under `text/csv`
+/// document nothing the spec said. The example still imports, undocumented, as
+/// a `204` does. A `content` map with no entries lost nothing and is not
+/// counted. Mutation check: dropping the tally leaves the count at 0.
+TEST (OpenApiImport, CountsAResponseWhoseMediaTypesDeclareNoExample) {
+    const ImportParse parsed = parse_responses (R"j({
+        "200":{"description":"csv","content":{
+            "text/csv":{"schema":{"type":"string"}},
+            "application/pdf":{"schema":{"type":"string","format":"binary"}}}},
+        "204":{"description":"empty"},
+        "205":{"description":"none","content":{}}})j");
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+
+    const nlohmann::ordered_json& csv = example_of_status (parsed, 200);
+    EXPECT_EQ (csv.at ("body"), "");
+    EXPECT_EQ (csv.at ("contentType"), "");
+    EXPECT_TRUE (csv.at ("headers").empty ());
+    EXPECT_EQ (parsed.result.at ("meta").at ("exampleCount"), 3);
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "example_no_media_type"), 1);
+}
+
     EXPECT_EQ (requests[0].at ("params").size (), 3u);
     EXPECT_EQ (requests[0].at ("params")[2].at ("key"), "abcd");
     EXPECT_EQ (requests[1].at ("url"), "https://x.com/p?q=1&flag#top");

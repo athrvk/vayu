@@ -65,6 +65,14 @@ export interface SkippedItem {
 		 */
 		| "example_no_status"
 		/**
+		 * An OpenAPI 3.x response with a `content` map and no JSON media type, none
+		 * of whose media types declares an example to serve as text - a schema-only
+		 * `text/csv`, say. The example still imports, undocumented and with no body,
+		 * so the mock would answer it empty; counted so the preview says so
+		 * (issue #3424).
+		 */
+		| "example_no_media_type"
+		/**
 		 * An OpenAPI response keyed `default` (issue #710). Dropped for exactly the
 		 * reason above - a catch-all has no status line to be served under - but
 		 * counted apart from it, because it is not a defect: `default` is

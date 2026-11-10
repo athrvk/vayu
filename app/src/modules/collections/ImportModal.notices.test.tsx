@@ -234,6 +234,26 @@ describe("the import preview's notices", () => {
 		expect(screen.getByRole("button", { name: /^Import\b/i })).toBeEnabled();
 	});
 
+	it("says a response example had no usable media type, as a note and not a warning (#3424)", async () => {
+		stubParse(() =>
+			result({
+				collections: [
+					collection({ name: "API", requests: [request({ name: "Export report" })] }),
+				],
+				meta: {
+					format: "OpenAPI 3.0",
+					skipped: [{ kind: "example_no_media_type", count: 2 }],
+				},
+			})
+		);
+		preview();
+
+		const line = await screen.findByText("2 examples skipped (no usable media type)");
+		// The request sends as documented; only a saved response lost its body.
+		expect(line.className).toContain("text-muted-foreground");
+		expect(line.className).not.toContain("text-warning-text");
+	});
+
 	it("announces the preview through one status region and no alert (#2291)", async () => {
 		stubParse(() =>
 			result({

@@ -380,6 +380,34 @@ TEST (BoundExport, WritesNothingIntoADocumentNobodyEdited) {
     EXPECT_EQ (exported.notes.referenced_responses_left, 1);
 }
 
+TEST (BoundExport, WritesNothingForAnImportedTextExampleTheDocumentDeclares) {
+    const std::string content           = R"({
+      "openapi": "3.0.3",
+      "info": { "title": "Ping", "version": "1" },
+      "paths": { "/ping": { "get": { "operationId": "ping", "responses": {
+        "200": { "description": "pong", "content": { "text/plain": { "example": "pong" } } },
+        "201": { "description": "count", "content": { "text/plain": { "example": "42" } } },
+        "202": { "description": "page", "content": { "text/html; charset=utf-8": {
+          "examples": { "page": { "value": "<h1>Hi</h1>" } } } } }
+      } } } }
+    })";
+    std::vector<ExportRequest> requests = { bound_request (
+    "GET", "{{baseUrl}}/ping", "ping", "/ping") };
+    // What an import of this document stores: each text example as the bytes
+    // the document wrote under the media type key it wrote them (#3424). The
+    // `"42"` is the case a value comparison alone misreads - stored text that
+    // parses as the number 42 is still the string the document declared.
+    requests[0].examples = { imported (example ("200 - pong", 200, "pong", "text/plain")),
+        imported (example ("201 - count", 201, "42", "text/plain")),
+        with_key (imported (example ("202 - page", 202, "<h1>Hi</h1>", "text/html; charset=utf-8")),
+        "page") };
+
+    const Exported exported = export_json (requests, content);
+    EXPECT_EQ (exported.document, json::parse (content));
+    EXPECT_EQ (exported.notes.examples_written, 0);
+    EXPECT_EQ (exported.notes.examples_already_declared, 3);
+}
+
 TEST (BoundExport, AddsAKeptResponseBesideTheDocumentsExamplesRatherThanOverThem) {
     std::vector<ExportRequest> requests = refs_requests ();
     requests[0].examples = { example ("Rex alone", 200, R"([{"id":"p9"}])") };

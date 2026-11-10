@@ -922,6 +922,84 @@ response_example (const std::string& code, const json* response, ImportTally* ta
     return example;
 }
 
+/// The JSON media type of a 3.x response's `content` as a payload: its declared
+/// example, else a sample of its schema, else nothing.
+std::optional<ExamplePayload> json_example_payload (const Sampler& sampler,
+const json& content,
+const std::string& type) {
+    const json* media = as_record (prop (&content, type));
+    if (media == nullptr) {
+        return std::nullopt;
+    }
+    // `declared ?? sample`: see `declared_example_value` for the `??`
+    // this stands in for.
+    const DeclaredExampleValue declared = declared_example_value (media);
+    if (declared.value != nullptr && !declared.value->is_null ()) {
+        return ExamplePayload{ example_body_text (*declared.value), type,
+            declared.key };
+    }
+    if (const json* schema = prop (media, "schema"); truthy (schema)) {
+        return ExamplePayload{ example_body_text (sampler.sample (schema)), type, {} };
+    }
+    return std::nullopt;
+}
+
+/// A text-family media type: `text/*`, or an `xml` / `html` subtype under any
+/// top-level type (`application/xml`, `application/html`).
+bool is_text_media_type (const std::string& key) {
+    const std::string bare = media_type (json (key));
+    const auto has_subtype = [&bare] (std::string_view subtype) {
+        return bare.size () > subtype.size () &&
+        bare.compare (bare.size () - subtype.size (), subtype.size (), subtype) == 0;
+    };
+    return bare.rfind ("text/", 0) == 0 || has_subtype ("/xml") || has_subtype ("/html");
+}
+
+/**
+ * The first non-JSON media type of @p content, in document order, whose declared
+ * example is served as the bytes it is: the example is a string, or the media
+ * type is a text-family one.
+ *
+ * Only a *declared* example is read. A schema is sampled into JSON, and JSON
+ * bytes under a `text/csv` or `text/html` media type document nothing the spec
+ * said, so a schema-only media type stays unchosen.
+ */
+std::optional<ExamplePayload> text_example_payload (const json& content) {
+    for (auto entry = content.begin (); entry != content.end (); ++entry) {
+        const DeclaredExampleValue declared =
+        declared_example_value (as_record (&entry.value ()));
+        if (declared.value == nullptr || declared.value->is_null ()) {
+            continue;
+        }
+        if (declared.value->is_string () || is_text_media_type (entry.key ())) {
+            return ExamplePayload{ example_body_text (*declared.value),
+                entry.key (), declared.key };
+        }
+    }
+    return std::nullopt;
+}
+
+/// What a 3.x response documents: its JSON media type when it has one, else the
+/// first text example. A `content` map with entries and neither is counted, so
+/// the preview says a documented response imported without its body.
+std::optional<ExamplePayload>
+response_payload_v3 (const Sampler& sampler, const json& node, ImportTally* tally) {
+    const json* content = as_record (prop (&node, "content"));
+    if (content == nullptr) {
+        return std::nullopt;
+    }
+    if (const std::optional<std::string> type = find_json_media_type (*content)) {
+        return json_example_payload (sampler, *content, *type);
+    }
+    if (std::optional<ExamplePayload> text = text_example_payload (*content)) {
+        return text;
+    }
+    if (!content->empty ()) {
+        tally_add (tally, "example_no_media_type");
+    }
+    return std::nullopt;
+}
+
 /// A 3.x operation's documented responses.
 std::vector<DraftExample>
 examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) {
@@ -935,32 +1013,9 @@ examples_v3 (const Sampler& sampler, const json* responses, ImportTally* tally) 
         // a document that declares its errors once and names them everywhere
         // leaves (issue #714).
         const json* response = sampler.deref (&entry.value ());
-        auto example         = response_example (entry.key (), response, tally,
-        [&] (const json& node) -> std::optional<ExamplePayload> {
-            const json* content = as_record (prop (&node, "content"));
-            if (content == nullptr) {
-                return std::nullopt;
-            }
-            const std::optional<std::string> type = find_json_media_type (*content);
-            if (!type) {
-                return std::nullopt;
-            }
-            const json* media = as_record (prop (content, *type));
-            if (media == nullptr) {
-                return std::nullopt;
-            }
-            // `declared ?? sample`: see `declared_example_value` for the `??`
-            // this stands in for.
-            const DeclaredExampleValue declared = declared_example_value (media);
-            if (declared.value != nullptr && !declared.value->is_null ()) {
-                return ExamplePayload{ example_body_text (*declared.value),
-                    *type, declared.key };
-            }
-            if (const json* schema = prop (media, "schema"); truthy (schema)) {
-                return ExamplePayload{ example_body_text (sampler.sample (schema)),
-                    *type, {} };
-            }
-            return std::nullopt;
+        auto example =
+        response_example (entry.key (), response, tally, [&] (const json& node) {
+            return response_payload_v3 (sampler, node, tally);
         });
         if (example) {
             out.push_back (std::move (*example));
@@ -1454,10 +1509,10 @@ nlohmann::ordered_json ImportTally::items () const {
     // enumerating every JMeter plugin class in advance) is appended after,
     // in `counts_`'s own insertion order, rather than the `nothing dropped
     // quietly` rule silently losing it to a list it was never going to fit.
-    static constexpr auto ORDER =
-    std::to_array<const char*> ({ "websocket", "grpc", "api_spec", "unit_test",
-    "file_body", "malformed_item", "unsupported_method", "malformed_spec",
-    "example_no_status", "default_response", "external_ref", "duplicate_operation_id",
+    static constexpr auto ORDER = std::to_array<const char*> ({ "websocket", "grpc",
+    "api_spec", "unit_test", "file_body", "malformed_item", "unsupported_method",
+    "malformed_spec", "example_no_status", "example_no_media_type",
+    "default_response", "external_ref", "duplicate_operation_id",
     "webhook_operations", "deprecated_operation", "cookie_param", "unmapped_body",
     "unresolved_base_url", "no_server_url", "servers_dropped", "unsupported_auth",
     "security_unmapped_or", "security_unmapped_and", "security_unmapped_scheme",
