@@ -32,6 +32,7 @@ import {
 	invalidationsForChange,
 	parseChangeFeedChange,
 } from "@/lib/change-feed-invalidation";
+import { streamRetryDelayMs } from "@/lib/stream-backoff";
 
 /** First backoff step; each attempt doubles it, up to the cap. */
 export const CHANGE_FEED_RETRY_BASE_MS = 500;
@@ -44,18 +45,18 @@ export const CHANGE_FEED_RETRY_BASE_MS = 500;
 export const CHANGE_FEED_RETRY_MAX_MS = 15_000;
 
 /**
- * How long to wait before reconnect attempt @p attempt (1-based). Jitter keeps
- * two windows that lost the engine together from retrying in lockstep.
+ * How long to wait before reconnect attempt @p attempt (1-based), on the
+ * shared stream ladder (`lib/stream-backoff.ts`).
  */
 export function changeFeedRetryDelayMs(
 	attempt: number,
 	random: () => number = Math.random
 ): number {
-	const step = Math.min(
-		CHANGE_FEED_RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1),
-		CHANGE_FEED_RETRY_MAX_MS
+	return streamRetryDelayMs(
+		attempt,
+		{ baseMs: CHANGE_FEED_RETRY_BASE_MS, maxMs: CHANGE_FEED_RETRY_MAX_MS },
+		random
 	);
-	return Math.round(step + random() * step * 0.5);
 }
 
 export class ChangeFeedService {
