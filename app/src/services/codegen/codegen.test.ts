@@ -1660,6 +1660,13 @@ describe("transfer settings across the targets", () => {
 			expect(generateCurl({ ...BASE, timeout: 30000 }).code).toContain("--max-time 30");
 		});
 
+		it("parseCurl reads the written timeout back as the same milliseconds (#3426)", () => {
+			for (const timeout of [2500, 30_000, 1]) {
+				const { code } = generateCurl({ ...BASE, timeout });
+				expect(parseCommand(code.split("\\\n").join(" "))?.timeout).toBe(timeout);
+			}
+		});
+
 		it("says nothing about a timeout the request does not state", () => {
 			expect(generateCurl(BASE).code).not.toContain("--max-time");
 			expect(generateCurl({ ...BASE, timeout: null }).code).not.toContain("--max-time");

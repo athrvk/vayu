@@ -56,7 +56,10 @@ The URL bar keeps the same invariant the other way: typing into it **merges**
 the parsed query into `params[]` rather than replacing the list, so a disabled
 row (invisible in the query by design) survives, and a key removed from the URL
 is removed from `params[]` too, rather than left behind as a row the URL no
-longer carries (`mergeParamsFromUrl`, issue #1482).
+longer carries (`mergeParamsFromUrl`, issue #1482). Enabled rows take the
+URL's pair order, so the table's row-ordered rebuild writes back the order that
+was typed, and a disabled row keeps its slot after the enabled row that
+preceded it (issue #3426).
 
 **Query rows hold the query as the URL spells it** (issue #1771), which is
 Postman's own row model: `?q=a%20b` is the row `a%20b`, never decoded, in

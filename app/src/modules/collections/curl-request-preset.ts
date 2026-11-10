@@ -31,5 +31,6 @@ export function presetFromCommand(request: ParsedRequest): RequestPreset {
 		verifySSL: request.verifySSL,
 		followRedirects: request.followRedirects,
 		maxRedirects: request.maxRedirects,
+		timeout: request.timeout,
 	};
 }

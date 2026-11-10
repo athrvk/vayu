@@ -41,6 +41,12 @@ describe("presetFromCommand", () => {
 		expect(result.headers).toEqual([{ key: "X-Empty", value: "", enabled: true }]);
 	});
 
+	it("carries the command's total timeout, and none when it states none (#3426)", () => {
+		expect(preset("curl --max-time 30 https://x.test/a").timeout).toBe(30_000);
+		expect(preset("wget -T 2.5 https://x.test/a").timeout).toBe(2500);
+		expect(preset("curl https://x.test/a").timeout).toBeUndefined();
+	});
+
 	it("states an empty body as mode none", () => {
 		expect(preset("curl https://x.test/a")).toMatchObject({
 			body: { mode: "none" },

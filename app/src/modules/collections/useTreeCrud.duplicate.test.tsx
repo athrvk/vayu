@@ -27,7 +27,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { useTreeCrud } from "./useTreeCrud";
-import { useToastStore } from "@/stores";
+import { useSaveStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests, type SaveOutcome } from "@/stores/save-store";
 import type { Collection, Request, RequestSummary } from "@/types";
 
 const createRequest = vi.fn();
@@ -47,6 +48,8 @@ vi.mock("@/queries", () => ({
 		queryKey: ["requests", "detail", id],
 		queryFn: () => getRequest(id),
 		retry: false,
+		// The real options' policy: a cached detail is never refetched on its own.
+		staleTime: Infinity,
 	}),
 }));
 
@@ -119,7 +122,7 @@ function renderCrud() {
 	const wrapper = ({ children }: { children: ReactNode }) => (
 		<QueryClientProvider client={client}>{children}</QueryClientProvider>
 	);
-	return renderHook(
+	const hook = renderHook(
 		() =>
 			useTreeCrud({
 				collections,
@@ -128,6 +131,7 @@ function renderCrud() {
 			}),
 		{ wrapper }
 	);
+	return { ...hook, client };
 }
 
 beforeEach(() => {
@@ -136,6 +140,7 @@ beforeEach(() => {
 	getRequest.mockReset();
 	getRequest.mockResolvedValue(source);
 	useToastStore.setState({ toasts: [] });
+	resetSaveStoreForTests();
 });
 
 describe("duplicating a request", () => {
@@ -200,5 +205,109 @@ describe("duplicating a request", () => {
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0].variant).toBe("error");
 		expect(toasts[0].message).toContain("Couldn't duplicate the request");
+	});
+});
+
+/**
+ * #3426: the open editor autosaves after a delay, so a Duplicate inside that
+ * window used to copy the stored record without the edit.
+ */
+describe("duplicating a request whose editor has an unsaved edit", () => {
+	const edited: Request = { ...source, url: "https://api.example.com/pets/edited" };
+
+	function registerEditor(save: () => Promise<SaveOutcome | void>, hasPendingChanges = true) {
+		useSaveStore
+			.getState()
+			.registerContext({ id: "request-r-1", name: "Request", save, hasPendingChanges });
+	}
+
+	it("saves first, then reads the request, then creates the copy from the saved record", async () => {
+		const order: string[] = [];
+		getRequest.mockImplementation(async () => {
+			order.push("getRequest");
+			return edited;
+		});
+		createRequest.mockImplementation(async () => {
+			order.push("createRequest");
+			return { id: "r-1-copy", collectionId: "c-1" };
+		});
+		registerEditor(async () => {
+			order.push("save");
+			return "saved";
+		});
+		const { result } = renderCrud();
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(order).toEqual(["save", "getRequest", "createRequest"]);
+		expect(createRequest.mock.calls[0][0]).toHaveProperty("url", edited.url);
+	});
+
+	// The detail cache is `staleTime: Infinity`: a tab that has the request open
+	// holds the pre-edit record, and a plain fetchQuery would serve it.
+	it("reads past a cached pre-edit record once the save has landed", async () => {
+		getRequest.mockResolvedValue(edited);
+		registerEditor(async () => "saved");
+		const { result, client } = renderCrud();
+		client.setQueryData(["requests", "detail", "r-1"], source);
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(getRequest).toHaveBeenCalledExactlyOnceWith("r-1");
+		expect(createRequest.mock.calls[0][0]).toHaveProperty("url", edited.url);
+	});
+
+	it("does not save an editor with nothing pending, and keeps serving its cached record", async () => {
+		const save = vi.fn(async (): Promise<SaveOutcome> => "saved");
+		registerEditor(save, false);
+		const { result, client } = renderCrud();
+		client.setQueryData(["requests", "detail", "r-1"], source);
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(save).not.toHaveBeenCalled();
+		expect(getRequest).not.toHaveBeenCalled();
+		expect(createRequest).toHaveBeenCalledTimes(1);
+	});
+
+	it.each<SaveOutcome>(["failed", "final", "disk-full", "pending"])(
+		"creates nothing when the save ends %s, and says why",
+		async (outcome) => {
+			registerEditor(async () => outcome);
+			const { result } = renderCrud();
+
+			await act(async () => {
+				await result.current.handlers.onDuplicateRequest(listRow);
+			});
+
+			expect(getRequest).not.toHaveBeenCalled();
+			expect(createRequest).not.toHaveBeenCalled();
+			const toasts = useToastStore.getState().toasts;
+			expect(toasts).toHaveLength(1);
+			expect(toasts[0].variant).toBe("error");
+			expect(toasts[0].message).toContain("Couldn't duplicate the request");
+		}
+	);
+
+	it("creates nothing when the save rejects", async () => {
+		registerEditor(async () => {
+			throw new Error("engine unreachable");
+		});
+		const { result } = renderCrud();
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(createRequest).not.toHaveBeenCalled();
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].message).toContain("engine unreachable");
 	});
 });

@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Edit2, Copy, FileJson, FileOutput, FolderPlus, Play } from "lucide-react";
 import { useTabsStore, useSaveStore, useToastStore } from "@/stores";
+import { isFailedOutcome } from "@/stores/save-store";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import {
 	useCreateCollectionMutation,
@@ -37,6 +38,25 @@ import type { Collection, Request, RequestSummary } from "@/types";
 import { DEFAULT_REQUEST_NAME } from "@/constants/request";
 import { DEFAULT_COLLECTION_NAME, DEFAULT_FOLDER_NAME } from "@/constants/collection";
 import { ICON_MOTION } from "@/components/ui";
+
+/**
+ * Land an open editor's unsaved edit on the engine before a copy is read from
+ * it (#3426). The editor autosaves after a delay, so a Duplicate inside that
+ * window would otherwise copy the stored record without the edit. Read at click
+ * time, not subscribed: the tree has no business re-rendering on a keystroke.
+ *
+ * Returns whether a save ran. Throws when the edit did not land: a copy that
+ * silently lacks the latest edit is the defect this exists to prevent.
+ */
+async function flushOpenEditor(requestId: string): Promise<boolean> {
+	const context = useSaveStore.getState().contexts.get(`request-${requestId}`);
+	if (!context?.hasPendingChanges) return false;
+	const outcome = await context.save();
+	if (isFailedOutcome(outcome) || outcome === "pending") {
+		throw new Error("the open editor's latest edit is not saved yet");
+	}
+	return true;
+}
 
 export interface TreeCrudOptions {
 	collections: Collection[];
@@ -379,11 +399,19 @@ export function useTreeCrud({
 	 * row is a summary (#2546), and the detail route answers every column whole
 	 * however large, where a full list row substitutes a default for a column
 	 * over the field cap (#1485) - so neither can be copied as the request.
+	 *
+	 * The open editor's pending save lands first (#3426), and the detail is then
+	 * read past its `staleTime: Infinity` cache: the copy is of what the engine
+	 * now holds, never of the record as it stood before the edit.
 	 */
 	const handleDuplicateRequest = useStableCallback(async (row: RequestSummary) => {
 		if (createRequestMutation.isPending) return;
 		try {
-			const request = await queryClient.fetchQuery(requestDetailOptions(row.id));
+			const flushed = await flushOpenEditor(row.id);
+			const request = await queryClient.fetchQuery({
+				...requestDetailOptions(row.id),
+				...(flushed && { staleTime: 0 }),
+			});
 			// Spread the source record rather than a hand-written field list
 			// (#1519): a named list drops every field added after it was
 			// written, which is how the previous version silently reset
