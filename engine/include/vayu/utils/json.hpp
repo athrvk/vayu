@@ -169,21 +169,23 @@ const std::vector<vayu::db::Result>& results);
  * Applied to the trace built by `build_result_trace`
  * (engine/src/http/routes/execution.cpp) before it is persisted to
  * `results.trace_data`, so one large exchange cannot bloat the DB forever. When
- * a `body` exceeds @p max_body_bytes it is cut to that many bytes and its node
- * gains `bodyTruncated: true` and `bodyBytes` (the original byte length) so a
- * reader can tell a stored slice from the whole body. The cut is on a raw byte
- * boundary - the body is an opaque string - so the caller must dump with
- * `error_handler_t::replace` in case the slice splits a UTF-8 sequence. A node
- * whose `bodyEncoding` is `base64` is capped by its decoded bytes instead, cut
- * at a multiple of three so the slice is still whole base64, and `bodyBytes`
- * counts decoded bytes too (issue #2458). A node that already carries
- * `bodyBytes` (a stream's wire count, issue #3238) keeps it, since the body
- * it holds can be shorter than what the server delivered.
+ * a `body` exceeds @p max_body_bytes it is cut to at most that many bytes and
+ * its node gains `bodyTruncated: true` and `bodyBytes` (the original byte
+ * length) so a reader can tell a stored slice from the whole body. A text body
+ * is cut on a character boundary (`without_incomplete_utf8_tail`, issue #3423),
+ * so the slice can be up to three bytes shorter than the cap. A node whose
+ * `bodyEncoding` is `base64` is capped by its decoded bytes instead, cut at a
+ * multiple of three so the slice is still whole base64, and `bodyBytes` counts
+ * decoded bytes too (issue #2458). A node that already carries `bodyBytes`
+ * keeps it: `build_result_trace` writes the held length on every response node
+ * (issue #3423), and a stream's wire count (issue #3238), which the body it
+ * holds can be shorter than.
  *
  * The request node's `rawRequest` ends with that same body, so it is capped to
  * the same limit - body half only, header block kept whole, since the headers
- * are what the field is stored for. See docs/engine/db-schema.md
- * (results.trace_data).
+ * are what the field is stored for. That cut is on a raw byte count, so the
+ * caller still dumps with `error_handler_t::replace`. See
+ * docs/engine/db-schema.md (results.trace_data).
  */
 void cap_trace_bodies (nlohmann::json& trace, size_t max_body_bytes);
 

@@ -246,8 +246,9 @@ const std::vector<vayu::db::Result>& results) {
 namespace {
 
 // Mark @p node's `body` a stored prefix of @p held_bytes. A `bodyBytes` the
-// node already carries is a stream's wire count (#3238), which is at least
-// what was held, so it stays: `bodyBytes` is what the server delivered.
+// node already carries stays: on a response node `build_result_trace` writes
+// the held length (#3423), or a stream's wire count (#3238), which is at least
+// what was held.
 void mark_body_cut (nlohmann::json& node, size_t held_bytes) {
     node["bodyTruncated"] = true;
     if (!node.contains ("bodyBytes")) {
@@ -274,6 +275,10 @@ void cap_base64_node_body (nlohmann::json& node, size_t max_body_bytes) {
 // Cap a single trace node's `body` string in place. Records bodyTruncated +
 // bodyBytes (the original length) when the body is cut so a reader can tell a
 // stored slice from the whole body.
+//
+// A text body is cut on a character boundary (#3423): a lead byte left
+// dangling at the cut would be dumped as U+FFFD, so a reopened body would end
+// in a character the server never sent.
 void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
     if (!node.is_object () || !node.contains ("body") || !node["body"].is_string ()) {
         return;
@@ -282,11 +287,15 @@ void cap_node_body (nlohmann::json& node, size_t max_body_bytes) {
         cap_base64_node_body (node, max_body_bytes);
         return;
     }
-    const std::string body = node["body"].get<std::string> ();
-    if (body.size () > max_body_bytes) {
-        node["body"] = body.substr (0, max_body_bytes);
-        mark_body_cut (node, body.size ());
+    const auto& body = node["body"].get_ref<const std::string&> ();
+    if (body.size () <= max_body_bytes) {
+        return;
     }
+    const size_t whole_bytes = body.size ();
+    std::string kept (vayu::utils::without_incomplete_utf8_tail (
+    std::string_view (body).substr (0, max_body_bytes)));
+    node["body"] = std::move (kept);
+    mark_body_cut (node, whole_bytes);
 }
 
 // Cap the body half of a request node's `rawRequest`, leaving the header block

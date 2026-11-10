@@ -153,6 +153,70 @@ void record_auth_provenance (nlohmann::json& node, const vayu::Request& request)
     }
 }
 
+namespace {
+
+/// What the server answered with: the `response` node of a stored trace.
+nlohmann::json response_trace_node (const vayu::Response& response) {
+    // "" when nothing was negotiated, not omitted - same convention as
+    // serialize(Response) in json.cpp, so restore-response.ts can't
+    // confuse "empty" with "this key doesn't exist on a stored trace".
+    const auto body_text = vayu::json::response_body_text (response);
+    std::string body = body_text ? std::string (*body_text) :
+                                   vayu::utils::base64_encode (response.body);
+    nlohmann::json node{ { "headers", response.headers },
+        { "body", std::move (body) }, { "httpVersion", response.http_version },
+        { "httpVersionDowngraded", response.http_version_downgraded },
+        { "bodyBytes", response.body_size } };
+
+    // The same decision `serialize (Response)` makes for the live answer
+    // (issue #2458), so a restored body is the text or bytes the live one
+    // was. Written only when it applies, on the `bodyCapped` rule below:
+    // every row stored before this field holds text, and absent says so.
+    if (!body_text) {
+        node["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
+    }
+
+    // The lossless header list (issue #2460), written only when non-empty
+    // on the `bodyCapped` rule below: a row stored before the field, and a
+    // load sample, hold the folded map alone, and absent says so.
+    if (!response.header_lines.empty ()) {
+        node["headerLines"] = vayu::json::serialize_header_lines (response.header_lines);
+    }
+
+    // The followed redirect hops (issue #2461), on the same rule: a row
+    // stored before the field, and a send that followed nothing, hold no
+    // `redirects`, and absent says so.
+    if (!response.redirect_hops.empty ()) {
+        node["redirects"] = vayu::json::serialize_redirects (response.redirect_hops);
+    }
+
+    // The read cap, carried so a restored response says what the live one
+    // said (issue #1157) - the same rule `clientCertificate` states,
+    // and the one the app's two funnels are held to. Written only when it
+    // is true, unlike the live body's always-present key: every row stored
+    // before this field would otherwise be indistinguishable from one whose
+    // body was cut, and absent is what those rows mean - not capped.
+    //
+    // `bodyTruncated` on this same node is a different cut, added later by
+    // `cap_trace_bodies`: that one is this body being shortened for
+    // storage, which re-sending recovers from.
+    if (response.body_truncated) {
+        node["bodyCapped"] = true;
+    }
+
+    // `bodyBytes` above is the held length in bytes (#3423), which a reader
+    // cannot recount from `body`: a JSON string's length is not its UTF-8
+    // size, and `cap_trace_bodies` keeps it when it cuts the body. A stream
+    // overwrites it with what it delivered, which its `body` cannot say: an
+    // event stream keeps none, and any other reply at most the bound (#3238).
+    if (response.stream_body_bytes) {
+        node["bodyBytes"] = *response.stream_body_bytes;
+    }
+    return node;
+}
+
+} // namespace
+
 nlohmann::json build_result_trace (const vayu::Request& request,
 const vayu::Response& response) {
     nlohmann::json trace;
@@ -231,63 +295,16 @@ const vayu::Response& response) {
     }
     record_auth_provenance (trace["request"], request);
 
-    if (!response.has_error ()) {
-        // "" when nothing was negotiated, not omitted - same convention as
-        // serialize(Response) in json.cpp, so restore-response.ts can't
-        // confuse "empty" with "this key doesn't exist on a stored trace".
-        const auto body_text = vayu::json::response_body_text (response);
-        std::string body = body_text ? std::string (*body_text) :
-                                       vayu::utils::base64_encode (response.body);
-        trace["response"] = { { "headers", response.headers },
-            { "body", std::move (body) }, { "httpVersion", response.http_version },
-            { "httpVersionDowngraded", response.http_version_downgraded } };
-
-        // The same decision `serialize (Response)` makes for the live answer
-        // (issue #2458), so a restored body is the text or bytes the live one
-        // was. Written only when it applies, on the `bodyCapped` rule below:
-        // every row stored before this field holds text, and absent says so.
-        if (!body_text) {
-            trace["response"]["bodyEncoding"] = vayu::json::BODY_ENCODING_BASE64;
-        }
-
-        // The lossless header list (issue #2460), written only when non-empty
-        // on the `bodyCapped` rule below: a row stored before the field, and a
-        // load sample, hold the folded map alone, and absent says so.
-        if (!response.header_lines.empty ()) {
-            trace["response"]["headerLines"] =
-            vayu::json::serialize_header_lines (response.header_lines);
-        }
-
-        // The followed redirect hops (issue #2461), on the same rule: a row
-        // stored before the field, and a send that followed nothing, hold no
-        // `redirects`, and absent says so.
-        if (!response.redirect_hops.empty ()) {
-            trace["response"]["redirects"] =
-            vayu::json::serialize_redirects (response.redirect_hops);
-        }
-
-        // The read cap, carried so a restored response says what the live one
-        // said (issue #1157) - the same rule `clientCertificate` above states,
-        // and the one the app's two funnels are held to. Written only when it
-        // is true, unlike the live body's always-present key: every row stored
-        // before this field would otherwise be indistinguishable from one whose
-        // body was cut, and absent is what those rows mean - not capped.
-        //
-        // `bodyTruncated` on this same node is a different cut, added later by
-        // `cap_trace_bodies`: that one is this body being shortened for
-        // storage, which re-sending recovers from.
-        if (response.body_truncated) {
-            trace["response"]["bodyCapped"] = true;
-        }
-
-        // What a stream delivered, which its `body` cannot say: an event
-        // stream keeps none, and any other reply at most the bound (#3238).
-        // Written before `cap_trace_bodies`, which keeps it rather than
-        // restating it as the held length when it cuts the body.
-        if (response.stream_body_bytes) {
-            trace["response"]["bodyBytes"] = *response.stream_body_bytes;
-        }
-    } else {
+    // A response node for every exchange that did not fail, and for a failure
+    // that still names the server's status (#3423), whose headers, protocol
+    // and body are then kept beside `error_type`. Status 0 is "no answer from
+    // the target" and stores no node. Every driver reports a failure at status
+    // 0 today (`mark_failed`, the stream's `settle_end_reason`), so a failed
+    // trace has no node however much of a reply the transfer read.
+    if (!response.has_error () || response.status_code > 0) {
+        trace["response"] = response_trace_node (response);
+    }
+    if (response.has_error ()) {
         trace["error_type"]    = to_string (response.error_code);
         trace["error_message"] = response.error_message;
     }
@@ -306,8 +323,8 @@ const vayu::Response& response) {
     }
 
     // The engine's per-exchange warnings (issue #3307), top level on the same
-    // reasoning: a failed exchange has no `response` node and can still carry
-    // one. Omitted when empty, like `clientCertificate`, so a row stored before
+    // reasoning: an exchange the target never answered has no `response`
+    // node and can still carry one. Omitted when empty, like `clientCertificate`, so a row stored before
     // the field and a clean exchange read the same.
     if (!response.warnings.empty ()) {
         trace["warnings"] = vayu::json::serialize_warnings (response.warnings);

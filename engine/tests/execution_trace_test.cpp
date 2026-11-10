@@ -230,6 +230,55 @@ TEST (ExecutionTrace, AnUncutResponseStoresNoReadCapFlag) {
     EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
 }
 
+// The held length in bytes, on every response node (#3423): a reader cannot
+// recount it from `body`, because a JSON string's length is not its UTF-8
+// size ("caf\xC3\xA9" is four characters and five bytes). Mutation check: drop
+// `bodyBytes` from `response_trace_node` and the key is missing.
+TEST (ExecutionTrace, AnUncutResponseStoresItsByteCount) {
+    auto response      = make_response ();
+    response.body      = "caf\xC3\xA9";
+    response.body_size = response.body.size ();
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace["response"].contains ("bodyBytes")) << trace.dump ();
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5u);
+}
+
+// A stream's wire count (#3238) is what it delivered, which the held body
+// cannot say, so it replaces the held length. Mutation check: write the held
+// length after the stream's count and this reads 13.
+TEST (ExecutionTrace, AStreamsWireCountWinsOverTheHeldLength) {
+    auto response              = make_response ();
+    response.body_size         = 13;
+    response.stream_body_bytes = 5000;
+
+    auto trace = build_result_trace (make_request (), response);
+
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5000u);
+}
+
+// A failure that still names the server's status keeps what the server sent
+// beside the error (#3423), as the live answer does: the restored pane would
+// otherwise read "No headers in response". Mutation check: write the response
+// node only when `!response.has_error ()` and the node is missing.
+TEST (ExecutionTrace, AFailureAfterTheAnswerKeepsTheResponseBesideTheError) {
+    auto response          = make_response ();
+    response.http_version  = "HTTP/1.1";
+    response.header_lines  = { { "server", "mock" } };
+    response.error_code    = vayu::ErrorCode::BadContentEncoding;
+    response.error_message = "bad gzip";
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace.contains ("response")) << trace.dump ();
+    EXPECT_EQ (trace["response"]["headers"]["server"], "mock");
+    EXPECT_EQ (trace["response"]["headerLines"][0]["value"], "mock");
+    EXPECT_EQ (trace["response"]["httpVersion"], "HTTP/1.1");
+    EXPECT_EQ (trace["error_type"], to_string (vayu::ErrorCode::BadContentEncoding));
+    EXPECT_EQ (trace["error_message"], "bad gzip");
+}
+
 // ============================================================================
 // rawRequest - the wire message, stored (issue #348)
 //
@@ -393,6 +442,8 @@ TEST (ExecutionTrace, FailedTransferStillStoresItsSynthesizedRequest) {
     std::string::npos);
 }
 
+// Status 0 is "no answer from the target", so the headers a half-read
+// transfer collected are not stored as a response.
 TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
     auto response          = make_response ();
     response.status_code   = 0;
@@ -488,6 +539,12 @@ vayu::Response make_response_with_client_certificate () {
     return response;
 }
 
+vayu::Response make_response_with_body_size () {
+    auto response      = make_response ();
+    response.body_size = response.body.size ();
+    return response;
+}
+
 vayu::Response make_response_with_warnings () {
     auto response     = make_response ();
     response.warnings = { { "first_code", "first message" },
@@ -513,6 +570,7 @@ constexpr auto STORED_EQUALS_LIVE_CASES = std::to_array<StoredEqualsLiveCase> ({
 { "ClientCertificate", make_request, make_response_with_client_certificate,
 "/clientCertificate", "/clientCertificate" },
 { "Warnings", make_request, make_response_with_warnings, "/warnings", "/warnings" },
+{ "BodyBytes", make_request, make_response_with_body_size, "/response/bodyBytes", "/bodySize" },
 });
 
 class ExecutionTraceStoredEqualsLive

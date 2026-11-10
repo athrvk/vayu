@@ -1270,8 +1270,8 @@ std::optional<double> engine_ms) {
             trace["events"] = stream->events;
         }
 
-        // A capped body may split a UTF-8 sequence, and the raw response body can
-        // be arbitrary bytes - dump with error_handler_t::replace so a lone
+        // A capped `rawRequest` may split a UTF-8 sequence, and a request body
+        // can be arbitrary bytes - dump with error_handler_t::replace so a lone
         // continuation byte becomes U+FFFD instead of throwing (import.cpp uses
         // the same guard).
         db_result.trace_data =

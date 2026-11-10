@@ -982,16 +982,31 @@ TEST (CapTraceBodies, AStatedBodyBytesSurvivesTheCut) {
     EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5000u);
 }
 
-TEST (CapTraceBodies, InvalidUtf8SliceDumpsWithReplacement) {
-    // A cap that splits a multi-byte UTF-8 sequence must not make dump() throw.
-    // "abc" + a 2-byte sequence (0xC3 0xA9 = e-acute); cap 4 keeps the lead byte only.
-    auto trace = make_trace ("x", std::string ("abc\xC3\xA9"));
+// A cap that lands inside a character keeps the text before it (#3423): the
+// lead byte left dangling would be dumped as U+FFFD, and a reopened body would
+// end in a character the server never sent. `bodyBytes` stays the whole
+// length. Mutation check: store `body.substr (0, max_body_bytes)` in
+// `cap_node_body` and the body reads "caf\xC3".
+TEST (CapTraceBodies, ACutInsideACharacterKeepsTheTextBeforeIt) {
+    auto trace = make_trace ("x", std::string ("caf\xC3\xA9")); // 5 bytes
 
     cap_trace_bodies (trace, 4);
 
+    EXPECT_EQ (trace["response"]["body"], "caf");
     EXPECT_TRUE (trace["response"]["bodyTruncated"].get<bool> ());
-    EXPECT_NO_THROW (
-    (void)trace.dump (-1, ' ', false, nlohmann::json::error_handler_t::replace));
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5u);
+    // A strict dump: what is stored is text, with nothing left to replace.
+    EXPECT_NO_THROW ((void)trace.dump ());
+}
+
+// A cut on a character boundary takes nothing more than the cap does.
+TEST (CapTraceBodies, ACutAfterAWholeCharacterKeepsIt) {
+    auto trace = make_trace ("x", std::string ("caf\xC3\xA9!")); // 6 bytes
+
+    cap_trace_bodies (trace, 5);
+
+    EXPECT_EQ (trace["response"]["body"], std::string ("caf\xC3\xA9"));
+    EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 6u);
 }
 
 // A base64 body (issue #2458) is capped by what it decodes to, on a three-byte
