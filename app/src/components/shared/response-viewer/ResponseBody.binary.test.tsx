@@ -185,6 +185,46 @@ describe("bytes with no text view", () => {
 	});
 });
 
+describe("a binary header over a body the engine sent as text (#3427)", () => {
+	it.each(["application/octet-stream", "application/zip", "application/gzip"])(
+		"keeps the editor for %s when there are no bytes to say otherwise",
+		(contentType) => {
+			render(<ResponseBody body="hello" headers={{ "content-type": contentType }} />);
+
+			expect(editorProps.current?.value).toBe("hello");
+			expect(editorProps.current?.language).toBe("plaintext");
+			expect(screen.queryByText(/Binary data/)).toBeNull();
+		}
+	);
+
+	it("keeps the editor when the funnel read the bytes as text", () => {
+		render(
+			<ResponseBody
+				body="hello"
+				rawBytes={bytesOf(new TextEncoder().encode("hello"), true)}
+				headers={{ "content-type": "application/octet-stream" }}
+			/>
+		);
+
+		expect(editorProps.current?.value).toBe("hello");
+		expect(screen.queryByText(/Binary data/)).toBeNull();
+	});
+
+	it("still draws an image from a body with no bytes beside it", () => {
+		render(<ResponseBody body="GIF89a" headers={{ "content-type": "image/gif" }} />);
+
+		expect(screen.getByText("Image (GIF), 6 B")).toBeInTheDocument();
+		expect(editorProps.current).toBeNull();
+	});
+
+	it("still names a PDF from a body with no bytes beside it", () => {
+		render(<ResponseBody body="%PDF-" headers={{ "content-type": "application/pdf" }} />);
+
+		expect(screen.getByText("PDF document, 5 B")).toBeInTheDocument();
+		expect(editorProps.current).toBeNull();
+	});
+});
+
 describe("text decoded from bytes", () => {
 	it("shows the decoding, and says when bytes were replaced", () => {
 		render(
