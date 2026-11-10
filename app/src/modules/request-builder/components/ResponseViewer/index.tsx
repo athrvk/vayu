@@ -821,7 +821,7 @@ export default function ResponseViewer() {
 				</TabsContent>
 				<TabsContent value="timing" className="mt-0 flex-1 overflow-hidden">
 					{shown.timing ? (
-						<ResponseTimingTab timing={shown.timing} />
+						<ResponseTimingTab timing={shown.timing} redirects={shown.redirects} />
 					) : (
 						<EmptyState variant="inline" title="No timing recorded" />
 					)}

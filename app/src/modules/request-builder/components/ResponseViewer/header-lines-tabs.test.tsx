@@ -19,6 +19,8 @@
  * as two cookies. Each case renders the whole pane, so it fails on a tab that
  * is wired to `shown.headers` whatever the component below it does.
  *
+ * (The Timing cases at the end read `shown.redirects`, not headers.)
+ *
  * Mutation checks: pass `headers` to `ResponseCookies` alone and the Cookies
  * case fails; hand `RawRequestResponse` the map and the Raw case fails; count
  * `Object.keys(shown.headers)` for the tab and the count case fails.
@@ -154,5 +156,32 @@ describe("the Raw tab", () => {
 		}
 		expect(text.match(/< Set-Cookie: /g)).toHaveLength(2);
 		expect(text).not.toContain("< x-dup: one, two");
+	});
+});
+
+describe("the Timing tab", () => {
+	const timing = {
+		totalMs: 120,
+		dnsMs: 1,
+		connectMs: 2,
+		tlsMs: 3,
+		firstByteMs: 100,
+		downloadMs: 1,
+	};
+	const hop = { status: 302, statusText: "Found", headerLines: [] };
+
+	it("notes the summed phases when the response followed redirects", () => {
+		renderViewer(response({ timing, redirects: [hop] }));
+		selectTab(/timing/i);
+
+		expect(screen.getByText(/Phases are summed over 2 requests/)).toBeInTheDocument();
+	});
+
+	it("says nothing of the kind for a response that followed none", () => {
+		renderViewer(response({ timing }));
+		selectTab(/timing/i);
+
+		expect(screen.getByText("Request timing")).toBeInTheDocument();
+		expect(screen.queryByText(/Phases are summed/)).toBeNull();
 	});
 });

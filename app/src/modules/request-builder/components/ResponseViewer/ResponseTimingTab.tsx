@@ -44,6 +44,8 @@ import {
 } from "@/components/shared/response-viewer/utils";
 import { phaseColor, phasesFromTrace } from "@/components/shared/response-viewer/timing-phases";
 import { Eyebrow, InfoChip } from "@/components/ui";
+import { pluralize } from "@/modules/dashboard/utils/format";
+import type { RedirectHop } from "@/types/domain";
 import type { ResponseTiming } from "../../types";
 
 /**
@@ -54,12 +56,33 @@ import type { ResponseTiming } from "../../types";
  */
 const TIP_CLASS = "ml-1 border-rule";
 
+/**
+ * The engine adds each followed hop's libcurl timers into the phase fields
+ * (`add_phase_times`), so after a redirect TTFB is a sum of waits at every
+ * server on the chain, which the shared `PHASE_TIPS.ttfb` ("the server") would
+ * misdescribe. Kept here: the dashboard and history read the shared tip for
+ * single requests.
+ */
+const SUMMED_TTFB_TIP =
+	"Time to first byte, summed over every request in the redirect chain - server processing + propagation at each hop. It is not one server's wait.";
+
 export interface ResponseTimingTabProps {
 	timing: ResponseTiming;
+	/** The hops followed before the final response; their phases are in `timing`. */
+	redirects?: RedirectHop[];
 }
 
-export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
-	const phases = phasesFromTrace(timing);
+/** One request per followed redirect, plus the one that answered finally. */
+function summedPhasesNote(redirectCount: number): string {
+	return `Phases are summed over ${redirectCount + 1} requests: ${redirectCount} ${pluralize(redirectCount, "redirect")} and the final response.`;
+}
+
+export default function ResponseTimingTab({ timing, redirects }: ResponseTimingTabProps) {
+	const redirectCount = redirects?.length ?? 0;
+	const summed = redirectCount > 0;
+	const phases = phasesFromTrace(timing).map((p) =>
+		summed && p.key === "ttfb" ? { ...p, tip: SUMMED_TTFB_TIP } : p
+	);
 
 	// Bar segments are proportional to the network phases (which sum to ≈ wire).
 	const phaseSum = phases.reduce((s, p) => s + Math.max(0, p.value), 0);
@@ -68,6 +91,11 @@ export default function ResponseTimingTab({ timing }: ResponseTimingTabProps) {
 	return (
 		<div className="p-4 overflow-auto h-full">
 			<Eyebrow className="mb-3">Request timing</Eyebrow>
+			{summed && (
+				<p className="mb-3 text-label text-muted-foreground">
+					{summedPhasesNote(redirectCount)}
+				</p>
+			)}
 
 			{/* Continuous timeline: each phase is a sequential segment of the request. */}
 			<div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-accent">
