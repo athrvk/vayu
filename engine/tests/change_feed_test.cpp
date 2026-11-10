@@ -331,6 +331,7 @@ TEST_F (ChangeFeedDatabaseTest, ASpecSyncPublishesEachRowItWrote) {
 
     const auto events = published_since (before);
     std::vector<std::pair<std::string, std::string>> seen;
+    seen.reserve (events.size ());
     for (const auto& event : events) {
         seen.emplace_back (event.change.id, vayu::db::to_string (event.change.op));
     }
@@ -380,7 +381,7 @@ TEST_F (ChangeFeedDatabaseTest, RetentionPublishesOnePurgePerRootItDestroys) {
     db_->delete_collection ("col_2");
 
     const auto before = db_->change_feed ().last_id ();
-    EXPECT_EQ (db_->purge_expired_trash (1, now_ms () + 2 * DAY_MS), 2);
+    EXPECT_EQ (db_->purge_expired_trash (1, now_ms () + (2 * DAY_MS)), 2);
     const auto events = published_since (before);
     ASSERT_EQ (events.size (), 2U);
     for (const auto& event : events) {
@@ -550,23 +551,34 @@ class ChangeFeedRouteTest : public ChangeFeedDatabaseTest {
         ChangeFeedDatabaseTest::TearDown ();
     }
 
-    /// The JSON answer to one call, which must succeed.
-    json call (const std::string& method, const std::string& path, const json& body = nullptr) {
+    /// The JSON answer to one call, which must succeed. An absent body is
+    /// sent empty, as a client with nothing to say sends it.
+    json post (const std::string& path, const json& body = nullptr) const {
         httplib::Client client ("127.0.0.1", port_);
-        const std::string text = body.is_null () ? std::string{} : body.dump ();
-        httplib::Result result = method == "POST" ?
-        client.Post (path, text, "application/json") :
-        method == "PUT" ? client.Put (path, text, "application/json") :
-                          client.Delete (path);
+        return answer ("POST " + path, client.Post (path, text_of (body), "application/json"));
+    }
+
+    json put (const std::string& path, const json& body) const {
+        httplib::Client client ("127.0.0.1", port_);
+        return answer ("PUT " + path, client.Put (path, text_of (body), "application/json"));
+    }
+
+    json del (const std::string& path) const {
+        httplib::Client client ("127.0.0.1", port_);
+        return answer ("DELETE " + path, client.Delete (path));
+    }
+
+    static std::string text_of (const json& body) {
+        return body.is_null () ? std::string{} : body.dump ();
+    }
+
+    static json answer (const std::string& what, const httplib::Result& result) {
         if (!result) {
-            ADD_FAILURE () << method << " " << path << ": "
-                           << httplib::to_string (result.error ());
+            ADD_FAILURE () << what << ": " << httplib::to_string (result.error ());
             return nullptr;
         }
-        EXPECT_GE (result->status, 200)
-        << method << " " << path << ": " << result->body;
-        EXPECT_LT (result->status, 300)
-        << method << " " << path << ": " << result->body;
+        EXPECT_GE (result->status, 200) << what << ": " << result->body;
+        EXPECT_LT (result->status, 300) << what << ": " << result->body;
         return json::parse (result->body, nullptr, false);
     }
 
@@ -601,16 +613,15 @@ class ChangeFeedRouteTest : public ChangeFeedDatabaseTest {
 TEST_F (ChangeFeedRouteTest, EveryWriteRoutePublishesExactlyOneChange) {
     const auto collection = expect_one_change ("create collection",
     ChangeKind::Collection, ChangeOp::Create,
-    [&] { return call ("POST", "/collections", { { "name", "API" } }); });
+    [&] { return post ("/collections", { { "name", "API" } }); });
     const std::string col = collection.value ("id", "");
     ASSERT_FALSE (col.empty ());
-    expect_one_change ("update collection", ChangeKind::Collection, ChangeOp::Update, [&] {
-        return call ("PUT", "/collections/" + col, { { "name", "Renamed" } });
-    });
+    expect_one_change ("update collection", ChangeKind::Collection, ChangeOp::Update,
+    [&] { return put ("/collections/" + col, { { "name", "Renamed" } }); });
 
     const auto request =
     expect_one_change ("create request", ChangeKind::Request, ChangeOp::Create, [&] {
-        return call ("POST", "/requests",
+        return post ("/requests",
         { { "collectionId", col }, { "name", "Ping" }, { "method", "GET" },
         { "url", "https://example.test/ping" } });
     });
@@ -618,59 +629,56 @@ TEST_F (ChangeFeedRouteTest, EveryWriteRoutePublishesExactlyOneChange) {
     ASSERT_FALSE (req.empty ());
     EXPECT_EQ (last_change_id (), req);
     expect_one_change ("update request", ChangeKind::Request, ChangeOp::Update,
-    [&] { return call ("PUT", "/requests/" + req, { { "method", "POST" } }); });
+    [&] { return put ("/requests/" + req, { { "method", "POST" } }); });
     expect_one_change ("reorder", ChangeKind::Request, ChangeOp::Update, [&] {
-        return call ("POST", "/reorder",
+        return post ("/reorder",
         { { "moves",
         json::array ({ { { "type", "request" }, { "id", req }, { "order", 3 } } }) } });
     });
 
     const auto example =
     expect_one_change ("create example", ChangeKind::Example, ChangeOp::Create, [&] {
-        return call ("POST", "/requests/" + req + "/examples",
+        return post ("/requests/" + req + "/examples",
         { { "name", "200" }, { "origin", "user" } });
     });
     const std::string exa = example.value ("id", "");
     ASSERT_FALSE (exa.empty ());
     expect_one_change ("update example", ChangeKind::Example, ChangeOp::Update, [&] {
-        return call ("PUT", "/requests/" + req + "/examples/" + exa, { { "name", "OK" } });
+        return put ("/requests/" + req + "/examples/" + exa, { { "name", "OK" } });
     });
     expect_one_change ("delete example", ChangeKind::Example, ChangeOp::Delete,
-    [&] { return call ("DELETE", "/requests/" + req + "/examples/" + exa); });
-    expect_one_change ("restore example", ChangeKind::Example, ChangeOp::Restore,
-    [&] { return call ("POST", "/trash/" + exa + "/restore"); });
+    [&] { return del ("/requests/" + req + "/examples/" + exa); });
+    expect_one_change ("restore example", ChangeKind::Example,
+    ChangeOp::Restore, [&] { return post ("/trash/" + exa + "/restore"); });
 
     const auto environment = expect_one_change ("create environment",
     ChangeKind::Environment, ChangeOp::Create,
-    [&] { return call ("POST", "/environments", { { "name", "Dev" } }); });
+    [&] { return post ("/environments", { { "name", "Dev" } }); });
     const std::string env  = environment.value ("id", "");
     ASSERT_FALSE (env.empty ());
-    expect_one_change (
-    "update environment", ChangeKind::Environment, ChangeOp::Update, [&] {
-        return call ("PUT", "/environments/" + env, { { "name", "Staging" } });
-    });
+    expect_one_change ("update environment", ChangeKind::Environment, ChangeOp::Update,
+    [&] { return put ("/environments/" + env, { { "name", "Staging" } }); });
     expect_one_change ("delete environment", ChangeKind::Environment,
-    ChangeOp::Delete, [&] { return call ("DELETE", "/environments/" + env); });
+    ChangeOp::Delete, [&] { return del ("/environments/" + env); });
     expect_one_change ("purge environment", ChangeKind::Environment,
-    ChangeOp::Purge, [&] { return call ("DELETE", "/trash/" + env); });
+    ChangeOp::Purge, [&] { return del ("/trash/" + env); });
 
     const ChangeOp globals_op =
     db_->get_globals ().has_value () ? ChangeOp::Update : ChangeOp::Create;
-    expect_one_change ("save globals", ChangeKind::Globals, globals_op, [&] {
-        return call ("POST", "/globals", { { "variables", json::object () } });
-    });
+    expect_one_change ("save globals", ChangeKind::Globals, globals_op,
+    [&] { return post ("/globals", { { "variables", json::object () } }); });
 
     expect_one_change ("delete request", ChangeKind::Request, ChangeOp::Delete,
-    [&] { return call ("DELETE", "/requests/" + req); });
-    expect_one_change ("restore request", ChangeKind::Request, ChangeOp::Restore,
-    [&] { return call ("POST", "/trash/" + req + "/restore"); });
+    [&] { return del ("/requests/" + req); });
+    expect_one_change ("restore request", ChangeKind::Request,
+    ChangeOp::Restore, [&] { return post ("/trash/" + req + "/restore"); });
     expect_one_change ("delete collection", ChangeKind::Collection,
-    ChangeOp::Delete, [&] { return call ("DELETE", "/collections/" + col); });
-    expect_one_change ("restore collection", ChangeKind::Collection, ChangeOp::Restore,
-    [&] { return call ("POST", "/trash/" + col + "/restore"); });
+    ChangeOp::Delete, [&] { return del ("/collections/" + col); });
+    expect_one_change ("restore collection", ChangeKind::Collection,
+    ChangeOp::Restore, [&] { return post ("/trash/" + col + "/restore"); });
 
     expect_one_change ("import", ChangeKind::Collection, ChangeOp::Create, [&] {
-        return call ("POST", "/import/apply",
+        return post ("/import/apply",
         { { "collections",
         json::array ({ { { "tempId", "c1" }, { "name", "Imported" } } }) } });
     });
@@ -690,7 +698,7 @@ TEST_F (ChangeFeedRouteTest, AStreamOpensReadyThenRelaysAChangeAsItCommits) {
     EXPECT_EQ (opening.front ().id, newest);
     EXPECT_EQ (json::parse (opening.front ().data), json ({ { "lastEventId", newest } }));
 
-    call ("PUT", "/requests/req_1", { { "name", "Renamed" } });
+    put ("/requests/req_1", { { "name", "Renamed" } });
     const auto frames = reader.await_frames (2);
     ASSERT_EQ (frames.size (), 2U);
     EXPECT_EQ (frames[1].event, "change");

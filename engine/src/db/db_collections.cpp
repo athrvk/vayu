@@ -269,8 +269,9 @@ const std::optional<std::string>& declined_under) {
     // already took keeps that delete's stamp, so restoring this collection
     // leaves it in the trash - as its own root, since its owner is live again.
     // The cascade publishes one change, on the root, and only when this call
-    // is what stamped it.
-    std::optional<Change> root_deleted;
+    // stamps it: a root already in the trash changes nothing.
+    const auto live_root = impl_->storage.get_all<Collection> (
+    where (c (&Collection::id) == id && is_null (&Collection::deleted_at)));
     impl_->storage.transaction ([&] {
         for (const auto& collection_id : subtree) {
             for (auto& request : impl_->storage.get_all<Request> (
@@ -288,15 +289,12 @@ const std::optional<std::string>& declined_under) {
                  c (&Collection::id) == collection_id && is_null (&Collection::deleted_at)))) {
                 collection.deleted_at = stamp;
                 impl_->storage.update (collection);
-                if (collection.id == id) {
-                    root_deleted = collection_change (collection, ChangeOp::Delete);
-                }
             }
         }
         return true; // Commit
     });
-    if (root_deleted) {
-        impl_->changes.publish (std::move (*root_deleted));
+    if (!live_root.empty ()) {
+        impl_->changes.publish (collection_change (live_root.front (), ChangeOp::Delete));
     }
 
     // No spec-document sweep here, deliberately: a stamped collection still
