@@ -61,6 +61,7 @@
 #include "optional_assert.hpp"
 #include "sibling_listing.hpp"
 #include "temp_database.hpp"
+#include "vayu/core/constants.hpp"
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/postman_export.hpp"
 #include "vayu/db/database.hpp"
@@ -3460,6 +3461,56 @@ TEST (PostmanImport, KeepsASavedResponseWhoseCodeIsNotANumberAsA200) {
     EXPECT_EQ (examples[0].at ("status"), 200);
     EXPECT_EQ (examples[1].at ("status"), 200);
     EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 0);
+}
+
+/// A saved response whose body is past `request_example::MAX_BODY_BYTES` is one
+/// `POST /import/apply` refuses, which would fail the whole import (#3431), so
+/// the import leaves it out and counts it while the request and the responses
+/// within the limit still import. The body at exactly the limit is kept.
+/// Mutation check: removing the size predicate imports the oversize row and the
+/// count reads 0.
+TEST (PostmanImport, LeavesOutASavedResponseWhoseBodyIsOverTheLimit) {
+    constexpr size_t LIMIT = vayu::core::constants::request_example::MAX_BODY_BYTES;
+    const json item          = { { "name", "R" },
+        { "request", { { "method", "GET" }, { "url", "https://x.com" } } },
+        { "response",
+        { { { "name", "over" }, { "code", 200 }, { "body", std::string (LIMIT + 1, 'x') } },
+        { { "name", "at" }, { "code", 200 }, { "body", std::string (LIMIT, 'x') } },
+        { { "name", "small" }, { "code", 200 }, { "body", "{}" } } } } };
+    const ImportParse parsed = parse_postman_items (item.dump ());
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& request = parsed.result.at ("collections")[0].at ("requests")[0];
+    const json& examples = request.at ("examples");
+    ASSERT_EQ (examples.size (), 2u);
+    EXPECT_EQ (examples[0].at ("name"), "at");
+    EXPECT_EQ (examples[0].at ("body").get<std::string> ().size (), LIMIT);
+    EXPECT_EQ (examples[1].at ("name"), "small");
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 1);
+}
+
+/// A request keeps its first `request_example::MAX_PER_REQUEST` saved responses
+/// and each one past that is counted, because `POST /import/apply` refuses a
+/// request carrying more (#3431) and would fail the whole import.
+/// Mutation check: removing the cap imports all MAX_PER_REQUEST + 1 and the
+/// count reads 0.
+TEST (PostmanImport, KeepsOnlyTheFirstSavedResponsesUpToThePerRequestCap) {
+    constexpr size_t CAP = vayu::core::constants::request_example::MAX_PER_REQUEST;
+    json responses = json::array ();
+    for (size_t index = 0; index <= CAP; ++index) {
+        responses.push_back ({ { "name", "r" + std::to_string (index) },
+        { "code", 200 }, { "body", "" } });
+    }
+    const json item          = { { "name", "R" },
+        { "request", { { "method", "GET" }, { "url", "https://x.com" } } },
+        { "response", std::move (responses) } };
+    const ImportParse parsed = parse_postman_items (item.dump ());
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    const json& examples =
+    parsed.result.at ("collections")[0].at ("requests")[0].at ("examples");
+    ASSERT_EQ (examples.size (), CAP);
+    EXPECT_EQ (examples.front ().at ("name"), "r0");
+    EXPECT_EQ (examples.back ().at ("name"), "r" + std::to_string (CAP - 1));
+    EXPECT_EQ (skipped_count (parsed.result.at ("meta"), "malformed_item"), 1);
 }
 
 /// An OpenAPI `101` (a WebSocket upgrade) documents a response no mock can
