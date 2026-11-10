@@ -8637,8 +8637,8 @@ sentence a person reads. A warning never fails the send. It is always present on
 a design answer, an empty array when there is nothing to say, so a client can
 tell "no warnings" from an engine too old to warn. The stored
 `trace_data` carries it at the top level, beside `clientCertificate` and not
-inside `response`, because a send the target never answered has no `response`
-node and can still have warned; it is written only when non-empty, so a row
+inside `response`, because a send that failed before any header block
+arrived has no `response` node and can still have warned; it is written only when non-empty, so a row
 stored before the field reads as having none. A load-run sample records none.
 Codes are listed here as the engine starts producing them:
 
@@ -12267,15 +12267,15 @@ step - its steps are read from the report's `results` array instead.
 ```
 
 `trace.error_type` / `trace.error_message` are present when the exchange
-failed, and `trace.response` when it did not or when the failure still names
-a non-zero `statusCode` (issue #3423): such a trace keeps the server's
-`headers`, `headerLines`, `httpVersion` and `body` beside the error, so a
-client must not read the presence of `response` as success. A failure at
-`statusCode` 0 has no `trace.response`, and every engine driver reports a
-failure at status 0 today, a send that failed after reading the server's
-headers (an undecodable body, a timeout mid-body, too many redirects) included;
-the live answer to such a send carries those headers, the stored trace does
-not.
+failed, and `trace.response` when it did not or when the failure came after a
+header block arrived (issue #3423): an undecodable body, a timeout mid-body,
+too many redirects. Such a failure is still reported at `statusCode` 0, and
+its trace keeps the `headers`, `headerLines`, `httpVersion` and `body` the live
+answer showed beside the error, so a client must not read the presence of
+`response` as success. A failure that received no header block (a refused
+connection, an unresolved host, a failed handshake) has no `trace.response`.
+A proxy's answer counts as a header block: a proxy's refusal, or headers on
+the tunnel it opened, are kept as the live answer shows them.
 
 Every `trace.response` carries `bodyBytes` (issue #3423), the body's length in
 bytes, which a client cannot recount from `body` because a JSON string's

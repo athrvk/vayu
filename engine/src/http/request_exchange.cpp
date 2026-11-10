@@ -296,12 +296,14 @@ const vayu::Response& response) {
     record_auth_provenance (trace["request"], request);
 
     // A response node for every exchange that did not fail, and for a failure
-    // that still names the server's status (#3423), whose headers, protocol
-    // and body are then kept beside `error_type`. Status 0 is "no answer from
-    // the target" and stores no node. Every driver reports a failure at status
-    // 0 today (`mark_failed`, the stream's `settle_end_reason`), so a failed
-    // trace has no node however much of a reply the transfer read.
-    if (!response.has_error () || response.status_code > 0) {
+    // after a header block arrived (#3423): an undecodable body, a timeout
+    // mid-body, a redirect limit. Every driver reports a failure at status 0
+    // (`mark_failed`, the stream's `settle_end_reason`), so the headers are
+    // the only sign of an answer, and the live answer shows them beside the
+    // error. A refused connection or an unresolved host received none and
+    // stores no node; a proxy's refusal stores the proxy's headers, as the
+    // live answer shows them.
+    if (!response.has_error () || !response.headers.empty ()) {
         trace["response"] = response_trace_node (response);
     }
     if (response.has_error ()) {
@@ -323,9 +325,10 @@ const vayu::Response& response) {
     }
 
     // The engine's per-exchange warnings (issue #3307), top level on the same
-    // reasoning: an exchange the target never answered has no `response`
-    // node and can still carry one. Omitted when empty, like `clientCertificate`, so a row stored before
-    // the field and a clean exchange read the same.
+    // reasoning: a failed exchange that received no headers has no
+    // `response` node and can still carry one. Omitted when empty, like
+    // `clientCertificate`, so a row stored before the field and a clean
+    // exchange read the same.
     if (!response.warnings.empty ()) {
         trace["warnings"] = vayu::json::serialize_warnings (response.warnings);
     }

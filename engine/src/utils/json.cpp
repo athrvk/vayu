@@ -330,7 +330,9 @@ void cap_node_raw_request (nlohmann::json& node, size_t max_body_bytes) {
 
     const size_t body_start = separator + HEADER_BODY_SEPARATOR.size ();
     if (raw.size () - body_start > max_body_bytes) {
-        node["rawRequest"] = raw.substr (0, body_start + max_body_bytes);
+        // On a character boundary, as `cap_node_body` cuts the body (#3423).
+        node["rawRequest"] = std::string (vayu::utils::without_incomplete_utf8_tail (
+        std::string_view (raw).substr (0, body_start + max_body_bytes)));
     }
 }
 

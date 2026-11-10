@@ -1079,6 +1079,21 @@ TEST (CapTraceBodies, CapsTheRawRequestBodyAndKeepsTheHeaderBlockWhole) {
     EXPECT_TRUE (trace["request"]["bodyTruncated"].get<bool> ());
 }
 
+// The wire message's body is cut on a character boundary too (#3423), so a
+// reopened raw view does not end in a U+FFFD the request never carried.
+// Mutation check: store `raw.substr (0, body_start + max_body_bytes)` in
+// `cap_node_raw_request` and the message ends in "caf\xC3".
+TEST (CapTraceBodies, CutsTheRawRequestBodyOnACharacterBoundary) {
+    auto trace = make_trace (std::string ("caf\xC3\xA9"), "x");
+    trace["request"]["rawRequest"] =
+    make_raw_request (std::string ("caf\xC3\xA9"));
+
+    cap_trace_bodies (trace, 4);
+
+    EXPECT_EQ (trace["request"]["rawRequest"], make_raw_request ("caf"));
+    EXPECT_NO_THROW ((void)trace.dump ());
+}
+
 TEST (CapTraceBodies, LeavesAnUnderCapRawRequestVerbatim) {
     auto trace = make_trace ("small-request", "small-response");
     trace["request"]["rawRequest"] = make_raw_request ("small-request");

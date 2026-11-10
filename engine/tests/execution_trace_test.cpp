@@ -230,6 +230,19 @@ TEST (ExecutionTrace, AnUncutResponseStoresNoReadCapFlag) {
     EXPECT_FALSE (trace["response"].contains ("bodyCapped"));
 }
 
+// What a transfer the target never answered leaves on the response: the
+// timing and raw request a driver fills, and no status line, header or body.
+vayu::Response make_unanswered_response (vayu::ErrorCode code, std::string message) {
+    auto response        = make_response ();
+    response.status_code = 0;
+    response.status_text = "";
+    response.headers.clear ();
+    response.body.clear ();
+    response.error_code    = code;
+    response.error_message = std::move (message);
+    return response;
+}
+
 // The held length in bytes, on every response node (#3423): a reader cannot
 // recount it from `body`, because a JSON string's length is not its UTF-8
 // size ("caf\xC3\xA9" is four characters and five bytes). Mutation check: drop
@@ -258,10 +271,35 @@ TEST (ExecutionTrace, AStreamsWireCountWinsOverTheHeldLength) {
     EXPECT_EQ (trace["response"]["bodyBytes"].get<size_t> (), 5000u);
 }
 
-// A failure that still names the server's status keeps what the server sent
-// beside the error (#3423), as the live answer does: the restored pane would
-// otherwise read "No headers in response". Mutation check: write the response
-// node only when `!response.has_error ()` and the node is missing.
+// A send that failed after the server's header block arrived (an undecodable
+// body, a timeout mid-body, a redirect limit) is reported at status 0 by every
+// driver, and keeps what the server sent beside the error (#3423), as the live
+// answer does: the restored pane would otherwise read "No headers in
+// response". Mutation check: write the response node only when
+// `!response.has_error ()` and the node is missing.
+TEST (ExecutionTrace, AFailureAfterTheHeadersKeepsThemBesideTheError) {
+    auto response        = make_response ();
+    response.status_code = 0;
+    response.status_text = "";
+    response.body.clear ();
+    response.http_version = "HTTP/1.1";
+    response.header_lines = { { "Content-Encoding", "gzip" }, { "server", "mock" } };
+    response.headers = { { "content-encoding", "gzip" }, { "server", "mock" } };
+    response.error_code    = vayu::ErrorCode::BadContentEncoding;
+    response.error_message = "Unrecognized content encoding type";
+
+    auto trace = build_result_trace (make_request (), response);
+
+    ASSERT_TRUE (trace.contains ("response")) << trace.dump ();
+    EXPECT_EQ (trace["response"]["headers"]["content-encoding"], "gzip");
+    EXPECT_EQ (trace["response"]["headerLines"][1]["value"], "mock");
+    EXPECT_EQ (trace["response"]["httpVersion"], "HTTP/1.1");
+    EXPECT_EQ (trace["error_type"], to_string (vayu::ErrorCode::BadContentEncoding));
+    EXPECT_EQ (trace["error_message"], "Unrecognized content encoding type");
+}
+
+// The same rule for a failure that names a status, which no driver reports
+// today: the headers are what decide, not the code.
 TEST (ExecutionTrace, AFailureAfterTheAnswerKeepsTheResponseBesideTheError) {
     auto response          = make_response ();
     response.http_version  = "HTTP/1.1";
@@ -428,10 +466,9 @@ TEST (ExecutionTrace, RecordsOnlyTheAuthKindThatWasWritten) {
 // synthesizes one from the composed request - so an unreachable host still
 // stores the request it attempted, on the branch that writes no response node.
 TEST (ExecutionTrace, FailedTransferStillStoresItsSynthesizedRequest) {
-    auto response          = make_response_with_wire_request ();
-    response.status_code   = 0;
-    response.error_code    = vayu::ErrorCode::ConnectionFailed;
-    response.error_message = "connection refused";
+    auto response =
+    make_unanswered_response (vayu::ErrorCode::ConnectionFailed, "connection refused");
+    response.raw_request = make_response_with_wire_request ().raw_request;
 
     auto trace = build_result_trace (make_request (), response);
 
@@ -442,13 +479,11 @@ TEST (ExecutionTrace, FailedTransferStillStoresItsSynthesizedRequest) {
     std::string::npos);
 }
 
-// Status 0 is "no answer from the target", so the headers a half-read
-// transfer collected are not stored as a response.
+// A failure that received no header block is no answer from the target, and
+// stores the error with no response node.
 TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
-    auto response          = make_response ();
-    response.status_code   = 0;
-    response.error_code    = vayu::ErrorCode::ConnectionFailed;
-    response.error_message = "connection refused";
+    const auto response =
+    make_unanswered_response (vayu::ErrorCode::ConnectionFailed, "connection refused");
 
     auto trace = build_result_trace (make_request (), response);
 
@@ -465,10 +500,8 @@ TEST (ExecutionTrace, FailureStoresErrorInsteadOfResponse) {
 // the exchange where "which certificate did we send" is the whole question -
 // and that one stores no `response` node at all.
 TEST (ExecutionTrace, StoresTheClientCertificateOnAFailedExchangeToo) {
-    auto response               = make_response ();
-    response.status_code        = 0;
-    response.error_code         = vayu::ErrorCode::SslError;
-    response.error_message      = "handshake failure";
+    auto response =
+    make_unanswered_response (vayu::ErrorCode::SslError, "handshake failure");
     response.client_certificate = "api.example.com";
 
     auto trace = build_result_trace (make_request (), response);
@@ -490,11 +523,8 @@ TEST (ExecutionTrace, OmitsTheClientCertificateWhenNoneWasUsed) {
 // The engine's warnings (issue #3307) are top level, like the certificate, so
 // a failed exchange (no `response` node) still says what the engine did.
 TEST (ExecutionTrace, StoresWarningsInOrderOnAFailedExchangeToo) {
-    auto response          = make_response ();
-    response.status_code   = 0;
-    response.error_code    = vayu::ErrorCode::Timeout;
-    response.error_message = "timed out";
-    response.warnings      = { { "first_code", "first message" },
+    auto response = make_unanswered_response (vayu::ErrorCode::Timeout, "timed out");
+    response.warnings = { { "first_code", "first message" },
         { "second_code", "second message" } };
 
     auto trace = build_result_trace (make_request (), response);
