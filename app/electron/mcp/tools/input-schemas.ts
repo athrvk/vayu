@@ -640,7 +640,7 @@ export function storedAuthInput(subject: string, extra: string) {
  */
 export function storedCollectionAuthInput(extra: string) {
 	return authBlock(COLLECTION_AUTH_MODES).describe(
-		`Auth block stored on this collection, in the same shape run_request takes - e.g. { mode: 'bearer', token: '{{apiToken}}' }. "inherit" is refused: a collection is a link of the chain a request inherits through, and { mode: "none" } is how it stops being an auth source. It is stored as written and resolved when a request below it is sent, so {{variables}} inside it are fine. ${extra}`
+		`Auth block stored on this collection, as run_request takes it - e.g. { mode: 'bearer', token: '{{apiToken}}' }. No "inherit": a collection is a link of the chain, and { mode: "none" } stops it being an auth source. {{variables}} resolve at send. ${extra}`
 	);
 }
 
