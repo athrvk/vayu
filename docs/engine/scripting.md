@@ -3080,7 +3080,7 @@ you do not need to. Any header you derive yourself works the same way.
 ### Add or replace a query parameter
 
 `pm.request.url.query.upsert` replaces the first parameter of that name where
-it stands, or appends one when there is none. It encodes the value it is given
+it stands, or appends one when there is none. It encodes the value it is given when the request sends its query encoded
 and leaves the rest of the URL as written, a `{{baseUrl}}` host included, so
 the same line works on a literal URL and on an imported Postman request:
 

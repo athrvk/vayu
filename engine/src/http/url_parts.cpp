@@ -137,7 +137,7 @@ std::optional<std::size_t> host_end (std::string_view authority) {
     if (!authority.starts_with ('[')) {
         return std::min (find_outside_tokens (authority, ":"), authority.size ());
     }
-    const std::size_t close = authority.find (']');
+    const std::size_t close = find_outside_tokens (authority, "]");
     if (close == npos) {
         return std::nullopt;
     }

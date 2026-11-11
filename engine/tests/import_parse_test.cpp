@@ -2282,6 +2282,30 @@ TEST (PostmanImport, CertificateOnAnUnresolvedVariableHostIsCountedRatherThanDro
     EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ());
 }
 
+/// A port or scheme still written as `{{name}}` parses since #3454 with the
+/// braces outside the host; the certificate must still be counted, not
+/// registered for the bare host.
+TEST (PostmanImport, CertificateOnATemplatedPortOrSchemeIsCountedNotRegistered) {
+    const ScratchFile cert ("import_parse_cert_templated_port.pem");
+    const ScratchFile key ("import_parse_key_templated_port.pem");
+    for (const std::string url :
+    { "https://api.example.com:{{port}}/pets", "{{scheme}}://api.example.com/pets" }) {
+        const ImportParse parsed =
+        parse_import (R"({"info":{"schema":")" + std::string (POSTMAN_SCHEMA) + R"("},"item":[
+        {"name":"R","request":{"method":"GET","url":")" +
+        url + R"(",
+            "certificate":{"name":"c","cert":{"src":")" +
+        cert.path () + R"("},"key":{"src":")" + key.path () +
+        R"("},"passphrase":"secret"}}}
+    ]})",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (skip_counts (parsed.result.at ("meta").at ("skipped")).at ("certificate"), 1)
+        << url;
+        EXPECT_TRUE (parsed.result.at ("clientCertificates").empty ()) << url;
+    }
+}
+
 /// A `cert.src` with no `key.src` is an incomplete PEM pair - the same
 /// "key file is empty" refusal `POST /client-certificates` gives a hand-written
 /// entry (`client_cert_file_rejection`), so this is "cannot resolve" too, not a
@@ -2340,7 +2364,7 @@ TEST (PostmanImport, TwoRequestsWithTheSameCertificateForOneHostDedupe) {
     const std::string request = R"({"name":"R","request":{"method":"GET",
         "url":"https://api.example.com/pets",
         "certificate":{"cert":{"src":")" +
-    cert.path () + R"("},"key":{"src":")" + key.path () + R"("}}}})";
+    cert.path () + R"("},"key":{"src":")" + key.path () + R"("},"passphrase":"secret"}}})";
     const ImportParse parsed = parse_import (R"({"info":{"schema":")" +
     std::string (POSTMAN_SCHEMA) + R"("},"item":[)" + request + "," + request + "]}",
     {}, {});
