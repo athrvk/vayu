@@ -2033,7 +2033,8 @@ is how the Cookies tab knows the `set-cookie` it holds is folded and must be
 split by the legacy `parseSetCookie` rather than read one cookie per line. The
 Headers and Raw tabs and the History step pane show the lines when there are
 some and `headers` when there are not (`resolveHeaderLines`); Save as example
-stores the folded map.
+does the same, one row per received line, so a `Set-Cookie` pair stays two rows
+(issue #3422). It also saves a `bodyCapped` body as partial.
 
 `redirects` is the redirect responses the send followed (issue #2461): one
 `{ status, statusText, headerLines, url?, schemeDowngrade? }` per 3xx, in arrival

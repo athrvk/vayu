@@ -334,8 +334,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a saved example is refused with the engine's 409 when its request is gone or full, and a client certificate when a live entry holds its host and port |
 | `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count, a saved example's name, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
-| `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; the returned row has credential-header values withheld unless revealed |
-| `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; the returned row has credential-header values withheld unless revealed |
+| `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; `headers` is ordered `{key, value, enabled?}` rows (repeats kept) or a string map; the returned row has credential-header values withheld unless revealed |
+| `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; `headers` (rows or map) replaces the whole list; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence); a soft delete for a saved (`user`) example - it goes to the Trash; an imported example becomes a spec-sync tombstone, not a Trash entry |
 | `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId`; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); a blank or whitespace-only `name` is an input error, as on `update_environment`, and never reaches the engine (#3253); the returned row has secret values withheld unless revealed |
@@ -870,10 +870,11 @@ Notes:
   names no `mockExampleId`, exactly like the bodyType-without-body refusal
   above, and the change only takes effect the next time `start_mock_server`
   runs - a running mock's route table is a snapshot, not a live view of the
-  request. A `mockExampleId` that later stops resolving (the example was
-  deleted or suppressed after the write) is not refused retroactively; the
-  mock server falls back to `"first"` at serve time, same as a `fixed` mode
-  pointed at an example that never existed.
+  request. Deleting the example it names (`delete_request_example`, or the
+  Examples tab) clears `mockExampleId` engine-side (issue #3422). One that
+  stops resolving another way is not refused retroactively; the mock server
+  falls back to `"first"` at serve time, same as a `fixed` mode pointed at an
+  example that never existed.
 - **A skipped certificate check has to leave a record** (issue #795). The
   *stored* `verifySSL: false` is writable over MCP; a *per-call* one is not.
   `run_request` declares `verifySSL` only so that `false` is refused by name -
@@ -900,7 +901,16 @@ Notes:
   overwrite, and one that could claim `user` could pin a stale imported row
   against the document it came from - neither is the agent's call, so
   `create_request_example` always stores `user` and the update tool cannot
-  restate it. Bodies are bounded on the way out for the reason
+  restate it. **`headers` on the two write tools is an ordered array of
+  `{key, value, enabled?}` rows or a string map** (#3422). An example is a
+  stored list and a captured response can repeat a name - several `Set-Cookie`
+  lines are several rows - which a map cannot hold, so the rows are forwarded
+  as given, in order, a repeated key kept and `enabled` defaulting to true; the
+  map is the short spelling, one value per name. A row that is not an object
+  with string `key` and `value` is refused by its position. Update replaces the
+  whole list. The rows are `{key, value}`, unlike `run_request`'s `{name, value}`
+  lines, because they are the rows the engine stores and
+  `list_request_examples` returns, not a request in flight. Bodies are bounded on the way out for the reason
   `get_run_report`'s traces are (#767, #769): an example body is capped
   engine-side at 1 MB and a request may hold 100 of them. One over 32 KB comes
   back cut, flagged `bodyClipped` with its stored size in `bodyBytes`; once the
@@ -1687,6 +1697,8 @@ How each tool uses `POST /compose` (`tools/compose.ts::composeViaEngine`):
   answers lines either way, and a line that is not an object with a string
   `name` is refused by its position. The same payload that composes is the one
   sent: nothing is folded between the two.
+  The saved-example tools take `{key, value, enabled?}` rows instead, for the
+  reason given under the examples bullet above (#3422).
 - **What actually went out** - the engine adds headers an agent never wrote: the
   body-implied `Content-Type` (a `json` body, a `graphql` body on `POST`, or a
   `jsonrpc` body, sends `application/json`; a `graphql` body on `GET` has no

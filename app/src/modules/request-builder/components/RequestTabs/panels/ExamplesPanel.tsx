@@ -235,6 +235,13 @@ function MockResponseModeControl({
 }) {
 	const updateRequest = useUpdateRequestMutation();
 	const mode = request.mockResponseMode;
+	// What the mock answers with, not what the row records: a pointer that is
+	// unset, or names an example that is gone (a spec sync can drop one without
+	// touching the request), falls back to the first example, so the selector
+	// shows that one instead of a blank trigger (#3422).
+	const effectiveExampleId = examples.some((e) => e.id === request.mockExampleId)
+		? request.mockExampleId
+		: examples[0]?.id;
 
 	const setMode = (next: MockResponseMode, exampleId?: string) => {
 		if (!request.id) return;
@@ -272,10 +279,7 @@ function MockResponseModeControl({
 				<ToggleGroupItem value="fixed">Specific example</ToggleGroupItem>
 			</ToggleGroup>
 			{mode === "fixed" && (
-				<Select
-					value={request.mockExampleId ?? examples[0]?.id}
-					onValueChange={(id) => setMode("fixed", id)}
-				>
+				<Select value={effectiveExampleId} onValueChange={(id) => setMode("fixed", id)}>
 					{/* Fixed rem, not `w-40`: the trigger holds an example's name, a
 					    text measure that should not narrow at the Default density the
 					    way `w-40`'s `--spacing` unit does. */}

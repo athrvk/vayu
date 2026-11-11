@@ -25,6 +25,7 @@
  */
 
 import type { CreateRequestExampleRequest, KeyValueEntry } from "@/types";
+import { resolveHeaderLines } from "@/lib/header-lines";
 import type { ResponseState } from "../../types";
 import { receivedBody } from "../../utils/response-bytes";
 
@@ -61,9 +62,19 @@ export function exampleRefusal(response: Pick<ResponseState, "rawBytes">): strin
 	return response.rawBytes ? "Examples hold UTF-8 text, and this body isn't" : undefined;
 }
 
-/** The response's headers as stored entries, in the order they are held. */
-function headerEntries(headers: Record<string, string>): KeyValueEntry[] {
-	return Object.entries(headers).map(([key, value]) => ({ key, value, enabled: true }));
+/**
+ * The response's headers as stored entries, one per line the server sent, in
+ * its case and order (issue #3422). The folded `headers` map joins a repeated
+ * name into one value and lowercases it, so saving from it would store a
+ * `Set-Cookie` pair as one row and a mock would answer with a header the server
+ * never sent; a response with no recorded lines falls back to that map.
+ */
+function headerEntries(response: ResponseState): KeyValueEntry[] {
+	return resolveHeaderLines(response.headers, response.headerLines).map(({ name, value }) => ({
+		key: name,
+		value,
+		enabled: true,
+	}));
 }
 
 /**
@@ -85,7 +96,7 @@ export function exampleFromResponse(
 	response: ResponseState,
 	name: string
 ): CreateRequestExampleRequest {
-	const headers = headerEntries(response.headers);
+	const headers = headerEntries(response);
 	return {
 		name,
 		status: response.status,
@@ -97,10 +108,11 @@ export function exampleFromResponse(
 		// Always `user`: this is the field a spec sync reads to know it must
 		// leave the row alone (#627). An app-saved example is never a spec's.
 		origin: "user",
-		// `?? false` rather than passing it through: `ResponseState` leaves the
-		// flag optional for responses that never went through a trace, and an
-		// absent one there means "not truncated", not "unknown".
-		bodyTruncated: response.bodyTruncated ?? false,
+		// Partial either way: stored-run truncation or a read stopped at the Send
+		// cap (`bodyCapped`, #3422). Both leave a body that is not what the server
+		// sent, and a mock serves it as whole. An absent flag means "not partial",
+		// not "unknown", for a response that never went through a trace.
+		bodyTruncated: Boolean(response.bodyTruncated || response.bodyCapped),
 		...(response.sentRequest && {
 			savedFrom: {
 				request: response.sentRequest,

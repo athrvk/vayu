@@ -220,7 +220,7 @@ Postman stores a request's recorded responses in `item.response[]`. They were re
 
 `postmanResponse` keeps what no example field models - the request the response was recorded against (`originalRequest`, which usually differs per example: its own query values, headers, body and path variables), the status text as recorded, `_postman_previewlanguage` / `_postman_previewtype`, `cookie[]`, `responseTime`, and the header rows as written (`name` fields, number values) - so an export writes them back. It is stored in `request_examples.postman_response` and read only by the Postman export; nothing is lost, so nothing is counted in `meta.skipped`. An entry whose text would pass the cap is imported without it and its export regenerates those members.
 
-An entry that is not an object, or whose numeric `code` is outside 200-599, counts toward `malformed_item`, the same treatment `pm_folder` gives a malformed item. A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
+An entry that is not an object, whose numeric `code` is outside 200-599, or whose `body` is over 1 MiB (`request_example::MAX_BODY_BYTES`, measured in bytes) counts toward `malformed_item`, the same treatment `pm_folder` gives a malformed item. A request keeps its first 100 saved responses (`request_example::MAX_PER_REQUEST`) and each one past that is left out and counted the same way. `POST /import/apply` refuses both an oversize body and a request past the cap, so leaving them out here is what keeps one recorded response from failing the whole import (issue #3431). A request that saved no responses omits `examples` entirely rather than sending `[]` - the orchestrator forwards presence, and an empty array reads as "this request documents no responses".
 
 `meta.exampleCount` totals what survived, counted off the drafts by `count_examples` (the same read-the-result approach `unattached_file_parts` uses), and the import preview shows it.
 
@@ -551,6 +551,12 @@ request as it was when you pressed Send - method, URL, params, headers and
 body, with `{{variables}}` left unresolved and auth left out - together with
 the server's own status text, the response's cookies (a `Max-Age` counted from
 when the response arrived) and its response time.
+The saved headers are one row per header line the server sent, in its case and
+order, so two `Set-Cookie` lines are two rows and two real cookies in the
+export's `cookie[]`, not one row holding both. A body the engine stopped reading
+at the Send response cap (*Max Send response body* in Settings) saves as partial,
+the same *Partial body* flag a body shortened for storage gets, and the dialog
+says so before you save.
 The export writes those back, so editing the request afterwards does not change
 what the example says it was sent with. A value typed literally into a header
 or the URL at Send stays in that example after you remove it from the request;

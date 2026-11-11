@@ -123,6 +123,30 @@ describe("ExamplesPanel mock response mode", () => {
 		);
 	});
 
+	// The engine answers with the first example for a pointer that is unset or
+	// names an example that is not in the list (#3422), so the selector says
+	// that one rather than rendering blank.
+	it.each([
+		["no pointer", undefined],
+		["a stale pointer", "exa_gone"],
+	])("shows the first example in the selector for %s", async (_label, mockExampleId) => {
+		getRequest.mockResolvedValue({ ...REQUEST, mockResponseMode: "fixed", mockExampleId });
+		renderPanel({ id: "req_1" });
+
+		expect(await screen.findByRole("combobox", { name: "Example" })).toHaveTextContent("A");
+	});
+
+	it("shows the example the pointer names when it is in the list", async () => {
+		getRequest.mockResolvedValue({
+			...REQUEST,
+			mockResponseMode: "fixed",
+			mockExampleId: "exa_b",
+		});
+		renderPanel({ id: "req_1" });
+
+		expect(await screen.findByRole("combobox", { name: "Example" })).toHaveTextContent("B");
+	});
+
 	it("writes random mode and clears the fixed example id", async () => {
 		renderPanel({ id: "req_1" });
 
