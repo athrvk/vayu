@@ -579,7 +579,7 @@ Stores folder/group hierarchy for requests.
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
 | `variables`          | TEXT    | JSON: `Record<string, VariableValue>`        |
-| `auth`               | TEXT    | JSON: `RequestAuth` (never `inherit`)        |
+| `auth`               | TEXT    | JSON: `RequestAuth` (`POST`/`PUT /collections` refuse `inherit`, #3445; a row stored before that is read as no auth of its own) |
 | `elements`           | TEXT    | JSON array of elements (issue #1513, run by #1514); default `"[]"` |
 | `data_schema`        | TEXT    | JSON: the declared data contract; default `"{}"` |
 | `openapi`            | TEXT    | JSON: the bound spec document; default `"{}"` |

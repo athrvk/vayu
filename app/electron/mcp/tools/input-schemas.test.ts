@@ -18,7 +18,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { TOOLS } from "../tools.js";
-import { authInput, storedAuthInput } from "./input-schemas.js";
+import { authInput, storedAuthInput, storedCollectionAuthInput } from "./input-schemas.js";
 
 const MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"];
 
@@ -138,6 +138,51 @@ describe("a tool call is refused by the registered schema", () => {
 				collectionId: "col_1",
 				name: "r",
 				auth: { mode: "Bearer", token: "t" },
+			});
+			expect(parsed.success).toBe(false);
+			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toContain(
+				"auth"
+			);
+		}
+	);
+});
+
+describe("a collection's stored auth never inherits (#3445)", () => {
+	const collectionAuth = storedCollectionAuthInput("Extra.");
+
+	it("refuses inherit and says why", () => {
+		const [message] = refusal({ mode: "inherit" }, collectionAuth);
+		expect(message).toContain("A collection cannot inherit auth");
+		expect(message).toContain('"none"');
+		expect(message).not.toContain("inherit, none");
+	});
+
+	it.each(MODES.filter((mode) => mode !== "inherit"))("still accepts %s", (mode) => {
+		expect(collectionAuth.safeParse({ mode }).success).toBe(true);
+	});
+
+	it("keeps the shared refusals", () => {
+		expect(refusal({ mode: "Bearer" }, collectionAuth)[0]).toContain("Unknown auth mode");
+		expect(refusal({ mode: "apikey", addTo: "query" }, collectionAuth)[0]).toContain('"in"');
+	});
+
+	it("leaves the shared authInput accepting inherit", () => {
+		expect(authInput.safeParse({ mode: "inherit" }).success).toBe(true);
+		expect(storedAuthInput("a request", "Extra.").safeParse({ mode: "inherit" }).success).toBe(
+			true
+		);
+	});
+
+	it.each(["create_collection", "update_collection"])(
+		"%s is refused inherit by its registered schema",
+		(name) => {
+			const tool = TOOLS.find((t) => t.name === name);
+			expect(tool).toBeDefined();
+			const schema = z.object(tool?.inputSchema ?? {});
+			const parsed = schema.safeParse({
+				collectionId: "col_1",
+				name: "c",
+				auth: { mode: "inherit" },
 			});
 			expect(parsed.success).toBe(false);
 			expect(parsed.success ? [] : parsed.error.issues.map((i) => i.path[0])).toContain(

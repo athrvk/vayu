@@ -283,6 +283,80 @@ TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
     EXPECT_EQ (body["order"], 3);
 }
 
+// -- A collection never inherits auth (#3445) -------------------------------
+//
+// Mutation check: drop `reject_inherit_auth` from either core and the matching
+// refusal test reds; make it fire on an absent `auth` and the legacy-row test
+// reds; make it fire on null and the null test reds.
+
+TEST_F (CollectionsRouteTest, ACreateStatingInheritAuthIsRefusedAndWritesNothing) {
+    auto [status, body] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "X" }, { "auth", { { "mode", "inherit" } } } });
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("'auth'"), std::string::npos)
+    << body.dump ();
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateStatingInheritAuthIsRefusedAndLeavesTheRowAlone) {
+    seed_collection ("col_a", "A");
+    const auto before = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (before);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (*db_,
+    "col_a", json{ { "name", "Renamed" }, { "auth", { { "mode", "inherit" } } } });
+
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_NE (body["error"]["message"].get<std::string> ().find ("'auth'"), std::string::npos)
+    << body.dump ();
+    const auto after = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "A");
+    EXPECT_EQ (after->auth, before->auth);
+    EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+TEST_F (CollectionsRouteTest, OtherAuthModesAreStillStored) {
+    auto [status, body] = vayu::http::routes::create_collection_response (*db_,
+    json{ { "name", "X" }, { "auth", { { "mode", "bearer" }, { "token", "t" } } } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["auth"]["mode"], "bearer");
+}
+
+// A row stored before the refusal existed is still editable: only a stated
+// `auth` is judged, so a PUT that says nothing about it passes.
+TEST_F (CollectionsRouteTest, APutOfOtherFieldsSucceedsOnARowStoredWithInheritAuth) {
+    vayu::db::Collection legacy;
+    legacy.id   = "col_legacy";
+    legacy.name = "Legacy";
+    legacy.auth = R"({"mode":"inherit"})";
+    db_->create_collection (legacy);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_legacy", json{ { "name", "Renamed" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto stored = db_->get_collection ("col_legacy");
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Renamed");
+    EXPECT_EQ (json::parse (stored->auth)["mode"], "inherit");
+}
+
+TEST_F (CollectionsRouteTest, ANullAuthResetsToNoneOnBothVerbs) {
+    auto [created_status, created] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "X" }, { "auth", nullptr } });
+    ASSERT_EQ (created_status, 200) << created.dump ();
+    EXPECT_EQ (created["auth"]["mode"], "none");
+
+    seed_collection ("col_a", "A");
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_a", json{ { "auth", nullptr } });
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_EQ (body["auth"]["mode"], "none");
+}
+
 // -- GET /collections: `q` / `limit` / `offset` (#2443) ----------------------
 
 std::vector<std::string> ids_of (const json& rows) {

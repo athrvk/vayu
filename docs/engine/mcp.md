@@ -941,9 +941,11 @@ Notes:
   script argument with no explicit `elements` (which needs the stored list to
   fold the sugar into without dropping the collection's other elements) -
   passing `elements` directly, like a plain rename, sends one `PUT` and
-  nothing else. A collection is the root of an auth chain and never inherits,
-  which the engine enforces - `{mode: "none"}` is how a collection stops being
-  an auth source.
+  nothing else. A collection never inherits auth (#3445): both tools' `auth`
+  schema omits `inherit` and refuses it as an input error naming the modes that
+  are accepted, and the engine refuses it too (`400`), so `{mode: "none"}` is
+  how a collection stops being an auth source. `run_request`, `start_load_run`
+  and the request tools keep `inherit`.
 - **`move_item` is a bounded move, not a reorder** (issue #759). It maps to
   `POST /reorder`, whose batch validates and commits under one acquisition of the
   engine's DB mutex (#386) - which is why re-parenting goes here rather than

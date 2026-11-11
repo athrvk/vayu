@@ -572,6 +572,34 @@ TEST_F (RequestComposerTest, InheritWalksLeafToRootAndNoauthTerminates) {
     EXPECT_TRUE (vayu::http::resolve_inherited_auth ({}).is_null ());
 }
 
+// A row stored before collection writes refused `inherit` (#3445) is no
+// credential of its own: the walk steps past it like `none`, so the request
+// beneath it gets the nearest real auth instead of nothing.
+TEST_F (RequestComposerTest, InheritWalkStepsPastAFolderStoredWithInherit) {
+    seed_collection ("root", "", "", R"({"mode":"bearer","token":"root-token"})");
+    seed_collection ("folder", "root", "", R"({"mode":"inherit"})");
+
+    const auto resolved = vayu::http::resolve_inherited_auth (
+    vayu::http::collection_chain (*db_, "folder"));
+    ASSERT_TRUE (resolved.is_object ());
+    EXPECT_EQ (resolved.value ("token", ""), "root-token");
+
+    auto [status, payload] = vayu::http::compose_request_core (*db_,
+    json{ { "request",
+          { { "method", "GET" }, { "url", "https://x.test/" },
+          { "auth", { { "mode", "inherit" } } } } },
+    { "collectionId", "folder" } });
+    ASSERT_EQ (status, 200) << payload.dump ();
+    ASSERT_TRUE (payload.contains ("auth")) << payload.dump ();
+    EXPECT_EQ (payload["auth"].value ("token", ""), "root-token");
+
+    // With nothing concrete above it, the same stored row resolves to no auth.
+    seed_collection ("lone", "", "", R"({"mode":"inherit"})");
+    EXPECT_TRUE (
+    vayu::http::resolve_inherited_auth (vayu::http::collection_chain (*db_, "lone"))
+    .is_null ());
+}
+
 TEST_F (RequestComposerTest, ComposesASavedRequestById) {
     seed_collection ("root", "",
     R"({"host":{"value":"root.test","enabled":true},"path":{"value":"root-path","enabled":true}})",

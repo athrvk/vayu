@@ -565,7 +565,8 @@ collection_chain (vayu::db::Database& db, const std::string& leaf_id);
  * The auth a descendant's `inherit` resolves to: walk the chain leaf->root and
  * take the first collection with concrete auth. An explicit `noauth` stops the
  * walk ("send nothing" is a different answer from "nobody configured any");
- * `none` is stepped over. Returns the winning auth JSON, or `null` when the
+ * `none` is stepped over, and so is a stored `inherit` (collection writes refuse
+ * it since #3445, but an older row may hold one). Returns the winning auth JSON, or `null` when the
  * walk ends with nothing to send.
  */
 nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& chain);
