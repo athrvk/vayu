@@ -24,6 +24,7 @@
  */
 
 import { compactObject, readCompactJson, type JsonNode } from "./compact-json";
+import type { SnippetBody } from "./types";
 import { splitFragment } from "@/modules/request-builder/utils/query-encoding";
 import { maskTokens } from "@/modules/request-builder/utils/path-variables";
 
@@ -142,6 +143,21 @@ export function graphqlGetQuery(content: string): string | undefined {
 		if (parameter !== null) parameters.push(parameter);
 	}
 	return parameters.join("&");
+}
+
+/**
+ * The GraphQL document a request carries in its URL instead of a body, or
+ * undefined for any other request: `graphql_url_transport`'s gate
+ * (`engine/src/http/form_body.cpp`) - a GET whose body is the GraphQL mode with
+ * content. The text is as stored; the engine resolves `{{name}}` in it before it
+ * builds the query, so a caller that shows the sent URL resolves it first and
+ * only then asks {@link graphqlGetQuery}, which can still decline it.
+ */
+export function graphqlUrlContent(method: string, body: unknown): string | undefined {
+	if (method.toUpperCase() !== "GET" || typeof body !== "object" || body === null)
+		return undefined;
+	const { mode, content } = body as SnippetBody;
+	return mode === "graphql" && content ? content : undefined;
 }
 
 /**

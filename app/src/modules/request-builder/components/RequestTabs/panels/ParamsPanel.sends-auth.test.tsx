@@ -13,6 +13,9 @@
  * libcurl never sends is cut, and an API key placed in the query - the request's
  * own or one it inherits from a folder - is appended as the engine appends it.
  * The key's value is a credential, so it is masked on the line like any secret.
+ * An OAuth 2.0 token placed in the query and a GraphQL GET's document are on the
+ * wire too (#3437): the token is drawn as a masked stand-in, and a secret
+ * variable inside the document is masked where it lands encoded.
  */
 
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
@@ -188,5 +191,100 @@ describe("the Sends line's API key is masked as it was resolved and trimmed", ()
 		expect(lineNow()).toBe("https://x/s?api_key={{apiKey}}");
 		// The first paint was before the engine answered: the stored value, masked.
 		expect(line).toBe("https://x/s?api_key=••••");
+	});
+});
+
+describe("the Sends line's OAuth 2.0 token placed in the query (#3437)", () => {
+	const oauth2 = (config: Record<string, unknown>): RequestAuth =>
+		({ mode: "oauth2", config }) as unknown as RequestAuth;
+
+	it("adds the parameter with the token masked, under the default name", () => {
+		const line = sendsLine("{{base}}/s?q=1", { auth: oauth2({ tokenPlacement: "query" }) });
+		expect(line).toBe("https://x/s?q=1&access_token=••••");
+	});
+
+	it("adds it under the configured name", () => {
+		const auth = oauth2({ tokenPlacement: "query", queryParamName: "tok" });
+		expect(sendsLine("{{base}}/s", { auth })).toBe("https://x/s?tok=••••");
+	});
+
+	it("adds it for the OAuth 2.0 a request inherits from its chain", () => {
+		ancestors = [
+			{
+				id: "folder",
+				auth: oauth2({ tokenPlacement: "query", queryParamName: "tok" }),
+			} as unknown as Collection,
+		];
+		expect(sendsLine("{{base}}/s", { auth: { mode: "inherit" } })).toBe("https://x/s?tok=••••");
+	});
+
+	it("adds nothing for a header placement", () => {
+		const auth = oauth2({ tokenPlacement: "header", queryParamName: "tok" });
+		expect(sendsLine("{{base}}/s", { auth })).toBe("https://x/s");
+	});
+
+	it("shows a name a pre-request script sets as written", async () => {
+		composeRequest.mockResolvedValue({ deferredVariables: ["param"] });
+		const auth = oauth2({ tokenPlacement: "query", queryParamName: "{{param}}" });
+		sendsLine("{{base}}/s", { auth }, { param: { value: "stored" } });
+		expect(
+			await screen.findByText("{{param}} is set by a pre-request script at send.")
+		).toBeInTheDocument();
+		expect(lineNow()).toBe("https://x/s?{{param}}=••••");
+	});
+});
+
+describe("the Sends line's GraphQL GET (#3437)", () => {
+	const graphql = (content: string): Partial<RequestState> => ({
+		method: "GET",
+		bodyMode: "graphql",
+		body: content,
+	});
+
+	it("carries the document as the query parameter the engine sends", () => {
+		expect(sendsLine("{{base}}/g?a=1#top", graphql("{ me }"))).toBe(
+			"https://x/g?a=1&query=%7B%20me%20%7D"
+		);
+	});
+
+	it("carries an envelope's members, its variables resolved before they are encoded", () => {
+		const line = sendsLine(
+			"{{base}}/g",
+			graphql('{"query":"{ me }","variables":{"id":"{{userId}}"}}'),
+			{ userId: { value: "u 1" } }
+		);
+		expect(line).toBe(
+			"https://x/g?query=%7B%20me%20%7D&variables=%7B%22id%22%3A%22u%201%22%7D"
+		);
+	});
+
+	it("masks a secret variable in the document where it lands encoded", () => {
+		const line = sendsLine("{{base}}/g", graphql('{ login(pw: "{{pw}}") }'), {
+			pw: { value: "hunter2", secret: true },
+		});
+		expect(line).toBe("https://x/g?query=%7B%20login%28pw%3A%20%22••••%22%29%20%7D");
+		expect(line).not.toContain("hunter2");
+	});
+
+	it("masks a secret variable in an envelope's variables, whose value needs encoding", () => {
+		const line = sendsLine(
+			"{{base}}/g",
+			graphql('{"query":"{ me }","variables":{"pw":"{{pw}}"}}'),
+			{ pw: { value: "p@ss w&rd", secret: true } }
+		);
+		expect(line).toBe("https://x/g?query=%7B%20me%20%7D&variables=%7B%22pw%22%3A%22••••%22%7D");
+		expect(line).not.toMatch(/p%40ss|p@ss/);
+	});
+
+	it("adds nothing for a POST, whose document stays in the body", () => {
+		expect(sendsLine("{{base}}/g", { ...graphql("{ me }"), method: "POST" })).toBe(
+			"https://x/g"
+		);
+	});
+
+	it("adds nothing for a GET with any other body mode", () => {
+		expect(sendsLine("{{base}}/g", { method: "GET", bodyMode: "json", body: "{ me }" })).toBe(
+			"https://x/g"
+		);
 	});
 });

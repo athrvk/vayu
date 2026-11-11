@@ -45,7 +45,13 @@ import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
 import { AUTH_MODE_LABELS, isUneditableAuthMode } from "@/constants/auth-modes";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { DEFAULT_HTTP_VERSION, isHttpVersion, type HttpVersion } from "@/constants/request";
-import { curlEscape, graphqlGetQuery, urlWithQuery, wireBodyContent } from "./wire-body";
+import {
+	curlEscape,
+	graphqlGetQuery,
+	graphqlUrlContent,
+	urlWithQuery,
+	wireBodyContent,
+} from "./wire-body";
 
 /** A multipart part that uploads a file - its path, and what it declares. */
 export interface PreparedFilePart {
@@ -401,13 +407,11 @@ function normalizeBody(body: unknown): PreparedBody | undefined {
 
 /**
  * The query string a GraphQL GET carries its document as, or undefined for any
- * other request and for a GraphQL body the engine keeps in the body frame
- * (`graphql_url_transport`, `engine/src/http/form_body.cpp`).
+ * other request and for a GraphQL body the engine keeps in the body frame.
  */
 function graphqlUrlTransport(method: string, body: unknown): string | undefined {
-	if (method !== "GET" || typeof body !== "object" || body === null) return undefined;
-	const { mode, content } = body as SnippetBody;
-	return mode === "graphql" && content ? graphqlGetQuery(content) : undefined;
+	const content = graphqlUrlContent(method, body);
+	return content === undefined ? undefined : graphqlGetQuery(content);
 }
 
 /**

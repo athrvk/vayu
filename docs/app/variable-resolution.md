@@ -379,15 +379,23 @@ both call, so a `:name` path row's value fills its segment, a value is encoded
 by the part of the URL it lands in, and `disableUrlEncoding` leaves it as typed.
 The function returns the URL that reaches the server (#3425): the fragment is
 cut, since libcurl never sends it (a `#` inside a `{{token}}` is not one), and
-an API key placed in the query, the request's own or an inherited one, is
-appended as the engine's `append_query_param` does. Its `auth` input is the
-Sends line's alone: the tab title omits it so a title never carries the auth's
-API key, and keeps the fragment cut. An OAuth 2.0 token placed in the query
-and a GraphQL GET's query are not shown. Its `{{token}}`s in the key and value
+the auth's query parameter, then a GraphQL GET's document, are appended in the
+engine's order (#3437). The parameter is an API key placed in the query, the
+request's own or an inherited one, as the engine's `append_query_param` writes
+it, or an OAuth 2.0 token placed there (`tokenPlacement: "query"`, named by the
+config's `queryParamName`, `access_token` when that is empty, read from the
+nested `config`), drawn as a fixed stand-in because the token is fetched at
+send. The document is the body of a GET in the GraphQL mode, which the engine
+sends as query parameters and no body; its `{{token}}`s are resolved before it
+is encoded, as the engine resolves them before it builds the query. The `auth`,
+`method` and `body` inputs are the Sends line's alone: the tab title omits them
+so a title never carries a key, a token or a query, and keeps the fragment cut.
+The `{{token}}`s in the key, its value, the token's name and the document
 resolve like the URL's, and a name a script defers stays written. The
-resolution also answers the value it appended (`SendsResolved.secret`), which
-the line masks whatever its variable's secret flag, so a key is never
-resolved twice and a generator in it does not reroll.
+resolution also answers the secret it appended (`SendsResolved.secret`: the
+key's value, or the token's stand-in), which the line masks whatever its
+variable's secret flag, so a key is never resolved twice and a generator in it
+does not reroll.
 The title then shows only the path, through `pathLabel`, which decodes it, so
 `a%20b` still reads `a b`.
 
@@ -1134,11 +1142,12 @@ under the snippet: "`{{token}}` is set by a pre-request script at send." (or
 "... are set ..." for several). Templated mode shows the request as written.
 
 The Params tab's **Sends** line says the same, in the same words
-(`deferredNote`), for the names its URL, enabled path rows and query-placed API key use, and draws
+(`deferredNote`), for the names its URL, enabled path rows, query-placed API key or token name and
+GraphQL GET document use, and draws
 those names as written instead of as their stored values (#2741). It reads the
 `POST /compose` entry the Code section shares (`compositionOptions` in
-`code-composition.ts`), fetches it only for a URL, path row or query-placed API
-key holding a `{{token}}`, and
+`code-composition.ts`), fetches it only for a URL, path row, query-placed API
+key or token name, or GraphQL GET document holding a `{{token}}`, and
 holds no rule of its own for which requests are scripted: a request whose
 folder's pre-request script sets `{{token}}` is scripted because the engine says
 so. An unnamed request's tab title leaves the names written too, but only reads

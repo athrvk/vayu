@@ -18,6 +18,7 @@ import { readCompactJson } from "./compact-json";
 import {
 	curlEscape,
 	graphqlGetQuery,
+	graphqlUrlContent,
 	graphqlWireBody,
 	jsonRpcWireBody,
 	urlWithQuery,
@@ -334,6 +335,40 @@ describe("graphqlGetQuery", () => {
 			`{"query":"{ a }","variables":${'{"a":'.repeat(objects - 1)}{}${"}".repeat(objects - 1)}}`;
 		expect(graphqlGetQuery(nested(127))).toMatch(/^query=%7B%20a%20%7D&variables=%7B/);
 		expect(graphqlGetQuery(nested(128))).toBeUndefined();
+	});
+});
+
+describe("graphqlUrlContent", () => {
+	const graphql = { mode: "graphql", content: "{ hero }" };
+
+	it("hands back the stored document of a GET with a GraphQL body, unresolved", () => {
+		expect(graphqlUrlContent("GET", graphql)).toBe("{ hero }");
+		expect(graphqlUrlContent("GET", { mode: "graphql", content: "{ {{field}} }" })).toBe(
+			"{ {{field}} }"
+		);
+	});
+
+	it("reads the method in any case", () => {
+		expect(graphqlUrlContent("get", graphql)).toBe("{ hero }");
+		expect(graphqlUrlContent("Get", graphql)).toBe("{ hero }");
+	});
+
+	it.each(["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", ""])(
+		"leaves the body where it is for %s",
+		(method) => {
+			expect(graphqlUrlContent(method, graphql)).toBeUndefined();
+		}
+	);
+
+	it.each([
+		["another body mode", { mode: "json", content: "{ hero }" }],
+		["an empty document", { mode: "graphql", content: "" }],
+		["no content", { mode: "graphql" }],
+		["no body", undefined],
+		["a null body", null],
+		["a string body", "{ hero }"],
+	])("is undefined for %s", (_name, body) => {
+		expect(graphqlUrlContent("GET", body)).toBeUndefined();
 	});
 });
 
