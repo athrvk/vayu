@@ -33,6 +33,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import type { Collection } from "@/types";
 
 const mutation = {
@@ -68,7 +69,8 @@ async function renderTab(overrides: Partial<Collection> = {}) {
 	const utils = render(
 		<TooltipProvider>
 			<InfoTab collection={{ ...collection, ...overrides }} requestCount={3} />
-		</TooltipProvider>
+		</TooltipProvider>,
+		{ wrapper: TestQueryClient }
 	);
 	await act(async () => {});
 	return utils;

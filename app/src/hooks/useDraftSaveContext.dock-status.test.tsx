@@ -12,13 +12,14 @@
  * The Dock's "Unsaved changes" line is derived from what each id reports to
  * `useSaveStore`, never from a context's own `hasPendingChanges` (see
  * save-store.ts) - so a registered context that reports nothing is invisible
- * to it. `AuthTab`, `InfoTab` and `ScriptTab` register through this hook and
- * reported nothing themselves (#1483): every collection editor could sit dirty
+ * to it. The collection editors register through this hook and reported
+ * nothing themselves (#1483): every collection editor could sit dirty
  * for as long as the app ran without the Dock ever saying so.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { SaveBlockedError } from "@/lib/elements";
+import { resetEntityDraftStoreForTests, useEntityDraftStore } from "@/stores/entity-draft-store";
 import { useToastStore } from "@/stores/toast-store";
 import { act, renderHook } from "@testing-library/react";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
@@ -27,6 +28,7 @@ import { useDraftSaveContext } from "./useDraftSaveContext";
 import { useEntityDraft } from "./useEntityDraft";
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
 	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
 });
@@ -95,7 +97,8 @@ describe("useDraftSaveContext's Dock status wiring", () => {
 		expect(useSaveStore.getState().status).toBe("idle");
 	});
 
-	it("stops counting the draft as unsaved once the editor unmounts", () => {
+	it("stops counting a draft it does not store as unsaved once the editor unmounts", () => {
+		// The inbox reply's case: no `stored`, so the edit goes with the editor.
 		// Mutation check: dropping the discard on teardown leaves the Dock on
 		// "Unsaved changes" for a draft nothing can save any more.
 		const { unmount } = mount({ id: "a", isDirty: true });
@@ -359,5 +362,232 @@ describe("how a draft save's rejection is reported (#2423)", () => {
 		const result = await flushRejecting(new ApiError(500, "internal_error", "boom"));
 
 		expect(result).toEqual({ saved: 0, failed: 1, pending: 0 });
+	});
+});
+
+describe("a stored draft's context outliving its editor (#3459)", () => {
+	interface StoredProps {
+		id: string;
+		draftKey: string;
+		isDirty: boolean;
+		save: () => Promise<void>;
+	}
+
+	/** An editor whose draft sits in `entity-draft-store` under `draftKey`. */
+	function mountStored(initial: StoredProps) {
+		return renderHook(
+			(props: StoredProps) =>
+				useDraftSaveContext({
+					id: props.id,
+					name: "Test editor",
+					isDirty: props.isDirty,
+					isActive: true,
+					save: props.save,
+					// Nothing loaded, so the stored draft is judged by its entry
+					// alone; the persisted readings are the screen suite's
+					// (`draft-survival.test.tsx`).
+					stored: {
+						key: props.draftKey,
+						read: () => undefined,
+						subscribe: () => () => {},
+					},
+				}),
+			{ initialProps: initial }
+		);
+	}
+
+	const holdDraft = (key: string) =>
+		useEntityDraftStore.getState().put(key, { draft: "edited", baseline: "stored" });
+
+	const context = (id: string) => useSaveStore.getState().contexts.get(id);
+
+	it("keeps the context registered and dirty, and the Dock unsaved", () => {
+		// Mutation check: always discarding on the goodbye leaves no context, so
+		// the tab reads clean and the quit flush never sees the draft.
+		holdDraft("a:f");
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: true,
+			save: () => Promise.resolve(),
+		});
+
+		unmount();
+
+		expect(context("a")?.hasPendingChanges).toBe(true);
+		expect(useSaveStore.getState().status).toBe("pending");
+	});
+
+	it("lets the context go when the editor unmounts clean", () => {
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: false,
+			save: () => Promise.resolve(),
+		});
+
+		unmount();
+
+		expect(context("a")).toBeUndefined();
+	});
+
+	it("lets it go when the stored draft was dropped before the unmount - a closed tab", () => {
+		holdDraft("a:f");
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: true,
+			save: () => Promise.resolve(),
+		});
+
+		useEntityDraftStore.getState().drop("a:f");
+		unmount();
+
+		expect(context("a")).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("lets it go for an entity already deleted", () => {
+		holdDraft("a:f");
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: true,
+			save: () => Promise.resolve(),
+		});
+
+		useSaveStore.getState().markRemoved(["a"]);
+		unmount();
+
+		expect(context("a")).toBeUndefined();
+	});
+
+	it("saves through the editor's last save, then lets the context and the draft go", async () => {
+		holdDraft("a:f");
+		const save = vi.fn(() => Promise.resolve());
+		const { unmount } = mountStored({ id: "a", draftKey: "a:f", isDirty: true, save });
+		unmount();
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(save).toHaveBeenCalledTimes(1);
+		expect(tally).toEqual({ saved: 1, failed: 0, pending: 0 });
+		expect(context("a")).toBeUndefined();
+		expect(useEntityDraftStore.getState().entries.has("a:f")).toBe(false);
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("keeps both when that save fails, for the next flush to try again", async () => {
+		holdDraft("a:f");
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: true,
+			save: () => Promise.reject(new Error("boom")),
+		});
+		unmount();
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(tally).toEqual({ saved: 0, failed: 1, pending: 0 });
+		expect(context("a")?.hasPendingChanges).toBe(true);
+		expect(useEntityDraftStore.getState().entries.has("a:f")).toBe(true);
+		expect(useSaveStore.getState().status).toBe("error");
+	});
+
+	it("goes when its stored draft is dropped while its failing save is out", async () => {
+		// The tab closed mid-flush. Mutation check: watch again after every
+		// failure, and the closed tab's context stays registered and "Not saved".
+		holdDraft("a:f");
+		let fail: (error: Error) => void = () => {};
+		const failing = () =>
+			new Promise<void>((_resolve, reject) => {
+				fail = reject;
+			});
+		mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: failing }).unmount();
+		const flushing = useSaveStore.getState().flushAll();
+
+		useEntityDraftStore.getState().drop("a:f");
+		await act(async () => {
+			fail(new Error("boom"));
+			await flushing;
+		});
+
+		expect(context("a")).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes, as a discard, when the stored draft is dropped while the editor is away", () => {
+		holdDraft("a:f");
+		const { unmount } = mountStored({
+			id: "a",
+			draftKey: "a:f",
+			isDirty: true,
+			save: () => Promise.resolve(),
+		});
+		unmount();
+
+		act(() => useEntityDraftStore.getState().dropForEntities(["a"]));
+
+		expect(context("a")).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("keeps the entity switched away from, saving it with that entity's own save", async () => {
+		// `CollectionDetail` is one instance across collection tabs, so a switch
+		// is the same goodbye as an unmount. Mutation check: detach with a save
+		// that reads the hook's `saveRef` when it runs, rather than the outgoing
+		// render's `save`, and the flush writes the second entity's draft under
+		// the first one's id.
+		holdDraft("a:f");
+		const saveA = vi.fn(() => Promise.resolve());
+		const saveB = vi.fn(() => Promise.resolve());
+		const { rerender } = mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: saveA });
+
+		rerender({ id: "b", draftKey: "b:f", isDirty: false, save: saveB });
+
+		expect(context("a")?.hasPendingChanges).toBe(true);
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		await act(() => useSaveStore.getState().flushAll());
+
+		expect(saveA).toHaveBeenCalledTimes(1);
+		expect(saveB).not.toHaveBeenCalled();
+	});
+
+	it("leaves a remounted editor's context alone when the save it took over lands", async () => {
+		// Mutation check: unregister on every detached success, and the editor
+		// on screen loses its context to a save that started before it mounted.
+		holdDraft("a:f");
+		let land: () => void = () => {};
+		const pending = () =>
+			new Promise<void>((resolve) => {
+				land = resolve;
+			});
+		mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: pending }).unmount();
+		const flushing = useSaveStore.getState().flushAll();
+
+		mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: () => Promise.resolve() });
+		await act(async () => {
+			land();
+			await flushing;
+		});
+
+		expect(context("a")?.hasPendingChanges).toBe(true);
+	});
+
+	it("hands the context back to the editor when it mounts again", async () => {
+		holdDraft("a:f");
+		const first = vi.fn(() => Promise.resolve());
+		mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: first }).unmount();
+
+		const second = vi.fn(() => Promise.resolve());
+		mountStored({ id: "a", draftKey: "a:f", isDirty: true, save: second });
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		await act(() => useSaveStore.getState().flushAll());
+
+		expect(second).toHaveBeenCalledTimes(1);
+		expect(first).not.toHaveBeenCalled();
 	});
 });

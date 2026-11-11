@@ -33,8 +33,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useToastStore } from "@/stores/toast-store";
 import type { Collection } from "@/types";
@@ -66,7 +68,8 @@ function renderTab() {
 	return render(
 		<TooltipProvider>
 			<InfoTab collection={collection} requestCount={3} />
-		</TooltipProvider>
+		</TooltipProvider>,
+		{ wrapper: TestQueryClient }
 	);
 }
 
@@ -78,6 +81,7 @@ function renderTab() {
 const nameField = () => screen.getByLabelText("Collection name") as HTMLInputElement;
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
 	vi.clearAllMocks();
 	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });
