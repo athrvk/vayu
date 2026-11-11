@@ -25,7 +25,14 @@ import {
 } from "@/components/ui";
 import CollectionTreeRows, { type TreeRowWindow } from "./CollectionTreeRows";
 import { CollectionTreeContextMenu } from "./CollectionTreeContextMenu";
-import { flattenVisibleRows, folderIdOfRowKey, navigableRows, rowEntity } from "./tree-rows";
+import {
+	entityRowKey,
+	flattenVisibleRows,
+	folderIdOfRowKey,
+	folderRowKey,
+	navigableRows,
+	rowEntity,
+} from "./tree-rows";
 import { focusTreeRow, type TreeRowModel } from "./tree-focus";
 import ExportSpecDialog from "./ExportSpecDialog";
 import ExportPostmanDialog from "./ExportPostmanDialog";
@@ -133,6 +140,20 @@ export default function CollectionTree() {
 		[rows, expandedCollectionIds, expandCollections]
 	);
 	const treeFocus = useRovingTreeFocus(treeRef, navigationModel);
+
+	/*
+	 * Where a dialog opened from a row's menu hands focus back (#3443). Radix
+	 * would restore it to the menu item that opened the dialog, which closed with
+	 * its menu, so focus lands on `<body>`. Through the window, because the row
+	 * may have been scrolled out of the mounted set while the dialog was up.
+	 */
+	const returnFocusToRow = useCallback(
+		(key: string) => (event: Event) => {
+			event.preventDefault();
+			rowWindowRef.current?.revealRow(key, (row) => focusTreeRow(treeRef.current, row));
+		},
+		[]
+	);
 
 	// The row an event came from, from the rows model: what the tree's one
 	// right-click menu and its drag handlers act on, in place of a handler per row.
@@ -556,6 +577,7 @@ export default function CollectionTree() {
 					<RunCollectionDialog
 						collection={panel.runTarget}
 						onOpenChange={(open) => !open && panel.dismissRunDialog()}
+						onCloseAutoFocus={returnFocusToRow(folderRowKey(panel.runTarget.id))}
 					/>
 				)}
 
@@ -566,12 +588,18 @@ export default function CollectionTree() {
 					<ExportSpecDialog
 						collection={panel.exportTarget.collection}
 						onOpenChange={(open) => !open && panel.dismissExportDialog()}
+						onCloseAutoFocus={returnFocusToRow(
+							folderRowKey(panel.exportTarget.collection.id)
+						)}
 					/>
 				)}
 				{panel.exportTarget?.format === "postman" && (
 					<ExportPostmanDialog
 						collection={panel.exportTarget.collection}
 						onOpenChange={(open) => !open && panel.dismissExportDialog()}
+						onCloseAutoFocus={returnFocusToRow(
+							folderRowKey(panel.exportTarget.collection.id)
+						)}
 					/>
 				)}
 
@@ -580,6 +608,9 @@ export default function CollectionTree() {
 					collections={collections}
 					onClose={closeMoveDialog}
 					onMove={moveToOwner}
+					onCloseAutoFocus={
+						moveTarget ? returnFocusToRow(entityRowKey(moveTarget)) : undefined
+					}
 				/>
 
 				<CollectionPicker {...pickerProps} />

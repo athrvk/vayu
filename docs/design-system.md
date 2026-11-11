@@ -2640,6 +2640,20 @@ are kept mounted beside the row holding the tab stop, and for a commit after it
 leaves, so the answer read from the mounted rows is the one the whole list
 gives (`rowsAroundFocus`).
 
+**A request row's `⋯` menu stays mounted while its delete runs** (#3443). The
+menu is what hands focus back to the row the delete was invoked from, and
+`useDeleteRefocus` then moves on from that row once it leaves; a menu unmounted
+at the start of the delete took the hand-back with it and left the removed row's
+focus on `<body>`. Only a rename removes it, as on a folder row.
+
+**A dialog opened from a row's menu hands focus back to that row.** Move to,
+Run collection and both exports are controlled dialogs with no trigger, and the
+menu item that opened them closes with its menu, so Radix's restore has nowhere
+to land - `<body>`, again. `CollectionTree` passes each an `onCloseAutoFocus`
+that focuses the row through the window (`revealRow` + `focusTreeRow`), so the
+row is mounted even if the dialog's own scrolling moved it away, and the tab
+stop travels with it.
+
 **A tree that runs out of rows still has to name somewhere.** The rules above
 answer for every row but one: a root falls back to the root before it, so it
 takes the *whole tree emptying* - the deleted row was the only one there was -

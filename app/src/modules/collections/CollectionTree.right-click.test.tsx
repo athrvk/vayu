@@ -26,6 +26,7 @@ import { useTabsStore } from "@/stores";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 const requests = new Map([
@@ -173,12 +174,6 @@ describe("right-click on a tree row", () => {
 	 * the field and committed the name unchanged, so Rename did nothing.
 	 */
 	describe("an action that opens a field", () => {
-		/** Radix hands focus back on a `setTimeout(0)` of its own; a later one runs after it. */
-		async function menuClosedAndFocusSettled() {
-			await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-			await new Promise((resolve) => setTimeout(resolve, 0));
-		}
-
 		it("leaves Add collection's name field focused", async () => {
 			renderTree();
 			fireEvent.contextMenu(collectionRow());

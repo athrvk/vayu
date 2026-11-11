@@ -30,6 +30,7 @@ import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 const requests = new Map([
@@ -208,17 +209,6 @@ describe("an action that opens a dialog", () => {
 		expect(document.activeElement).not.toBe(row);
 	});
 });
-
-/**
- * Radix hands focus back as the closing menu's focus scope unmounts, on a
- * `setTimeout(0)` of its own. Waiting for the menu to leave the DOM is not
- * enough: the handoff is still queued behind it. A zero timeout scheduled now
- * runs after that one, so what follows measures where focus *settled*.
- */
-async function menuClosedAndFocusSettled() {
-	await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-	await new Promise((resolve) => setTimeout(resolve, 0));
-}
 
 describe("an action that opens a field (#3443)", () => {
 	/*

@@ -24,13 +24,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act, within, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useCollectionsStore } from "./collections-store";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { ReorderRequest } from "@/types";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 
 const ROW_HEIGHT = 32;
 
@@ -678,6 +679,45 @@ describe("Move to…", () => {
 			normalize: [],
 		});
 		expect(fixture.requests.get("c1")?.map((r) => r.id)).toEqual(["r1", "r2"]);
+	});
+
+	/*
+	 * The dialog opens from a menu item that closes with its menu, so Radix has
+	 * nowhere of the tree's to restore focus to and drops it on `<body>`
+	 * (#3443). The row, wherever it ends up, is where the user was.
+	 */
+	it("returns focus to the row when the dialog is dismissed", async () => {
+		renderTree();
+		const source = requestRow("r1");
+		const menu = Array.from(source.querySelectorAll("button")).find((b) =>
+			/more actions/i.test(b.getAttribute("aria-label") ?? "")
+		)!;
+		fireEvent.pointerDown(menu, new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+		fireEvent.click(await screen.findByText("Move to…"));
+		const dialog = await screen.findByRole("dialog");
+		// The menu's own hand-back has to land before the dialog is dismissed:
+		// a dismissal that outruns it would be handed focus by the menu instead.
+		await menuClosedAndFocusSettled();
+
+		fireEvent.keyDown(dialog, { key: "Escape" });
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(requestRow("r1")));
+	});
+
+	it("focuses the row where it landed once it has been moved", async () => {
+		renderTree();
+		const menu = Array.from(requestRow("r1").querySelectorAll("button")).find((b) =>
+			/more actions/i.test(b.getAttribute("aria-label") ?? "")
+		)!;
+		fireEvent.pointerDown(menu, new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+		fireEvent.click(await screen.findByText("Move to…"));
+		fireEvent.click(
+			within(await screen.findByRole("dialog")).getByRole("button", { name: "Beta" })
+		);
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() => expect(document.activeElement).toBe(requestRow("r1")));
 	});
 
 	it("does not offer to move a row into where it already is", async () => {

@@ -24,6 +24,7 @@ import { Copy, CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowContextMenu } from "./RowContextMenu";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import type { RowAction } from "./row-actions";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 
 const actions: RowAction[] = [
 	{ label: "Duplicate", icon: CopyPlus, onSelect: () => {} },
@@ -131,9 +132,7 @@ describe("RowContextMenu", () => {
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 		const field = await screen.findByLabelText("Name");
 
-		await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-		// Radix's hand-back runs on a timer of its own; a later one runs after it.
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await menuClosedAndFocusSettled();
 
 		expect(document.activeElement).toBe(field);
 	});

@@ -181,6 +181,13 @@ export interface RunCollectionDialogProps {
 	 */
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
+	/**
+	 * Where focus goes when the dialog closes. Radix restores it to whatever held
+	 * it before the dialog opened, which for a dialog opened from a row's menu is
+	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
+	 * knows the row calls `preventDefault` and focuses it.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** Matches the engine's `iterations` bound: a whole number, 1 or more. */
@@ -264,6 +271,7 @@ function describeRun(loadTest: boolean, mode: ScenarioLoadProfile["mode"]): stri
 export default function RunCollectionDialog({
 	collection,
 	onOpenChange,
+	onCloseAutoFocus,
 }: RunCollectionDialogProps) {
 	const activeEnvironmentId = useSessionStore((s) => s.activeEnvironmentId);
 	const openTab = useTabsStore((s) => s.openTab);
@@ -646,7 +654,7 @@ export default function RunCollectionDialog({
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-xl">
+			<DialogContent className="sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
 				<DialogHeader>
 					<DialogTitle>Run {collection.name}</DialogTitle>
 					<DialogDescription>{describeRun(loadTest, profile.mode)}</DialogDescription>

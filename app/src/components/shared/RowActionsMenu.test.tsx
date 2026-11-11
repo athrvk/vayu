@@ -28,6 +28,7 @@ import { useState } from "react";
 import { CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowActionsMenu } from "./RowActionsMenu";
 import type { RowAction } from "./row-actions";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 
 const duplicate = vi.fn();
 const remove = vi.fn();
@@ -218,9 +219,8 @@ describe("an action that opens a field (#3443)", () => {
 
 		const field = await screen.findByLabelText("Name");
 
-		await waitFor(() => expect(document.activeElement).toBe(field));
-		// Radix's hand-back runs on a timer of its own; a later one runs after it.
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await menuClosedAndFocusSettled();
+
 		expect(document.activeElement).toBe(field);
 	});
 

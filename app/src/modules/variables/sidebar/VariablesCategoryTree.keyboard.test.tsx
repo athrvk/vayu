@@ -28,6 +28,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import VariablesCategoryTree from "./VariablesCategoryTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus";
 import type { Collection, Environment } from "@/types";
 
 const STAGING: Environment = {
@@ -377,9 +378,7 @@ describe("right-click reaches the same menu (#1360)", () => {
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
 		const field = await within(tree).findByRole("textbox");
 
-		await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-		// Radix's hand-back runs on a timer of its own; a later one runs after it.
-		await new Promise((resolve) => setTimeout(resolve, 0));
+		await menuClosedAndFocusSettled();
 
 		expect(document.activeElement).toBe(field);
 		expect(updateEnvironment).not.toHaveBeenCalled();
