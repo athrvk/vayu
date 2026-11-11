@@ -1306,7 +1306,11 @@ Rules worth knowing before you rely on them:
   are resolved after the pre-request script and before the send (#1008),
   against the scopes as the script left them. So `pm.environment.set('host', …)`
   reaches a `{{host}}` in this send's URL, on every run. Meanwhile
-  `pm.request.url` holds the `{{host}}` as written, in the script. A request no
+  `pm.request.url` holds the `{{host}}` as written, in the script, and reads a
+  token in the scheme or host as the host itself, as Postman does: on
+  `{{baseUrl}}/users?page=2`, `getHost()` is `'{{baseUrl}}'`, `protocol` is
+  `''`, and `getPath()`, the query and every member edit work, the token
+  written back verbatim for this same pass to resolve (#3454). A request no
   pre-request script runs before is composed once, as it always was, and a
   `{{host}}` composition substituted is finished text - assign
   `pm.request.url` directly to change that. A collection run widens this to
@@ -1466,8 +1470,18 @@ pm.request.url.query.toObject();      // {page: '2'} - last wins
 pm.request.url.query.count();         // 3
 ```
 
-Four rules behind those answers:
+Five rules behind those answers:
 
+- **A `{{variable}}` in the scheme or host is opaque host text**, as in
+  Postman. A scripted request's URL reaches its script with its scope names
+  still written (see [Mutating the request](#mutating-the-request-pre-request-scripts)),
+  so `{{baseUrl}}/echo?b=2&a=1` reads `host` `['{{baseUrl}}']`, `protocol`
+  and `port` `''`, `getPath()` `'/echo'` and `getQueryString()` `'b=2&a=1'`;
+  `http://{{h}}:8/p` reads `protocol` `'http'`, `port` `'8'`. A separator
+  inside a token is part of its name (`{{api.host}}` is one host segment), and
+  a token with no path after it has no path segments, so `getPath()` is `''`
+  there where Postman answers `'/'`: an edit then writes no `/` that the
+  variable's own value may already end in.
 - **Path segments are decoded, query values are not.** A path is what you want
   to read; a query is what you want to *sign*, and a canonical string has to be
   built from the bytes that were sent. `getQueryString()` is byte-exact against
@@ -1478,7 +1492,9 @@ Four rules behind those answers:
 - **A bare `?flag` reads as `null`, an empty `?flag=` as `''`.** Both are
   `has()`-true.
 - **A URL the parser cannot read has no parts.** `toString()` still answers the
-  whole string, and every part is empty rather than a plausible half.
+  whole string, and every part is empty rather than a plausible half. A URL
+  with no scheme and no token before its path (`example.com/users`) is one: no
+  scheme is guessed.
 
 #### Writing
 
@@ -1540,7 +1556,9 @@ undo:
 - **A URL nobody edited is sent exactly as it arrived.** The parts are
   recomposed only when a member was actually written to, so a read-only script
   cannot change a single byte - which is what keeps `getQueryString()`
-  byte-exact against the wire.
+  byte-exact against the wire. An edit writes every `{{variable}}` back as
+  written, a path segment's included, so the names still waiting are resolved
+  after the script as they would have been without the edit.
 - **`upsert` keeps wire position**, `add` appends. A parameter that quietly
   moved to the end would change the shape of any signature computed over the
   query.
@@ -3061,25 +3079,18 @@ you do not need to. Any header you derive yourself works the same way.
 
 ### Add or replace a query parameter
 
-`pm.request.url.query` reads the parameters; the write is the whole URL, so
-rebuild the query string and assign it back.
+`pm.request.url.query.upsert` replaces the first parameter of that name where
+it stands, or appends one when there is none. It encodes the value it is given
+and leaves the rest of the URL as written, a `{{baseUrl}}` host included, so
+the same line works on a literal URL and on an imported Postman request:
 
 ```javascript
-function withQueryParam(url, name, value) {
-  var pair = { key: encodeURIComponent(name), value: encodeURIComponent(value) };
-  var kept = url.query.all().filter(function (p) { return p.key !== pair.key; });
-  kept.push(pair);
-
-  var query = kept
-    .map(function (p) { return p.value === null ? p.key : p.key + '=' + p.value; })
-    .join('&');
-
-  return url.protocol + '://' + url.getHost() + (url.port ? ':' + url.port : '') +
-    url.getPath() + (query ? '?' + query : '') + (url.hash ? '#' + url.hash : '');
-}
-
-pm.request.url = withQueryParam(pm.request.url, 'traceId', 'run-' + Date.now());
+pm.request.url.query.upsert({ key: 'traceId', value: 'run-' + Date.now() });
+// {{baseUrl}}/orders?page=2  ->  {{baseUrl}}/orders?page=2&traceId=run-1700000000000
 ```
+
+`query.add` appends even when the name is already there, and `query.remove`
+takes every match; [Writing](#writing) has the rest.
 
 ### Switch method and body together
 
@@ -3168,6 +3179,11 @@ pm.request.headers['X-Timestamp'] = timestamp;
 pm.request.headers['X-Signature'] =
   pm.crypto.hmacSha256(pm.environment.get('secret'), canonical);
 ```
+
+On a bodiless `GET {{baseUrl}}/echo?b=2&a=1`, `canonical` is
+`"GET\n/echo\na=1&b=2\n1700000000000\n"`: the path and query are read past the
+`{{baseUrl}}` the script still sees, and the server receives that path and
+query once the variable is resolved after the script.
 
 Note the ordering: the canonical string is built from `pm.request` *after* the
 other edits, so it covers what is actually sent. If you sign first and rewrite

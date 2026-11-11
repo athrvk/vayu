@@ -13,11 +13,66 @@
 #include <ada.h>
 #include <curl/curl.h>
 
+#include "vayu/core/path_template.hpp"
 #include "vayu/utils/ascii_case.hpp"
 
 namespace vayu::http {
 
 namespace {
+
+constexpr std::size_t npos = std::string_view::npos;
+
+/// The first byte of @p text at or after @p from that is one of @p chars and
+/// not inside a `{{...}}` token, or `npos`.
+std::size_t
+find_outside_tokens (std::string_view text, std::string_view chars, std::size_t from = 0) {
+    for (std::size_t at = from; at < text.size ();) {
+        if (const std::size_t end = vayu::core::template_token_end (text, at); end != npos) {
+            at = end;
+            continue;
+        }
+        if (chars.find (text[at]) != npos) {
+            return at;
+        }
+        ++at;
+    }
+    return npos;
+}
+
+/// @p text split on @p separator, a separator inside a token splitting nothing.
+std::vector<std::string_view> split_outside_tokens (std::string_view text, char separator) {
+    std::vector<std::string_view> pieces;
+    const std::string_view separators (&separator, 1);
+    for (std::size_t start = 0;;) {
+        const std::size_t at = find_outside_tokens (text, separators, start);
+        if (at == npos) {
+            pieces.push_back (text.substr (start));
+            return pieces;
+        }
+        pieces.push_back (text.substr (start, at - start));
+        start = at + 1;
+    }
+}
+
+/// @p text with @p transform applied to each run between whole `{{...}}`
+/// tokens and every token copied as written.
+template <typename Transform>
+std::string transform_outside_tokens (std::string_view text, const Transform& transform) {
+    std::string out;
+    std::size_t plain = 0;
+    for (std::size_t at = 0; at < text.size ();) {
+        const std::size_t end = vayu::core::template_token_end (text, at);
+        if (end == npos) {
+            ++at;
+            continue;
+        }
+        out += transform (std::string (text.substr (plain, at - plain)));
+        out += text.substr (at, end - at);
+        plain = at = end;
+    }
+    out += transform (std::string (text.substr (plain)));
+    return out;
+}
 
 /// One field off a parsed handle. `nullopt` is libcurl saying the URL states
 /// none of that field - an absent port and an absent fragment are both normal.
@@ -50,7 +105,8 @@ std::string percent_decode (const std::string& value) {
 /// Split a raw path on `/`, dropping the empty segment the leading slash makes
 /// and decoding each of the rest on its own. Segment-at-a-time decoding is the
 /// point: decoding the whole path first would turn an encoded `%2F` into a
-/// separator and invent a segment that was never there.
+/// separator and invent a segment that was never there. A token is neither
+/// split nor decoded, so `compose_url` can write it back as it was.
 std::vector<std::string> split_path (std::string_view raw) {
     std::vector<std::string> segments;
     if (raw.empty ()) {
@@ -59,16 +115,97 @@ std::vector<std::string> split_path (std::string_view raw) {
     if (raw.front () == '/') {
         raw.remove_prefix (1);
     }
-    while (true) {
-        const size_t slash = raw.find ('/');
-        if (slash == std::string_view::npos) {
-            segments.push_back (percent_decode (std::string (raw)));
-            break;
-        }
-        segments.push_back (percent_decode (std::string (raw.substr (0, slash))));
-        raw.remove_prefix (slash + 1);
+    for (const std::string_view segment : split_outside_tokens (raw, '/')) {
+        segments.push_back (transform_outside_tokens (segment, percent_decode));
     }
     return segments;
+}
+
+/// A host's labels: split on `.`, so an IPv6 literal (no dot) is one label.
+std::vector<std::string> split_host (std::string_view host) {
+    std::vector<std::string> labels;
+    for (const std::string_view label : split_outside_tokens (host, '.')) {
+        labels.emplace_back (label);
+    }
+    return labels;
+}
+
+/// Where @p authority's host ends and its port begins: the first `:` outside a
+/// token, or the one after an IPv6 literal's `]`. `nullopt` for a `[` with no
+/// `]`, or anything but a `:port` after one.
+std::optional<std::size_t> host_end (std::string_view authority) {
+    if (!authority.starts_with ('[')) {
+        return std::min (find_outside_tokens (authority, ":"), authority.size ());
+    }
+    const std::size_t close = authority.find (']');
+    if (close == npos) {
+        return std::nullopt;
+    }
+    if (close + 1 < authority.size () && authority[close + 1] != ':') {
+        return std::nullopt;
+    }
+    return close + 1;
+}
+
+/**
+ * @brief Postman's reading of a URL libcurl refused, when a `{{...}}` token in
+ *        its scheme or authority is why; unparsed otherwise.
+ *
+ * `postman-url-encoder`'s `parse`, every separator looked for outside the
+ * tokens: the fragment from the first `#`, the query from the first `?` before
+ * it, a `scheme://` when its `:` comes before any `/`, the authority up to the
+ * next `/`, userinfo up to its last `@` dropped as a libcurl reading drops it,
+ * and the host and port split at the `:`. A URL whose token is only in the
+ * path or query stays unparsed: libcurl refused it for something else (no
+ * scheme, a space), and reading it anyway would guess.
+ */
+UrlParts parse_templated_url_parts (std::string_view url) {
+    const std::size_t hash_at     = find_outside_tokens (url, "#");
+    const std::string_view pre    = url.substr (0, hash_at);
+    const std::size_t query_at    = find_outside_tokens (pre, "?");
+    const std::string_view target = pre.substr (0, query_at);
+
+    std::size_t authority_begin = 0;
+    const std::size_t colon     = find_outside_tokens (target, ":/");
+    const bool has_scheme = colon != npos && target.substr (colon).starts_with ("://");
+    if (has_scheme) {
+        authority_begin = colon + 3;
+    }
+    const std::size_t authority_end =
+    std::min (find_outside_tokens (target, "/", authority_begin), target.size ());
+    if (!vayu::core::holds_template_token (target.substr (0, authority_end))) {
+        return {};
+    }
+
+    std::string_view authority =
+    target.substr (authority_begin, authority_end - authority_begin);
+    for (std::size_t at = find_outside_tokens (authority, "@"); at != npos;
+    at                  = find_outside_tokens (authority, "@")) {
+        authority.remove_prefix (at + 1);
+    }
+    const auto split = host_end (authority);
+    if (!split || *split == 0) {
+        return {};
+    }
+
+    UrlParts parts;
+    parts.parsed = true;
+    if (has_scheme) {
+        parts.protocol = std::string (target.substr (0, colon));
+    }
+    parts.host = split_host (authority.substr (0, *split));
+    if (*split < authority.size ()) {
+        parts.port = std::string (authority.substr (*split + 1));
+    }
+    parts.path = split_path (target.substr (authority_end));
+    if (query_at != npos) {
+        parts.query        = std::string (pre.substr (query_at + 1));
+        parts.query_params = parse_query_params (parts.query);
+    }
+    if (hash_at != npos) {
+        parts.hash = std::string (url.substr (hash_at + 1));
+    }
+    return parts;
 }
 
 } // namespace
@@ -158,7 +295,9 @@ std::string compose_url (const UrlParts& parts) {
         return {};
     }
     std::string out = parts.protocol;
-    out += "://";
+    if (!out.empty ()) {
+        out += "://";
+    }
     out += join_host (parts.host);
     if (!parts.port.empty ()) {
         out += ':';
@@ -166,10 +305,11 @@ std::string compose_url (const UrlParts& parts) {
     }
     // Encoded per segment, undoing `split_path`'s per-segment decode - so a
     // segment an edit put a `/` into stays one segment rather than becoming
-    // two, which is the same rule read the other way round.
+    // two, which is the same rule read the other way round. A token stays
+    // `{{name}}` for the pass that resolves it after the script.
     for (const auto& segment : parts.path) {
         out += '/';
-        out += percent_encode (segment);
+        out += transform_outside_tokens (segment, percent_encode);
     }
     const std::string query = compose_query (parts.query_params);
     if (!query.empty ()) {
@@ -203,7 +343,9 @@ std::string join_path (const std::vector<std::string>& path) {
     return out;
 }
 
-UrlParts parse_url_parts (const std::string& url) {
+namespace {
+
+UrlParts parse_with_libcurl (const std::string& url) {
     UrlParts parts;
     CURLU* handle = curl_url ();
     if (!handle) {
@@ -221,18 +363,8 @@ UrlParts parse_url_parts (const std::string& url) {
             parts.protocol = std::move (*scheme);
         }
         if (auto host = url_field (handle, CURLUPART_HOST)) {
-            // A host is split on `.` only when it has one to split on; an IPv6
-            // literal comes back bracketed and is one segment either way.
-            std::string_view remaining (*host);
-            while (true) {
-                const size_t dot = remaining.find ('.');
-                if (dot == std::string_view::npos) {
-                    parts.host.emplace_back (remaining);
-                    break;
-                }
-                parts.host.emplace_back (remaining.substr (0, dot));
-                remaining.remove_prefix (dot + 1);
-            }
+            // An IPv6 literal comes back bracketed, with no dot to split on.
+            parts.host = split_host (*host);
         }
         if (auto port = url_field (handle, CURLUPART_PORT)) {
             parts.port = std::move (*port);
@@ -250,6 +382,16 @@ UrlParts parse_url_parts (const std::string& url) {
     }
     curl_url_cleanup (handle);
     return parts;
+}
+
+} // namespace
+
+UrlParts parse_url_parts (const std::string& url) {
+    UrlParts parts = parse_with_libcurl (url);
+    if (parts.parsed) {
+        return parts;
+    }
+    return parse_templated_url_parts (url);
 }
 
 namespace {

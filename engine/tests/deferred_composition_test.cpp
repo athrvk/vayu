@@ -424,6 +424,33 @@ TEST_F (DeferredCompositionTest, ADeferredBearerTokenCarryingALineBreakIsRefused
     EXPECT_EQ (echo.requests_seen (), 0) << "the forged line went out";
 }
 
+// A `{{baseUrl}}/...` request, the shape an imported Postman collection stores
+// (#3454): its script edits the query of a URL whose host is still a token,
+// and the token is resolved after the script, against the value it set.
+// Mutation check: return `parse_with_libcurl (url)` alone from
+// `parse_url_parts` (url_parts.cpp) and each script throws instead.
+TEST_F (DeferredCompositionTest, AQueryEditOnABaseUrlRequestReachesTheWire) {
+    const vayu::tests::EchoServer echo;
+    const std::string base = "http://127.0.0.1:" + std::to_string (echo.port ());
+    seed_environment ({ { "baseUrl", base + "/echo/stale" } });
+
+    seed_request ("{{baseUrl}}/echo?b=2&a=1", json::object (),
+    "pm.environment.set('baseUrl', '" + base +
+    "');"
+    "pm.request.url.query.add({ key: 'ts', value: '1' });");
+    json answer = compose_and_execute ();
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (echo.target (), "/echo?b=2&a=1&ts=1");
+
+    // The editor's "Upsert a query parameter" snippet (routes/scripting.cpp).
+    seed_environment ({ { "baseUrl", base } });
+    seed_request ("{{baseUrl}}/echo?b=2&a=1", json::object (),
+    "pm.request.url.query.upsert({ key: \"page\", value: 2 });");
+    answer = compose_and_execute ();
+    EXPECT_EQ (answer.value ("status", 0), 200) << answer.dump ();
+    EXPECT_EQ (echo.target (), "/echo?b=2&a=1&page=2");
+}
+
 // A load run of the same composed payload: `POST /runs` takes the payload with
 // `deferredVariables` in it, and the residual pass every submission of a run
 // declaring `requestElements` makes answers the deferred name from the run's

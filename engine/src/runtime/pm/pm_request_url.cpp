@@ -678,10 +678,11 @@ JSValue* func_data) {
 /**
  * @brief Refuse a member edit on a URL that has no members (issue #1040).
  *
- * `parse_url_parts` leaves every part empty for a URL libcurl cannot read, so a
+ * `parse_url_parts` leaves every part empty for a URL it cannot read, so a
  * write there would compose a plausible URL out of nothing - `://` and whatever
  * was pushed - and send it. There is no honest edit to make, so it is an error
- * rather than a no-op.
+ * rather than a no-op. A `{{baseUrl}}/...` URL is not that case: its token is
+ * read as the host (#3454).
  */
 bool require_parsed_url (JSContext* ctx, const RequestUrlState& state, const char* member) {
     if (state.parts.parsed) {
@@ -1123,7 +1124,7 @@ JSValue string_array (JSContext* ctx, const std::vector<std::string>& values) {
  * it, so the members and the string can never disagree. Redefining rather than
  * patching: a URL with no fragment must not keep the previous URL's `hash`.
  *
- * A URL libcurl cannot parse leaves every part empty (see `parse_url_parts`)
+ * A URL the parser cannot read leaves every part empty (see `parse_url_parts`)
  * and the string intact. That is deliberate: `toString()` still answers, so a
  * script reading the whole URL is unaffected, while a script reading parts of
  * an unparseable URL gets nothing rather than a plausible half.
@@ -1191,7 +1192,8 @@ JSValue* func_data) {
     std::string value = js_to_string (ctx, argv[0]);
     if (magic == URL_PART_PROTOCOL && value.empty ()) {
         // Every other part may legitimately be cleared; a URL with no scheme is
-        // one `parse_url_parts` would refuse to read back.
+        // one `parse_url_parts` would refuse to read back unless a token
+        // stood in for it.
         return JS_ThrowTypeError (ctx, "pm.request.url.protocol must not be empty");
     }
     url_string_part (*state, magic) = std::move (value);

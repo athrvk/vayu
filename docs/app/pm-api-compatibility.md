@@ -1841,8 +1841,13 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   `removeQueryParams()`. It still behaves as a
   string in every context JavaScript allows - concatenation, template literals, `==`,
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
-  `===` and `typeof`. The full surface and the migration note are in
-  [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
+  `===` and `typeof`. A `{{variable}}` in the scheme or host is read as opaque host
+  text, as Postman's parser reads it (#3454): a pre-request script on the
+  `{{baseUrl}}/users?page=2` an imported collection stores sees `getHost()`
+  `'{{baseUrl}}'`, `getPath()` `'/users'` and the query, and its edits keep the token
+  for the resolution after the script. One divergence: with no path after the token,
+  `getPath()` is `''` where Postman answers `'/'`. The full surface and the migration
+  note are in [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
 - **The URL is writable a member at a time, not only whole** (#1040). `path` and
   `host` are arrays a script mutates in place (`push`, `splice`, index assignment,
   a `length` truncation); `protocol` / `port` / `hash` take an assignment; and the
