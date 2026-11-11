@@ -523,6 +523,35 @@ TEST_F (ScriptLifecycleTest, SequentialThrowingTeardownIsRecordedWithoutChanging
     teardown[0]["message"].get<std::string> ().find ("teardown boom"), std::string::npos);
 }
 
+// #3455: a teardown that logs and fails only a `pm.test` is `failed` with that
+// test as its message (it was `error` with none), and its stored row keeps the
+// test and the console line. Mutation check: restore `result.success ? "ok" :
+// "error"` in `run_lifecycle_script` (script_kinds.cpp) and the outcome and
+// message expectations fail; drop `lifecycle_row`'s `write_message_sample`
+// calls (pipeline.cpp) and the two lists are absent.
+TEST_F (ScriptLifecycleTest, SequentialTeardownKeepsItsConsoleAndFailingTest) {
+    seed_collection (setup_and_teardown_elements (
+    "pm.environment.set('lifecycleToken', 'set-by-setup');",
+    "console.log('x'); pm.test('t', () => { throw new Error('nope'); });"));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_sequential (execution), vayu::RunStatus::Completed);
+
+    const auto summary = summary_of ("run_seq");
+    ASSERT_TRUE (summary.contains ("lifecycle")) << summary.dump ();
+    const auto& teardown = summary["lifecycle"]["teardown"];
+    ASSERT_EQ (teardown.size (), 1u);
+    EXPECT_EQ (teardown[0].value ("outcome", ""), "failed");
+    EXPECT_EQ (teardown[0].value ("message", ""), "Test failed - t: Error: nope");
+    EXPECT_EQ (teardown[0].value ("messages", json ()),
+    json::array ({ { { "kind", "test" }, { "text", "t: Error: nope" } } }))
+    << teardown[0].dump ();
+    EXPECT_EQ (teardown[0].value ("console", json ()),
+    json::array ({ { { "level", "log" }, { "text", "x" } } }))
+    << teardown[0].dump ();
+}
+
 // Mutation check: skip the `script.setup` dispatch `execute_load_test` runs
 // before `test_start` (run_manager.cpp) and this reddens - every VU's first
 // submission keeps the literal `{{lifecycleToken}}`.

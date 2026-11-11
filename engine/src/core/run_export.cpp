@@ -766,12 +766,20 @@ bool held_request_values (const ordered& config) {
     config["body"]["mode"] != "none";
 }
 
+/// Whether a lifecycle row of @p phase holds script text: its own `message`,
+/// or the `messages` / `console` lists a script that said something carries.
+bool lifecycle_held_text (const json& lifecycle, const char* phase) {
+    const json& rows = member (lifecycle, phase);
+    return any_has_member (rows, "message") ||
+    any_has_member (rows, "messages") || any_has_member (rows, "console");
+}
+
 bool held_message_text (const RunExportRun& run) {
     const json& lifecycle = member (run.report, "lifecycle");
     const json& failures = member (member (run.report, "schemaValidation"), "failures");
     return (failures.is_array () && !failures.empty ()) ||
-    any_has_member (member (lifecycle, "setup"), "message") ||
-    any_has_member (member (lifecycle, "teardown"), "message");
+    lifecycle_held_text (lifecycle, "setup") ||
+    lifecycle_held_text (lifecycle, "teardown");
 }
 
 ordered not_carried (const RunExportRun& run, const ordered& config) {

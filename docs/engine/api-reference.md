@@ -5160,9 +5160,9 @@ is absent here until it is added on purpose:
    parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts
    only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
-   `lifecycle` outcome drops its `message`, an element row (a step's or the
-   run's `elements`) drops `messages`, `console` and their dropped counts
-   (#3127), and the report's `auth` section (whose `lastError` is a token
+   `lifecycle` outcome drops its `message`, `messages` and `console`, an
+   element row (a step's or the run's `elements`) drops `messages`, `console`
+   and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
    display name, step, transaction, metric and series names) is carried as
@@ -12997,7 +12997,9 @@ are HTTP-only, the same rule a failed assertion follows
   },
   "lifecycle": {
     "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
-    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
+                    "messages": [ { "kind": "error", "text": "Error: boom" } ],
+                    "console": [ { "level": "log", "text": "tearing down" } ] } ]
   },
   "elements": [
     { "id": "el_1", "kind": "assert.status", "name": "Is 200",
@@ -13250,14 +13252,22 @@ scenario step report the same warning for the same mistake.
 **`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
-`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`); absent entirely,
+`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`, plus the two lists
+below); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
 other than `"ok"` or `"skipped"` already means the run never sent anything - `status` is
 `Failed` and every other section above is absent or zeroed - so a reader who
 finds one here knows why the rest of the report is empty. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
-teardown failure is reported, not fatal. A script whose `pm.sendRequest` the run's
+teardown failure is reported, not fatal. A script that ran and failed only
+`pm.test`s is `"failed"`, its `message` the first failing test, as a `script.post`'s is.
+A script element's row also carries **`messages`** (what it threw, then each
+failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
+console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
+the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
+element row's lists (#3127), each key present only when the script said something.
+A script whose `pm.sendRequest` the run's
 Stop cancelled is `"skipped"` (#3371), with a `message` saying so: the run ended
 under it, nothing failed, and the app shows the row muted rather than as a failure.
 
