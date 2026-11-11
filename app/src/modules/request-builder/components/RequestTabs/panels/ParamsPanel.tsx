@@ -155,6 +155,9 @@ export default function ParamsPanel() {
 	//
 	// The auth is the effective one, `inherit` walked: a key a folder places in
 	// the query is on the wire, so it is on the line and masked below (#3425).
+	// So is an OAuth 2.0 token placed there (drawn as a stand-in, as the token is
+	// fetched at send) and a GraphQL GET's document, which travels as query
+	// parameters (#3437); the method and the body are what tell those apart.
 	const ancestors = useCollectionAncestors(request.collectionId);
 	const auth = resolveAuthForSend(request.auth, ancestors);
 	const sends = {
@@ -162,6 +165,8 @@ export default function ParamsPanel() {
 		params: request.params,
 		disableUrlEncoding: request.disableUrlEncoding,
 		auth,
+		method: request.method,
+		body: { mode: request.bodyMode, content: request.body },
 	};
 	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(sends));
 	const deferred = deferredNamesInSends(sends, engineDeferred);

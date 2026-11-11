@@ -36,6 +36,11 @@ envelope that cannot travel as parameters - a member other than those four, a
 non-object `variables` - keeps the JSON body in the snippet, as it does in the
 send.
 
+The Params tab's **Sends** line shows the same URL, resolved and with any secret
+variable in the document masked: the `{{variables}}` in the document are
+resolved before it is encoded, as the engine does, and the document comes after
+the auth's query parameter, if the request has one (#3437).
+
 ## The schema
 
 The moment a GraphQL body is on screen with a URL in the bar, Vayu introspects

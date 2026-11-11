@@ -16,17 +16,25 @@
  * (#1773, #2465). Two surfaces that resolved this separately disagreed about
  * `a b`: one drew `%20` and the other a space.
  *
- * Then what only the wire adds or drops (#3425): an API key placed in the query
- * is appended, as the engine's `append_query_param` does, and the fragment is
- * cut, because libcurl never sends it. The key is the request's *effective*
- * auth - `inherit` already walked by the caller - and the tab title leaves it
- * out, so a title never carries the auth's API key. The cut applies to both: a
- * fragment is never part of what is sent. Only an API key is appended; an OAuth
- * 2.0 token placed in the query, and a GraphQL GET's query, are not shown.
+ * Then what only the wire adds or drops (#3425, #3437), in the engine's order:
+ * the auth's query parameter is appended, as `append_query_param` does, then a
+ * GraphQL GET's document, and the fragment is cut last, because libcurl never
+ * sends it. The auth is the request's *effective* one - `inherit` already walked
+ * by the caller - and the title leaves it, the method and the body out, so a
+ * title never carries a key, a token or a query. The cut applies to both: a
+ * fragment is never part of what is sent.
  *
- * The line a caller draws carries that key's value, so the resolution also
- * answers what it appended ({@link SendsResolved}): the caller masks that, and
- * does not resolve the key again, which would reroll a generator in it.
+ * The auth parameter is an API key placed in the query, or an OAuth 2.0 token
+ * placed there (`tokenPlacement: "query"`, in the config's `queryParamName`,
+ * `access_token` when that is empty). The token is fetched at send, so the line
+ * draws a fixed stand-in for it that the caller masks like any secret. The
+ * GraphQL document is the body of a GET, which the engine sends as query
+ * parameters and no body; its `{{}}` are resolved before it is encoded, as the
+ * engine resolves them before it builds the query.
+ *
+ * The line a caller draws carries that value, so the resolution also answers
+ * what it appended ({@link SendsResolved}): the caller masks that, and does not
+ * resolve the key again, which would reroll a generator in it.
  *
  * A name `POST /compose` reports in `deferredVariables` (#2521) is left written
  * as `{{name}}`: a pre-request script runs before the send and may change what
@@ -49,6 +57,8 @@ import {
 } from "@/constants/variables";
 import type { BoundField, DataFieldContext } from "@/lib/data-bind-escaping";
 import { deferredNamesIn, tokenName } from "@/lib/deferred-note";
+import type { SnippetBody } from "@/services/codegen/types";
+import { graphqlGetQuery, graphqlUrlContent, urlWithQuery } from "@/services/codegen/wire-body";
 import type { KeyValueEntry, Request } from "@/types";
 import { answeringPathRows, composePathParams, substitutePathVariables } from "./path-variables";
 import {
@@ -62,10 +72,13 @@ import {
 export type SendsUrlInput = Pick<Request, "url" | "params" | "disableUrlEncoding"> & {
 	/**
 	 * The effective auth, `resolveAuthForSend`'s record: `inherit` already walked.
-	 * Only an API key placed in the query changes the URL. Omitted by the tab
-	 * title, which never carries the auth's API key.
+	 * Only an API key or an OAuth 2.0 token placed in the query changes the URL.
+	 * Omitted by the tab title, which never carries either.
 	 */
 	auth?: Record<string, unknown>;
+	/** Read, with {@link body}, only for a GraphQL GET. Omitted by the tab title. */
+	method?: string;
+	body?: SnippetBody;
 };
 
 type Resolve = (input: string) => string;
@@ -74,12 +87,13 @@ type Resolve = (input: string) => string;
 export interface SendsResolved {
 	url: string;
 	/**
-	 * The API key's value as it was appended, resolved and trimmed, or null when
-	 * nothing secret is on the line: no key appended, a blank value, or a
-	 * `{{token}}` text that resolved to itself (an unset name, or one a script
-	 * defers), which goes out as written and hides nothing. A key is a credential
-	 * whether or not its variable is marked secret, so the caller masks this
-	 * whatever the variable's flag says.
+	 * The API key's value as it was appended, resolved and trimmed, or the
+	 * stand-in drawn for an OAuth 2.0 token, or null when nothing secret is on
+	 * the line: no key appended, a blank value, or a `{{token}}` text that
+	 * resolved to itself (an unset name, or one a script defers), which goes
+	 * out as written and hides nothing. A key is a credential whether or not
+	 * its variable is marked secret, so the caller masks this whatever the
+	 * variable's flag says. One auth applies, so there is at most one.
 	 */
 	secret: string | null;
 }
@@ -90,12 +104,30 @@ interface QueryKey {
 	value: string;
 }
 
+/**
+ * What the line draws for an OAuth 2.0 token, which is fetched at send and so
+ * unknown here. Only unreserved characters, so no encoding touches it and the
+ * masker finds it as written; long enough that no URL holds it by chance.
+ */
+const OAUTH2_TOKEN_STAND_IN = "vayu-oauth2-access-token-stand-in";
+
+/** The query parameter name the engine writes when the config leaves it empty. */
+const DEFAULT_OAUTH2_QUERY_PARAM = "access_token";
+
+/**
+ * Every member the sent URL depends on, so it is the cache's whole key: a field
+ * read while resolving and left out of it would never re-resolve.
+ */
 interface SendsInput {
 	url: string;
 	rows: KeyValueEntry[];
 	encode: boolean;
 	deferred: readonly string[];
 	queryKey: QueryKey | null;
+	/** The OAuth 2.0 token's parameter name as written, or null off the query. */
+	oauth2Param: string | null;
+	/** A GraphQL GET's document as stored, or null for any other request. */
+	graphql: string | null;
 }
 
 const stringField = (record: Record<string, unknown>, name: string): string => {
@@ -114,6 +146,20 @@ function queryKeyOf(auth: SendsUrlInput["auth"]): QueryKey | null {
 	return { key, value: stringField(auth, "value") };
 }
 
+/**
+ * The name an OAuth 2.0 token placed in the query goes under, as written, or
+ * null when the effective auth is not OAuth 2.0 or places it in the header. The
+ * config is nested under `config`, as the engine reads it.
+ */
+function oauth2ParamOf(auth: SendsUrlInput["auth"]): string | null {
+	if (!auth || auth.mode !== "oauth2") return null;
+	const { config } = auth;
+	if (typeof config !== "object" || config === null) return null;
+	const settings = config as Record<string, unknown>;
+	if (settings.tokenPlacement !== "query") return null;
+	return stringField(settings, "queryParamName");
+}
+
 function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsInput {
 	return {
 		url: request.url,
@@ -121,6 +167,8 @@ function sendsInput(request: SendsUrlInput, deferred: readonly string[]): SendsI
 		encode: !request.disableUrlEncoding,
 		deferred,
 		queryKey: queryKeyOf(request.auth),
+		oauth2Param: oauth2ParamOf(request.auth),
+		graphql: graphqlUrlContent(request.method ?? "", request.body) ?? null,
 	};
 }
 
@@ -209,10 +257,56 @@ function secretOf(template: string, sent: string): string | null {
 	return sent === trimCredential(template) && containsVariableToken(sent) ? null : sent;
 }
 
-function resolveSends(
-	{ url, rows, encode, deferred, queryKey }: SendsInput,
-	resolveAll: Resolve
+/** @p url with the API key appended, and the value it put there as a secret. */
+function withApiKey(
+	url: string,
+	queryKey: QueryKey,
+	resolve: Resolve,
+	encode: boolean
 ): SendsResolved {
+	const key = trimCredential(resolve(queryKey.key));
+	const value = trimCredential(resolve(queryKey.value));
+	return {
+		url: appendQueryParam(url, key, value, encode),
+		secret: key === "" ? null : secretOf(queryKey.value, value),
+	};
+}
+
+/** @p url with the OAuth 2.0 token's stand-in appended, and the stand-in as the secret. */
+function withOAuth2Token(
+	url: string,
+	param: string,
+	resolve: Resolve,
+	encode: boolean
+): SendsResolved {
+	const name = resolve(param) || DEFAULT_OAUTH2_QUERY_PARAM;
+	return {
+		url: appendQueryParam(url, name, OAUTH2_TOKEN_STAND_IN, encode),
+		secret: OAUTH2_TOKEN_STAND_IN,
+	};
+}
+
+/** @p url with the auth's query parameter, if the request places one there. */
+function withAuthParameter(url: string, input: SendsInput, resolve: Resolve): SendsResolved {
+	const { queryKey, oauth2Param, encode } = input;
+	if (queryKey !== null) return withApiKey(url, queryKey, resolve, encode);
+	if (oauth2Param !== null) return withOAuth2Token(url, oauth2Param, resolve, encode);
+	return { url, secret: null };
+}
+
+/**
+ * @p url with a GraphQL GET's document appended as the query parameters the
+ * engine sends it as. The document is resolved first and encoded after: encoding
+ * first would draw `%7B%7Bname%7D%7D` where the engine sends the value.
+ */
+function withGraphqlQuery(url: string, document: string | null, resolve: Resolve): string {
+	if (document === null) return url;
+	const query = graphqlGetQuery(resolve(document));
+	return query === undefined ? url : urlWithQuery(url, query);
+}
+
+function resolveSends(input: SendsInput, resolveAll: Resolve): SendsResolved {
+	const { url, rows, encode, deferred, graphql } = input;
 	const resolve = leaveDeferred(resolveAll, deferred);
 	const resolved = resolveUrlTemplate(
 		substitutePathVariables(url, rows, resolve, { encode }),
@@ -221,13 +315,13 @@ function resolveSends(
 	);
 	const { base } = splitFragment(resolved);
 	// No URL, no line: an appended `?k=v` would hide that the request has none.
-	if (queryKey === null || base.trim() === "") return { url: base, secret: null };
-	const key = trimCredential(resolve(queryKey.key));
-	const value = trimCredential(resolve(queryKey.value));
-	// The fragment is cut after the append: under `disableUrlEncoding` a `#` in
-	// the key or value is written raw, and libcurl drops everything from it.
-	const sent = splitFragment(appendQueryParam(base, key, value, encode)).base;
-	return { url: sent, secret: key === "" ? null : secretOf(queryKey.value, value) };
+	if (base.trim() === "") return { url: base, secret: null };
+	const authed = withAuthParameter(base, input, resolve);
+	// The fragment is cut last: under `disableUrlEncoding` a `#` in the key or
+	// value is written raw, and libcurl drops everything from it, the GraphQL
+	// query included.
+	const sent = splitFragment(withGraphqlQuery(authed.url, graphql, resolve)).base;
+	return { url: sent, secret: authed.secret };
 }
 
 /**
@@ -244,15 +338,23 @@ export function resolveSendsUrl(
 
 /**
  * The text the sent URL is built from that can hold a `{{token}}`: the URL, the
- * values of the path rows the line substitutes and an API key placed in the
- * query, no others.
+ * values of the path rows the line substitutes, an API key placed in the query,
+ * an OAuth 2.0 token's parameter name and a GraphQL GET's document, no others.
  */
 function sendsTemplates(request: SendsUrlInput): string[] {
 	const pathValues = answeringPathRows(request.url, composePathParams(request.params)).flatMap(
 		(row) => (typeof row.value === "string" ? [row.value] : [])
 	);
 	const queryKey = queryKeyOf(request.auth);
-	return [request.url, ...pathValues, ...(queryKey ? [queryKey.key, queryKey.value] : [])];
+	const oauth2Param = oauth2ParamOf(request.auth);
+	const graphql = graphqlUrlContent(request.method ?? "", request.body);
+	return [
+		request.url,
+		...pathValues,
+		...(queryKey ? [queryKey.key, queryKey.value] : []),
+		...(oauth2Param === null ? [] : [oauth2Param]),
+		...(graphql === undefined ? [] : [graphql]),
+	];
 }
 
 /**

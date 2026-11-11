@@ -226,6 +226,244 @@ describe("resolveSendsUrl, the URL that reaches the server (#3425)", () => {
 	});
 });
 
+describe("resolveSendsUrl, an OAuth 2.0 token placed in the query (#3437)", () => {
+	const oauth2 = (config: Record<string, unknown>): Record<string, unknown> => ({
+		mode: "oauth2",
+		config,
+	});
+	const resolved = (
+		url: string,
+		auth: Record<string, unknown> | undefined,
+		disableUrlEncoding = false
+	) => sendsResolver(resolve)(sendsCacheInput({ ...sends(url, [], disableUrlEncoding), auth }));
+	const queried = (config: Record<string, unknown> = {}) =>
+		oauth2({ tokenPlacement: "query", ...config });
+
+	it("appends the engine's default name, `access_token`, with a stand-in for the token", () => {
+		const { url, secret } = resolved("https://api.test/p", queried());
+		expect(secret).not.toBeNull();
+		expect(url).toBe(`https://api.test/p?access_token=${secret}`);
+		expect(resolved("https://api.test/p?a=1", queried()).url).toBe(
+			`https://api.test/p?a=1&access_token=${secret}`
+		);
+	});
+
+	it("writes the stand-in as it is, whatever the encoding", () => {
+		const encoded = resolved("https://api.test/p", queried());
+		const raw = resolved("https://api.test/p", queried(), true);
+		expect(raw).toEqual(encoded);
+	});
+
+	it("uses the configured name, resolved, and the default only when it is empty", () => {
+		expect(resolved("https://api.test/p", queried({ queryParamName: "tok" })).url).toMatch(
+			/^https:\/\/api\.test\/p\?tok=/
+		);
+		expect(resolved("https://api.test/p", queried({ queryParamName: "{{host}}" })).url).toMatch(
+			/^https:\/\/api\.test\/p\?api\.test=/
+		);
+		expect(resolved("https://api.test/p", queried({ queryParamName: "" })).url).toMatch(
+			/\?access_token=/
+		);
+		// Empty once resolved, which is when the engine reads it.
+		const blank = sendsResolver(resolverFor({ blank: "" }));
+		const request = {
+			...sends("https://api.test/p"),
+			auth: queried({ queryParamName: "{{blank}}" }),
+		};
+		expect(blank(sendsCacheInput(request)).url).toMatch(/\?access_token=/);
+		expect(resolved("https://api.test/p", queried({ queryParamName: 7 })).url).toMatch(
+			/\?access_token=/
+		);
+	});
+
+	it("reads the nested config, never a flat field", () => {
+		const flat = { mode: "oauth2", tokenPlacement: "query", queryParamName: "tok" };
+		expect(resolved("https://api.test/p", flat).url).toBe("https://api.test/p");
+	});
+
+	it("is appended where the fragment was cut, not after it", () => {
+		expect(resolved("https://api.test/p#frag", queried()).url).toMatch(
+			/^https:\/\/api\.test\/p\?access_token=[^#]*$/
+		);
+	});
+
+	it("leaves a request with no URL with no URL", () => {
+		expect(resolved("", queried())).toEqual({ url: "", secret: null });
+	});
+
+	it("adds nothing for a header placement, an absent one or a config that is not one", () => {
+		const url = "https://api.test/p";
+		for (const auth of [
+			oauth2({ tokenPlacement: "header", queryParamName: "tok" }),
+			oauth2({ queryParamName: "tok" }),
+			oauth2({}),
+			{ mode: "oauth2" },
+			{ mode: "oauth2", config: null },
+			{ mode: "oauth2", config: "query" },
+			{ mode: "bearer", config: { tokenPlacement: "query" } },
+		]) {
+			expect(resolved(url, auth)).toEqual({ url, secret: null });
+		}
+	});
+
+	it("is the one an `inherit` request gets from its chain", () => {
+		const folder = {
+			id: "f",
+			auth: { mode: "oauth2", config: { tokenPlacement: "query", queryParamName: "tok" } },
+		} as unknown as Collection;
+		const inherited = resolveAuthForSend({ mode: "inherit" }, [folder]);
+		expect(resolved("https://api.test/p", inherited).url).toMatch(/\?tok=/);
+	});
+
+	it("leaves a deferred name in the parameter name written", () => {
+		const request = {
+			...sends("https://api.test/p"),
+			auth: queried({ queryParamName: "{{seg}}" }),
+		};
+		expect(resolveSendsUrl(request, resolve, ["seg"])).toMatch(/\?\{\{seg\}\}=/);
+	});
+});
+
+describe("resolveSendsUrl, a GraphQL GET (#3437)", () => {
+	const graphql = (content: string) => ({ mode: "graphql", content });
+	const getting = (
+		url: string,
+		content: string,
+		extra: Partial<Parameters<typeof resolveSendsUrl>[0]> = {}
+	): Parameters<typeof resolveSendsUrl>[0] => ({
+		...sends(url),
+		method: "GET",
+		body: graphql(content),
+		...extra,
+	});
+
+	it("sends a bare document as the `query` parameter, encoded as the engine does", () => {
+		expect(resolveSendsUrl(getting("https://api.test/g", "{ me(id: 1) }"), resolve)).toBe(
+			"https://api.test/g?query=%7B%20me%28id%3A%201%29%20%7D"
+		);
+	});
+
+	it("sends an envelope as one parameter per member, in the author's order", () => {
+		const envelope =
+			'{"query":"query Q($id: ID!) { me }","variables":{"id":7},"operationName":"Q"}';
+		expect(resolveSendsUrl(getting("https://api.test/g?a=1", envelope), resolve)).toBe(
+			"https://api.test/g?a=1&query=query%20Q%28%24id%3A%20ID%21%29%20%7B%20me%20%7D" +
+				"&variables=%7B%22id%22%3A7%7D&operationName=Q"
+		);
+	});
+
+	it("reads the method in any case", () => {
+		const request = getting("https://api.test/g", "{ me }", { method: "get" });
+		expect(resolveSendsUrl(request, resolve)).toBe("https://api.test/g?query=%7B%20me%20%7D");
+	});
+
+	it("resolves a {{token}} in the document before it encodes it", () => {
+		const request = getting("https://{{host}}/g", '{ user(name: "{{seg}}") }');
+		expect(resolveSendsUrl(request, resolve)).toBe(
+			"https://api.test/g?query=%7B%20user%28name%3A%20%22a%20b%22%29%20%7D"
+		);
+		// Encoded first, the token would be sent as its own spelling.
+		expect(resolveSendsUrl(request, resolve)).not.toContain("%7B%7B");
+	});
+
+	it("resolves a {{token}} in an envelope's variables before the document is read", () => {
+		const request = getting(
+			"https://api.test/g",
+			'{"query":"{ me }","variables":{"n":"{{seg}}"}}'
+		);
+		expect(resolveSendsUrl(request, resolve)).toBe(
+			"https://api.test/g?query=%7B%20me%20%7D&variables=%7B%22n%22%3A%22a%20b%22%7D"
+		);
+	});
+
+	it("keeps a deferred name written, encoded with the rest of the document", () => {
+		const request = getting("https://api.test/g", "{ f(x: {{seg}}) }");
+		expect(resolveSendsUrl(request, resolve, ["seg"])).toContain("%7B%7Bseg%7D%7D");
+	});
+
+	it("is the URL the engine sends under disableUrlEncoding too", () => {
+		const request = getting("https://api.test/g", "{ me }", { disableUrlEncoding: true });
+		expect(resolveSendsUrl(request, resolve)).toBe("https://api.test/g?query=%7B%20me%20%7D");
+	});
+
+	it("adds nothing for another method, another body mode, or an empty document", () => {
+		const url = "https://api.test/g";
+		for (const request of [
+			getting(url, "{ me }", { method: "POST" }),
+			getting(url, "{ me }", { method: "HEAD" }),
+			getting(url, "{ me }", { method: undefined }),
+			getting(url, "{ me }", { body: { mode: "json", content: "{ me }" } }),
+			getting(url, "{ me }", { body: { mode: "none" } }),
+			getting(url, "{ me }", { body: undefined }),
+			getting(url, ""),
+			getting(url, "{ me }", { method: "GET", body: { mode: "graphql" } }),
+		]) {
+			expect(resolveSendsUrl(request, resolve)).toBe(url);
+		}
+	});
+
+	it("keeps the body where it is for a document the engine cannot carry in the URL", () => {
+		const unsupported = '{"query":"{ me }","extra":1}';
+		expect(resolveSendsUrl(getting("https://api.test/g", unsupported), resolve)).toBe(
+			"https://api.test/g"
+		);
+	});
+
+	it("is appended before the fragment, which is then cut", () => {
+		expect(resolveSendsUrl(getting("https://api.test/g?a=1#top", "{ me }"), resolve)).toBe(
+			"https://api.test/g?a=1&query=%7B%20me%20%7D"
+		);
+	});
+
+	it("leaves a request with no URL with no URL", () => {
+		expect(resolveSendsUrl(getting("", "{ me }"), resolve)).toBe("");
+	});
+
+	describe("beside the auth's query parameter", () => {
+		it("comes after an API key, as the engine appends the auth first", () => {
+			const request = getting("https://api.test/g", "{ me }", {
+				auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+			});
+			expect(resolveSendsUrl(request, resolve)).toBe(
+				"https://api.test/g?k=v&query=%7B%20me%20%7D"
+			);
+		});
+
+		it("comes after an OAuth 2.0 token", () => {
+			const request = getting("https://api.test/g", "{ me }", {
+				auth: {
+					mode: "oauth2",
+					config: { tokenPlacement: "query", queryParamName: "tok" },
+				},
+			});
+			expect(resolveSendsUrl(request, resolve)).toMatch(
+				/^https:\/\/api\.test\/g\?tok=[^&]+&query=%7B%20me%20%7D$/
+			);
+		});
+
+		it("is cut with the rest of what a raw # in the key's value starts", () => {
+			const request = getting("https://api.test/g", "{ me }", {
+				disableUrlEncoding: true,
+				auth: { mode: "apikey", key: "k", value: "a#b", in: "query" },
+			});
+			expect(resolveSendsUrl(request, resolve)).toBe(
+				"https://api.test/g?k=a&query=%7B%20me%20%7D"
+			);
+		});
+
+		it("leaves the secret the auth's, never the document's", () => {
+			const request = getting("https://api.test/g", "{ me }", {
+				auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+			});
+			expect(sendsResolver(resolve)(sendsCacheInput(request)).secret).toBe("v");
+			expect(
+				sendsResolver(resolve)(sendsCacheInput(getting("https://api.test/g", "{ me }")))
+					.secret
+			).toBeNull();
+		});
+	});
+});
+
 describe("the secret a Sends resolution appends (#3425)", () => {
 	const keyed = (key: string, value: string, url = "https://api.test/p") => ({
 		...sends(url),
@@ -384,6 +622,39 @@ describe("sendsHasTokens and deferredNamesInSends read an API key placed in the 
 	});
 });
 
+describe("sendsHasTokens and deferredNamesInSends read the new members of the sent URL (#3437)", () => {
+	const oauth2 = (config: Record<string, unknown>) => ({
+		...sends("https://api.test/p"),
+		auth: { mode: "oauth2", config },
+	});
+	const graphql = (content: string, method = "GET", mode = "graphql") => ({
+		...sends("https://api.test/g"),
+		method,
+		body: { mode, content },
+	});
+
+	it("sees a token in an OAuth 2.0 query parameter's name, only where it is placed in the query", () => {
+		const placed = oauth2({ tokenPlacement: "query", queryParamName: "{{name}}" });
+		expect(sendsHasTokens(placed)).toBe(true);
+		expect(deferredNamesInSends(placed, ["name", "other"])).toEqual(["name"]);
+		const inHeader = oauth2({ tokenPlacement: "header", queryParamName: "{{name}}" });
+		expect(sendsHasTokens(inHeader)).toBe(false);
+		expect(deferredNamesInSends(inHeader, ["name"])).toEqual([]);
+		expect(sendsHasTokens(oauth2({ tokenPlacement: "query", queryParamName: "tok" }))).toBe(
+			false
+		);
+	});
+
+	it("sees a token in a GraphQL GET's document, and in no other body", () => {
+		expect(sendsHasTokens(graphql("{ f(x: {{v}}) }"))).toBe(true);
+		expect(deferredNamesInSends(graphql("{ f(x: {{v}}) }"), ["v", "other"])).toEqual(["v"]);
+		expect(sendsHasTokens(graphql("{ f }"))).toBe(false);
+		expect(sendsHasTokens(graphql("{ f(x: {{v}}) }", "POST"))).toBe(false);
+		expect(sendsHasTokens(graphql("{ f(x: {{v}}) }", "GET", "json"))).toBe(false);
+		expect(deferredNamesInSends(graphql("{{v}}", "POST"), ["v"])).toEqual([]);
+	});
+});
+
 describe("deferredNamesInSends", () => {
 	it("keeps only the engine's names that the URL uses, once each, in order", () => {
 		const request = sends("https://{{host}}/{{token}}?a={{token}}&b={{ other }}");
@@ -446,6 +717,42 @@ describe("sendsCacheInput", () => {
 		);
 	});
 
+	it("changes with an OAuth 2.0 token placed in the query, its name, and only with those", () => {
+		const oauth2 = (config: Record<string, unknown>) => ({
+			...base,
+			auth: { mode: "oauth2", config },
+		});
+		const input = sendsCacheInput(oauth2({ tokenPlacement: "query" }));
+		expect(input).not.toBe(sendsCacheInput(base));
+		expect(sendsCacheInput(oauth2({ tokenPlacement: "query", queryParamName: "t" }))).not.toBe(
+			input
+		);
+		// Placed in the header, or any other config member, adds nothing to the URL,
+		// so a change to it must not re-resolve (a generator would reroll).
+		expect(sendsCacheInput(oauth2({ tokenPlacement: "header", queryParamName: "t" }))).toBe(
+			sendsCacheInput(base)
+		);
+		expect(sendsCacheInput(oauth2({ tokenPlacement: "query", scope: "a" }))).toBe(input);
+	});
+
+	it("changes with a GraphQL GET's document, and only for a GET with that body", () => {
+		const body = (content: string, mode = "graphql") => ({ mode, content });
+		const get = (content: string) => ({ ...base, method: "GET", body: body(content) });
+		const input = sendsCacheInput(get("{ a }"));
+		expect(input).not.toBe(sendsCacheInput(base));
+		expect(sendsCacheInput(get("{ b }"))).not.toBe(input);
+		// Anything else leaves the body in the request, so editing it must not
+		// re-resolve the line.
+		expect(sendsCacheInput({ ...get("{ a }"), method: "POST" })).toBe(sendsCacheInput(base));
+		expect(sendsCacheInput({ ...get("{ a }"), body: body("{ a }", "json") })).toBe(
+			sendsCacheInput(base)
+		);
+		expect(sendsCacheInput(get(""))).toBe(sendsCacheInput(base));
+		expect(sendsCacheInput({ ...base, method: "GET", body: body("{ b }", "text") })).toBe(
+			sendsCacheInput(base)
+		);
+	});
+
 	it("changes with the deferred names, so a changed answer re-resolves", () => {
 		expect(sendsCacheInput(base, ["token"])).not.toBe(sendsCacheInput(base));
 		expect(sendsCacheInput(base, ["token"])).toBe(sendsCacheInput(base, ["token"]));
@@ -489,6 +796,26 @@ describe("sendsResolver", () => {
 		);
 		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toBe(
 			"https://api.test/p?k=a%20b"
+		);
+	});
+
+	it("answers what resolveSendsUrl does for an OAuth 2.0 token and a GraphQL GET", () => {
+		const request = {
+			...sends("https://{{host}}/g#f"),
+			method: "GET",
+			body: { mode: "graphql", content: '{ f(x: "{{seg}}") }' },
+			auth: {
+				mode: "oauth2",
+				config: { tokenPlacement: "query", queryParamName: "{{host}}" },
+			},
+		};
+		for (const deferred of [[], ["seg"]]) {
+			expect(sendsResolver(resolve)(sendsCacheInput(request, deferred)).url).toBe(
+				resolveSendsUrl(request, resolve, deferred)
+			);
+		}
+		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toMatch(
+			/^https:\/\/api\.test\/g\?api\.test=[^&]+&query=%7B%20f%28x%3A%20%22a%20b%22%29%20%7D$/
 		);
 	});
 

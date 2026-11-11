@@ -43,6 +43,7 @@ let request: {
 	params: KeyValueEntry[];
 	disableUrlEncoding: boolean;
 	auth?: Record<string, unknown>;
+	body?: { mode: string; content?: string };
 };
 
 vi.mock("@/queries", () => ({
@@ -181,5 +182,32 @@ describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) =
 		expect(title).toBe("api.test/users?page=1");
 		expect(title).not.toContain("s3cret");
 		expect(resolveSendsUrl(request, resolveSeg)).toContain("api_key=s3cret");
+	});
+
+	it("leaves an OAuth 2.0 token placed in the query out, which the Sends line shows", () => {
+		openRequest({
+			url: "api.test/users?page=1",
+			auth: { mode: "oauth2", config: { tokenPlacement: "query", queryParamName: "tok" } },
+		});
+		bind();
+		const title = titleOfRequestTab(request.id);
+		expect(title).toBe("api.test/users?page=1");
+		expect(title).not.toContain("tok=");
+		expect(resolveSendsUrl(request, resolveSeg)).toContain("&tok=");
+	});
+
+	it("leaves a GraphQL GET's document out, which the Sends line shows", () => {
+		openRequest({
+			url: "api.test/graphql?page=1",
+			method: "GET",
+			body: { mode: "graphql", content: "{ me }" },
+		});
+		bind();
+		const title = titleOfRequestTab(request.id);
+		expect(title).toBe("api.test/graphql?page=1");
+		expect(title).not.toContain("query=");
+		expect(resolveSendsUrl(request, resolveSeg)).toBe(
+			"api.test/graphql?page=1&query=%7B%20me%20%7D"
+		);
 	});
 });

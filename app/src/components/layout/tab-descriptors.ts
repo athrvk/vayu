@@ -314,9 +314,10 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				// does on the line (#2741); the cache input holds those names, so a
 				// changed answer re-resolves and nothing else rerolls a generator.
 				//
-				// Without the auth (#3425): an API key placed in the query is on the
-				// line but never in a title, which never carries the auth's API key. Named
-				// field by field because the whole request would carry its `auth`.
+				// Without the auth, the method and the body (#3425, #3437): what they
+				// add to the query - an API key, an OAuth 2.0 token, a GraphQL GET's
+				// document - is on the line but never in a title. Named field by
+				// field because the whole request would carry them.
 				const sends = {
 					url: request.url,
 					params: request.params,
