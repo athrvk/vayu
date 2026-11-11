@@ -4355,7 +4355,7 @@ per kind. The fixed kinds, in the order they are reported (`ORDER` in
 | `api_spec` | An Insomnia design document (`api_spec` resource) |
 | `unit_test` | An Insomnia unit test or unit test suite |
 | `file_body` | A whole-file body (Postman `file`, Insomnia binary, an OpenAPI `application/octet-stream` or `format: binary` body), imported as a `binary` body whose file is still to choose |
-| `malformed_item` | A Postman `item[]` or `event[]` entry that is not an object, or a saved response that is not an object or whose numeric `code` is not an integer from 200 to 599 (the request still imports) |
+| `malformed_item` | A Postman `item[]` or `event[]` entry that is not an object, or a saved response that is not an object, whose numeric `code` is not an integer from 200 to 599, whose `body` is over 1 MiB, or that comes past the request's first 100 (the request still imports) |
 | `unsupported_method` | A Postman custom HTTP verb (imported as `GET`), or an OpenAPI `trace` operation (dropped; `HttpMethod` has no `TRACE`) |
 | `malformed_spec` | An OpenAPI path item, `parameters` list or response whose shape the specification does not allow, stepped over so the rest of the file still imports |
 | `example_no_status` | An OpenAPI response key that is neither `default` nor a status from 200 to 599 (a `2XX` wildcard, a `1xx` interim response, junk) |

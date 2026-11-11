@@ -1874,6 +1874,9 @@ std::optional<int> saved_response_status (const json* code) {
  * shows for one. What no column models - the request it was recorded against,
  * the status text, preview settings, cookies, response time, the header rows
  * as written - rides along as `postmanResponse` for the Postman export.
+ * A response whose body is over `request_example::MAX_BODY_BYTES`, and every
+ * response past the first `MAX_PER_REQUEST` kept, is left out and counted as
+ * malformed (#3431).
  */
 json pm_examples (const json* item, PostmanCounts& counts) {
     json out              = json::array ();
@@ -1881,14 +1884,23 @@ json pm_examples (const json* item, PostmanCounts& counts) {
     if (responses == nullptr || !responses->is_array ()) {
         return out;
     }
+    namespace limits = vayu::core::constants::request_example;
     for (const json& entry : *responses) {
+        // `POST /import/apply` refuses a request past the cap and an example
+        // whose body is past the size limit (#3431), so each is left out here,
+        // counted, rather than failing the whole import.
+        if (out.size () >= limits::MAX_PER_REQUEST) {
+            counts.skipped_malformed += 1;
+            continue;
+        }
         const json* saved = as_record (&entry);
         if (saved == nullptr) {
             counts.skipped_malformed += 1;
             continue;
         }
         const std::optional<int> status = saved_response_status (prop (saved, "code"));
-        if (!status) {
+        const std::string* body = as_str (prop (saved, "body"));
+        if (!status || (body != nullptr && body->size () > limits::MAX_BODY_BYTES)) {
             counts.skipped_malformed += 1;
             continue;
         }
@@ -1901,7 +1913,6 @@ json pm_examples (const json* item, PostmanCounts& counts) {
                 break;
             }
         }
-        const std::string* body = as_str (prop (saved, "body"));
         out.push_back (
         { { "name", name == nullptr || name->is_null () ? "Example" : as_string (name) },
         { "status", *status }, { "headers", std::move (headers) },
