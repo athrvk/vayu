@@ -59,6 +59,7 @@ function renderCrud() {
 				collections,
 				requestsByCollection,
 				getRequestsByCollection: (id: string) => requestsByCollection.get(id) ?? [],
+				revealEntity: vi.fn(),
 			}),
 		{ wrapper }
 	);

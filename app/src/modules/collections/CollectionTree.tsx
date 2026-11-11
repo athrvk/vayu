@@ -103,6 +103,7 @@ export default function CollectionTree() {
 		collections,
 		requestsByCollection,
 		getRequestsByCollection,
+		revealEntity,
 	});
 
 	const creatingSubfolder = rowState.creatingSubfolder;

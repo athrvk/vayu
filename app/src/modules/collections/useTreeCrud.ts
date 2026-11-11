@@ -23,6 +23,8 @@ import {
 	requestDetailOptions,
 } from "@/queries";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
+import { collectionEntity } from "./tree-rows";
+import type { TreeEntity } from "./drop-position";
 import { useCopy } from "@/hooks/useCopy";
 import { useStableCallback } from "@/hooks/useStableCallback";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
@@ -62,6 +64,13 @@ export interface TreeCrudOptions {
 	collections: Collection[];
 	requestsByCollection: Map<string, RequestSummary[]>;
 	getRequestsByCollection: (collectionId: string) => RequestSummary[];
+	/**
+	 * Expand to a row, scroll it into view and focus it
+	 * (`useRevealActiveSelection`). A folder is created wherever the sort puts
+	 * it, which in a long tree is off screen: without this the new row appears
+	 * out of sight and focus is left on `<body>` (#3443).
+	 */
+	revealEntity: (entity: TreeEntity) => void;
 }
 
 /** What the tree's own chrome renders: the create form, the toolbar, the dialog. */
@@ -143,6 +152,7 @@ export function useTreeCrud({
 	collections,
 	requestsByCollection,
 	getRequestsByCollection,
+	revealEntity: revealEntityNow,
 }: TreeCrudOptions): TreeCrud {
 	const openTab = useTabsStore((s) => s.openTab);
 	const closeTabsForEntities = useTabsStore((s) => s.closeTabsForEntities);
@@ -164,6 +174,9 @@ export function useTreeCrud({
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const offerUndo = useTrashUndo();
+	// Called from events after the create has settled, so it reads the render
+	// that holds the current collections rather than re-keying the handlers.
+	const revealEntity = useStableCallback(revealEntityNow);
 
 	const [creatingCollection, setCreatingCollection] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState<string | null>(null); // parent collection ID
@@ -263,8 +276,9 @@ export function useTreeCrud({
 	const handleCreateCollection = useCallback(async () => {
 		if (!newCollectionName.trim() || createCollectionMutation.isPending) return;
 
+		let created: Collection;
 		try {
-			await createCollectionMutation.mutateAsync({
+			created = await createCollectionMutation.mutateAsync({
 				name: newCollectionName.trim(),
 			});
 		} catch (error) {
@@ -272,7 +286,14 @@ export function useTreeCrud({
 			return; // Keep the form open with the typed name so it can be retried.
 		}
 		handleCancelNewCollectionForm();
-	}, [newCollectionName, createCollectionMutation, reportFailure, handleCancelNewCollectionForm]);
+		revealEntity(collectionEntity(created));
+	}, [
+		newCollectionName,
+		createCollectionMutation,
+		reportFailure,
+		handleCancelNewCollectionForm,
+		revealEntity,
+	]);
 
 	const handleCancelSubfolder = useCallback(() => {
 		setCreatingSubfolder(null);
@@ -284,8 +305,9 @@ export function useTreeCrud({
 
 		expandCollection(parentId);
 
+		let created: Collection;
 		try {
-			await createCollectionMutation.mutateAsync({
+			created = await createCollectionMutation.mutateAsync({
 				name: newFolderName.trim(),
 				parentId: parentId,
 			});
@@ -294,6 +316,7 @@ export function useTreeCrud({
 			return;
 		}
 		handleCancelSubfolder();
+		revealEntity(collectionEntity(created));
 	});
 
 	const handleCreateRequest = useStableCallback(async (collectionId: string) => {

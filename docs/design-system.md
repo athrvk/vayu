@@ -2654,6 +2654,13 @@ that focuses the row through the window (`revealRow` + `focusTreeRow`), so the
 row is mounted even if the dialog's own scrolling moved it away, and the tab
 stop travels with it.
 
+**A folder just created is revealed** (#3443). It lands where the sort puts it -
+the end of the root list, or the top of its parent - which in a long tree is off
+screen, so the create calls `revealEntity` (`useRevealActiveSelection`, the same
+reveal a move uses): ancestors expanded, the row mounted and scrolled to through
+the window, focus and the tab stop on it. The new-folder field that held focus
+unmounts with the create, so without this focus fell to `<body>`.
+
 **A tree that runs out of rows still has to name somewhere.** The rules above
 answer for every row but one: a root falls back to the root before it, so it
 takes the *whole tree emptying* - the deleted row was the only one there was -

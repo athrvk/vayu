@@ -39,9 +39,12 @@ const LIST_TOP_PX = 40;
 /** The one request named off the pattern, for the typeahead. */
 const FAR_NAMED = 777;
 
-const collections = [
+const COLLECTIONS = [
 	{ id: "alpha", name: "Alpha", order: 0 },
 	{ id: "big", name: "Big", order: 1 },
+];
+let collections: Array<{ id: string; name: string; order: number; parentId?: string }> = [
+	...COLLECTIONS,
 ];
 function requestFixture(count: number) {
 	return Array.from({ length: count }, (_, order) => ({
@@ -63,6 +66,9 @@ const UNIT_PX = 4;
 const requestTopPx = (k: number) => 70 + 34 * k;
 const ROW_PX = 32;
 const TOTAL_UNITS = 8 + 8.5 + 9 + (REQUEST_COUNT - 1) * 8.5;
+
+/** The collection the create cases add, last in the list. */
+const CREATED_ID = "fresh";
 
 const mutateAsync = vi.fn();
 const deleteRequest = vi.fn();
@@ -138,7 +144,14 @@ const listScreenTop = () => LIST_TOP_PX - scroller().scrollTop;
 function rowRect(el: Element): DOMRect {
 	const id = el.getAttribute("data-request-id");
 	if (id) return rect(listScreenTop() + requestTopPx(Number(id.slice(1))), ROW_PX);
-	const top = el.getAttribute("data-collection-id") === "alpha" ? 0 : 34;
+	const collectionId = el.getAttribute("data-collection-id");
+	// A folder created after the last request sits below the whole list.
+	const top =
+		collectionId === CREATED_ID
+			? (TOTAL_UNITS + 0.5) * UNIT_PX
+			: collectionId === "alpha"
+				? 0
+				: 34;
 	return rect(listScreenTop() + top, ROW_PX);
 }
 
@@ -200,6 +213,8 @@ const originalElementFromPoint = document.elementFromPoint;
 
 beforeEach(() => {
 	frames = [];
+	collections = [...COLLECTIONS];
+	mutateAsync.mockReset();
 	requests = new Map([["big", requestFixture(REQUEST_COUNT)]]);
 	reorderMutate.mockReset();
 	deleteRequest.mockReset().mockResolvedValue(undefined);
@@ -335,6 +350,56 @@ describe("rows that stay mounted wherever the drawer is scrolled", () => {
 		// The form is a row of its own (a unit above, ten tall), and the first request
 		// below it is now its sibling, half a unit down rather than a whole one.
 		expect(renderedUnits()).toBe(TOTAL_UNITS + 11 - 0.5);
+	});
+});
+
+describe("a folder just created in a long tree", () => {
+	/** What the engine answers, and the refetch that follows, as the real mutation does. */
+	function createAnswers(parentId?: string) {
+		mutateAsync.mockImplementation(async (data: { name: string }) => {
+			const created = {
+				id: CREATED_ID,
+				name: data.name,
+				order: 2,
+				...(parentId && { parentId }),
+			};
+			collections = [...collections, created];
+			rerenderTree();
+			return created;
+		});
+	}
+
+	/*
+	 * It lands where the sort puts it, which here is a thousand rows below the
+	 * top, so nothing on screen says it exists: it has to be mounted, scrolled to
+	 * and focused for the user to find it (#3443).
+	 */
+	it("is mounted, in view and focused when a top-level collection goes last", async () => {
+		createAnswers();
+		renderTree();
+		expect(collectionRow(CREATED_ID)).toBeNull();
+
+		fireEvent.click(screen.getByRole("button", { name: "Add collection" }));
+		fireEvent.keyDown(await screen.findByPlaceholderText("Collection name"), { key: "Enter" });
+
+		await waitFor(() => expect(document.activeElement).toBe(collectionRow(CREATED_ID)));
+		expect(collectionRow(CREATED_ID)).not.toBeNull();
+		expect(inView(collectionRow(CREATED_ID)!)).toBe(true);
+	});
+
+	it("is mounted and focused when a subfolder goes above the rows scrolled past", async () => {
+		createAnswers("big");
+		renderTree();
+		const big = collectionRow("big")!;
+		act(() => big.focus());
+		fireEvent.keyDown(big, { key: "F10", shiftKey: true });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
+		const field = await screen.findByPlaceholderText("Collection name");
+		scrollDrawerTo(LIST_TOP_PX + requestTopPx(600));
+
+		fireEvent.keyDown(field, { key: "Enter" });
+
+		await waitFor(() => expect(document.activeElement).toBe(collectionRow(CREATED_ID)));
 	});
 });
 
