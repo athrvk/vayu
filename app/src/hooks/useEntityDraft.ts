@@ -210,9 +210,9 @@ export function useEntityDraft<T>({
 		if (stored && !held) useEntityDraftStore.getState().drop(entityKey, stored);
 	}, [entityKey, stored, held]);
 
-	// The other half of the switch. These editors are rendered without a `key`,
-	// so a different entity arrives via props on the same component instance -
-	// and a TanStack mutation holds `isError` until the next `mutate`. Without
+	// The other half of the switch. An editor rendered without a `key` gets a
+	// different entity via props on the same component instance - and a
+	// TanStack mutation holds `isError` until the next `mutate`. Without
 	// this, a failed save would keep being reported against an entity the user
 	// never tried to save. `reset` is bound once in the observer, so it is a
 	// stable dep.

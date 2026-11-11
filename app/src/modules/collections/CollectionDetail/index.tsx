@@ -349,18 +349,32 @@ export default function CollectionDetail() {
 						}
 						className="mt-0 flex-1 overflow-auto p-6 bg-background"
 					>
+						{/* The draft editors are keyed too: a draft left dirty on
+						    the collection switched away from keeps saving through
+						    its editor's mutation observer (`useDraftSaveContext`'s
+						    `detach`), and one observer shared with the next
+						    collection would paint that save's failure there. */}
 						{t.id === "info" && (
 							<InfoTab
+								key={collection.id}
 								collection={collection}
 								requestCount={requestCount}
 								active={tab === "info"}
 							/>
 						)}
 						{t.id === "auth" && (
-							<AuthTab collection={collection} active={tab === "auth"} />
+							<AuthTab
+								key={collection.id}
+								collection={collection}
+								active={tab === "auth"}
+							/>
 						)}
 						{t.id === "elements" && (
-							<ElementsTab collection={collection} active={tab === "elements"} />
+							<ElementsTab
+								key={collection.id}
+								collection={collection}
+								active={tab === "elements"}
+							/>
 						)}
 						{t.id === "variables" && <VariablesTab collection={collection} />}
 						{/* Keyed: the Data tab reads the remembered file on mount

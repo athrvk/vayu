@@ -32,7 +32,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import CollectionDetail from "./index";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
@@ -67,11 +67,12 @@ const mutateAsync = vi.fn((_patch: { id: string; name?: string; elements?: Eleme
 	Promise.resolve(collection)
 );
 // What the engine holds: a save that lands updates it, the way the real
-// mutation's `onSuccess` updates the collections cache, and `c1Deleted` takes
-// it out of the list.
+// mutation's `onSuccess` updates the collections cache. `others` are the rest
+// of the list, and `c1Deleted` takes c1 out of it.
 let stored: Collection = collection;
+let others: Collection[] = [];
 let c1Deleted = false;
-const listed = () => (c1Deleted ? [] : [stored]);
+const listed = () => (c1Deleted ? others : [stored, ...others]);
 
 const mutation = {
 	mutate: vi.fn(),
@@ -81,23 +82,33 @@ const mutation = {
 	isError: false,
 	error: null as Error | null,
 };
+// The stub above by default; a case about which observer a save reports
+// through swaps in a real `useMutation`.
+const updateMutation = { use: (): unknown => mutation };
+function useRealUpdateMutation() {
+	return useMutation({
+		mutationFn: (patch: { id: string; elements?: ElementDef[] }) => mutateAsync(patch),
+	});
+}
+
 vi.mock("@/queries/collections", () => ({
 	useCollectionsQuery: () => ({ data: listed(), isLoading: false, isError: false }),
 	useRequestsQuery: () => ({ data: [], isLoading: false }),
 	// The shell counts the whole subtree for its header (issue #723); an empty
 	// map is "no requests anywhere", which is what these cases are about.
 	useMultipleCollectionRequests: () => ({ requestsByCollection: new Map(), isLoading: false }),
-	useUpdateCollectionMutation: () => mutation,
+	useUpdateCollectionMutation: () => updateMutation.use(),
 	useCollectionAncestors: () => [],
 }));
 
 // The screen reads which tab is showing from a stub; the cases that close a tab
 // drive the real store, imported directly.
+let shownId = "c1";
 vi.mock("@/stores", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/stores")>()),
 	useTabsStore: (selector: (s: Record<string, unknown>) => unknown) =>
 		selector({
-			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			openTabs: [{ id: "t1", type: "collection", entityId: shownId }],
 			activeTabId: "t1",
 		}),
 	useSessionStore: (selector: (s: unknown) => unknown) =>
@@ -167,7 +178,10 @@ function resetHarness() {
 	useTabSelectionStore.getState().clearAll();
 	client = new QueryClient();
 	stored = collection;
+	others = [];
 	c1Deleted = false;
+	shownId = "c1";
+	updateMutation.use = () => mutation;
 }
 
 function nameInput(): HTMLInputElement {
@@ -514,5 +528,28 @@ describe("CollectionDetail - a draft away from its screen, against what is store
 		render(<Screen />);
 		expect(screen.getByText("Changed elsewhere: the elements list")).toBeInTheDocument();
 		expect(toggle()).not.toBeChecked();
+	});
+
+	it("keeps a switched-away collection's failure off the next collection's screen", async () => {
+		// The screen is one instance across collection tabs. Mutation check:
+		// render the editors without `key={collection.id}`, and c1's detached
+		// save fails on the observer c2's editor reads, painting c1's error there.
+		updateMutation.use = useRealUpdateMutation;
+		const c2: Collection = { ...collection, id: "c2", name: "Other API" };
+		others = [c2];
+		publish();
+		useTabSelectionStore.getState().setCollectionTab("c2", "elements");
+		const view = render(<Screen />);
+		selectTab(/elements/i);
+		fireEvent.click(toggle());
+
+		shownId = "c2";
+		view.rerender(<Screen />);
+		mutateAsync.mockRejectedValue(new Error("engine down"));
+		await act(() => useSaveStore.getState().flushAll());
+
+		expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
+		expect(screen.queryByText("Couldn't save the elements list")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /save elements/i })).toBeDisabled();
 	});
 });
