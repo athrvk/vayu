@@ -71,8 +71,18 @@ export interface LoadTestConfigDialogProps {
 	onClose: () => void;
 	onStart: (config: LoadTestConfig) => void;
 	isStarting: boolean;
-	/** True when the pending request has a non-empty preRequestScript. */
+	/**
+	 * True when the pending request has an enabled, non-blank pre-request script
+	 * that is not marked inline (`hasUnmarkedPreScript`): the one the engine skips
+	 * unless Scripts is All inline.
+	 */
 	hasPreRequestScript: boolean;
+	/**
+	 * True when the pending request has an enabled, non-blank pre-request script
+	 * marked inline (`hasInlinePreScript`): it runs at As marked, and only All
+	 * deferred skips it.
+	 */
+	hasInlinePreScript: boolean;
 	/**
 	 * True when a post-request script (the request's own or an inherited
 	 * collection one) would be replayed after the run on a sample of
@@ -186,6 +196,7 @@ export default function LoadTestConfigDialog({
 	onStart,
 	isStarting,
 	hasPreRequestScript,
+	hasInlinePreScript,
 	hasPostRequestScript,
 	oauth2Config,
 	oauth2DeferredNames = NO_NAMES,
@@ -304,6 +315,7 @@ export default function LoadTestConfigDialog({
 	const notices = buildNotices({
 		...errors,
 		hasPreRequestScript,
+		hasInlinePreScript,
 		hasPostRequestScript,
 		scriptsOverride,
 		defaultHeaderDifference,

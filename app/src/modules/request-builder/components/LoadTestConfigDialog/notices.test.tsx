@@ -21,6 +21,7 @@ const CLEAN: NoticeInputs = {
 	monitoringError: null,
 	scenarioOnlyError: null,
 	hasPreRequestScript: false,
+	hasInlinePreScript: false,
 	hasPostRequestScript: false,
 	scriptsOverride: "asMarked",
 	defaultHeaderDifference: null,
@@ -69,6 +70,29 @@ describe("buildNotices", () => {
 
 	it("drops the pre-request warning once Scripts is All inline", () => {
 		expect(keys({ hasPreRequestScript: true, scriptsOverride: "allInline" })).toEqual([]);
+		expect(keys({ hasInlinePreScript: true, scriptsOverride: "allInline" })).toEqual([]);
+	});
+
+	describe("a pre-request script marked inline", () => {
+		it("is not warned about at As marked, where the engine runs it", () => {
+			expect(keys({ hasInlinePreScript: true, scriptsOverride: "asMarked" })).toEqual([]);
+		});
+
+		it("is warned about at All deferred, which overrides the mark", () => {
+			expect(keys({ hasInlinePreScript: true, scriptsOverride: "allDeferred" })).toEqual([
+				"pre-script",
+			]);
+		});
+
+		it("does not hide the warning for an unmarked one beside it", () => {
+			expect(
+				keys({
+					hasPreRequestScript: true,
+					hasInlinePreScript: true,
+					scriptsOverride: "asMarked",
+				})
+			).toEqual(["pre-script"]);
+		});
 	});
 
 	it("says nothing about scripts when the request has no pre-request script", () => {

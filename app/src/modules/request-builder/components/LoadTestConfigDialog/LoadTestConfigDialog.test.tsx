@@ -175,6 +175,7 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={onStart}
 			isStarting={false}
 			hasPreRequestScript={false}
+			hasInlinePreScript={false}
 			hasPostRequestScript={false}
 			isStreamingRequest={false}
 			{...props}
@@ -692,6 +693,19 @@ describe("notices", () => {
 		);
 
 		expect(screen.queryByText("Pre-request script won't run")).toBeNull();
+	});
+
+	it("leaves a pre-request script marked inline unwarned until Scripts is All deferred", () => {
+		open({ hasInlinePreScript: true });
+		expect(screen.queryByText("Pre-request script won't run")).toBeNull();
+
+		fireEvent.click(
+			within(screen.getByRole("radiogroup", { name: /^scripts$/i })).getByRole("radio", {
+				name: "All deferred",
+			})
+		);
+
+		expect(screen.getByText("Pre-request script won't run")).toBeInTheDocument();
 	});
 
 	it("explains the post-request sample for a request with only a post-request script", () => {
