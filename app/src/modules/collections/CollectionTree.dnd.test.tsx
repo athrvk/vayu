@@ -270,7 +270,7 @@ describe("a press on a control inside a row", () => {
 /**
  * A move and an editor's save do not conflict (#3447): the builder's save is a
  * merge-patch of the fields it changed, so it never carries the owner or order
- * a move rewrites. The tree used to refuse the press and toast "try again".
+ * a move rewrites, so the press is never refused.
  */
 describe("a request whose open editor has an unsaved edit", () => {
 	function registerPendingEditor(requestId: string) {
@@ -603,8 +603,7 @@ describe("a drop", () => {
 
 /**
  * An empty folder shows an "Empty collection" line in place of its children.
- * It is not a treeitem, so a drop on it used to resolve to nothing and the
- * only way into an empty folder was its own row.
+ * It is not a treeitem, so it resolves its folder from a data attribute.
  */
 describe("a drop on an empty folder's placeholder", () => {
 	const placeholder = () => document.getElementById("tree-empty-c3")!;

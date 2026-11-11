@@ -31,7 +31,7 @@ import {
 	rowStrides,
 	type TreeRow,
 } from "./tree-rows";
-import { TREE_ITEM } from "./tree-focus";
+import { EMPTY_OWNER_ATTR, TREE_ITEM } from "./tree-focus";
 import { useDraggingRowKey } from "./tree-row-dnd";
 import { RowDropIndicatorFor } from "./TreeRowDnd";
 import { useTreeWindow } from "./useTreeWindow";
@@ -118,7 +118,7 @@ function RowContent({ row }: { row: TreeRow }) {
 			return (
 				<div
 					id={row.id}
-					data-tree-empty-owner={row.parentId}
+					{...{ [EMPTY_OWNER_ATTR]: row.parentId }}
 					className="relative flex h-full items-center pr-3 text-xs text-muted-foreground"
 					style={{
 						paddingLeft: rowInsetPx(row.depth),

@@ -537,9 +537,8 @@ describe("a drag in a windowed tree", () => {
 
 	/*
 	 * The pointer held still in the edge band: every frame scrolls the drawer
-	 * and brings a different row under it, and the hit test used to run only on
-	 * a pointer move, so the line and the drop stayed on the row from before the
-	 * scroll (#3447).
+	 * and brings a different row under it, so the hit test must re-run on each
+	 * scroll frame, not only on a pointer move (#3447).
 	 */
 	it("re-aims the drop at the row each scroll frame brings under a still pointer", () => {
 		renderTree();
