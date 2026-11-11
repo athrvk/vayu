@@ -71,9 +71,9 @@ R"("paths":{"/cars":{"get":{"operationId":"listCars","responses":{"200":{}}}}}})
 class SpecMoveTrees {
     public:
     explicit SpecMoveTrees (vayu::db::Database& db) : db_ (db) {
-        pets   = create_collection (nlohmann::json{ { "name", "Pets" },
-        { "openapi", { { "specId", store_spec (PETS_DOC) } } } });
-        owners = create_collection (
+        pets_spec = store_spec (PETS_DOC);
+        pets      = create_bound ("Pets", pets_spec);
+        owners    = create_collection (
         nlohmann::json{ { "name", "owners" }, { "parentId", pets } });
         cars  = create_collection (nlohmann::json{ { "name", "Cars" },
         { "openapi", { { "specId", store_spec (CARS_DOC) } } } });
@@ -82,6 +82,21 @@ class SpecMoveTrees {
         list_pets   = create_stamped (pets, "GET", "/pets", "listPets");
         list_owners = create_stamped (owners, "GET", "/owners", "listOwners");
         list_cars   = create_stamped (cars, "GET", "/cars", "listCars");
+    }
+
+    /**
+     * A collection bound to @p spec_id, at the root or under @p parent_id: a
+     * second binding of the same document, which is or is not inside `pets`'s
+     * contract depending on where it sits.
+     */
+    std::string create_bound (const std::string& name,
+    const std::string& spec_id,
+    const std::string& parent_id = {}) {
+        nlohmann::json body{ { "name", name }, { "openapi", { { "specId", spec_id } } } };
+        if (!parent_id.empty ()) {
+            body["parentId"] = parent_id;
+        }
+        return create_collection (body);
     }
 
     /** A request under @p collection_id stamped with the named operation. */
@@ -121,6 +136,7 @@ class SpecMoveTrees {
         return response.value ("created", size_t{ 0 });
     }
 
+    std::string pets_spec;
     std::string pets;
     std::string owners;
     std::string cars;

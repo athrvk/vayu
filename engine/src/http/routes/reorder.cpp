@@ -399,16 +399,16 @@ stamped_requests_moved (vayu::db::Database& db, const std::vector<Move>& moves) 
 }
 
 /**
- * Stages the requests the batch takes out of the binding that answered for them
- * (#3446), and answers each one's id with the bound collection its operation is
- * declined under (`core::declined_by_move`).
+ * Stages the requests the batch takes out of the contract that answered for
+ * them (#3446), and answers each one's id with the bound collection its
+ * operation is declined under (`declined_by_move`).
  *
- * The binding before is read off the stored tree and the binding after off the
- * staged one, because a batch can move a folder and its requests together and
- * only the tree it is about to write says where each request ends up. Both come
- * from one read of the collections rather than a query per ancestor per
- * request. A departing request is staged with its stamp cleared, so the
- * response shows the row as written.
+ * The binding before is read off the stored tree, and the binding after and the
+ * contract walk off the staged one, because a batch can move a folder and its
+ * requests together and only the tree it is about to write says where each
+ * request ends up. Both come from one read of the collections rather than a
+ * query per ancestor per request. A departing request is staged with its stamp
+ * cleared, so the response shows the row as written.
  */
 std::unordered_map<std::string, std::string> stage_binding_departures (vayu::db::Database& db,
 const std::vector<Move>& moves,
@@ -440,15 +440,22 @@ WriteSet& writes) {
         }
         return before (id);
     };
+    std::vector<vayu::db::Collection> staged_tree;
+    staged_tree.reserve (stored_tree.size ());
+    for (const auto& [id, collection] : stored_tree) {
+        const auto staged = writes.collections.find (id);
+        staged_tree.push_back (
+        staged != writes.collections.end () ? staged->second : collection);
+    }
 
     for (const auto& [id, stored] : stamped) {
         const auto staged    = writes.requests.find (id);
         const bool is_staged = staged != writes.requests.end ();
         const std::string destination =
         is_staged ? staged->second.collection_id : stored.collection_id;
-        const auto under = vayu::core::declined_by_move (stored,
+        const auto under = declined_by_move (stored,
         vayu::core::nearest_spec_binding (before, stored.collection_id),
-        vayu::core::nearest_spec_binding (after, destination));
+        vayu::core::nearest_spec_binding (after, destination), staged_tree);
         if (!under) {
             continue;
         }
@@ -543,7 +550,7 @@ std::vector<Move>& moves) {
  *     into a legacy all-zeros collection has real slots to name; the moves then
  *     state the positions the drop actually produced, and win over the
  *     renumber for any row named by both. A stamped request the moves take out
- *     of its binding is then staged with its stamp cleared
+ *     of its contract is then staged with its stamp cleared
  *     (`stage_binding_departures`, #3446).
  *  3. **One transaction** (`Database::apply_reorder`), whose rows are updates,
  *     never inserts - a row deleted out from under the batch is a 409 naming it
@@ -667,7 +674,7 @@ void register_reorder_routes (RouteContext& ctx) {
      * roots); both optional, an empty batch is a no-op. Normalization
      * renumbers a parent's sub-folders and requests together dense 0..n-1 in
      * sibling order before the moves apply. A stamped request moved out of
-     * its spec binding, alone or under a moved folder, comes back with
+     * its spec contract, alone or under a moved folder, comes back with
      * `specOperation: null` and its operation declined under the source
      * binding (#3446). Returns: 200
      * `{"collections": [...], "requests": [...]}` - the rows as written - or

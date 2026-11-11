@@ -320,15 +320,18 @@ collection takes its records with it. Deleting the bound collection itself
 records nothing, and a sync's own hard deletes record nothing either: the
 document dropped those operations, nobody declined them.
 
-**Moving the request out of the binding is the same decision** (#3446). A move
+**Moving the request out of the contract is the same decision** (#3446). A move
 through `POST /reorder` or `PUT /requests/:id` that leaves a stamped request
-under a collection whose nearest binding names another document, or none,
-records the operation under the binding it left and clears the request's
-`spec_operation`, in the move's own transaction; a moved collection does it for
-every stamped request beneath it. The route compares the two bindings
-(`core::declined_by_move`; for a batch, the binding after is read off the tree
-the batch writes) and passes the decision down, so `Database` still reads no
-binding. A move within one binding keeps the stamp. Because the moved request
+outside the contract it answered to - under a collection whose nearest binding
+names another document, none, or the same document bound by a collection
+outside the source's contract walk (a sibling root) - records the operation
+under the binding it left and clears the request's `spec_operation`, in the
+move's own transaction; a moved collection does it for every stamped request
+beneath it. The route compares the two bindings (`declined_by_move`, over
+`spec_contract_subtree_ids`; for a batch, the binding after and the walk are
+read off the tree the batch writes) and passes the decision down, so `Database`
+still reads no binding. A move within one contract keeps the stamp, a move
+between the root and a sub-folder bound to the same document included. Because the moved request
 no longer records the operation, restoring it from the trash after a later
 delete forgets nothing: a restore takes back only a record its request can
 claim again.

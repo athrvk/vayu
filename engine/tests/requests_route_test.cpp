@@ -688,4 +688,33 @@ TEST_F (RequestMoveSpecBindingTest, AMoveThatStatesItsStampKeepsTheStatedOne) {
     EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
 }
 
+
+// Mutation check: compare the two bindings' `specId` alone in
+// `declined_by_move` and the stamp survives the move.
+TEST_F (RequestMoveSpecBindingTest, AMoveToASiblingRootBoundToTheSameDocumentIsDeclined) {
+    const std::string twin = trees_->create_bound ("Pets copy", trees_->pets_spec);
+
+    const json response = put (trees_->list_owners, json{ { "collectionId", twin } });
+
+    EXPECT_TRUE (response["specOperation"].is_null ()) << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+// Mutation check: keep a move only between identical binding collections in
+// `declined_by_move` and both moves decline.
+TEST_F (RequestMoveSpecBindingTest, AMoveBetweenTheRootAndASameDocumentSubFolderKeepsTheStamp) {
+    const std::string inner =
+    trees_->create_bound ("pets again", trees_->pets_spec, trees_->pets);
+
+    const json in = put (trees_->list_owners, json{ { "collectionId", inner } });
+    EXPECT_TRUE (in["specOperation"].is_object ()) << in.dump ();
+    const json out = put (trees_->list_owners, json{ { "collectionId", trees_->pets } });
+    EXPECT_TRUE (out["specOperation"].is_object ()) << out.dump ();
+
+    EXPECT_TRUE (declined_at_pets ().empty ());
+    EXPECT_TRUE (db_->get_declined_operations (inner).empty ());
+}
+
 } // namespace

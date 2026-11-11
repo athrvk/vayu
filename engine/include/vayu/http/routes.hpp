@@ -31,6 +31,7 @@
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_data.hpp"
 #include "vayu/core/schema_validation.hpp"
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
@@ -1268,6 +1269,32 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into);
 std::unordered_set<std::string> spec_contract_subtree_ids (
 const std::vector<vayu::db::Collection>& all,
 const std::string& root);
+
+/**
+ * The bound collection a move declines @p stored's operation under, or
+ * `std::nullopt` when the move keeps it (#3446).
+ *
+ * Moving a stamped request out of the contract that answered for it is removing
+ * it from that contract, so the move records the decline `DELETE /requests/:id`
+ * records (#3031) and clears the stamp. The move stays inside when @p after is
+ * the same binding as @p before, or binds the same document with one of the two
+ * inside the other's `spec_contract_subtree_ids` (a sub-folder bound to the
+ * root's own document). A collection that merely binds the same document
+ * elsewhere, a sibling root, is another contract: its diff and its sync never
+ * see the source's requests. A request with no stamp, or one that answered to no
+ * binding, declines nothing. Defined in spec_sync.cpp.
+ *
+ * @param stored the request as stored before the move: its stamp is what is
+ *        declined.
+ * @param before the binding that answered for it before the move.
+ * @param after the binding that answers for it once the move has landed.
+ * @param tree the collections as the move leaves them, which the contract walk
+ *        reads.
+ */
+[[nodiscard]] std::optional<std::string> declined_by_move (const vayu::db::Request& stored,
+const std::optional<vayu::core::BoundSpec>& before,
+const std::optional<vayu::core::BoundSpec>& after,
+const std::vector<vayu::db::Collection>& tree);
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.

@@ -1043,4 +1043,39 @@ TEST_F (ReorderSpecBindingTest, RestoringTheMovedRequestKeepsTheSourcesDecline) 
     EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
 }
 
+
+// A sibling root bound to the same document is a contract of its own: `pets`'s
+// diff and sync never walk into it. Mutation check: compare the two bindings'
+// `specId` alone in `declined_by_move` and the stamp survives the move.
+TEST_F (ReorderSpecBindingTest, AMoveToASiblingRootBoundToTheSameDocumentIsDeclined) {
+    const std::string twin = trees_->create_bound ("Pets copy", trees_->pets_spec);
+
+    const json response = move_request_to (trees_->list_owners, twin);
+
+    EXPECT_TRUE (
+    written_request (response, trees_->list_owners)["specOperation"].is_null ())
+    << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+// A sub-folder bound to the root's own document sits inside the root's contract
+// walk, so a move into it and back out keeps the stamp. Mutation check: keep a
+// move only between identical binding collections in `declined_by_move` and
+// both moves decline.
+TEST_F (ReorderSpecBindingTest, AMoveBetweenTheRootAndASameDocumentSubFolderKeepsTheStamp) {
+    const std::string inner =
+    trees_->create_bound ("pets again", trees_->pets_spec, trees_->pets);
+
+    move_request_to (trees_->list_owners, inner);
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    move_request_to (trees_->list_owners, trees_->pets);
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+
+    EXPECT_TRUE (declined_at_pets ().empty ());
+    EXPECT_TRUE (db_->get_declined_operations (inner).empty ());
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+}
+
 } // namespace

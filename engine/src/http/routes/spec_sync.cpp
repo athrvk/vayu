@@ -182,6 +182,24 @@ const std::string& root) {
     });
 }
 
+std::optional<std::string> declined_by_move (const vayu::db::Request& stored,
+const std::optional<vayu::core::BoundSpec>& before,
+const std::optional<vayu::core::BoundSpec>& after,
+const std::vector<vayu::db::Collection>& tree) {
+    if (!stored.spec_operation || !before) {
+        return std::nullopt;
+    }
+    if (!after || after->spec_id != before->spec_id) {
+        return before->collection_id;
+    }
+    if (after->collection_id == before->collection_id ||
+    spec_contract_subtree_ids (tree, before->collection_id).contains (after->collection_id) ||
+    spec_contract_subtree_ids (tree, after->collection_id).contains (before->collection_id)) {
+        return std::nullopt;
+    }
+    return before->collection_id;
+}
+
 bool binding_leaves_document (const std::string& before, const std::string& after) {
     if (bound_spec_id (after).empty ()) {
         return true;

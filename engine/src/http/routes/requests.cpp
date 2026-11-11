@@ -848,14 +848,14 @@ const std::function<void ()>& before_write) {
     if (order_is_defaulted (json) && (moved || json.contains ("order"))) {
         r.order = append_order (db, r);
     }
-    // A move out of the binding that stamped the request declines its
+    // A move out of the contract that stamped the request declines its
     // operation there (#3446), as `delete_request_response` does. A body that
     // states `specOperation` has said what the moved row records.
     std::optional<std::string> declined_under;
     if (moved) {
-        declined_under = vayu::core::declined_by_move (*existing,
+        declined_under = declined_by_move (*existing,
         vayu::core::nearest_spec_binding (db, existing->collection_id),
-        vayu::core::nearest_spec_binding (db, r.collection_id));
+        vayu::core::nearest_spec_binding (db, r.collection_id), db.get_collections ());
     }
     if (declined_under && !json.contains ("specOperation")) {
         r.spec_operation = std::nullopt;
@@ -1104,7 +1104,7 @@ void register_request_routes (RouteContext& ctx) {
      * Updates an existing request (merge-patch: absent fields keep their value,
      * null resets to the default). Update only - a missing id is a 404, never a
      * silent create (issue #95). A `collectionId` that moves a stamped request
-     * out of its spec binding declines its operation there and clears the
+     * out of its spec contract declines its operation there and clears the
      * stamp, unless the body states `specOperation` (#3446).
      * Path params: id - The request ID to update.
      * Headers: If-Match (optional) - the row's `W/"<updatedAt>"` (#2433).

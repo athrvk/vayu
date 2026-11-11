@@ -839,12 +839,14 @@ logged as a warning: it means a client skipped composition.
     a tag folder's `DELETE /collections/:id` record it under the nearest bound
     ancestor, which the route resolves (`core::nearest_spec_binding`) and
     passes to `Database::delete_request` / `delete_collection`, so `Database`
-    reads no binding. A move out of the binding is the same decision (#3446):
+    reads no binding. A move out of the contract is the same decision (#3446):
     `PUT /requests/:id` and `POST /reorder` (a moved folder's whole subtree,
     judged against the tree the batch writes) compare the nearest binding
-    before and after (`core::declined_by_move`), clear the stamp and pass the
-    record down to `save_request` / `apply_reorder`; a move within one binding
-    keeps it. The diff lists it under `declined`, never `added`;
+    before and after (`declined_by_move`, `routes.hpp`: the same binding, or
+    the same document with one inside the other's `spec_contract_subtree_ids`,
+    is one contract; a sibling root bound to the same document is not), clear
+    the stamp and pass the record down to `save_request` / `apply_reorder`; a
+    move within one contract keeps it. The diff lists it under `declined`, never `added`;
     `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
     it. A restore of a request that still records the operation, a sync that
     creates it, an unbind and a bind to other bytes forget the record; a purge

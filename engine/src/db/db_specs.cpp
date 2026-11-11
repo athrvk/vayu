@@ -156,7 +156,7 @@ size_t Database::sweep_orphaned_spec_documents () {
         //    `get_collections_bound_to_spec` makes, once over the sidebar-sized
         //    table rather than once per candidate.
         //
-        //    Unfiltered by `deleted_at`, unlike that reader (issue #988): a
+        //    Unfiltered by `deleted_at`, as that reader is (#988, #3446): a
         //    collection in the trash still binds its document, and reclaiming
         //    the document now would leave the restore pointing at nothing.
         std::unordered_set<std::string> referenced;

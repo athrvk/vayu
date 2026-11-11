@@ -455,7 +455,7 @@ class Database {
     void rebind_collection (const Collection& collection); // db_collections.cpp
 
     /// @param declined_under the bound collection a move takes @p r out of
-    ///        (`core::declined_by_move`, resolved by the route, #3446): the
+    ///        (`declined_by_move` in `routes.hpp`, resolved by the route, #3446): the
     ///        operation the *stored* row records is declined under it in the
     ///        same transaction, as `delete_request` records it. The caller
     ///        has already cleared @p r's stamp. Empty records nothing.

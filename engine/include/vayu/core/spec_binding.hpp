@@ -128,25 +128,4 @@ std::function<std::optional<vayu::db::Collection> (const std::string& collection
 [[nodiscard]] std::optional<BoundSpec>
 nearest_spec_binding (const CollectionLookup& lookup, const std::string& collection_id);
 
-/**
- * The bound collection a move declines @p stored's operation under, or
- * `std::nullopt` when the move keeps it (#3446).
- *
- * Moving a stamped request out of the binding that answered for it is removing
- * it from that contract, so the move records the decline `DELETE /requests/:id`
- * records (#3031) and clears the stamp. Out means the destination's nearest
- * binding names another document or there is none; a move to a collection whose
- * nearest binding names the same document (a sub-folder bound to it too, inside
- * the same contract walk) keeps the stamp. A request with no stamp, or one that
- * answered to no binding, declines nothing.
- *
- * @param stored the request as stored before the move: its stamp is what is
- *        declined.
- * @param before the binding that answered for it before the move.
- * @param after the binding that answers for it once the move has landed.
- */
-[[nodiscard]] std::optional<std::string> declined_by_move (const vayu::db::Request& stored,
-const std::optional<BoundSpec>& before,
-const std::optional<BoundSpec>& after);
-
 } // namespace vayu::core

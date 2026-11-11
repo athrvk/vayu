@@ -2235,15 +2235,17 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
 `PUT` that moves it somewhere real. A move that takes a request recording an
-operation (`specOperation`) out of the spec binding that answers for it, to a
-collection whose nearest binding names another document or none, is removing it
-from that contract (#3446): the operation is recorded as declined under the
-source binding, as [`DELETE /requests/:id`](#delete-requestsid) records it, and
-the stamp is cleared in the same write, so the source's
-[`POST /specs/diff`](#post-specsdiff) lists it under `declined` rather than
-`added`. A move within one binding (into a sub-collection bound to the same
-document included) keeps the stamp; a body that states `specOperation` beside
-the move keeps the stated value. Omitting `followRedirects` / `maxRedirects` /
+operation (`specOperation`) out of the spec contract that answers for it is
+removing it from that contract (#3446): out means the destination's nearest
+binding names another document, none, or the same document from a collection
+outside the source's contract (a sibling root bound to it too). The operation
+is recorded as declined under the source binding, as
+[`DELETE /requests/:id`](#delete-requestsid) records it, and the stamp is
+cleared in the same write, so the source's [`POST /specs/diff`](#post-specsdiff)
+lists it under `declined` rather than `added`. A move within one contract keeps
+the stamp, a move between the bound collection and a sub-collection bound to the
+same document included; a body that states `specOperation` beside the move
+keeps the stated value. Omitting `followRedirects` / `maxRedirects` /
 `timeout` / `verifySSL` / `stream` / `specOperation` / `methodSource` /
 `mockResponseMode` / `mockExampleId` / `disableCookies` /
 `disabledSystemHeaders` / `disableUrlEncoding` / `postmanProtocolBehavior`
@@ -2339,7 +2341,7 @@ sync that creates the operation on purpose; purging the request, by hand or by
 `trashRetentionDays`, does not - the decision outlives the row it was made on.
 Unbinding the collection, or binding it to a document with other bytes, forgets
 every record under it. A sync's own deletes record nothing. Moving the request
-out of the binding records the same decline (#3446, see
+out of the contract records the same decline (#3446, see
 [`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder));
 the move clears the stamp, and a restore forgets only the record of a request
 that still records an operation, so deleting and restoring the moved request
@@ -4037,16 +4039,16 @@ its requests after them, the order the tie rule already showed. It is idempotent
 
 Where a row is named by both lists, the move wins.
 
-**A move out of a spec binding declines the operation** (#3446), the rule
-[`PUT /requests/:id`](#put-requestsid) applies to one request. A request that
-records an operation (`specOperation`) and that the batch leaves under a
-collection whose nearest binding names another document, or none, comes back
-with `specOperation: null`, and the operation is recorded as declined under the
-binding it left, in the batch's transaction. A moved collection does this for
-every stamped request beneath it. Both bindings are read against the tree the
+**A move out of a spec contract declines the operation** (#3446), the rule
+[`PUT /requests/:id`](#put-requestsid) applies to one request, with the same
+meaning of out. A request that records an operation (`specOperation`) and that
+the batch leaves outside its contract comes back with `specOperation: null`,
+and the operation is recorded as declined under the binding it left, in the
+batch's transaction. A moved collection does this for every stamped request
+beneath it. The binding after and the contract are read against the tree the
 batch writes, so a request moved into a folder the same batch moves away is
-judged by where the folder lands. A move within one binding keeps the stamp, and
-so does moving the bound collection itself. Each request this clears is in the
+judged by where the folder lands. A move within one contract keeps the stamp,
+and so does moving the bound collection itself. Each request this clears is in the
 response, a request whose position did not change included.
 
 **Validation is complete before the first write.** Entry shapes, the existence of

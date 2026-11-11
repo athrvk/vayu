@@ -99,16 +99,4 @@ const std::string& collection_id) {
     return std::nullopt;
 }
 
-std::optional<std::string> declined_by_move (const vayu::db::Request& stored,
-const std::optional<BoundSpec>& before,
-const std::optional<BoundSpec>& after) {
-    if (!stored.spec_operation || !before) {
-        return std::nullopt;
-    }
-    if (after && after->spec_id == before->spec_id) {
-        return std::nullopt;
-    }
-    return before->collection_id;
-}
-
 } // namespace vayu::core
