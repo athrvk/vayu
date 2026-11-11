@@ -9,7 +9,9 @@
 
 #include <nlohmann/json.hpp>
 
-#include "vayu/http/request_composer.hpp"
+#include <string>
+#include <unordered_set>
+#include <utility>
 
 namespace vayu::core {
 
@@ -67,11 +69,23 @@ std::string string_field (const nlohmann::json& binding, const char* key) {
 
 std::optional<BoundSpec>
 nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id) {
-    const auto chain = vayu::http::collection_chain (db, collection_id);
-    // Root-first, so walking backwards finds the *nearest* bound ancestor.
-    for (auto it = chain.rbegin (); it != chain.rend (); ++it) {
-        const nlohmann::json binding =
-        nlohmann::json::parse (it->openapi, nullptr, /*allow_exceptions=*/false);
+    return nearest_spec_binding (
+    [&db] (const std::string& id) { return db.get_collection (id); }, collection_id);
+}
+
+std::optional<BoundSpec> nearest_spec_binding (const CollectionLookup& lookup,
+const std::string& collection_id) {
+    // Leaf upwards, so the first bound collection met is the *nearest* one.
+    std::unordered_set<std::string> seen;
+    std::string current = collection_id;
+    while (!current.empty () && seen.insert (current).second) {
+        const auto collection = lookup (current);
+        if (!collection) {
+            break;
+        }
+        current                      = collection->parent_id.value_or ("");
+        const nlohmann::json binding = nlohmann::json::parse (
+        collection->openapi, nullptr, /*allow_exceptions=*/false);
         if (!binding.is_object ()) {
             continue; // an unparseable column binds nothing, as everywhere else
         }
@@ -79,7 +93,8 @@ nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id) 
         if (spec_id.empty ()) {
             continue;
         }
-        return BoundSpec{ it->id, std::move (spec_id), string_field (binding, "specHash") };
+        return BoundSpec{ collection->id, std::move (spec_id),
+            string_field (binding, "specHash") };
     }
     return std::nullopt;
 }

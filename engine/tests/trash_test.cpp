@@ -340,7 +340,8 @@ TEST_F (TrashTest, ADeletedRequestsExamplesAreUnreachable) {
     EXPECT_EQ (error_field (body, "message"), "Request not found");
 }
 
-TEST_F (TrashTest, ADeletedCollectionIsNotListedAsBindingItsSpecDocument) {
+// #3446: a restore brings the binding back, so the delete refusal counts it.
+TEST_F (TrashTest, ADeletedCollectionStillCountsAsBindingItsSpecDocument) {
     SpecDocument doc;
     doc.id         = "spec_1";
     doc.content    = "{\"openapi\":\"3.0.0\"}";
@@ -356,11 +357,12 @@ TEST_F (TrashTest, ADeletedCollectionIsNotListedAsBindingItsSpecDocument) {
     ASSERT_EQ (db_->get_collections_bound_to_spec ("spec_1").size (), 1U);
 
     db_->delete_collection ("col_1");
-    EXPECT_TRUE (db_->get_collections_bound_to_spec ("spec_1").empty ());
+    const auto bound = db_->get_collections_bound_to_spec ("spec_1");
+    ASSERT_EQ (bound.size (), 1U);
+    EXPECT_TRUE (bound.front ().deleted_at.has_value ());
 
-    // But the document itself survives, deliberately: the sweep reads the
-    // unfiltered table, because a collection in the trash still binds what a
-    // restore would need. Reclaiming it here would restore a broken binding.
+    // The sweep agrees: a collection in the trash still binds what a restore
+    // would need, and reclaiming the document would restore a broken binding.
     db_->sweep_orphaned_spec_documents ();
     EXPECT_TRUE (db_->get_spec_document ("spec_1").has_value ());
 }

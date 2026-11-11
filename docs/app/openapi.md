@@ -41,7 +41,8 @@ the app.
 
 Several collections may bind the same document. It is not owned by any of them,
 which is why unbinding one leaves it in place, and why the engine refuses to
-delete a document while a collection still binds it.
+delete a document while a collection still binds it - a collection in Trash
+included, since restoring it brings the binding back.
 
 Because nothing owns a document, nothing deletes one on your behalf either -
 until it can no longer be reached at all. **A stored document lives while a
@@ -445,6 +446,18 @@ not bring them back". Nothing creates it again unless you do:
   MCP tool can tick one, so bringing one back is done here.
 - Purging the deleted request keeps the record. Unbinding the collection, or
   binding it to a different document, clears it.
+
+**Moving it out records the same choice** (issue #3446). A request dragged, or
+moved with "Move to...", from the bound collection into a collection bound to a
+different document, into one bound to none, or into another top-level
+collection bound to the same document, has left the contract: the
+operation is listed under the same heading at the source, and the moved request
+no longer records the operation, so the destination does not count it as mapped
+or list it as removed. A folder moved out takes every request beneath it the same
+way. Moving a request between folders of the same bound collection, or into a
+folder inside it bound to the same document, changes nothing. The record clears as above, except that restoring the moved request
+from Trash after deleting it somewhere else does not clear it, because it no
+longer records the operation.
 
 The record follows the operation through a rename the way a request's identity
 does: if the document moves a deleted operation's path under a stable

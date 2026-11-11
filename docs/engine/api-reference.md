@@ -2234,7 +2234,18 @@ must resolve to a stored collection (`400` otherwise), and a move that states no
 `order` appends in the destination - see [Ordering](#ordering). An update that
 states no `collectionId` is not checked against the request's stored one, so a
 row stranded before this validation existed stays editable, and repairable by a
-`PUT` that moves it somewhere real. Omitting `followRedirects` / `maxRedirects` /
+`PUT` that moves it somewhere real. A move that takes a request recording an
+operation (`specOperation`) out of the spec contract that answers for it is
+removing it from that contract (#3446): out means the destination's nearest
+binding names another document, none, or the same document from a collection
+outside the source's contract (a sibling root bound to it too). The operation
+is recorded as declined under the source binding, as
+[`DELETE /requests/:id`](#delete-requestsid) records it, and the stamp is
+cleared in the same write, so the source's [`POST /specs/diff`](#post-specsdiff)
+lists it under `declined` rather than `added`. A move within one contract keeps
+the stamp, a move between the bound collection and a sub-collection bound to the
+same document included; a body that states `specOperation` beside the move
+keeps the stated value. Omitting `followRedirects` / `maxRedirects` /
 `timeout` / `verifySSL` / `stream` / `specOperation` / `methodSource` /
 `mockResponseMode` / `mockExampleId` / `disableCookies` /
 `disabledSystemHeaders` / `disableUrlEncoding` / `postmanProtocolBehavior`
@@ -2329,7 +2340,12 @@ back. Restoring the request from the trash forgets the record, and so does a
 sync that creates the operation on purpose; purging the request, by hand or by
 `trashRetentionDays`, does not - the decision outlives the row it was made on.
 Unbinding the collection, or binding it to a document with other bytes, forgets
-every record under it. A sync's own deletes record nothing.
+every record under it. A sync's own deletes record nothing. Moving the request
+out of the contract records the same decline (#3446, see
+[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder));
+the move clears the stamp, and a restore forgets only the record of a request
+that still records an operation, so deleting and restoring the moved request
+later leaves the source's record standing.
 
 **Response:**
 ```json
@@ -3059,8 +3075,9 @@ Delete a stored document.
 ```
 
 **Errors:** `404` when it does not exist. `409` while any collection still binds
-it, with a message naming the first binder (and a count of the rest) so the
-caller knows what to unbind without a second round trip:
+it, a collection in the Trash included, with a message naming the first binder
+(and a count of the rest) so the caller knows what to unbind without a second
+round trip:
 
 ```json
 {
@@ -3071,9 +3088,24 @@ caller knows what to unbind without a second round trip:
 }
 ```
 
+A binder in the Trash is named as such (#3446), because restoring it brings
+its binding back and a document deleted under it would come back named by a
+collection whose document is gone:
+
+```json
+{
+  "error": {
+    "code": "conflict",
+    "message": "Spec 'spec_3f2b...' is bound by collection 'Pets API' (col_9a1f...), which is in the Trash; restore it and unbind it, or purge it, before deleting the document"
+  }
+}
+```
+
 The refusal is deliberate rather than a cascade to unbound: the caller asked to
 delete a document, not to edit collections it never mentioned. Unbind with
-`PUT /collections/:id` and `{"openapi": null}`, then delete.
+`PUT /collections/:id` and `{"openapi": null}`, then delete. Purging a trashed
+binder runs the orphan sweep, which reclaims the document itself once nothing
+else binds it.
 
 ### POST /specs/match
 
@@ -4006,6 +4038,18 @@ its requests after them, the order the tie rule already showed. It is idempotent
 - a scope already dense writes nothing at all.
 
 Where a row is named by both lists, the move wins.
+
+**A move out of a spec contract declines the operation** (#3446), the rule
+[`PUT /requests/:id`](#put-requestsid) applies to one request, with the same
+meaning of out. A request that records an operation (`specOperation`) and that
+the batch leaves outside its contract comes back with `specOperation: null`,
+and the operation is recorded as declined under the binding it left, in the
+batch's transaction. A moved collection does this for every stamped request
+beneath it. The binding after and the contract are read against the tree the
+batch writes, so a request moved into a folder the same batch moves away is
+judged by where the folder lands. A move within one contract keeps the stamp,
+and so does moving the bound collection itself. Each request this clears is in the
+response, a request whose position did not change included.
 
 **Validation is complete before the first write.** Entry shapes, the existence of
 every named row and owner, and the acyclicity of the **post-move** collection

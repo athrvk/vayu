@@ -39,6 +39,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -52,6 +53,7 @@
 
 #include "competing_writer.hpp"
 #include "optional_assert.hpp"
+#include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/db/sibling_order.hpp"
@@ -59,17 +61,13 @@
 using nlohmann::json;
 
 namespace vayu::http::routes {
-// Defined in reorder.cpp / collections.cpp / requests.cpp; each returns
-// {http_status, json_body} - the same pair the HTTP handler writes out.
-// `before_write` is reorder.cpp's test seam: invoked inside the batch's lock
-// scope once it has staged and immediately before it commits.
+// Defined in reorder.cpp; returns {http_status, json_body} - the same pair the
+// HTTP handler writes out. `before_write` is its test seam: invoked inside the
+// batch's lock scope once it has staged and immediately before it commits.
+// The create cores this file also calls are declared in spec_move_fixture.hpp.
 std::pair<int, nlohmann::json> reorder_response (vayu::db::Database& db,
 const nlohmann::json& body,
 const std::function<void ()>& before_write = nullptr);
-std::pair<int, nlohmann::json>
-create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
-std::pair<int, nlohmann::json>
-create_request_response (vayu::db::Database& db, const nlohmann::json& json);
 } // namespace vayu::http::routes
 
 namespace {
@@ -826,6 +824,258 @@ TEST_F (ReorderRouteTest, ARowDeletedAfterStagingFailsTheBatchRatherThanBeingRes
     const auto stored_request = db_->get_request (a);
     ASSERT_HAS_VALUE (stored_request);
     EXPECT_EQ (stored_request->order, 0);
+}
+
+
+// ---------------------------------------------------------------------------
+// Leaving a spec binding (#3446) - a move out declines, a move within keeps
+// ---------------------------------------------------------------------------
+
+class ReorderSpecBindingTest : public ReorderRouteTest {
+    protected:
+    void SetUp () override {
+        ReorderRouteTest::SetUp ();
+        trees_ = std::make_unique<vayu::tests::SpecMoveTrees> (*db_);
+    }
+    void TearDown () override {
+        trees_.reset ();
+        ReorderRouteTest::TearDown ();
+    }
+
+    /** One request moved into @p collection_id, alone in its batch. */
+    json move_request_to (const std::string& id, const std::string& collection_id) {
+        auto [status, response] = reorder_response (*db_,
+        json{ { "moves",
+        json::array ({ json{ { "type", "request" }, { "id", id },
+        { "order", 0 }, { "collectionId", collection_id } } }) } });
+        EXPECT_EQ (status, 200) << response.dump ();
+        return response;
+    }
+
+    /** The row the response wrote for @p id, or `null` when it wrote none. */
+    static json written_request (const json& response, const std::string& id) {
+        for (const auto& row : response["requests"]) {
+            if (row["id"] == id) {
+                return row;
+            }
+        }
+        return nullptr;
+    }
+
+    bool stored_stamp (const std::string& id) {
+        const auto row = db_->get_request (id);
+        if (!row) {
+            ADD_FAILURE () << "no request " << id;
+            return false;
+        }
+        return row->spec_operation.has_value ();
+    }
+
+    /// The operation ids declined under `pets`, in recorded order.
+    std::vector<std::string> declined_at_pets () {
+        std::vector<std::string> ids;
+        for (const auto& record : db_->get_declined_operations (trees_->pets)) {
+            ids.push_back (record.operation_id);
+        }
+        return ids;
+    }
+
+    std::unique_ptr<vayu::tests::SpecMoveTrees> trees_;
+};
+
+// The issue's acceptance, through the drop the sidebar makes. Mutation checks:
+// drop the `spec_operation` clear in `stage_binding_departures` and the stamp
+// survives and `cars` lists it as removed; pass no departures to
+// `apply_reorder` and `pets` lists `listOwners` as added and a safe sync
+// creates it again.
+TEST_F (ReorderSpecBindingTest, AStampedRequestMovedToAnotherBindingIsDeclinedAtTheSource) {
+    const json response = move_request_to (trees_->list_owners, trees_->cars);
+
+    const json row = written_request (response, trees_->list_owners);
+    ASSERT_TRUE (row.is_object ()) << response.dump ();
+    EXPECT_TRUE (row["specOperation"].is_null ()) << row.dump ();
+    EXPECT_FALSE (stored_stamp (trees_->list_owners));
+
+    const auto declined = db_->get_declined_operations (trees_->pets);
+    ASSERT_EQ (declined.size (), 1u);
+    EXPECT_EQ (declined.front ().operation_id, "listOwners");
+    EXPECT_EQ (declined.front ().request_id, trees_->list_owners);
+
+    const json pets = trees_->diff_pets ();
+    EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+    EXPECT_EQ (pets["declined"].size (), 1u) << pets.dump ();
+    const json cars = trees_->diff (trees_->cars, vayu::tests::CARS_DOC);
+    EXPECT_TRUE (cars["removed"].empty ()) << "nothing foreign: " << cars.dump ();
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+TEST_F (ReorderSpecBindingTest, AStampedRequestMovedToAnUnboundCollectionIsDeclinedAtTheSource) {
+    const json response = move_request_to (trees_->list_owners, trees_->plain);
+
+    EXPECT_TRUE (
+    written_request (response, trees_->list_owners)["specOperation"].is_null ())
+    << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+// Mutation check: make `declined_by_move` ignore `after` and this move out of
+// the tag folder declines the operation the root still holds.
+TEST_F (ReorderSpecBindingTest, AMoveWithinTheBindingKeepsTheStampAndDeclinesNothing) {
+    const json response = move_request_to (trees_->list_owners, trees_->pets);
+
+    EXPECT_TRUE (
+    written_request (response, trees_->list_owners)["specOperation"].is_object ())
+    << response.dump ();
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    EXPECT_TRUE (declined_at_pets ().empty ());
+    const json pets = trees_->diff_pets ();
+    EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+    EXPECT_TRUE (pets["declined"].empty ()) << pets.dump ();
+}
+
+// Moving the bound collection itself moves the binding with its requests.
+TEST_F (ReorderSpecBindingTest, MovingTheBoundCollectionKeepsItsStamps) {
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves", json::array ({ move_collection (trees_->pets, 0, trees_->plain) }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_TRUE (response["requests"].empty ()) << response.dump ();
+    EXPECT_TRUE (stored_stamp (trees_->list_pets));
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    EXPECT_TRUE (declined_at_pets ().empty ());
+}
+
+// Mutation check: skip the collection moves in `stamped_requests_moved` and
+// both stamps survive the folder's move.
+TEST_F (ReorderSpecBindingTest, AFolderMovedOutClearsEveryStampedRequestBeneathIt) {
+    const std::string nested = make_collection ("nested", trees_->owners);
+    const std::string deep_pets =
+    trees_->create_stamped (nested, "GET", "/pets", "listPets");
+    const std::string unstamped = make_request (nested, "unstamped");
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves", json::array ({ move_collection (trees_->owners, 0, trees_->cars) }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    for (const auto& id : { trees_->list_owners, deep_pets }) {
+        EXPECT_TRUE (written_request (response, id)["specOperation"].is_null ())
+        << id << ": " << response.dump ();
+        EXPECT_FALSE (stored_stamp (id)) << id;
+    }
+    EXPECT_TRUE (written_request (response, unstamped).is_null ())
+    << "a request with no stamp has nothing to clear: " << response.dump ();
+    auto declined = declined_at_pets ();
+    std::sort (declined.begin (), declined.end ());
+    EXPECT_EQ (declined, (std::vector<std::string>{ "listOwners", "listPets" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    const json cars = trees_->diff (trees_->cars, vayu::tests::CARS_DOC);
+    EXPECT_TRUE (cars["removed"].empty ()) << cars.dump ();
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+// The binding after is read off the tree the batch writes, not the stored one:
+// `listPets` moves into `owners` while `owners` moves to `cars`. Mutation check:
+// let the `after` lookup ignore the staged collections and both stamps survive.
+TEST_F (ReorderSpecBindingTest, ARequestMovedIntoAFolderLeavingInTheSameBatchIsDeclined) {
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ move_collection (trees_->owners, 0, trees_->cars),
+    json{ { "type", "request" }, { "id", trees_->list_pets }, { "order", 1 },
+    { "collectionId", trees_->owners } } }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_FALSE (stored_stamp (trees_->list_pets));
+    EXPECT_FALSE (stored_stamp (trees_->list_owners));
+    EXPECT_EQ (declined_at_pets ().size (), 2u);
+}
+
+// The other half: `listOwners` leaves `owners` for the root as `owners` leaves.
+// Mutation check: judge every request by its stored `collection_id` and the
+// request is declined with the folder it no longer sits in.
+TEST_F (ReorderSpecBindingTest, ARequestMovedOutOfAFolderLeavingInTheSameBatchKeepsItsStamp) {
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ move_collection (trees_->owners, 0, trees_->cars),
+    json{ { "type", "request" }, { "id", trees_->list_owners }, { "order", 1 },
+    { "collectionId", trees_->pets } } }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    EXPECT_TRUE (declined_at_pets ().empty ());
+}
+
+// The decline is part of the batch's one transaction: a batch that fails at
+// commit leaves the stamp on and records nothing. The victim's id sorts after
+// every generated one, so the batch has recorded the decline before it meets
+// the missing row.
+TEST_F (ReorderSpecBindingTest, ABatchThatFailsAtCommitRecordsNoDecline) {
+    vayu::db::Request victim;
+    victim.id            = "req_zzzz_victim";
+    victim.collection_id = trees_->plain;
+    victim.name          = "victim";
+    victim.url           = "https://example.test";
+    db_->save_request (victim);
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ json{ { "type", "request" }, { "id", trees_->list_owners },
+                   { "order", 0 }, { "collectionId", trees_->plain } },
+    move_request (victim.id, 1) }) } },
+    [&] { db_->delete_request (victim.id); });
+
+    ASSERT_EQ (status, 409) << response.dump ();
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    EXPECT_TRUE (declined_at_pets ().empty ());
+}
+
+
+// The record a move wrote is not a delete's, so restoring the moved request
+// from the Trash later claims nothing back. Mutation check: drop the stamp
+// guard in `forget_declined_by_locked` and the restore forgets it.
+TEST_F (ReorderSpecBindingTest, RestoringTheMovedRequestKeepsTheSourcesDecline) {
+    move_request_to (trees_->list_owners, trees_->plain);
+    db_->delete_request (trees_->list_owners);
+    ASSERT_HAS_VALUE (db_->restore_deleted (trees_->list_owners));
+
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+
+// A sibling root bound to the same document is a contract of its own: `pets`'s
+// diff and sync never walk into it. Mutation check: compare the two bindings'
+// `specId` alone in `declined_by_move` and the stamp survives the move.
+TEST_F (ReorderSpecBindingTest, AMoveToASiblingRootBoundToTheSameDocumentIsDeclined) {
+    const std::string twin = trees_->create_bound ("Pets copy", trees_->pets_spec);
+
+    const json response = move_request_to (trees_->list_owners, twin);
+
+    EXPECT_TRUE (
+    written_request (response, trees_->list_owners)["specOperation"].is_null ())
+    << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+// A sub-folder bound to the root's own document sits inside the root's contract
+// walk, so a move into it and back out keeps the stamp. Mutation check: keep a
+// move only between identical binding collections in `declined_by_move` and
+// both moves decline.
+TEST_F (ReorderSpecBindingTest, AMoveBetweenTheRootAndASameDocumentSubFolderKeepsTheStamp) {
+    const std::string inner =
+    trees_->create_bound ("pets again", trees_->pets_spec, trees_->pets);
+
+    move_request_to (trees_->list_owners, inner);
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    move_request_to (trees_->list_owners, trees_->pets);
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+
+    EXPECT_TRUE (declined_at_pets ().empty ());
+    EXPECT_TRUE (db_->get_declined_operations (inner).empty ());
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
 }
 
 } // namespace

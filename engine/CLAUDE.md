@@ -820,7 +820,8 @@ logged as a warning: it means a client skipped composition.
   `{}` = unbound) is the edge; `requests.spec_operation` (`{operationId?,
   method, path}`, NULL = none) says which operation a request *is*. Nothing
   cascades to a document: `DELETE /specs/:id` is a **409 naming the binder**
-  while any collection holds it, and there is no `PUT /specs/:id` because a
+  while any collection holds it, one in the Trash included (#3446, a restore
+  brings the binding back), and there is no `PUT /specs/:id` because a
   rewrite would invalidate every stamped hash. A scenario run of a bound
   collection stamps `specId` + `specHash` into `config_snapshot` and the report
   echoes them under `metadata.openapi`. The writes and reads, each one route:
@@ -838,11 +839,18 @@ logged as a warning: it means a client skipped composition.
     a tag folder's `DELETE /collections/:id` record it under the nearest bound
     ancestor, which the route resolves (`core::nearest_spec_binding`) and
     passes to `Database::delete_request` / `delete_collection`, so `Database`
-    reads no binding. The diff lists it under `declined`, never `added`;
+    reads no binding. A move out of the contract is the same decision (#3446):
+    `PUT /requests/:id` and `POST /reorder` (a moved folder's whole subtree,
+    judged against the tree the batch writes) compare the nearest binding
+    before and after (`declined_by_move`, `routes.hpp`: the same binding, or
+    the same document with one inside the other's `spec_contract_subtree_ids`,
+    is one contract; a sibling root bound to the same document is not), clear
+    the stamp and pass the record down to `save_request` / `apply_reorder`; a
+    move within one contract keeps it. The diff lists it under `declined`, never `added`;
     `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
-    it. A restore, a sync that creates the operation, an unbind and a bind to
-    other bytes forget the record; a purge of the request keeps it, and the
-    sync's own hard deletes write none.
+    it. A restore of a request that still records the operation, a sync that
+    creates it, an unbind and a bind to other bytes forget the record; a purge
+    of the request keeps it, and the sync's own hard deletes write none.
   - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped

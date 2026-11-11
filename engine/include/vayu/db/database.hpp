@@ -454,7 +454,13 @@ class Database {
     /// runs.
     void rebind_collection (const Collection& collection); // db_collections.cpp
 
-    void save_request (const Request& r);
+    /// @param declined_under the bound collection a move takes @p r out of
+    ///        (`declined_by_move` in `routes.hpp`, resolved by the route, #3446): the
+    ///        operation the *stored* row records is declined under it in the
+    ///        same transaction, as `delete_request` records it. The caller
+    ///        has already cleared @p r's stamp. Empty records nothing.
+    void save_request (const Request& r,
+    const std::optional<std::string>& declined_under = std::nullopt);
     /// Live only - see `get_collection` (issue #988).
     std::optional<Request> get_request (const std::string& id);
     /// Live only, and empty for a deleted collection (issue #988).
@@ -616,8 +622,9 @@ class Database {
      * sidebar-sized one. Its callers are the delete refusal and nothing on a
      * request's hot path.
      *
-     * Empty means the spec is bound by nobody, which is the only state
-     * `delete_spec_document` may be called in.
+     * Collections in the Trash are included, `deleted_at` set (#3446): a
+     * restore brings their binding back. Empty means the spec is bound by
+     * nobody, which is the only state `delete_spec_document` may be called in.
      */
     std::vector<Collection> get_collections_bound_to_spec (const std::string& spec_id);
     void delete_spec_document (const std::string& id);
@@ -750,10 +757,17 @@ class Database {
      * Separate from `import_apply` despite the shared shape: this writes rows
      * that already exist and must not touch environments, and the two callers
      * validate entirely different things beforehand.
+     *
+     * @param declined_under request id to the bound collection the batch moves
+     *        that request out of (#3446), each resolved by the route: the
+     *        operation the stored row records is declined under it before the
+     *        row is written, in the same transaction. The caller has already
+     *        cleared the stamp on the row it passes.
      */
     // db_collections.cpp
     void apply_reorder (const std::vector<Collection>& collections,
-    const std::vector<Request>& requests);
+    const std::vector<Request>& requests,
+    const std::unordered_map<std::string, std::string>& declined_under = {});
 
     /**
      * @brief Persist a whole OpenAPI sync in one transaction (issue #655).
@@ -1544,10 +1558,12 @@ class Database {
     void record_declined_operation_locked (const std::string& collection_id,
     const Request& request); // db_requests.cpp
 
-    /// Forgets the record @p request_id's delete wrote, the half of a restore
-    /// that puts the operation back in the sync's hands (#3031). Same scope
-    /// rule as `record_declined_operation_locked`.
-    void forget_declined_by_locked (const std::string& request_id); // db_requests.cpp
+    /// Forgets the record @p request's delete wrote, the half of a restore
+    /// that puts the operation back in the sync's hands (#3031). Nothing for a
+    /// request that records no operation: it claims none back, and the record
+    /// a move out of its binding wrote stands (#3446). Same scope rule as
+    /// `record_declined_operation_locked`.
+    void forget_declined_by_locked (const Request& request); // db_requests.cpp
 
     /**
      * @brief The five shapes of `restore_deleted`, split by what a row can

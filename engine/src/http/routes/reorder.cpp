@@ -11,6 +11,7 @@
  *        requests (issue #365).
  */
 
+#include "vayu/core/spec_binding.hpp"
 #include "vayu/db/sibling_order.hpp"
 #include "vayu/http/file_access_policy.hpp"
 #include "vayu/http/routes.hpp"
@@ -369,6 +370,105 @@ void stage_move (vayu::db::Database& db, const Move& move, int64_t now, WriteSet
 }
 
 /**
+ * The stored rows of every stamped request whose binding the batch can change:
+ * each one a move names with an owner, and each one beneath a collection a move
+ * names with a parent. Read before anything is written, so these are the rows
+ * as they stand before the batch. Only a stamped request can decline anything.
+ */
+std::map<std::string, vayu::db::Request>
+stamped_requests_moved (vayu::db::Database& db, const std::vector<Move>& moves) {
+    std::map<std::string, vayu::db::Request> stamped;
+    const auto keep = [&stamped] (vayu::db::Request request) {
+        if (request.spec_operation) {
+            stamped.emplace (request.id, std::move (request));
+        }
+    };
+    for (const auto& move : moves) {
+        if (!move.states_owner) {
+            continue;
+        }
+        if (move.kind == Kind::Request) {
+            keep (vayu::utils::invariant_value (db.get_request (move.id), ROW_EXISTS_INVARIANT));
+            continue;
+        }
+        for (auto& request : db.get_requests_in_subtree (move.id)) {
+            keep (std::move (request));
+        }
+    }
+    return stamped;
+}
+
+/**
+ * Stages the requests the batch takes out of the contract that answered for
+ * them (#3446), and answers each one's id with the bound collection its
+ * operation is declined under (`declined_by_move`).
+ *
+ * The binding before is read off the stored tree, and the binding after and the
+ * contract walk off the staged one, because a batch can move a folder and its
+ * requests together and only the tree it is about to write says where each
+ * request ends up. Both come from one read of the collections rather than a
+ * query per ancestor per request. A departing request is staged with its stamp
+ * cleared, so the response shows the row as written.
+ */
+std::unordered_map<std::string, std::string> stage_binding_departures (vayu::db::Database& db,
+const std::vector<Move>& moves,
+int64_t now,
+WriteSet& writes) {
+    std::unordered_map<std::string, std::string> departures;
+    const auto stamped = stamped_requests_moved (db, moves);
+    if (stamped.empty ()) {
+        return departures;
+    }
+
+    std::unordered_map<std::string, vayu::db::Collection> stored_tree;
+    for (auto& collection : db.get_collections ()) {
+        stored_tree.emplace (collection.id, std::move (collection));
+    }
+    const vayu::core::CollectionLookup before =
+    [&stored_tree] (const std::string& id) -> std::optional<vayu::db::Collection> {
+        const auto found = stored_tree.find (id);
+        if (found == stored_tree.end ()) {
+            return std::nullopt;
+        }
+        return found->second;
+    };
+    const vayu::core::CollectionLookup after =
+    [&writes, &before] (const std::string& id) -> std::optional<vayu::db::Collection> {
+        const auto staged = writes.collections.find (id);
+        if (staged != writes.collections.end ()) {
+            return staged->second;
+        }
+        return before (id);
+    };
+    std::vector<vayu::db::Collection> staged_tree;
+    staged_tree.reserve (stored_tree.size ());
+    for (const auto& [id, collection] : stored_tree) {
+        const auto staged = writes.collections.find (id);
+        staged_tree.push_back (
+        staged != writes.collections.end () ? staged->second : collection);
+    }
+
+    for (const auto& [id, stored] : stamped) {
+        const auto staged    = writes.requests.find (id);
+        const bool is_staged = staged != writes.requests.end ();
+        const std::string destination =
+        is_staged ? staged->second.collection_id : stored.collection_id;
+        const auto under = declined_by_move (stored,
+        vayu::core::nearest_spec_binding (before, stored.collection_id),
+        vayu::core::nearest_spec_binding (after, destination), staged_tree);
+        if (!under) {
+            continue;
+        }
+        vayu::db::Request row = is_staged ? staged->second : stored;
+        row.spec_operation    = std::nullopt;
+        row.updated_at        = now;
+        writes.requests[id]   = std::move (row);
+        departures.emplace (id, *under);
+    }
+    return departures;
+}
+
+/**
  * The batch a reorder is about to stage: the scopes to renumber and the moves to
  * apply, each read through the same validation a single write uses.
  */
@@ -449,10 +549,13 @@ std::vector<Move>& moves) {
  *     materializes a scope's displayed order as dense `0..n-1` so a first drop
  *     into a legacy all-zeros collection has real slots to name; the moves then
  *     state the positions the drop actually produced, and win over the
- *     renumber for any row named by both.
+ *     renumber for any row named by both. A stamped request the moves take out
+ *     of its contract is then staged with its stamp cleared
+ *     (`stage_binding_departures`, #3446).
  *  3. **One transaction** (`Database::apply_reorder`), whose rows are updates,
  *     never inserts - a row deleted out from under the batch is a 409 naming it
- *     and a whole rollback, not a silent resurrection.
+ *     and a whole rollback, not a silent resurrection. The departures' declines
+ *     are recorded in it.
  *
  * The response carries the rows as written, because the client that drew the
  * drop optimistically needs the authoritative positions to settle its caches on
@@ -483,6 +586,7 @@ const std::function<void ()>& before_write) {
     for (const auto& move : moves) {
         stage_move (db, move, now, writes);
     }
+    const auto departures = stage_binding_departures (db, moves, now, writes);
 
     std::vector<vayu::db::Collection> collection_rows;
     std::vector<vayu::db::Request> request_rows;
@@ -506,7 +610,7 @@ const std::function<void ()>& before_write) {
 
     if (!writes.empty ()) {
         try {
-            db.apply_reorder (collection_rows, request_rows);
+            db.apply_reorder (collection_rows, request_rows, departures);
         } catch (const vayu::db::MissingRowError& e) {
             // Unreachable while every writer takes the DB mutex - the lock this
             // runs under is what makes it so. It stays because `apply_reorder`
@@ -569,7 +673,10 @@ void register_reorder_routes (RouteContext& ctx) {
      * collectionId?}) and `normalize` (array of {parentId}, null for the
      * roots); both optional, an empty batch is a no-op. Normalization
      * renumbers a parent's sub-folders and requests together dense 0..n-1 in
-     * sibling order before the moves apply. Returns: 200
+     * sibling order before the moves apply. A stamped request moved out of
+     * its spec contract, alone or under a moved folder, comes back with
+     * `specOperation: null` and its operation declined under the source
+     * binding (#3446). Returns: 200
      * `{"collections": [...], "requests": [...]}` - the rows as written - or
      * 400 naming the offending row, in which case nothing at all was written.
      */

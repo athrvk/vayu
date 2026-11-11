@@ -1286,7 +1286,8 @@ The table itself was new when it landed, so `sync_schema()` created it outright;
 ### `spec_declined_operations`
 
 The operations a person declined by deleting the request for them (schema
-version 10, #3031), so that a sync of the document does not re-create them.
+version 10, #3031), or by moving it out of the contract (#3446), so that a sync
+of the document does not re-create them.
 [`POST /specs/diff`](api-reference.md#post-specsdiff) lists such an operation
 under `declined` instead of `added`, and a `policy: "safe"` sync never creates
 it.
@@ -1298,7 +1299,7 @@ it.
 | `operation_id`  | TEXT       | The operation's `operationId`, `""` when it declares none   |
 | `method`        | TEXT       | The identity's method, as `requests.spec_operation` records it |
 | `path`          | TEXT       | The identity's path template                                |
-| `request_id`    | TEXT       | The deleted request whose delete wrote the row              |
+| `request_id`    | TEXT       | The request whose delete, or move out of the contract, wrote the row |
 
 `UNIQUE (collection_id, method, path, operation_id)`: one row per operation
 under one binding, and a second request's delete for the same operation takes
@@ -1318,8 +1319,19 @@ each in the transaction of the write named:
   (`core::nearest_spec_binding`, resolved by the route and passed in, so
   `Database` reads no binding itself). Deleting the bound collection itself
   writes nothing. A sync's own (hard) deletes write nothing.
+- **Written** too by a person's move out of the contract (#3446): a
+  `PUT /requests/:id` with a `collectionId`, or a `POST /reorder` batch (every
+  stamped request under a moved collection included), that leaves a stamped
+  request where the nearest binding is not the same contract
+  (`declined_by_move` in `routes.hpp`: another document, none, or the same
+  document bound by a collection outside the source's contract walk). The
+  collection is the source's nearest binding, read before the move, and the
+  same write clears the request's `spec_operation` (`Database::save_request` /
+  `apply_reorder`, given the decision by the route).
 - **Forgotten** when the request comes back from the trash (by `request_id`,
-  alone or with its collection's cohort); when a `POST /specs/sync` creates a
+  alone or with its collection's cohort) while it still records an operation
+  (`forget_declined_by_locked`'s guard): a request a move unstamped claims
+  nothing back, so its move's row stands; when a `POST /specs/sync` creates a
   request for the same operation (`core::declines_taken_back`, the diff's own
   identity rule run against the document being stored); when
   `PUT /collections/:id` unbinds the collection, or `POST /specs/bind` binds it

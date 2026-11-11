@@ -631,7 +631,7 @@ const TrashEntry& entry) {
             impl_->storage.update (request);
             // Back in the subtree, the request claims its operation again, and
             // the decision its delete recorded is taken back with it (#3031).
-            forget_declined_by_locked (request.id);
+            forget_declined_by_locked (request);
         }
         return true; // Commit
     });
@@ -661,7 +661,7 @@ TrashOutcome Database::restore_collection_locked (const TrashEntry& entry) {
                     request.headers = std::move (*rewritten);
                 }
                 impl_->storage.update (request);
-                forget_declined_by_locked (request.id); // As `restore_request_locked`.
+                forget_declined_by_locked (request); // As `restore_request_locked`.
             }
             for (auto& collection : impl_->storage.get_all<Collection> (
                  where (c (&Collection::id) == collection_id &&
@@ -818,7 +818,8 @@ int64_t Database::purge_expired_trash_configured () {
 // out of the transaction lambda leaves the guard uncommitted, so the rows
 // updated before the missing one roll back with it.
 void Database::apply_reorder (const std::vector<Collection>& collections,
-const std::vector<Request>& requests) {
+const std::vector<Request>& requests,
+const std::unordered_map<std::string, std::string>& declined_under) {
     if (collections.empty () && requests.empty ()) {
         return;
     }
@@ -847,6 +848,14 @@ const std::vector<Request>& requests) {
                 if (impl_->storage.count<Request> (where (
                     c (&Request::id) == row.id && is_null (&Request::deleted_at))) == 0) {
                     throw MissingRowError ("Request", row.id);
+                }
+                // Read off the stored row, before the write clears its stamp.
+                if (const auto under = declined_under.find (row.id);
+                under != declined_under.end ()) {
+                    for (const auto& stored : impl_->storage.get_all<Request> (
+                         where (c (&Request::id) == row.id))) {
+                        record_declined_operation_locked (under->second, stored);
+                    }
                 }
                 impl_->storage.update (row);
                 moved.push_back (request_change (row, ChangeOp::Update));

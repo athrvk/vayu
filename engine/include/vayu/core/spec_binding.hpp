@@ -109,10 +109,23 @@ struct BoundSpec {
  *
  * An unparseable or non-object `openapi` column binds nothing and the walk
  * continues past it, the reading every other reader of that column gives it. The
- * chain is cycle-guarded by `collection_chain`, so corrupted `parent_id` data
- * terminates instead of looping under the DB mutex.
+ * walk visits each collection once, so corrupted `parent_id` data terminates
+ * instead of looping under the DB mutex.
  */
 [[nodiscard]] std::optional<BoundSpec>
 nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id);
+
+/// A live collection by id, from whichever state of the tree the caller is
+/// asking about; `std::nullopt` for none.
+using CollectionLookup =
+std::function<std::optional<vayu::db::Collection> (const std::string& collection_id)>;
+
+/**
+ * `nearest_spec_binding`'s walk over @p lookup instead of the stored rows: what
+ * `POST /reorder` asks of the tree its batch is about to write, before writing
+ * it. The `Database` overload is this one over `get_collection`.
+ */
+[[nodiscard]] std::optional<BoundSpec>
+nearest_spec_binding (const CollectionLookup& lookup, const std::string& collection_id);
 
 } // namespace vayu::core
