@@ -31,6 +31,7 @@ import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
 
 const deleteCollection = vi.fn();
+const deleteRequest = vi.fn();
 const stopMockServer = vi.fn();
 
 // root > mid > leaf, each holding one request. Deleting `root` cascades over
@@ -76,7 +77,7 @@ vi.mock("@/queries", () => ({
 	useUpdateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteCollectionMutation: () => ({ mutateAsync: deleteCollection, isPending: false }),
 	useCreateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useDeleteRequestMutation: () => ({ mutateAsync: deleteRequest, isPending: false }),
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: mockServers }),
@@ -102,6 +103,16 @@ function renderTree() {
 		refetchWithout(collectionId: string) {
 			collections = collections.filter((entry) => entry.id !== collectionId);
 			requests = new Map(TREE_REQUESTS.filter(([owner]) => owner !== collectionId));
+			act(() => view.rerender(ui()));
+		},
+		/** The same, for a request. */
+		refetchWithoutRequest(collectionId: string, requestId: string) {
+			requests = new Map(
+				[...requests].map(([owner, list]) => [
+					owner,
+					owner === collectionId ? list.filter((entry) => entry.id !== requestId) : list,
+				])
+			);
 			act(() => view.rerender(ui()));
 		},
 		/** A render with nothing changed, the kind the delete's own state causes. */
@@ -132,6 +143,7 @@ beforeEach(() => {
 	// jsdom implements no scrolling; the reveal effect calls it for an open tab.
 	Element.prototype.scrollIntoView = vi.fn();
 	deleteCollection.mockReset().mockResolvedValue(undefined);
+	deleteRequest.mockReset().mockResolvedValue(undefined);
 	stopMockServer.mockReset().mockResolvedValue(undefined);
 	collections = [...TREE];
 	requests = new Map(TREE_REQUESTS);
@@ -329,6 +341,42 @@ describe("deleting a collection with nothing running", () => {
  * first and says so. `mockServers` is set per test rather than in
  * `beforeEach`, so the default stays the "no mock" case above.
  */
+/*
+ * A request row's menu used to unmount while its delete ran, taking the menu's
+ * own focus hand-back with it: the removed row then left focus on `<body>`
+ * (#3443). The collection row's menu stays mounted, which is the shape this
+ * pins for requests.
+ */
+describe("deleting a request from its menu", () => {
+	async function askToDeleteRequest(name: string) {
+		fireEvent.pointerDown(
+			screen.getByRole("button", { name: `More actions for request ${name}` }),
+			{ button: 0, ctrlKey: false, pointerType: "mouse" }
+		);
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Delete/ }));
+		await waitFor(() => expect(deleteRequest).toHaveBeenCalled());
+		await act(async () => {});
+	}
+
+	it("moves focus to the row that follows it once the request is gone", async () => {
+		const view = renderTree();
+		await askToDeleteRequest("Charge");
+
+		view.refetchWithoutRequest("mid", "r-mid");
+
+		// "Charge" was the last row in Billing, so its parent is the successor.
+		expect(document.activeElement).toBe(document.querySelector('[data-collection-id="mid"]'));
+	});
+
+	it("leaves focus on the request when the delete fails", async () => {
+		deleteRequest.mockRejectedValue(new Error("database is locked"));
+		renderTree();
+		await askToDeleteRequest("Charge");
+
+		expect(document.activeElement).toBe(document.querySelector('[data-request-id="r-mid"]'));
+	});
+});
+
 describe("deleting a collection with a mock server running", () => {
 	it("asks first, and deletes nothing until confirmed", async () => {
 		runMockOnInvoices();
