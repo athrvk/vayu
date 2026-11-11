@@ -115,8 +115,6 @@ beforeEach(() => {
 		kind: "collection",
 		name: "Acme",
 		deletedAt: 1,
-		collections: 0,
-		requests: 0,
 		restored: true,
 		reparentedToRoot: false,
 	});
@@ -170,8 +168,6 @@ describe("deleting from the tree", () => {
 			kind: "collection",
 			name: "Acme",
 			deletedAt: 1,
-			collections: 0,
-			requests: 0,
 			restored: true,
 			reparentedToRoot: true,
 		});

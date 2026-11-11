@@ -122,7 +122,7 @@ export interface DeleteConfirmTarget {
 	 * sent it (#3449), and Undo does not start them again (a running mock is
 	 * engine-process state, not a database row).
 	 */
-	runningMocks?: { mockId: string; collectionName: string; port: number }[];
+	runningMocks?: { collectionName: string; port: number }[];
 }
 
 export interface TreeCrud {
@@ -471,7 +471,6 @@ export function useTreeCrud({
 		const runningMocks = mockServers
 			.filter((mock) => affected.has(mock.collectionId))
 			.map((mock) => ({
-				mockId: mock.mockId,
 				collectionName: mock.collectionName,
 				port: mock.port,
 			}));

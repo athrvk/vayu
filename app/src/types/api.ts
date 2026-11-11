@@ -1324,13 +1324,14 @@ export interface WorkspaceBackupResult {
  * is not listed separately. A request is a root only while its collection is
  * live, and an example only while its request is.
  *
- * A collection entry carries two pairs of counts, and they answer different
- * questions (#3449). `collections` and `requests` are the **cohort**: what that
- * one delete took, which is exactly what a restore puts back. `purgeCollections`
- * and `purgeRequests` are what a **purge** destroys: every deleted row under the
- * root, an *earlier* delete's included, which the cohort does not count and the
- * list does not show. A purge prompt and a row that tell the user what leaves
- * for good read the second pair; the first is never below it.
+ * A collection entry's `purgeCollections` and `purgeRequests` are what a
+ * **purge** destroys: every deleted row under the root, an *earlier* delete's
+ * included, which the list does not show (#3449). A purge prompt and a row that
+ * tell the user what leaves for good read them. The engine also sends the
+ * **cohort** pair `collections` / `requests` - what that one delete took, which
+ * is exactly what a restore puts back, and never above the purge totals - and
+ * this type deliberately does not claim it: nothing here reads it. Add it back
+ * with its reader, not before.
  *
  * An environment (#2970) is always a root and takes nothing with it: its
  * variables live on its own row, so they are counted in `variables` rather than
@@ -1361,10 +1362,6 @@ export interface TrashEntry {
 	 * same-named entries tell apart by it (#3449).
 	 */
 	parentName?: string;
-	/** Sub-collections this delete took with it - what a restore puts back. Always 0 for every kind but a collection. */
-	collections: number;
-	/** Requests this delete took with it - what a restore puts back. Always 0 for every kind but a collection. */
-	requests: number;
 	/** Sub-collections a purge destroys, an earlier delete's included (#3449). Always 0 for every kind but a collection. */
 	purgeCollections: number;
 	/** Requests a purge destroys, an earlier delete's included (#3449). Always 0 for every kind but a collection. */

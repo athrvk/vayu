@@ -134,8 +134,6 @@ beforeEach(() => {
 		kind: "environment",
 		name: "Staging",
 		deletedAt: 1,
-		collections: 0,
-		requests: 0,
 		variables: 1,
 		restored: true,
 		reparentedToRoot: false,

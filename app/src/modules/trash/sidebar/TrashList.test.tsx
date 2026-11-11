@@ -47,8 +47,6 @@ function collectionEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 		kind: "collection",
 		name: "Billing",
 		deletedAt: Date.now() - 60_000,
-		collections: 0,
-		requests: 0,
 		purgeCollections: 0,
 		purgeRequests: 0,
 		...over,
@@ -250,9 +248,14 @@ describe("the list", () => {
 
 	it("reads the purge totals, not the cohort a restore would bring back (#3449)", () => {
 		// An earlier delete left a request under this folder: the cohort counts 2
-		// requests, the purge destroys 3.
+		// requests, the purge destroys 3. The type no longer claims the cohort pair,
+		// but the engine still sends it, so the row is built with it on the wire.
 		state.items = [
-			collectionEntry({ collections: 1, requests: 2, purgeCollections: 2, purgeRequests: 3 }),
+			collectionEntry({
+				purgeCollections: 2,
+				purgeRequests: 3,
+				...({ collections: 1, requests: 2 } as object),
+			}),
 		];
 		renderTrash();
 
@@ -510,11 +513,9 @@ describe("delete forever", () => {
 	});
 
 	it("counts everything a purge removes, since the confirm is the last word", async () => {
-		// The cohort is 1 collection and 2 requests; an earlier delete left more
-		// under the folder, and the purge takes it too (#3449).
-		state.items = [
-			collectionEntry({ collections: 1, requests: 2, purgeCollections: 2, purgeRequests: 4 }),
-		];
+		// An earlier delete left rows under the folder that its cohort does not
+		// count, and the purge takes them too (#3449).
+		state.items = [collectionEntry({ purgeCollections: 2, purgeRequests: 4 })];
 		renderTrash();
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));

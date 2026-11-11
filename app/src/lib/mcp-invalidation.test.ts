@@ -133,6 +133,15 @@ describe("invalidateForMcpEvent", () => {
 		expect(keys).toContainEqual(queryKeys.trash.all);
 	});
 
+	test("a deleted collection reaches the running-mock list the engine stops from", () => {
+		// The engine stops a deleted collection's mocks as part of the delete
+		// (#3449), so `delete_collection` (and the change feed's collection delete,
+		// which maps to this family) must refresh the list. Mutation check: drop the
+		// `mockServer.list()` line from the `collection` invalidator and this fails.
+		const { keys } = keysFor({ entity: "collection" });
+		expect(keys).toContainEqual(queryKeys.mockServer.list());
+	});
+
 	test("a deleted environment reaches the Trash drawer's list", () => {
 		// `delete_environment` declares the `environment` family alone and, since
 		// #2970, stamps a row the drawer lists - the same reason the request

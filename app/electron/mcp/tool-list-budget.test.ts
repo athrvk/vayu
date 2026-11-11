@@ -191,7 +191,7 @@
  *
  * #3449's Trash wording (`list_trash` names the purge totals and `parentName`,
  * `restore_trash_entry` the root a 409 names, `delete_collection` the mock it
- * stops) added 82 / 82 / 138 / 138 B, taking the rows to 150,524 / 147,928 /
+ * stops) added 73 / 73 / 185 / 185 B, taking the rows to 150,524 / 147,928 /
  * 221,679 / 217,412 B; the four caps went to 150,600 / 148,000 / 221,700 /
  * 217,500.
  */

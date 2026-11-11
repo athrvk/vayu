@@ -62,7 +62,6 @@ export {
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";
-export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,
