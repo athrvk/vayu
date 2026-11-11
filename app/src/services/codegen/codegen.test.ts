@@ -679,6 +679,44 @@ describe("auth is applied, because the engine applies it at send time", () => {
 		expect(code).toContain("'https://x/y?k%3D1=a|b+c=d%20%26'");
 	});
 
+	it("trims an api key's name and value as the engine does, in the query and the header", () => {
+		const query = generateCurl({
+			...GET,
+			url: "https://x/y",
+			auth: { mode: "apikey", key: " k ", value: "\tv ", in: "query" },
+		});
+		expect(query.code).toContain("'https://x/y?k=v'");
+
+		const header = generateCurl({
+			...GET,
+			auth: { mode: "apikey", key: " X-Key ", value: " abc ", in: "header" },
+		});
+		expect(header.code).toContain("-H 'X-Key: abc'");
+
+		const blank = generateCurl({
+			...GET,
+			url: "https://x/y",
+			auth: { mode: "apikey", key: "  ", value: "v", in: "query" },
+		});
+		expect(blank.code).toContain("'https://x/y'");
+		expect(authSecrets({ mode: "apikey", key: "K", value: " v " })).toEqual(["v"]);
+	});
+
+	it("appends a query api key before the fragment, reading a # inside a token as text (#3425)", () => {
+		const { code } = generateCurl({
+			...GET,
+			url: "https://x/{{a#b}}?p=1#frag",
+			auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+		});
+		expect(code).toContain("'https://x/{{a#b}}?p=1&k=v#frag'");
+		const tokenOnly = generateCurl({
+			...GET,
+			url: "https://x/{{a#b}}",
+			auth: { mode: "apikey", key: "k", value: "v", in: "query" },
+		});
+		expect(tokenOnly.code).toContain("'https://x/{{a#b}}?k=v'");
+	});
+
 	it("says so when the mode cannot be reproduced statically", () => {
 		const { code, notes } = generateCurl({
 			...GET,
@@ -821,6 +859,19 @@ describe("secret masking", () => {
 				auth: { mode: "apikey", key: "X-Tenant-Key", value: "", in: "header" },
 			};
 			const { code } = generateCurl(request, { secrets: [], mask: true });
+			expect(code).toContain(`-H 'x-tenant-key: ${SECRET_PLACEHOLDER}'`);
+			expect(code).not.toContain("k-123");
+		});
+
+		it("masks the header a padded API-key name points at", () => {
+			const { code } = generateCurl(
+				{
+					...GET,
+					headers: { "x-tenant-key": "k-123" },
+					auth: { mode: "apikey", key: " \tX-Tenant-Key ", value: "", in: "header" },
+				},
+				{ secrets: [], mask: true }
+			);
 			expect(code).toContain(`-H 'x-tenant-key: ${SECRET_PLACEHOLDER}'`);
 			expect(code).not.toContain("k-123");
 		});

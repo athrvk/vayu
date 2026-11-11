@@ -24,6 +24,8 @@
  */
 
 import { compactObject, readCompactJson, type JsonNode } from "./compact-json";
+import { splitFragment } from "@/modules/request-builder/utils/query-encoding";
+import { maskTokens } from "@/modules/request-builder/utils/path-variables";
 
 /** `constants::request_body::MAX_JSON_DEPTH`: a JSON-RPC call nested deeper is left as typed. */
 const ENGINE_MAX_JSON_DEPTH = 128;
@@ -145,15 +147,15 @@ export function graphqlGetQuery(content: string): string | undefined {
 /**
  * @p url with @p query appended, as the engine's `url_with_query`: the fragment
  * is split off first and put back last, a URL with no `?` gets one, and a
- * separator is added unless the URL already ends in `?` or `&`.
+ * separator is added unless the URL already ends in `?` or `&`. The engine reads
+ * a raw `#` and `?`, resolved by then; this sees the URL before resolution, so
+ * both are looked for outside a `{{token}}`, where a name may hold either.
  */
 export function urlWithQuery(url: string, query: string): string {
 	if (query === "") return url;
-	const hash = url.indexOf("#");
-	const target = hash === -1 ? url : url.slice(0, hash);
-	const fragment = hash === -1 ? "" : url.slice(hash);
+	const { base: target, fragment } = splitFragment(url);
 	let separator = "";
-	if (!target.includes("?")) separator = "?";
+	if (!maskTokens(target).includes("?")) separator = "?";
 	else if (target !== "" && !target.endsWith("?") && !target.endsWith("&")) separator = "&";
 	return `${target}${separator}${query}${fragment}`;
 }

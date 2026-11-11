@@ -347,6 +347,9 @@ describe("urlWithQuery", () => {
 		["a query and a fragment", "https://x/g?a=1#top", "https://x/g?a=1&q=1#top"],
 		["a ? only in the fragment", "https://x/g#a?b", "https://x/g?q=1#a?b"],
 		["an empty URL", "", "?q=1"],
+		["a # inside a token", "https://x/{{a#b}}", "https://x/{{a#b}}?q=1"],
+		["a ? inside a token", "https://x/{{a?b}}", "https://x/{{a?b}}?q=1"],
+		["a ? inside a token and a query", "https://x/{{a?b}}?a=1", "https://x/{{a?b}}?a=1&q=1"],
 	])("joins onto %s", (_name, url, expected) => {
 		expect(urlWithQuery(url, "q=1")).toBe(expected);
 	});

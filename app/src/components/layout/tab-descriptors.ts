@@ -47,6 +47,7 @@ import {
 	resolveSendsUrl,
 	sendsCacheInput,
 	sendsResolver,
+	type SendsResolved,
 } from "@/modules/request-builder/utils/sends-url";
 import { compositionOptions } from "./context-bar/code-composition";
 
@@ -170,7 +171,7 @@ export function iconForTab(
  * lint: this is a caching layer keyed on every open tab, of which there can be
  * any number, so it is not one hook's worth of state to begin with.
  */
-const stableTitleUrl = createStableResolve();
+const stableTitleUrl = createStableResolve<SendsResolved>();
 
 /**
  * The names a pre-request script sets at send, for each request tab, read from
@@ -312,14 +313,23 @@ export function useTabDescriptors(tabs: Tab[]): TabDescriptor[] {
 				// A name a pre-request script sets at send stays written in it, as it
 				// does on the line (#2741); the cache input holds those names, so a
 				// changed answer re-resolves and nothing else rerolls a generator.
-				const deferred = deferredNamesInSends(request, deferredByTab.get(tab.id) ?? []);
+				//
+				// Without the auth (#3425): an API key placed in the query is on the
+				// line but never in a title, which never carries the auth's API key. Named
+				// field by field because the whole request would carry its `auth`.
+				const sends = {
+					url: request.url,
+					params: request.params,
+					disableUrlEncoding: request.disableUrlEncoding,
+				};
+				const deferred = deferredNamesInSends(sends, deferredByTab.get(tab.id) ?? []);
 				const resolvedUrl = row
-					? resolveSendsUrl(request, (text) => resolveString(text, row), deferred)
+					? resolveSendsUrl(sends, (text) => resolveString(text, row), deferred)
 					: stableTitleUrl(
 							request.id ?? tab.entityId ?? "",
-							sendsCacheInput(request, deferred),
+							sendsCacheInput(sends, deferred),
 							sendsResolver(resolveString)
-						);
+						).url;
 				const name = requestTabTitle(request.name, resolvedUrl);
 				const chain = collectionNamePath(request.collectionId, collections);
 				return {

@@ -15,8 +15,9 @@
 import { describe, it, expect, vi } from "vitest";
 import type { DataFieldContext } from "@/lib/data-bind-escaping";
 import { previewRowBind } from "@/lib/variable-resolution";
-import type { KeyValueEntry } from "@/types";
+import type { Collection, KeyValueEntry, RequestAuth } from "@/types";
 import { deferredNamesIn } from "@/lib/deferred-note";
+import { resolveAuthForSend } from "./auth-resolution";
 import {
 	deferredNamesInSends,
 	leaveDeferredField,
@@ -87,6 +88,195 @@ describe("resolveSendsUrl", () => {
 	it("takes query rows from the URL, never from the rows", () => {
 		const request = sends("https://api.test/users?page=1", [queryRow("page", "2")]);
 		expect(resolveSendsUrl(request, resolve)).toBe("https://api.test/users?page=1");
+	});
+});
+
+describe("resolveSendsUrl, the URL that reaches the server (#3425)", () => {
+	const withUrl = (url: string, disableUrlEncoding = false) =>
+		resolveSendsUrl(sends(url, [], disableUrlEncoding), resolve);
+
+	describe.each([
+		["encoded", false],
+		["as typed", true],
+	])("%s", (_mode, disableUrlEncoding) => {
+		it("cuts the fragment, which libcurl never sends", () => {
+			expect(withUrl("https://api.test/p?x=1#frag", disableUrlEncoding)).toBe(
+				"https://api.test/p?x=1"
+			);
+			expect(withUrl("https://api.test/p#", disableUrlEncoding)).toBe("https://api.test/p");
+		});
+
+		it("cuts a fragment a variable's value brings", () => {
+			const brings = resolverFor({ frag: "#x" });
+			expect(
+				resolveSendsUrl(sends("https://api.test/p{{frag}}", [], disableUrlEncoding), brings)
+			).toBe("https://api.test/p");
+		});
+
+		it("does not read a # inside a {{token}} as the fragment", () => {
+			const named = resolverFor({ "a#b": "v" });
+			const request = sends("https://api.test/{{a#b}}?q=1#f", [], disableUrlEncoding);
+			expect(resolveSendsUrl(request, named)).toBe("https://api.test/v?q=1");
+			// Left written (a deferred name), the token is still not a fragment.
+			expect(resolveSendsUrl(request, named, ["a#b"])).toBe("https://api.test/{{a#b}}?q=1");
+		});
+	});
+
+	describe("an API key placed in the query", () => {
+		const apiKey = (
+			key: string,
+			value: string,
+			where: "query" | "header" = "query"
+		): RequestAuth => ({ mode: "apikey", key, value, in: where });
+		const sendsWith = (
+			url: string,
+			auth: Record<string, unknown> | undefined,
+			disableUrlEncoding = false
+		) => resolveSendsUrl({ ...sends(url, [], disableUrlEncoding), auth }, resolve);
+		const record = (auth: RequestAuth) => auth as unknown as Record<string, unknown>;
+
+		it("is appended encoded, with or without a query already there", () => {
+			const auth = record(apiKey("api_key", "s3cr et&x"));
+			expect(sendsWith("https://api.test/p", auth)).toBe(
+				"https://api.test/p?api_key=s3cr%20et%26x"
+			);
+			expect(sendsWith("https://api.test/p?a=1", auth)).toBe(
+				"https://api.test/p?a=1&api_key=s3cr%20et%26x"
+			);
+		});
+
+		it("is appended where the fragment was cut, not after it", () => {
+			expect(sendsWith("https://api.test/p#frag", record(apiKey("k", "v")))).toBe(
+				"https://api.test/p?k=v"
+			);
+		});
+
+		it("is written as typed under disableUrlEncoding", () => {
+			expect(sendsWith("https://api.test/p", record(apiKey("k 1", "s3cr et&x")), true)).toBe(
+				"https://api.test/p?k 1=s3cr et&x"
+			);
+		});
+
+		it("is trimmed, writes `key=` for an empty value and nothing for an empty key", () => {
+			expect(sendsWith("https://api.test/p", record(apiKey(" k ", "\tv ")))).toBe(
+				"https://api.test/p?k=v"
+			);
+			expect(sendsWith("https://api.test/p", record(apiKey("k", "")))).toBe(
+				"https://api.test/p?k="
+			);
+			expect(sendsWith("https://api.test/p", record(apiKey("  ", "v")))).toBe(
+				"https://api.test/p"
+			);
+		});
+
+		it("cuts a `#` typed in the key or value under disableUrlEncoding, as libcurl does", () => {
+			expect(sendsWith("https://api.test/p", record(apiKey("k", "a#b")), true)).toBe(
+				"https://api.test/p?k=a"
+			);
+			expect(sendsWith("https://api.test/p?x=1", record(apiKey("k#1", "v")), true)).toBe(
+				"https://api.test/p?x=1&k"
+			);
+			// Encoded, the `#` is `%23` and stays.
+			expect(sendsWith("https://api.test/p", record(apiKey("k", "a#b")))).toBe(
+				"https://api.test/p?k=a%23b"
+			);
+		});
+
+		it("leaves a request with no URL with no URL", () => {
+			expect(sendsWith("", record(apiKey("k", "v")))).toBe("");
+		});
+
+		it("is not appended when it goes in a header, or for any other mode", () => {
+			const url = "https://api.test/p";
+			expect(sendsWith(url, record(apiKey("k", "v", "header")))).toBe(url);
+			for (const auth of [
+				undefined,
+				{ mode: "none" },
+				{ mode: "noauth" },
+				{ mode: "bearer", token: "t" },
+				{ mode: "oauth2", config: {} },
+				{ mode: "inherit" },
+			]) {
+				expect(sendsWith(url, auth)).toBe(url);
+			}
+		});
+
+		it("is the one an `inherit` request gets from its chain", () => {
+			const folder = {
+				id: "f",
+				auth: apiKey("k", "inherited"),
+			} as unknown as Collection;
+			const inherited = resolveAuthForSend({ mode: "inherit" }, [folder]);
+			expect(sendsWith("https://api.test/p", inherited)).toBe(
+				"https://api.test/p?k=inherited"
+			);
+			expect(
+				sendsWith("https://api.test/p", resolveAuthForSend({ mode: "inherit" }, []))
+			).toBe("https://api.test/p");
+		});
+
+		it("resolves a {{token}} in its name and value, and leaves a deferred one written", () => {
+			const auth = record(apiKey("{{host}}", "{{seg}}"));
+			const request = { ...sends("https://api.test/p"), auth };
+			expect(resolveSendsUrl(request, resolve)).toBe("https://api.test/p?api.test=a%20b");
+			expect(resolveSendsUrl(request, resolve, ["seg"])).toBe(
+				"https://api.test/p?api.test={{seg}}"
+			);
+		});
+	});
+});
+
+describe("the secret a Sends resolution appends (#3425)", () => {
+	const keyed = (key: string, value: string, url = "https://api.test/p") => ({
+		...sends(url),
+		auth: { mode: "apikey", key, value, in: "query" },
+	});
+	const secretOf = (
+		request: ReturnType<typeof keyed>,
+		vars: Record<string, string>,
+		deferred: readonly string[] = []
+	) => sendsResolver(resolverFor(vars))(sendsCacheInput(request, deferred)).secret;
+
+	it("is the resolved, trimmed value, whatever the variable that held it", () => {
+		expect(secretOf(keyed("k", "s3cr3t"), {})).toBe("s3cr3t");
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "abc" })).toBe("abc");
+		expect(secretOf(keyed("k", "pre-{{apiKey}}"), { apiKey: "abc" })).toBe("pre-abc");
+		// A value the trim shortens: the text on the line is not the variable's.
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "  abc \t" })).toBe("abc");
+	});
+
+	it("is the value that went onto the line, not a second resolution", () => {
+		let calls = 0;
+		const rolling = (text: string) => text.replace("{{$roll}}", () => `r${++calls}`);
+		const resolved = sendsResolver(rolling)(sendsCacheInput(keyed("k", "{{$roll}}")));
+		expect(resolved).toEqual({ url: "https://api.test/p?k=r1", secret: "r1" });
+		expect(calls).toBe(1);
+	});
+
+	it("is null when no key is appended or its value is blank", () => {
+		expect(secretOf(keyed("k", ""), {})).toBeNull();
+		expect(secretOf(keyed("k", " {{blank}} "), { blank: "" })).toBeNull();
+		expect(secretOf(keyed("  ", "v"), {})).toBeNull();
+		expect(secretOf(keyed("{{blank}}", "v"), { blank: " " })).toBeNull();
+		expect(secretOf(keyed("k", "v", ""), {})).toBeNull();
+		expect(
+			secretOf({ ...keyed("k", "v"), auth: { ...keyed("k", "v").auth, in: "header" } }, {})
+		).toBeNull();
+	});
+
+	it("is null for a `{{token}}` nothing resolved, which goes out as written", () => {
+		const request = keyed("k", "{{missing}}");
+		expect(sendsResolver((text) => text)(sendsCacheInput(request))).toEqual({
+			url: "https://api.test/p?k={{missing}}",
+			secret: null,
+		});
+		expect(secretOf(keyed("k", " pre-{{missing}} "), {})).toBeNull();
+		// A name a script defers stays written, so it is not a value either.
+		expect(secretOf(keyed("k", "{{token}}"), { token: "stored" }, ["token"])).toBeNull();
+	});
+
+	it("is the value when a variable's own text looks like a token", () => {
+		expect(secretOf(keyed("k", "{{apiKey}}"), { apiKey: "{{other}}" })).toBe("{{other}}");
 	});
 });
 
@@ -165,6 +355,35 @@ describe("sendsHasTokens", () => {
 	});
 });
 
+describe("sendsHasTokens and deferredNamesInSends read an API key placed in the query (#3425)", () => {
+	const keyed = (key: string, value: string, where = "query") => ({
+		...sends("https://api.test/p"),
+		auth: { mode: "apikey", key, value, in: where },
+	});
+
+	it("sees a token in the key or the value", () => {
+		expect(sendsHasTokens(keyed("k", "v"))).toBe(false);
+		expect(sendsHasTokens(keyed("{{name}}", "v"))).toBe(true);
+		expect(sendsHasTokens(keyed("k", "{{secret}}"))).toBe(true);
+		expect(deferredNamesInSends(keyed("k", "{{token}}"), ["token", "other"])).toEqual([
+			"token",
+		]);
+	});
+
+	it("ignores a key with no name, which the engine writes nothing for", () => {
+		expect(sendsHasTokens(keyed(" \t", "{{secret}}"))).toBe(false);
+		expect(deferredNamesInSends(keyed("  ", "{{token}}"), ["token"])).toEqual([]);
+		expect(sendsCacheInput(keyed("  ", "v"))).toBe(
+			sendsCacheInput(sends("https://api.test/p"))
+		);
+	});
+
+	it("ignores a key that is not appended", () => {
+		expect(sendsHasTokens(keyed("k", "{{secret}}", "header"))).toBe(false);
+		expect(deferredNamesInSends(keyed("k", "{{token}}", "header"), ["token"])).toEqual([]);
+	});
+});
+
 describe("deferredNamesInSends", () => {
 	it("keeps only the engine's names that the URL uses, once each, in order", () => {
 		const request = sends("https://{{host}}/{{token}}?a={{token}}&b={{ other }}");
@@ -210,6 +429,23 @@ describe("sendsCacheInput", () => {
 		expect(sendsCacheInput({ ...base, disableUrlEncoding: true })).not.toBe(input);
 	});
 
+	it("changes with the API key placed in the query, and only with that one", () => {
+		const key = (k: string, v: string, where = "query") => ({
+			...base,
+			auth: { mode: "apikey", key: k, value: v, in: where },
+		});
+		const input = sendsCacheInput(key("k", "v"));
+		expect(input).not.toBe(sendsCacheInput(base));
+		expect(sendsCacheInput(key("k2", "v"))).not.toBe(input);
+		expect(sendsCacheInput(key("k", "v2"))).not.toBe(input);
+		// A header placement and another mode add nothing to the URL, so a change
+		// to them must not re-resolve (a generator would reroll).
+		expect(sendsCacheInput(key("k", "v", "header"))).toBe(sendsCacheInput(base));
+		expect(sendsCacheInput({ ...base, auth: { mode: "bearer", token: "t" } })).toBe(
+			sendsCacheInput(base)
+		);
+	});
+
 	it("changes with the deferred names, so a changed answer re-resolves", () => {
 		expect(sendsCacheInput(base, ["token"])).not.toBe(sendsCacheInput(base));
 		expect(sendsCacheInput(base, ["token"])).toBe(sendsCacheInput(base, ["token"]));
@@ -230,17 +466,30 @@ describe("sendsResolver", () => {
 		const request = sends("https://api.test/users/:name/{{seg}}", [
 			pathRow("name", "{{tail}}"),
 		]);
-		expect(sendsResolver(resolve)(sendsCacheInput(request))).toBe(
+		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toBe(
 			resolveSendsUrl(request, resolve)
 		);
 	});
 
 	it("answers what resolveSendsUrl does for deferred names too", () => {
 		const request = sends("https://{{host}}/{{seg}}");
-		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"]))).toBe(
+		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"])).url).toBe(
 			resolveSendsUrl(request, resolve, ["seg"])
 		);
 		expect(resolveSendsUrl(request, resolve, ["seg"])).toBe("https://api.test/{{seg}}");
+	});
+
+	it("answers what resolveSendsUrl does for a query-placed API key", () => {
+		const request = {
+			...sends("https://{{host}}/p#f"),
+			auth: { mode: "apikey", key: "k", value: "{{seg}}", in: "query" },
+		};
+		expect(sendsResolver(resolve)(sendsCacheInput(request, ["seg"])).url).toBe(
+			resolveSendsUrl(request, resolve, ["seg"])
+		);
+		expect(sendsResolver(resolve)(sendsCacheInput(request)).url).toBe(
+			"https://api.test/p?k=a%20b"
+		);
 	});
 
 	it("is one wrapper per resolver, so a cache comparing resolvers by identity holds", () => {

@@ -32,11 +32,13 @@ import {
 	substitutePathVariables,
 } from "@/modules/request-builder/utils/path-variables";
 import {
+	appendQueryParam,
 	encodeAtUrlComponent,
 	encodeHost,
 	encodeQueryComponent,
 	resolveUrlTemplate,
 	splitUrlUserInfo,
+	trimCredential,
 } from "@/modules/request-builder/utils/query-encoding";
 import { headerLinesOf } from "@/lib/header-lines";
 import { isSensitiveHeaderName } from "@/lib/sensitive-headers";
@@ -272,23 +274,6 @@ export function createSecretMasker(
 		return placeholder;
 	};
 	return { apply, applyHeader, wasUsed: () => used };
-}
-
-/**
- * Append a query parameter to a URL that may or may not already have some -
- * encoded with Postman's query rule (issue #1771) unless the request sends its
- * URL as written (issue #1765), as the engine's `append_query_param` does.
- */
-function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
-	const encoded = encode
-		? `${encodeQueryComponent(key, "key")}=${encodeQueryComponent(value, "value")}`
-		: `${key}=${value}`;
-	// Split the fragment off first: a parameter appended after `#` lands in the
-	// fragment and is never sent.
-	const hash = url.indexOf("#");
-	const base = hash === -1 ? url : url.slice(0, hash);
-	const fragment = hash === -1 ? "" : url.slice(hash);
-	return `${base}${base.includes("?") ? "&" : "?"}${encoded}${fragment}`;
 }
 
 /**
@@ -655,8 +640,9 @@ export function prepareRequest(
 			}
 			break;
 		case "apikey": {
-			const key = asString(auth!.key);
-			const value = asString(auth!.value);
+			// Trimmed as the engine trims both halves before placing either.
+			const key = trimCredential(asString(auth!.key));
+			const value = trimCredential(asString(auth!.value));
 			if (key) {
 				if (asString(auth!.in) === "query") url = appendQueryParam(url, key, value, encode);
 				else if (!carriesHeader(headers, key)) headers.push([key, value]);
@@ -769,6 +755,7 @@ export function headerEncodingNotes(
 /**
  * The header an API-key auth writes its key into, or none when it writes a
  * query parameter instead (that value is masked by value, like any secret).
+ * Left as written: `isSensitiveHeaderName` trims both names it compares.
  */
 function apiKeyHeaderName(auth: Record<string, unknown> | undefined): string | undefined {
 	if (!auth || asString(auth.mode) !== "apikey" || asString(auth.in) === "query")
@@ -790,7 +777,7 @@ export function authSecrets(auth: Record<string, unknown> | undefined): string[]
 		case "basic":
 			return [asString(auth.password)];
 		case "apikey":
-			return [asString(auth.value)];
+			return [trimCredential(asString(auth.value))];
 		default:
 			return [];
 	}

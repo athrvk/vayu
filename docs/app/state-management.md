@@ -2524,8 +2524,8 @@ into a pane that can never load on every restart.
   for a request, behind `compositionOptions` (`code-composition.ts`), which the
   context bar's Code section, the Params tab's "Sends" line and the tab strip
   all build their query from, so they share one entry (#2741). The Code section
-  fetches it on expand. The Sends line fetches it only for a URL holding a
-  `{{token}}` (default mount behaviour, so a tab switch back is a cache hit),
+  fetches it on expand. The Sends line fetches it only for a URL, path row or
+  query-placed API key holding a `{{token}}` (default mount behaviour, so a tab switch back is a cache hit),
   for the `deferredVariables` it needs. `RequestBuilderProvider` reads it too,
   once per builder and only while the request holds a `{{token}}` anywhere
   (`requestHasTokens`), so the token painters can leave those names unpainted as

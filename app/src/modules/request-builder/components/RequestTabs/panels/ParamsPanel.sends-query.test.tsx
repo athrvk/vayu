@@ -77,12 +77,12 @@ function sendsLine(url: string, disableUrlEncoding: boolean, params: KeyValueIte
 }
 
 describe("the Sends line's query", () => {
-	it("encodes a value a variable brings into the query, its # opening the fragment", () => {
-		expect(sendsLine("{{base}}/s?q={{term}}", false)).toBe("https://x/s?q=a%20b#c");
+	it("encodes a value a variable brings into the query, its # opening a fragment that is not sent", () => {
+		expect(sendsLine("{{base}}/s?q={{term}}", false)).toBe("https://x/s?q=a%20b");
 	});
 
 	it("shows the value as it stands under disableUrlEncoding", () => {
-		expect(sendsLine("{{base}}/s?q={{term}}", true)).toBe("https://x/s?q=a b#c");
+		expect(sendsLine("{{base}}/s?q={{term}}", true)).toBe("https://x/s?q=a b");
 	});
 
 	it("encodes a value a variable brings into the path", () => {
@@ -96,8 +96,8 @@ describe("the Sends line's query", () => {
 
 	it("writes the bytes Postman encodes and the host as the wire does", () => {
 		const typed = "HTTPS://{{host}}\\a\"{b}?q='<>#f`";
-		expect(sendsLine(typed, false)).toBe("HTTPS://x.test/a%22%7Bb%7D?q=%27%3C%3E#f%60");
-		expect(sendsLine(typed, true)).toBe("HTTPS://X.Test\\a\"{b}?q='<>#f`");
+		expect(sendsLine(typed, false)).toBe("HTTPS://x.test/a%22%7Bb%7D?q=%27%3C%3E");
+		expect(sendsLine(typed, true)).toBe("HTTPS://X.Test\\a\"{b}?q='<>");
 	});
 
 	it("does not encode a path variable's value a second time", () => {

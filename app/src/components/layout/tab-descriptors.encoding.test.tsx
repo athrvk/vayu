@@ -42,6 +42,7 @@ let request: {
 	url: string;
 	params: KeyValueEntry[];
 	disableUrlEncoding: boolean;
+	auth?: Record<string, unknown>;
 };
 
 vi.mock("@/queries", () => ({
@@ -152,5 +153,33 @@ describe.each(BRANCHES)("%s", (_branch, bind) => {
 		expect(sends).toBe("https://api.test/users/a?b");
 		expect(titleOfRequestTab(request.id)).toBe(pathLabel(sends));
 		expect(titleOfRequestTab(request.id)).toBe("/users/a");
+	});
+});
+
+// A scheme-less URL is not one `new URL` parses, so `pathLabel` draws it as
+// written and a query or fragment left in the Sends text would show (#3425).
+describe.each(BRANCHES)("%s, the URL that reaches the server", (_branch, bind) => {
+	it("cuts the fragment, as the Sends line does", () => {
+		openRequest({ url: "api.test/users#frag" });
+		bind();
+		expect(titleOfRequestTab(request.id)).toBe("api.test/users");
+	});
+
+	it("does not cut at a # inside a {{token}}", () => {
+		openRequest({ url: "api.test/{{seg}}#frag" });
+		bind();
+		expect(titleOfRequestTab(request.id)).toBe("api.test/a?b");
+	});
+
+	it("leaves an API key placed in the query out, which the Sends line shows", () => {
+		openRequest({
+			url: "api.test/users?page=1",
+			auth: { mode: "apikey", key: "api_key", value: "s3cret", in: "query" },
+		});
+		bind();
+		const title = titleOfRequestTab(request.id);
+		expect(title).toBe("api.test/users?page=1");
+		expect(title).not.toContain("s3cret");
+		expect(resolveSendsUrl(request, resolveSeg)).toContain("api_key=s3cret");
 	});
 });

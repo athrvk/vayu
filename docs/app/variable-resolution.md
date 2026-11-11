@@ -377,6 +377,17 @@ A tab titled from its URL resolves it as the Params panel's **Sends** line does
 (issue #2637): `modules/request-builder/utils/sends-url.ts` is the one function
 both call, so a `:name` path row's value fills its segment, a value is encoded
 by the part of the URL it lands in, and `disableUrlEncoding` leaves it as typed.
+The function returns the URL that reaches the server (#3425): the fragment is
+cut, since libcurl never sends it (a `#` inside a `{{token}}` is not one), and
+an API key placed in the query, the request's own or an inherited one, is
+appended as the engine's `append_query_param` does. Its `auth` input is the
+Sends line's alone: the tab title omits it so a title never carries the auth's
+API key, and keeps the fragment cut. An OAuth 2.0 token placed in the query
+and a GraphQL GET's query are not shown. Its `{{token}}`s in the key and value
+resolve like the URL's, and a name a script defers stays written. The
+resolution also answers the value it appended (`SendsResolved.secret`), which
+the line masks whatever its variable's secret flag, so a key is never
+resolved twice and a generator in it does not reroll.
 The title then shows only the path, through `pathLabel`, which decodes it, so
 `a%20b` still reads `a b`.
 
@@ -1123,10 +1134,11 @@ under the snippet: "`{{token}}` is set by a pre-request script at send." (or
 "... are set ..." for several). Templated mode shows the request as written.
 
 The Params tab's **Sends** line says the same, in the same words
-(`deferredNote`), for the names its URL and enabled path rows use, and draws
+(`deferredNote`), for the names its URL, enabled path rows and query-placed API key use, and draws
 those names as written instead of as their stored values (#2741). It reads the
 `POST /compose` entry the Code section shares (`compositionOptions` in
-`code-composition.ts`), fetches it only for a URL holding a `{{token}}`, and
+`code-composition.ts`), fetches it only for a URL, path row or query-placed API
+key holding a `{{token}}`, and
 holds no rule of its own for which requests are scripted: a request whose
 folder's pre-request script sets `{{token}}` is scripted because the engine says
 so. An unnamed request's tab title leaves the names written too, but only reads

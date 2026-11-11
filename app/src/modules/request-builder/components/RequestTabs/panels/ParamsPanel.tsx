@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCollectionAncestors } from "@/queries/collections";
 import { useRequestBuilderContext } from "../../../context";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import KeyValueEditor from "@/components/shared/KeyValueEditor";
@@ -37,16 +38,24 @@ import {
 	isNoOpParamsEdit,
 } from "../../../utils/params-format";
 import { buildUrlWithParams } from "../../../utils/url";
+import { resolveAuthForSend } from "../../../utils/auth-resolution";
 import { displayPathRows, isPathRow, pathRowsOf, queryRowsOf } from "../../../utils/path-variables";
 import {
 	deferredNamesInSends,
 	sendsCacheInput,
 	sendsHasTokens,
 	sendsResolver,
+	type SendsResolved,
 } from "../../../utils/sends-url";
 import { useDeferredVariables } from "@/components/layout/context-bar/code-composition";
 import { deferredNote } from "@/lib/deferred-note";
-import { SECRET_UI_MASK, collectSecrets, createSecretMasker } from "@/services/codegen";
+import { containsVariableToken } from "@/constants/variables";
+import {
+	SECRET_UI_MASK,
+	authSecrets,
+	collectSecrets,
+	createSecretMasker,
+} from "@/services/codegen";
 import { EmptyTableHint } from "./EmptyTableHint";
 
 /*
@@ -60,7 +69,7 @@ import { EmptyTableHint } from "./EmptyTableHint";
  * `lib/dynamic-variable-cache.ts` for why this is module scope and why it is
  * keyed by request id rather than by the URL text.
  */
-const stableResolvedUrl = createStableResolve();
+const stableResolvedUrl = createStableResolve<SendsResolved>();
 
 // Module constants for the path table's gates: `KeyValueEditor` keeps its
 // callbacks stable only while these are (issue #1716).
@@ -143,21 +152,38 @@ export default function ParamsPanel() {
 	// (`POST /compose`'s `deferredVariables`, read from the Code section's cache
 	// entry), and is drawn as written rather than as its stored value (#2741).
 	// Only a URL with a `{{token}}` asks: a literal one never pays a compose.
-	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(request));
-	const deferred = deferredNamesInSends(request, engineDeferred);
-	const resolvedUrl = stableResolvedUrl(
+	//
+	// The auth is the effective one, `inherit` walked: a key a folder places in
+	// the query is on the wire, so it is on the line and masked below (#3425).
+	const ancestors = useCollectionAncestors(request.collectionId);
+	const auth = resolveAuthForSend(request.auth, ancestors);
+	const sends = {
+		url: request.url,
+		params: request.params,
+		disableUrlEncoding: request.disableUrlEncoding,
+		auth,
+	};
+	const engineDeferred = useDeferredVariables(request.id ?? "", sendsHasTokens(sends));
+	const deferred = deferredNamesInSends(sends, engineDeferred);
+	const { url: resolvedUrl, secret: appendedKey } = stableResolvedUrl(
 		request.id ?? "new",
-		sendsCacheInput(request, deferred),
+		sendsCacheInput(sends, deferred),
 		sendsResolver(resolveString)
 	);
 	// Masked here, after the cache: the cache keeps the resolved URL (a
 	// `{{$randomInt}}` stays what it rolled) and only what is drawn is hidden.
-	const sendsText = createSecretMasker(
-		collectSecrets(getAllVariables(), request.auth),
-		true,
-		undefined,
-		SECRET_UI_MASK
-	).apply(resolvedUrl);
+	// The appended key is masked as the resolution sent it, never re-resolved
+	// here. The auth as written covers a literal credential; one that is a
+	// `{{token}}` is a template, not a secret, so it stays out and an unset or
+	// deferred name shows as the written text that is going out.
+	const secrets = [
+		...collectSecrets(getAllVariables(), undefined),
+		...authSecrets(auth).filter((text) => !containsVariableToken(text)),
+		...(appendedKey === null ? [] : [appendedKey]),
+	];
+	const sendsText = createSecretMasker(secrets, true, undefined, SECRET_UI_MASK).apply(
+		resolvedUrl
+	);
 	// The blank row to type into is derived where the rows are rendered, as the
 	// Headers tab does (`useHeadersManager`), because `request.params` does not
 	// carry it: a URL edit goes through `mergeParamsFromUrl`, which drops the
