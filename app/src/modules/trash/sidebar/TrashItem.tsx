@@ -52,23 +52,24 @@ const KIND_DISPLAY: Record<TrashEntry["kind"], { icon: LucideIcon; label: string
 };
 
 /**
- * What a delete took with it, as a phrase - "with 3 requests", "with 2
+ * What a purge of this entry destroys, as a phrase - "with 3 requests", "with 2
  * collections, 11 requests", "with 12 variables" - or nothing at all when the
  * entry stood alone.
  *
- * The counts are the engine's, over the cohort that single delete stamped (or,
- * for an environment, the variables on its own row), and they are the one thing
- * a trash row says that the tree could never have shown: a collection in the
- * trash looks exactly like an empty one otherwise, and restoring it is a
- * different-sized act depending on the answer.
+ * A collection reads the engine's **purge** totals, not the cohort counts
+ * (#3449): a purge also takes whatever an earlier delete left under the root, so
+ * the cohort is a floor, and "Delete forever" on a row that undercounts is the
+ * wrong moment for one. An environment's number is the variables on its own row.
+ * It is the one thing a trash row says that the tree could never have shown: a
+ * collection in the trash looks exactly like an empty one otherwise.
  */
 function contentsSummary(entry: TrashEntry): string | null {
 	const parts: string[] = [];
-	if (entry.collections > 0) {
-		parts.push(`${entry.collections} ${pluralize(entry.collections, "collection")}`);
+	if (entry.purgeCollections > 0) {
+		parts.push(`${entry.purgeCollections} ${pluralize(entry.purgeCollections, "collection")}`);
 	}
-	if (entry.requests > 0) {
-		parts.push(`${entry.requests} ${pluralize(entry.requests, "request")}`);
+	if (entry.purgeRequests > 0) {
+		parts.push(`${entry.purgeRequests} ${pluralize(entry.purgeRequests, "request")}`);
 	}
 	if (entry.variables) {
 		parts.push(`${entry.variables} ${pluralize(entry.variables, "variable")}`);
@@ -132,7 +133,10 @@ export default function TrashItem({
 					 * know which shape means which.
 					 */}
 					<p className="text-xs text-muted-foreground">
-						{kindLabel} · Deleted <TimeValue value={entry.deletedAt} style="relative" />
+						{kindLabel}
+						{/* The owner is what tells two same-named entries apart (#3449). */}
+						{entry.parentName ? ` · from ${entry.parentName}` : ""} · Deleted{" "}
+						<TimeValue value={entry.deletedAt} style="relative" />
 						{contents ? `, ${contents}` : ""}
 					</p>
 				</div>

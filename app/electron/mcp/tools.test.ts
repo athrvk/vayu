@@ -2070,8 +2070,12 @@ describe("trash tools", () => {
 		name: "Retired API",
 		deletedAt: 1_755_000_000_000,
 		parentId: null,
+		// The cohort a restore puts back: a floor. An earlier delete left more
+		// under the collection, which only the purge totals count (#3449).
 		collections: 2,
 		requests: 5,
+		purgeCollections: 3,
+		purgeRequests: 8,
 	};
 	// The engine's environment entry (#2970): a root that takes nothing with it,
 	// and the one kind that carries `variables`.
@@ -2083,6 +2087,8 @@ describe("trash tools", () => {
 		parentId: null,
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 		variables: 6,
 	};
 
@@ -2094,8 +2100,11 @@ describe("trash tools", () => {
 		name: "Happy path",
 		deletedAt: 1_755_000_000_000,
 		parentId: "req_2",
+		parentName: "Create payment",
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 	};
 
 	// A client certificate (#2973): a root named by its target, owning no parent.
@@ -2107,6 +2116,8 @@ describe("trash tools", () => {
 		parentId: null,
 		collections: 0,
 		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 	};
 
 	test("list_trash answers a client certificate row as the engine wrote it", async () => {
@@ -2260,7 +2271,7 @@ describe("trash tools", () => {
 		// fixture here would have passed against a body the trash routes never
 		// produce, and the agent would have been shown raw JSON.
 		const message =
-			"Request 'req_5' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first";
+			"Request 'Charge' cannot be restored on its own - the collection it belongs to, 'Payments', is in the trash under 'Archive' (col_1), so restore that first";
 		const client = fakeClient({
 			restoreTrashEntry: vi
 				.fn()
@@ -2307,7 +2318,10 @@ describe("trash tools", () => {
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
 	});
 
-	test("purge_trash_entry previews the entry's name and counts, and purges nothing", async () => {
+	test("purge_trash_entry previews the entry's name and what a purge destroys, and purges nothing", async () => {
+		// The prompt counts everything the purge destroys (#3449), not the cohort
+		// a restore puts back (2 and 5 in the fixture). Mutation check: read
+		// `collections` / `requests` again in `readTrashEntry` and this fails.
 		const client = fakeClient({
 			listTrash: vi.fn().mockResolvedValue({ items: [TRASH_ITEM], total: 1 }),
 		});
@@ -2319,8 +2333,9 @@ describe("trash tools", () => {
 		expect(res.isError).toBeFalsy();
 		expect(firstText(res)).toMatch(/awaiting confirmation/i);
 		expect(firstText(res)).toContain("Retired API");
-		expect(firstText(res)).toContain("2 sub-collection(s)");
-		expect(firstText(res)).toContain("5 saved request(s)");
+		expect(firstText(res)).toContain("3 sub-collection(s)");
+		expect(firstText(res)).toContain("8 saved request(s)");
+		expect(firstText(res)).not.toContain("5 saved request(s)");
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
 	});
 
@@ -2372,10 +2387,42 @@ describe("trash tools", () => {
 		);
 		expect(res.isError).toBeFalsy();
 		expect(firstText(res)).toContain(
-			'This would permanently destroy the saved example "Happy path".'
+			'This would permanently destroy the saved example "Happy path" from the request "Create payment".'
 		);
 		expect(firstText(res)).not.toContain("collection");
 		expect(client.purgeTrashEntry).not.toHaveBeenCalled();
+	});
+
+	test("purge_trash_entry names the collection a saved request came from, and nothing when the engine named none", async () => {
+		// Mutation check: drop the `parentName` read in `readTrashEntry` and the
+		// owner leaves the prompt.
+		const request = {
+			id: "req_7",
+			kind: "request",
+			name: "Charge",
+			deletedAt: 1_755_000_000_000,
+			parentId: "col_2",
+			parentName: "Payments",
+			collections: 0,
+			requests: 0,
+			purgeCollections: 0,
+			purgeRequests: 0,
+		};
+		const { parentName: _omitted, ...unowned } = request;
+		for (const [item, expected] of [
+			[request, 'the saved request "Charge" from the collection "Payments".'],
+			[unowned, 'the saved request "Charge".'],
+		] as const) {
+			const client = fakeClient({
+				listTrash: vi.fn().mockResolvedValue({ items: [item], total: 1 }),
+			});
+			const res = await dispatchTool(
+				"purge_trash_entry",
+				{ entryId: "req_7" },
+				ctxWith(client, { allowWrites: true })
+			);
+			expect(firstText(res)).toContain(expected);
+		}
 	});
 
 	test("restore_trash_entry puts a saved example back and answers the engine's entry", async () => {

@@ -74,6 +74,8 @@ beforeEach(() => {
 		deletedAt: 1,
 		collections: 0,
 		requests: 1,
+		purgeCollections: 0,
+		purgeRequests: 1,
 		restored: true,
 		reparentedToRoot: false,
 	});
@@ -84,6 +86,8 @@ beforeEach(() => {
 		deletedAt: 1,
 		collections: 0,
 		requests: 1,
+		purgeCollections: 0,
+		purgeRequests: 1,
 		purged: true,
 	});
 	vi.mocked(apiService.listTrash).mockResolvedValue({ items: [], total: 0 });
@@ -159,6 +163,8 @@ describe("useRestoreTrashMutation", () => {
 			deletedAt: 1,
 			collections: 0,
 			requests: 0,
+			purgeCollections: 0,
+			purgeRequests: 0,
 			restored: true,
 			reparentedToRoot: false,
 		});

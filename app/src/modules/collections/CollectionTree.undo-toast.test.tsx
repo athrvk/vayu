@@ -61,7 +61,6 @@ vi.mock("@/queries", () => ({
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: restoreTrash, isPending: false }),
 	useMockServersQuery: () => ({ data: [] }),
-	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 // Only the toast store is replaced; `useTabsStore` and the rest stay real,
@@ -195,7 +194,7 @@ describe("deleting from the tree", () => {
 		// whole value of it - a bare "Couldn't restore" in its place would not.
 		restoreTrash.mockRejectedValue(
 			new Error(
-				"Request 'r-root' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first"
+				"Request 'Charge' cannot be restored on its own - the collection it belongs to, 'Billing', is in the trash, so restore that first"
 			)
 		);
 		renderTree();

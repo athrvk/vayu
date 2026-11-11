@@ -31,6 +31,8 @@ const ENTRY: TrashEntry = {
 	deletedAt: 1700000000000,
 	collections: 0,
 	requests: 0,
+	purgeCollections: 0,
+	purgeRequests: 0,
 	// Not part of the type; the engine's row may carry more than the view claims.
 	...({ url: `https://api.test/pets?token=${SENTINEL}` } as object),
 };

@@ -92,7 +92,6 @@ vi.mock("@/queries", () => ({
 	useUpdateRequestMutation: () => ({ mutateAsync, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync, isPending: false }),
 	useMockServersQuery: () => ({ data: [] }),
-	useStopMockServerMutation: () => ({ mutateAsync, isPending: false }),
 }));
 
 let rerenderTree = () => {};

@@ -188,6 +188,12 @@
  * a sentence in each description) added 690 B to the writes-on rows, taking them
  * to 221,541 / 217,274 B; those two caps went to 221,600 / 217,300 and the
  * writes-off rows are untouched.
+ *
+ * #3449's Trash wording (`list_trash` names the purge totals and `parentName`,
+ * `restore_trash_entry` the root a 409 names, `delete_collection` the mock it
+ * stops) added 82 / 82 / 138 / 138 B, taking the rows to 150,524 / 147,928 /
+ * 221,679 / 217,412 B; the four caps went to 150,600 / 148,000 / 221,700 /
+ * 217,500.
  */
 
 import { describe, it, expect } from "vitest";
@@ -207,10 +213,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_500 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_900 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_300 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_000 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_700 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_500 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

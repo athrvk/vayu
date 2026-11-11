@@ -58,6 +58,7 @@ export {
 	deleteConfirmCopy,
 	clientCertificateDeleteDescription,
 	clientCertificatePurgeDescription,
+	collectionPurgeDescription,
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";

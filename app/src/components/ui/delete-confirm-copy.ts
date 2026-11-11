@@ -116,3 +116,25 @@ export function clientCertificatePurgeDescription(target: string): string {
 		"The certificate and key files on disk are not touched."
 	);
 }
+
+/**
+ * The Trash's purge description for a collection: the engine's purge totals
+ * (#3449), which count every deleted row under it whichever delete stamped it,
+ * so the sentence says what "Delete forever" removes rather than what a restore
+ * would bring back. A collection that holds nothing reads as the generic
+ * sentence.
+ */
+export function collectionPurgeDescription(
+	name: string,
+	purged: { collections: number; requests: number }
+): string {
+	const parts: string[] = [];
+	if (purged.collections > 0) {
+		parts.push(`${purged.collections} ${pluralize(purged.collections, "collection")}`);
+	}
+	if (purged.requests > 0) {
+		parts.push(`${purged.requests} ${pluralize(purged.requests, "request")}`);
+	}
+	if (parts.length === 0) return deleteConfirmCopy(name).description;
+	return `"${name}" is removed permanently, along with ${parts.join(" and ")} inside it. This can't be undone.`;
+}

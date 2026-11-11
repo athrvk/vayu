@@ -2252,7 +2252,10 @@ engine's `scenario_plan_test.cpp` (issues #431, #2535).
   when the write is sent
 - **`useDeleteCollectionMutation()`** - Soft-delete a collection into the trash
   rather than removing it (issue #988); invalidates coarsely, see below, and
-  also invalidates the trash list so the Trash view picks it up. It writes no
+  also invalidates the trash list so the Trash view picks it up, and the
+  running-mock list (`mockServer.list()`): the engine stops the mocks of the
+  subtree as part of the delete, whichever client sent it (#3449), so the app
+  sends no stop of its own and only refreshes what it shows. It writes no
   file binding: the spec-file and data-file bindings stay on the trashed row
   (#2765), the stores that mirror the list drop the entry with the row, and the
   tree's Undo - a restore - brings them back with nothing captured
