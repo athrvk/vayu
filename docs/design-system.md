@@ -2487,6 +2487,8 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   variables sidebar's rows - and focuses the row on the way past, so Escape returns focus there rather
   than dropping it to `<body>` - the tree still has to hold its one tab stop
   after the menu closes, whichever way it opened.
+  An action that opens a field (Add collection, Rename) is the exception to
+  that hand-back; see `opensField` below.
 - **The second binding on those two is what a Mac keyboard can reach.** The key
   labelled "delete" on a Mac reports `"Backspace"` (`"Delete"` is forward-delete,
   Fn+Delete), and Mac keyboards have no Menu key and default F10 to a media key -
@@ -2535,6 +2537,18 @@ because the tree is one tab stop and the keys above are the way in. Closing the
 menu hands focus back to the *row*, not to the trigger Radix would return it to:
 a `tabIndex={-1}` control holding the tree's focus is a stop the user cannot Tab
 back to.
+
+**An action that opens a field runs after its menu has closed** (`opensField` on
+the `RowAction`, #3443; Add collection and the Rename of the tree and the variables sidebar). The menu's focus scope
+is still trapping when `onSelect` runs, so a field mounted from there claims
+focus and is yanked back into the menu, and the close then hands focus to the
+row: the field shows but the row holds the keys, so typing drives the typeahead,
+Backspace deletes the row, and a rename's blur commits the name unchanged. The
+menu instead records the action and runs it from `onCloseAutoFocus` - Radix's
+signal that its cleanup is done - skipping the hand-back to the row, so the field
+mounts into a page nothing else is holding focus on. Both menus do this through
+`useAfterMenuClose`, because the `⋯` dropdown and right-click are different Radix
+families with the same trap. An action that opens no field stays on `onSelect`.
 
 Rows declare behaviour through data attributes rather than props
 (`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,

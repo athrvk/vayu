@@ -35,6 +35,7 @@ import {
 	DropdownMenuSeparator,
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { useAfterMenuClose } from "./useAfterMenuClose";
 // The list, its grouping rule and what an item draws live beside this file:
 // right-click offers the same actions through a different Radix family
 // (`RowContextMenu`), and one of the two would otherwise drift.
@@ -76,6 +77,7 @@ export function RowActionsMenu({
 }: RowActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const trigger = useRef<HTMLButtonElement>(null);
+	const { onSelectOf, runDeferred } = useAfterMenuClose();
 
 	if (actions.length === 0) return null;
 
@@ -116,11 +118,15 @@ export function RowActionsMenu({
 				// floor with a smaller, density-scaled one.
 				className="min-w-[10rem]"
 				onCloseAutoFocus={(e) => {
+					// A field the action opens takes the focus; the row must not.
+					const handedToField = runDeferred(e);
 					// Radix hands focus back to the trigger. In a roving-tabindex
 					// tree that control is deliberately not a tab stop, so the row
 					// it belongs to is where focus has to land - otherwise Escape
 					// leaves the tree's one stop on something Tab cannot return to.
-					const row = trigger.current?.closest<HTMLElement>('[role="treeitem"]');
+					const row = handedToField
+						? null
+						: trigger.current?.closest<HTMLElement>('[role="treeitem"]');
 					if (row) {
 						e.preventDefault();
 						row.focus();
@@ -133,7 +139,7 @@ export function RowActionsMenu({
 						{separatorBefore && <DropdownMenuSeparator />}
 						<DropdownMenuItem
 							disabled={action.disabled}
-							onSelect={action.onSelect}
+							onSelect={onSelectOf(action)}
 							className={rowActionItemClass(action)}
 						>
 							<RowActionBody action={action} />

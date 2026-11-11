@@ -658,6 +658,7 @@ export function useTreeCrud({
 			{
 				label: "Rename",
 				icon: Edit2,
+				opensField: true,
 				onSelect: () => handleRenameCollection(collection),
 			},
 			{
@@ -668,6 +669,7 @@ export function useTreeCrud({
 			{
 				label: "Add collection",
 				icon: FolderPlus,
+				opensField: true,
 				onSelect: () => {
 					expandCollection(collection.id);
 					setCreatingSubfolder(collection.id);

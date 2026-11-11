@@ -369,6 +369,21 @@ describe("right-click reaches the same menu (#1360)", () => {
 
 		await waitFor(() => expect(document.activeElement).toBe(staging));
 	});
+
+	it("opens Rename's field focused, so the blur that commits is the user's", async () => {
+		const tree = renderTree();
+
+		fireEvent.contextMenu(row(tree, "Staging"));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+		const field = await within(tree).findByRole("textbox");
+
+		await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+		// Radix's hand-back runs on a timer of its own; a later one runs after it.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(document.activeElement).toBe(field);
+		expect(updateEnvironment).not.toHaveBeenCalled();
+	});
 });
 
 describe("a delete never strands focus", () => {

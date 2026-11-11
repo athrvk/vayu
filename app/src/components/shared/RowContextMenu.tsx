@@ -52,6 +52,7 @@ import {
 import { contextProps } from "@/lib/context-menu";
 import { rowActionRows, rowActionItemClass, type RowAction } from "./row-actions";
 import { RowActionBody } from "./RowActionBody";
+import { useAfterMenuClose } from "./useAfterMenuClose";
 
 interface RowContextMenuProps {
 	/** Names the menu for screen readers, e.g. "Actions for Get users". */
@@ -114,19 +115,27 @@ export function RowContextMenu({ label, actions, disabled, children }: RowContex
  * click (#2543). One drawing of the list, so the two cannot drift.
  */
 export function RowContextMenuContent({ label, actions }: { label: string; actions: RowAction[] }) {
+	const { onSelectOf, runDeferred } = useAfterMenuClose();
+
 	return (
 		// `min-w-[10rem]`, not `min-w-40`: the floor exists to hold the action
 		// labels, a text measure, and `min-w-40` rides `--spacing` - at the
 		// Default density it resolved under the primitive's own fixed
 		// `min-w-[8rem]` default (context-menu.tsx), overriding a deliberately
 		// density-independent floor with a smaller, density-scaled one.
-		<ContextMenuContent aria-label={label} className="min-w-[10rem]">
+		<ContextMenuContent
+			aria-label={label}
+			className="min-w-[10rem]"
+			// Radix would hand focus back to the row the menu opened over, taking
+			// it from the field an action opened (`useAfterMenuClose`, #3443).
+			onCloseAutoFocus={runDeferred}
+		>
 			{rowActionRows(actions).map(({ action, separatorBefore }) => (
 				<Fragment key={action.label}>
 					{separatorBefore && <ContextMenuSeparator />}
 					<ContextMenuItem
 						disabled={action.disabled}
-						onSelect={action.onSelect}
+						onSelect={onSelectOf(action)}
 						className={rowActionItemClass(action)}
 					>
 						<RowActionBody action={action} />
