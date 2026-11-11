@@ -1718,7 +1718,9 @@ sequential collection run it is the share of steps that errored.
 **A throwing `script.setup` fails the run before anything is sent.** Its
 outcome is checked the same way any element's is (`"error"` fails the check);
 the run reaches `Failed` before either run mode's strategy starts, so nothing
-is sent and no duration is measured. **A throwing `script.teardown` is
+is sent and no duration is measured. The failed run's report still carries
+`lifecycle.setup`, the refusing setup's row with its outcome and message, so it
+says which script failed and why (#3455). **A throwing `script.teardown` is
 recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
 `"error"` outcome and the thrown message. A script that only fails a `pm.test`

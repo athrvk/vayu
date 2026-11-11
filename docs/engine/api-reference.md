@@ -9842,8 +9842,9 @@ sources of truth for the same run boundary.
 `script.setup` runs once, before the run's first submission (before
 `test_start` is captured, so its own time is never folded into the run's
 duration figures, live or stored: the live stream's `elapsedSeconds` reads `0`
-until it ends); a throwing setup fails the run - `Failed`, nothing sent -
-the same as a collection-backed run. `script.teardown` runs once, after the
+until it ends); a throwing setup, or one that fails a `pm.test`, fails the
+run - `Failed`, nothing sent, its outcome under the report's
+`lifecycle.setup` - the same as a collection-backed run. `script.teardown` runs once, after the
 last submission settles, and sees `pm.info.run` (`requestsSent`,
 `errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's
@@ -13256,9 +13257,12 @@ only when that phase ran at least one element (`ElementOutcome`'s usual shape:
 below); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
-other than `"ok"` or `"skipped"` already means the run never sent anything - `status` is
-`Failed` and every other section above is absent or zeroed - so a reader who
-finds one here knows why the rest of the report is empty. A `script.teardown`
+other than `"ok"` or `"skipped"` means setup refused the run before it sent
+anything: `status` is `Failed`, no step ran, and the run still stores a summary
+whose `lifecycle.setup` holds that outcome with its `message` (#3455), every
+other section above absent or zeroed - so a reader who finds one here knows why
+the rest of the report is empty. No teardown runs on such a run, so it has no
+`teardown` key. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
 teardown failure is reported, not fatal. A script that ran and failed only
 `pm.test`s is `"failed"`, its `message` the first failing test, as a `script.post`'s is.

@@ -606,8 +606,9 @@ struct RunContext {
     std::unordered_map<std::string, int64_t> pacing_state;
 
     /// `script.setup`'s outcomes (#1499), written once by `execute_load_test`
-    /// before the strategy starts and read back by `finish_load_test` for the
-    /// summary's `lifecycle` key - safe unguarded for the same reason
+    /// before the strategy starts and read back by `finish_load_test`, or by
+    /// `failed_run_summary_inputs` on a failed run, for the summary's
+    /// `lifecycle` key - safe unguarded for the same reason
     /// `scripts_override` above is: written on the run's own worker thread
     /// before any other thread of this run exists, read on that same thread
     /// after every other one has joined.
@@ -1673,8 +1674,9 @@ int default_max_per_host);
 [[nodiscard]] SamplingRetention read_retention (const MetricsCollector& mc);
 
 /**
- * @brief The summary inputs of a load run that threw before it finished: what
- *        its collector holds, with a duration from load start.
+ * @brief The summary inputs of a load run that threw or whose `script.setup`
+ *        refused it before it finished: what its collector holds, with a
+ *        duration from load start, and setup's outcomes as `lifecycle` (#3455).
  *
  * Declared here so a test reaches the crashed-run summary without making a run
  * crash; it is the second producer of `RunSummaryInputs` beside the completed

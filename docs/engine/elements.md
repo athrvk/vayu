@@ -355,7 +355,9 @@ load run's live `elapsedSeconds` reads `0` until setup ends (issue #2395) - and
 writes through the same `ScriptVariableScopes` (`scopes` / `scope_bases`) every other script of the
 run shares, so its writes are visible from the very first step or submission (a scenario load
 run's folder bases are built from what it left, #3248). A throwing setup fails
-the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
+the run - `Failed`, nothing sent - before either mode's strategy starts, and the failed run's stored
+summary still carries `lifecycle.setup` (the sequential runner's `catch`, the load path's
+`failed_run_summary_inputs`, #3455); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
 `ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
 propagating one. Either kind reads its script's result as `script.post` does (`record_script_outcome`):

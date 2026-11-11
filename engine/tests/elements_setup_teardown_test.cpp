@@ -45,6 +45,7 @@
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
+#include "vayu/http/routes.hpp"
 #include "wait_until.hpp"
 
 using nlohmann::json;
@@ -414,6 +415,17 @@ class ScriptLifecycleTest : public ::testing::Test {
         return json::parse (run->summary);
     }
 
+    /// The `lifecycle` node `GET /runs/:id/report` answers for @p run_id.
+    [[nodiscard]] json report_lifecycle_of (const std::string& run_id) {
+        const auto [status, report] =
+        vayu::http::routes::run_report_response (*db_, run_id);
+        if (status != 200 || !report.contains ("lifecycle")) {
+            ADD_FAILURE () << "no lifecycle in the report: " << report.dump ();
+            return json::object ();
+        }
+        return report["lifecycle"];
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<LifecycleMockServer> server_;
     vayu::core::RunManager manager_;
@@ -430,6 +442,24 @@ json setup_and_teardown_elements (const std::string& setup, const std::string& t
                           { "enabled", true }, { "config", { { "script", setup } } } },
     json{ { "id", "el_teardown" }, { "kind", "script.teardown" },
     { "enabled", true }, { "config", { { "script", teardown } } } } });
+}
+
+/// A setup whose only problem is a failing `pm.test`.
+constexpr const char* FAILING_TEST_SETUP =
+"pm.test('t', () => { throw new Error('nope'); });";
+constexpr const char* FAILING_TEST_MESSAGE = "Test failed - t: Error: nope";
+
+/// That a run's @p lifecycle names the one setup that refused it, with
+/// @p outcome and a message holding @p text, and no teardown, since none ran.
+void expect_refusing_setup (const json& lifecycle,
+const std::string& outcome,
+const std::string& text) {
+    EXPECT_FALSE (lifecycle.contains ("teardown")) << lifecycle.dump ();
+    const auto setup = lifecycle.value ("setup", json::array ());
+    ASSERT_EQ (setup.size (), 1u) << lifecycle.dump ();
+    EXPECT_EQ (setup[0].value ("outcome", ""), outcome);
+    EXPECT_NE (setup[0].value ("message", "").find (text), std::string::npos)
+    << setup[0].dump ();
 }
 
 // Mutation check: remove the `run.start` dispatch call in
@@ -474,6 +504,8 @@ TEST_F (ScriptLifecycleTest, SequentialSetupFetchesATokenWithSendRequestAndSetsI
 
 // Mutation check: change the throw-on-error loop in `execute_scenario_run` to
 // merely log the outcome and this reddens to Completed with one request sent.
+// Drop the `catch`'s `summary.lifecycle` assignment (#3455) and the report
+// has no lifecycle to say why.
 TEST_F (ScriptLifecycleTest, SequentialThrowingSetupFailsTheRunBeforeAnyStepIsSent) {
     seed_collection (script_setup_element ("throw new Error('boom');"));
     seed_request ();
@@ -481,6 +513,17 @@ TEST_F (ScriptLifecycleTest, SequentialThrowingSetupFailsTheRunBeforeAnyStepIsSe
 
     EXPECT_EQ (run_sequential (execution), vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_seq"), "error", "boom");
+}
+
+TEST_F (ScriptLifecycleTest, SequentialSetupWithAFailingTestFailsTheRunAndSaysWhich) {
+    seed_collection (script_setup_element (FAILING_TEST_SETUP));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_sequential (execution), vayu::RunStatus::Failed);
+    EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_seq"), "failed", FAILING_TEST_MESSAGE);
 }
 
 // Issue #2359: the text the failing setup script threw is script-authored, so
@@ -640,7 +683,9 @@ TEST_F (ScriptLifecycleTest, LoadSetupFetchesATokenWithSendRequestAndEveryVUSees
 
 // Mutation check: let a throwing `script.setup` outcome pass unnoticed in
 // `execute_load_test` (drop the `for (const auto& outcome : ...)` refusal
-// loop) and this reddens to Completed with three requests sent.
+// loop) and this reddens to Completed with three requests sent. Drop the
+// `lifecycle` assignment in `failed_run_summary_inputs` (#3455) and the
+// report has no lifecycle to say why.
 TEST_F (ScriptLifecycleTest, LoadThrowingSetupFailsTheRunWithNoSubmissions) {
     seed_collection (script_setup_element ("throw new Error('boom');"));
     seed_request ();
@@ -649,6 +694,7 @@ TEST_F (ScriptLifecycleTest, LoadThrowingSetupFailsTheRunWithNoSubmissions) {
     EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_load"), "error", "boom");
 }
 
 // The load-mode half of SequentialSetupFailureLogsTheThrownTextAsABoundedField.
@@ -800,7 +846,7 @@ TEST_F (ScriptLifecycleTest, SingleRequestSetupCanFetchATokenWithSendRequestBefo
 
 // Mutation check: let a throwing `script.setup` outcome pass unnoticed in
 // `execute_load_test` and this reddens to Completed with three requests sent
-// - the same mutation `LoadThrowingSetupFailsTheRunWithNoSubmissions` checks
+// - the same mutations `LoadThrowingSetupFailsTheRunWithNoSubmissions` checks
 // for the collection-backed path.
 TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissions) {
     EXPECT_EQ (run_single_request_load (
@@ -808,6 +854,15 @@ TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissi
                /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_single"), "error", "boom");
+}
+
+TEST_F (ScriptLifecycleTest, SingleRequestSetupWithAFailingTestFailsTheRunAndSaysWhich) {
+    EXPECT_EQ (run_single_request_load (script_setup_element (FAILING_TEST_SETUP),
+               /*iterations=*/1, /*concurrency=*/3),
+    vayu::RunStatus::Failed);
+    EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_single"), "failed", FAILING_TEST_MESSAGE);
 }
 
 // The single-request half of LoadSetupFailureLogsTheThrownTextAsABoundedField.
