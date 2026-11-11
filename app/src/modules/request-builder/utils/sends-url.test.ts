@@ -248,6 +248,16 @@ describe("resolveSendsUrl, an OAuth 2.0 token placed in the query (#3437)", () =
 		);
 	});
 
+	it("writes the name as the engine does, untrimmed (#3437)", () => {
+		const { secret } = resolved("https://api.test/p", queried());
+		expect(resolved("https://api.test/p", queried({ queryParamName: " tok " })).url).toBe(
+			`https://api.test/p?%20tok%20=${secret}`
+		);
+		expect(resolved("https://api.test/p", queried({ queryParamName: "  " })).url).toBe(
+			`https://api.test/p?%20%20=${secret}`
+		);
+	});
+
 	it("writes the stand-in as it is, whatever the encoding", () => {
 		const encoded = resolved("https://api.test/p", queried());
 		const raw = resolved("https://api.test/p", queried(), true);

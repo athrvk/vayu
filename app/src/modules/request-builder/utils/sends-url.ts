@@ -63,6 +63,7 @@ import type { KeyValueEntry, Request } from "@/types";
 import { answeringPathRows, composePathParams, substitutePathVariables } from "./path-variables";
 import {
 	appendQueryParam,
+	appendQueryPair,
 	resolveUrlTemplate,
 	splitFragment,
 	trimCredential,
@@ -281,7 +282,7 @@ function withOAuth2Token(
 ): SendsResolved {
 	const name = resolve(param) || DEFAULT_OAUTH2_QUERY_PARAM;
 	return {
-		url: appendQueryParam(url, name, OAUTH2_TOKEN_STAND_IN, encode),
+		url: appendQueryPair(url, name, OAUTH2_TOKEN_STAND_IN, encode),
 		secret: OAUTH2_TOKEN_STAND_IN,
 	};
 }
@@ -318,8 +319,8 @@ function resolveSends(input: SendsInput, resolveAll: Resolve): SendsResolved {
 	if (base.trim() === "") return { url: base, secret: null };
 	const authed = withAuthParameter(base, input, resolve);
 	// The fragment is cut last: under `disableUrlEncoding` a `#` in the key or
-	// value is written raw, and libcurl drops everything from it, the GraphQL
-	// query included.
+	// value is written raw, and libcurl drops everything from it. The GraphQL
+	// query goes in before any `#`, so only the fragment is lost.
 	const sent = splitFragment(withGraphqlQuery(authed.url, graphql, resolve)).base;
 	return { url: sent, secret: authed.secret };
 }

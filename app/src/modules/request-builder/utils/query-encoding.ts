@@ -120,10 +120,18 @@ export function trimCredential(text: string): string {
 export function appendQueryParam(url: string, key: string, value: string, encode: boolean): string {
 	const name = trimCredential(key);
 	if (name === "") return url;
-	const text = trimCredential(value);
+	return appendQueryPair(url, name, trimCredential(value), encode);
+}
+
+/**
+ * @p url with `key=value` appended as written, no trim and no empty-key rule:
+ * `append_query_param` itself, for a caller whose engine function does not trim
+ * (an OAuth 2.0 token's `queryParamName`, which the engine writes as it is).
+ */
+export function appendQueryPair(url: string, key: string, value: string, encode: boolean): string {
 	const pair = encode
-		? `${encodeQueryComponent(name, "key")}=${encodeQueryComponent(text, "value")}`
-		: `${name}=${text}`;
+		? `${encodeQueryComponent(key, "key")}=${encodeQueryComponent(value, "value")}`
+		: `${key}=${value}`;
 	const { base, fragment } = splitFragment(url);
 	const separator = maskTokens(base).includes("?") ? "&" : "?";
 	return `${base}${separator}${pair}${fragment}`;

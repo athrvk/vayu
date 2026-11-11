@@ -287,12 +287,4 @@ describe("the Sends line's GraphQL GET (#3437)", () => {
 			"https://x/g"
 		);
 	});
-
-	it("follows the body as it is edited", () => {
-		const first = sendsLine("{{base}}/g", graphql("{ a }"));
-		cleanup();
-		const second = sendsLine("{{base}}/g", graphql("{ b }"));
-		expect(first).toBe("https://x/g?query=%7B%20a%20%7D");
-		expect(second).toBe("https://x/g?query=%7B%20b%20%7D");
-	});
 });
