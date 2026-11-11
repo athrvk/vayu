@@ -45,6 +45,20 @@ spec_sync_response (vayu::db::Database& db, const nlohmann::json& body);
 
 namespace vayu::tests {
 
+/**
+ * The `id` a create core answered with, or `""` when it answered none.
+ *
+ * `find` rather than `value ("id", std::string{})`: a release GCC 13 inlines
+ * that accessor far enough to report a `-Wnull-dereference` inside nlohmann,
+ * fatal under CI's `-Werror` (the shape `default_headers_test.cpp`'s
+ * `row_source` avoids the same way).
+ */
+inline std::string id_of (const nlohmann::json& response) {
+    const auto id = response.find ("id");
+    return id != response.end () && id->is_string () ? id->get<std::string> () :
+                                                       std::string{};
+}
+
 /// Declares `listPets` and `listOwners`.
 constexpr const char* PETS_DOC =
 R"({"openapi":"3.1.0","info":{"title":"Pets","version":"1.0.0"},)"
@@ -110,7 +124,7 @@ class SpecMoveTrees {
         { "specOperation",
         { { "operationId", operation_id }, { "method", method }, { "path", path } } } });
         EXPECT_EQ (status, 200) << response.dump ();
-        return response.value ("id", std::string{});
+        return id_of (response);
     }
 
     /** `POST /specs/diff` of @p collection_id against @p content. */
@@ -133,7 +147,10 @@ class SpecMoveTrees {
         nlohmann::json{ { "collectionId", pets },
         { "spec", { { "content", PETS_DOC_REVISED } } }, { "policy", "safe" } });
         EXPECT_EQ (status, 200) << response.dump ();
-        return response.value ("created", size_t{ 0 });
+        const auto created = response.find ("created");
+        return created != response.end () && created->is_number_unsigned () ?
+        created->get<size_t> () :
+        0;
     }
 
     std::string pets_spec;
@@ -150,14 +167,14 @@ class SpecMoveTrees {
         auto [status, response] = vayu::http::routes::create_spec_document_response (
         db_, nlohmann::json{ { "content", content } });
         EXPECT_EQ (status, 200) << response.dump ();
-        return response.value ("id", std::string{});
+        return id_of (response);
     }
 
     std::string create_collection (const nlohmann::json& body) {
         auto [status, response] =
         vayu::http::routes::create_collection_response (db_, body);
         EXPECT_EQ (status, 200) << response.dump ();
-        return response.value ("id", std::string{});
+        return id_of (response);
     }
 
     vayu::db::Database& db_;
