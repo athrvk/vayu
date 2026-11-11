@@ -930,7 +930,9 @@ nlohmann::json resolve_inherited_auth (const std::vector<vayu::db::Collection>& 
         if (auth_mode (auth) == "noauth") {
             return nlohmann::json (); // explicit "send nothing" ends the walk
         }
-        if (!is_empty_auth (auth)) {
+        // A stored `inherit` is no credential either: collection writes refuse
+        // it now (#3445), but a row written before that still steps past.
+        if (!is_empty_auth (auth) && auth_mode (auth) != "inherit") {
             return auth;
         }
     }
@@ -1748,7 +1750,7 @@ nlohmann::json& payload) {
     if (auth_mode (auth) == "inherit") {
         auth = resolve_inherited_auth (chain);
     }
-    if (is_empty_auth (auth) || auth_mode (auth) == "inherit") {
+    if (is_empty_auth (auth)) {
         payload.erase ("auth");
         return std::nullopt;
     }

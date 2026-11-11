@@ -226,6 +226,33 @@ static RouteResult reject_binding_on_update (const nlohmann::json& json) {
     "bind a collection to a document with POST /specs/bind");
 }
 
+/**
+ * Refuses a collection write whose `auth` states `{"mode":"inherit"}` (#3445).
+ * A collection is a link of the chain a request inherits through, and the
+ * composer walks past an `inherit` link, so one that was stored would show the
+ * parent's credential in the app and hold it back at send time.
+ *
+ * Only a stated `auth` object is judged: absent keeps the stored value (which
+ * may be a legacy `inherit` the composer already steps past, so an unrelated
+ * PUT must not fail on it) and `null` resets to none. The create and update
+ * cores call it and `apply_collection_fields` does not, because `POST
+ * /import/apply` and `POST /specs/sync` share that applier and an importer's
+ * `inherit` must not fail an atomic import (the `reject_blank_name` split).
+ */
+static RouteResult reject_inherit_auth (const nlohmann::json& json) {
+    const auto auth = json.find ("auth");
+    if (auth == json.end () || !auth->is_object ()) {
+        return {};
+    }
+    const auto mode = auth->find ("mode");
+    if (mode == auth->end () || *mode != "inherit") {
+        return {};
+    }
+    return route_error (400,
+    "Invalid 'auth': a collection cannot inherit auth (mode 'inherit' is for "
+    "requests); use 'none' or a concrete mode");
+}
+
 using vayu::core::constants::file_binding::MAX_FILE_NAME_BYTES;
 using vayu::core::constants::file_binding::MAX_PATH_BYTES;
 
@@ -378,7 +405,9 @@ bool is_create) {
     if (auto outcome = apply_variables_field (json, c.variables, is_create); !outcome) {
         return outcome;
     }
-    // Collection auth is never 'inherit' - a collection is the root of a chain.
+    // Never 'inherit' - a collection is a link of the chain a request inherits
+    // through. The refusal is `reject_inherit_auth`, in the create and update
+    // cores, not here: bulk import and spec sync share this applier.
     if (auto outcome = apply_json_field (json, "auth", c.auth, R"({"mode":"none"})", is_create);
     !outcome) {
         return outcome;
@@ -463,6 +492,9 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     if (auto outcome = reject_blank_name (json); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto outcome = reject_inherit_auth (json); !outcome) {
+        return as_response (outcome.error ());
+    }
     const std::string id = vayu::utils::generate_id ("col_");
 
     if (db.get_collection (id).has_value ()) {
@@ -511,6 +543,9 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_blank_name (json); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (auto outcome = reject_inherit_auth (json); !outcome) {
         return as_response (outcome.error ());
     }
     auto existing = db.get_collection (id);

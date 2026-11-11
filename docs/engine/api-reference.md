@@ -543,6 +543,24 @@ not held to this: they carry names an importer wrote, and a blank one imports
 as it always did. The MCP `create_` and `update_` tools for both resources
 refuse the same name as an input error before calling the engine.
 
+### Collection auth
+
+A collection's `auth` is never `{"mode":"inherit"}` (#3445). A collection, a
+folder included, is a link of the chain a request inherits through, so its own
+`inherit` would mean nothing the walk could use: the composer steps past it,
+while a client reading the row would show the parent's credential as the
+collection's. `POST`/`PUT /collections` answer `400` (`Invalid 'auth': a
+collection cannot inherit auth ...`) when the body states an `auth` object whose
+`mode` is `inherit`, and write nothing. A body without `auth` is not judged (a
+`PUT` keeps the stored value), and `"auth": null` resets to `{"mode":"none"}`,
+which is how a collection stops being an auth source. `POST /import/apply` and
+`POST /specs/sync` are not held to this, as with [blank names](#blank-names). A
+row that already stores `inherit` from before this rule is read as no auth of
+its own: `POST /compose` resolves a request beneath it to the nearest ancestor's
+credential, and a `PUT` of other fields still succeeds. The MCP `create_` and
+`update_` collection tools refuse `inherit` as an input error before calling the
+engine.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1642,6 +1660,7 @@ the null-vs-absent rule.
   "parentId": null,         // Optional, null for root; a trashed collection is a 409
   "order": 0,               // Optional, appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
+  "auth": {"mode": "none"}, // Optional, default none; never mode "inherit" - see Collection auth
   "dataSchema": {},         // Optional, the declared data contract - see below
   "openapi": {},            // Optional, the bound spec document - see below
   "specFile": {},           // Optional, the bound spec file - see below
@@ -1655,7 +1674,8 @@ the null-vs-absent rule.
 ([the engine owns it](#the-engine-owns-every-id)), if `name` is missing or
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
-([#3251](#accepted-field-shapes)), if an `openapi` binding names no stored spec
+([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
+([#3445](#collection-auth)), if an `openapi` binding names no stored spec
 (below), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1679,6 +1699,7 @@ its value, an explicit `null` resets it to the default.
   "parentId": null,         // Optional, null moves it to the root; a trashed collection is a 409
   "order": 3,               // Optional; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
+  "auth": null,             // Optional, null resets to {"mode":"none"}; never mode "inherit" - see Collection auth
   "dataSchema": null,       // Optional, null clears the declared contract
   "openapi": null,          // Optional, null or {} unbinds the spec document; nothing else
   "specFile": null,         // Optional, null unbinds the spec file
@@ -1699,6 +1720,7 @@ list it just left. See [Ordering](#ordering).
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
+`auth` that states mode `inherit` ([#3445](#collection-auth)), an
 `openapi` that is neither `null` nor `{}` (binding is
 [`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
 (below); `409` if `parentId` names a collection in the
