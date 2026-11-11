@@ -5160,7 +5160,8 @@ is absent here until it is added on purpose:
    parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts
    only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
-   `lifecycle` outcome drops its `message`, `messages` and `console`, an
+   `lifecycle` outcome drops its `message`, `messages`, `console` and their
+   dropped counts, an
    element row (a step's or the run's `elements`) drops `messages`, `console`
    and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
