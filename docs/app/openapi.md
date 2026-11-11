@@ -41,7 +41,8 @@ the app.
 
 Several collections may bind the same document. It is not owned by any of them,
 which is why unbinding one leaves it in place, and why the engine refuses to
-delete a document while a collection still binds it.
+delete a document while a collection still binds it - a collection in Trash
+included, since restoring it brings the binding back.
 
 Because nothing owns a document, nothing deletes one on your behalf either -
 until it can no longer be reached at all. **A stored document lives while a

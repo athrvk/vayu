@@ -3059,8 +3059,9 @@ Delete a stored document.
 ```
 
 **Errors:** `404` when it does not exist. `409` while any collection still binds
-it, with a message naming the first binder (and a count of the rest) so the
-caller knows what to unbind without a second round trip:
+it, a collection in the Trash included, with a message naming the first binder
+(and a count of the rest) so the caller knows what to unbind without a second
+round trip:
 
 ```json
 {
@@ -3071,9 +3072,24 @@ caller knows what to unbind without a second round trip:
 }
 ```
 
+A binder in the Trash is named as such (#3446), because restoring it brings
+its binding back and a document deleted under it would come back named by a
+collection whose document is gone:
+
+```json
+{
+  "error": {
+    "code": "conflict",
+    "message": "Spec 'spec_3f2b...' is bound by collection 'Pets API' (col_9a1f...), which is in the Trash; restore it and unbind it, or purge it, before deleting the document"
+  }
+}
+```
+
 The refusal is deliberate rather than a cascade to unbound: the caller asked to
 delete a document, not to edit collections it never mentioned. Unbind with
-`PUT /collections/:id` and `{"openapi": null}`, then delete.
+`PUT /collections/:id` and `{"openapi": null}`, then delete. Purging a trashed
+binder runs the orphan sweep, which reclaims the document itself once nothing
+else binds it.
 
 ### POST /specs/match
 

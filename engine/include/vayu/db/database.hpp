@@ -616,8 +616,9 @@ class Database {
      * sidebar-sized one. Its callers are the delete refusal and nothing on a
      * request's hot path.
      *
-     * Empty means the spec is bound by nobody, which is the only state
-     * `delete_spec_document` may be called in.
+     * Collections in the Trash are included, `deleted_at` set (#3446): a
+     * restore brings their binding back. Empty means the spec is bound by
+     * nobody, which is the only state `delete_spec_document` may be called in.
      */
     std::vector<Collection> get_collections_bound_to_spec (const std::string& spec_id);
     void delete_spec_document (const std::string& id);

@@ -62,12 +62,10 @@ std::vector<Collection> Database::get_collections_bound_to_spec (const std::stri
     // An unparseable blob binds nothing - the same reading every serializer
     // gives it - and must not make the spec undeletable.
     //
-    // Deleted collections are excluded (issue #988): this backs the "N
-    // collections still bind this document" refusal and the list beside it,
-    // and a collection in the trash is not something a user can act on. The
-    // *sweep* deliberately reads the unfiltered table instead - see there.
-    for (auto& col :
-    impl_->storage.get_all<Collection> (where (is_null (&Collection::deleted_at)))) {
+    // Trashed collections count (#3446): a restore brings the binding back,
+    // so a document deleted under one would come back named by a collection
+    // whose document is gone.
+    for (auto& col : impl_->storage.get_all<Collection> ()) {
         try {
             const auto parsed = nlohmann::json::parse (col.openapi);
             if (parsed.is_object () && parsed.value ("specId", std::string ()) == spec_id) {

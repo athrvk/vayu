@@ -371,6 +371,30 @@ TEST_F (SpecsRouteTest, RefusesToDeleteADocumentACollectionStillBindsAndNamesIt)
     << "a refused delete must leave the document alone";
 }
 
+// #3446: restoring the collection brings its binding back, so a document its
+// only binder holds from the Trash is still bound. Mutation check: put the
+// `deleted_at IS NULL` filter back in `get_collections_bound_to_spec` and the
+// delete answers 200.
+TEST_F (SpecsRouteTest, RefusesToDeleteADocumentBoundOnlyByATrashedCollection) {
+    const std::string spec_id = store_spec ();
+    const std::string col_id  = create_collection (
+    json{ { "name", "Pets API" }, { "openapi", { { "specId", spec_id } } } });
+    db_->delete_collection (col_id);
+
+    auto [status, body] = routes::delete_spec_document_response (*db_, spec_id);
+    ASSERT_EQ (status, 409) << body.dump ();
+    const std::string message = body["error"]["message"].get<std::string> ();
+    EXPECT_NE (message.find ("Pets API"), std::string::npos) << message;
+    EXPECT_NE (message.find ("in the Trash"), std::string::npos) << message;
+    EXPECT_TRUE (db_->get_spec_document (spec_id).has_value ());
+
+    ASSERT_HAS_VALUE (db_->restore_deleted (col_id));
+    EXPECT_EQ (stored_binding (col_id)["specId"].get<std::string> (), spec_id);
+    auto [meta, meta_body] = routes::get_spec_document_meta_response (*db_, spec_id);
+    EXPECT_EQ (meta, 200)
+    << "the restored binding names a stored document: " << meta_body.dump ();
+}
+
 TEST_F (SpecsRouteTest, DeleteSucceedsOnceTheCollectionUnbinds) {
     const std::string spec_id = store_spec ();
     const std::string col_id  = create_collection (

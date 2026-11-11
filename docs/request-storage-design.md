@@ -280,8 +280,9 @@ parents it has not written yet.
 
 One thing a soft delete deliberately does not release: a stamped collection
 still binds its OpenAPI document, so the orphan sweep leaves that document alone
-until the collection is purged. Reclaiming it earlier would restore a binding
-that points at nothing.
+until the collection is purged, and `DELETE /specs/:id` refuses it with a `409`
+naming the binder as in the Trash (#3446). Reclaiming it earlier would restore a
+binding that points at nothing.
 
 A collection's spec-file and data-file bindings (`collections.spec_file` /
 `data_file`, issue #2765: the path and name of the file its Spec and Data tabs

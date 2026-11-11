@@ -440,7 +440,9 @@ get_spec_document_meta_response (vayu::db::Database& db, const std::string& id) 
  * cascade that quietly unbinds it: the caller asked to delete a document, not to
  * edit collections it did not mention, and the message has to be actionable
  * without a second round trip. Only the first binder is named, with a count when
- * there are more, so the answer stays one line whatever the fan-out.
+ * there are more, so the answer stays one line whatever the fan-out. A binder in
+ * the Trash counts and is named as such (#3446): restoring it brings the
+ * binding back.
  */
 std::pair<int, nlohmann::json>
 delete_spec_document_response (vayu::db::Database& db, const std::string& id) {
@@ -458,13 +460,20 @@ delete_spec_document_response (vayu::db::Database& db, const std::string& id) {
         }
         const auto bound = db.get_collections_bound_to_spec (id);
         if (!bound.empty ()) {
+            const auto& named   = bound.front ();
             std::string message = "Spec '" + id + "' is bound by collection '" +
-            bound.front ().name + "' (" + bound.front ().id + ")";
+            named.name + "' (" + named.id + ")";
+            if (named.deleted_at) {
+                message += ", which is in the Trash";
+            }
             if (bound.size () > 1) {
                 message += " and " + std::to_string (bound.size () - 1) +
                 " other" + std::string (bound.size () == 2 ? "" : "s");
             }
-            message += "; unbind it before deleting the document";
+            message += named.deleted_at ?
+            "; restore it and unbind it, or purge it, before deleting the "
+            "document" :
+            "; unbind it before deleting the document";
             result = { 409, error_body (409, message) };
             return;
         }

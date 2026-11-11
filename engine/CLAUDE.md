@@ -820,7 +820,8 @@ logged as a warning: it means a client skipped composition.
   `{}` = unbound) is the edge; `requests.spec_operation` (`{operationId?,
   method, path}`, NULL = none) says which operation a request *is*. Nothing
   cascades to a document: `DELETE /specs/:id` is a **409 naming the binder**
-  while any collection holds it, and there is no `PUT /specs/:id` because a
+  while any collection holds it, one in the Trash included (#3446, a restore
+  brings the binding back), and there is no `PUT /specs/:id` because a
   rewrite would invalidate every stamped hash. A scenario run of a bound
   collection stamps `specId` + `specHash` into `config_snapshot` and the report
   echoes them under `metadata.openapi`. The writes and reads, each one route:
