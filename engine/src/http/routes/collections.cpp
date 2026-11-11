@@ -14,6 +14,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/list_page.hpp"
+#include "vayu/http/mock_server.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -660,6 +661,29 @@ delete_collection_response (vayu::db::Database& db, const std::string& id) {
     return result;
 }
 
+namespace {
+
+/**
+ * Stop every running mock whose collection no longer resolves (#3449), so a
+ * trashed collection stops serving whichever client deleted it, a folder
+ * trashed with an ancestor included. Called outside `with_lock`: a stop joins
+ * the mock's listener thread. A start that read the collection before the
+ * delete committed and registers after this scan still survives it.
+ */
+void stop_mocks_of_trashed_collections (vayu::db::Database& db, MockServerManager& mocks) {
+    for (const auto& mock : mocks.list ()) {
+        if (db.get_collection (mock.collection_id)) {
+            continue;
+        }
+        if (mocks.stop (mock.mock_id)) {
+            vayu::utils::log_info ("mock", "Stopped the mock of a trashed collection",
+            { { "mockId", mock.mock_id }, { "collectionId", mock.collection_id } });
+        }
+    }
+}
+
+} // namespace
+
 /**
  * Testable core of GET /collections, returning {http_status, json_body}: every
  * live collection in the documented order as a bare array, or, with any of
@@ -806,7 +830,8 @@ void register_collection_routes (RouteContext& ctx) {
      * DELETE /collections/:id
      * Moves a collection and its whole subtree to the trash; beneath a bound
      * collection, the operations its requests record are recorded as
-     * declined (#3031).
+     * declined (#3031). Every running mock of the subtree stops (#3449); a
+     * restore does not start it again.
      * Path params: id - The collection ID to delete.
      * Returns: Success message or 404 if not found.
      */
@@ -823,6 +848,7 @@ void register_collection_routes (RouteContext& ctx) {
             } else {
                 vayu::utils::log_info ("http",
                 "Successfully deleted collection", { { "id", collection_id } });
+                stop_mocks_of_trashed_collections (ctx.db, ctx.mock_server_manager);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

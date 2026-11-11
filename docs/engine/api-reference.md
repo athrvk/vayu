@@ -1856,6 +1856,13 @@ everything in it. Deleting the bound collection itself records nothing - that
 is the whole contract going, not a choice about any operation of it - and a
 purge of a bound collection takes its records with it.
 
+**The delete stops every running [mock](#mock-server) of what it trashed**
+(issue #3449): a mock of the collection itself or of any folder under it,
+whichever client sent the delete, before the response is sent, so it is gone
+from [`GET /mock`](#get-mock) by then. A mock of a collection outside the
+subtree keeps running. Restoring the collection does not start its mock again;
+`POST /mock/start` does.
+
 **Response:**
 ```json
 {
@@ -6667,7 +6674,10 @@ from Postman may expect. Resolving them would be a feature, not a docs fix.
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
-that outlives its listener, unlike an inbox and its captures.
+that outlives its listener, unlike an inbox and its captures. Trashing the
+collection a mock serves, or any collection above it, stops the mock the same
+way ([`DELETE /collections/:id`](#delete-collectionsid)), and a restore does
+not start it again.
 
 **Load-testing against a mock is a supported workflow**, and it is the one this
 listener exists for as much as frontend development: a mock is a
