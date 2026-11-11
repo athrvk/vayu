@@ -36,6 +36,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CollectionDetail from "./index";
 import { resetEntityDraftStoreForTests, useEntityDraftStore } from "@/stores/entity-draft-store";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
+import { useEngineStore } from "@/stores/engine-store";
 import { useTabSelectionStore } from "@/stores/tab-selection-store";
 import { useTabsStore as useRealTabsStore } from "@/stores/tabs-store";
 import { TooltipProvider } from "@/components/ui";
@@ -367,6 +368,38 @@ describe("CollectionDetail - an unsaved draft outliving the screen (#3459)", () 
 
 		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
 		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes with its tab: closing it throws the draft away", () => {
+		// Mutation check: drop `forgetDrafts` from `closeTabsNow` and the closed
+		// tab's draft is still registered for the quit flush to save.
+		editElements().unmount();
+		// A dirty tab closes only while the engine could take its save.
+		useEngineStore.setState({ engineStatus: "connected" });
+		useRealTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			activeTabId: null,
+		});
+
+		useRealTabsStore.getState().closeTab("t1");
+
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes with its collection: a delete throws the draft away, a descendant's too", () => {
+		// The tree passes the whole subtree to `closeTabsForEntities`. Mutation
+		// check: drop the `dropForEntities` there and the deleted collection's
+		// draft stays registered, to be saved into a row that no longer exists.
+		editElements().unmount();
+		useEntityDraftStore.getState().put("c1-child:elements", { draft: [], baseline: [script] });
+
+		useRealTabsStore.getState().closeTabsForEntities(["c1", "c1-child"]);
+
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
 		expect(useSaveStore.getState().status).toBe("idle");
 	});
 });

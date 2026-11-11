@@ -1113,8 +1113,13 @@ dropped.
 
 **Who drops an entry.** The editor (`useEntityDraft`'s `reset`, an edit back
 to the persisted value, the persisted value catching up after a save, or
-`markSaved` for a save that lands once the editor has gone), and the save
-context's detached save once it lands (`useDraftSaveContext`).
+`markSaved` for a save that lands once the editor has gone), the save context's
+detached save once it lands (`useDraftSaveContext`), and `tabs-store`:
+every close path (`closeTabsNow`, LRU eviction) drops the closed collection
+tabs' drafts, and `closeTabsForEntities` drops every id the delete names,
+descendants included, beside `clearEntity`. The delete path cannot rely on
+`markRemoved`, whose ids are request-scoped, and a draft left behind would
+send its save at the deleted row on quit.
 
 **It replaced `collection-auth-draft-store.ts` (#1483).** The Inheritance Chain
 card and the context bar's `CollectionAuthSection` read the stored collection,

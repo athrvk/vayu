@@ -11,6 +11,7 @@ import { STORAGE_KEYS } from "@/constants/storage-keys";
 import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
 import { useTabSelectionStore } from "./tab-selection-store";
+import { useEntityDraftStore } from "./entity-draft-store";
 import { useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -455,6 +456,31 @@ function closeTabs(
 	};
 }
 
+/**
+ * Closes the tabs and throws away the collection drafts they held (#3459). A
+ * stored draft outlives its editor only while its tab is open: once the tab is
+ * gone nothing can show the draft again, and its context must not save it on
+ * quit.
+ */
+function closeTabsNow(
+	get: () => TabsState,
+	set: (partial: Partial<TabsState>) => void,
+	closing: ReadonlySet<string>
+): void {
+	const before = get().openTabs;
+	const next = closeTabs(get(), closing);
+	if (!next) return;
+	set(next);
+	forgetDrafts(before.filter((t) => closing.has(t.id)));
+}
+
+function forgetDrafts(closed: readonly Tab[]): void {
+	const ids = closed.flatMap((t) =>
+		t.type === "collection" && t.entityId !== null ? [t.entityId] : []
+	);
+	if (ids.length > 0) useEntityDraftStore.getState().dropForEntities(ids);
+}
+
 /** The tab nearest `index` that is staying open, preferring the one to the left. */
 function nearestSurvivor(
 	tabs: Tab[],
@@ -716,6 +742,7 @@ function activateTab(
 
 	const newTab: Tab = { ...tabDef, id: makeId() };
 	const tabs = [...openTabs, newTab];
+	const evicted: Tab[] = [];
 
 	// LRU eviction when over cap. Nothing is flushed on the way out:
 	// the selector refuses a dirty tab, so there is no flush to run -
@@ -729,7 +756,7 @@ function activateTab(
 			tabFocusedAt,
 			useSaveStore.getState().contexts
 		);
-		if (evictIndex !== -1) tabs.splice(evictIndex, 1);
+		if (evictIndex !== -1) evicted.push(...tabs.splice(evictIndex, 1));
 	}
 
 	set({
@@ -739,6 +766,7 @@ function activateTab(
 		navIntent: intent,
 		...visited,
 	});
+	forgetDrafts(evicted);
 }
 
 export const useTabsStore = create<TabsState>()(
@@ -815,8 +843,7 @@ export const useTabsStore = create<TabsState>()(
 						.showToast("Not saved - Vayu's engine is unreachable", "error");
 					return;
 				}
-				const next = closeTabs(get(), new Set([tabId]));
-				if (next) set(next);
+				closeTabsNow(get, set, new Set([tabId]));
 			},
 
 			closeOtherTabs: (tabId) => {
@@ -826,8 +853,7 @@ export const useTabsStore = create<TabsState>()(
 					openTabs,
 					new Set(openTabs.filter((t) => t.id !== tabId).map((t) => t.id))
 				);
-				const next = closeTabs(get(), closing);
-				if (next) set(next);
+				closeTabsNow(get, set, closing);
 			},
 
 			closeTabsToRight: (tabId) => {
@@ -838,8 +864,7 @@ export const useTabsStore = create<TabsState>()(
 					openTabs,
 					new Set(openTabs.slice(index + 1).map((t) => t.id))
 				);
-				const next = closeTabs(get(), closing);
-				if (next) set(next);
+				closeTabsNow(get, set, closing);
 			},
 
 			moveTab: (tabId, toIndex) => {
@@ -860,8 +885,7 @@ export const useTabsStore = create<TabsState>()(
 						.openTabs.filter((t) => !isTabDirty(t, contexts))
 						.map((t) => t.id)
 				);
-				const next = closeTabs(get(), closing);
-				if (next) set(next);
+				closeTabsNow(get, set, closing);
 			},
 
 			closeTabsForEntities: (entityIds, type) => {
@@ -890,6 +914,11 @@ export const useTabsStore = create<TabsState>()(
 				// for whichever of the four maps never held the id.
 				const { clearEntity } = useTabSelectionStore.getState();
 				for (const id of ids) clearEntity(id);
+				// And so does any unsaved draft it held, descendants' included: the
+				// caller passes the whole subtree. `markRemoved` cannot stand in for
+				// this - its ids are request-scoped - and a draft left behind would
+				// send its save at the deleted row on quit.
+				useEntityDraftStore.getState().dropForEntities(ids);
 
 				const { openTabs, activeTabId, tabFocusedAt, navHistory, navIndex, navIntent } =
 					get();
