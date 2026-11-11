@@ -311,6 +311,31 @@ describe("FeedInvalidationBatch", () => {
 		expect(countOf(keys(), queryKeys.requests.listByCollection("col_1"))).toBe(1);
 	});
 
+	it("reads one collection's list and the Trash once for a burst of distinct rows (#3448)", () => {
+		const { queryClient, keys } = spiedClient();
+		const batch = new FeedInvalidationBatch(queryClient);
+
+		for (let i = 0; i < 50; i += 1) {
+			batch.add(
+				invalidationsForChange(queryClient, {
+					kind: "request",
+					id: `req_${i}`,
+					op: "update",
+					collectionId: "col_1",
+				})!
+			);
+		}
+		vi.advanceTimersByTime(CHANGE_FEED_COALESCE_MS);
+
+		expect(countOf(keys(), queryKeys.requests.listByCollection("col_1"))).toBe(1);
+		expect(countOf(keys(), queryKeys.trash.all)).toBe(1);
+		// Every row still drops its own detail and compositions.
+		for (let i = 0; i < 50; i += 1) {
+			expect(countOf(keys(), queryKeys.requests.detail(`req_${i}`))).toBe(1);
+			expect(includesKey(keys(), queryKeys.compose.allForRequest(`req_${i}`))).toBe(true);
+		}
+	});
+
 	it("holds nothing back once the window has passed", () => {
 		const { queryClient, keys } = spiedClient();
 		const batch = new FeedInvalidationBatch(queryClient);

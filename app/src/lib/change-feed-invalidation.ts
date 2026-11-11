@@ -22,7 +22,7 @@
  */
 
 import type { QueryClient } from "@tanstack/react-query";
-import { invalidateForMcpEvent } from "@/lib/mcp-invalidation";
+import { invalidateForMcpEvent, invalidateRequestRow } from "@/lib/mcp-invalidation";
 import { ownerOfRequest } from "@/queries/collections";
 import { invalidateCompositions } from "@/queries/compose-invalidation";
 import { queryKeys } from "@/queries/keys";
@@ -50,6 +50,8 @@ export interface ChangeFeedChange {
 /** What one change asks of the cache. */
 export interface FeedInvalidation {
 	families: McpDataChangedEvent[];
+	/** Requests whose own detail and compositions are stale, apart from any list. */
+	requestRows?: string[];
 	/** The Trash list, for a change none of `families` already refetches it for. */
 	trash?: boolean;
 }
@@ -86,20 +88,27 @@ function cachedOwner(queryClient: QueryClient, requestId: string): string | unde
 }
 
 /**
- * The `request` family for @p requestId, once per collection whose list can
- * have changed. A move's event names only the destination, so the owner the
- * cache still holds is the source; an owner the cache never saw is in no list
- * on screen. With neither known the family falls back to every list.
+ * What a change to @p requestId asks of the cache: the `request` family once
+ * per collection whose list can have changed, and the row's own detail and
+ * compositions. The families carry no `requestId`, so {@link familyKey}
+ * dedupes them: a reorder that writes N rows of one collection is one list
+ * read and one Trash read, not N. A move's event names only the destination,
+ * so the owner the cache still holds is the source; an owner the cache never
+ * saw is in no list on screen. With neither known the family falls back to
+ * every list.
  */
-function requestFamilies(
+function requestInvalidation(
 	queryClient: QueryClient,
 	requestId: string,
 	collectionId: string | undefined
-): McpDataChangedEvent[] {
+): FeedInvalidation {
 	const previous = cachedOwner(queryClient, requestId);
 	const owners = new Set([collectionId ?? previous]);
 	if (previous) owners.add(previous);
-	return [...owners].map((owner) => ({ entity: "request", requestId, collectionId: owner }));
+	return {
+		families: [...owners].map((owner) => ({ entity: "request", collectionId: owner })),
+		requestRows: [requestId],
+	};
 }
 
 /**
@@ -114,17 +123,17 @@ const BY_KIND: Record<
 	collection: (_queryClient, change) => ({
 		families: [{ entity: ROW_WRITES.has(change.op) ? "collectionRow" : "collection" }],
 	}),
-	request: (queryClient, change) => ({
-		families: requestFamilies(queryClient, change.id, change.collectionId),
-	}),
+	request: (queryClient, change) =>
+		requestInvalidation(queryClient, change.id, change.collectionId),
 	/*
 	 * The `request` family named by the example's request, as the MCP example
 	 * tools declare it: the Examples list sits under that request's detail key,
 	 * and the family takes the Trash list a saved example's delete adds to.
 	 */
-	example: (queryClient, change) => ({
-		families: change.requestId ? requestFamilies(queryClient, change.requestId, undefined) : [],
-	}),
+	example: (queryClient, change) =>
+		change.requestId
+			? requestInvalidation(queryClient, change.requestId, undefined)
+			: { families: [] },
 	environment: () => ({ families: [{ entity: "environment" }] }),
 	// Globals ride on the environment family (#758), as `update_globals` does.
 	globals: () => ({ families: [{ entity: "environment" }] }),
@@ -208,9 +217,9 @@ export const CHANGE_FEED_COALESCE_MS = 200;
  */
 export const CHANGE_FEED_MUTATION_HOLD_MAX_MS = 5_000;
 
-/** One key per family and scope, so a burst on one row is one invalidation. */
+/** One key per family and collection, so a burst on one collection is one invalidation. */
 function familyKey(event: McpDataChangedEvent): string {
-	return `${event.entity}|${event.collectionId ?? ""}|${event.requestId ?? ""}`;
+	return `${event.entity}|${event.collectionId ?? ""}`;
 }
 
 /**
@@ -227,6 +236,7 @@ function familyKey(event: McpDataChangedEvent): string {
  */
 export class FeedInvalidationBatch {
 	private families = new Map<string, McpDataChangedEvent>();
+	private requestRows = new Set<string>();
 	private trash = false;
 	private reset = false;
 	private openRows = false;
@@ -238,6 +248,7 @@ export class FeedInvalidationBatch {
 
 	add(invalidation: FeedInvalidation): void {
 		for (const event of invalidation.families) this.families.set(familyKey(event), event);
+		for (const id of invalidation.requestRows ?? []) this.requestRows.add(id);
 		if (invalidation.trash) this.trash = true;
 		this.arm();
 	}
@@ -269,8 +280,9 @@ export class FeedInvalidationBatch {
 			this.flushWhenMutationsSettle();
 			return;
 		}
-		const { families, trash, reset, openRows } = this;
+		const { families, requestRows, trash, reset, openRows } = this;
 		this.families = new Map();
+		this.requestRows = new Set();
 		this.trash = false;
 		this.reset = false;
 		this.openRows = false;
@@ -280,6 +292,7 @@ export class FeedInvalidationBatch {
 		}
 		if (openRows) invalidateOpenRows(this.queryClient);
 		for (const event of families.values()) invalidateForMcpEvent(this.queryClient, event);
+		for (const id of requestRows) invalidateRequestRow(this.queryClient, id);
 		if (trash) void this.queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
 	}
 
