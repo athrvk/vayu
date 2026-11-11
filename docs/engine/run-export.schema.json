@@ -504,7 +504,7 @@
           }
         },
         "lifecycle": {
-          "description": "Outcomes only: the message a setup or teardown script threw is left out.",
+          "description": "Outcomes only: a setup or teardown script's message, its messages and its console are left out.",
           "type": "object",
           "additionalProperties": false,
           "properties": {

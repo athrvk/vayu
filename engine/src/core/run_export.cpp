@@ -235,7 +235,8 @@ std::to_array<std::string_view> ({ "sampled", "checked", "valid", "failed",
 "unevaluated", "failuresTotal", "exact", "failOnSchemaError" });
 constexpr auto KEYWORD_COUNT_KEYS =
 std::to_array<std::string_view> ({ "keyword", "count" });
-// `message` is left behind: it is what a setup or teardown script threw.
+// `message`, `messages` and `console` are left behind: they are what a setup
+// or teardown script threw, asserted and logged.
 constexpr auto LIFECYCLE_OUTCOME_KEYS =
 std::to_array<std::string_view> ({ "id", "kind", "name", "outcome", "waitedMs" });
 constexpr auto THRESHOLD_KEYS =

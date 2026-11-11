@@ -462,6 +462,26 @@ const std::string& text) {
     << setup[0].dump ();
 }
 
+/// A teardown that logs a line and fails only a `pm.test`.
+constexpr const char* LOGGING_FAILING_TEST_TEARDOWN =
+"console.log('x'); pm.test('t', () => { throw new Error('nope'); });";
+
+/// That a run's @p lifecycle holds the one teardown of
+/// `LOGGING_FAILING_TEST_TEARDOWN` as `failed`, with its test and its console
+/// line kept beside the message (#3455).
+void expect_teardown_keeps_its_output (const json& lifecycle) {
+    const auto teardown = lifecycle.value ("teardown", json::array ());
+    ASSERT_EQ (teardown.size (), 1u) << lifecycle.dump ();
+    EXPECT_EQ (teardown[0].value ("outcome", ""), "failed");
+    EXPECT_EQ (teardown[0].value ("message", ""), FAILING_TEST_MESSAGE);
+    EXPECT_EQ (teardown[0].value ("messages", json ()),
+    json::array ({ { { "kind", "test" }, { "text", "t: Error: nope" } } }))
+    << teardown[0].dump ();
+    EXPECT_EQ (teardown[0].value ("console", json ()),
+    json::array ({ { { "level", "log" }, { "text", "x" } } }))
+    << teardown[0].dump ();
+}
+
 // Mutation check: remove the `run.start` dispatch call in
 // `execute_scenario_run` (scenario_runner.cpp) and this reddens - step 1's
 // request keeps its literal `{{lifecycleToken}}` because nothing ever wrote
@@ -697,6 +717,18 @@ TEST_F (ScriptLifecycleTest, LoadThrowingSetupFailsTheRunWithNoSubmissions) {
     expect_refusing_setup (report_lifecycle_of ("run_load"), "error", "boom");
 }
 
+// The load-mode half of SequentialSetupWithAFailingTestFailsTheRunAndSaysWhich.
+TEST_F (ScriptLifecycleTest, LoadSetupWithAFailingTestFailsTheRunAndSaysWhich) {
+    seed_collection (script_setup_element (FAILING_TEST_SETUP));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/1, /*concurrency=*/3),
+    vayu::RunStatus::Failed);
+    EXPECT_TRUE (server_->requests ().empty ());
+    expect_refusing_setup (report_lifecycle_of ("run_load"), "failed", FAILING_TEST_MESSAGE);
+}
+
 // The load-mode half of SequentialSetupFailureLogsTheThrownTextAsABoundedField.
 // Mutation check: put `*setup_failure` back into the message in `run_worker`'s
 // setup refusal (run_manager.cpp) and this reddens.
@@ -737,6 +769,20 @@ TEST_F (ScriptLifecycleTest, LoadThrowingTeardownIsRecordedWithoutChangingStatus
     EXPECT_EQ (teardown[0]["outcome"], "error");
     EXPECT_NE (
     teardown[0]["message"].get<std::string> ().find ("teardown boom"), std::string::npos);
+}
+
+// The load-mode half of SequentialTeardownKeepsItsConsoleAndFailingTest, read
+// as the report answers it. Mutation check: drop the `outcome_messages`
+// assignment in `record_script_outcome` (script_kinds.cpp) and the message
+// and console lists are absent.
+TEST_F (ScriptLifecycleTest, LoadTeardownKeepsItsConsoleAndFailingTest) {
+    seed_collection (setup_and_teardown_elements ("", LOGGING_FAILING_TEST_TEARDOWN));
+    seed_request ();
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/2, /*concurrency=*/2),
+    vayu::RunStatus::Completed);
+    expect_teardown_keeps_its_output (report_lifecycle_of ("run_load"));
 }
 
 // The issue's own Tests requirement, literally: "teardown runs after the last
@@ -895,6 +941,14 @@ TEST_F (ScriptLifecycleTest, SingleRequestThrowingTeardownIsRecordedWithoutChang
     EXPECT_EQ (teardown[0]["outcome"], "error");
     EXPECT_NE (
     teardown[0]["message"].get<std::string> ().find ("teardown boom"), std::string::npos);
+}
+
+// The single-request half of LoadTeardownKeepsItsConsoleAndFailingTest.
+TEST_F (ScriptLifecycleTest, SingleRequestTeardownKeepsItsConsoleAndFailingTest) {
+    EXPECT_EQ (run_single_request_load (setup_and_teardown_elements ("", LOGGING_FAILING_TEST_TEARDOWN),
+               /*iterations=*/2, /*concurrency=*/2),
+    vayu::RunStatus::Completed);
+    expect_teardown_keeps_its_output (report_lifecycle_of ("run_single"));
 }
 
 // The single-request half of LoadTeardownSeesTheActualSentCount: teardown
