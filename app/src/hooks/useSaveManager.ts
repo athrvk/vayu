@@ -29,14 +29,14 @@ import { useClientSettingsStore } from "@/stores";
 import { queryKeys } from "@/queries/keys";
 import { ApiError } from "@/services/http-client";
 import { SaveBlockedError } from "@/lib/elements";
-import { saveFailureOutcome, saveRetryDelayMs } from "@/lib/save-failure";
+import { isNotFoundError, saveFailureOutcome, saveRetryDelayMs } from "@/lib/save-failure";
 
 /**
  * The id this hook registers and reports under. Every registration, update and
  * report in this file needs it, and a second spelling of the template string is
  * how they drift apart.
  */
-const saveContextId = (entityId: string) => `request-${entityId}`;
+export const saveContextId = (entityId: string) => `request-${entityId}`;
 
 /**
  * Where an entity-switch or unmount flush leaves its edit once the pane that
@@ -45,18 +45,20 @@ const saveContextId = (entityId: string) => `request-${entityId}`;
  * entry once it lands - left registered dirty, every later reconnect would
  * re-send the stale draft. A save the editor held back has nothing left to
  * send it (the provider reseeds from the next entity), so its id stops
- * counting as unsaved. Either way, a pane that came back to the entity owns
- * the id again and is left alone.
+ * counting as unsaved, and so does one the engine answered 404 (#3444): the
+ * entity is gone and no retry can land. Either way, a pane that came back to
+ * the entity owns the id again and is left alone.
  */
 function settleGoodbyeFlush(
 	contextId: string,
 	name: string,
 	save: () => Promise<void>,
-	outcome: SaveOutcome | void
+	outcome: SaveOutcome | void,
+	entityGone: boolean
 ) {
 	const store = useSaveStore.getState();
 	if (store.contexts.has(contextId)) return;
-	if (outcome === "pending") {
+	if (outcome === "pending" || (entityGone && isFailedOutcome(outcome))) {
 		store.discard(contextId);
 		return;
 	}
@@ -97,6 +99,9 @@ interface UseSaveManagerOptions {
 	/** Whether auto-save is enabled (default: true) */
 	enabled?: boolean;
 }
+
+/** Told of the error behind a failed save, before the failure is reported. */
+type ErrorSink = (error: unknown) => void;
 
 /** Where this entity's own edit stands; never `saved`, which no id records. */
 export type EditStatus = Exclude<SaveStatus, "saved">;
@@ -236,71 +241,77 @@ export function useSaveManager({
 	// The verdict is returned as well as reported: `status` is derived from
 	// every surface's reports, so a caller that needs to know what became of
 	// *this* save (`flushAll`, the retry) cannot read it back from there.
-	const performSave = useCallback((): Promise<SaveOutcome | void> => {
-		if (!entityId) return Promise.resolve();
-		const contextId = saveContextId(entityId);
+	const performSave = useCallback(
+		(onError?: ErrorSink): Promise<SaveOutcome | void> => {
+			if (!entityId) return Promise.resolve();
+			const contextId = saveContextId(entityId);
 
-		// Bind the saver now, not when the queue reaches us. An entity switch
-		// flushes from its effect cleanup, which runs before the next render
-		// repoints `onSaveRef` - a queued save that read the ref late would write
-		// the entity the user just switched *to*.
-		const save = onSaveRef.current;
-		// The generation that saver carries. Bound here, beside it, for the same
-		// reason: both describe the state of the entity at this moment, and a
-		// read taken later would describe an edit this save is not carrying.
-		const savedGeneration = changeTokenRef.current;
+			// Bind the saver now, not when the queue reaches us. An entity switch
+			// flushes from its effect cleanup, which runs before the next render
+			// repoints `onSaveRef` - a queued save that read the ref late would write
+			// the entity the user just switched *to*.
+			const save = onSaveRef.current;
+			// The generation that saver carries. Bound here, beside it, for the same
+			// reason: both describe the state of the entity at this moment, and a
+			// read taken later would describe an edit this save is not carrying.
+			const savedGeneration = changeTokenRef.current;
 
-		const run = saveQueueRef.current.then(async (): Promise<SaveOutcome> => {
-			reportSaving(contextId);
-			try {
-				await save();
-				// "Saved" is a claim about the editor, not about the round trip.
-				// An edit that landed while this save was in flight is not in
-				// what went out, so the honest status is still "unsaved" - the
-				// Dock reads this store, and it used to flash "Saved" over an
-				// edit nobody had persisted. The caller re-arms the save; this
-				// only refuses to mislabel it.
-				if (changeTokenRef.current !== savedGeneration) {
-					reportPending(contextId);
-					return "pending";
-				}
-				reportSaved(contextId);
-				return "saved";
-			} catch (error) {
-				if (error instanceof SaveBlockedError) {
-					// Not a failure - the caller chose not to send. Report the same
-					// "still dirty, nothing in flight" state a plain unsaved edit
-					// has, so the status bar reads correctly and `attemptAutoSave`
-					// does not arm a retry against a payload that will not have
-					// changed by the next tick.
-					reportPending(contextId);
-					return "pending";
-				}
-				console.error("Save failed:", error);
-				reportFailed(
-					contextId,
-					error instanceof Error ? `Couldn't save - ${error.message}` : "Couldn't save",
-					error
-				);
+			const run = saveQueueRef.current.then(async (): Promise<SaveOutcome> => {
+				reportSaving(contextId);
+				try {
+					await save();
+					// "Saved" is a claim about the editor, not about the round trip.
+					// An edit that landed while this save was in flight is not in
+					// what went out, so the honest status is still "unsaved" - the
+					// Dock reads this store, and it used to flash "Saved" over an
+					// edit nobody had persisted. The caller re-arms the save; this
+					// only refuses to mislabel it.
+					if (changeTokenRef.current !== savedGeneration) {
+						reportPending(contextId);
+						return "pending";
+					}
+					reportSaved(contextId);
+					return "saved";
+				} catch (error) {
+					if (error instanceof SaveBlockedError) {
+						// Not a failure - the caller chose not to send. Report the same
+						// "still dirty, nothing in flight" state a plain unsaved edit
+						// has, so the status bar reads correctly and `attemptAutoSave`
+						// does not arm a retry against a payload that will not have
+						// changed by the next tick.
+						reportPending(contextId);
+						return "pending";
+					}
+					console.error("Save failed:", error);
+					onError?.(error);
+					reportFailed(
+						contextId,
+						error instanceof Error
+							? `Couldn't save - ${error.message}`
+							: "Couldn't save",
+						error
+					);
 
-				// A 4xx is the engine's verdict on this payload, not a hiccup - a
-				// timed-out or refused connection is the shape a dead engine
-				// actually takes, and that is the only failure worth reacting to
-				// here. `shouldRetryQuery` already draws this line for queries;
-				// mutations reach `ApiError` the same way.
-				if (!(error instanceof ApiError)) {
-					// The health poll can be up to HEALTH_CHECK_INTERVAL_MS behind
-					// an engine that just died - a failed save is evidence sooner
-					// than the next tick would be, so nudge it now instead of
-					// waiting.
-					void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
+					// A 4xx is the engine's verdict on this payload, not a hiccup - a
+					// timed-out or refused connection is the shape a dead engine
+					// actually takes, and that is the only failure worth reacting to
+					// here. `shouldRetryQuery` already draws this line for queries;
+					// mutations reach `ApiError` the same way.
+					if (!(error instanceof ApiError)) {
+						// The health poll can be up to HEALTH_CHECK_INTERVAL_MS behind
+						// an engine that just died - a failed save is evidence sooner
+						// than the next tick would be, so nudge it now instead of
+						// waiting.
+						void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
+					}
+					return saveFailureOutcome(error);
 				}
-				return saveFailureOutcome(error);
-			}
-		});
-		saveQueueRef.current = run;
-		return run;
-	}, [entityId, reportSaving, reportSaved, reportPending, reportFailed, queryClient]);
+			});
+			saveQueueRef.current = run;
+			return run;
+		},
+		[entityId, reportSaving, reportSaved, reportPending, reportFailed, queryClient]
+	);
 
 	/**
 	 * The auto-save path specifically, not every `performSave` caller.
@@ -406,13 +417,23 @@ export function useSaveManager({
 			// The sibling registration effect has already unregistered this
 			// context by the time this runs, so what the flush leaves behind is
 			// settled outside the registry.
+			const contextId = saveContextId(entityId);
+			// A request deleted from the tree is gone, and its edit is too: there is
+			// nothing to save it to, so it is dropped rather than PUT to a 404 (#3444).
+			if (useSaveStore.getState().isRemoved(contextId)) {
+				discard(contextId);
+				return;
+			}
 			const save = onSaveRef.current;
 			const name = contextName || "Request";
-			void performSave().then((outcome) =>
-				settleGoodbyeFlush(saveContextId(entityId), name, save, outcome)
+			let failure: unknown;
+			void performSave((error) => {
+				failure = error;
+			}).then((outcome) =>
+				settleGoodbyeFlush(contextId, name, save, outcome, isNotFoundError(failure))
 			);
 		};
-	}, [entityId, performSave, clearRetry, contextName]);
+	}, [entityId, performSave, clearRetry, contextName, discard]);
 
 	// An edit that is gone - reverted, or its request deleted elsewhere - leaves
 	// this id's report describing nothing, and nothing to retry. A save in

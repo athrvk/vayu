@@ -15,12 +15,18 @@
 import { TIMING } from "@/config/timing";
 import { isDiskFullError } from "@/lib/disk-full";
 import { isFinalError } from "@/lib/query-client";
+import { ApiError } from "@/services/http-client";
 import type { SaveOutcome } from "@/stores/save-store";
 
 /** The verdict on a save that threw `error`. */
 export function saveFailureOutcome(error: unknown): SaveOutcome {
 	if (isDiskFullError(error)) return "disk-full";
 	return isFinalError(error) ? "final" : "failed";
+}
+
+/** The engine answered 404: the record a save targets no longer exists. */
+export function isNotFoundError(error: unknown): boolean {
+	return error instanceof ApiError && error.statusCode === 404;
 }
 
 /**
