@@ -44,6 +44,7 @@ import {
 } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
+import { entityDraftKey } from "@/stores/entity-draft-store";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import type { Collection, ElementDef, VariableSupport } from "@/types";
 import { InfoBanner, SaveFailed } from "./shared";
@@ -100,15 +101,17 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		]
 	);
 
+	const draftKey = entityDraftKey(collection.id, "elements");
 	const {
 		draft: elements,
 		setDraft: setElements,
 		isDirty,
 		reset: resetDraft,
 		consumeDiscard,
+		markSaved,
 		externalValue,
 	} = useEntityDraft<ElementDef[]>({
-		entityKey: `${collection.id}:elements`,
+		entityKey: draftKey,
 		value: collection.elements,
 		mutation: updateCollection,
 	});
@@ -136,7 +139,8 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 			refuseElement(error, elements);
 			throw error;
 		}
-	}, [isDirty, updateCollection, collection.id, elements, kinds, refuseElement]);
+		markSaved(elements);
+	}, [isDirty, updateCollection, collection.id, elements, kinds, refuseElement, markSaved]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-elements`,
@@ -145,6 +149,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		isActive: active,
 		save: persist,
 		consumeDiscard,
+		draftKey,
 	});
 
 	const handleSave = () => void persist().catch(() => {});

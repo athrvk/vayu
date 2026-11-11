@@ -32,7 +32,7 @@
  * above the fields.
  */
 
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 import { Lock } from "lucide-react";
 
 import {
@@ -54,7 +54,7 @@ import {
 } from "@/constants/auth-modes";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
-import { useCollectionAuthDraftStore } from "@/stores";
+import { collectionAuthDraftKey } from "@/stores/entity-draft-store";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
@@ -123,15 +123,20 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 
 	// Draft/resync/isDirty/mutation-reset all live in the shared hook - the
 	// three collection tabs used to hand-roll it one each. See useEntityDraft.
+	// The key is also what the context bar's `CollectionAuthSection` reads the
+	// draft by (`useCollectionAuthDraft`), so it shows the picked-but-unsaved
+	// mode instead of the stored one (#1483).
+	const draftKey = collectionAuthDraftKey(collection.id);
 	const {
 		draft: auth,
 		setDraft: setAuth,
 		isDirty,
 		reset: resetDraft,
 		consumeDiscard,
+		markSaved,
 		externalValue,
 	} = useEntityDraft<CollectionAuth>({
-		entityKey: collection.id,
+		entityKey: draftKey,
 		value: collection.auth,
 		mutation: updateCollection,
 	});
@@ -149,7 +154,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	const persist = useCallback(async () => {
 		if (!isDirty) return;
 		await updateCollection.mutateAsync({ id: collection.id, auth });
-	}, [isDirty, updateCollection, collection.id, auth]);
+		markSaved(auth);
+	}, [isDirty, updateCollection, collection.id, auth, markSaved]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-auth`,
@@ -158,19 +164,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		isActive: active,
 		save: persist,
 		consumeDiscard,
+		draftKey,
 	});
-
-	// Published outside this tab so the Inheritance Chain card (rendered below)
-	// and the context bar's `CollectionAuthSection` (mounted elsewhere in the
-	// tree) can show the picked-but-unsaved mode instead of the stale stored
-	// one (#1483). Equal to the stored value while clean, so this is a no-op
-	// then.
-	const setAuthDraft = useCollectionAuthDraftStore((s) => s.setDraft);
-	const clearAuthDraft = useCollectionAuthDraftStore((s) => s.clearDraft);
-	useEffect(() => {
-		setAuthDraft(collection.id, auth);
-		return () => clearAuthDraft(collection.id);
-	}, [collection.id, auth, setAuthDraft, clearAuthDraft]);
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
 	// toast instead, since this callout may not be on screen at all.

@@ -9,20 +9,24 @@
  */
 
 /**
- * The collection tabs hold their drafts in component state, and two things used
- * to take those drafts away without a word.
+ * Three things used to take a collection tab's unsaved draft away without a
+ * word.
  *
- * **A tab switch.** Radix unmounts an inactive `TabsContent`, so renaming the
- * collection, glancing at Auth and coming back showed the old name again - the
- * same defect the request builder's body drafts hit, and fixed the same way, by
- * keeping the panel alive rather than by moving where the draft is stored.
+ * **A sub-tab switch.** Radix unmounts an inactive `TabsContent`, so renaming
+ * the collection, glancing at Auth and coming back showed the old name again.
+ * Fixed by keeping a visited panel mounted.
  *
  * **Quit, or Ctrl/Cmd+S from anywhere.** None of the three tabs called
  * `registerContext`, so `flushAll` and `triggerSave` could not see them at all:
  * the save store's registry was the only list of dirty editors, and these were
  * absent from it.
  *
- * Both are asserted against the real save store, since a mocked registry would
+ * **A look at another workspace tab (#3459).** `Shell.tsx` mounts only the tab
+ * on screen, so clicking a request unmounted this whole screen and the draft
+ * with it - no prompt, the Dock idle, the old script still sent. The draft is
+ * kept in `entity-draft-store` now, and its save context outlives the screen.
+ *
+ * All are asserted against the real save store, since a mocked registry would
  * pass whatever it was told.
  */
 
@@ -30,9 +34,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CollectionDetail from "./index";
-import { useSaveStore } from "@/stores/save-store";
+import { resetEntityDraftStoreForTests, useEntityDraftStore } from "@/stores/entity-draft-store";
+import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
+import { useTabSelectionStore } from "@/stores/tab-selection-store";
+import { useTabsStore as useRealTabsStore } from "@/stores/tabs-store";
 import { TooltipProvider } from "@/components/ui";
-import type { Collection } from "@/types";
+import type { Collection, ElementDef, ElementKindSchema } from "@/types";
+
+const script: ElementDef = {
+	id: "e1",
+	kind: "script.pre",
+	enabled: true,
+	config: { script: "console.log(1);" },
+};
 
 const collection: Collection = {
 	id: "c1",
@@ -41,12 +55,18 @@ const collection: Collection = {
 	order: 0,
 	variables: {},
 	auth: { mode: "none" },
-	elements: [],
+	elements: [script],
 	createdAt: "2026-01-01T00:00:00Z",
 	updatedAt: "2026-01-01T00:00:00Z",
 };
 
-const mutateAsync = vi.fn((_patch: { id: string; name?: string }) => Promise.resolve(collection));
+const mutateAsync = vi.fn((_patch: { id: string; name?: string; elements?: ElementDef[] }) =>
+	Promise.resolve(collection)
+);
+// What the engine holds: a save that lands updates it, the way the real
+// mutation's `onSuccess` updates the collections cache.
+let stored: Collection = collection;
+
 const mutation = {
 	mutate: vi.fn(),
 	mutateAsync,
@@ -57,7 +77,7 @@ const mutation = {
 };
 
 vi.mock("@/queries/collections", () => ({
-	useCollectionsQuery: () => ({ data: [collection], isLoading: false, isError: false }),
+	useCollectionsQuery: () => ({ data: [stored], isLoading: false, isError: false }),
 	useRequestsQuery: () => ({ data: [], isLoading: false }),
 	// The shell counts the whole subtree for its header (issue #723); an empty
 	// map is "no requests anywhere", which is what these cases are about.
@@ -66,7 +86,10 @@ vi.mock("@/queries/collections", () => ({
 	useCollectionAncestors: () => [],
 }));
 
-vi.mock("@/stores", () => ({
+// The screen reads which tab is showing from a stub; the cases that close a tab
+// drive the real store, imported directly.
+vi.mock("@/stores", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/stores")>()),
 	useTabsStore: (selector: (s: Record<string, unknown>) => unknown) =>
 		selector({
 			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
@@ -74,16 +97,44 @@ vi.mock("@/stores", () => ({
 		}),
 	useSessionStore: (selector: (s: unknown) => unknown) =>
 		selector({ setLastCollectionId: vi.fn() }),
-	// AuthTab publishes its draft here (#1483); these tests are about draft
-	// survival across a tab switch, not about the mirror, so a no-op stands in.
-	useCollectionAuthDraftStore: (selector: (s: unknown) => unknown) =>
-		selector({ setDraft: vi.fn(), clearDraft: vi.fn() }),
 }));
 
 // Monaco and the variables editor are not what these tests are about, and both
 // drag in a great deal of setup.
-vi.mock("./ScriptTab", () => ({ default: () => null }));
 vi.mock("./VariablesTab", () => ({ default: () => null }));
+vi.mock("@/components/ui", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/components/ui")>()),
+	CodeEditor: () => null,
+}));
+
+// The Elements tab's kind list and its "Names mentioned" row; the wiring under
+// test is the draft's, not theirs.
+const SCRIPT_KIND: ElementKindSchema = {
+	kind: "script.pre",
+	version: 1,
+	label: "Pre-request script",
+	description: "",
+	category: "script",
+	hotPathClass: "script",
+	collectionOnly: false,
+	configSchema: { type: "object", properties: {} },
+	phases: [],
+};
+vi.mock("@/queries", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/queries")>()),
+	useElementKindsQuery: () => ({ data: [SCRIPT_KIND] }),
+	useScriptCompletionsQuery: () => ({ data: undefined, isPending: true, isError: false }),
+}));
+vi.mock("@/hooks", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@/hooks")>()),
+	useDataContract: () => undefined,
+	useVariableResolver: () => ({
+		resolveField: (value: string) => value,
+		getAllVariables: () => ({}),
+		getVariableOrigins: () => [],
+	}),
+	useVariableWriter: () => ({ updateVariable: vi.fn(), writableScopes: [] }),
+}));
 // The header's mock-server control reaches the engine and the toast store;
 // this file is about the tab shell, and its own suite covers the control.
 vi.mock("./MockServerControl", () => ({ default: () => null }));
@@ -115,8 +166,11 @@ function selectTab(label: RegExp) {
 
 describe("CollectionDetail - an unsaved draft", () => {
 	beforeEach(() => {
+		resetEntityDraftStoreForTests();
+		resetSaveStoreForTests();
+		useTabSelectionStore.getState().clearAll();
+		stored = collection;
 		mutateAsync.mockClear();
-		useSaveStore.setState({ contexts: new Map(), activeContextId: null, status: "idle" });
 	});
 
 	it("survives a switch to another tab and back", () => {
@@ -176,5 +230,143 @@ describe("CollectionDetail - an unsaved draft", () => {
 		});
 
 		expect(mutateAsync).not.toHaveBeenCalled();
+	});
+});
+
+describe("CollectionDetail - an unsaved draft outliving the screen (#3459)", () => {
+	beforeEach(() => {
+		resetEntityDraftStoreForTests();
+		resetSaveStoreForTests();
+		useTabSelectionStore.getState().clearAll();
+		stored = collection;
+		mutateAsync.mockReset();
+		mutateAsync.mockImplementation((patch) => {
+			stored = { ...stored, ...patch };
+			return Promise.resolve(stored);
+		});
+	});
+
+	const toggle = () => screen.getByRole("switch", { name: /enable pre-request script/i });
+
+	/** Elements tab open, its one script element disabled but not saved. */
+	function editElements() {
+		const view = render(<Screen />);
+		selectTab(/elements/i);
+		fireEvent.click(toggle());
+		expect(toggle()).not.toBeChecked();
+		return view;
+	}
+
+	it("is still there when the screen comes back, and Save elements writes it", () => {
+		// Mutation check: drop the store and keep the draft in component state,
+		// and the remount shows the script enabled again with Save disabled.
+		editElements().unmount();
+
+		render(<Screen />);
+
+		expect(screen.getByRole("tab", { name: /elements/i })).toHaveAttribute(
+			"data-state",
+			"active"
+		);
+		expect(toggle()).not.toBeChecked();
+		fireEvent.click(screen.getByRole("button", { name: /save elements/i }));
+		expect(mutateAsync).toHaveBeenCalledWith({
+			id: "c1",
+			elements: [{ ...script, enabled: false }],
+		});
+	});
+
+	it("keeps the tab dirty and the Dock on unsaved while the screen is gone", () => {
+		// Mutation check: restore the unmount `discard(id)` in
+		// `useDraftSaveContext` and the context is gone, the Dock idle, and
+		// "Close saved tabs" takes the tab - and the draft - with it.
+		editElements().unmount();
+
+		const context = useSaveStore.getState().contexts.get("collection-c1-elements");
+		expect(context?.hasPendingChanges).toBe(true);
+		expect(useSaveStore.getState().status).toBe("pending");
+
+		useRealTabsStore.setState({
+			openTabs: [{ id: "t1", type: "collection", entityId: "c1" }],
+			activeTabId: null,
+		});
+		useRealTabsStore.getState().closeSavedTabs();
+		expect(useRealTabsStore.getState().openTabs.map((t) => t.id)).toEqual(["t1"]);
+	});
+
+	it("is saved by the quit flush with the screen gone, which then reads clean", async () => {
+		// Mutation check: register no save after the unmount and the flush
+		// writes nothing - `{ saved: 0 }` and the quit does not ask.
+		editElements().unmount();
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(tally).toEqual({ saved: 1, failed: 0, pending: 0 });
+		expect(mutateAsync).toHaveBeenCalledWith({
+			id: "c1",
+			elements: [{ ...script, enabled: false }],
+		});
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().status).toBe("saved");
+	});
+
+	it("makes the quit ask when that save fails, and keeps the draft", async () => {
+		editElements().unmount();
+		mutateAsync.mockRejectedValue(new Error("engine down"));
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		// `failed > 0` is what `flushNeedsConfirmation` asks on.
+		expect(tally).toEqual({ saved: 0, failed: 1, pending: 0 });
+		expect(
+			useSaveStore.getState().contexts.get("collection-c1-elements")?.hasPendingChanges
+		).toBe(true);
+
+		render(<Screen />);
+		expect(toggle()).not.toBeChecked();
+	});
+
+	it("is the remounted editor's again, so a Reset there leaves its context alone", () => {
+		// Mutation check: skip ending the detachment when the editor registers
+		// again, and the Reset's drop reads to the old watch as the tab closing:
+		// it unregisters the editor that is on screen.
+		editElements().unmount();
+		render(<Screen />);
+
+		fireEvent.click(screen.getByRole("button", { name: /^reset$/i }));
+
+		expect(toggle()).toBeChecked();
+		expect(useSaveStore.getState().contexts.get("collection-c1-elements")).toMatchObject({
+			hasPendingChanges: false,
+		});
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("lets the context go when a save started on screen lands after the screen went", async () => {
+		// Save elements, then a click elsewhere before the write returns: no
+		// editor is left to see the stored value catch up. Mutation check: drop
+		// `markSaved` from the tab's save and the Dock keeps "Unsaved changes"
+		// for an edit that is on disk.
+		let land: () => void = () => {};
+		mutateAsync.mockImplementationOnce(
+			(patch) =>
+				new Promise((resolve) => {
+					land = () => {
+						stored = { ...stored, ...patch };
+						resolve(stored);
+					};
+				})
+		);
+		const view = editElements();
+		fireEvent.click(screen.getByRole("button", { name: /save elements/i }));
+		view.unmount();
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(true);
+
+		await act(async () => land());
+
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().status).toBe("idle");
 	});
 });

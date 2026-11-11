@@ -210,6 +210,7 @@ The app uses a dual-state management approach:
    - `client-settings-store.ts`: Renderer preferences (editor, charts, auto-save, notifications)
    - `toast-store.ts`: The transient notification queue
    - `save-store.ts`: Auto-save orchestration and progress
+   - `entity-draft-store.ts`: The unsaved drafts of the manual-save collection editors (`useEntityDraft`), by entity key, so a draft outlives the screen that holds it (#3459); dropped with its save, its Reset or its tab, and never persisted
    - `import-modal-store.ts`: Import dialog visibility and state
    - `env-switcher-store.ts`: Whether the title bar's environment menu is open, so a toast action can open it
    - `import-report-store.ts`: The loss report of each applied import, by root collection id, until dismissed
@@ -284,7 +285,7 @@ sections themselves.
 - **`useEngine()`**: Compose (`POST /compose`), execute, and stop
 - **`useVariableResolver()`**: Resolve `{{variables}}` in strings/objects for previews (the engine resolves what is sent)
 - **`useSaveManager()`**: Auto-save orchestration with debouncing
-- **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button
+- **`useEntityDraft()`**: The manual counterpart - draft, `isDirty`, reset, for editors that save on a button; the draft is kept in `entity-draft-store` by entity, so it outlives the editor (#3459)
 - **`useChangeFeed()`**: Mounted once in `App.tsx`; holds the change feed open while the engine is connected
 
 ## Data Flow

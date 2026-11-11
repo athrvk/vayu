@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render as renderBare, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
@@ -199,6 +200,7 @@ function expandRow(title: string) {
 }
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
 	mutation.mutate.mockReset();
 	mutation.mutateAsync.mockClear();
 	mutation.reset.mockReset();

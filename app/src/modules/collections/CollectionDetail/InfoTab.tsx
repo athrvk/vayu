@@ -28,6 +28,7 @@ import { ExternalChangeCallout } from "@/components/shared";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
+import { entityDraftKey } from "@/stores/entity-draft-store";
 import type { Collection } from "@/types";
 import { ImportNotesCallout } from "./ImportNotesCallout";
 import { Field, RelativeTime, SaveFailed, Stat } from "./shared";
@@ -82,9 +83,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
 	// draft with trailing whitespace would otherwise stay dirty against the
 	// trimmed saved value forever.
-	const { draft, setDraft, adopt, consumeDiscard, isDirty, baseline, externalValue } =
+	const draftKey = entityDraftKey(collection.id, "info");
+	const { draft, setDraft, adopt, consumeDiscard, markSaved, isDirty, baseline, externalValue } =
 		useEntityDraft<InfoDraft>({
-			entityKey: collection.id,
+			entityKey: draftKey,
 			value: { name: collection.name, description: collection.description ?? "" },
 			mutation: updateCollection,
 		});
@@ -114,12 +116,10 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 
 	const persist = useCallback(async () => {
 		if (!canSave) return;
-		await updateCollection.mutateAsync({
-			id: collection.id,
-			name: name.trim(),
-			description,
-		});
-	}, [canSave, updateCollection, collection.id, name, description]);
+		const sent = { name: name.trim(), description };
+		await updateCollection.mutateAsync({ id: collection.id, ...sent });
+		markSaved(sent);
+	}, [canSave, updateCollection, collection.id, name, description, markSaved]);
 
 	useDraftSaveContext({
 		id: `collection-${collection.id}-info`,
@@ -128,6 +128,7 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 		isActive: active,
 		save: persist,
 		consumeDiscard,
+		draftKey,
 	});
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths

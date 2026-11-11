@@ -33,6 +33,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
@@ -78,6 +79,7 @@ function renderTab() {
 const nameField = () => screen.getByLabelText("Collection name") as HTMLInputElement;
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
 	vi.clearAllMocks();
 	resetSaveStoreForTests();
 	useToastStore.setState({ toasts: [] });

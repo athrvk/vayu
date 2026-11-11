@@ -44,12 +44,13 @@ const TABS: { id: CollectionTab; label: string }[] = [
  * Tabs that hold an unsaved draft, and therefore must not be torn down when the
  * user looks at a sibling.
  *
- * These four use the manual save-button model (`useEntityDraft`), which keeps
- * the draft in component state. Radix unmounts an inactive `TabsContent`, so
- * writing a script, glancing at Auth and coming back used to lose the script -
- * no save, no prompt, no trace. Keeping them mounted is the same fix, for the
- * same reason, as the request builder's body drafts living in its provider
- * rather than in `BodyPanel` (see `request-builder/utils/body-drafts.ts`).
+ * These three use the manual save-button model (`useEntityDraft`). Radix
+ * unmounts an inactive `TabsContent`, and writing a script, glancing at Auth
+ * and coming back used to lose the script - no save, no prompt, no trace. The
+ * draft itself now lives in `entity-draft-store` (#3459), which is what carries
+ * it across `Shell.tsx` unmounting this whole screen; keeping a visited panel
+ * mounted still keeps what that store does not hold, the editors' own undo
+ * history and scroll position, across a look at a sibling.
  *
  * `variables` is absent deliberately: it autosaves and registers its own save
  * context on mount, so keeping it alive behind another tab would leave the

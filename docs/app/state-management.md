@@ -825,9 +825,13 @@ flush of a pane that has already unregistered still reaches the Dock.
 its context id (`globals-editor`, `environment-<id>`, `collection-<id>`),
 `SettingsMain` under `settings`, the inbox reply under `inbox-reply`, and the
 context bar's variables section under `context-bar-variables`. A surface that
-drops its draft discards its id: `useDraftSaveContext` and `VariableTableEditor`
-when the id changes or they unmount (the draft is component state, so nothing
-holds it after that), `SettingsMain` when its staged edits are gone (reverted,
+drops its draft discards its id: `VariableTableEditor`, and `useDraftSaveContext`
+for an editor that passes no `draftKey` (the inbox reply), when the id changes
+or they unmount (the draft is component state, so nothing holds it after that),
+`useDraftSaveContext` for a stored draft (the collection editors, #3459) when
+that stored draft is dropped, which an unmount alone does not do (see
+[`entity-draft-store.ts`](#entity-draft-storets---unsaved-collection-drafts-that-outlive-their-editor)),
+`SettingsMain` when its staged edits are gone (reverted,
 or flushed with every one of them invalid) and no write is in flight, and
 `useSaveManager` when the request's edit is gone without a save (reverted, or
 the request deleted elsewhere while dirty) and no write is in flight, which also
@@ -1082,31 +1086,53 @@ on one row - a save carrying the row's contents while a reorder rewrites its
 owner and order - is the clobber family #237 belongs to, and the drag is the
 half that can simply wait.
 
-#### `collection-auth-draft-store.ts` - A Collection's Live Auth-Tab Draft
+#### `entity-draft-store.ts` - Unsaved Collection Drafts That Outlive Their Editor
 
-A `Map<collectionId, CollectionAuth>` mirroring `AuthTab`'s in-progress draft
-outside the component (#1483).
+A `Map<entityKey, { draft, baseline }>` holding every `useEntityDraft` draft
+outside the component that edits it (#3459). `Shell.tsx` mounts only the tab on
+screen, so a look at a request unmounted the whole collection screen, and a
+draft in component state went with it: no prompt, the Dock idle, the old
+script still sent.
 
 **Key Methods:**
 
 ```typescript
-const draftAuth = useCollectionAuthDraft(collectionId); // undefined = no tab open, or clean
+entityDraftKey(collectionId, "elements")    // "<entityId>:<field>"; also "info", collectionAuthDraftKey(id) for "auth"
+put(key, { draft, baseline })               // useEntityDraft's setDraft / adopt, while the draft is dirty
+drop(key, only?)                            // reset, a draft edited back clean, a save that landed
+dropForEntities(entityIds)                  // closing a collection tab, deleting a collection subtree
+const draftAuth = useCollectionAuthDraft(collectionId); // the Auth tab's unsaved pick, mounted or not
 ```
 
-**Non-persisted.** `AuthTab`'s draft is component-local `useEntityDraft` state,
-invisible to anything that is not `AuthTab` - including the Inheritance Chain
-card it renders as a child, and the context bar's `CollectionAuthSection`,
-mounted in a different part of the tree and backed by `useCollectionsQuery`
-directly. Both used to describe the last-saved mode while the picker sat on an
-unsaved one. `AuthTab` writes its current draft here on every render and clears
-its entry on unmount; `withDraftAuth` (`modules/request-builder/utils/auth-resolution.ts`)
-substitutes it into an ancestor chain before either reader calls
-`resolveAuthSource`, so a dirty pick and its own inheritance chain agree.
-The entry is also published while the tab is clean, equal to the stored value,
-so a reader tells "unsaved" from "open" with `isUnsavedAuthDraft` (same module),
-which compares the way the tab's `isDirty` does; both readers append "(unsaved)"
-to what they describe only while that holds, because the engine composes from the
-stored row and a request below sends that until Save.
+**Clean is absence.** An entry exists only while its draft differs from the
+persisted value. `baseline` is the persisted value the draft diverged from, so
+a change that lands while the editor is unmounted still arrives on the remount
+as `externalValue`, a conflict, rather than replacing the draft; an entry whose
+draft the persisted value has caught up with is a save that landed and is
+dropped.
+
+**Who drops an entry.** The editor (`useEntityDraft`'s `reset`, an edit back
+to the persisted value, the persisted value catching up after a save, or
+`markSaved` for a save that lands once the editor has gone), and the save
+context's detached save once it lands (`useDraftSaveContext`).
+
+**It replaced `collection-auth-draft-store.ts` (#1483).** The Inheritance Chain
+card and the context bar's `CollectionAuthSection` read the stored collection,
+which says nothing about a mode picked and not yet saved. `AuthTab` used to
+mirror its draft into a store of its own and clear it on unmount, so with the
+draft now outliving the tab the context bar would have described the saved
+auth while the tab stayed dirty. Both read the entity draft store through
+`useCollectionAuthDraft` instead; `withDraftAuth`
+(`modules/request-builder/utils/auth-resolution.ts`) substitutes the pick into
+an ancestor chain before either reader calls `resolveAuthSource`, so a dirty
+pick and its own inheritance chain agree. A reader tells "unsaved" from a
+just-saved entry with `isUnsavedAuthDraft` (same module), which compares the
+way the tab's `isDirty` does; both readers append "(unsaved)" only while that
+holds, because the engine composes from the stored row and a request below
+sends that until Save.
+
+**Non-persisted**, deliberately: a draft can carry a credential, and an unsaved
+edit does not outlive the app - the quit flush saves it or asks.
 
 #### `response-store.ts` - Response Cache
 
@@ -3379,10 +3405,11 @@ const {
   reset: () => void                        // Discard the draft, adopting the persisted value
   adopt: Dispatch<SetStateAction<T>>       // setDraft for taking a persisted value; landing on it from a dirty draft is a discard (#2033)
   consumeDiscard: () => boolean            // Was the last clean edge a reset or an adopt? Clears the answer (#1931)
+  markSaved: (sent: T) => void             // Call from the editor's save once it lands; drops the stored draft if the editor has gone meanwhile (#3459)
   baseline: T                              // The value the draft last agreed with the server on
   externalValue: T | null                  // A persisted change pending while the draft is dirty
 } = useEntityDraft<T>({
-  entityKey: string                        // Identity of the thing being edited
+  entityKey: string                        // Identity of the thing being edited, and its entity-draft-store key
   value: T                                 // The persisted value
   mutation: { reset: () => void }          // The save mutation this editor reports through
 });
@@ -3390,32 +3417,38 @@ const {
 
 **Behaviour:**
 - **Seeds and resyncs while clean:** a clean draft follows `value` when it changes - a save landing, a background refetch. In `InfoTab` this is what clears the post-trim divergence, since the tab persists `name.trim()`. The request builder needs the same property for the same reason and gets it a different way, since its state is not a draft: see [the draft adopts an external write per field](#the-request-builders-draft-adopts-an-external-write-per-field).
-- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose. Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too): `adopt` leaves `baseline` and `externalValue` alone, so the other key's conflict survives, and it marks a discard only when the result equals the persisted value and the draft differed from it before - with the other field still dirty no clean edge follows to consume the mark, and the later real save would read as a discard.
+- **A dirty draft is never silently overwritten (#1437).** While the draft disagrees with `baseline`, an incoming change to `value` is held in `externalValue` instead of reseeding `draft` - an MCP `update_collection` landing mid-edit used to replace the user's unsaved text with whatever the agent wrote. `ElementsTab` and `AuthTab` treat `externalValue` as one value and show a "Changed elsewhere" `Callout` (`CollectionDetail/shared.tsx`'s `ExternalChangeCallout`) whose action calls `reset()` to take it. `InfoTab`'s draft has two independent fields, so it diffs `draft` and `externalValue` against `baseline` per key instead: a key the user has not touched adopts the external value immediately, the same as a clean tab; a key both sides touched surfaces its own conflict, named, and is left at the user's edit until they choose. Its per-key Take theirs calls `adopt`, not `setDraft` and not `reset` (which would take the other field too): while the draft stays dirty `adopt` leaves `baseline` and `externalValue` alone, so the other key's conflict survives, and it marks a discard only when the result equals the persisted value and the draft differed from it before - with the other field still dirty no clean edge follows to consume the mark, and the later real save would read as a discard.
 - **Tracks by JSON value, not identity:** `value` may be a fresh object literal every render (`InfoTab` builds `{ name, description }` inline); callers do not have to memoize it.
-- **`entityKey` is a switch, not an edit:** a change reseeds the draft *and* calls `mutation.reset()`, discarding any pending `externalValue` too. These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. `ElementsTab` passes `${collection.id}:elements`, one entity key for the whole element list under one collection id (the retired `ScriptTab` passed `${collection.id}:${fieldKey}`, since pre- and post-request scripts were two separate things to edit).
+- **`entityKey` is a switch, not an edit:** a change shows that entity's own draft (its stored one, or its persisted value) *and* calls `mutation.reset()`. The entity switched away from keeps its draft in the store, so going back to it restores the edit (#3459). These editors render without a React `key`, so a different entity arrives via props on the same instance, and a TanStack mutation holds `isError` until the next `mutate` - without the reset, a failed save is reported against an entity the user never tried to save. The keys come from `entityDraftKey`: `<collectionId>:elements` for the whole element list, `:info`, and `:auth` (`collectionAuthDraftKey`, which the context bar reads too).
 - **Requiring the mutation is the point:** the three hand-rolled copies this replaced had drifted, and the one that omitted the reset had exactly that bug.
 
 **Usage:**
 ```typescript
 const { draft, setDraft, isDirty, reset } = useEntityDraft({
-  entityKey: collection.id,
+  entityKey: collectionAuthDraftKey(collection.id),
   value: collection.auth,
   mutation: updateCollection,
 });
 ```
 
-**The draft lives in component state, so its panel must not unmount.** Radix
-unmounts an inactive `TabsContent`; `CollectionDetail` therefore force-mounts the
-four draft-holding tabs (Info, Auth, Pre-request, Post-request) from their first
-visit onwards, so an intra-collection tab switch stops discarding the draft.
-This is the same call, for the same reason, as the request builder's body drafts
-living in `RequestBuilderProvider` rather than in `BodyPanel` (see
-`request-builder/utils/body-drafts.ts`). The Variables tab is deliberately not
+**The draft lives in `entity-draft-store`, not in the component (#3459).**
+`Shell.tsx` mounts only the tab on screen, so clicking a request unmounted the
+whole collection screen and, with the draft in component state, threw an
+unsaved script away without a prompt. The hook reads the draft from the store
+by `entityKey` (falling back to `value` when there is none) and writes it there
+on `setDraft`, `adopt`, `reset` and `markSaved`, so a remount picks up the edit
+where it was, dirty, with `baseline` intact: a change that landed meanwhile
+arrives as `externalValue`. `useDraftSaveContext`'s `draftKey` keeps the save reachable
+while the editor is gone; see
+[`entity-draft-store.ts`](#entity-draft-storets---unsaved-collection-drafts-that-outlive-their-editor)
+for who drops an entry.
+
+`CollectionDetail` still force-mounts the three draft-holding tabs (Info, Auth,
+Elements) from their first visit onwards. The draft no longer needs it; what
+does is what the store does not hold, the editors' own undo history and scroll
+position, across a look at a sibling. The Variables tab is deliberately not
 force-mounted: it autosaves and claims the store's active context on mount, so
 keeping it alive behind another tab would point Ctrl/Cmd+S at the wrong editor.
-
-A *collection* switch still reseeds and discards, deliberately - it is the
-hook's documented behaviour above, and pinned by `useEntityDraft.test.ts`.
 
 ### `useDraftSaveContext()` - Registering a Manual Draft
 
@@ -3430,6 +3463,8 @@ useDraftSaveContext({
   isDirty,                                 // From useEntityDraft
   isActive: active,                        // Is this the tab on screen?
   save: persist,                           // Rejecting is how failure is reported
+  consumeDiscard,                          // From useEntityDraft
+  draftKey,                                // The entityKey: the context outlives the editor
 });
 ```
 
@@ -3462,9 +3497,26 @@ useDraftSaveContext({
   `isDirty` turns true and `reportSaved(id)` the moment it turns false again,
   mirroring `useSaveManager`'s autosave editors. Edge-triggered, and reset
   rather than fired across an `id` change, so switching the entity a mounted
-  editor describes never reports the previous entity's save as this one's. The
-  draft goes with its id, so the hook discards the id's report when the id
-  changes or the editor unmounts.
+  editor describes never reports the previous entity's save as this one's.
+- **A stored draft keeps its context after the editor goes (#3459).** On an
+  unmount or an id switch, an editor that passed a `draftKey` and was dirty
+  leaves its context registered (`detach`): still `hasPendingChanges`, so
+  `isTabDirty` holds the tab and the quit flush and Ctrl/Cmd+S's fallback still
+  reach it, and its id stays reported, so the Dock keeps "Unsaved changes". Its
+  save is the editor's last `save`, which closed over the draft and over a
+  mutation observer that still works unmounted. When that save lands the
+  context and the stored draft both go; when the stored draft is dropped
+  another way (the tab closed, the collection deleted) the context goes and the
+  id is discarded. That includes a save the editor started on screen and that
+  landed after it went: the editor's save calls `useEntityDraft`'s
+  `markSaved`, which drops the entry only when no editor shows it (one that does
+  sees the persisted value catch up instead, and dropping first would paint the
+  old value for a frame, since the query cache notifies on a later tick). A
+  remount under the same id takes the context back. Without
+  a `draftKey` (the inbox reply, whose draft is component state), or for a
+  clean draft or an id `markRemoved` names, the goodbye discards the id's
+  report as before. On a remount over a dirty stored draft the rising edge
+  reports it pending again.
 - **A discard is not a save (#1931, #2033).** The clean edge is a save landing,
   a `useEntityDraft` `reset` (the Reset button, an external change's "Take
   theirs") or an `adopt` that lands on the persisted value (`InfoTab`'s

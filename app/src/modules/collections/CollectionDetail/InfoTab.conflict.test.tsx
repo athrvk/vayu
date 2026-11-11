@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { useSaveStore } from "@/stores/save-store";
@@ -64,6 +65,7 @@ async function renderTab(props: Partial<Collection> = {}) {
 }
 
 beforeEach(() => {
+	resetEntityDraftStoreForTests();
 	vi.clearAllMocks();
 	useSaveStore.setState({ status: "idle", lastErrorMessage: null });
 });
