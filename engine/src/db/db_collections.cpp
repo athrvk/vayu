@@ -314,8 +314,23 @@ constexpr const char* STAMPED =
 
 // Each kind's entry is built from the columns it shows and nothing else, so
 // neither the listing nor a restore loads a body, a script or a header blob
-// to name a row (#2972). The clauses are the caller's: which rows, and for the
-// listing's examples the join that keeps only those under a live request.
+// to name a row (#2972). Where a builder takes clauses they say which rows.
+
+/// An entry with what only some kinds carry left at its default: no counts, no
+/// variables, no owner name.
+TrashEntry entry_of (std::string id,
+const char* kind,
+std::string name,
+const std::optional<int64_t>& deleted_at,
+std::optional<std::string> parent_id) {
+    TrashEntry entry;
+    entry.id         = std::move (id);
+    entry.kind       = kind;
+    entry.name       = std::move (name);
+    entry.deleted_at = vayu::utils::invariant_value (deleted_at, STAMPED);
+    entry.parent_id  = std::move (parent_id);
+    return entry;
+}
 
 template <typename... Clauses>
 std::vector<TrashEntry> request_entries (Storage& storage, Clauses&&... clauses) {
@@ -323,9 +338,8 @@ std::vector<TrashEntry> request_entries (Storage& storage, Clauses&&... clauses)
     for (auto& [id, name, collection_id, deleted_at] : storage.select (
          columns (&Request::id, &Request::name, &Request::collection_id, &Request::deleted_at),
          std::forward<Clauses> (clauses)...)) {
-        entries.push_back (TrashEntry{ std::move (id), "request",
-        std::move (name), vayu::utils::invariant_value (deleted_at, STAMPED),
-        std::move (collection_id), 0, 0, std::nullopt });
+        entries.push_back (entry_of (std::move (id), "request",
+        std::move (name), deleted_at, std::move (collection_id)));
     }
     return entries;
 }
@@ -339,24 +353,43 @@ std::vector<TrashEntry> environment_entries (Storage& storage, Clauses&&... clau
     std::forward<Clauses> (clauses)...)) {
         // Counted through the reader composition uses, so the number is the
         // variables a restore gives back to every `{{name}}` that names one.
-        const auto count =
+        auto entry = entry_of (std::move (id), "environment", std::move (name),
+        deleted_at, std::nullopt);
+        entry.variables =
         static_cast<int64_t> (vayu::json::parse_variables (variables).size ());
-        entries.push_back (TrashEntry{ std::move (id), "environment", std::move (name),
-        vayu::utils::invariant_value (deleted_at, STAMPED), std::nullopt, 0, 0, count });
+        entries.push_back (std::move (entry));
     }
     return entries;
 }
 
-template <typename... Clauses>
-std::vector<TrashEntry> example_entries (Storage& storage, Clauses&&... clauses) {
+/// The one example, stamped, that @p id names: its owner's name is the
+/// caller's to look up, because the request row may be gone.
+std::optional<TrashEntry> example_entry (Storage& storage, const std::string& id) {
+    auto rows = storage.select (
+    columns (&RequestExample::name, &RequestExample::request_id, &RequestExample::deleted_at),
+    where (c (&RequestExample::id) == id && is_not_null (&RequestExample::deleted_at)));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    auto& [name, request_id, deleted_at] = rows.front ();
+    return entry_of (id, "example", std::move (name), deleted_at, std::move (request_id));
+}
+
+/// Every stamped example under a live request, named by that request: the
+/// join keeps neither one under a trashed request, which is part of that
+/// request's entry, nor one whose request row is gone, which has nothing to
+/// come back under (#2971) - the rule `request_is_absent_locked` states.
+std::vector<TrashEntry> listed_example_entries (Storage& storage) {
     std::vector<TrashEntry> entries;
-    for (auto& [id, name, request_id, deleted_at] :
+    for (auto& [id, name, request_id, deleted_at, request_name] :
     storage.select (columns (&RequestExample::id, &RequestExample::name,
-                    &RequestExample::request_id, &RequestExample::deleted_at),
-    std::forward<Clauses> (clauses)...)) {
-        entries.push_back (TrashEntry{ std::move (id), "example",
-        std::move (name), vayu::utils::invariant_value (deleted_at, STAMPED),
-        std::move (request_id), 0, 0, std::nullopt });
+                    &RequestExample::request_id, &RequestExample::deleted_at, &Request::name),
+    inner_join<Request> (on (c (&Request::id) == &RequestExample::request_id)),
+    where (and_ (is_not_null (&RequestExample::deleted_at), is_null (&Request::deleted_at))))) {
+        auto entry = entry_of (std::move (id), "example", std::move (name),
+        deleted_at, std::move (request_id));
+        entry.parent_name = std::move (request_name);
+        entries.push_back (std::move (entry));
     }
     return entries;
 }
@@ -370,10 +403,8 @@ std::vector<TrashEntry> client_certificate_entries (Storage& storage, Clauses&&.
     std::forward<Clauses> (clauses)...)) {
         // Named by its target, which is how the Settings card and a trace name
         // it too; `?q=` matches that.
-        entries.push_back (TrashEntry{ std::move (id), "clientCertificate",
-        vayu::http::client_cert_label (host, port),
-        vayu::utils::invariant_value (deleted_at, STAMPED), std::nullopt, 0, 0,
-        std::nullopt });
+        entries.push_back (entry_of (std::move (id), "clientCertificate",
+        vayu::http::client_cert_label (host, port), deleted_at, std::nullopt));
     }
     return entries;
 }
@@ -419,6 +450,39 @@ struct TrashGraph {
         return by_stamp == by_collection->second.end () ? 0 : by_stamp->second;
     }
 
+    /// Every stamped request in @p collection_id, whichever delete stamped it.
+    int64_t stamped_requests_in (const std::string& collection_id) const {
+        const auto by_collection = stamped_requests.find (collection_id);
+        if (by_collection == stamped_requests.end ()) {
+            return 0;
+        }
+        int64_t total = 0;
+        for (const auto& [stamp, count] : by_collection->second) {
+            total += count;
+        }
+        return total;
+    }
+
+    /// @p id's stamped children: the step `SubtreeRows::StampedOnly` takes.
+    std::vector<std::string> stamped_children_of (const std::string& id) const {
+        std::vector<std::string> stamped;
+        for (const auto& child : children_of (id)) {
+            if (collections.at (child).deleted_at.has_value ()) {
+                stamped.push_back (child);
+            }
+        }
+        return stamped;
+    }
+
+    /// The name of the collection @p id names, or nothing when no row has it.
+    std::optional<std::string> name_of (const std::string& id) const {
+        const auto it = collections.find (id);
+        if (it == collections.end ()) {
+            return std::nullopt;
+        }
+        return it->second.name;
+    }
+
     /// A row whose owner is missing entirely is a root as much as one whose
     /// owner is live: there is nothing above it a restore could come back
     /// under. The tree root (no owner) is not a deleted one either.
@@ -449,12 +513,12 @@ TrashGraph read_collection_graph (Storage& storage) {
 /// The entry for the stamped collection @p root_id, which @p graph holds.
 TrashEntry collection_entry (const TrashGraph& graph, const std::string& root_id) {
     const auto& root = graph.collections.at (root_id);
-    const int64_t stamp = vayu::utils::invariant_value (root.deleted_at, STAMPED);
-    TrashEntry entry{ root_id, "collection", root.name, stamp, root.parent_id,
-        0, 0, std::nullopt };
-    // The counts are the *cohort's*, not the subtree's: what this delete took
-    // is what restoring it puts back, and a row an earlier delete already held
-    // is neither. The walk is `collection_subtree_locked`'s, over the rows the
+    auto entry =
+    entry_of (root_id, "collection", root.name, root.deleted_at, root.parent_id);
+    const int64_t stamp = entry.deleted_at;
+    // The cohort counts are not the subtree's: what this delete took is what
+    // restoring it puts back, and a row an earlier delete already held is
+    // neither. The walk is `collection_subtree_locked`'s, over the rows the
     // graph already holds.
     const auto children_of = [&graph] (const std::string& id) -> const auto& {
         return graph.children_of (id);
@@ -465,7 +529,34 @@ TrashEntry collection_entry (const TrashGraph& graph, const std::string& root_id
         }
         entry.requests += graph.stamped_requests_in (id, stamp);
     }
+    // The purge counts are every stamped row `purge_collection_locked` reaches.
+    const auto stamped_children_of = [&graph] (const std::string& id) {
+        return graph.stamped_children_of (id);
+    };
+    const auto purged       = walk_subtree (root_id, stamped_children_of);
+    entry.purge_collections = static_cast<int64_t> (purged.size ()) - 1;
+    for (const auto& id : purged) {
+        entry.purge_requests += graph.stamped_requests_in (id);
+    }
     return entry;
+}
+
+/// The name of the collection @p id names, or nothing when no row has it.
+std::optional<std::string> collection_name (Storage& storage, const std::string& id) {
+    auto names = storage.select (&Collection::name, where (c (&Collection::id) == id));
+    if (names.empty ()) {
+        return std::nullopt;
+    }
+    return std::move (names.front ());
+}
+
+/// The name of the request @p id names, or nothing when no row has it.
+std::optional<std::string> request_name (Storage& storage, const std::string& id) {
+    auto names = storage.select (&Request::name, where (c (&Request::id) == id));
+    if (names.empty ()) {
+        return std::nullopt;
+    }
+    return std::move (names.front ());
 }
 
 /// Whether the row @p entry names is still stamped: one indexed count on its
@@ -511,31 +602,41 @@ std::optional<TrashEntry> Database::trash_entry_locked (const std::string& id) {
     where (c (&Collection::id) == id && is_not_null (&Collection::deleted_at)));
     if (!collections.empty ()) {
         const auto& [name, parent_id, deleted_at] = collections.front ();
-        const int64_t stamp = vayu::utils::invariant_value (deleted_at, STAMPED);
-        TrashEntry entry{ id, "collection", name, stamp, parent_id, 0, 0, std::nullopt };
+        auto entry = entry_of (id, "collection", name, deleted_at, parent_id);
         // The cohort's counts, as `collection_entry` takes them.
         for (const auto& descendant_id : collection_subtree_locked (id)) {
             if (descendant_id != id) {
                 entry.collections +=
                 storage.count<Collection> (where (c (&Collection::id) == descendant_id &&
-                c (&Collection::deleted_at) == stamp));
+                c (&Collection::deleted_at) == entry.deleted_at));
             }
             entry.requests +=
             storage.count<Request> (where (c (&Request::collection_id) == descendant_id &&
-            c (&Request::deleted_at) == stamp));
+            c (&Request::deleted_at) == entry.deleted_at));
+        }
+        // And the purge's, as `collection_entry` takes them too.
+        const auto purged = collection_subtree_locked (id, SubtreeRows::StampedOnly);
+        entry.purge_collections = static_cast<int64_t> (purged.size ()) - 1;
+        for (const auto& descendant_id : purged) {
+            entry.purge_requests +=
+            storage.count<Request> (where (c (&Request::collection_id) == descendant_id &&
+            is_not_null (&Request::deleted_at)));
         }
         return entry;
     }
     if (auto entry = first_entry (request_entries (storage,
         where (c (&Request::id) == id && is_not_null (&Request::deleted_at))))) {
+        entry->parent_name = collection_name (storage,
+        vayu::utils::invariant_value (entry->parent_id, "a request has a collection"));
         return entry;
     }
     if (auto entry = first_entry (environment_entries (storage,
         where (c (&Environment::id) == id && is_not_null (&Environment::deleted_at))))) {
         return entry;
     }
-    if (auto entry = first_entry (example_entries (storage,
-        where (c (&RequestExample::id) == id && is_not_null (&RequestExample::deleted_at))))) {
+    if (auto entry = example_entry (storage, id)) {
+        entry->parent_name = request_name (storage,
+        vayu::utils::invariant_value (entry->parent_id, "an example has a request"));
         return entry;
     }
     return first_entry (client_certificate_entries (storage,
@@ -566,6 +667,8 @@ std::vector<TrashEntry> Database::get_trash () {
     }
     for (auto& request : requests) {
         if (!graph.owner_is_deleted (request.parent_id)) {
+            request.parent_name = graph.name_of (vayu::utils::invariant_value (
+            request.parent_id, "a request has a collection"));
             entries.push_back (std::move (request));
         }
     }
@@ -574,13 +677,7 @@ std::vector<TrashEntry> Database::get_trash () {
     environment_entries (storage, where (is_not_null (&Environment::deleted_at)))) {
         entries.push_back (std::move (environment));
     }
-    // An example under a trashed request is part of that request's entry, and
-    // one whose request row is gone has nothing to come back under (#2971):
-    // the join keeps neither, the rule `request_is_absent_locked` states.
-    for (auto& example : example_entries (storage,
-         inner_join<Request> (on (c (&Request::id) == &RequestExample::request_id)),
-         where (and_ (is_not_null (&RequestExample::deleted_at),
-         is_null (&Request::deleted_at))))) {
+    for (auto& example : listed_example_entries (storage)) {
         entries.push_back (std::move (example));
     }
     // Nothing owns a client certificate either (#2973).
@@ -600,6 +697,61 @@ std::vector<TrashEntry> Database::get_trash () {
     return entries;
 }
 
+std::optional<Database::TrashRootRef> Database::collection_trash_root_locked (
+const std::string& collection_id) {
+    std::optional<TrashRootRef> root;
+    std::optional<std::string> next = collection_id;
+    std::unordered_set<std::string> visited;
+    while (next.has_value () && visited.insert (*next).second) {
+        auto rows =
+        impl_->storage.select (columns (&Collection::name, &Collection::parent_id),
+        where (c (&Collection::id) == *next && is_not_null (&Collection::deleted_at)));
+        if (rows.empty ()) {
+            break;
+        }
+        auto& [name, parent_id] = rows.front ();
+
+        root = TrashRootRef{ *next, std::move (name) };
+        next = std::move (parent_id);
+    }
+    return root;
+}
+
+std::optional<Database::TrashRootRef> Database::request_trash_root_locked (
+const std::string& request_id) {
+    auto rows = impl_->storage.select (columns (&Request::name, &Request::collection_id),
+    where (c (&Request::id) == request_id));
+    if (rows.empty ()) {
+        return std::nullopt;
+    }
+    auto& [name, collection_id] = rows.front ();
+    if (auto root = collection_trash_root_locked (collection_id)) {
+        return root;
+    }
+    return TrashRootRef{ request_id, std::move (name) };
+}
+
+RestoreFailure Database::owner_not_live_refusal (std::string_view what,
+std::string_view owner_noun,
+const TrashEntry& entry,
+const std::optional<TrashRootRef>& root) {
+    std::string message = std::string (what) + " '" + entry.name +
+    "' cannot be restored on its own - the " + std::string (owner_noun) + " it belongs to";
+    if (!root.has_value ()) {
+        return RestoreFailure{ RestoreRefusal::OwnerGone, message + " is gone" };
+    }
+    message += ", '" +
+    vayu::utils::invariant_value (
+    entry.parent_name, "trash_entry_locked names an owner row that exists") +
+    "'";
+    if (root->id == entry.parent_id) {
+        message += " (" + root->id + "), is in the trash";
+    } else {
+        message += ", is in the trash under '" + root->name + "' (" + root->id + ")";
+    }
+    return RestoreFailure{ RestoreRefusal::OwnerGone, message + ", so restore that first" };
+}
+
 std::expected<TrashOutcome, RestoreFailure> Database::restore_request_locked (
 const TrashEntry& entry) {
     // A request has no root to come back to: `collection_id` is NOT NULL, so
@@ -608,12 +760,9 @@ const TrashEntry& entry) {
     // collection after the request, and the answer is the restore that *does*
     // work, named rather than guessed at.
     if (owner_is_absent_locked (entry.parent_id)) {
-        const bool gone = !entry.parent_id.has_value () ||
-        impl_->storage.count<Collection> (
-        where (c (&Collection::id) == *entry.parent_id)) == 0;
-        return std::unexpected (RestoreFailure{ RestoreRefusal::OwnerGone,
-        "Request '" + entry.id + "' cannot be restored on its own - the collection it belongs to is " +
-        (gone ? "gone" : "in the trash, so restore that first") });
+        return std::unexpected (owner_not_live_refusal ("Request", "collection", entry,
+        collection_trash_root_locked (vayu::utils::invariant_value (
+        entry.parent_id, "a request has a collection"))));
     }
 
     impl_->storage.transaction ([&] {

@@ -263,14 +263,19 @@ Two rules make a restore mean something precise:
 - **Re-parenting.** A restored collection whose parent is gone or itself deleted
   comes back at the tree root. A request cannot do this - `collection_id` is
   required - so restoring one whose collection is in the trash is refused with a
-  `409` that names the collection to restore first.
+  `409` that names the request and its collection, and the trash root to
+  restore first: the listed entry holding the collection, which may be an
+  ancestor whose delete took it (issue #3449).
 
 A purge is deliberately *not* limited to the cohort: it takes every stamped row
 in the subtree, whichever delete stamped it, because a request left under a
 removed collection would be reachable by no read and restorable by nothing. It
 takes stamped rows *only* (issue #1883): a live collection found under a purged
 one was never listed in the trash, so it is re-parented to the tree root - the
-restore's rule - and the walk stops there, leaving anything below it alone.
+restore's rule - and the walk stops there, leaving anything below it alone. A
+collection's trash entry counts both: the cohort a restore puts back
+(`collections`, `requests`) and what this walk would destroy
+(`purgeCollections`, `purgeRequests`, issue #3449).
 
 The write side keeps that state from arising. `POST /collections` and
 `PUT /collections/:id` refuse a `parentId` naming a collection in the trash with
