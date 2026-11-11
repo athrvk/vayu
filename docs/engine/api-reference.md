@@ -2116,6 +2116,9 @@ keeps the current target, `null` clears it, and a non-empty string sets it -
 it is not checked against the request's saved examples at write time, because
 the target can be created afterwards or deleted later, and a mock server falls
 back to `"first"` for either case rather than this write refusing one up front.
+Deleting the target through `DELETE /requests/:id/examples/:exampleId` clears
+`mockExampleId` to `null` (issue #3422) and leaves `mockResponseMode` as it was;
+restoring the example from the trash does not set it again.
 
 **Postman's per-request protocol settings** (issue #1765), under the same
 null-vs-absent rule (absent keeps on update, `null` resets):
@@ -2415,7 +2418,9 @@ example's own earlier delete in the trash as a root again. Restoring an example
 whose request is in the trash or gone is a `409` naming the request to restore
 first, and so is restoring one into a request that already holds the maximum of
 100 examples. A stamped example whose request row is gone entirely is listed
-nowhere.
+nowhere. The delete clears the request's `mockExampleId` when it named the
+example, and the restore does not set it again: choosing it as the fixed mock
+answer is the client's write, as making an environment active is.
 
 A client certificate hangs under nothing, like an environment: its delete
 stamps its one row and it is always a root, named by its target (`host`, or
@@ -2507,8 +2512,9 @@ Put a deleted collection, request, environment, example or client certificate
 back, with everything the same delete took. Takes no body. An environment comes
 back exactly as it was deleted except that it is inactive (see [Trash](#trash)),
 and its answer carries `variables` like its list entry. An example comes back
-exactly as it was deleted, `order` included, and so does a client certificate,
-passphrase included. A restored request, alone or with its collection, takes
+exactly as it was deleted, `order` included, but its request's
+`mockExampleId`, cleared by the delete, stays `null` (issue #3422); a client
+certificate comes back exactly as it was, passphrase included. A restored request, alone or with its collection, takes
 back the operation its delete declined (issue #3031), so the next sync sees it
 claimed again.
 
@@ -2774,6 +2780,16 @@ counts against the 100-example cap, and [`GET /trash`](#get-trash) lists it
 [`POST /trash/:id/restore`](#post-trashidrestore) brings it back as it was;
 [`DELETE /trash/:id`](#delete-trashid), or the startup sweep after
 `trashRetentionDays`, destroys it.
+
+**Either way, a request that named the example as its fixed mock answer stops
+naming it** (issue #3422). When the request's `mockExampleId` is this example's
+id, the same write clears it to `null`, advances the request's `updatedAt` (so
+a `PUT /requests/:id` sent with the old `If-Match` is a `412`) and publishes a
+`request` `update` on [`GET /changes`](#get-changes) after the example's
+`delete`. `mockResponseMode` is not
+touched: a `"fixed"` request with no target answers with its first example. A
+`mockExampleId` naming any other example is left alone, and a restore from the
+trash does not set it again.
 
 The response is the same either way, because from the caller's side so is the
 outcome:

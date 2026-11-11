@@ -124,6 +124,15 @@ class ExamplesRouteTest : public ::testing::Test {
         return response.value ("id", std::string{});
     }
 
+    /** Makes @p example_id the request's fixed mock answer, as a saved PUT would. */
+    void point_mock_at (const std::string& request_id, const std::string& example_id) {
+        auto request = db_->get_request (request_id);
+        ASSERT_HAS_VALUE (request);
+        request->mock_response_mode = "fixed";
+        request->mock_example_id    = example_id;
+        db_->save_request (*request);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
 };
 
@@ -952,6 +961,49 @@ TEST_F (ExamplesRouteTest, DeletingAnImportedExampleLeavesATombstoneNoReadCanSee
     EXPECT_EQ (tombstones[0].status, 404);
     EXPECT_TRUE (tombstones[0].body.empty ());
     EXPECT_TRUE (tombstones[0].content_type.empty ());
+}
+
+// #3422: the request must not keep naming an example no read can see. The
+// mode stays "fixed" (the mock falls back to the first example), and the
+// request's `updatedAt` advances so a stale `If-Match` is a 412. Mutation
+// check: drop the `release_mock_example` call in
+// `delete_request_example_locked` and both origins keep the pointer.
+TEST_F (ExamplesRouteTest, DeletingTheFixedMockExampleClearsTheRequestsPointer) {
+    for (const char* origin : { vayu::core::constants::request_example::ORIGIN_USER,
+         vayu::core::constants::request_example::ORIGIN_IMPORT }) {
+        SCOPED_TRACE (origin);
+        const std::string id =
+        create_example ("req_1", json{ { "name", "fixed" }, { "origin", origin } });
+        point_mock_at ("req_1", id);
+        const auto pointed = db_->get_request ("req_1");
+        ASSERT_HAS_VALUE (pointed);
+
+        auto [status, body] = routes::delete_request_example_response (*db_, "req_1", id);
+        ASSERT_EQ (status, 200) << body.dump ();
+
+        const auto request = db_->get_request ("req_1");
+        ASSERT_HAS_VALUE (request);
+        EXPECT_FALSE (request->mock_example_id.has_value ());
+        EXPECT_EQ (request->mock_response_mode, "fixed");
+        EXPECT_GT (request->updated_at, pointed->updated_at);
+    }
+}
+
+TEST_F (ExamplesRouteTest, DeletingAnotherExampleLeavesTheMockPointerAlone) {
+    const std::string fixed = create_example ("req_1", json{ { "name", "fixed" } });
+    const std::string other = create_example ("req_1", json{ { "name", "other" } });
+    point_mock_at ("req_1", fixed);
+    const auto pointed = db_->get_request ("req_1");
+    ASSERT_HAS_VALUE (pointed);
+
+    auto [status, body] = routes::delete_request_example_response (*db_, "req_1", other);
+    ASSERT_EQ (status, 200) << body.dump ();
+
+    const auto request = db_->get_request ("req_1");
+    ASSERT_HAS_VALUE (request);
+    EXPECT_EQ (request->mock_example_id, fixed);
+    EXPECT_EQ (request->updated_at, pointed->updated_at)
+    << "the request was not rewritten";
 }
 
 // Without the cascade these rows survive their owner: every read is by request

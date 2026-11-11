@@ -37,6 +37,27 @@ import {
 } from "./examples.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
+/**
+ * `headers` on both write tools: ordered rows, or a string map (#3422). The
+ * tools' own descriptions say when to use the rows; this one stays short
+ * because the schema is listed once per tool.
+ */
+function headersInput(lead: string) {
+	return z
+		.union([
+			z.array(
+				z.object({
+					key: z.string(),
+					value: z.string(),
+					enabled: z.boolean().optional(),
+				})
+			),
+			z.record(z.string(), z.string()),
+		])
+		.optional()
+		.describe(`${lead} Ordered {key, value, enabled?} rows, or a {name: value} map.`);
+}
+
 export const EXAMPLE_TOOLS: McpTool[] = [
 	{
 		name: "list_request_examples",
@@ -75,7 +96,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Save an example response on a request - what a mock server for its collection answers with, and what the Examples tab shows. " +
 			GUARDED_WRITE_SENTENCE +
-			". Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
+			". `headers` takes ordered `{key, value, enabled?}` rows (one per line of a repeated header such as Set-Cookie) or a string map. Vayu assigns the id and appends the example after the request's current ones; a request already holding the maximum (100) is refused by the engine. The example is marked as written by hand: an agent cannot claim an example came from an import, because an OpenAPI sync replaces imported examples and leaves the others alone." +
 			withheldPointer(config),
 		annotations: {
 			title: "Create saved example",
@@ -93,10 +114,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 				.max(599)
 				.optional()
 				.describe("Final status, 200-599 (default 200)."),
-			headers: z
-				.record(z.string(), z.string())
-				.optional()
-				.describe("Response headers as a string map."),
+			headers: headersInput("Response headers."),
 			body: z.string().optional().describe("Response body, stored verbatim."),
 			contentType: z
 				.string()
@@ -133,7 +151,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 		description: (config) =>
 			"Correct a saved example: its name, status, headers, body or content type. " +
 			GUARDED_WRITE_SENTENCE +
-			". Only the fields you pass change; passing `headers` replaces the whole header list. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
+			". Only the fields you pass change; passing `headers` replaces the whole header list, as ordered `{key, value, enabled?}` rows (one per line of a repeated header such as Set-Cookie) or a string map. Where the example came from is not editable - an imported example stays imported, which is what lets an OpenAPI sync tell the two apart." +
 			withheldPointer(config),
 		annotations: {
 			title: "Update saved example",
@@ -147,12 +165,7 @@ export const EXAMPLE_TOOLS: McpTool[] = [
 			exampleId: z.string().describe("Example ID to update."),
 			name: z.string().optional().describe("New display name."),
 			status: z.number().int().min(200).max(599).optional().describe("New status, 200-599."),
-			headers: z
-				.record(z.string(), z.string())
-				.optional()
-				.describe(
-					"Replacement response headers as a string map (replaces the stored list)."
-				),
+			headers: headersInput("Replacement response headers (replaces the stored list)."),
 			body: z.string().optional().describe("New response body."),
 			contentType: z.string().optional().describe("New content type for `body`."),
 		},

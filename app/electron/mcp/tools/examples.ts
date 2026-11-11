@@ -84,23 +84,54 @@ export function boundExampleBodies(value: unknown): BoundedExamples {
 const EXAMPLE_WRITE_KEYS = ["name", "status", "contentType"] as const;
 
 /**
+ * An example's headers as the engine's stored rows: an ordered `{key, value,
+ * enabled?}` array, or a string map (#3422).
+ *
+ * The array is forwarded row for row, in order, a repeated key kept - an
+ * example is a stored list, and a response with several `Set-Cookie` lines is
+ * several rows, which a map cannot hold. `enabled` defaults to true. The map is
+ * the short spelling and one value per name, as the request tools take it. Rows
+ * are `{key, value}` rather than `run_request`'s `{name, value}` lines because
+ * these are the rows the engine stores and `list_request_examples` returns.
+ */
+function exampleHeaderRows(
+	headers: unknown
+): Array<{ key: string; value: string; enabled: boolean }> {
+	if (!Array.isArray(headers)) {
+		if (!isRecord(headers)) {
+			throw new ToolArgError(
+				'"headers" must be an array of {key, value} rows or an object mapping header names to values.'
+			);
+		}
+		return toKeyValueEntries(headers);
+	}
+	return headers.map((row, index) => {
+		const at = `"headers" row ${index}`;
+		if (!isRecord(row))
+			throw new ToolArgError(`${at} must be an object with "key" and "value".`);
+		if (typeof row.key !== "string" || typeof row.value !== "string") {
+			throw new ToolArgError(`${at} needs a string "key" and a string "value".`);
+		}
+		if (row.enabled !== undefined && typeof row.enabled !== "boolean") {
+			throw new ToolArgError(`${at} has an "enabled" that is not true or false.`);
+		}
+		return { key: row.key, value: row.value, enabled: row.enabled ?? true };
+	});
+}
+
+/**
  * The body of an example write - the named fields only, so an update leaves
  * what it did not mention alone (the engine merge-patches on `PUT`).
  *
- * `headers` follows the request tools' rule: a string map in, the engine's
- * `{key, value, enabled}` rows out, replacing the stored list wholesale.
+ * `headers` is the engine's `{key, value, enabled}` rows, replacing the stored
+ * list wholesale (see `exampleHeaderRows` for the two spellings accepted).
  */
 export function exampleWritePayload(args: Record<string, unknown>): Record<string, unknown> {
 	const payload: Record<string, unknown> = {};
 	for (const key of EXAMPLE_WRITE_KEYS) {
 		if (args[key] !== undefined) payload[key] = args[key];
 	}
-	if (args.headers !== undefined) {
-		if (!isRecord(args.headers)) {
-			throw new ToolArgError('"headers" must be an object mapping header names to values.');
-		}
-		payload.headers = toKeyValueEntries(args.headers);
-	}
+	if (args.headers !== undefined) payload.headers = exampleHeaderRows(args.headers);
 	const body = str(args, "body");
 	if (body !== undefined) payload.body = body;
 	return payload;

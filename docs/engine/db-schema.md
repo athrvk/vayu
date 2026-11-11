@@ -763,7 +763,7 @@ Stores individual HTTP request definitions.
 | `postman_protocol_behavior` | TEXT | The imported Postman item's `protocolProfileBehavior`, JSON text in source member order; NULL when none (issue #1765) |
 | `spec_operation`      | TEXT    | JSON: which spec operation this is; NULL when none   |
 | `mock_response_mode`  | TEXT    | Which saved example a mock server answers with; default `'first'` (issue #481 phase 3) |
-| `mock_example_id`     | TEXT    | The example id `mock_response_mode == 'fixed'` names; NULL when none |
+| `mock_example_id`     | TEXT    | The example id `mock_response_mode == 'fixed'` names; NULL when none. Cleared when that example is deleted through its route, and not set again by its restore (issue #3422) |
 | `created_at`          | INTEGER | Unix ms                                              |
 | `updated_at`          | INTEGER | Unix ms                                              |
 | `deleted_at`          | INTEGER | Unix ms; NULL while the request is live (issue #988) |

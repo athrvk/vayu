@@ -632,6 +632,26 @@ const nlohmann::json& json) {
 }
 
 /**
+ * Clears the request's `mock_example_id` when it names the example just
+ * deleted (#3422), through the save a `PUT /requests/:id` makes: the
+ * `updatedAt` advances, so a tab still holding the old tag gets a 412, and the
+ * change feed carries the request. `mock_response_mode` is left as it is; a
+ * "fixed" request with no target answers with its first example.
+ */
+static void release_mock_example (vayu::db::Database& db,
+const std::string& request_id,
+const std::string& example_id) {
+    auto request = vayu::utils::invariant_value (db.get_request (request_id),
+    "the delete's owner check ran under the same held lock");
+    if (request.mock_example_id != example_id) {
+        return;
+    }
+    request.mock_example_id.reset ();
+    request.updated_at = next_updated_at (request.updated_at);
+    db.save_request (request);
+}
+
+/**
  * The check-and-write of DELETE /requests/:id/examples/:exampleId, run under the
  * caller's lock.
  */
@@ -651,6 +671,7 @@ const std::string& example_id) {
     } else {
         db.delete_request_example (example_id);
     }
+    release_mock_example (db, request_id, example_id);
     return { 200,
         nlohmann::json{ { "message", "Example deleted successfully" }, { "id", example_id } } };
 }
@@ -669,8 +690,9 @@ const std::string& example_id) {
  * so the delete is the only copy of the decision and the row is the only copy
  * of the response; `POST /trash/:id/restore` brings it back. Either way the
  * answer is the same, because from the caller's side it is: the example is
- * gone from every read. The check and the write are one lock scope, so the
- * origin read is the origin acted on.
+ * gone from every read. A request whose `mockExampleId` named it loses the
+ * pointer too, and a restore does not put it back. The check and the
+ * writes are one lock scope, so the origin read is the origin acted on.
  */
 std::pair<int, nlohmann::json> delete_request_example_response (vayu::db::Database& db,
 const std::string& request_id,
@@ -801,8 +823,9 @@ void register_request_example_routes (RouteContext& ctx) {
     /**
      * DELETE /requests/:id/examples/:exampleId
      * Deletes one saved example: a user's own goes to the trash (#2971), an
-     * imported one becomes a tombstone (#722). Returns a message and the id,
-     * or 404.
+     * imported one becomes a tombstone (#722). The request's `mockExampleId`
+     * is cleared when it named this example (#3422). Returns a message and the
+     * id, or 404.
      */
     ctx.server.Delete (R"(/requests/([^/]+)/examples/([^/]+))",
     [&ctx] (const httplib::Request& req, httplib::Response& res) {

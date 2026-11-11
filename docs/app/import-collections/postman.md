@@ -551,6 +551,12 @@ request as it was when you pressed Send - method, URL, params, headers and
 body, with `{{variables}}` left unresolved and auth left out - together with
 the server's own status text, the response's cookies (a `Max-Age` counted from
 when the response arrived) and its response time.
+The saved headers are one row per header line the server sent, in its case and
+order, so two `Set-Cookie` lines are two rows and two real cookies in the
+export's `cookie[]`, not one row holding both. A body the engine stopped reading
+at the Send response cap (*Max Send response body* in Settings) saves as partial,
+the same *Partial body* flag a body shortened for storage gets, and the dialog
+says so before you save.
 The export writes those back, so editing the request afterwards does not change
 what the example says it was sent with. A value typed literally into a header
 or the URL at Send stays in that example after you remove it from the request;
