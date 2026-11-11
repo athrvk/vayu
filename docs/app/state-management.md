@@ -2892,8 +2892,12 @@ what Send sends.
 
 **The feed reports the app's own writes too, so invalidations are coalesced and
 held.** `FeedInvalidationBatch` collects a burst into one invalidation per
-family and scope over `CHANGE_FEED_COALESCE_MS` (200ms), fixed from the first
-event rather than restarted by each, so a bulk import is one flush and a client
+family and collection over `CHANGE_FEED_COALESCE_MS` (200ms), fixed from the
+first event rather than restarted by each. A request event contributes a
+collection-scoped `request` family, which carries no row id and so dedupes (one
+list read and one Trash read per collection however many rows a reorder wrote,
+#3448), plus the row's own detail and compositions, which are never coalesced
+away. So a bulk import is one flush and a client
 writing without pause is still shown every 200ms. A flush waits while
 `queryClient.isMutating()` is above zero: the autosave PUT's echo then
 refetches after the PUT's own answer is in the detail cache, where structural

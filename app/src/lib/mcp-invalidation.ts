@@ -27,6 +27,16 @@ import { queryKeys } from "@/queries/keys";
 import type { McpDataChangedEvent, McpDataEntity } from "@/types/domain";
 
 /**
+ * One request's own caches: its detail and its compositions, which no list
+ * covers. Split from the `request` family so the change feed can coalesce the
+ * list and Trash reads per collection while still dropping each row's copy.
+ */
+export function invalidateRequestRow(queryClient: QueryClient, requestId: string): void {
+	void queryClient.invalidateQueries({ queryKey: queryKeys.requests.detail(requestId) });
+	invalidateCompositions(queryClient, requestId);
+}
+
+/**
  * Which caches each family invalidates.
  *
  * A `Record` over the union rather than a `switch`: a new entity added to
@@ -141,12 +151,7 @@ const INVALIDATORS: Record<
 				: queryKeys.requests.lists(),
 		});
 		void queryClient.invalidateQueries({ queryKey: queryKeys.trash.all });
-		if (event.requestId) {
-			void queryClient.invalidateQueries({
-				queryKey: queryKeys.requests.detail(event.requestId),
-			});
-			invalidateCompositions(queryClient, event.requestId);
-		}
+		if (event.requestId) invalidateRequestRow(queryClient, event.requestId);
 	},
 
 	/*
