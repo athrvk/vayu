@@ -641,6 +641,32 @@ describe("auth is applied, because the engine applies it at send time", () => {
 		expect(generateFetch(request).code).toContain(`"Authorization": "Bearer t0ken"`);
 	});
 
+	it("trims the bearer token, as the engine does (#3438)", () => {
+		const request: SnippetRequest = { ...GET, auth: { mode: "bearer", token: " \t tok \t" } };
+		expect(generateCurl(request).code).toContain(`-H 'Authorization: Bearer tok'`);
+		expect(generateFetch(request).code).toContain(`"Authorization": "Bearer tok"`);
+	});
+
+	it.each(["", "   ", " \t "])(
+		"sends no Authorization header for an empty bearer token %j (#3438)",
+		(token) => {
+			const request: SnippetRequest = { ...GET, auth: { mode: "bearer", token } };
+			expect(generateCurl(request).code).not.toContain("Authorization");
+			expect(generateFetch(request).code).not.toContain("Authorization");
+		}
+	);
+
+	it("keeps a typed Authorization when the bearer token is empty", () => {
+		const request: SnippetRequest = {
+			...GET,
+			headers: { Authorization: "Custom x" },
+			auth: { mode: "bearer", token: " " },
+		};
+		const { code } = generateCurl(request);
+		expect(code).toContain(`-H 'Authorization: Custom x'`);
+		expect(code).not.toContain("Bearer");
+	});
+
 	it("uses -u for basic, and btoa for fetch", () => {
 		const request: SnippetRequest = {
 			...GET,
@@ -751,6 +777,7 @@ describe("auth is applied, because the engine applies it at send time", () => {
 
 	it("names the credential values a caller should mask", () => {
 		expect(authSecrets({ mode: "bearer", token: "t" })).toEqual(["t"]);
+		expect(authSecrets({ mode: "bearer", token: " t \t" })).toEqual(["t"]);
 		expect(authSecrets({ mode: "basic", username: "ada", password: "p" })).toEqual(["p"]);
 		expect(authSecrets({ mode: "apikey", key: "K", value: "v" })).toEqual(["v"]);
 		expect(authSecrets(undefined)).toEqual([]);
@@ -796,6 +823,19 @@ describe("secret masking", () => {
 		expect(code.split(SECRET_PLACEHOLDER)).toHaveLength(5);
 		expect(code).toContain("public");
 		expect(masked).toBe(true);
+	});
+
+	it("masks a padded bearer token by its trimmed value where it also landed (#3438)", () => {
+		const padded: SnippetRequest = {
+			...GET,
+			url: "https://x/y?t=s3cret",
+			auth: { mode: "bearer", token: " s3cret " },
+		};
+		const { code } = generateCurl(padded, {
+			secrets: authSecrets(padded.auth),
+			mask: true,
+		});
+		expect(code).not.toContain("s3cret");
 	});
 
 	it("leaves the value alone when masking is off", () => {

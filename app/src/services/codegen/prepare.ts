@@ -623,11 +623,15 @@ export function prepareRequest(
 		case "none":
 		case "noauth":
 			break;
-		case "bearer":
-			if (!carriesHeader(headers, "Authorization")) {
-				headers.push(["Authorization", `Bearer ${asString(auth!.token)}`]);
+		case "bearer": {
+			// Trimmed, and no header at all when nothing is left, as the engine's
+			// `apply_bearer` does (#3438).
+			const token = trimCredential(asString(auth!.token));
+			if (token && !carriesHeader(headers, "Authorization")) {
+				headers.push(["Authorization", `Bearer ${token}`]);
 			}
 			break;
+		}
 		case "basic":
 			// Left null, not a header: `basicAuth` is rendered as its own
 			// `Authorization` by every target (`-u`, `-a`, `auth=`, `btoa`), so a
@@ -773,7 +777,7 @@ export function authSecrets(auth: Record<string, unknown> | undefined): string[]
 	if (!auth) return [];
 	switch (asString(auth.mode)) {
 		case "bearer":
-			return [asString(auth.token)];
+			return [trimCredential(asString(auth.token))];
 		case "basic":
 			return [asString(auth.password)];
 		case "apikey":
