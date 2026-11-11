@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -1295,6 +1296,37 @@ const std::string& root);
 const std::optional<vayu::core::BoundSpec>& before,
 const std::optional<vayu::core::BoundSpec>& after,
 const std::vector<vayu::db::Collection>& tree);
+
+/**
+ * A write that moves collections, as `declined_by_move` reads it: the binding
+ * before off the tree as stored, the binding after and the contract walk off
+ * the same tree with the write's rows in place. A write can move a folder and
+ * a request under it together, and only the tree it is about to store says
+ * where each request ends up. One read of the collections answers for every
+ * request the write carries along, rather than a query per ancestor per
+ * request. Shared by `POST /reorder` (#3446) and `PUT /collections/:id`
+ * (#3470). Defined in spec_sync.cpp.
+ */
+class SpecTreeMove {
+    public:
+    /**
+     * @param stored every live collection, as `Database::get_collections`
+     *        answers before the write.
+     * @param staged the collection rows the write is about to store, by id.
+     */
+    SpecTreeMove (std::vector<vayu::db::Collection> stored,
+    std::map<std::string, vayu::db::Collection> staged);
+
+    /// `declined_by_move` for @p stored, which sits under its stored
+    /// `collection_id` before the write and under @p destination after it.
+    [[nodiscard]] std::optional<std::string>
+    declined_under (const vayu::db::Request& stored, const std::string& destination) const;
+
+    private:
+    std::unordered_map<std::string, vayu::db::Collection> stored_;
+    std::map<std::string, vayu::db::Collection> staged_;
+    std::vector<vayu::db::Collection> written_tree_;
+};
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.
