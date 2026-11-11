@@ -188,6 +188,12 @@
  * a sentence in each description) added 690 B to the writes-on rows, taking them
  * to 221,541 / 217,274 B; those two caps went to 221,600 / 217,300 and the
  * writes-off rows are untouched.
+ *
+ * #3458's `assertionsFailed` clause in `list_runs` (a single-request load row
+ * carries it alone) is paid once per row, 51 B, taking the rows to 150,549 /
+ * 147,953 / 221,592 / 217,325 B; the three caps that no longer held went to
+ * 150,600 / 148,000 / 217,400 and the writes-on, reveal-off cap (8 B of margin)
+ * stays.
  */
 
 import { describe, it, expect } from "vitest";
@@ -207,10 +213,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_500 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 147_900 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_600 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_000 },
 	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_300 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_400 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

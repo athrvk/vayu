@@ -16,6 +16,11 @@
  * Failed assertions (#2820): make `judgeRun` ignore `assertionsFailed` and every
  * assertion row, and both wrapper tests, redden; make `reportOutcome` or
  * `rowOutcome` stop passing it and only that wrapper's test reddens.
+ *
+ * A single-request run's failures (#3458): make `failedAssertionsOf` stop
+ * summing `elements` and the exact-names case reddens; stop reading
+ * `testValidation` and the sampled-names case reddens; drop the scenario guard
+ * and the no-double-count case reddens.
  */
 
 import { describe, it, expect } from "vitest";
@@ -236,6 +241,52 @@ const CASES: Array<[name: string, input: RunOutcomeInput, expected: unknown]> = 
 		{ status: "completed", thresholdValidation: THREE_MET, errorRate: 0, assertionsFailed: 0 },
 		{ outcome: "passed", reason: "All 3 budgets met" },
 	],
+	// A single-request run's two populations (#3458): the reason says which.
+	[
+		"sampled failures are named as a replay's",
+		{
+			status: "completed",
+			thresholdValidation: budgets(["latencyP95Ms", true]),
+			errorRate: 0,
+			sampledAssertionsFailed: 4,
+		},
+		{
+			outcome: "not-judged",
+			reason: "The budget was met, but 4 assertions failed in the sampled replay",
+		},
+	],
+	[
+		"exact and sampled failures are both named",
+		{
+			status: "completed",
+			thresholdValidation: budgets(["latencyP95Ms", true]),
+			errorRate: 0,
+			assertionsFailed: 150,
+			sampledAssertionsFailed: 4,
+		},
+		{
+			outcome: "not-judged",
+			reason: "The budget was met, but 150 assertions failed, 4 more in the sampled replay",
+		},
+	],
+	[
+		"sampled failures with no budgets",
+		{ status: "completed", errorRate: 0, sampledAssertionsFailed: 1 },
+		{
+			outcome: "not-judged",
+			reason: "No budgets set. 0.0% errors, 1 assertion failed in the sampled replay",
+		},
+	],
+	[
+		"zero sampled failures changes nothing",
+		{
+			status: "completed",
+			thresholdValidation: THREE_MET,
+			errorRate: 0,
+			sampledAssertionsFailed: 0,
+		},
+		{ outcome: "passed", reason: "All 3 budgets met" },
+	],
 	[
 		"a missed budget stays failed and does not take the assertion count",
 		{ status: "completed", thresholdValidation: TWO_OF_FOUR_MISSED, assertionsFailed: 9 },
@@ -305,6 +356,63 @@ describe("reportOutcome", () => {
 		});
 	});
 
+	// #3458: a single-request report has no `scenario`; its exact tallies are the
+	// top-level elements and its sampled ones `testValidation`.
+	it("names the exact count when an inline script's tests fail, so the run is not a pass", () => {
+		const inline = report({
+			thresholdValidation: THREE_MET,
+			elements: [
+				{ id: "a", kind: "assert.status", passed: 150, failed: 0, skipped: 0 },
+				{ id: "b", kind: "script.post", passed: 0, failed: 150, skipped: 0 },
+			],
+		} as Partial<RunReport>);
+		expect(reportOutcome(inline)).toEqual({
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 150 assertions failed",
+		});
+	});
+
+	it("names the sampled replay when only testValidation failed", () => {
+		const sampled = report({
+			thresholdValidation: THREE_MET,
+			testValidation: { samplesTested: 8, testsPassed: 4, testsFailed: 4, successRate: 50 },
+		} as Partial<RunReport>);
+		expect(reportOutcome(sampled)).toEqual({
+			outcome: "not-judged",
+			reason: "All 3 budgets met, but 4 assertions failed in the sampled replay",
+		});
+	});
+
+	it("names both populations without folding them into one count", () => {
+		const both = report({
+			thresholdValidation: THREE_MET,
+			elements: [{ id: "b", kind: "script.post", passed: 0, failed: 150, skipped: 0 }],
+			testValidation: { samplesTested: 8, testsPassed: 4, testsFailed: 4, successRate: 50 },
+		} as Partial<RunReport>);
+		expect(reportOutcome(both)?.reason).toBe(
+			"All 3 budgets met, but 150 assertions failed, 4 more in the sampled replay"
+		);
+	});
+
+	it("still reads passed when a single-request run's elements all passed", () => {
+		const clean = report({
+			thresholdValidation: THREE_MET,
+			elements: [{ id: "b", kind: "script.post", passed: 150, failed: 0, skipped: 0 }],
+			testValidation: { samplesTested: 8, testsPassed: 8, testsFailed: 0, successRate: 100 },
+		} as Partial<RunReport>);
+		expect(reportOutcome(clean)?.outcome).toBe("passed");
+	});
+
+	it("does not add a scenario report's top-level fields to its exact assertions", () => {
+		const scenario = report({
+			thresholdValidation: THREE_MET,
+			scenario: { assertions: { passed: 10, failed: 2 } },
+			elements: [{ id: "b", kind: "script.post", passed: 0, failed: 50, skipped: 0 }],
+			testValidation: { samplesTested: 8, testsPassed: 4, testsFailed: 4, successRate: 50 },
+		} as Partial<RunReport>);
+		expect(reportOutcome(scenario)?.reason).toBe("All 3 budgets met, but 2 assertions failed");
+	});
+
 	it("leaves a scenario report with no assertions block as it was", () => {
 		const without = report({
 			thresholdValidation: THREE_MET,
@@ -366,6 +474,17 @@ describe("rowOutcome", () => {
 		).toEqual({
 			outcome: "not-judged",
 			reason: "All budgets met, but 4,580 assertions failed",
+		});
+	});
+
+	it("reads a single-request row's failed assertions off the same key", () => {
+		expect(
+			rowOutcome(
+				row({ resultSummary: { errorRate: 0, verdict: "passed", assertionsFailed: 150 } })
+			)
+		).toEqual({
+			outcome: "not-judged",
+			reason: "All budgets met, but 150 assertions failed",
 		});
 	});
 

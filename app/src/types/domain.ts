@@ -2068,11 +2068,14 @@ export interface LoadResultSummary {
 	errorRate?: number;
 	verdict?: "passed" | "failed";
 	/**
-	 * Exact assertion outcomes of a **scenario load run** that made at least one
-	 * (#2820): `assert.*` outcomes, required `extract.*` misses and inline
-	 * `pm.test` calls. Both keys are present or neither is, and neither is ever
-	 * zeroed: absent for a run that asserted nothing, a collection run, a
-	 * single-request run and a run stored before the field.
+	 * Assertion outcomes of a load run. A **scenario load run** that made at least
+	 * one carries both keys, exact (#2820): `assert.*` outcomes, required
+	 * `extract.*` misses and inline `pm.test` calls; neither is ever zeroed, and
+	 * both are absent for a run that asserted nothing, a collection run and a run
+	 * stored before the field. A **single-request run** carries `assertionsFailed`
+	 * alone (#3458), summed from its inline element tallies and its sampled
+	 * replay, so the row cannot say which population a failure came from; its
+	 * `assertionsPassed` stays absent because the two are not one population.
 	 *
 	 * `assertionsFailed` is what a row's verdict and subtitle read (`rowOutcome`,
 	 * `resultSubtitle`); `errorRate` and `verdict` stay HTTP-and-budget only.

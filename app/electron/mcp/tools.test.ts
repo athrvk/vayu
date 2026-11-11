@@ -560,6 +560,15 @@ describe("tool registry", () => {
 		expect(description).toContain("omitted for every other run");
 	});
 
+	// Mutation check (#3458): drop the single-request clause from list_runs in
+	// reads.tools.ts and this fails.
+	test("list_runs says a single-request load row carries assertionsFailed alone", () => {
+		const description = descriptionOf(TOOLS.find((t) => t.name === "list_runs"));
+		expect(description).toContain(
+			"a single-request load run carries `assertionsFailed` alone (inline plus sampled-replay failures)"
+		);
+	});
+
 	test("toolCatalog mirrors the registry as IPC-safe metadata", () => {
 		const catalog = toolCatalog();
 		expect(catalog).toHaveLength(TOOLS.length);

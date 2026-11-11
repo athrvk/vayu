@@ -28,7 +28,9 @@
  * **not-judged**, not **failed**, because **failed** is reserved for a line the
  * run declared and missed - a run that declared `maxAssertionFailureRatePct`
  * and broke it is already `failed` through its budgets. The reason names the
- * count either way.
+ * count either way. That holds for a single-request run too (#3458), whose
+ * failures are counted two ways the reason keeps apart: exactly, off its inline
+ * `elements`, and from the sampled replay's `testValidation`.
  *
  * A budget the run could not measure (`evaluated: false`, issue #1484) is
  * counted by the engine as failed (`passed: false`, in `failed`), so it lands in
@@ -42,7 +44,7 @@
 
 import type { Run, RunReport } from "@/types";
 import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
-import { assertionsFailedPhrase, exactAssertionsOf } from "./run-assertions";
+import { failedAssertionsOf, failedAssertionsReason } from "./run-assertions";
 import { budgetName } from "./threshold-metrics";
 
 export type RunOutcome = "passed" | "failed" | "not-judged";
@@ -75,10 +77,18 @@ export interface RunOutcomeInput {
 	/** Percent, 0-100. Absent when the run recorded no request. */
 	errorRate?: number;
 	/**
-	 * Failed exact assertions of a scenario load run (#2820). Any positive count
-	 * keeps the run from reading `passed`; absent or 0 changes nothing.
+	 * Failed assertions counted exactly: a scenario load run's (#2820) or a
+	 * single-request run's inline elements (#3458). A list row's single count
+	 * lands here too, since the row cannot tell the two populations apart. Any
+	 * positive count keeps the run from reading `passed`; absent or 0 changes
+	 * nothing.
 	 */
 	assertionsFailed?: number;
+	/**
+	 * Failed assertions of a single-request run's sampled replay (#3458), apart
+	 * from {@link assertionsFailed} so the reason can say they are a sample.
+	 */
+	sampledAssertionsFailed?: number;
 }
 
 /** `15.1%`; a rate that exists but rounds to nothing reads `<0.1%`, never `0.0%`. */
@@ -136,7 +146,10 @@ export function judgeRun(input: RunOutcomeInput): RunJudgement | null {
 
 	const errors =
 		errorRate !== undefined && errorRate > 0 ? `${formatErrorRate(errorRate)} errors` : null;
-	const assertions = assertionsFailedPhrase(input.assertionsFailed);
+	const assertions = failedAssertionsReason(
+		input.assertionsFailed,
+		input.sampledAssertionsFailed
+	);
 	if (budgets.state === "met") {
 		const met = metReason(budgets);
 		const undercut = [errors, assertions].filter(Boolean).join(", ");
@@ -159,10 +172,12 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 	const status = report?.metadata?.status;
 	if (!report || !status) return null;
 	const { totalRequests, errorRate } = report.summary ?? {};
+	const { exact, sampled } = failedAssertionsOf(report);
 	return judgeRun({
 		status,
 		thresholdValidation: report.thresholdValidation,
-		assertionsFailed: exactAssertionsOf(report)?.failed,
+		assertionsFailed: exact,
+		sampledAssertionsFailed: sampled,
 		// A run that sent nothing has no error rate; the report's 0 there is
 		// an empty denominator, not 0.0% measured.
 		errorRate: totalRequests && totalRequests > 0 ? errorRate : undefined,
