@@ -28,7 +28,8 @@ import { render, screen, fireEvent, act, within, waitFor } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useCollectionsStore } from "./collections-store";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useSaveStore, useTabsStore, useToastStore } from "@/stores";
+import { resetSaveStoreForTests } from "@/stores/save-store";
 import type { ReorderRequest } from "@/types";
 import CollectionTree from "./CollectionTree";
 import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
@@ -200,6 +201,7 @@ beforeEach(() => {
 	useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1", "c3"]) });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useToastStore.setState({ toasts: [] });
+	resetSaveStoreForTests();
 });
 
 afterEach(() => {
@@ -262,6 +264,66 @@ describe("a press on a control inside a row", () => {
 		expect(document.querySelector("[data-drop-blocked]")).toBeNull();
 		fireEvent.pointerUp(chevron, { pointerId: 1, clientX: 10, clientY: yIn(4, 0.5) });
 		expect(reorderMutate).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * A move and an editor's save do not conflict (#3447): the builder's save is a
+ * merge-patch of the fields it changed, so it never carries the owner or order
+ * a move rewrites. The tree used to refuse the press and toast "try again".
+ */
+describe("a request whose open editor has an unsaved edit", () => {
+	function registerPendingEditor(requestId: string) {
+		useSaveStore.getState().registerContext({
+			id: `request-${requestId}`,
+			name: "Request",
+			save: async () => "saved",
+			hasPendingChanges: true,
+		});
+	}
+
+	it("still opens on a click, with no toast", () => {
+		registerPendingEditor("r1");
+		renderTree();
+		const target = requestRow("r1");
+
+		fireEvent.pointerDown(target, { button: 0, pointerId: 1, clientX: 10, clientY: 80 });
+		fireEvent.pointerUp(target, { pointerId: 1, clientX: 10, clientY: 80 });
+		fireEvent.click(target);
+
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+		expect(useTabsStore.getState().openTabs).toHaveLength(1);
+	});
+
+	it("drags like any other row", () => {
+		registerPendingEditor("r1");
+		renderTree();
+
+		dragTo(requestRow("r1"), yIn(rowIndex(requestRow("r2")), 0.8));
+
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+		expect(reorderMutate).toHaveBeenCalledTimes(1);
+		expect(fixture.requests.get("c1")?.map((r) => r.id)).toEqual(["r2", "r1"]);
+	});
+});
+
+describe("a press after an Escape cancel", () => {
+	it("lets the next chevron click toggle its folder instead of swallowing it", () => {
+		renderTree();
+		const source = requestRow("r2");
+		dragTo(source, yIn(rowIndex(requestRow("r1")), 0.2), { hold: true });
+		// The Escape arms a click suppression; the release lands outside the
+		// tree, which never hears it, so the click it was armed for never comes.
+		fireEvent.keyDown(window, { key: "Escape" });
+
+		const folder = collectionRow("c1");
+		const chevron = folder.querySelector<HTMLElement>("[data-tree-toggle]")!;
+		expect(folder.getAttribute("aria-expanded")).toBe("true");
+		fireEvent.pointerDown(chevron, { button: 0, pointerId: 2, clientX: 10, clientY: 16 });
+		fireEvent.pointerUp(chevron, { pointerId: 2, clientX: 10, clientY: 16 });
+		fireEvent.click(chevron);
+
+		expect(collectionRow("c1").getAttribute("aria-expanded")).toBe("false");
 	});
 });
 
@@ -495,6 +557,54 @@ describe("a drop", () => {
 	});
 });
 
+/**
+ * An empty folder shows an "Empty collection" line in place of its children.
+ * It is not a treeitem, so a drop on it used to resolve to nothing and the
+ * only way into an empty folder was its own row.
+ */
+describe("a drop on an empty folder's placeholder", () => {
+	const placeholder = () => document.getElementById("tree-empty-c3")!;
+
+	/** Hold a drag of `source` with the pointer over the placeholder. */
+	function dragOntoPlaceholder(source: HTMLElement, options: DragOptions = {}) {
+		const rowsHitTest = document.elementFromPoint;
+		const overPlaceholderY = 500;
+		document.elementFromPoint = (x, y) =>
+			y === overPlaceholderY ? placeholder() : rowsHitTest.call(document, x, y);
+		dragTo(source, overPlaceholderY, options);
+	}
+
+	it("moves a request inside that folder, drawing the indicator on the folder", () => {
+		renderTree();
+		dragOntoPlaceholder(requestRow("r1"), { hold: true });
+
+		// "Inside" is the folder row's ring, not a line between rows.
+		expect(collectionRow("c3").getAttribute("class")).toMatch(/ring-primary\/50/);
+		fireEvent.pointerUp(requestRow("r1"), { pointerId: 1, clientX: 10, clientY: 500 });
+
+		expect(fixture.requests.get("c3")?.map((r) => r.id)).toEqual(["r1"]);
+		expect(reorderMutate.mock.calls[0][0].moves).toContainEqual(
+			expect.objectContaining({ type: "request", id: "r1", collectionId: "c3" })
+		);
+	});
+
+	it("moves a folder inside it as well", () => {
+		renderTree();
+		dragOntoPlaceholder(collectionRow("c2"));
+
+		expect(fixture.collections.find((c) => c.id === "c2")?.parentId).toBe("c3");
+	});
+
+	it("refuses a folder dragged into its own subtree", () => {
+		renderTree();
+		dragOntoPlaceholder(collectionRow("c1"), { hold: true });
+
+		expect(collectionRow("c3").getAttribute("class")).not.toMatch(/ring-primary\/50/);
+		fireEvent.pointerUp(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: 500 });
+		expect(reorderMutate).not.toHaveBeenCalled();
+	});
+});
+
 describe("the keyboard move", () => {
 	it("reorders among siblings, announces it, and keeps the row focused", () => {
 		renderTree();
@@ -718,6 +828,40 @@ describe("Move to…", () => {
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		await waitFor(() => expect(document.activeElement).toBe(requestRow("r1")));
+	});
+
+	/*
+	 * The planner's own refusal names a row id ("Reorder source does not contain
+	 * 'r1'"), which tells a user nothing they can act on. An Undo that cannot
+	 * be honoured says so in the row's name instead.
+	 */
+	it("says the row has moved since, rather than naming an id, when Undo is stale", async () => {
+		renderTree();
+		const menu = Array.from(requestRow("r1").querySelectorAll("button")).find((b) =>
+			/more actions/i.test(b.getAttribute("aria-label") ?? "")
+		)!;
+		fireEvent.pointerDown(menu, new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+		fireEvent.click(await screen.findByText("Move to…"));
+		fireEvent.click(
+			within(await screen.findByRole("dialog")).getByRole("button", { name: "Beta" })
+		);
+		const queued = useToastStore.getState().toasts;
+		const undo = queued[queued.length - 1]?.action;
+
+		// Someone else moves the row on before Undo is pressed.
+		const [moved] = fixture.requests.get("c2")!.filter((r) => r.id === "r1");
+		fixture.requests.set(
+			"c2",
+			fixture.requests.get("c2")!.filter((r) => r.id !== "r1")
+		);
+		fixture.requests.set("c3", [{ ...moved, collectionId: "c3" }]);
+		act(() => undo!.onClick());
+
+		expect(reorderMutate).toHaveBeenCalledTimes(1);
+		const toasts = useToastStore.getState().toasts;
+		const refusal = toasts[toasts.length - 1];
+		expect(refusal.variant).toBe("error");
+		expect(refusal.message).toBe("One has moved since; Undo is no longer available");
 	});
 
 	it("does not offer to move a row into where it already is", async () => {

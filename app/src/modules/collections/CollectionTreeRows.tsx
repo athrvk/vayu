@@ -117,6 +117,7 @@ function RowContent({ row }: { row: TreeRow }) {
 			return (
 				<div
 					id={row.id}
+					data-tree-empty-owner={row.parentId}
 					className="flex h-full items-center pr-3 text-xs text-muted-foreground"
 					style={{
 						paddingLeft: rowInsetPx(row.depth),

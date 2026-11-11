@@ -1080,12 +1080,10 @@ Between them every dirty editor in the app is in this registry, which is what
 `flushAll` walks on quit - a surface that is not registered is not merely
 unsaved on quit, it is invisible.
 
-The registry has a second reader: the collection tree refuses to *drag* a
-request whose open tab still has unsaved edits (`contexts.get("request-<id>")
-?.hasPendingChanges`, keyed the way `useSaveManager` registers it). Two writers
-on one row - a save carrying the row's contents while a reorder rewrites its
-owner and order - is the clobber family #237 belongs to, and the drag is the
-half that can simply wait.
+The collection tree does not read the registry: a request whose open tab has
+unsaved edits drags like any other row (#3447). A move rewrites the row's owner
+and order, and the builder's save is a merge-patch of the fields that changed,
+so neither writer carries what the other owns and neither needs to wait.
 
 #### `entity-draft-store.ts` - Unsaved Collection Drafts That Outlive Their Editor
 

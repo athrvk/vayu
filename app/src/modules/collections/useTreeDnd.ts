@@ -37,7 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { createStore, useStore } from "zustand";
 import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
-import { useToastStore, useSaveStore } from "@/stores";
+import { useToastStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import type { Collection, RequestSummary } from "@/types";
 import { isDescendant } from "./tree-utils";
@@ -59,7 +59,8 @@ import type {
 	CollectionTreeDragState,
 	CollectionTreeDropTarget,
 } from "./context/CollectionTreeContext";
-import { TREE_ITEM } from "./tree-focus";
+import { EMPTY_OWNER_ATTR, TREE_ITEM } from "./tree-focus";
+import { collectionEntity } from "./tree-rows";
 import type { RowAction } from "@/components/shared";
 import { TIMING } from "@/config/timing";
 import { useStableCallback } from "@/hooks/useStableCallback";
@@ -144,6 +145,33 @@ function withOwner(entity: TreeEntity, ownerId: string | null): TreeEntity | nul
  * chevron, the `⋯` menu, a rename field - and not on the row.
  */
 const ROW_CONTROLS = "[data-tree-menu],[data-tree-toggle],input,textarea";
+
+/** A drop or keyboard move the planner refused; its own message says why. */
+function failedMoveMessage(entity: TreeEntity, error: unknown): string {
+	return error instanceof Error
+		? `Couldn't move ${entity.name}: ${error.message}`
+		: `Couldn't move ${entity.name}`;
+}
+
+/**
+ * An Undo whose row is no longer where the move left it. The planner's own
+ * message names a row id, which says nothing a user can act on.
+ */
+function staleUndoMessage(entity: TreeEntity): string {
+	return `${entity.name} has moved since; Undo is no longer available`;
+}
+
+/**
+ * A folder cannot be dropped into its own subtree; the engine's cycle guard
+ * stays the backstop, this is what greys the rows.
+ */
+function isInOwnSubtree(
+	dragged: TreeEntity,
+	targetId: string,
+	collections: readonly Collection[]
+): boolean {
+	return dragged.kind === "collection" && isDescendant(targetId, dragged.id, collections);
+}
 
 /**
  * The index a destination names, among the siblings *without* the moved row -
@@ -268,7 +296,11 @@ export function useTreeDnd({
 	 * an Undo needs: the same call, with the two swapped.
 	 */
 	const writeMove = useCallback(
-		(entity: TreeEntity, to: Placement): { from: Placement; moved: TreeEntity } | null => {
+		(
+			entity: TreeEntity,
+			to: Placement,
+			options: { isUndo?: boolean } = {}
+		): { from: Placement; moved: TreeEntity } | null => {
 			// The row as it is *after* the move, so a reveal expands the folder it
 			// landed in and an Undo plans from its new parent rather than its old.
 			const moved = withOwner(entity, to.ownerId);
@@ -294,10 +326,9 @@ export function useTreeDnd({
 				// move did not happen and the user has to know that, but it is not a
 				// crash inside a toast's click handler.
 				useToastStore.getState().showToast({
-					message:
-						error instanceof Error
-							? `Couldn't move ${entity.name}: ${error.message}`
-							: `Couldn't move ${entity.name}`,
+					message: options.isUndo
+						? staleUndoMessage(entity)
+						: failedMoveMessage(entity, error),
 					variant: "error",
 				});
 				return null;
@@ -335,7 +366,7 @@ export function useTreeDnd({
 				action: {
 					label: "Undo",
 					altText: `Undo moving ${entity.name}`,
-					onClick: () => writeMove(result.moved, result.from),
+					onClick: () => writeMove(result.moved, result.from, { isUndo: true }),
 				},
 			});
 		},
@@ -468,34 +499,41 @@ export function useTreeDnd({
 		dragState.setState({ dragging: null, dropTarget: null });
 	}, [clearSpring, dragState, stopAutoScroll]);
 
-	const hasUnsavedEdits = useCallback((entity: TreeEntity): boolean => {
-		if (entity.kind !== "request") return false;
-		// Two writers on one row is the clobber family: the tab's auto-save holds
-		// the row's contents while a move rewrites its owner and order.
-		return (
-			useSaveStore.getState().contexts.get(`request-${entity.id}`)?.hasPendingChanges === true
-		);
-	}, []);
-
 	const onPointerDown = useCallback(
 		(e: React.PointerEvent<HTMLElement>) => {
 			if (e.button !== 0) return;
 			// An open row menu is a React child of the tree but not a DOM one.
 			if (!isOwnEvent(e)) return;
+			// A new press ends the last gesture wherever it lands. An Escape cancel
+			// arms a click suppression for a click that never arrives when the
+			// release is outside the tree, and a press on a row control returns
+			// below without pressing anything - the suppression would eat that
+			// control's own click.
+			gestureRef.current = IDLE_GESTURE;
+			pressedRef.current = null;
 			if (!(e.target instanceof Element) || e.target.closest(ROW_CONTROLS)) return;
 			const entity = entityAt(e.target);
 			if (!entity || isRowBusy(entity.id)) return;
-			if (hasUnsavedEdits(entity)) {
-				useToastStore.getState().showToast({
-					message: `Saving ${entity.name} - try again in a moment`,
-					variant: "info",
-				});
-				return;
-			}
 			gestureRef.current = pressGesture({ x: e.clientX, y: e.clientY });
 			pressedRef.current = { entity, pointerId: e.pointerId, el: e.currentTarget };
 		},
-		[entityAt, hasUnsavedEdits, isRowBusy]
+		[entityAt, isRowBusy]
+	);
+
+	/**
+	 * A drop on an empty folder's "Empty collection" line means "inside that
+	 * folder": the line is not a treeitem, so no row resolves it. It carries no
+	 * spring, because the line only shows while its folder is open.
+	 */
+	const dropIntoEmptyFolder = useCallback(
+		(dragged: TreeEntity, ownerId: string): DropDestination | null => {
+			const { collections: loaded } = dataRef.current;
+			const owner = loaded.find((c) => c.id === ownerId);
+			if (!owner || isRowBusy(ownerId)) return null;
+			if (isInOwnSubtree(dragged, ownerId, loaded)) return null;
+			return resolveDrop({ dragged, target: collectionEntity(owner), zone: "inside" });
+		},
+		[isRowBusy]
 	);
 
 	/**
@@ -512,15 +550,16 @@ export function useTreeDnd({
 			under: Element | null,
 			clientY: number
 		): { destination: DropDestination | null; spring: TreeEntity | null } => {
+			const emptyOwnerId = under
+				?.closest(`[${EMPTY_OWNER_ATTR}]`)
+				?.getAttribute(EMPTY_OWNER_ATTR);
+			if (emptyOwnerId) {
+				return { destination: dropIntoEmptyFolder(dragged, emptyOwnerId), spring: null };
+			}
 			const row = under?.closest<HTMLElement>(TREE_ITEM) ?? null;
 			const target = row ? entityAt(row) : null;
 			if (!row || !target || isRowBusy(target.id)) return { destination: null, spring: null };
-			// A folder cannot be dropped into its own subtree; the engine's cycle
-			// guard stays the backstop, this is what greys the rows.
-			if (
-				dragged.kind === "collection" &&
-				isDescendant(target.id, dragged.id, dataRef.current.collections)
-			) {
+			if (isInOwnSubtree(dragged, target.id, dataRef.current.collections)) {
 				return { destination: null, spring: null };
 			}
 			const rect = row.getBoundingClientRect();
@@ -528,7 +567,7 @@ export function useTreeDnd({
 			const destination = resolveDrop({ dragged, target, zone });
 			return { destination, spring: destination && zone === "inside" ? target : null };
 		},
-		[entityAt, isRowBusy]
+		[dropIntoEmptyFolder, entityAt, isRowBusy]
 	);
 
 	const onPointerMove = useCallback(
@@ -796,12 +835,7 @@ export function useTreeDnd({
 
 	const isDropBlocked = useCallback((dragged: TreeEntity, entity: TreeEntity) => {
 		if (entity.id === dragged.id) return true;
-		if (
-			dragged.kind === "collection" &&
-			isDescendant(entity.id, dragged.id, dataRef.current.collections)
-		) {
-			return true;
-		}
+		if (isInOwnSubtree(dragged, entity.id, dataRef.current.collections)) return true;
 		// No band of this row names a destination the dragged row could
 		// take - a request over a root folder's edges. Asked of the same
 		// resolver the drop uses, so what is greyed and what is refused cannot
