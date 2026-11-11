@@ -30,6 +30,7 @@ import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 const requests = new Map([
@@ -206,6 +207,67 @@ describe("an action that opens a dialog", () => {
 
 		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
 		expect(document.activeElement).not.toBe(row);
+	});
+});
+
+describe("an action that opens a field (#3443)", () => {
+	/*
+	 * The field mounts with `autoFocus` while the menu is still closing, and the
+	 * menu then hands focus back to the row - taking it out of the field. Typing
+	 * drove the tree's typeahead and Backspace trashed the folder.
+	 */
+	const KEYS: [string, string, { shiftKey?: boolean }][] = [
+		["Shift+F10", "F10", { shiftKey: true }],
+		["the Menu key", "ContextMenu", {}],
+		["Shift+Enter", "Enter", { shiftKey: true }],
+	];
+
+	it.each(KEYS)(
+		"leaves Add collection's name field focused after %s",
+		async (_name, key, init) => {
+			renderTree();
+			pressOnRow(collectionRow(), key, init);
+			fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
+			const field = await screen.findByPlaceholderText("Collection name");
+
+			await menuClosedAndFocusSettled();
+
+			expect(document.activeElement).toBe(field);
+		}
+	);
+
+	it("leaves Add collection's name field focused after the pointer opens the menu", async () => {
+		renderTree();
+		const trigger = collectionRow().querySelector<HTMLElement>("[data-tree-menu]")!;
+		fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
+		const field = await screen.findByPlaceholderText("Collection name");
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(field);
+	});
+
+	it("still hands focus to the row when the action opens no field", async () => {
+		renderTree();
+		const row = requestRow();
+		pressOnRow(row, "F10", { shiftKey: true });
+		fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(row);
+	});
+
+	it("keeps the rename field focused when Rename is picked from the menu", async () => {
+		renderTree();
+		pressOnRow(requestRow(), "F10", { shiftKey: true });
+		fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+		await waitFor(() => expect(requestRow().querySelector("input")).not.toBeNull());
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(requestRow().querySelector("input"));
 	});
 });
 

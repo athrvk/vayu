@@ -19,10 +19,12 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { Copy, CopyPlus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Copy, CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowContextMenu } from "./RowContextMenu";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import type { RowAction } from "./row-actions";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const actions: RowAction[] = [
 	{ label: "Duplicate", icon: CopyPlus, onSelect: () => {} },
@@ -99,5 +101,39 @@ describe("RowContextMenu", () => {
 		fireEvent.keyDown(menu, { key: "Escape" });
 
 		await waitFor(() => expect(document.activeElement).toBe(row()));
+	});
+
+	/*
+	 * A Rename that opens its field from `onSelect` loses it to the menu's focus
+	 * trap and then to the row (#3443): the field is blurred, which commits the
+	 * name unchanged. An `opensField` action runs from the close instead.
+	 */
+	it("leaves focus in the field an opensField action opened", async () => {
+		function Row() {
+			const [renaming, setRenaming] = useState(false);
+			const rowActions: RowAction[] = [
+				{
+					label: "Rename",
+					icon: Pencil,
+					opensField: true,
+					onSelect: () => setRenaming(true),
+				},
+			];
+			return (
+				<RowContextMenu label="Actions for Orders" actions={rowActions}>
+					<div role="treeitem" aria-selected={false} data-testid="row" tabIndex={-1}>
+						{renaming ? <input aria-label="Name" autoFocus /> : "Orders"}
+					</div>
+				</RowContextMenu>
+			);
+		}
+		render(<Row />);
+		fireEvent.contextMenu(row());
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+		const field = await screen.findByLabelText("Name");
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(field);
 	});
 });

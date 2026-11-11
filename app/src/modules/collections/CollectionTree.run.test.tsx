@@ -19,12 +19,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const startScenarioRun = vi.fn();
 
@@ -147,5 +148,27 @@ describe("running a collection from the tree", () => {
 
 		expect(startScenarioRun).not.toHaveBeenCalled();
 		expect(screen.queryByText(/Run Acme/)).toBeNull();
+	});
+
+	// The dialog opens from a menu item that closes with its menu, so Radix's own
+	// restore lands on `<body>` (#3443).
+	it.each([
+		["Cancel", () => fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))],
+		["Escape", () => fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })],
+	])("returns focus to the collection's row on %s", async (_name, dismiss) => {
+		renderTree();
+		await openRunDialog("Billing");
+		// The menu's own hand-back has to land before the dialog is dismissed:
+		// a dismissal that outruns it would be handed focus by the menu instead.
+		await menuClosedAndFocusSettled();
+
+		dismiss();
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				document.querySelector('[data-collection-id="mid"]')
+			)
+		);
 	});
 });

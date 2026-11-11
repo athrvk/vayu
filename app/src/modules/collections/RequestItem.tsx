@@ -141,9 +141,11 @@ function RequestItemRow({
 		moveActions: dnd.moveActions,
 		isDeleting,
 	});
-	// A row mid-rename or mid-delete offers nothing: its ⋯ menu is unmounted for
-	// the same reason, and the rename field wants the platform's own Cut/Copy/
-	// Paste rather than a menu of row actions over what is being typed.
+	// A row mid-rename or mid-delete offers no right-click menu: the rename field
+	// wants the platform's own Cut/Copy/Paste rather than a menu of row actions
+	// over what is being typed. The ⋯ menu leaves only for the rename; through a
+	// delete it stays mounted, because it is what hands focus back to the row
+	// that the delete refocus then moves on from (#3443).
 	const hasMenu = !isRenaming && !isDeleting && menu.actions.length > 0;
 
 	return (
@@ -260,7 +262,7 @@ function RequestItemRow({
 			/>
 			<RowMoveControls entity={entity} />
 
-			{!isRenaming && !isDeleting && (
+			{!isRenaming && (
 				<RowActionsMenu
 					label={menu.label}
 					// The tree is one tab stop: the row holds it, and Shift+F10 /

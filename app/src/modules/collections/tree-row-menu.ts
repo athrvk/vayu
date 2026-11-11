@@ -89,7 +89,12 @@ export interface RequestMenuSources {
 export function requestRowMenu(request: RequestSummary, sources: RequestMenuSources): RowMenu {
 	const { handlers, reference, copy, moveActions, isDeleting } = sources;
 	const own: RowAction[] = [
-		{ label: "Rename", icon: Edit2, onSelect: () => handlers.onStartRequestRename(request) },
+		{
+			label: "Rename",
+			icon: Edit2,
+			opensField: true,
+			onSelect: () => handlers.onStartRequestRename(request),
+		},
 		{
 			label: "Duplicate",
 			icon: CopyPlus,

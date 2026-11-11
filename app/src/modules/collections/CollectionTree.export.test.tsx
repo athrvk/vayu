@@ -18,13 +18,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import type { Collection } from "@/types";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 
@@ -49,15 +50,40 @@ vi.mock("@/queries", () => ({
 	useStopMockServerMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+/**
+ * What the real dialogs do when they close: hand Radix's close event to the
+ * caller's `onCloseAutoFocus` before they unmount. The stub keeps that seam and
+ * nothing else.
+ */
+interface StubProps {
+	collection: Collection;
+	onOpenChange: (open: boolean) => void;
+	onCloseAutoFocus?: (event: Event) => void;
+}
+function StubDialog({ label, props }: { label: string; props: StubProps }) {
+	return (
+		<>
+			<p data-testid="export-dialog">
+				{label} of {props.collection.name}
+			</p>
+			<button
+				type="button"
+				onClick={() => {
+					props.onCloseAutoFocus?.(new Event("focus", { cancelable: true }));
+					props.onOpenChange(false);
+				}}
+			>
+				Close stub
+			</button>
+		</>
+	);
+}
+
 vi.mock("./ExportSpecDialog", () => ({
-	default: ({ collection }: { collection: Collection }) => (
-		<p data-testid="export-dialog">OpenAPI export of {collection.name}</p>
-	),
+	default: (props: StubProps) => <StubDialog label="OpenAPI export" props={props} />,
 }));
 vi.mock("./ExportPostmanDialog", () => ({
-	default: ({ collection }: { collection: Collection }) => (
-		<p data-testid="export-dialog">Postman export of {collection.name}</p>
-	),
+	default: (props: StubProps) => <StubDialog label="Postman export" props={props} />,
 }));
 
 function renderTree() {
@@ -109,4 +135,28 @@ describe("a collection row's export entries", () => {
 		const mounted = await screen.findAllByTestId("export-dialog");
 		expect(mounted.map((node) => node.textContent)).toEqual([dialog]);
 	});
+
+	// The dialog opens from a menu item that closes with its menu, so Radix's own
+	// restore lands on `<body>` (#3443). The row it was opened over is where
+	// focus belongs.
+	it.each([["Export as OpenAPI"], ["Export as Postman Collection"]])(
+		"%s hands focus back to the row it was opened over",
+		async (entry) => {
+			renderTree();
+			await openRowMenu();
+			fireEvent.click(screen.getByRole("menuitem", { name: entry }));
+			await screen.findByTestId("export-dialog");
+			await menuClosedAndFocusSettled();
+			// The real dialog holds focus while it is open; the stub has no trap.
+			(document.activeElement as HTMLElement).blur();
+
+			fireEvent.click(screen.getByRole("button", { name: "Close stub" }));
+
+			await waitFor(() =>
+				expect(document.activeElement).toBe(
+					document.querySelector('[data-collection-id="acme"]')
+				)
+			);
+		}
+	);
 });

@@ -26,6 +26,7 @@ import { useTabsStore } from "@/stores";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 const requests = new Map([
@@ -165,6 +166,40 @@ describe("right-click on a tree row", () => {
 			await waitFor(() => expect(document.activeElement).toBe(row()));
 		});
 	}
+
+	/*
+	 * An action that opens a field has to leave focus in it (#3443). The field
+	 * mounts while the menu's focus scope is still trapping, and the menu then
+	 * hands focus back to the row it opened over - which, for Rename, blurred
+	 * the field and committed the name unchanged, so Rename did nothing.
+	 */
+	describe("an action that opens a field", () => {
+		it("leaves Add collection's name field focused", async () => {
+			renderTree();
+			fireEvent.contextMenu(collectionRow());
+			fireEvent.click(await screen.findByRole("menuitem", { name: /Add collection/ }));
+			const field = await screen.findByPlaceholderText("Collection name");
+
+			await menuClosedAndFocusSettled();
+
+			expect(document.activeElement).toBe(field);
+		});
+
+		for (const [name, row] of ROWS) {
+			it(`leaves ${name}'s rename field mounted and focused`, async () => {
+				renderTree();
+				fireEvent.contextMenu(row());
+				fireEvent.click(await screen.findByRole("menuitem", { name: /Rename/ }));
+				await waitFor(() => expect(row().querySelector("input")).not.toBeNull());
+
+				await menuClosedAndFocusSettled();
+
+				const field = row().querySelector("input");
+				expect(field).not.toBeNull();
+				expect(document.activeElement).toBe(field);
+			});
+		}
+	});
 
 	it("marks the rows so the main process draws no menu of its own over them", () => {
 		renderTree();

@@ -45,6 +45,12 @@ export interface MoveToDialogProps {
 	onClose: () => void;
 	/** `null` is the top level, which only a collection can be moved to. */
 	onMove: (entity: TreeEntity, ownerId: string | null) => void;
+	/**
+	 * Where focus goes when the dialog closes. Radix restores it to whatever held
+	 * it before the dialog opened, which here is a menu item that is gone: focus
+	 * lands on `<body>` (#3443). The caller knows the row.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** A candidate destination, with the depth its label is indented by. */
@@ -75,7 +81,13 @@ function moveCandidates(entity: TreeEntity, collections: Collection[]): Candidat
 	return walk(null, 0);
 }
 
-export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDialogProps) {
+export function MoveToDialog({
+	entity,
+	collections,
+	onClose,
+	onMove,
+	onCloseAutoFocus,
+}: MoveToDialogProps) {
 	if (!entity) return null;
 
 	const candidates = moveCandidates(entity, collections);
@@ -91,7 +103,7 @@ export function MoveToDialog({ entity, collections, onClose, onMove }: MoveToDia
 
 	return (
 		<Dialog open onOpenChange={(next) => !next && onClose()}>
-			<DialogContent className="sm:max-w-lg">
+			<DialogContent className="sm:max-w-lg" onCloseAutoFocus={onCloseAutoFocus}>
 				<DialogHeader>
 					<DialogTitle>Move &ldquo;{entity.name}&rdquo;</DialogTitle>
 					<DialogDescription>

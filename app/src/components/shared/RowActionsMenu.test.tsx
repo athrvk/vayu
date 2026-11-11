@@ -24,8 +24,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { CopyPlus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowActionsMenu } from "./RowActionsMenu";
+import type { RowAction } from "./row-actions";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const duplicate = vi.fn();
 const remove = vi.fn();
@@ -170,5 +173,63 @@ describe("where focus lands when the menu closes", () => {
 		fireEvent.keyDown(menu, { key: "Escape" });
 
 		await waitFor(() => expect(onCloseAutoFocus).toHaveBeenCalledTimes(1));
+	});
+});
+
+describe("an action that opens a field (#3443)", () => {
+	const rename = vi.fn();
+
+	/** A row whose Rename mounts an `autoFocus` field, as the tree's does. */
+	function RenameRow() {
+		const [renaming, setRenaming] = useState(false);
+		const rowActions: RowAction[] = [
+			{
+				label: "Rename",
+				icon: Pencil,
+				opensField: true,
+				onSelect: () => {
+					rename();
+					setRenaming(true);
+				},
+			},
+		];
+		return (
+			<div role="treeitem" aria-selected={false} tabIndex={0} data-testid="row">
+				{renaming && <input aria-label="Name" autoFocus />}
+				<RowActionsMenu label={LABEL} actions={rowActions} tabIndex={-1} />
+			</div>
+		);
+	}
+
+	it("runs the action once the menu has closed, not while it is still open", async () => {
+		render(<RenameRow />);
+		trigger().click();
+
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+
+		expect(rename).not.toHaveBeenCalled();
+		await waitFor(() => expect(rename).toHaveBeenCalledTimes(1));
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+	});
+
+	it("leaves focus in the field it opened rather than handing it to the row", async () => {
+		render(<RenameRow />);
+		trigger().click();
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+
+		const field = await screen.findByLabelText("Name");
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(field);
+	});
+
+	it("runs an ordinary action straight from the select", async () => {
+		renderMenu();
+		trigger().click();
+
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Duplicate" }));
+
+		expect(duplicate).toHaveBeenCalledTimes(1);
 	});
 });

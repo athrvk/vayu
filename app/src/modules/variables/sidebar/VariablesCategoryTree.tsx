@@ -590,6 +590,7 @@ export default function VariablesCategoryTree() {
 											{
 												label: "Rename",
 												icon: Edit2,
+												opensField: true,
 												onSelect: () => startRenameEnvironment(environment),
 											},
 											{

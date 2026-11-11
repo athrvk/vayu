@@ -2487,6 +2487,8 @@ workspace with 2 collections and 4 requests cost 17 presses to tab past.
   variables sidebar's rows - and focuses the row on the way past, so Escape returns focus there rather
   than dropping it to `<body>` - the tree still has to hold its one tab stop
   after the menu closes, whichever way it opened.
+  An action that opens a field (Add collection, Rename) is the exception to
+  that hand-back; see `opensField` below.
 - **The second binding on those two is what a Mac keyboard can reach.** The key
   labelled "delete" on a Mac reports `"Backspace"` (`"Delete"` is forward-delete,
   Fn+Delete), and Mac keyboards have no Menu key and default F10 to a media key -
@@ -2535,6 +2537,18 @@ because the tree is one tab stop and the keys above are the way in. Closing the
 menu hands focus back to the *row*, not to the trigger Radix would return it to:
 a `tabIndex={-1}` control holding the tree's focus is a stop the user cannot Tab
 back to.
+
+**An action that opens a field runs after its menu has closed** (`opensField` on
+the `RowAction`, #3443; Add collection and the Rename of the tree and the variables sidebar). The menu's focus scope
+is still trapping when `onSelect` runs, so a field mounted from there claims
+focus and is yanked back into the menu, and the close then hands focus to the
+row: the field shows but the row holds the keys, so typing drives the typeahead,
+Backspace deletes the row, and a rename's blur commits the name unchanged. The
+menu instead records the action and runs it from `onCloseAutoFocus` - Radix's
+signal that its cleanup is done - skipping the hand-back to the row, so the field
+mounts into a page nothing else is holding focus on. Both menus do this through
+`useAfterMenuClose`, because the `⋯` dropdown and right-click are different Radix
+families with the same trap. An action that opens no field stays on `onSelect`.
 
 Rows declare behaviour through data attributes rather than props
 (`data-tree-activate`, `data-tree-toggle`, `data-tree-menu`, `data-tree-rename`,
@@ -2625,6 +2639,27 @@ In the windowed collection tree the successor, the parent and the row before
 are kept mounted beside the row holding the tab stop, and for a commit after it
 leaves, so the answer read from the mounted rows is the one the whole list
 gives (`rowsAroundFocus`).
+
+**A request row's `⋯` menu stays mounted while its delete runs** (#3443). The
+menu is what hands focus back to the row the delete was invoked from, and
+`useDeleteRefocus` then moves on from that row once it leaves; a menu unmounted
+at the start of the delete took the hand-back with it and left the removed row's
+focus on `<body>`. Only a rename removes it, as on a folder row.
+
+**A dialog opened from a row's menu hands focus back to that row.** Move to,
+Run collection and both exports are controlled dialogs with no trigger, and the
+menu item that opened them closes with its menu, so Radix's restore has nowhere
+to land - `<body>`, again. `CollectionTree` passes each an `onCloseAutoFocus`
+that focuses the row through the window (`revealRow` + `focusTreeRow`), so the
+row is mounted even if the dialog's own scrolling moved it away, and the tab
+stop travels with it.
+
+**A folder just created is revealed** (#3443). It lands where the sort puts it -
+the end of the root list, or the top of its parent - which in a long tree is off
+screen, so the create calls `revealEntity` (`useRevealActiveSelection`, the same
+reveal a move uses): ancestors expanded, the row mounted and scrolled to through
+the window, focus and the tab stop on it. The new-folder field that held focus
+unmounts with the create, so without this focus fell to `<body>`.
 
 **A tree that runs out of rows still has to name somewhere.** The rules above
 answer for every row but one: a root falls back to the root before it, so it

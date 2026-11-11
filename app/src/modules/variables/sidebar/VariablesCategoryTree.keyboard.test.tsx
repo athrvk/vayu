@@ -28,6 +28,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import VariablesCategoryTree from "./VariablesCategoryTree";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 import type { Collection, Environment } from "@/types";
 
 const STAGING: Environment = {
@@ -368,6 +369,19 @@ describe("right-click reaches the same menu (#1360)", () => {
 		fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
 
 		await waitFor(() => expect(document.activeElement).toBe(staging));
+	});
+
+	it("opens Rename's field focused, so the blur that commits is the user's", async () => {
+		const tree = renderTree();
+
+		fireEvent.contextMenu(row(tree, "Staging"));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+		const field = await within(tree).findByRole("textbox");
+
+		await menuClosedAndFocusSettled();
+
+		expect(document.activeElement).toBe(field);
+		expect(updateEnvironment).not.toHaveBeenCalled();
 	});
 });
 

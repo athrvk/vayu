@@ -80,9 +80,20 @@ export interface ExportSpecDialogProps {
 	 */
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
+	/**
+	 * Where focus goes when the dialog closes. Radix restores it to whatever held
+	 * it before the dialog opened, which for a dialog opened from a row's menu is
+	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
+	 * knows the row calls `preventDefault` and focuses it.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
-export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpecDialogProps) {
+export default function ExportSpecDialog({
+	collection,
+	onOpenChange,
+	onCloseAutoFocus,
+}: ExportSpecDialogProps) {
 	const [format, setFormat] = useState<ExportFormat>("json");
 	const [mode, setMode] = useState<ExportMode>("contract");
 	const [saveError, setSaveError] = useState<string | null>(null);
@@ -117,7 +128,7 @@ export default function ExportSpecDialog({ collection, onOpenChange }: ExportSpe
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-xl">
+			<DialogContent className="sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
 				<DialogHeader>
 					<DialogTitle>Export as OpenAPI</DialogTitle>
 					<DialogDescription>

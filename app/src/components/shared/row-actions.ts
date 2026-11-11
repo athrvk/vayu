@@ -34,6 +34,13 @@ export interface RowAction {
 	 */
 	iconMotion?: IconMotion;
 	onSelect: () => void;
+	/**
+	 * The action opens a field that takes focus as it mounts (Rename, Add
+	 * collection). The menu runs it once it has closed rather than from
+	 * `onSelect`, because focus a field claims while the menu is still closing
+	 * is taken back (`useAfterMenuClose`, #3443).
+	 */
+	opensField?: boolean;
 	/** Renders in destructive colour and is separated from the actions above. */
 	destructive?: boolean;
 	disabled?: boolean;

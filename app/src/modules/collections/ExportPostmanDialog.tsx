@@ -68,11 +68,19 @@ export interface ExportPostmanDialogProps {
 	 */
 	collection: Collection;
 	onOpenChange: (open: boolean) => void;
+	/**
+	 * Where focus goes when the dialog closes. Radix restores it to whatever held
+	 * it before the dialog opened, which for a dialog opened from a row's menu is
+	 * a menu item that is gone: focus lands on `<body>` (#3443). A caller that
+	 * knows the row calls `preventDefault` and focuses it.
+	 */
+	onCloseAutoFocus?: (event: Event) => void;
 }
 
 export default function ExportPostmanDialog({
 	collection,
 	onOpenChange,
+	onCloseAutoFocus,
 }: ExportPostmanDialogProps) {
 	const [includeSecrets, setIncludeSecrets] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
@@ -93,7 +101,7 @@ export default function ExportPostmanDialog({
 
 	return (
 		<Dialog open onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-xl">
+			<DialogContent className="sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
 				<DialogHeader>
 					<DialogTitle>Export as Postman Collection</DialogTitle>
 					<DialogDescription>
