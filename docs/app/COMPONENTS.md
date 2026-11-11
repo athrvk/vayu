@@ -2644,7 +2644,19 @@ offers: setup and teardown run outside any request, so they get only the
 engine's `both` templates, never a `pm.response` one (#3457). Its lead
 sentence is the kind's own catalogue `description` (issue #1608, absorbed
 there by #1607) rather than a hard-coded pair of strings, so the text is
-authored once and doubles as the card's collapsed-summary fallback. It
+authored once and doubles as the card's collapsed-summary fallback. **The
+kind's advanced properties render under the editor** (#3457): `script.pre` /
+`script.post` declare `config.inline` ("Run inline", `x-vayu-group: advanced`)
+and nothing else in the app set it, so `ScriptElementForm` takes the `schema`
+and `errors` `ElementList` hands every bespoke form, slices the advanced
+properties out of the schema (`subsetSchema`, `schema-subset.ts`, shared with
+`ModeElementForm`) and renders them through `GenericElementForm` - the switch
+is the generic form's own `ToggleRow` inside its Advanced disclosure, closed
+until the element sets one, and turning it off stores `inline: false` rather
+than removing the key, as that form does for every boolean. `script.setup` /
+`script.teardown` have no `inline` (the engine refuses it: a run-boundary kind
+has no inline-or-deferred choice), so their subset is empty and the form
+renders nothing there, not an empty disclosure. It
 deliberately carries none of the old `ScriptPanel`'s variable-reference chips
 or inherited/legacy notices - those read `useRequestBuilderContext`, which
 this primitive cannot depend on - so inheritance is shown once for the whole

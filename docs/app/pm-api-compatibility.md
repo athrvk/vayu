@@ -746,7 +746,8 @@ named ("Collection pre-request script failed - ..."). An entry stored before
 the field carries no `scope` and reads as the request's.
 
 **A load test runs a pre-request script only when it is opted in inline**
-(`config.inline`, or the run's `elements.scripts` override; see
+(`config.inline`, set by the **Run inline** switch under the script's editor
+in the Elements tab, or the run's `elements.scripts` override; see
 [load-test scripts](../engine/scripting.md#load-test-scripts)), so a check
 before the request has nothing to assert on unless the script is inlined.
 

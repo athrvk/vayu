@@ -516,7 +516,10 @@ off the kind's registered `hotPath`, never a `kind ==` comparison (the extensibi
 other; otherwise the step keeps its pre-#1495 behaviour, deferred to the post-run `tests`
 replay, which now skips a step whose script already ran inline
 (`RunContext::script_element_runs_inline` is the one place that decision is made, read by
-both sides).
+both sides). The app sets `config.inline` from the **Run inline** switch under a
+`script.pre` / `script.post` editor (the kind's schema declares it `x-vayu-group: "advanced"`,
+so it sits in the card's Advanced disclosure, #3457); `script.setup` / `script.teardown` have
+no such property and their form renders none.
 
 **Per-VU isolation.** A load run's VUs share one event loop, so what an element writes
 (`extract.*`'s target variable, an inline `script.*`'s `pm.environment.set`) cannot land in
@@ -651,7 +654,8 @@ run-level `elements` override (above) - compiled once at run start into
 `Phase::StepAfter` once the response is in, the same phases a design send
 uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
 `script.post` element runs inline only when its own `config.inline` is
-`true` or the run's `elements.scripts` override forces it -
+`true` (the app's **Run inline** switch on the script's card, #3457) or the run's
+`elements.scripts` override forces it -
 `RunContext::script_element_runs_inline` deciding exactly as it does for a
 scenario step. An unmarked `script.post` defers to this run's own completion
 replay (`RunContext::test_scripts`, one entry per un-inlined element taken at

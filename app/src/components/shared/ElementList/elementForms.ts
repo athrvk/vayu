@@ -25,25 +25,12 @@
  */
 
 import type { ComponentType } from "react";
-import type { ElementConfigSchema } from "@/types";
 import { ScriptElementForm, type ScriptElementFormProps } from "./ScriptElementForm";
 import { ModeElementForm } from "./ModeElementForm";
 import { ELEMENT_MODES } from "./element-modes";
 
-export interface ElementFormProps extends ScriptElementFormProps {
-	/**
-	 * The kind's `configSchema`, for a bespoke form that still renders its
-	 * fields from the catalogue. Absent only for an element naming a kind this
-	 * engine build no longer serves.
-	 */
-	schema?: ElementConfigSchema;
-	/**
-	 * What `validateElementConfig` says is wrong with each config field, by dot
-	 * path. A form that renders config fields shows each message on its field;
-	 * the script forms have no constrained field and ignore it.
-	 */
-	errors?: Readonly<Record<string, string>>;
-}
+/** What every bespoke form is handed: the script form's props carry the catalogue schema and field errors too. */
+export type ElementFormProps = ScriptElementFormProps;
 
 export const ELEMENT_FORM_OVERRIDES: Record<string, ComponentType<ElementFormProps>> = {
 	"script.pre": ScriptElementForm,

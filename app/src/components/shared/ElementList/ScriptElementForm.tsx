@@ -12,6 +12,13 @@
  * script, instead of the generic form's plain text field a multi-line script
  * would otherwise get.
  *
+ * **The schema's advanced properties render under the editor** (#3457): the
+ * engine gives `script.pre` / `script.post` a `config.inline` switch ("Run
+ * inline", x-vayu-group advanced) that no other part of the app sets, so this
+ * form hands the advanced subset of the kind's own schema to
+ * {@link GenericElementForm} rather than hand-drawing the switch. A kind with
+ * no advanced property (setup, teardown) renders nothing there.
+ *
  * **The kind decides the label and the snippets** (`SCRIPT_KINDS`). Setup and
  * teardown run once per run, outside any request, so there is no `pm.request`
  * or `pm.response` to template: they are offered only the engine's `"both"`
@@ -83,7 +90,10 @@ import {
 	SCRIPT_EDITOR_MIN_HEIGHT,
 } from "@/constants/layout";
 import { cn } from "@/lib/utils";
+import type { ElementConfigSchema } from "@/types";
 import type { ScriptSnippetContext } from "@/types/domain";
+import { GenericElementForm } from "./GenericElementForm";
+import { subsetSchema } from "./schema-subset";
 
 interface ScriptKindPresentation {
 	/** The editor's accessible name; the resize handle's is derived from it. */
@@ -109,7 +119,29 @@ export interface ScriptElementFormProps {
 	config: Record<string, unknown>;
 	/** The kind's own catalogue description - the form's lead sentence. */
 	description: string;
+	/**
+	 * The kind's `configSchema`. Its `x-vayu-group: "advanced"` properties are
+	 * rendered under the editor (`script.pre` / `script.post`'s `inline`, #3457);
+	 * absent only for an element naming a kind this engine build no longer serves.
+	 */
+	schema?: ElementConfigSchema;
+	/** `validateElementConfig`'s messages for the element, by dot path from the top of `config`. */
+	errors?: Readonly<Record<string, string>>;
 	onChange: (config: Record<string, unknown>) => void;
+}
+
+/**
+ * The schema's advanced properties as a schema of their own, or `undefined`
+ * when it declares none - setup and teardown have no `inline` (a run-boundary
+ * kind has no inline-or-deferred choice), and the engine refuses it there.
+ */
+function advancedSubset(schema: ElementConfigSchema | undefined) {
+	const properties = schema?.properties ?? {};
+	const names = Object.keys(properties).filter(
+		(name) => properties[name]?.["x-vayu-group"] === "advanced"
+	);
+	if (names.length === 0) return undefined;
+	return subsetSchema(properties, schema?.required, names);
 }
 
 export function ScriptElementForm({
@@ -117,12 +149,15 @@ export function ScriptElementForm({
 	kind,
 	config,
 	description,
+	schema,
+	errors,
 	onChange,
 }: ScriptElementFormProps) {
 	const script = typeof config.script === "string" ? config.script : "";
 	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	const { label: editorLabel, snippets: snippetContext } =
 		SCRIPT_KINDS[kind] ?? UNKNOWN_SCRIPT_KIND;
+	const advanced = advancedSubset(schema);
 
 	// This row's own entry, if it has ever been dragged - a live subscription,
 	// so a drag on *this* row's handle re-renders it. The fallback default is
@@ -244,6 +279,14 @@ export function ScriptElementForm({
 				onCollapsedChange={handleSnippetsCollapsedChange}
 				onInsert={(snippet) => insertSnippetAtCursor(editorRef.current, snippet)}
 			/>
+			{advanced && (
+				<GenericElementForm
+					schema={advanced}
+					config={config}
+					errors={errors}
+					onChange={onChange}
+				/>
+			)}
 		</div>
 	);
 }
