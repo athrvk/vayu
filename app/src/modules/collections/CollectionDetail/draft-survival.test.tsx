@@ -430,6 +430,40 @@ describe("CollectionDetail - an unsaved draft outliving the screen (#3459)", () 
 		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
 		expect(useSaveStore.getState().status).toBe("idle");
 	});
+
+	it("goes with its tab on Close others, and a clean tab's leftover draft on Close saved", () => {
+		// A blank Info name is stored but never dirty to the save store, so its
+		// tab reads saved. Mutation check: drop `forgetDrafts` from `closeTabsNow`
+		// and both drafts outlive their tabs.
+		editElements().unmount();
+		useEntityDraftStore
+			.getState()
+			.put("c2:info", { draft: { name: "", description: "" }, baseline: {} });
+		useEngineStore.setState({ engineStatus: "connected" });
+		useRealTabsStore.setState({
+			openTabs: [
+				{ id: "t1", type: "collection", entityId: "c1" },
+				{ id: "t2", type: "collection", entityId: "c2" },
+				{ id: "t3", type: "request", entityId: "r1" },
+			],
+			activeTabId: "t3",
+		});
+
+		useRealTabsStore.getState().closeSavedTabs();
+		expect(useRealTabsStore.getState().openTabs.map((t) => t.id)).toEqual(["t1"]);
+		expect([...useEntityDraftStore.getState().entries.keys()]).toEqual(["c1:elements"]);
+
+		useRealTabsStore.setState({
+			openTabs: [
+				{ id: "t1", type: "collection", entityId: "c1" },
+				{ id: "t3", type: "request", entityId: "r1" },
+			],
+			activeTabId: "t3",
+		});
+		useRealTabsStore.getState().closeOtherTabs("t3");
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
+	});
 });
 
 describe("CollectionDetail - a draft away from its screen, against what is stored (#3459)", () => {
@@ -551,5 +585,43 @@ describe("CollectionDetail - a draft away from its screen, against what is store
 		expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
 		expect(screen.queryByText("Couldn't save the elements list")).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: /save elements/i })).toBeDisabled();
+	});
+});
+
+describe("CollectionDetail - Info and Auth drafts outliving the screen (#3459)", () => {
+	beforeEach(() => {
+		resetHarness();
+		mutateAsync.mockReset();
+		mutateAsync.mockResolvedValue(collection);
+	});
+
+	it("brings an Info rename back on the remount", () => {
+		// Mutation check: drop the stored entry when `useEntityDraft` unmounts,
+		// and the remount shows the stored name with no context left pending.
+		const view = render(<Screen />);
+		fireEvent.change(nameInput(), { target: { value: "Renamed" } });
+		view.unmount();
+
+		render(<Screen />);
+
+		expect(screen.getByDisplayValue("Renamed")).toBeInTheDocument();
+		expect(useSaveStore.getState().contexts.get("collection-c1-info")?.hasPendingChanges).toBe(
+			true
+		);
+	});
+
+	it("brings an unsaved Auth pick back on the remount, still waiting for Save auth", () => {
+		// The same mutation check as Info's: the remount shows the stored mode.
+		const view = render(<Screen />);
+		selectTab(/auth/i);
+		fireEvent.click(screen.getByRole("combobox"));
+		fireEvent.click(screen.getByRole("option", { name: /No auth \(blocks inheriting\)/i }));
+		view.unmount();
+
+		render(<Screen />);
+
+		expect(screen.getByRole("combobox")).toHaveTextContent(/No auth \(blocks inheriting\)/i);
+		fireEvent.click(screen.getByRole("button", { name: /save auth/i }));
+		expect(mutateAsync).toHaveBeenCalledWith({ id: "c1", auth: { mode: "noauth" } });
 	});
 });
