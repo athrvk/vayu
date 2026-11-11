@@ -2518,8 +2518,10 @@ nested mode before handing its generic parts theirs. A row shows its message the
 way `NumberSettingRow` always has: `aria-invalid` on the control, the
 `border-destructive` edge and a `FieldError` the control's `aria-describedby`
 names, ahead of the hint's id. Number, text, dropdown (`SelectSettingRow`'s
-`error` prop) and untyped JSON fields all do; the script forms have no
-constrained field and ignore the prop. Only a value that is present and refused
+`error` prop) and untyped JSON fields all do; a boolean row shows none, so
+`script.pre` / `script.post`, which pass the prop to their advanced Run inline
+switch, show no message there today, and `script.setup` / `script.teardown`
+render nothing there and ignore it. Only a value that is present and refused
 shows a message: a fresh element's absent keys stay the "Needs ..." chip's, so
 the same field is never told twice. The row's mark covers both halves of
 `elementNeeds` (#3066): a collapsed element with a refused value and no missing
