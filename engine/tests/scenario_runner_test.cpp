@@ -1268,6 +1268,25 @@ TEST_F (ScenarioRunnerTest, ATeardownScriptsVariableWritesArePersisted) {
     EXPECT_EQ (global_vars.at ("teardown_global").value, "y");
 }
 
+// A workspace whose globals were never saved has no globals row, and the run's
+// one write-back has to create it rather than discard what a step set (#3453).
+// Mutation check: return nothing for an absent globals row in
+// `persist_script_variables` and `get_globals` stays empty.
+TEST_F (ScenarioRunnerTest, AGlobalSetOnAWorkspaceWithNoGlobalsRowIsPersisted) {
+    seed_collection ("col_1");
+    seed_request ("req_a", 0, "/ok", "pm.globals.set('fresh_global', 'y');");
+    ASSERT_FALSE (db_->get_globals ().has_value ());
+
+    const auto run_id = start (/*iterations=*/1);
+    ASSERT_EQ (await_terminal (run_id), vayu::RunStatus::Completed);
+
+    const auto globals = db_->get_globals ();
+    ASSERT_HAS_VALUE (globals);
+    const auto global_vars = vayu::json::parse_variables (globals->variables);
+    ASSERT_EQ (global_vars.count ("fresh_global"), 1u) << globals->variables;
+    EXPECT_EQ (global_vars.at ("fresh_global").value, "y");
+}
+
 // Probe XA: the collection's failing test used to be overwritten by the
 // request's passing one, and the step passed. Mutation check: assign instead
 // of folding in `script_kinds.cpp`'s `run_step_script` and the step passes.

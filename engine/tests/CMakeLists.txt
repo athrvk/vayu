@@ -162,6 +162,7 @@ add_executable(vayu_tests
     execute_auth_provenance_test.cpp
     execute_binary_body_test.cpp
     execute_elements_validation_test.cpp
+    execute_globals_test.cpp
     execute_transport_failure_test.cpp
     execute_disconnect_test.cpp
     oauth_client_test.cpp
@@ -425,6 +426,7 @@ set(vayu_scratch_database_suites
     ExecuteAuthProvenanceTest
     ExecuteBinaryBodyTest
     ExecuteElementsValidation
+    ExecuteGlobalsTest
     ExecuteTransportFailureTest
     ExecuteDisconnectTest
     ExecuteByteRowTest
@@ -472,6 +474,7 @@ set(vayu_scratch_database_suites
     OAuthClientTest
     OAuthRouteTest
     PerHostLimitRunTest
+    PersistIntoUnsavedGlobalsTest
     PersistScriptVariablesTest
     PlanAuthRefreshTest
     PlanScenarioAuthRefreshTest

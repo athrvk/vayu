@@ -1773,8 +1773,10 @@ one database lock:
 Everything else on the row is left as it is now, so an edit made in the
 variables editor, a `POST /globals` or another send's own write while the run
 was in flight survives it. A scope whose delta changes nothing is not written
-at all, so its `updated_at` does not move, and a row deleted meanwhile is not
-recreated.
+at all, so its `updated_at` does not move, and an environment or collection row
+deleted meanwhile is not recreated. The globals singleton is the exception: no
+row there means none was ever saved, not that one was deleted, so the first
+global a run sets creates it (#3453).
 
 ### A value keeps its type for the run
 
