@@ -21,20 +21,30 @@
  */
 
 import { useMemo } from "react";
-import { createStore, useStore } from "zustand";
+import { createStore, useStore, type StoreApi } from "zustand";
 import { useCollectionTreeHandlers } from "./context/CollectionTreeContext";
-import type { CollectionTreeDragState } from "./context/CollectionTreeContext";
+import type {
+	CollectionTreeDragState,
+	CollectionTreeDropTarget,
+} from "./context/CollectionTreeContext";
 import type { TreeEntity } from "./drop-position";
 import { entityRowKey } from "./tree-rows";
 import type { RowAction } from "@/components/shared";
+import { rowInsetPx } from "@/constants/layout";
+
+/** The drop line a row draws: which edge, and the left inset it starts at. */
+export interface RowDropLine {
+	edge: "before" | "after";
+	indentPx: number;
+}
 
 export interface RowDnd {
 	/** This row is the one being dragged. */
 	isDragging: boolean;
 	/** This row cannot be dropped on: it is inside the dragged folder's subtree. */
 	isBlocked: boolean;
-	/** A drop would land immediately before or after this row. */
-	dropEdge: "before" | "after" | null;
+	/** The line on this row's edge, for a drop beside this row or above it. */
+	dropLine: RowDropLine | null;
 	/** A drop would land inside this row (folders only). */
 	isDropInto: boolean;
 	/** The row menu's move entries, empty when no drag machinery is mounted. */
@@ -48,19 +58,44 @@ const IDLE_DRAG_STATE = createStore<CollectionTreeDragState>(() => ({
 }));
 
 /**
- * A row's drag state, subscribed per fact (#2543). The drop target changes on
- * every row the pointer crosses, so it is read through a selector that answers
- * only for this row: a crossing re-renders the row the line left and the row it
- * arrived on, not the tree. `dragging` changes twice per drag, so every row
- * reading it is fine.
+ * The drop target when it is drawn on the row `rowKey` names, else `null`: the
+ * selector answers only for this row, so a crossing re-renders the row the
+ * indicator left and the row it arrived on, not the tree (#2543).
+ */
+function useDropTargetOn(
+	dragState: StoreApi<CollectionTreeDragState>,
+	rowKey: string
+): CollectionTreeDropTarget | null {
+	return useStore(dragState, (state) =>
+		state.dropTarget?.rowKey === rowKey ? state.dropTarget : null
+	);
+}
+
+/** The line half of a drop target; the indent is the target's depth, not the row's. */
+function lineOf(target: CollectionTreeDropTarget | null): RowDropLine | null {
+	if (!target || target.position === "inside") return null;
+	return { edge: target.position, indentPx: rowInsetPx(target.depth) };
+}
+
+/**
+ * The drop line for a row that is not a treeitem - the "Empty collection"
+ * line, the new-folder form - which a line after an open folder can sit under.
+ */
+export function useRowDropLine(rowKey: string): RowDropLine | null {
+	const { dnd } = useCollectionTreeHandlers();
+	return lineOf(useDropTargetOn(dnd?.dragState ?? IDLE_DRAG_STATE, rowKey));
+}
+
+/**
+ * A row's drag state, subscribed per fact (#2543): the drop target through
+ * `useDropTargetOn`, and `dragging`, which changes twice per drag, so every
+ * row reading it is fine.
  */
 export function useRowDnd(entity: TreeEntity): RowDnd {
 	const { dnd } = useCollectionTreeHandlers();
 	const dragState = dnd?.dragState ?? IDLE_DRAG_STATE;
 	const dragging = useStore(dragState, (state) => state.dragging);
-	const target = useStore(dragState, (state) =>
-		state.dropTarget?.id === entity.id ? state.dropTarget.position : null
-	);
+	const target = useDropTargetOn(dragState, entityRowKey(entity));
 	const isBlocked = useMemo(
 		() => (dnd && dragging ? dnd.isDropBlocked(dragging, entity) : false),
 		[dnd, dragging, entity]
@@ -70,7 +105,7 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 		return {
 			isDragging: false,
 			isBlocked: false,
-			dropEdge: null,
+			dropLine: null,
 			isDropInto: false,
 			moveActions: [],
 		};
@@ -78,8 +113,8 @@ export function useRowDnd(entity: TreeEntity): RowDnd {
 	return {
 		isDragging: dragging?.id === entity.id,
 		isBlocked,
-		dropEdge: target === "inside" ? null : target,
-		isDropInto: target === "inside",
+		dropLine: lineOf(target),
+		isDropInto: target?.position === "inside",
 		moveActions: dnd.moveActions(entity),
 	};
 }

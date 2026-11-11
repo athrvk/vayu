@@ -312,22 +312,57 @@ export function rowSpacingAbove(rows: readonly TreeRow[], index: number): 0 | 0.
 	return rows[index].depth > rows[index - 1].depth ? 1 : 0.5;
 }
 
+/** The index just past `rows[start]`'s visible subtree: the next row at its depth or shallower. */
+function subtreeEnd(rows: readonly TreeRow[], start: number): number {
+	const depth = rows[start].depth;
+	let end = start + 1;
+	while (end < rows.length && rows[end].depth > depth) end++;
+	return end;
+}
+
 /**
  * The keys of every row inside `collectionId`'s subtree, the folder's own row
  * excluded: the rows following it that sit deeper than it does. Empty when the
  * folder is not visible or not expanded.
  */
 export function rowKeysUnder(rows: readonly TreeRow[], collectionId: string): Set<string> {
-	const keys = new Set<string>();
 	const start = rows.findIndex(
 		(row) => row.kind === "folder" && row.collection.id === collectionId
 	);
-	if (start === -1) return keys;
+	if (start === -1) return new Set();
+	return new Set(rows.slice(start + 1, subtreeEnd(rows, start)).map((row) => row.key));
+}
+
+/**
+ * A drop line between rows: the row it is drawn on, the edge, and the depth
+ * whose indent it starts at, which is the depth of the row the drop lands
+ * beside and not always that of the row carrying the line.
+ */
+export interface DropLine {
+	rowKey: string;
+	position: "before" | "after";
+	depth: number;
+}
+
+/**
+ * Where the line for a drop beside the row `key` names is drawn (#3447).
+ *
+ * Before a row, on its top edge. After a row, under the last row of its
+ * visible subtree: a row dropped after an open folder lands after everything
+ * in it, so the folder row's own bottom edge, above its first child, would show
+ * a different drop. An open folder's form and "Empty collection" line are rows
+ * of that subtree too. `null` when no visible row has the key.
+ */
+export function dropLineBeside(
+	rows: readonly TreeRow[],
+	key: string,
+	position: "before" | "after"
+): DropLine | null {
+	const start = rows.findIndex((row) => row.key === key);
+	if (start === -1) return null;
 	const depth = rows[start].depth;
-	for (let index = start + 1; index < rows.length && rows[index].depth > depth; index++) {
-		keys.add(rows[index].key);
-	}
-	return keys;
+	if (position === "before") return { rowKey: key, position, depth };
+	return { rowKey: rows[subtreeEnd(rows, start) - 1].key, position, depth };
 }
 
 /**

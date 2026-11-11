@@ -419,6 +419,50 @@ describe("a drop", () => {
 		fireEvent.pointerUp(requestRow("r2"), { pointerId: 1, clientX: 10, clientY: 0 });
 	});
 
+	/*
+	 * An open folder's bottom band is "after the folder", which lands after
+	 * everything in it (#3447). Its own bottom edge is the seam above its first
+	 * child, a different drop; the line belongs under its last visible row, at
+	 * the folder's indent rather than that row's.
+	 */
+	it("draws a line after an open folder under its last row, at the folder's indent", () => {
+		useCollectionsStore.setState({ expandedCollectionIds: new Set(["c1", "c3", "c2"]) });
+		renderTree();
+		const lineUnderThree = () =>
+			requestRow("r3").querySelector<HTMLElement>('[data-drop-indicator="after"]');
+		// After Three itself first: the same row and edge, at Three's depth (24px).
+		dragTo(collectionRow("c1"), yIn(rowIndex(requestRow("r3")), 0.9), { hold: true });
+		expect(lineUnderThree()?.style.left).toBe("24px");
+
+		const y = yIn(rowIndex(collectionRow("c2")), 0.9);
+		fireEvent.pointerMove(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: y });
+		// Beta's depth (0), not Three's.
+		expect(lineUnderThree()?.style.left).toBe("8px");
+		expect(collectionRow("c2").querySelector("[data-drop-indicator]")).toBeNull();
+
+		fireEvent.pointerUp(collectionRow("c1"), { pointerId: 1, clientX: 10, clientY: y });
+		expect(fixture.collections.filter((c) => !c.parentId).map((c) => c.id)).toEqual([
+			"c2",
+			"c1",
+		]);
+	});
+
+	it("draws a line after an open, empty folder under its placeholder", () => {
+		renderTree();
+		const y = yIn(rowIndex(collectionRow("c3")), 0.9);
+		dragTo(requestRow("r2"), y, { hold: true });
+
+		const line = row("#tree-empty-c3").querySelector<HTMLElement>(
+			'[data-drop-indicator="after"]'
+		);
+		expect(line).not.toBeNull();
+		expect(line!.style.left).toBe("24px");
+		expect(collectionRow("c3").querySelector("[data-drop-indicator]")).toBeNull();
+
+		fireEvent.pointerUp(requestRow("r2"), { pointerId: 1, clientX: 10, clientY: y });
+		expect(fixture.requests.get("c1")?.map((r) => r.id)).toEqual(["r2", "r1"]);
+	});
+
 	it("is cancelled by Escape, leaving nothing written", () => {
 		renderTree();
 		const source = requestRow("r2");

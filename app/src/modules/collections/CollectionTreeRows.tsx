@@ -33,6 +33,7 @@ import {
 } from "./tree-rows";
 import { TREE_ITEM } from "./tree-focus";
 import { useDraggingRowKey } from "./tree-row-dnd";
+import { RowDropIndicatorFor } from "./TreeRowDnd";
 import { useTreeWindow } from "./useTreeWindow";
 import { cn } from "@/lib/utils";
 import { rowInsetPx } from "@/constants/layout";
@@ -118,12 +119,13 @@ function RowContent({ row }: { row: TreeRow }) {
 				<div
 					id={row.id}
 					data-tree-empty-owner={row.parentId}
-					className="flex h-full items-center pr-3 text-xs text-muted-foreground"
+					className="relative flex h-full items-center pr-3 text-xs text-muted-foreground"
 					style={{
 						paddingLeft: rowInsetPx(row.depth),
 						...treeGuideStyle(row.depth, row.activeGuideLevel),
 					}}
 				>
+					<RowDropIndicatorFor rowKey={row.key} />
 					Empty collection
 				</div>
 			);

@@ -187,7 +187,7 @@ function RequestItemRow({
 				rowDndClasses(dnd)
 			)}
 		>
-			<RowDropIndicator edge={dnd.dropEdge} indentPx={rowInsetPx(depth)} />
+			<RowDropIndicator line={dnd.dropLine} />
 			<button
 				onClick={handleClick}
 				onDoubleClick={handleDoubleClick}

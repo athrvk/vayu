@@ -2592,10 +2592,16 @@ before it is a drag is dropped, since its release would land where the tree
 never hears it.
 
 **Drop indicators are classes on rows that already exist.** A line between two
-rows is a 2px `bg-primary` span positioned inside the target row and indented to
-that row's own depth - the depth is the only thing separating "after this
-collapsed folder", "into it" and "after its parent". Dropping *into* a folder
-reuses the selected-row ring. Nothing new gets `role="treeitem"`: an indicator
+rows is a 2px `bg-primary` span positioned inside a row and indented to the
+depth of the row the drop lands beside - the depth is the only thing separating
+"after this collapsed folder", "into it" and "after its parent". A drop after an
+*open* folder lands after everything in it, so its line is drawn under the last
+visible row of the folder's subtree (a request, a sub-folder's last row, the
+"Empty collection" line or the new-folder form), still at the folder's indent:
+the folder row's own bottom edge is the seam above its first child, a different
+drop (#3447). Dropping *into* a folder reuses the selected-row ring. While the
+drawer auto-scrolls under a held pointer, every scroll frame hit-tests again, so
+the line and the drop follow the row the scroll brings under the pointer. Nothing new gets `role="treeitem"`: an indicator
 node between rows would join the tree's rows and change its shape mid-drag - a
 row with no level, sitting between a folder and its children. The row being
 dragged stays mounted however far the drawer auto-scrolls from it, so the source
