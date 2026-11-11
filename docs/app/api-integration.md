@@ -1182,7 +1182,8 @@ unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
 `assertionsFailed` (both or neither) on a scenario load run that made an exact
-assertion (#2820). The renderer reads `assertionsFailed` (the row's verdict and
+assertion (#2820), or `assertionsFailed` alone on a single-request run that
+stored `elements` or a test replay (#3458). The renderer reads `assertionsFailed` (the row's verdict and
 its result line); `assertionsPassed` has no renderer reader and is there for the
 MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted
