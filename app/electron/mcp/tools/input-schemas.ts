@@ -542,6 +542,13 @@ export function collectionScriptInput(which: "pre" | "post") {
 const AUTH_MODES = ["bearer", "basic", "apikey", "oauth2", "inherit", "none", "noauth"] as const;
 
 /**
+ * What a collection's `auth` may be: every mode but `inherit`. A collection is
+ * a link of the chain a request inherits through, and the engine refuses its
+ * own `inherit` (#3445).
+ */
+const COLLECTION_AUTH_MODES = AUTH_MODES.filter((mode) => mode !== "inherit");
+
+/**
  * Modes an import can store that the engine has no resolution for
  * (`UneditableAuthMode` in the app's `constants/auth-modes.ts`). Named so the
  * refusal can say Vayu does not send them rather than call them misspelt.
@@ -561,12 +568,15 @@ const UNEXECUTED_AUTH_MODES: readonly string[] = [
  * sends anyway, so the refusal has to happen here, before a request goes out
  * the agent believes is authenticated.
  */
-function authModeError(input: unknown): string {
+function authModeError(input: unknown, modes: readonly string[]): string {
 	const keep = 'Leave "auth" out to keep what is stored.';
-	if (typeof input === "string" && UNEXECUTED_AUTH_MODES.includes(input)) {
-		return `Vayu does not execute auth mode "${input}": a request carrying it is sent with no authentication. Use one of ${AUTH_MODES.join(", ")}. ${keep}`;
+	if (input === "inherit" && !modes.includes(input)) {
+		return `A collection cannot inherit auth: it is a link of the chain a request inherits through, so "inherit" is for requests. Use one of ${modes.join(", ")} - "none" is how a collection stops being an auth source. ${keep}`;
 	}
-	return `Unknown auth mode ${JSON.stringify(input)}. Modes are lowercase and exact: ${AUTH_MODES.join(", ")}. ${keep}`;
+	if (typeof input === "string" && UNEXECUTED_AUTH_MODES.includes(input)) {
+		return `Vayu does not execute auth mode "${input}": a request carrying it is sent with no authentication. Use one of ${modes.join(", ")}. ${keep}`;
+	}
+	return `Unknown auth mode ${JSON.stringify(input)}. Modes are lowercase and exact: ${modes.join(", ")}. ${keep}`;
 }
 
 /**
@@ -581,25 +591,28 @@ function authModeError(input: unknown): string {
  * header; a Postman-style `addTo` is refused because the engine would read
  * nothing from it and send the key in a header.
  */
-export const authInput = z
-	.object({
-		mode: z
-			.enum(AUTH_MODES, { error: (issue) => authModeError(issue.input) })
-			.describe(AUTH_MODES.join(" | ") + "."),
-		in: z
-			.enum(["header", "query"])
-			.optional()
-			.describe("apikey only: where the key goes (default header)."),
-	})
-	.passthrough()
-	.refine((auth) => auth.mode !== "apikey" || !("addTo" in auth), {
-		path: ["addTo"],
-		error: 'An apikey block places the key with "in" ("header" | "query"), not "addTo".',
-	})
-	.optional()
-	.describe(
-		"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."
-	);
+function authBlock(modes: readonly string[]) {
+	return z
+		.object({
+			mode: z
+				.enum(modes, { error: (issue) => authModeError(issue.input, modes) })
+				.describe(modes.join(" | ") + "."),
+			in: z
+				.enum(["header", "query"])
+				.optional()
+				.describe("apikey only: where the key goes (default header)."),
+		})
+		.passthrough()
+		.refine((auth) => auth.mode !== "apikey" || !("addTo" in auth), {
+			path: ["addTo"],
+			error: 'An apikey block places the key with "in" ("header" | "query"), not "addTo".',
+		})
+		.optional();
+}
+
+export const authInput = authBlock(AUTH_MODES).describe(
+	"Optional auth block (e.g. { mode: 'bearer', token: '{{apiToken}}' }); the engine resolves and applies it."
+);
 
 /**
  * The auth block as it is *stored* on a document, described for the resource
@@ -610,11 +623,24 @@ export const authInput = z
  * in the same shape, and an agent that read a request's `auth` over
  * `get_request` must be able to write it back verbatim. What differs per
  * subject is only which modes are meaningful: a request may `inherit` (its
- * default), while a collection is the root of the chain and never does.
+ * default), while a collection never does ({@link storedCollectionAuthInput}).
  */
 export function storedAuthInput(subject: string, extra: string) {
 	return authInput.describe(
 		`Auth block stored on ${subject}, in the same shape run_request takes - e.g. { mode: 'bearer', token: '{{apiToken}}' }. It is stored as written and resolved when the request is sent, so {{variables}} inside it are fine. ${extra}`
+	);
+}
+
+/**
+ * A collection's stored auth block (#3445): {@link authInput} without `inherit`,
+ * which `create_collection` / `update_collection` would otherwise forward for
+ * the engine to refuse. A folder is a collection, so this covers both. `inherit`
+ * stays in the shared `authInput`: `run_request`, `start_load_run` and a saved
+ * request's auth all legitimately use it.
+ */
+export function storedCollectionAuthInput(extra: string) {
+	return authBlock(COLLECTION_AUTH_MODES).describe(
+		`Auth block stored on this collection, in the same shape run_request takes - e.g. { mode: 'bearer', token: '{{apiToken}}' }. "inherit" is refused: a collection is a link of the chain a request inherits through, and { mode: "none" } is how it stops being an auth source. It is stored as written and resolved when a request below it is sent, so {{variables}} inside it are fine. ${extra}`
 	);
 }
 

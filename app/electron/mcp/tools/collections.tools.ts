@@ -41,7 +41,11 @@ import {
 	variablesInput,
 } from "./variable-blobs.js";
 import { readAuthArg, readScriptEdits, scriptElement, upsertScriptElement } from "./compose.js";
-import { collectionScriptInput, elementsInput, storedAuthInput } from "./input-schemas.js";
+import {
+	collectionScriptInput,
+	elementsInput,
+	storedCollectionAuthInput,
+} from "./input-schemas.js";
 import { type CascadeScope, describeCascade, readCascadeScope } from "./cascade.js";
 import { GUARDED_WRITE_SENTENCE } from "../remedy.js";
 
@@ -73,9 +77,8 @@ export const COLLECTION_TOOLS: McpTool[] = [
 				.describe("Optional parent collection ID; omit for a top-level collection."),
 			description: z.string().optional(),
 			variables: variablesInput("the new collection"),
-			auth: storedAuthInput(
-				"this collection",
-				'A collection is the root of an auth chain and never inherits, so "inherit" is refused by the engine; requests below it that store { mode: "inherit" } resolve to this block.'
+			auth: storedCollectionAuthInput(
+				'Requests below it that store { mode: "inherit" } resolve to this block unless a nearer folder sets one.'
 			),
 			elements: elementsInput("this collection"),
 			preRequestScript: collectionScriptInput("pre"),
@@ -150,9 +153,8 @@ export const COLLECTION_TOOLS: McpTool[] = [
 			description: z.string().optional().describe("New description."),
 			variables: variablesInput("this collection"),
 			removeVariables: removeVariablesInput("this collection"),
-			auth: storedAuthInput(
-				"this collection",
-				'A collection never inherits - it is the root of the chain - so the engine refuses "inherit" here; { mode: "none" } is how a collection stops being an auth source.'
+			auth: storedCollectionAuthInput(
+				"Replaces the stored block whole; leave it out to keep it."
 			),
 			elements: elementsInput("this collection"),
 			preRequestScript: collectionScriptInput("pre"),
