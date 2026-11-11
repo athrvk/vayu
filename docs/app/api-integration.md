@@ -1176,8 +1176,9 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer does not read it - no badge or glyph on the row changes - and the MCP
-`list_runs` rows are its consumer. A load run's results are
+renderer reads `failed` and `errored` (a completed run with either gets the
+failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
+the consumer of the rest. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and

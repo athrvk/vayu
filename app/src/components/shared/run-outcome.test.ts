@@ -20,7 +20,9 @@
  * A single-request run's failures (#3458): make `failedAssertionsOf` stop
  * summing `elements` and the exact-names case reddens; stop reading
  * `testValidation` and the sampled-names case reddens; drop the scenario guard
- * and the no-double-count case reddens.
+ * and the no-double-count case reddens. Make `rowOutcome` return `null` for a
+ * collection row and the collection cases redden; read only `failed` and the
+ * errored-only case reddens.
  */
 
 import { describe, it, expect } from "vitest";
@@ -492,10 +494,40 @@ describe("rowOutcome", () => {
 		expect(rowOutcome(row({}))).toBeNull();
 	});
 
-	it("says nothing for a design or collection row, whatever it carries", () => {
+	it("says nothing for a design row, whatever it carries", () => {
 		expect(
 			rowOutcome(row({ type: "design", resultSummary: { statusCode: 500, latencyMs: 3 } }))
 		).toBeNull();
-		expect(rowOutcome(row({ type: "scenario" }))).toBeNull();
+	});
+
+	// #3458: a collection row is failed when a step failed or errored.
+	describe("a collection row", () => {
+		function collection(
+			resultSummary: Extract<Run, { type: "scenario" }>["resultSummary"],
+			status: Run["status"] = "completed"
+		): Run {
+			return row({ type: "scenario", status, resultSummary });
+		}
+
+		it.each([
+			["a failed step", { passed: 3, failed: 1 }, "1 failed"],
+			["an errored step", { passed: 3, errored: 2 }, "2 errored"],
+			["both", { passed: 2, failed: 1, errored: 4, skipped: 5 }, "1 failed, 4 errored"],
+		])("is failed for %s", (_name, resultSummary, reason) => {
+			expect(rowOutcome(collection(resultSummary))).toEqual({ outcome: "failed", reason });
+		});
+
+		it.each([
+			["only passed and skipped steps", { passed: 3, skipped: 1 }],
+			["zeroed failure counts", { passed: 3, failed: 0, errored: 0 }],
+			["a step stopped by the user", { passed: 1, stopped: 2 }],
+		])("keeps its status glyph for %s", (_name, resultSummary) => {
+			expect(rowOutcome(collection(resultSummary))).toBeNull();
+		});
+
+		it("says nothing for a row with no summary or a run that did not complete", () => {
+			expect(rowOutcome(row({ type: "scenario" }))).toBeNull();
+			expect(rowOutcome(collection({ failed: 2 }, "stopped"))).toBeNull();
+		});
 	});
 });

@@ -42,7 +42,8 @@
  * something about a run that has not been looked at.
  */
 
-import type { Run, RunReport } from "@/types";
+import { formatNumber } from "@/lib/format-number";
+import type { CollectionResultSummary, Run, RunReport } from "@/types";
 import { formatErrorPercent, pickByCount, pluralize } from "@/modules/dashboard/utils/format";
 import { failedAssertionsOf, failedAssertionsReason } from "./run-assertions";
 import { budgetName } from "./threshold-metrics";
@@ -184,13 +185,54 @@ export function reportOutcome(report: RunReport | null | undefined): RunJudgemen
 	});
 }
 
+type StepCount = Exclude<keyof CollectionResultSummary, "verdict">;
+
+/** A collection row's step outcomes in the order a line reads them; each key is also its word. */
+const STEP_COUNTS: ReadonlyArray<StepCount> = ["passed", "failed", "errored", "skipped", "stopped"];
+
+/** The step outcomes that make a collection run read as not clean. */
+const UNCLEAN_STEP_COUNTS: ReadonlyArray<StepCount> = ["failed", "errored"];
+
+/**
+ * `2 passed, 1 failed, 4 errored`: the non-zero step counts among `which`, or
+ * `null` when none is. A key the row did not record reads as none, the way the
+ * wire leaves it absent rather than zeroed.
+ */
+export function stepCountsPhrase(
+	summary: CollectionResultSummary,
+	which: ReadonlyArray<StepCount> = STEP_COUNTS
+): string | null {
+	const parts = STEP_COUNTS.filter((key) => which.includes(key) && (summary[key] ?? 0) > 0).map(
+		(key) => `${formatNumber(summary[key])} ${key}`
+	);
+	return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * A completed collection run is not clean when a step failed or errored
+ * (#3458): `completed` says the sequence ran to its end, not that its steps
+ * held. A clean run answers `null` and keeps the status glyph; `verdict`, the
+ * run's budgets, is not read here.
+ */
+function collectionRowOutcome(
+	status: string,
+	summary: CollectionResultSummary
+): RunJudgement | null {
+	if (status !== "completed") return null;
+	const unclean = stepCountsPhrase(summary, UNCLEAN_STEP_COUNTS);
+	return unclean ? { outcome: "failed", reason: unclean } : null;
+}
+
 /**
  * The verdict a history list row can state from its own `resultSummary`. Only a
- * terminal load run's row carries one; every other row, and a load row from an
- * engine that predates the summary, answers `null` and keeps its status glyph.
+ * terminal load or collection run's row carries one; every other row, and a row
+ * from an engine that predates the summary, answers `null` and keeps its status
+ * glyph. A clean collection row also answers `null`.
  */
 export function rowOutcome(run: Run): RunJudgement | null {
-	if (run.type !== "load" || !run.resultSummary) return null;
+	if (!run.resultSummary) return null;
+	if (run.type === "scenario") return collectionRowOutcome(run.status, run.resultSummary);
+	if (run.type !== "load") return null;
 	const { verdict, errorRate, assertionsFailed } = run.resultSummary;
 	return judgeRun({ status: run.status, verdict, errorRate, assertionsFailed });
 }

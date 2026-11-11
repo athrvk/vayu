@@ -2029,8 +2029,8 @@ export type Run =
 	// list), not the load-test report: a scenario run's `results[]` are step
 	// executions, so the load report's percentiles would describe a sequence as if
 	// it were one request repeated. The sidebar row is still the non-load shape,
-	// which `RunItem.run-types.test.tsx` pins: the row carries the counts (#2954)
-	// for a reader of the wire, and no badge or glyph reads them.
+	// with no badge of its own; it reads the row's step counts (#2954) for its
+	// glyph and subtitle (`RunItem.run-types.test.tsx`).
 	| (RunFields & { type: "scenario"; resultSummary?: CollectionResultSummary });
 
 /**
@@ -2108,9 +2108,10 @@ export interface LoadResultSummary {
  * `resultSummary` at all, and `verdict` is present only when the run declared
  * budgets.
  *
- * No renderer reader: the history row's badge and glyph stay gated on a load
- * run, and the MCP `list_runs` row, which passes the summary through, is the
- * consumer.
+ * `failed` and `errored` are what the history row reads (#3458): a completed run
+ * with either reads as failed, and its subtitle prints the counts
+ * (`rowOutcome`, `collectionSubtitle`). `verdict` has no renderer reader; the
+ * MCP `list_runs` row, which passes the summary through, is its consumer.
  */
 export interface CollectionResultSummary {
 	passed?: number;
