@@ -28,7 +28,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import VariablesCategoryTree from "./VariablesCategoryTree";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 import type { Collection, Environment } from "@/types";
 
 const STAGING: Environment = {

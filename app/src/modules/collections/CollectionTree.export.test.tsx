@@ -25,7 +25,7 @@ import { useTabsStore } from "@/stores";
 import type { Collection } from "@/types";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 

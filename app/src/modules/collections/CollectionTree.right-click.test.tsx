@@ -26,7 +26,7 @@ import { useTabsStore } from "@/stores";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const collections = [{ id: "acme", name: "Acme", order: 0 }];
 const requests = new Map([

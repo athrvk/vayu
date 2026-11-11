@@ -25,7 +25,7 @@ import { TooltipProvider } from "@/components/ui";
 import { useTabsStore } from "@/stores";
 import { useCollectionsStore } from "./collections-store";
 import CollectionTree from "./CollectionTree";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const startScenarioRun = vi.fn();
 

@@ -24,7 +24,7 @@ import { Copy, CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowContextMenu } from "./RowContextMenu";
 import { CONTEXT_ATTRIBUTE } from "@/lib/context-menu";
 import type { RowAction } from "./row-actions";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const actions: RowAction[] = [
 	{ label: "Duplicate", icon: CopyPlus, onSelect: () => {} },

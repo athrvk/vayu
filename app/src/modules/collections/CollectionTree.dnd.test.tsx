@@ -31,7 +31,7 @@ import { useCollectionsStore } from "./collections-store";
 import { useTabsStore, useToastStore } from "@/stores";
 import type { ReorderRequest } from "@/types";
 import CollectionTree from "./CollectionTree";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const ROW_HEIGHT = 32;
 

@@ -28,7 +28,7 @@ import { useState } from "react";
 import { CopyPlus, Pencil, Trash2 } from "lucide-react";
 import { RowActionsMenu } from "./RowActionsMenu";
 import type { RowAction } from "./row-actions";
-import { menuClosedAndFocusSettled } from "@/test/menu-focus";
+import { menuClosedAndFocusSettled } from "@/test/menu-focus.testkit";
 
 const duplicate = vi.fn();
 const remove = vi.fn();
