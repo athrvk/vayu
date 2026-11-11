@@ -2362,9 +2362,9 @@ and the request builder's `ExternalChangeNotice` (above) are its callers.
 ## Shared Script Snippets (`components/shared/ScriptSnippets.tsx`)
 
 The insertable templates under a script editor, listed for both script hosts -
-the shared `ElementList`'s `script.pre` / `script.post` bespoke form
-(`ScriptElementForm`, `components/shared/ElementList/`) used by both the
-request builder's Elements tab and the collection detail's (issue #1223).
+the shared `ElementList`'s `script.*` bespoke form (`ScriptElementForm`,
+`components/shared/ElementList/`) used by both the request builder's Elements
+tab and the collection detail's (issue #1223).
 
 **It replaced two hand-rolled copies of one idea.** The request panels carried a
 14-line `<pre>` of `pm.*` calls plus nine paragraphs of rules, always on; the
@@ -2381,7 +2381,12 @@ templates Monaco offers as you type, made browsable for the author who does not
 know what to type yet. `lib/script-snippets.ts` is that pure read, so the
 selection rules are tested without a Monaco instance; a heading this build does
 not know is listed under its own name rather than dropped, since the engine is
-the one that decides what exists.
+the one that decides what exists. The `context` prop is `pre`, `test` or
+`both`: the first two list that context's templates and the shared ones, and
+`both` lists only the shared ones, for a `script.setup` / `script.teardown`
+editor, which has no request or response for a `pm.request` or `pm.response`
+template to read (#3457). A context with no template at all (the engine
+shipped none) shows one line saying so rather than an empty filter field.
 
 **Insertion goes through Monaco's snippet controller** (`lib/editor-snippet.ts`),
 not a text splice: the templates carry `${1:...}` placeholders, and only the
@@ -2632,7 +2637,11 @@ Phase 0 ships a bespoke form for every `script.*`
 kind - `script.pre` / `script.post` and, since issue #1499, `script.setup` /
 `script.teardown` - which render `ScriptElementForm`'s Monaco editor and
 insertable snippets instead of the generic form's plain text field, because
-"the same editor" is what the Elements tab has to keep for a script. Its lead
+"the same editor" is what the Elements tab has to keep for a script. The kind
+picks the editor's accessible name (Pre-request, Post-request, Setup or
+Teardown script, which the resize handle's name extends) and the snippets it
+offers: setup and teardown run outside any request, so they get only the
+engine's `both` templates, never a `pm.response` one (#3457). Its lead
 sentence is the kind's own catalogue `description` (issue #1608, absorbed
 there by #1607) rather than a hard-coded pair of strings, so the text is
 authored once and doubles as the card's collapsed-summary fallback. It

@@ -6,10 +6,17 @@
  */
 
 /**
- * The bespoke form for `script.pre` / `script.post` (issue #1512): the same
+ * The bespoke form for every `script.*` kind - `script.pre`, `script.post`,
+ * and `script.setup` / `script.teardown` (issues #1512, #1499, #3457): the same
  * Monaco editor and insertable snippets the old Pre-request/Tests tabs gave a
  * script, instead of the generic form's plain text field a multi-line script
  * would otherwise get.
+ *
+ * **The kind decides the label and the snippets** (`SCRIPT_KINDS`). Setup and
+ * teardown run once per run, outside any request, so there is no `pm.request`
+ * or `pm.response` to template: they are offered only the engine's `"both"`
+ * snippets, and are labelled for what they are rather than as a post-request
+ * script.
  *
  * Deliberately without the old `ScriptPanel`'s variable-reference chips,
  * inherited-scripts notice or legacy-run notice: those read
@@ -76,6 +83,24 @@ import {
 	SCRIPT_EDITOR_MIN_HEIGHT,
 } from "@/constants/layout";
 import { cn } from "@/lib/utils";
+import type { ScriptSnippetContext } from "@/types/domain";
+
+interface ScriptKindPresentation {
+	/** The editor's accessible name; the resize handle's is derived from it. */
+	label: string;
+	/** Which of the engine's snippet contexts this kind can run. */
+	snippets: ScriptSnippetContext;
+}
+
+const SCRIPT_KINDS: Record<string, ScriptKindPresentation> = {
+	"script.pre": { label: "Pre-request script", snippets: "pre" },
+	"script.post": { label: "Post-request script", snippets: "test" },
+	"script.setup": { label: "Setup script", snippets: "both" },
+	"script.teardown": { label: "Teardown script", snippets: "both" },
+};
+
+/** A kind this build has no entry for gets the one template set safe anywhere. */
+const UNKNOWN_SCRIPT_KIND: ScriptKindPresentation = { label: "Script", snippets: "both" };
 
 export interface ScriptElementFormProps {
 	/** The owning element's own id - the key into `scriptEditorHeights` (issue #1643). */
@@ -96,8 +121,8 @@ export function ScriptElementForm({
 }: ScriptElementFormProps) {
 	const script = typeof config.script === "string" ? config.script : "";
 	const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
-	const isPre = kind === "script.pre";
-	const editorLabel = isPre ? "Pre-request script" : "Post-request script";
+	const { label: editorLabel, snippets: snippetContext } =
+		SCRIPT_KINDS[kind] ?? UNKNOWN_SCRIPT_KIND;
 
 	// This row's own entry, if it has ever been dragged - a live subscription,
 	// so a drag on *this* row's handle re-renders it. The fallback default is
@@ -214,7 +239,7 @@ export function ScriptElementForm({
 				/>
 			</div>
 			<ScriptSnippets
-				context={isPre ? "pre" : "test"}
+				context={snippetContext}
 				collapsed={snippetsCollapsed}
 				onCollapsedChange={handleSnippetsCollapsedChange}
 				onInsert={(snippet) => insertSnippetAtCursor(editorRef.current, snippet)}

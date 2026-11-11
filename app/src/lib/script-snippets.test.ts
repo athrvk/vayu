@@ -60,6 +60,16 @@ describe("snippetsForContext", () => {
 		expect(labels).not.toContain("set a header");
 	});
 
+	// Setup and teardown run outside any request, so a template that reaches for
+	// `pm.request` or `pm.response` is advice that cannot work there.
+	it("offers a script with no request only the templates every script can use", () => {
+		const labels = snippetsForContext(TABLE, "both").flatMap((g) =>
+			g.snippets.map((s) => s.label)
+		);
+
+		expect(labels).toEqual(["set a variable"]);
+	});
+
 	it("takes only the snippet entries, whatever else the table holds", () => {
 		const all = snippetsForContext(TABLE, "test").flatMap((g) => g.snippets);
 
@@ -98,8 +108,15 @@ describe("snippetsForContext", () => {
 		expect(groups[0].group).toBe("Request");
 	});
 
+	it("files a shared template with no heading under Variables, not under a request or test heading", () => {
+		const groups = snippetsForContext([entry({ label: "bare", context: "both" })], "both");
+
+		expect(groups.map((g) => g.group)).toEqual(["Variables"]);
+	});
+
 	it("answers emptily while the table has not arrived", () => {
 		expect(snippetsForContext(undefined, "pre")).toEqual([]);
+		expect(snippetsForContext(undefined, "both")).toEqual([]);
 		expect(countSnippets(snippetsForContext(undefined, "test"))).toBe(0);
 	});
 

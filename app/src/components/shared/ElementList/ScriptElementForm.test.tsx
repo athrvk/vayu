@@ -33,6 +33,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { ScriptElementForm } from "./ScriptElementForm";
 import { useLayoutStore } from "@/stores";
+import type { ScriptCompletion } from "@/types/domain";
 import { INTL_MARKER_OWNER } from "@/lib/script-intl-diagnostics";
 import {
 	DEFAULT_SCRIPT_EDITOR_HEIGHT,
@@ -60,12 +61,21 @@ vi.mock("@/components/ui", async (importOriginal) => ({
 	},
 }));
 
+const completions = vi.hoisted(() => ({
+	value: undefined as undefined | { completions: ScriptCompletion[] },
+}));
+
 vi.mock("@/queries", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@/queries")>()),
-	useScriptCompletionsQuery: () => ({ data: undefined, isPending: false, isError: false }),
+	useScriptCompletionsQuery: () => ({
+		data: completions.value,
+		isPending: false,
+		isError: false,
+	}),
 }));
 
 beforeEach(() => {
+	completions.value = undefined;
 	useLayoutStore.setState({
 		scriptEditorHeights: {},
 		scriptEditorHeightDefault: DEFAULT_SCRIPT_EDITOR_HEIGHT,
@@ -77,7 +87,16 @@ afterEach(() => {
 	cleanup();
 });
 
-function renderForm(kind: "script.pre" | "script.post" = "script.pre", id = "s1") {
+const EDITOR_LABEL = {
+	"script.pre": "Pre-request script",
+	"script.post": "Post-request script",
+	"script.setup": "Setup script",
+	"script.teardown": "Teardown script",
+} as const;
+
+type ScriptKind = keyof typeof EDITOR_LABEL;
+
+function renderForm(kind: ScriptKind = "script.pre", id = "s1") {
 	const onChange = vi.fn();
 	render(
 		<ScriptElementForm
@@ -90,9 +109,7 @@ function renderForm(kind: "script.pre" | "script.post" = "script.pre", id = "s1"
 	);
 	return {
 		onChange,
-		box: screen.getByTestId(
-			`code-editor-${kind === "script.pre" ? "Pre-request script" : "Post-request script"}`
-		).parentElement!,
+		box: screen.getByTestId(`code-editor-${EDITOR_LABEL[kind]}`).parentElement!,
 	};
 }
 
@@ -113,6 +130,71 @@ describe("ScriptElementForm's editor box", () => {
 		const { box } = renderForm();
 
 		expect(box).toHaveStyle({ height: "240px" });
+	});
+});
+
+describe("the editor's name, by kind", () => {
+	it.each(Object.entries(EDITOR_LABEL) as [ScriptKind, string][])(
+		"%s is labelled %s on the editor and its resize handle",
+		(kind, label) => {
+			renderForm(kind);
+
+			expect(screen.getByTestId(`code-editor-${label}`)).toBeInTheDocument();
+			expect(screen.getByRole("separator")).toHaveAttribute(
+				"aria-label",
+				`${label} editor height`
+			);
+		}
+	);
+});
+
+const SNIPPETS: ScriptCompletion[] = [
+	{
+		label: "Set a header",
+		kind: 28,
+		insertText: "pm.request.headers['X'] = 'v';",
+		detail: "",
+		documentation: "",
+		context: "pre",
+		group: "Request",
+	},
+	{
+		label: "Test: Status code",
+		kind: 28,
+		insertText: "pm.test('ok', () => pm.response.to.have.status(200));",
+		detail: "",
+		documentation: "",
+		context: "test",
+		group: "Tests",
+	},
+	{
+		label: "Set environment variable",
+		kind: 28,
+		insertText: "pm.environment.set('k', 'v');",
+		detail: "",
+		documentation: "",
+		context: "both",
+		group: "Variables",
+	},
+];
+
+describe("the snippets offered, by kind", () => {
+	function offered(kind: ScriptKind) {
+		completions.value = { completions: SNIPPETS };
+		useLayoutStore.setState({ scriptSnippetsCollapsed: false });
+		renderForm(kind);
+		return SNIPPETS.map((s) => s.label).filter((label) => screen.queryByText(label));
+	}
+
+	it.each([
+		["script.pre", ["Set a header", "Set environment variable"]],
+		["script.post", ["Test: Status code", "Set environment variable"]],
+		["script.setup", ["Set environment variable"]],
+		["script.teardown", ["Set environment variable"]],
+	] as const)("%s lists %j", (kind, expected) => {
+		// A setup or teardown script has no request and no response, so it is never
+		// offered a template that reads either.
+		expect(offered(kind).sort()).toEqual([...expected].sort());
 	});
 });
 

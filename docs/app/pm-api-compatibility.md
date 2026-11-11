@@ -2067,7 +2067,8 @@ belongs in, and `group` (`"Variables"`, `"Request"`, `"Response"`, `"Tests"`,
 the script panels' insertable snippets surface is built from, so a template
 added to the engine table is what a script author finds there - reachable
 from the panel it actually runs in, filed under its heading, with nothing
-maintained twice.
+maintained twice. A `script.setup` / `script.teardown` editor runs outside any
+request, so it is offered only the `"both"` templates.
 
 ### Type declarations (hover, signature help)
 
