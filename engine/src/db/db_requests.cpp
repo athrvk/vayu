@@ -50,12 +50,24 @@ void Database::purge_request_locked (const std::string& id) {
 // Requests - HTTP request definitions with pre/post scripts
 // ============================================================================
 
-void Database::save_request (const Request& r) {
+void Database::save_request (const Request& r, const std::optional<std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug (
     "db", "Saving request", { { "id", r.id }, { "name", r.name } });
     const ChangeOp op = upsert_op<Request> (impl_->storage, r.id);
-    impl_->storage.replace (r);
+    if (!declined_under) {
+        impl_->storage.replace (r);
+        changes_.publish (request_change (r, op));
+        return;
+    }
+    impl_->storage.transaction ([&] {
+        for (const auto& stored : impl_->storage.get_all<Request> (
+             where (c (&Request::id) == r.id && is_null (&Request::deleted_at)))) {
+            record_declined_operation_locked (*declined_under, stored);
+        }
+        impl_->storage.replace (r);
+        return true; // Commit
+    });
     changes_.publish (request_change (r, op));
 }
 
@@ -268,9 +280,12 @@ const Request& request) {
     impl_->storage.insert (record);
 }
 
-void Database::forget_declined_by_locked (const std::string& request_id) {
+void Database::forget_declined_by_locked (const Request& request) {
+    if (!request.spec_operation) {
+        return;
+    }
     impl_->storage.remove_all<DeclinedOperation> (
-    where (c (&DeclinedOperation::request_id) == request_id));
+    where (c (&DeclinedOperation::request_id) == request.id));
 }
 
 std::vector<DeclinedOperation> Database::get_declined_operations (

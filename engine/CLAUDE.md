@@ -839,11 +839,16 @@ logged as a warning: it means a client skipped composition.
     a tag folder's `DELETE /collections/:id` record it under the nearest bound
     ancestor, which the route resolves (`core::nearest_spec_binding`) and
     passes to `Database::delete_request` / `delete_collection`, so `Database`
-    reads no binding. The diff lists it under `declined`, never `added`;
+    reads no binding. A move out of the binding is the same decision (#3446):
+    `PUT /requests/:id` and `POST /reorder` (a moved folder's whole subtree,
+    judged against the tree the batch writes) compare the nearest binding
+    before and after (`core::declined_by_move`), clear the stamp and pass the
+    record down to `save_request` / `apply_reorder`; a move within one binding
+    keeps it. The diff lists it under `declined`, never `added`;
     `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
-    it. A restore, a sync that creates the operation, an unbind and a bind to
-    other bytes forget the record; a purge of the request keeps it, and the
-    sync's own hard deletes write none.
+    it. A restore of a request that still records the operation, a sync that
+    creates it, an unbind and a bind to other bytes forget the record; a purge
+    of the request keeps it, and the sync's own hard deletes write none.
   - **`POST /specs/match`** (#761, `core/operation_match.hpp`) pairs a
     collection's subtree with a document's declared identities by structure:
     both sides reduced to a path shape with origin, query and fragment dropped

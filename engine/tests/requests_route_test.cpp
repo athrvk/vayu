@@ -19,6 +19,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,6 +29,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/list_page.hpp"
@@ -49,9 +51,8 @@ std::pair<int, std::string> list_requests_response (vayu::db::Database& db,
 const std::optional<std::string>& collection_id,
 std::string_view fields,
 const ListPageQuery& page_query = {});
-// Defined in requests.cpp; each returns {http_status, json_body}.
-std::pair<int, nlohmann::json>
-create_request_response (vayu::db::Database& db, const nlohmann::json& json);
+// Defined in requests.cpp; returns {http_status, json_body}. The create core
+// this file also calls is declared in spec_move_fixture.hpp.
 std::pair<int, nlohmann::json> update_request_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
@@ -587,6 +588,104 @@ TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
 
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"], 1);
+}
+
+
+// -- Leaving a spec binding (#3446) -----------------------------------------
+//
+// `PUT /requests/:id` with a `collectionId` is the other door a request moves
+// through (MCP `update_request`, any API client); it answers as `POST /reorder`
+// does.
+
+class RequestMoveSpecBindingTest : public RequestsRouteTest {
+    protected:
+    void SetUp () override {
+        RequestsRouteTest::SetUp ();
+        trees_ = std::make_unique<vayu::tests::SpecMoveTrees> (*db_);
+    }
+    void TearDown () override {
+        trees_.reset ();
+        RequestsRouteTest::TearDown ();
+    }
+
+    json put (const std::string& id, const json& body) {
+        auto [status, response] =
+        vayu::http::routes::update_request_response (*db_, id, body);
+        EXPECT_EQ (status, 200) << response.dump ();
+        return response;
+    }
+
+    /// The operation ids declined under `pets`, in recorded order.
+    std::vector<std::string> declined_at_pets () {
+        std::vector<std::string> ids;
+        for (const auto& record : db_->get_declined_operations (trees_->pets)) {
+            ids.push_back (record.operation_id);
+        }
+        return ids;
+    }
+
+    std::unique_ptr<vayu::tests::SpecMoveTrees> trees_;
+};
+
+// Mutation checks: drop the `spec_operation` clear in `update_request_locked`
+// and the stamp survives into `cars`, which lists it as removed; pass no
+// `declined_under` to `save_request` and `pets` lists `listOwners` as added
+// and a safe sync creates it again.
+TEST_F (RequestMoveSpecBindingTest, AStampedRequestMovedToAnotherBindingIsDeclinedAtTheSource) {
+    const json response =
+    put (trees_->list_owners, json{ { "collectionId", trees_->cars } });
+
+    EXPECT_TRUE (response["specOperation"].is_null ()) << response.dump ();
+    const auto declined = db_->get_declined_operations (trees_->pets);
+    ASSERT_EQ (declined.size (), 1u);
+    EXPECT_EQ (declined.front ().operation_id, "listOwners");
+    EXPECT_EQ (declined.front ().request_id, trees_->list_owners);
+
+    const json pets = trees_->diff_pets ();
+    EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+    EXPECT_EQ (pets["declined"].size (), 1u) << pets.dump ();
+    const json cars = trees_->diff (trees_->cars, vayu::tests::CARS_DOC);
+    EXPECT_TRUE (cars["removed"].empty ()) << "nothing foreign: " << cars.dump ();
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+TEST_F (RequestMoveSpecBindingTest,
+AStampedRequestMovedToAnUnboundCollectionIsDeclinedAtTheSource) {
+    const json response =
+    put (trees_->list_owners, json{ { "collectionId", trees_->plain } });
+
+    EXPECT_TRUE (response["specOperation"].is_null ()) << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
+    EXPECT_TRUE (trees_->diff_pets ()["added"].empty ());
+    EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+}
+
+TEST_F (RequestMoveSpecBindingTest, AMoveWithinTheBindingOrNoMoveAtAllKeepsTheStamp) {
+    const json moved =
+    put (trees_->list_owners, json{ { "collectionId", trees_->pets } });
+    EXPECT_TRUE (moved["specOperation"].is_object ()) << moved.dump ();
+
+    const json renamed = put (trees_->list_pets, json{ { "name", "every pet" } });
+    EXPECT_TRUE (renamed["specOperation"].is_object ()) << renamed.dump ();
+
+    EXPECT_TRUE (declined_at_pets ().empty ());
+    const json pets = trees_->diff_pets ();
+    EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+    EXPECT_TRUE (pets["declined"].empty ()) << pets.dump ();
+}
+
+// Merge-patch: a field the body states is what the row records, so a move that
+// also states `specOperation` keeps the stated value. The source still loses
+// the request. Mutation check: drop the `json.contains ("specOperation")`
+// guard and the stated stamp is cleared.
+TEST_F (RequestMoveSpecBindingTest, AMoveThatStatesItsStampKeepsTheStatedOne) {
+    const json cars_stamp{ { "operationId", "listCars" }, { "method", "GET" },
+        { "path", "/cars" } };
+    const json response = put (trees_->list_owners,
+    json{ { "collectionId", trees_->cars }, { "specOperation", cars_stamp } });
+
+    EXPECT_EQ (response["specOperation"], cars_stamp) << response.dump ();
+    EXPECT_EQ (declined_at_pets (), (std::vector<std::string>{ "listOwners" }));
 }
 
 } // namespace

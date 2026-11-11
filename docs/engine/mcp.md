@@ -337,7 +337,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; `headers` is ordered `{key, value, enabled?}` rows (repeats kept) or a string map; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; `headers` (rows or map) replaces the whole list; the returned row has credential-header values withheld unless revealed |
 | `delete_request_example`| write   | `GET /requests/:id/examples` + `DELETE /requests/:id/examples/:exampleId` | write toggle + confirm (the prompt names the example and the mock consequence); a soft delete for a saved (`user`) example - it goes to the Trash; an imported example becomes a spec-sync tombstone, not a Trash entry |
-| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId`; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; the renumbered rows come back withheld as the reads of them are |
+| `move_item`            | write    | `GET /collections` + `GET /requests?…` + `POST /reorder` | write toggle; names the item with `itemId`; `first` / `last` only, over the destination's sub-collections and requests as one list, and a collection into its own subtree is refused before the engine sees it; a stamped request moved out of its spec binding comes back unstamped, its operation declined at the source (#3446); the renumbered rows come back withheld as the reads of them are |
 | `create_environment`   | write    | `POST /environments`                         | write toggle (the engine assigns the id; created inactive); a blank or whitespace-only `name` is an input error, as on `update_environment`, and never reaches the engine (#3253); the returned row has secret values withheld unless revealed |
 | `update_environment`   | write    | `GET /environments` (scan) + `PUT /environments/:id` (fetch-merge, with `If-Match`; a `412` re-reads and merges once) | write toggle; a blank or whitespace-only `name` is an input error, never sent to the engine (#3253); `variables` takes a string or `{value, secret, type, enabled}`, `removeVariables` deletes names; a blank or whitespace-padded name is a `400` naming the key (#3251); `secret: false` over a stored secret is refused unless revealed, and the returned row has secret values withheld |
 | `activate_environment` | write    | `PUT /environments/:id` (`isActive`), + `GET /environments` for `"none"` | write toggle; one PUT - the engine deactivates the previous row in the same transaction; the active row is the environment every call naming no `environmentId` resolves and sends against; the returned row has secret values withheld unless revealed |
@@ -974,7 +974,11 @@ Notes:
   collection into itself or into its own subtree is refused here, walking the
   same tree the app's "Move to…" dialog walks, so the answer names the problem -
   the engine refuses the same batch under its lock, and that check stays the
-  authority.
+  authority. A request that records a bound document's operation and lands,
+  alone or under a moved collection, where the nearest binding names another
+  document or none, comes back with `specOperation: null`, and the operation is
+  declined at the binding it left (#3446, as `delete_request` declines it), so
+  that collection's next `sync_spec` does not create it again.
 - **`update_environment`** fetches the environment and merges the supplied
   variables (`PUT /environments/:id` replaces the whole variables blob), so
   partial updates preserve untouched variables and the name. **The write is

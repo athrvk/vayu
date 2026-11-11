@@ -2151,7 +2151,8 @@ struct SpecDocument {
 
 /**
  * @brief An operation of a bound document that a person declined by deleting
- * the request for it (`spec_declined_operations`, schema version 10, #3031).
+ * the request for it (`spec_declined_operations`, schema version 10, #3031),
+ * or by moving it out of the binding (#3446).
  *
  * A row of its own rather than a flag on the request: a purge removes the
  * request row, and the decision has to outlive it. `POST /specs/diff` lists the
@@ -2165,16 +2166,17 @@ struct SpecDocument {
 struct DeclinedOperation {
     int64_t id = 0;
     /// The bound collection the decision was made under: the nearest ancestor
-    /// of the deleted request that binds a document.
+    /// that binds a document of the request deleted, or moved out from under
+    /// it (#3446).
     std::string collection_id;
     /// `""` for an operation that declares no `operationId`, never NULL, so the
     /// table's UNIQUE key treats two such rows for one endpoint as one.
     std::string operation_id;
     std::string method;
     std::string path;
-    /// The deleted request whose delete recorded this; restoring it forgets the
-    /// row. A later delete of another request for the same operation takes it
-    /// over.
+    /// The request whose delete, or move out of the binding, recorded this;
+    /// restoring a deleted one forgets the row. A later decline of the same
+    /// operation by another request takes it over.
     std::string request_id;
 };
 

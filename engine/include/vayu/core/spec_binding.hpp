@@ -109,10 +109,44 @@ struct BoundSpec {
  *
  * An unparseable or non-object `openapi` column binds nothing and the walk
  * continues past it, the reading every other reader of that column gives it. The
- * chain is cycle-guarded by `collection_chain`, so corrupted `parent_id` data
- * terminates instead of looping under the DB mutex.
+ * walk visits each collection once, so corrupted `parent_id` data terminates
+ * instead of looping under the DB mutex.
  */
 [[nodiscard]] std::optional<BoundSpec>
 nearest_spec_binding (vayu::db::Database& db, const std::string& collection_id);
+
+/// A live collection by id, from whichever state of the tree the caller is
+/// asking about; `std::nullopt` for none.
+using CollectionLookup =
+std::function<std::optional<vayu::db::Collection> (const std::string& collection_id)>;
+
+/**
+ * `nearest_spec_binding`'s walk over @p lookup instead of the stored rows: what
+ * `POST /reorder` asks of the tree its batch is about to write, before writing
+ * it. The `Database` overload is this one over `get_collection`.
+ */
+[[nodiscard]] std::optional<BoundSpec>
+nearest_spec_binding (const CollectionLookup& lookup, const std::string& collection_id);
+
+/**
+ * The bound collection a move declines @p stored's operation under, or
+ * `std::nullopt` when the move keeps it (#3446).
+ *
+ * Moving a stamped request out of the binding that answered for it is removing
+ * it from that contract, so the move records the decline `DELETE /requests/:id`
+ * records (#3031) and clears the stamp. Out means the destination's nearest
+ * binding names another document or there is none; a move to a collection whose
+ * nearest binding names the same document (a sub-folder bound to it too, inside
+ * the same contract walk) keeps the stamp. A request with no stamp, or one that
+ * answered to no binding, declines nothing.
+ *
+ * @param stored the request as stored before the move: its stamp is what is
+ *        declined.
+ * @param before the binding that answered for it before the move.
+ * @param after the binding that answers for it once the move has landed.
+ */
+[[nodiscard]] std::optional<std::string> declined_by_move (const vayu::db::Request& stored,
+const std::optional<BoundSpec>& before,
+const std::optional<BoundSpec>& after);
 
 } // namespace vayu::core

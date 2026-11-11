@@ -447,6 +447,17 @@ not bring them back". Nothing creates it again unless you do:
 - Purging the deleted request keeps the record. Unbinding the collection, or
   binding it to a different document, clears it.
 
+**Moving it out records the same choice** (issue #3446). A request dragged, or
+moved with "Move to...", from the bound collection into a collection bound to a
+different document, or into one bound to none, has left the contract: the
+operation is listed under the same heading at the source, and the moved request
+no longer records the operation, so the destination does not count it as mapped
+or list it as removed. A folder moved out takes every request beneath it the same
+way. Moving a request between folders of the same bound collection changes
+nothing. The record clears as above, except that restoring the moved request
+from Trash after deleting it somewhere else does not clear it, because it no
+longer records the operation.
+
 The record follows the operation through a rename the way a request's identity
 does: if the document moves a deleted operation's path under a stable
 `operationId`, the entry is still the one you deleted. What was deleted by a sync
