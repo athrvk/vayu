@@ -843,7 +843,25 @@ to clear it. So a discarded id is abandoned until a save starts for it
 (`reportSaving`) or a context registers under it: a failure reported for it is a
 toast only, and `reportPending` counts only from a context registered under the
 id, which is a new edit. A goodbye flush never discards first, so its failure is
-recorded and stays "Not saved" until a later flush saves it.
+recorded and stays "Not saved" until a later flush saves it - except for an
+entity that was deleted (below).
+
+**A deleted entity's edit is dropped, not saved (#3444).** The tree's delete of
+a request, or of a collection above it, awaits the engine and then closes the
+tabs, and a tab's unmount flushes its draft. Saved into the deleted row that
+PUT answers 404, toasts "Couldn't save - Request not found" and leaves a retry
+context nothing can land, so the Dock stays "Not saved" and the quit prompt
+warns about an edit nobody can keep. `useTreeCrud` therefore calls
+`markRemoved(ids)` with the context ids (`request-<id>`, a collection's
+descendant requests included) after the delete lands and before
+`closeTabsForEntities`. The set behind it is module-local like `abandoned`, not
+store state, and `isRemoved(id)` is what the goodbye flush asks: a removed id
+is `discard`ed without a save. A context registering under the id clears the
+mark, so a restore (Undo brings the same id back) saves normally. The backstop
+for a delete the tree did not make (another window, an MCP client) is the
+flush's own answer: a goodbye flush whose save fails with a 404 discards the id
+instead of re-registering a retry. The failure toast has already been raised by
+then and is not taken back.
 
 **A failure that leaves no unsaved edit is a toast, not `reportFailed`.**
 `reportFailed` holds the Dock on "Not saved" until that id saves again, so it is
@@ -1018,8 +1036,10 @@ context under the same id, so the reconnect flush (#1479) and the quit flush
 and the landing reports the id saved. Before #3350 nothing marked it clean, so
 the Dock sat on "Unsaved changes" and every reconnect re-sent the stale draft. A
 save the editor held back has nothing left to send it (the provider reseeds
-from the next entity), so its id is discarded. A pane that came back to the
-entity owns the id again and is left alone.
+from the next entity), so its id is discarded, and so is one the engine
+answered 404 or that the tree marked removed (#3444): the entity is gone and no
+retry can land. A pane that came back to the entity owns the id again and is
+left alone.
 
 **SaveContext:**
 ```typescript
@@ -1038,6 +1058,8 @@ const reportFailed = useSaveStore((s) => s.reportFailed);
 
 // Reports, under the caller's own id - see the table above:
 //   reportPending, reportSaving, reportSaved, reportFailed, discard
+// markRemoved(ids) / isRemoved(id)  an entity's delete landed; its goodbye flush
+//                is skipped and discarded (#3444)
 // Registry:
 //   registerContext, unregisterContext, updateContext,
 //   setActiveContext, getActiveContext
@@ -3511,7 +3533,10 @@ same shape `useEntityDraft` (below) already uses for the collection tabs:
   below) so the draft is not lost. The provider notices `initialRequest` went
   missing while `request.id` is still set and flips `requestGone`, which feeds
   `useSaveManager`'s `enabled` - so a dirty draft's autosave timer, already
-  armed or about to be, never fires a PUT against an id that now 404s.
+  armed or about to be, never fires a PUT against an id that now 404s. A
+  delete made from the collection tree never reaches that state: it marks the
+  ids removed (`markRemoved`) before the tabs close, and the tab's goodbye flush
+  drops the draft instead of sending it (#3444).
 - **The generation** `handleSave` checks (`changeTokenRef`, see the save-manager
   walkthrough below) bumps on a foreign write too, not only on the user's own
   edits - an effect keyed on `baseline`'s identity, not a direct write inside

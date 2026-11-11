@@ -28,6 +28,7 @@ import type { TreeEntity } from "./drop-position";
 import { useCopy } from "@/hooks/useCopy";
 import { useStableCallback } from "@/hooks/useStableCallback";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
+import { saveContextId } from "@/hooks/useSaveManager";
 import { collectionReference } from "@/lib/agent-reference";
 import { withoutBodyFileTrust } from "@/lib/file-trust";
 import type {
@@ -51,7 +52,7 @@ import { ICON_MOTION } from "@/components/ui";
  * silently lacks the latest edit is the defect this exists to prevent.
  */
 async function flushOpenEditor(requestId: string): Promise<boolean> {
-	const context = useSaveStore.getState().contexts.get(`request-${requestId}`);
+	const context = useSaveStore.getState().contexts.get(saveContextId(requestId));
 	if (!context?.hasPendingChanges) return false;
 	const outcome = await context.save();
 	if (isFailedOutcome(outcome) || outcome === "pending") {
@@ -161,6 +162,7 @@ export function useTreeCrud({
 	const reportSaving = useSaveStore((s) => s.reportSaving);
 	const reportSaved = useSaveStore((s) => s.reportSaved);
 	const discard = useSaveStore((s) => s.discard);
+	const markRemoved = useSaveStore((s) => s.markRemoved);
 
 	const createCollectionMutation = useCreateCollectionMutation();
 	const updateCollectionMutation = useUpdateCollectionMutation();
@@ -542,6 +544,9 @@ export function useTreeCrud({
 			const restoreClientState = captureClientState(affected);
 			try {
 				await deleteCollectionMutation.mutateAsync(collectionId);
+				// Before the tabs close: their unmount flush must not save into the
+				// deleted rows (#3444). Collection ids ride along and match nothing.
+				markRemoved([...affected].map(saveContextId));
 				closeTabsForEntities(affected);
 				offerUndo(collectionId, name, "collection", restoreClientState);
 			} catch (error) {
@@ -584,6 +589,7 @@ export function useTreeCrud({
 		[
 			deleteCollectionMutation,
 			closeTabsForEntities,
+			markRemoved,
 			collections,
 			getRequestsByCollection,
 			captureClientState,
@@ -600,6 +606,9 @@ export function useTreeCrud({
 			const restoreClientState = captureClientState([requestId]);
 			try {
 				await deleteRequestMutation.mutateAsync(requestId);
+				// Before the tab closes: its unmount flush must not save into the
+				// deleted row (#3444).
+				markRemoved([saveContextId(requestId)]);
 				// Close any open tab pointing at the now-deleted request.
 				closeTabsForEntities([requestId]);
 				offerUndo(requestId, name, "request", restoreClientState);
@@ -614,7 +623,14 @@ export function useTreeCrud({
 				setDeletingRequestId(null);
 			}
 		},
-		[deleteRequestMutation, closeTabsForEntities, captureClientState, offerUndo, reportFailure]
+		[
+			deleteRequestMutation,
+			closeTabsForEntities,
+			markRemoved,
+			captureClientState,
+			offerUndo,
+			reportFailure,
+		]
 	);
 
 	const handleConfirmDelete = useCallback(() => {

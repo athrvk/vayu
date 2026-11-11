@@ -139,6 +139,14 @@ interface SaveState {
 	 */
 	discard: (id: string) => void;
 
+	/**
+	 * The entities behind these context ids were deleted. Call it after the
+	 * delete lands and before the tabs holding them close, so their goodbye
+	 * flushes see it (`isRemoved`) and drop the edit instead of saving it.
+	 */
+	markRemoved: (ids: Iterable<string>) => void;
+	isRemoved: (id: string) => boolean;
+
 	// Context management
 	registerContext: (context: SaveContext) => void;
 	unregisterContext: (id: string) => void;
@@ -209,6 +217,13 @@ let savedWindowGeneration = 0;
 // only from a registered owner - that is a new edit; from anyone else it is the
 // late save's "still unsaved".
 const abandoned = new Set<string>();
+
+// Ids whose entity was deleted. The pane that held a dirty edit for one
+// unmounts after the delete, and its goodbye flush would PUT to a 404 and park
+// the Dock on "Not saved" for an edit nobody can ever save. Cleared when a
+// context registers under the id again, which is a restore (Undo) bringing the
+// same id back.
+const removed = new Set<string>();
 
 // How many failures each id has reported, toast-only ones included: `runSave`
 // compares it across a save to tell whether the context already published its
@@ -347,9 +362,16 @@ export const useSaveStore = create<SaveState>((set, get) => {
 			apply((unsaved) => unsaved.delete(id), "keep");
 		},
 
+		markRemoved: (ids) => {
+			for (const id of ids) removed.add(id);
+		},
+
+		isRemoved: (id) => removed.has(id),
+
 		// Context management
 		registerContext: (context) => {
 			abandoned.delete(context.id);
+			removed.delete(context.id);
 			const newContexts = new Map(get().contexts);
 			newContexts.set(context.id, context);
 			set({ contexts: newContexts });
@@ -431,6 +453,7 @@ export function resetSaveStoreForTests(): void {
 	justSaved = false;
 	savedWindowGeneration++;
 	abandoned.clear();
+	removed.clear();
 	failureReports.clear();
 	useSaveStore.setState({
 		...INITIAL,
