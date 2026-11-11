@@ -1451,6 +1451,48 @@ TEST_F (PersistScriptVariablesTest, AnEnvironmentTrashedDuringTheRunIsNotWritten
     EXPECT_EQ (stored_environment_variables (), APP_BLOB);
 }
 
+// A workspace whose globals were never saved has no row (`get_globals` answers
+// nothing until `POST /globals` or an import writes one), so "absent" there
+// means "never written" and not "deleted during the run" (#3453).
+class PersistIntoUnsavedGlobalsTest : public PersistScriptVariablesTest {
+    protected:
+    void SetUp () override {
+        cleanup ();
+        db_ = std::make_unique<vayu::db::Database> (DB_PATH);
+        db_->init ();
+
+        run_.id     = "run_1";
+        run_.type   = vayu::RunType::Design;
+        run_.status = vayu::RunStatus::Completed;
+        ASSERT_FALSE (db_->get_globals ().has_value ());
+    }
+};
+
+// Mutation check: return nothing for an absent globals row in
+// `persist_script_variables` and the global is silently discarded.
+TEST_F (PersistIntoUnsavedGlobalsTest, AGlobalSetByAScriptCreatesTheRow) {
+    auto scopes = load ();
+    run_script (scopes, "pm.globals.set('token', 'abc');");
+
+    persist_script_variables (*db_, scopes);
+
+    const auto row = db_->get_globals ();
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->id, "globals");
+    EXPECT_GT (row->updated_at, 0);
+    const auto stored = json::parse (row->variables);
+    EXPECT_EQ (stored["token"]["value"], "abc") << row->variables;
+}
+
+TEST_F (PersistIntoUnsavedGlobalsTest, ARunThatSetNoGlobalCreatesNoRow) {
+    auto scopes = load ();
+    run_script (scopes, "pm.variables.set('local', '1');");
+
+    persist_script_variables (*db_, scopes);
+
+    EXPECT_FALSE (db_->get_globals ().has_value ());
+}
+
 // ---------------------------------------------------------------------------
 // load_script_variable_scopes - the collection chain a script reads (issue #234)
 //

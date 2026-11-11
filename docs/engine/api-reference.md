@@ -5595,7 +5595,11 @@ A storage failure answers `507`, `503` or `500` - see
 ### GET /globals
 
 Get global variables (singleton). An engine that never saved any answers the
-empty set at `updatedAt: 0`.
+empty set at `updatedAt: 0`. The row is created by the first `POST /globals`,
+the first import carrying globals, or the first script or extractor write to a
+global (`pm.globals.set`, an `extract.*` element with `scope: globals`): a
+`POST /execute` or collection run on a workspace with no globals stores what its
+scripts set rather than discarding it.
 
 **Response:**
 ```json

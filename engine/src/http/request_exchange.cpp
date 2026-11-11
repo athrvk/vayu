@@ -481,6 +481,22 @@ const vayu::Environment& now) {
     return row;
 }
 
+// The globals singleton, or a fresh empty row where none was ever written
+// (#3453): `get_globals` answers nothing until `POST /globals` or an import
+// creates it, so "absent" means "never written" here and not "deleted mid-run"
+// as it does for an environment or a collection. A default row whose delta is
+// empty leaves `with_scope_delta` nothing to write, so no row is created for a
+// run that set no global.
+vayu::db::Globals globals_row_or_default (vayu::db::Database& db) {
+    if (auto row = db.get_globals ()) {
+        return *std::move (row);
+    }
+    vayu::db::Globals fresh;
+    fresh.id        = "globals";
+    fresh.variables = "{}";
+    return fresh;
+}
+
 // One scope's write, isolated so a failure in it costs the other scopes
 // nothing.
 void persist_scope (std::string_view what, const std::function<void ()>& write) {
@@ -529,8 +545,8 @@ const std::function<void ()>& before_write) {
         }
 
         persist_scope ("globals", [&] {
-            if (auto row = with_scope_delta (
-                db.get_globals (), baseline.globals, scopes.globals)) {
+            if (auto row = with_scope_delta<vayu::db::Globals> (
+                globals_row_or_default (db), baseline.globals, scopes.globals)) {
                 staged ();
                 db.save_globals (*row);
             }

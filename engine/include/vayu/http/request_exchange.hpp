@@ -144,8 +144,10 @@ std::vector<std::string> secret_variable_values (const ScriptVariableScopes& sco
  * while the run was in flight survives (#1878); the definition states the
  * delta rule. A scope whose delta changes nothing is not written, which keeps
  * `updated_at` and every field the serializer does not know (#135). A missing
- * or deleted row is never recreated. Failures are logged and swallowed per
- * scope: the run's result must not depend on a variable write.
+ * or deleted environment or collection row is never recreated; the globals
+ * singleton is created from an empty set when none was ever saved (#3453).
+ * Failures are logged and swallowed per scope: the run's result must not
+ * depend on a variable write.
  *
  * @param before_write Test seam, invoked inside the lock scope after each
  *        scope's fresh read and immediately before that scope's write.
