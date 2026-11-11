@@ -29,6 +29,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "vayu/http/cookie_jar.hpp"
@@ -208,6 +209,92 @@ TEST_F (ScriptRequestUrlTest, CanonicalizesASortedQueryForSigning) {
         // And the signature over it is a real one, not a placeholder.
         pm.expect(pm.crypto.hmacSha256('key', canonical).length).to.equal(64);
     )JS");
+}
+
+// ---------------------------------------------------------------------------
+// A `{{baseUrl}}/...` URL (#3454): how a scripted request's URL reaches its
+// pre-request script, the scope names still written for the pass after it.
+// Mutation check: return `parse_with_libcurl (url)` alone from
+// `parse_url_parts` (url_parts.cpp) and all three cases fail.
+// ---------------------------------------------------------------------------
+
+TEST_F (ScriptRequestUrlTest, ABaseUrlTokenReadsAsTheHostAndThePartsAfterIt) {
+    request.url       = "{{baseUrl}}/v2/users?page=2&sort=name";
+    const auto result = engine.execute_prerequest (R"JS(
+        pm.environment.set('seen', JSON.stringify([
+            pm.request.url.getHost(), pm.request.url.getPath(),
+            pm.request.url.getQueryString(), pm.request.url.query.get('sort'),
+            pm.request.url.protocol, pm.request.url.port, pm.request.url.host
+        ]));
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("seen").value,
+    R"(["{{baseUrl}}","/v2/users","page=2&sort=name","name","","",["{{baseUrl}}"]])");
+    EXPECT_EQ (request.url, "{{baseUrl}}/v2/users?page=2&sort=name")
+    << "a read-only script rewrote the URL";
+}
+
+// The "Sign a request" example in docs/engine/scripting.md, as printed, on
+// the URL an imported Postman collection stores.
+TEST_F (ScriptRequestUrlTest, TheDocsSigningExampleCanonicalizesABaseUrlRequest) {
+    request.url       = "{{baseUrl}}/echo?b=2&a=1";
+    env["secret"]     = Variable{ "s3cret", false, true, "string" };
+    const auto result = engine.execute_prerequest (R"JS(
+        var timestamp = Date.now().toString();
+        var sortedQuery = pm.request.url.query.all()
+          .map(function (p) { return p.key + '=' + (p.value === null ? '' : p.value); })
+          .sort()
+          .join('&');
+        var canonical = [
+          pm.request.method,
+          pm.request.url.getPath(),
+          sortedQuery,
+          timestamp,
+          pm.request.body || ''
+        ].join('\n');
+        pm.request.headers['X-Timestamp'] = timestamp;
+        pm.request.headers['X-Signature'] =
+          pm.crypto.hmacSha256(pm.environment.get('secret'), canonical);
+        pm.environment.set('canonical', canonical);
+        pm.environment.set('timestamp', timestamp);
+    )JS",
+    request, env);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.at ("canonical").value,
+    "GET\n/echo\na=1&b=2\n" + env.at ("timestamp").value + "\n");
+    EXPECT_EQ (request.headers.at ("X-Signature").size (), 64u);
+}
+
+TEST_F (ScriptRequestUrlTest, AQueryEditOnABaseUrlKeepsTheTokenForThePassAfter) {
+    const std::array<std::pair<const char*, const char*>, 3> CASES = { {
+    { "pm.request.url.query.add({ key: 'ts', value: '1' });", "{{baseUrl}}/echo?b=2&a=1&ts=1" },
+    // The editor's "Upsert a query parameter" snippet (routes/scripting.cpp).
+    { "pm.request.url.query.upsert({ key: \"page\", value: 2 });", "{{baseUrl}}/echo?b=2&a=1&page=2" },
+    { "pm.request.url.path.push('{{id}}');", "{{baseUrl}}/echo/{{id}}?b=2&a=1" },
+    } };
+
+    for (const auto& [script, expected] : CASES) {
+        Request target    = request;
+        target.url        = "{{baseUrl}}/echo?b=2&a=1";
+        const auto result = engine.execute_prerequest (script, target, env);
+
+        ASSERT_TRUE (result.success) << script << ": " << result.error_message;
+        EXPECT_EQ (target.url, expected) << script;
+    }
+
+    // "Add or replace a query parameter" in docs/engine/scripting.md.
+    request.url = "{{baseUrl}}/orders?page=2";
+    const auto result =
+    engine.execute_prerequest ("pm.request.url.query.upsert({ key: 'traceId', "
+                               "value: 'run-' + Date.now() });",
+    request, env);
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (
+    request.url.starts_with ("{{baseUrl}}/orders?page=2&traceId=run-"))
+    << request.url;
 }
 
 // ---------------------------------------------------------------------------

@@ -1977,8 +1977,14 @@ void pm_certificate (const json* cert, const std::string& url, PostmanCounts& co
     // is a Postman-specific check with no primitive to reuse, catching what
     // would otherwise become a bogus host for `POST /client-certificates`'s
     // own check below to pass or reject on unpredictable grounds.
-    if (!parts.parsed || host.empty () || host.find ('{') != std::string::npos ||
-    host.find ('}') != std::string::npos) {
+    // A scheme or port still written as `{{name}}` parses (#3454) with the
+    // braces outside the host; the entry would register for more than the
+    // request reaches, so it is counted as unresolvable like a templated host.
+    const auto has_brace = [] (const std::string& text) {
+        return text.find_first_of ("{}") != std::string::npos;
+    };
+    if (!parts.parsed || host.empty () || has_brace (host) ||
+    has_brace (parts.protocol) || has_brace (parts.port)) {
         counts.skipped_certificate += 1;
         return;
     }

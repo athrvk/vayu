@@ -213,11 +213,109 @@ TEST (UrlPartsTest, AUrlWithoutASchemeIsNotParsedRatherThanGuessedAt) {
 }
 
 TEST (UrlPartsTest, AnUnparseableUrlReportsNoPartsAtAll) {
-    const UrlParts parts = parse_url_parts ("{{base_url}}/users");
+    const UrlParts parts = parse_url_parts ("not a url?at=all");
 
     EXPECT_FALSE (parts.parsed);
     EXPECT_TRUE (parts.host.empty ());
     EXPECT_TRUE (parts.query_params.empty ());
+}
+
+// ---------------------------------------------------------------------------
+// A `{{variable}}` before the path (#3454): the shape a scripted request's URL
+// reaches its script in, read the way Postman reads it.
+// Mutation check: return `parse_with_libcurl (url)` alone from
+// `parse_url_parts` and every case here that expects a parse reads unparsed.
+// ---------------------------------------------------------------------------
+
+TEST (UrlPartsTest, ATokenStandingForSchemeAndHostIsTheOpaqueHost) {
+    const UrlParts parts = parse_url_parts ("{{baseUrl}}/echo?b=2&a=1");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (parts.protocol, "");
+    EXPECT_EQ (parts.host, (std::vector<std::string>{ "{{baseUrl}}" }));
+    EXPECT_EQ (parts.port, "");
+    EXPECT_EQ (parts.path, (std::vector<std::string>{ "echo" }));
+    EXPECT_EQ (parts.query, "b=2&a=1");
+    ASSERT_EQ (parts.query_params.size (), 2u);
+    EXPECT_EQ (parts.query_params[0].key, "b");
+    EXPECT_EQ (parts.query_params[0].value, "2");
+    EXPECT_EQ (parts.query_params[1].key, "a");
+    EXPECT_EQ (parts.query_params[1].value, "1");
+    EXPECT_EQ (join_path (parts.path), "/echo");
+}
+
+TEST (UrlPartsTest, ATokenHostKeepsTheSchemePortPathQueryAndFragment) {
+    const UrlParts parts = parse_url_parts ("http://{{h}}:8/p/a%20b?q=1#top");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (parts.protocol, "http");
+    EXPECT_EQ (join_host (parts.host), "{{h}}");
+    EXPECT_EQ (parts.port, "8");
+    EXPECT_EQ (parts.path, (std::vector<std::string>{ "p", "a b" }));
+    EXPECT_EQ (parts.query, "q=1");
+    ASSERT_EQ (parts.query_params.size (), 1u);
+    EXPECT_EQ (parts.query_params[0].key, "q");
+    EXPECT_EQ (parts.hash, "top");
+}
+
+// A separator inside a token is part of the name, as in Postman's parser: the
+// `.` of `{{api.host}}`, the `/` and `?` of a name nobody should write but can.
+TEST (UrlPartsTest, ASeparatorInsideATokenSplitsNothing) {
+    const UrlParts parts =
+    parse_url_parts ("https://{{api.host}}.example.com/{{a/b}}?k={{c?d}}");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (parts.host, (std::vector<std::string>{ "{{api.host}}", "example", "com" }));
+    EXPECT_EQ (parts.path, (std::vector<std::string>{ "{{a/b}}" }));
+    EXPECT_EQ (parts.query, "k={{c?d}}");
+}
+
+// Userinfo is dropped as a libcurl reading drops it: the host is what follows
+// the last `@`, and an `@` inside a token is not one. A token in the scheme is
+// the protocol, as written.
+TEST (UrlPartsTest, UserinfoIsDroppedAndATokenSchemeIsTheProtocol) {
+    const UrlParts parts =
+    parse_url_parts ("{{proto}}://{{user}}:{{p@ss}}@{{host}}:8443/v1");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (parts.protocol, "{{proto}}");
+    EXPECT_EQ (join_host (parts.host), "{{host}}");
+    EXPECT_EQ (parts.port, "8443");
+    EXPECT_EQ (join_path (parts.path), "/v1");
+}
+
+// No path text is no path segment, so an edit composes `{{baseUrl}}?a=1`
+// rather than adding a `/` the variable's own value may already end in.
+TEST (UrlPartsTest, ABareTokenIsAHostWithNoPath) {
+    const UrlParts parts = parse_url_parts ("{{baseUrl}}?a=1");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (join_host (parts.host), "{{baseUrl}}");
+    EXPECT_TRUE (parts.path.empty ());
+    EXPECT_EQ (parts.query, "a=1");
+}
+
+// libcurl refused these for a reason the token is not: a token only in the
+// path or query does not make a scheme-less URL readable, and an authority
+// with no host, or an unclosed IPv6 bracket, is no URL with a token either.
+TEST (UrlPartsTest, ATokenOnlyAfterTheAuthorityDoesNotRescueAnUnreadableUrl) {
+    for (const char* url : { "example.com/{{id}}", "example.com/users?q={{v}}",
+         "{{a}}@/p", "http://[{{v6}}/p", "http://[{{v6}}]x/p" }) {
+        EXPECT_FALSE (parse_url_parts (url).parsed) << url;
+    }
+}
+
+// A literal URL is libcurl's reading, untouched: a token in its path is
+// accepted by libcurl and so never reaches the templated reading at all.
+TEST (UrlPartsTest, ALiteralHostWithATokenedPathIsStillLibcurlsReading) {
+    const UrlParts parts =
+    parse_url_parts ("http://127.0.0.1:19812/{{seg}}?q={{v}}");
+
+    ASSERT_TRUE (parts.parsed);
+    EXPECT_EQ (join_host (parts.host), "127.0.0.1");
+    EXPECT_EQ (parts.port, "19812");
+    EXPECT_EQ (parts.path, (std::vector<std::string>{ "{{seg}}" }));
+    EXPECT_EQ (parts.query, "q={{v}}");
 }
 
 // ---------------------------------------------------------------------------
@@ -283,10 +381,30 @@ TEST (UrlPartsTest, ComposeQueryKeepsTheBareKeyDistinction) {
 // Nothing to compose from, and a URL built out of empty pieces ("://") would
 // look plausible enough to send.
 TEST (UrlPartsTest, ComposingAnUnparsedUrlAnswersNothing) {
-    const UrlParts parts = parse_url_parts ("{{base_url}}/users");
+    const UrlParts parts = parse_url_parts ("not a url?at=all");
 
     ASSERT_FALSE (parts.parsed);
     EXPECT_EQ (compose_url (parts), "");
+}
+
+// Every token goes back as written, so the pass after the script still finds
+// `{{name}}` to resolve (#3454): a `%7B%7B` would reach the server instead.
+// Mutation check: compose path segments through `percent_encode` alone and the
+// `{{id}}` segment is written `%7B%7Bid%7D%7D`.
+TEST (UrlPartsTest, ComposeWritesEveryTokenBackVerbatim) {
+    for (const char* url : { "{{baseUrl}}/echo?b=2&a=1", "http://{{h}}:8/p?q=1",
+         "{{baseUrl}}?a=1", "https://{{api.host}}.example.com/{{a/b}}#top",
+         "http://127.0.0.1:9876/users/{{id}}?q={{v}}" }) {
+        const UrlParts parts = parse_url_parts (url);
+        ASSERT_TRUE (parts.parsed) << url;
+        EXPECT_EQ (compose_url (parts), url);
+    }
+
+    UrlParts edited = parse_url_parts ("{{baseUrl}}/users/{{id}}?b=2&a=1");
+    ASSERT_TRUE (edited.parsed);
+    edited.path.emplace_back ("a b");
+    edited.query_params.push_back ({ "ts", "1" });
+    EXPECT_EQ (compose_url (edited), "{{baseUrl}}/users/{{id}}/a%20b?b=2&a=1&ts=1");
 }
 
 TEST (UrlPartsTest, JoinHostAndJoinPathAreEmptyForEmptyInput) {

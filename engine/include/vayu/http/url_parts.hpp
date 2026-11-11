@@ -33,6 +33,17 @@
  * the transfer layer resolves the URL with, so what a script reads and what
  * goes on the wire cannot disagree about where the host ends.
  *
+ * **A `{{variable}}` before the path is read Postman's way** (#3454). A
+ * scripted request's URL reaches the script with its scope names still written
+ * (`{{baseUrl}}/echo`, #2521), and libcurl refuses a URL with no scheme or with
+ * braces in the host. Only then, and only when a token sits in the scheme or
+ * the authority, the text is split as `postman-url-encoder`'s parser splits
+ * it: an optional `scheme://`, the authority up to the first `/`, `?` or `#`
+ * with the token kept as opaque host text, then the path, query and fragment
+ * by the same splitters a libcurl reading uses. A separator inside a token
+ * never splits anything, and composition writes every token back verbatim, so
+ * the pass after the script still resolves it.
+ *
  * ## What is decoded and what is not
  *
  * Path segments are percent-**decoded**, each segment on its own so an encoded
@@ -64,20 +75,25 @@ struct UrlQueryParam {
  * @brief The pieces of a URL. Every field is empty when @ref parsed is false.
  */
 struct UrlParts {
-    /// libcurl could read the string as a URL. False leaves every field empty:
-    /// a caller that shows parts of an unparseable URL must show none of them
-    /// rather than a plausible half.
+    /// The string could be read as a URL, by libcurl or as a templated one
+    /// (see the file comment). False leaves every field empty: a caller that
+    /// shows parts of an unparseable URL must show none of them rather than a
+    /// plausible half.
     bool parsed = false;
-    /// Scheme with no trailing colon (`https`).
+    /// Scheme with no trailing colon (`https`). Empty only for a templated URL
+    /// that states none (`{{baseUrl}}/echo`), never guessed.
     std::string protocol;
-    /// Host split on `.` (`api.example.com` -> `{"api", "example", "com"}`).
+    /// Host split on `.` outside any `{{...}}` token (`api.example.com` ->
+    /// `{"api", "example", "com"}`, `{{api.host}}` -> `{"{{api.host}}"}`).
     std::vector<std::string> host;
     /// The port the URL states, empty when it states none. A scheme's default
     /// port is never filled in - the URL either carried one or it did not.
     std::string port;
     /// Percent-decoded path segments, without the empty segment the leading
-    /// `/` produces. A root path is one empty segment, which is how `/` and a
-    /// URL with no path at all both read.
+    /// `/` produces, a `{{...}}` token kept as written. A root path is one
+    /// empty segment, which is how `/` and a URL with no path at all both read
+    /// through libcurl. A templated URL with no path text has no segments, so
+    /// composing it adds no `/` the token's own value may already end in.
     std::vector<std::string> path;
     /// The query as it appears on the wire, without the leading `?`.
     std::string query;
@@ -274,8 +290,9 @@ std::string_view origin);
  *
  * Path segments are percent-encoded here because @ref parse_url_parts decoded
  * them, each segment on its own so an edited segment containing `/` stays one
- * segment. The query is passed through unencoded, for the same reason it was
- * never decoded.
+ * segment, and a whole `{{...}}` token in one is written verbatim, as the host
+ * is. The query is passed through unencoded, for the same reason it was never
+ * decoded. An empty `protocol` writes no `://`.
  *
  * Empty when `parts.parsed` is false: there is nothing to compose from, and a
  * plausible-looking URL built out of empty pieces is worse than none.
