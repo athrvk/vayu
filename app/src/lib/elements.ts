@@ -23,8 +23,7 @@ import type {
 
 /**
  * The joined text of every enabled element of one script kind (`script.pre`
- * or `script.post`) in a list - what a pre-request-script presence check
- * (`LoadTestConfigDialog`'s warning) and the variable-reference scanners
+ * or `script.post`) in a list - what the variable-reference scanners
  * (`ColumnAudit`, `column-audit.ts`, `request-references.ts`) need: one flat
  * string per entity rather than the element list itself.
  *

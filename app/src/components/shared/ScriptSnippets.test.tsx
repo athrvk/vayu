@@ -170,6 +170,25 @@ describe("ScriptSnippets", () => {
 		expect(screen.queryByText("Set a header")).not.toBeInTheDocument();
 	});
 
+	it("offers a script that runs outside any request only the shared templates", () => {
+		render(<Controlled context="both" onInsert={() => ({ placement: "cursor" as const })} />);
+		open();
+
+		expect(screen.getByText("Set environment variable")).toBeInTheDocument();
+		expect(screen.queryByText("Set a header")).not.toBeInTheDocument();
+		expect(screen.queryByText("Test: Status code")).not.toBeInTheDocument();
+	});
+
+	it("says there is nothing to insert, rather than showing an empty filter, when no template applies", () => {
+		served([TEMPLATES[0]]);
+		render(<Controlled context="both" onInsert={() => ({ placement: "cursor" as const })} />);
+		open();
+
+		expect(screen.getByText("No snippets for this kind of script.")).toBeInTheDocument();
+		expect(screen.queryByPlaceholderText(/filter snippets/i)).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /snippets/i }).textContent).not.toMatch(/\d/);
+	});
+
 	it("hands the caller the template, placeholders and all", () => {
 		const onInsert = vi.fn(() => ({ placement: "cursor" as const }));
 		render(<Controlled context="pre" onInsert={onInsert} />);

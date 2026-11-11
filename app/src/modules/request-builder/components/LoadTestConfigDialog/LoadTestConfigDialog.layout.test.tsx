@@ -55,6 +55,7 @@ function open(props: Partial<React.ComponentProps<typeof LoadTestConfigDialog>> 
 			onStart={vi.fn()}
 			isStarting={false}
 			hasPreRequestScript={false}
+			hasInlinePreScript={false}
 			hasPostRequestScript={false}
 			isStreamingRequest={false}
 			{...props}

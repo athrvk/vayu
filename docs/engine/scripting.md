@@ -4026,12 +4026,16 @@ carries two fields no other entry does:
 
 | Field | Values | What it decides |
 |-------|--------|-----------------|
-| `context` | `pre`, `test`, `both` | Which script kind the template belongs in. A template that reads `pm.response` is `test`, because a pre-request script has no response to read; one that writes `pm.request` is `pre`, because a test script's writes go nowhere. |
+| `context` | `pre`, `test`, `both` | Which script kind the template belongs in. A template that reads `pm.response` is `test`, because a pre-request script has no response to read; one that writes `pm.request` is `pre`, because a test script's writes go nowhere. `both` needs neither, so it is offered under every script editor. |
 | `group` | `Variables`, `Request`, `Response`, `Tests`, `Signing`, `Logging` | The heading it is listed under. |
 
 The app's snippets surface under each script editor is built from those two:
 it shows the templates for the editor it sits under, grouped by heading, and
-inserts one at the cursor with its `${1:placeholders}` intact. Adding a
+inserts one at the cursor with its `${1:placeholders}` intact. A pre-request
+script is offered `pre` and `both`, a post-request script `test` and `both`,
+and a `script.setup` / `script.teardown` script - which run once per run,
+outside any request, with no `pm.request` or `pm.response` to template - only
+`both`. Adding a
 template to the table is therefore all it takes to offer it in the app - see
 [`pm-api-compatibility`](../app/pm-api-compatibility.md#editor-autocomplete)
 for the payload itself.

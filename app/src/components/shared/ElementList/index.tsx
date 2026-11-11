@@ -515,8 +515,10 @@ function ElementRow({
 							description={schema?.description ?? ""}
 							// The mode forms render their fields from the
 							// catalogue like the generic one does; a script form
-							// ignores it. Undefined only for a kind this engine
-							// build no longer serves - a bespoke form still
+							// reads it only for the advanced switch it draws under
+							// the editor (script.pre / script.post), and setup and
+							// teardown ignore it. Undefined only for a kind this
+							// engine build no longer serves - a bespoke form still
 							// renders there, as it always has.
 							schema={schema?.configSchema}
 							errors={fieldErrors}
