@@ -28,8 +28,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace vayu::http::routes {
 
@@ -533,6 +535,71 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     return result;
 }
 
+/// The requests a reparent takes out of a spec contract (#3470), stamps
+/// cleared, and each one's id with the bound collection its operation is
+/// declined under: `Database::apply_reorder`'s last two parameters.
+struct ContractDepartures {
+    std::vector<vayu::db::Request> requests;
+    std::unordered_map<std::string, std::string> declined_under;
+};
+
+/**
+ * The stamped requests beneath @p moved that its reparent takes out of the
+ * contract that answered for them: `POST /reorder`'s rule for a moved folder
+ * (`stage_binding_departures`), for the one folder this write moves. Each
+ * request stays in its own collection; only the tree above it changes, and
+ * @p moved is that row as this write leaves it, so an unbind in the same body
+ * is judged too.
+ */
+static ContractDepartures stage_reparent_departures (vayu::db::Database& db,
+const vayu::db::Collection& moved) {
+    ContractDepartures departures;
+    std::vector<vayu::db::Request> stamped;
+    for (auto& request : db.get_requests_in_subtree (moved.id)) {
+        if (request.spec_operation) {
+            stamped.push_back (std::move (request));
+        }
+    }
+    if (stamped.empty ()) {
+        return departures;
+    }
+
+    const SpecTreeMove tree (db.get_collections (), { { moved.id, moved } });
+    for (auto& request : stamped) {
+        const auto under = tree.declined_under (request, request.collection_id);
+        if (!under) {
+            continue;
+        }
+        departures.declined_under.emplace (request.id, *under);
+        request.spec_operation = std::nullopt;
+        request.updated_at     = next_updated_at (request.updated_at);
+        departures.requests.push_back (std::move (request));
+    }
+    return departures;
+}
+
+/**
+ * Stores the merged row of PUT /collections/:id and what its reparent took out
+ * of a contract in one transaction. Unbinding forgets the operations deletes
+ * declined under the old document (#3031).
+ */
+static void write_collection_update (vayu::db::Database& db,
+const vayu::db::Collection& existing,
+const vayu::db::Collection& merged,
+const nlohmann::json& json,
+const ContractDepartures& departures) {
+    if (json.contains ("openapi") &&
+    binding_leaves_document (existing.openapi, merged.openapi)) {
+        db.rebind_collection (merged, departures.requests, departures.declined_under);
+        return;
+    }
+    if (!departures.requests.empty ()) {
+        db.apply_reorder ({ merged }, departures.requests, departures.declined_under);
+        return;
+    }
+    db.create_collection (merged);
+}
+
 /** The read-merge-write of PUT /collections/:id, run under the caller's lock. */
 static std::pair<int, nlohmann::json> update_collection_locked (vayu::db::Database& db,
 const std::string& id,
@@ -564,17 +631,21 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     c.updated_at = next_updated_at (existing->updated_at);
+    // A folder moved out of a contract declines its requests' operations
+    // there (#3470), as a move through `POST /reorder` does.
+    const ContractDepartures departures = c.parent_id != existing->parent_id ?
+    stage_reparent_departures (db, c) :
+    ContractDepartures{};
 
     if (before_write) {
         before_write ();
     }
-    // Unbinding forgets the operations deletes declined under the old
-    // document (#3031).
-    if (json.contains ("openapi") &&
-    binding_leaves_document (existing->openapi, c.openapi)) {
-        db.rebind_collection (c);
-    } else {
-        db.create_collection (c);
+    try {
+        write_collection_update (db, *existing, c, json, departures);
+    } catch (const vayu::db::MissingRowError& e) {
+        // Unreachable while every writer takes the DB mutex, as in
+        // `POST /reorder`, which answers the same 409: nothing was written.
+        return { 409, error_body (409, e.what ()) };
     }
     return { 200, vayu::json::serialize (c) };
 }

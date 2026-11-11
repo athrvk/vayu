@@ -452,7 +452,17 @@ class Database {
     /// forgets every operation declined under it (#3031): what a write that
     /// moves its binding off the document those deletes were decided against
     /// runs.
-    void rebind_collection (const Collection& collection); // db_collections.cpp
+    ///
+    /// @param departed the requests the same write takes out of a spec
+    ///        contract, stamps already cleared, with @p declined_under naming
+    ///        where each is declined: `apply_reorder`'s two parameters, for a
+    ///        `PUT /collections/:id` that unbinds and reparents at once
+    ///        (#3470). The forget runs after them, so a decline recorded under
+    ///        @p collection itself goes with the rest.
+    // db_collections.cpp
+    void rebind_collection (const Collection& collection,
+    const std::vector<Request>& departed                               = {},
+    const std::unordered_map<std::string, std::string>& declined_under = {});
 
     /// @param declined_under the bound collection a move takes @p r out of
     ///        (`declined_by_move` in `routes.hpp`, resolved by the route, #3446): the
@@ -1564,6 +1574,21 @@ class Database {
     /// a move out of its binding wrote stands (#3446). Same scope rule as
     /// `record_declined_operation_locked`.
     void forget_declined_by_locked (const Request& request); // db_requests.cpp
+
+    /**
+     * @brief Update each of @p requests, first recording the decline
+     *        @p declined_under names for it off the stored row, before the
+     *        write clears its stamp (#3446).
+     *
+     * Updated, never inserted: a row that is not stored and live throws
+     * `MissingRowError`, `apply_reorder`'s rule and its reason. Shared by
+     * `apply_reorder` and `rebind_collection`; the caller holds the DB mutex
+     * and is inside its own transaction, and publishes @p changes, to which
+     * each write's change is appended, once that commits.
+     */
+    void update_moved_requests_locked (const std::vector<Request>& requests,
+    const std::unordered_map<std::string, std::string>& declined_under,
+    std::vector<Change>& changes); // db_collections.cpp
 
     /**
      * @brief The five shapes of `restore_deleted`, split by what a row can
