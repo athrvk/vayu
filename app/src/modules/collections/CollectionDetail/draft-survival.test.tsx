@@ -34,6 +34,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CollectionDetail from "./index";
+import { queryKeys } from "@/queries/keys";
+import { ApiError } from "@/services/http-client";
 import { resetEntityDraftStoreForTests, useEntityDraftStore } from "@/stores/entity-draft-store";
 import { resetSaveStoreForTests, useSaveStore } from "@/stores/save-store";
 import { useEngineStore } from "@/stores/engine-store";
@@ -65,8 +67,11 @@ const mutateAsync = vi.fn((_patch: { id: string; name?: string; elements?: Eleme
 	Promise.resolve(collection)
 );
 // What the engine holds: a save that lands updates it, the way the real
-// mutation's `onSuccess` updates the collections cache.
+// mutation's `onSuccess` updates the collections cache, and `c1Deleted` takes
+// it out of the list.
 let stored: Collection = collection;
+let c1Deleted = false;
+const listed = () => (c1Deleted ? [] : [stored]);
 
 const mutation = {
 	mutate: vi.fn(),
@@ -76,9 +81,8 @@ const mutation = {
 	isError: false,
 	error: null as Error | null,
 };
-
 vi.mock("@/queries/collections", () => ({
-	useCollectionsQuery: () => ({ data: [stored], isLoading: false, isError: false }),
+	useCollectionsQuery: () => ({ data: listed(), isLoading: false, isError: false }),
 	useRequestsQuery: () => ({ data: [], isLoading: false }),
 	// The shell counts the whole subtree for its header (issue #723); an empty
 	// map is "no requests anywhere", which is what these cases are about.
@@ -140,14 +144,30 @@ vi.mock("@/hooks", async (importOriginal) => ({
 // this file is about the tab shell, and its own suite covers the control.
 vi.mock("./MockServerControl", () => ({ default: () => null }));
 
+let client = new QueryClient();
+
 function Screen() {
 	return (
-		<QueryClientProvider client={new QueryClient()}>
+		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<CollectionDetail />
 			</TooltipProvider>
 		</QueryClientProvider>
 	);
+}
+
+/** Writes what the engine holds into the collections cache, as a refetch would. */
+function publish() {
+	act(() => client.setQueryData(queryKeys.collections.list(), listed()));
+}
+
+function resetHarness() {
+	resetEntityDraftStoreForTests();
+	resetSaveStoreForTests();
+	useTabSelectionStore.getState().clearAll();
+	client = new QueryClient();
+	stored = collection;
+	c1Deleted = false;
 }
 
 function nameInput(): HTMLInputElement {
@@ -167,10 +187,7 @@ function selectTab(label: RegExp) {
 
 describe("CollectionDetail - an unsaved draft", () => {
 	beforeEach(() => {
-		resetEntityDraftStoreForTests();
-		resetSaveStoreForTests();
-		useTabSelectionStore.getState().clearAll();
-		stored = collection;
+		resetHarness();
 		mutateAsync.mockClear();
 	});
 
@@ -236,10 +253,7 @@ describe("CollectionDetail - an unsaved draft", () => {
 
 describe("CollectionDetail - an unsaved draft outliving the screen (#3459)", () => {
 	beforeEach(() => {
-		resetEntityDraftStoreForTests();
-		resetSaveStoreForTests();
-		useTabSelectionStore.getState().clearAll();
-		stored = collection;
+		resetHarness();
 		mutateAsync.mockReset();
 		mutateAsync.mockImplementation((patch) => {
 			stored = { ...stored, ...patch };
@@ -401,5 +415,104 @@ describe("CollectionDetail - an unsaved draft outliving the screen (#3459)", () 
 		expect(useEntityDraftStore.getState().entries.size).toBe(0);
 		expect(useSaveStore.getState().contexts.has("collection-c1-elements")).toBe(false);
 		expect(useSaveStore.getState().status).toBe("idle");
+	});
+});
+
+describe("CollectionDetail - a draft away from its screen, against what is stored (#3459)", () => {
+	beforeEach(() => {
+		resetHarness();
+		mutateAsync.mockReset();
+		mutateAsync.mockImplementation((patch) => {
+			stored = { ...stored, ...patch };
+			return Promise.resolve(stored);
+		});
+		publish();
+	});
+
+	const toggle = () => screen.getByRole("switch", { name: /enable pre-request script/i });
+	const elementsContext = () => useSaveStore.getState().contexts.get("collection-c1-elements");
+
+	function leaveElementsEdited() {
+		const view = render(<Screen />);
+		selectTab(/elements/i);
+		fireEvent.click(toggle());
+		view.unmount();
+		expect(elementsContext()?.hasPendingChanges).toBe(true);
+	}
+
+	it("goes when its collection is deleted elsewhere while the screen is away", () => {
+		// An MCP `delete_collection` or a trash purge closes no tab. Mutation
+		// check: drop the `gone` reading from the detached watch, and the tab
+		// stays dirty and the quit flush PUTs a deleted id.
+		leaveElementsEdited();
+
+		c1Deleted = true;
+		publish();
+
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(elementsContext()).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes when the screen lets it go to say the collection is not found", () => {
+		const view = render(<Screen />);
+		selectTab(/elements/i);
+		fireEvent.click(toggle());
+
+		c1Deleted = true;
+		publish();
+		view.rerender(<Screen />);
+
+		expect(screen.getByText("Collection not found")).toBeInTheDocument();
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(elementsContext()).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes when the flush's save answers 404, after the quit asks", async () => {
+		// The cache has not heard of the delete yet. Mutation check: keep the
+		// context after a 404, and every later flush PUTs the deleted id again.
+		leaveElementsEdited();
+		mutateAsync.mockRejectedValue(new ApiError(404, "not_found", "Collection not found"));
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(tally).toEqual({ saved: 0, failed: 1, pending: 0 });
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(elementsContext()).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("goes when what is stored catches up with it elsewhere", () => {
+		// Another window saved the same edit. Mutation check: compare the
+		// reading with the baseline only, and the Dock keeps "Unsaved changes"
+		// for an edit that is on disk.
+		leaveElementsEdited();
+
+		stored = { ...stored, elements: [{ ...script, enabled: false }] };
+		publish();
+
+		expect(useEntityDraftStore.getState().entries.size).toBe(0);
+		expect(elementsContext()).toBeUndefined();
+		expect(useSaveStore.getState().status).toBe("idle");
+	});
+
+	it("is not written over a change that arrived while the screen was away (#1437)", async () => {
+		// Mutation check: drop the conflict check from the detached save, and the
+		// quit flush sends the old draft over the newer script without a word.
+		leaveElementsEdited();
+		const theirs: ElementDef = { ...script, config: { script: "console.log(2);" } };
+		stored = { ...stored, elements: [theirs] };
+		publish();
+
+		const tally = await act(() => useSaveStore.getState().flushAll());
+
+		expect(tally).toEqual({ saved: 0, failed: 0, pending: 1 });
+		expect(mutateAsync).not.toHaveBeenCalled();
+		expect(elementsContext()?.hasPendingChanges).toBe(true);
+
+		render(<Screen />);
+		expect(screen.getByText("Changed elsewhere: the elements list")).toBeInTheDocument();
+		expect(toggle()).not.toBeChecked();
 	});
 });

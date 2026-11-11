@@ -826,10 +826,11 @@ its context id (`globals-editor`, `environment-<id>`, `collection-<id>`),
 `SettingsMain` under `settings`, the inbox reply under `inbox-reply`, and the
 context bar's variables section under `context-bar-variables`. A surface that
 drops its draft discards its id: `VariableTableEditor`, and `useDraftSaveContext`
-for an editor that passes no `draftKey` (the inbox reply), when the id changes
+for an editor that passes no `stored` draft (the inbox reply), when the id changes
 or they unmount (the draft is component state, so nothing holds it after that),
 `useDraftSaveContext` for a stored draft (the collection editors, #3459) when
-that stored draft is dropped, which an unmount alone does not do (see
+that stored draft is dropped or its entity is gone, which an unmount alone does
+not do (see
 [`entity-draft-store.ts`](#entity-draft-storets---unsaved-collection-drafts-that-outlive-their-editor)),
 `SettingsMain` when its staged edits are gone (reverted,
 or flushed with every one of them invalid) and no write is in flight, and
@@ -1120,6 +1121,19 @@ tabs' drafts, and `closeTabsForEntities` drops every id the delete names,
 descendants included, beside `clearEntity`. The delete path cannot rely on
 `markRemoved`, whose ids are request-scoped, and a draft left behind would
 send its save at the deleted row on quit.
+
+**A detached draft is read against the collections list.** Once its editor is
+gone, nothing on screen compares the draft with what is stored, so the
+detached context does (`useDraftSaveContext`'s `stored`, built by
+`useStoredCollectionDraft` in `CollectionDetail/collection-drafts.ts`, which
+also defines the value each editor drafts against). It watches the
+`collections.list` cache: a collection that leaves the list (an MCP
+`delete_collection`, a trash purge, another window) or a stored value that
+catches up with the draft drops the entry and discards the id, and a 404 from
+the detached save does the same after its failure toast. A stored value that
+moved away from the draft's `baseline` is a conflict (#1437): the detached
+save declines as `pending` rather than write over it unseen, so the quit asks
+and the remount shows "Changed elsewhere".
 
 **It replaced `collection-auth-draft-store.ts` (#1483).** The Inheritance Chain
 card and the context bar's `CollectionAuthSection` read the stored collection,

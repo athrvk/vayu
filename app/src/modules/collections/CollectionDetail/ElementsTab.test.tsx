@@ -26,8 +26,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render as renderBare, screen, fireEvent, within, waitFor } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useLayoutStore, useTabSelectionStore } from "@/stores";
 import { useEditorVariableTokensContext } from "@/components/shared/EditorVariableTokens/context";
 import type { Collection, DataContractScope, ElementDef, ElementKindSchema } from "@/types";
@@ -39,10 +40,20 @@ import ElementsTab from "./ElementsTab";
  * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
  * rendered bare is in a state the app is never in - and since #1690 a gated
  * control inside one carries a real tooltip, which throws without it. Every
- * render in this file goes through the provider, the way the app does.
+ * render in this file goes through the provider, the way the app does, and
+ * through a query client: the tab reads its stored draft against the
+ * collections cache (`useStoredCollectionDraft`).
  */
+function Providers({ children }: { children: ReactNode }) {
+	return (
+		<TestQueryClient>
+			<TooltipProvider>{children}</TooltipProvider>
+		</TestQueryClient>
+	);
+}
+
 function render(ui: ReactElement, options?: Parameters<typeof renderBare>[1]) {
-	return renderBare(ui, { wrapper: TooltipProvider, ...options });
+	return renderBare(ui, { wrapper: Providers, ...options });
 }
 
 const mutation = {
@@ -81,8 +92,8 @@ const variableOrigins: { value: Record<string, VariableOrigin[]> } = { value: {}
  * `useVariableWriter` itself is a real TanStack Query + Zustand hook with its
  * own suite (`hooks/useVariableWriter.test.ts`); stubbed here at the same
  * `@/hooks` seam as `useDataContract`/`useVariableResolver` above it, both
- * because this file stands up no `QueryClientProvider` and because what this
- * suite guards is the wiring - which `collectionId` this tab passes in - not
+ * because this file fills no query cache and because what this suite guards
+ * is the wiring - which `collectionId` this tab passes in - not
  * the hook's own behavior.
  */
 const useVariableWriterMock = vi.fn((_opts?: { collectionId?: string }) => ({

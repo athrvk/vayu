@@ -30,20 +30,37 @@
  * The registered save also resolves with its verdict (`SaveOutcome`), which is
  * what the store counts.
  *
- * **A stored draft keeps its context after the editor goes (#3459).** Given a
- * `draftKey`, an editor that unmounts or switches id while dirty leaves its
+ * **A stored draft keeps its context after the editor goes (#3459).** Given
+ * `stored`, an editor that unmounts or switches id while dirty leaves its
  * context registered (`detach`): the Dock keeps "Unsaved changes", the tab
  * stays dirty (`isTabDirty`), and the quit flush still saves the draft. Without
- * a `draftKey` (the inbox reply, whose draft is component state) the edit goes
- * with the editor, as it always has.
+ * it (the inbox reply, whose draft is component state) the edit goes with the
+ * editor, as it always has.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 
 import { isDiskFullError } from "@/lib/disk-full";
 import { SaveBlockedError } from "@/lib/elements";
+import { isNotFoundError } from "@/lib/save-failure";
 import { useEntityDraftStore } from "@/stores/entity-draft-store";
 import { useSaveStore, type SaveOutcome } from "@/stores/save-store";
+
+/**
+ * What is persisted for a stored draft's entity right now, read from outside
+ * the editor: the value, `"gone"` once the entity no longer exists, or
+ * `undefined` while that is not known (nothing loaded).
+ */
+export type PersistedReading = { value: unknown } | "gone" | undefined;
+
+/** A draft kept in `entity-draft-store`, and how to read what it is a draft of. */
+export interface StoredDraft {
+	/** The `useEntityDraft` key the draft is stored under. */
+	key: string;
+	read: () => PersistedReading;
+	/** Calls `onChange` whenever `read` may answer differently; returns the unsubscribe. */
+	subscribe: (onChange: () => void) => () => void;
+}
 
 interface DraftSaveContextOptions {
 	/** Unique id for this editor, e.g. `collection-<id>-auth`. */
@@ -74,11 +91,11 @@ interface DraftSaveContextOptions {
 	 */
 	consumeDiscard?: () => boolean;
 	/**
-	 * The `useEntityDraft` key the draft is stored under. Given, the context
-	 * outlives the editor for as long as that stored draft is unsaved - see
-	 * `detach`. Omitted, the context goes with the editor.
+	 * Where the draft is stored. Given, the context outlives the editor for as
+	 * long as that stored draft is unsaved - see `detach`. Omitted, the context
+	 * goes with the editor.
 	 */
-	draftKey?: string;
+	stored?: StoredDraft;
 }
 
 type DraftSave = () => Promise<SaveOutcome | void>;
@@ -114,25 +131,34 @@ async function runDraftSave(id: string, name: string, save: DraftSave): Promise<
 const detached = new Map<string, () => void>();
 
 /**
+ * Where a detached draft stands against what is persisted now. `spent` is a
+ * draft nothing is left to save: its entry is gone (the tab closed, a late
+ * save landed), its entity is gone (deleted elsewhere), or the persisted value
+ * caught up with it (saved elsewhere). `conflict` is a change that landed after
+ * the draft diverged, which the draft must not be written over unseen (#1437).
+ */
+function standingOf(stored: StoredDraft): "unsaved" | "conflict" | "spent" {
+	const entry = useEntityDraftStore.getState().entries.get(stored.key);
+	if (!entry) return "spent";
+	const reading = stored.read();
+	if (reading === undefined) return "unsaved";
+	if (reading === "gone") return "spent";
+	const persisted = JSON.stringify(reading.value);
+	if (persisted === JSON.stringify(entry.draft)) return "spent";
+	return persisted === JSON.stringify(entry.baseline) ? "unsaved" : "conflict";
+}
+
+/**
  * Keeps `id`'s context registered after its editor let go of a dirty stored
  * draft. Its save is the editor's last `save`, which closed over that draft and
- * over a mutation observer that still works unmounted. When it lands, the
- * stored draft is spent: the context and the entry both go. When the entry
- * goes another way - the tab closed, the entity deleted, or a save the editor
- * started before it went landing late (`useEntityDraft`'s `markSaved`) - the
- * context goes, and the id's report with it.
+ * over that editor's own mutation observer, which still works unmounted. When
+ * it lands, the context and the entry go. While the draft is `spent` the
+ * context, the entry and the id's report all go; while it is a `conflict` the
+ * save declines, so the quit asks and the remount shows the change.
  */
-function detach(id: string, name: string, draftKey: string, save: DraftSave) {
+function detach(id: string, name: string, stored: StoredDraft, save: DraftSave) {
 	const saveStore = useSaveStore.getState;
-	const draftStore = useEntityDraftStore.getState;
 	let unwatch = () => {};
-	const watch = () => {
-		unwatch = useEntityDraftStore.subscribe((s) => {
-			if (s.entries.has(draftKey)) return;
-			letGo();
-			saveStore().discard(id);
-		});
-	};
 	const end = () => {
 		unwatch();
 		detached.delete(id);
@@ -140,28 +166,50 @@ function detach(id: string, name: string, draftKey: string, save: DraftSave) {
 	const letGo = () => {
 		end();
 		saveStore().unregisterContext(id);
+		useEntityDraftStore.getState().drop(stored.key);
 	};
-	const detachedSave = async () => {
+	const release = () => {
+		letGo();
+		saveStore().discard(id);
+	};
+	const settle = () => {
+		if (standingOf(stored) === "spent") release();
+	};
+	const watch = () => {
+		const unwatchDraft = useEntityDraftStore.subscribe(settle);
+		const unwatchPersisted = stored.subscribe(settle);
+		unwatch = () => {
+			unwatchDraft();
+			unwatchPersisted();
+		};
+	};
+	const detachedSave = async (): Promise<SaveOutcome> => {
+		if (standingOf(stored) === "conflict") return "pending";
 		// Unwatched while it runs: the editor's save drops the entry itself when
 		// it lands (`markSaved`), and that is a save, not a discard.
 		unwatch();
-		const outcome = await runDraftSave(id, name, save);
+		let entityGone = false;
+		const outcome = await runDraftSave(id, name, () =>
+			save().catch((error: unknown) => {
+				entityGone = isNotFoundError(error);
+				throw error;
+			})
+		);
 		// An editor that mounted again meanwhile owns the id now.
 		if (saveStore().contexts.get(id)?.save !== detachedSave) return outcome;
-		if (outcome === "saved") {
-			letGo();
-			draftStore().drop(draftKey);
-		} else if (!draftStore().entries.has(draftKey)) {
-			letGo();
-			saveStore().discard(id);
-		} else {
-			watch();
-		}
+		// A 404 is the entity deleted where the persisted reading has not seen
+		// it yet: no retry can land, so the failure is a toast and no more.
+		if (outcome === "saved") letGo();
+		else if (entityGone || standingOf(stored) === "spent") release();
+		else watch();
 		return outcome;
 	};
 	saveStore().registerContext({ id, name, save: detachedSave, hasPendingChanges: true });
 	watch();
 	detached.set(id, end);
+	// The editor may have let go because its entity is gone ("Collection not
+	// found"), or after the persisted value caught up in the same commit.
+	settle();
 }
 
 export function useDraftSaveContext({
@@ -171,7 +219,7 @@ export function useDraftSaveContext({
 	isActive,
 	save,
 	consumeDiscard,
-	draftKey,
+	stored,
 }: DraftSaveContextOptions): void {
 	const registerContext = useSaveStore((s) => s.registerContext);
 	const unregisterContext = useSaveStore((s) => s.unregisterContext);
@@ -203,9 +251,9 @@ export function useDraftSaveContext({
 	// What the goodbye below needs to know about the id that is leaving. React
 	// runs every cleanup of a commit before any effect of it, so in that cleanup
 	// this still describes the outgoing id rather than the one replacing it.
-	const committed = useRef({ id, name, isDirty, draftKey, save });
+	const committed = useRef({ id, name, isDirty, stored, save });
 	useEffect(() => {
-		committed.current = { id, name, isDirty, draftKey, save };
+		committed.current = { id, name, isDirty, stored, save };
 	});
 
 	// The goodbye, on an unmount or an id switch: a dirty stored draft keeps
@@ -218,16 +266,16 @@ export function useDraftSaveContext({
 				id: lastId,
 				name: lastName,
 				isDirty: wasDirty,
-				draftKey: key,
+				stored: lastStored,
 				save: lastSave,
 			} = committed.current;
 			const keep =
-				key !== undefined &&
+				lastStored !== undefined &&
 				lastId === id &&
 				wasDirty &&
-				useEntityDraftStore.getState().entries.has(key) &&
+				useEntityDraftStore.getState().entries.has(lastStored.key) &&
 				!useSaveStore.getState().isRemoved(id);
-			if (keep) detach(id, lastName, key, lastSave);
+			if (keep) detach(id, lastName, lastStored, lastSave);
 			else discard(id);
 		},
 		[id, discard]

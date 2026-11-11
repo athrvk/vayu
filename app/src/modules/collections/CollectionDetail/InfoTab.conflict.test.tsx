@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resetEntityDraftStoreForTests } from "@/stores/entity-draft-store";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { TestQueryClient } from "@/test/TestQueryClient";
 import { useSaveStore } from "@/stores/save-store";
 import type { Collection } from "@/types";
 
@@ -58,7 +59,8 @@ async function renderTab(props: Partial<Collection> = {}) {
 	const utils = render(
 		<TooltipProvider>
 			<InfoTab collection={{ ...collection, ...props }} requestCount={0} />
-		</TooltipProvider>
+		</TooltipProvider>,
+		{ wrapper: TestQueryClient }
 	);
 	await act(async () => {});
 	return utils;

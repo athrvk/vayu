@@ -44,9 +44,9 @@ import {
 } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
 import { useElementKindsQuery } from "@/queries";
-import { entityDraftKey } from "@/stores/entity-draft-store";
 import { hasIncompleteElement, SaveBlockedError } from "@/lib/elements";
 import type { Collection, ElementDef, VariableSupport } from "@/types";
+import { persistedDraft, useStoredCollectionDraft } from "./collection-drafts";
 import { InfoBanner, SaveFailed } from "./shared";
 
 /** How many referenced names get a chip before the rest become a count - the
@@ -101,7 +101,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		]
 	);
 
-	const draftKey = entityDraftKey(collection.id, "elements");
+	const stored = useStoredCollectionDraft(collection.id, "elements");
 	const {
 		draft: elements,
 		setDraft: setElements,
@@ -111,8 +111,8 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		markSaved,
 		externalValue,
 	} = useEntityDraft<ElementDef[]>({
-		entityKey: draftKey,
-		value: collection.elements,
+		entityKey: stored.key,
+		value: persistedDraft(collection, "elements"),
 		mutation: updateCollection,
 	});
 
@@ -149,7 +149,7 @@ export default function ElementsTab({ collection, active = false }: ElementsTabP
 		isActive: active,
 		save: persist,
 		consumeDiscard,
-		draftKey,
+		stored,
 	});
 
 	const handleSave = () => void persist().catch(() => {});

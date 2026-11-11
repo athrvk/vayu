@@ -98,7 +98,7 @@ describe("useDraftSaveContext's Dock status wiring", () => {
 	});
 
 	it("stops counting a draft it does not store as unsaved once the editor unmounts", () => {
-		// The inbox reply's case: no `draftKey`, so the edit goes with the editor.
+		// The inbox reply's case: no `stored`, so the edit goes with the editor.
 		// Mutation check: dropping the discard on teardown leaves the Dock on
 		// "Unsaved changes" for a draft nothing can save any more.
 		const { unmount } = mount({ id: "a", isDirty: true });
@@ -383,7 +383,14 @@ describe("a stored draft's context outliving its editor (#3459)", () => {
 					isDirty: props.isDirty,
 					isActive: true,
 					save: props.save,
-					draftKey: props.draftKey,
+					// Nothing loaded, so the stored draft is judged by its entry
+					// alone; the persisted readings are the screen suite's
+					// (`draft-survival.test.tsx`).
+					stored: {
+						key: props.draftKey,
+						read: () => undefined,
+						subscribe: () => () => {},
+					},
 				}),
 			{ initialProps: initial }
 		);

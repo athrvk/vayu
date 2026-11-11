@@ -28,8 +28,12 @@ import { ExternalChangeCallout } from "@/components/shared";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { reportBlankNameRefused } from "@/lib/blank-name";
 import { useUpdateCollectionMutation } from "@/queries/collections";
-import { entityDraftKey } from "@/stores/entity-draft-store";
 import type { Collection } from "@/types";
+import {
+	persistedDraft,
+	useStoredCollectionDraft,
+	type CollectionDrafts,
+} from "./collection-drafts";
 import { ImportNotesCallout } from "./ImportNotesCallout";
 import { Field, RelativeTime, SaveFailed, Stat } from "./shared";
 
@@ -45,10 +49,7 @@ interface InfoTabProps {
 	active?: boolean;
 }
 
-interface InfoDraft {
-	name: string;
-	description: string;
-}
+type InfoDraft = CollectionDrafts["info"];
 
 /**
  * One field of the per-key merge #1437 needs: a field the user hasn't touched
@@ -83,11 +84,11 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 	// clears the post-trim divergence: `persist` writes `name.trim()`, so a
 	// draft with trailing whitespace would otherwise stay dirty against the
 	// trimmed saved value forever.
-	const draftKey = entityDraftKey(collection.id, "info");
+	const stored = useStoredCollectionDraft(collection.id, "info");
 	const { draft, setDraft, adopt, consumeDiscard, markSaved, isDirty, baseline, externalValue } =
 		useEntityDraft<InfoDraft>({
-			entityKey: draftKey,
-			value: { name: collection.name, description: collection.description ?? "" },
+			entityKey: stored.key,
+			value: persistedDraft(collection, "info"),
 			mutation: updateCollection,
 		});
 
@@ -128,7 +129,7 @@ export default function InfoTab({ collection, requestCount, active = false }: In
 		isActive: active,
 		save: persist,
 		consumeDiscard,
-		draftKey,
+		stored,
 	});
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths

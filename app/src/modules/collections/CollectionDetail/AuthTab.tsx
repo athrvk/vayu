@@ -54,10 +54,10 @@ import {
 } from "@/constants/auth-modes";
 import { useDraftSaveContext, useEntityDraft } from "@/hooks";
 import { useUpdateCollectionMutation } from "@/queries/collections";
-import { collectionAuthDraftKey } from "@/stores/entity-draft-store";
 import type { Collection } from "@/types";
 import { InfoBanner, SaveFailed, SectionLabel } from "./shared";
 import InheritanceChain from "./InheritanceChain";
+import { persistedDraft, useStoredCollectionDraft } from "./collection-drafts";
 import { defaultOAuth2Config } from "@/services/oauth/defaults";
 
 type CollectionAuth = Collection["auth"];
@@ -126,7 +126,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 	// The key is also what the context bar's `CollectionAuthSection` reads the
 	// draft by (`useCollectionAuthDraft`), so it shows the picked-but-unsaved
 	// mode instead of the stored one (#1483).
-	const draftKey = collectionAuthDraftKey(collection.id);
+	const stored = useStoredCollectionDraft(collection.id, "auth");
 	const {
 		draft: auth,
 		setDraft: setAuth,
@@ -136,8 +136,8 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		markSaved,
 		externalValue,
 	} = useEntityDraft<CollectionAuth>({
-		entityKey: draftKey,
-		value: collection.auth,
+		entityKey: stored.key,
+		value: persistedDraft(collection, "auth"),
 		mutation: updateCollection,
 	});
 
@@ -164,7 +164,7 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 		isActive: active,
 		save: persist,
 		consumeDiscard,
-		draftKey,
+		stored,
 	});
 
 	// A rejection here is rendered by <SaveFailed> below; the store-driven paths
