@@ -31,6 +31,7 @@ async function loadIn(locale: string) {
 		viewer: await import("@/components/shared/response-viewer/utils"),
 		dashboard: await import("@/modules/dashboard/utils/format"),
 		charts: await import("@/modules/dashboard/components/charts/uplot/formatters"),
+		hdr: await import("@/modules/dashboard/components/charts/uplot/hdrMarkers"),
 	};
 }
 
@@ -101,5 +102,12 @@ describe.each(LOCALES)("digits under $locale", ({ locale, mark, group }) => {
 		expect(charts.axisMs(2500, [0, 2500, 5000])).toBe(`2${mark}5s`);
 		expect(charts.fmtSeconds(1.26)).toBe(`1${mark}3s`);
 		expect(charts.fmtVitals(0.42)).toBe(`0${mark}420`);
+	});
+
+	it("the HDR percentile readout", async () => {
+		const { hdr } = await loadIn(locale);
+		// x of the 99.9th percentile, the one mark with a decimal.
+		expect(hdr.xToPctLabel(hdr.pctToX(99.9))).toBe(`99${mark}9%`);
+		expect(hdr.xToPctLabel(0)).toBe("0%");
 	});
 });

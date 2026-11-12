@@ -20,7 +20,7 @@ import { useClientSettingsStore } from "@/stores";
 import { UPlotChart, type UPlotSeriesSpec, type Marker } from "./UPlotChart";
 import { SCATTER_LEGEND } from "./legend";
 import { buildConcurrencyScatter } from "./buildData";
-import { formatLatency } from "@/lib/format-number";
+import { formatLatency, formatTrimmed } from "@/lib/format-number";
 import { axisMs, fmtMs } from "./formatters";
 import { hdrPercentileMarkers, pctToX, xToPctLabel } from "./hdrMarkers";
 
@@ -164,7 +164,8 @@ export function HdrPercentileChart({
 
 	if (!data) return null;
 	// The axis ticks at exactly HDR_SPLITS, so each tick is one mark's own position.
-	const xTickLabel = (x: number) => `${HDR_MARKS.find((m) => pctToX(m) === x)}%`;
+	const xTickLabel = (x: number) =>
+		`${formatTrimmed(HDR_MARKS.find((m) => pctToX(m) === x) ?? 0, 2)}%`;
 
 	return (
 		<UPlotChart
