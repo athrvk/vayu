@@ -1699,6 +1699,16 @@ accepted and warns:
   template in. The script keeps running
 - `pm.test.skip`, `pm.test.index`, `pm.require`, `pm.execution.runRequest`,
   `pm.execution.location` and `pm.response.dataURI()`
+- `pm.request.url.variables` (Postman's path-variable list, `:id` segments) and
+  `pm.response.jsonp(...)` - both read as `undefined`, so a call throws
+- **A reviver passed to `pm.response.json(reviver)`** - `json()` takes no
+  argument here, and one that is passed is *ignored*: the body is parsed as
+  plain JSON and nothing throws, so a script that revives dates or big numbers
+  gets the unrevived values. Parse the text yourself instead:
+  `JSON.parse(pm.response.text(), reviver)`. The same holds for the response a
+  `pm.sendRequest` callback receives, which shares the implementation; the
+  import notice cannot name that spelling, since the scan matches the written
+  path `pm.response.json` and not a callback's parameter
 - `console.debug` and every other console method beyond `log`, `info`, `warn` and
   `error` (`console.table`, `console.dir`, `console.time`, ...) - use
   `console.log`
@@ -1743,7 +1753,9 @@ under `meta.unsupportedScriptApis` (see
 the scan table (`API_RULES` in `engine/src/core/script_api_scan.cpp`), and only
 when written out: `pm.test.skip`, `pm.test.index`, `pm.require`,
 `pm.execution.runRequest`, `pm.execution.location`, `pm.response.dataURI`,
-`pm.response.headers.map`, `pm.request.headers.map`, `pm.cookies.set`,
+`pm.response.jsonp`, `pm.response.json(reviver)` (a call with an argument; the
+empty `json()` runs and is not named), `pm.response.headers.map`,
+`pm.request.headers.map`, `pm.request.url.variables`, `pm.cookies.set`,
 `pm.cookies.unset` and `pm.cookies.clear` (each its own name; `pm.cookies.jar()`
 is not among them), `console.debug`, `console.table`, `console.dir` and
 `console.time`, `fetch`, `XMLHttpRequest`, `URL`, `URLSearchParams`,
@@ -1760,7 +1772,8 @@ that uses them imports with no notice and throws at first run:
   `console.group`, `console.count`, `console.timeEnd`, ...)
 - `pm.environment.name`, `pm.request.clone()` / `.size()` / `.update()`, the
   `PropertyList` methods of a header object other than `map`, and a name read
-  through an alias (`const h = pm.response.headers; h.map(f)`)
+  through an alias (`const h = pm.response.headers; h.map(f)`), which includes a
+  reviver passed to the `json()` of a `pm.sendRequest` response
 
 Postman's pre-`pm.*` globals and the `postman.*` methods are not named either:
 they run (see [above](#postmans-legacy-globals)).

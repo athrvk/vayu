@@ -495,7 +495,9 @@ pm.response.responseTimeQueueWait // Wait before the wire in ms - generator
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
 pm.response.text()            // Body as string
-pm.response.json()            // Parse JSON (throws if invalid)
+pm.response.json()            // Parse JSON (throws if invalid). Takes no
+                              // reviver: an argument is ignored, and a Postman
+                              // import names a call that passes one
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
 pm.response.responseSize      // The body's bytes: size().body
