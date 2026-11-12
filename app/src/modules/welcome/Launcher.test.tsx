@@ -27,6 +27,11 @@ import { Launcher } from "./Launcher";
 import { FirstRunWelcome } from "./FirstRunWelcome";
 import { LauncherSkeleton } from "./LauncherSkeleton";
 
+// `RecentRuns` resolves a collection run's name through the collections query.
+vi.mock("@/queries", () => ({
+	useCollectionsQuery: () => ({ data: [] }),
+}));
+
 const noop = () => {};
 
 function classesOf(ui: React.ReactElement): string {

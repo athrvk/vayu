@@ -48,6 +48,10 @@ Two consequences worth keeping in mind before adding anything here:
   otherwise read the event as that data; the screen also wraps `onNewRequest`
   for the same reason.
 - `RecentRuns` copies before sorting - the array is the TanStack Query cache.
+- A `RecentRuns` row for a collection run names the collection (resolved from
+  `summary.scenario.collectionId`, the id once the collection is gone) and draws
+  no method badge, and its status word takes the run's verdict (`rowOutcome`) so
+  a run with failed steps is not green (#3496).
 - Doc links use `window.electronAPI.openAppLink(key)`, a keyed IPC channel
   (the keys live in `electron/app-links.ts`). The renderer cannot open
   arbitrary URLs, and a plain `<a target="_blank">` would spawn an unmanaged

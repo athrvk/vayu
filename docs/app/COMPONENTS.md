@@ -1172,7 +1172,12 @@ It is **not** a resume screen: `openTabs`/`activeTabId` are persisted and restor
 - `WelcomeScreen.tsx` - container: queries, picks the state. Holds on `isLoading` so the first-run screen never flashes at a returning user. The new-request flow itself is `hooks/useNewRequest.ts`, shared with the palette's `new-request` command - two entry points must not disagree about where a request lands. This screen renders that hook's `pickerProps` and nothing more.
 - `FirstRunWelcome.tsx` - fresh workspace. Import leads (people arrive carrying Postman/Insomnia/OpenAPI collections). The only state with branding. Also carries the "Connect your coding agent" row, which opens Settings on the MCP section through `lib/commands/reveal-settings.ts`'s `revealSettingsCategory` (shared with the palette's settings commands).
 - `Launcher.tsx` - populated. Action row, recent runs, workspace counts. No branding; the logo is in the title bar.
-- `components/` - `ActionTile`, `RecentRuns`, `FooterLinks`. The action row is six tiles: New
+- `components/` - `ActionTile`, `RecentRuns` (a run's row names what was run: the URL and method
+  badge, or for a collection run the collection's name, resolved from
+  `summary.scenario.collectionId` through the collections query and falling back to the id once
+  the collection is deleted, with no method badge; the status word takes the run's verdict, so a
+  collection run with failed or errored steps reads "Completed" in the error colour, #3496),
+  `FooterLinks`. The action row is six tiles: New
   request, Search, Import, History, Variables, Services. Services and History both reveal a
   drawer view (never close it) rather than opening a tab. Search opens the command palette - the
   chord alone is undiscoverable, and this grid is where the app teaches its own surfaces.
@@ -1589,10 +1594,11 @@ durations in `docs/design-system.md` -> Toasts.
 A run's status as a word and a glyph, tinted by its status family: `Running`
 (spinner), `Completed`, `Stopped`, `Failed`. The dashboard header and the history
 run tab's header (`HistoryDetail`, #1944) draw it; the history row draws only the
-glyph (`RunStatusGlyph`). Welcome's recent runs and the collection context bar's
-last-run row take the label and `-text` token alone. All read `RUN_STATUS` in
-`components/shared/run-status.ts`, so the label, glyph and `-text` token exist
-once per status. The dashboard header's ending includes `failed` (#1932), set
+glyph (`RunStatusGlyph`). Welcome's recent runs take the word and `-text` token
+through `runStatusDisplay`, fed the row's verdict (`rowOutcome`, #3496); the
+collection context bar's last-run row takes the label and `-text` token alone.
+All read `RUN_STATUS` in `components/shared/run-status.ts`, so the label, glyph
+and `-text` token exist once per status. The dashboard header's ending includes `failed` (#1932), set
 when the engine reports the run failed, so a failed run no longer reads as
 Completed; it says Running for as long as the run is live, a lost stream
 included (#3351).
@@ -1611,8 +1617,10 @@ and a fresh `{outcome, reason}` per render would defeat it (#1714). The history 
 loads (`reportOutcome`, else `rowOutcome`), so the tab, the dashboard header and
 the sidebar row draw one run in one colour (#2872); design runs pass none and
 keep the tick. A collection run's sidebar row refines its own glyph from its
-step counts (#3458, `rowOutcome`); its detail tab passes none, and its step list
-carries the counts.
+step counts (#3458, `rowOutcome`), and Welcome's recent-runs row paints the same
+verdict as the word's colour: "Completed" in the error token, with ", verdict
+failed" in its accessible name, so a run with failed steps is not green there
+(#3496). Its detail tab passes none, and its step list carries the counts.
 
 ## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
 
