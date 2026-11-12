@@ -1523,6 +1523,19 @@ struct ScriptResult {
     /// script's outcome is no verdict on it (#3371). Read by the load
     /// replay's tally and by `script.setup` / `script.teardown`.
     bool send_cancelled = false;
+    /// True when `ScriptContext::stop` ended the script itself before it
+    /// finished: the run's Stop or the engine shutting down (#3460). Like
+    /// `send_cancelled`, no verdict on the script.
+    bool cancelled = false;
+    /// True when the script's deadline (`scriptTimeout`) stopped it; the
+    /// deferred replay does not run such a script again (#3460).
+    bool timed_out = false;
+
+    /// Whether the run ending cut this script short, so that its outcome is no
+    /// verdict on it and no tally counts it.
+    [[nodiscard]] bool ended_by_stop () const {
+        return send_cancelled || cancelled;
+    }
 };
 
 // ============================================================================

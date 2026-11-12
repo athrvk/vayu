@@ -556,6 +556,7 @@ void install_execution_globals (JSContext* ctx, JSValue global, JSValueConst pm,
 TestResult legacy_test_result (JSContext* ctx, JSValueConst tests, const std::string& name) {
     TestResult result;
     result.name = name;
+    const AllocationRefusalWatch refusal_watch (ctx);
     ScopedValue value (ctx, JS_GetPropertyStr (ctx, tests, name.c_str ()));
     if (JS_IsException (value.get ())) {
         // A getter the script defined on the object threw: that is the row's

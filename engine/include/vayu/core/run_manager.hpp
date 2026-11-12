@@ -427,6 +427,31 @@ struct RunContext {
     /// `should_stop`: a natural end never sets that, and its join must not
     /// wait either. A transfer it ends is the run ending, never a failure.
     std::atomic<bool> aux_cancel{ false };
+    /// Raised by @ref request_shutdown alone, when the engine is shutting down
+    /// under the run. What ends a teardown that a Stop was latched before
+    /// (@ref teardown_stop): `should_stop` is already raised by then.
+    std::atomic<bool> engine_stopping{ false };
+
+    /**
+     * @brief What ends a `script.teardown` that is running (#3460), its
+     *        `ScriptContext::stop`. Read as teardown begins.
+     *
+     * Teardown runs at the end of every run that set up, a stopped one
+     * included, so a Stop latched before it began leaves it to run (its
+     * `pm.sendRequest` still cancelled at once): then only the engine
+     * shutting down ends it. Otherwise a Stop or a shutdown arriving while it
+     * runs does, as it ends every other script of the run.
+     */
+    [[nodiscard]] const std::atomic<bool>* teardown_stop () const {
+        return should_stop.load () ? &engine_stopping : &should_stop;
+    }
+
+    /// @ref request_stop for an engine shutting down: raises
+    /// @ref engine_stopping first, so a teardown already past the Stop ends.
+    void request_shutdown () {
+        engine_stopping.store (true);
+        request_stop ();
+    }
 
     /**
      * @brief Ask the run to stop, from any thread (#3341).
@@ -534,6 +559,15 @@ struct RunContext {
     /// `script.teardown` already read, populated alongside @ref
     /// step_base_vars for the same reason (issue #1594).
     vayu::runtime::ScriptConfig step_script_config;
+
+    /// The `pm.info.requestId` / `pm.info.requestName` an inline step script
+    /// reads (#3460): the saved request the run was started from, resolved
+    /// once with the same `read_run_script_identity` the deferred replay uses
+    /// (`run_manager.cpp`). Populated alongside @ref step_script_config, so
+    /// only for a run whose @ref step_elements is non-empty; unset for a run
+    /// started from no saved request, which a script reads as `undefined`.
+    std::optional<std::string> script_request_id;
+    std::optional<std::string> script_request_name;
 
     /// Per-element pass/fail/skip tallies for @ref step_elements (issue
     /// #1594), sized from it at construction. Default-constructed (empty)
@@ -737,7 +771,8 @@ struct RunContext {
      * route and default headers the run's transfers were sent under (the
      * `EventLoopConfig::transport` and `::default_headers` snapshot, #1256),
      * the run's resolved `timeout`, the load byte bound
-     * (`maxResponseBodyBytes`) and `should_stop` as the cancel (#3371).
+     * (`maxResponseBodyBytes`) and `should_stop` as the cancel (#3371) and
+     * as what ends the script itself (#3460).
      *
      * Written by `configure_event_loop` - the one place a load run resolves
      * them - before the loop starts, and only read afterwards: by
@@ -1370,6 +1405,28 @@ struct ScriptValidation {
 };
 
 /**
+ * @brief What a load run's worker hands its deferred replay to start from
+ *        (#3460), read and never written.
+ *
+ * Default-constructed for a context built by hand, as a test builds one,
+ * which has the replay read the stored rows instead.
+ */
+struct ReplayBase {
+    /// A single-request run's scopes as `script.setup` left them
+    /// (`RunContext::lifecycle_scopes`); null when setup loaded none.
+    const vayu::http::routes::ScriptVariableScopes* request_scopes = nullptr;
+    /// A single-request run's request as `build_load_request` built it, which
+    /// every submission copied (`request_as_submitted`). Null: `pm.request` is
+    /// the payload's request as written.
+    const vayu::Request* shared_request = nullptr;
+    /// A scenario load run's state, whose `lifecycle_scopes` are the scopes
+    /// as every `script.setup` left them and whose `scope_bases` each step's
+    /// residual pass read (`step_request_as_submitted`); null when its driver
+    /// never started, and `pm.request` is then the step's request as planned.
+    const ScenarioLoadState* scenario_state = nullptr;
+};
+
+/**
  * @brief Replay the run's deferred test scripts against its sampled responses.
  *
  * Runs after the load test has drained, which is what keeps it off the hot
@@ -1390,13 +1447,22 @@ struct ScriptValidation {
  * already run against a recorded response cannot redirect a sequence that
  * already happened.
  *
+ * The replay starts from @p base: a copy of the scopes as `script.setup` left
+ * them (#3460), so a deferred script reads what an inline one would and
+ * `script.teardown` still reads what setup left, and each sample's
+ * `pm.request` re-derived as it was sent, its row and identity bound and its
+ * residual names resolved. A virtual user's or a submission's own writes are
+ * not among them. An empty @p base reads the stored rows and the request as
+ * written instead.
+ *
  * Declared here rather than kept file-local so the per-step behaviour can be
  * tested directly against a drained run; the production caller is
  * `execute_load_test`. Logs its tallies at DEBUG unconditionally - the
  * console shows them at `-v 2`, as the run's own logging does.
  */
-[[nodiscard]] ScriptValidation
-validate_scripts (const std::shared_ptr<RunContext>& context, vayu::db::Database& db);
+[[nodiscard]] ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+const ReplayBase& base = {});
 
 /**
  * @brief Check a drained load run's sampled responses against the contract it

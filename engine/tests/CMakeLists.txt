@@ -138,6 +138,7 @@ add_executable(vayu_tests
     run_manager_test.cpp
     run_route_test.cpp
     run_stop_test.cpp
+    run_script_stop_test.cpp
     run_phase_test.cpp
     run_shutdown_test.cpp
     run_retention_release_test.cpp
@@ -495,6 +496,7 @@ set(vayu_scratch_database_suites
     RunExportTest
     RunOriginRouteTest
     RunRetentionReleaseTest
+    RunScriptStopTest
     RunShutdownTest
     RunStatusTransitionTest
     RunStopAccountingTest

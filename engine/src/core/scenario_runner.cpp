@@ -724,8 +724,10 @@ vayu::http::routes::ExchangeOutcome& exchange) {
     inputs.timers_override = &ctx.context->timers_override;
     inputs.should_stop     = [&] { return ctx.context->should_stop.load (); };
     // Stop and shutdown end the step's transfer, its late token request and
-    // its scripts' `pm.sendRequest` (#3397), never waiting out a timeout.
+    // its scripts' `pm.sendRequest` (#3397), and a script still running
+    // (#3460), never waiting out a timeout.
     inputs.cancel = &ctx.context->should_stop;
+    inputs.stop   = &ctx.context->should_stop;
     // `metric.record` and `pm.metrics` (issue #1500) record into this run's
     // own collector - a design send binds neither and reports "not
     // available here" instead.
@@ -1584,6 +1586,7 @@ RunManager& manager) {
             .request_timeout_ms =
             vayu::http::routes::resolve_request_timeout_ms (context->config, db),
             .cancel = &context->should_stop,
+            .stop   = &context->should_stop,
         };
         // Same reason, same read-once-for-the-run rule (issue #1514's
         // reopen): a step's `extract.json` / `assert.jsonpath` must not read
@@ -1698,8 +1701,10 @@ RunManager& manager) {
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
+        auto teardown_send     = script_send;
+        teardown_send.stop     = context->teardown_stop ();
         auto teardown_outcomes = run_scenario_teardown (
-        script_engine, scopes, script_send, lifecycle, run_summary_info);
+        script_engine, scopes, teardown_send, lifecycle, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
 

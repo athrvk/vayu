@@ -1737,7 +1737,9 @@ Both read and write the same three variable scopes every other script does
 (`pm.environment`, `pm.globals`, `pm.collectionVariables`) - a name
 `script.setup` sets is visible to the very first step or submission of the run,
 because it writes through the same scopes object every other script of that
-run shares, before either run mode's own work begins. A collection's setup
+run shares, before either run mode's own work begins. A load run's deferred
+test replay reads it too: the replay starts from a copy of the scopes setup
+left (#3460), so a replayed write never reaches what teardown reads. A collection's setup
 and teardown read the chain down to that collection and write that
 collection's variables, as a step in it does, so a folder's setup writes a
 value that folder's own steps (and the folders below it) read. `pm.info.eventName` reads
@@ -2340,6 +2342,21 @@ out of the step's result and the run's counts, and a replayed `tests` script
 whose fetch was cancelled is left out of the run's pass and fail counts. On a
 collection run the step itself is then `stopped`, since its own send is
 cancelled too.
+
+**A Stop ends the script itself, too** (#3460). The same Stop or shutdown stops
+a run's script that is still running, fetch or no fetch, at QuickJS's next
+interrupt poll, so a script stuck in a loop never holds a Stop open for its
+`scriptTimeout`. Every script of every run kind honours it: `script.setup`, an
+inline step script under load, the deferred replay (see
+[Load Test Scripts](#load-test-scripts)) and a sequential run's step scripts. A
+script it ended is recorded exactly as a cancelled fetch's is, `skipped` with
+the message `the run was stopped while this script was running`, never an error.
+`script.teardown` is the one exception: teardown runs at the end of every run
+that set up, a stopped one included, so a Stop latched before teardown began
+leaves it to run (its fetches still cancelled at once), and only the engine
+shutting down ends it then; a Stop or shutdown that arrives while it runs ends
+it. A `POST /execute`'s scripts are not ended by a hang-up or a shutdown: its
+post-request script runs after a stream's own Stop.
 
 **It leaves the way its execution leaves.** The fetch takes the transport policy
 its enclosing execution resolved - the proxy mode and URL, the bypass list, the
@@ -3389,6 +3406,15 @@ too; the queue is the engine's to free, so it costs the runtime nothing. State t
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
+One thing is shared on purpose: `Math.random` draws from a generator that lives
+on the thread, seeded once from libsodium, not from one the context owns. QuickJS
+seeds a context's own generator from the microsecond clock, so two workers
+starting a script in the same microsecond would draw the same numbers (#3460);
+with a per-thread generator the contexts of one thread continue a single
+sequence and two threads never share one. It is the same xorshift64* generator
+QuickJS runs, a fast PRNG and not a CSPRNG, so a script that needs unpredictable
+values uses `require('uuid')` rather than `Math.random`.
+
 ### What a script can compute
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
@@ -3534,7 +3560,9 @@ are all there, with npm's signatures (`v3.DNS` / `v3.URL` and `v5.DNS` /
 global** in Vayu: a script reads it with `require` only. Postman's
 `uuid()` and `uuid.v4()` draw from `Math.random`; Vayu's draw from libsodium's
 CSPRNG, so a script that works in Postman works here and the values are
-unpredictable rather than merely unlikely to collide. The bytes reach the
+unpredictable rather than merely unlikely to collide. (`Math.random` stays a PRNG,
+seeded per thread from the same source: see
+[Isolation between scripts](#isolation-between-scripts).) The bytes reach the
 library through a `crypto.getRandomValues` that exists only inside the
 library's own scope, so no script sees a `crypto` global.
 
@@ -4206,10 +4234,12 @@ The **language** is current; what is missing is the **host environment**:
   since quickjs-ng 0.18.0 the out-of-memory error cannot be caught by the
   script itself, so a `try` cannot swallow it and keep allocating. It is
   reported as `Script ran out of memory at the 64 MiB limit`, naming the limit
-  in force. At the 1 MiB floor a library as large as lodash cannot load:
-  `require('lodash')` fails with that sentence, so raise the limit rather than
-  load it. See [Error Handling](#error-handling) for what a thrown `null`
-  reads as.
+  in force. The engine holds the limit itself, counting each block as QuickJS
+  asked for it rather than as the platform allocator rounded it, and it is the
+  engine's record of the refusal that decides the report, whatever QuickJS
+  raised in its place. At the 1 MiB floor a library as large as lodash cannot
+  load: `require('lodash')` fails with that sentence, so raise the limit rather
+  than load it. See [Error Handling](#error-handling) for the rest.
 - **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
   execution; the rest is dropped behind one warning line
   ([Console Output](#console-output)).
@@ -4311,7 +4341,23 @@ The **language** is current; what is missing is the **host environment**:
   report says which one happened: `sampling.responseSampleBudgetSpent`
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
-  says how many responses the bound thinned away
+  says how many responses the bound thinned away. It counts the samples the
+  replay reached, so it is smaller than the sample when a Stop ended the replay
+  (below)
+- **A Stop or the engine shutting down ends the replay** (#3460). The script
+  running when it lands stops at its next interrupt poll, which is no verdict on
+  it, and no sample after it is replayed; the run settles within the Stop's 5 s
+  grace rather than after every remaining sample's `scriptTimeout`. A Stop that
+  lands before the replay begins (one during the sending) replays nothing, and
+  the report then has no `testValidation` rather than one of zeros. The run
+  keeps the end it would have had: a Stop after the sending ended still leaves
+  it `completed`
+- **A script that times out is not replayed against the rest of the sample**
+  (#3460): its deadline is its own, so each sample after it would wait it out
+  again, and at the 5 s default a thousand samples is most of an hour. Its one
+  failure says so, `Script error: Script execution timed out after 5000ms
+  (timed out, not replayed against the remaining 999 samples)`, and the
+  replay's other scripts still run against every sample
 - Results are aggregated and reported in the final report: `testsPassed` /
   `testsFailed` tally every `pm.test` call across every sampled response, so a
   script whose assertions are a mix of passing and failing reports both counts
@@ -4333,10 +4379,22 @@ The **language** is current; what is missing is the **host environment**:
   is two entries. The number of responses replayed is `testValidation`'s
   `samplesTested`, not a field of the row
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
-  `requestId` / `requestName` are the run's linked request when it has one. It
+  `requestId` / `requestName` are the run's linked request when it has one,
+  in an inline `script.pre` / `script.post` as in the deferred replay (#3460). It
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
+- `pm.request` in the deferred replay is the request each sample was sent as
+  (#3460), re-derived rather than stored: the request the run built, with that
+  submission's row and iteration (a scenario step's virtual user and iteration)
+  bound into it, and every name the bind left resolved against the scopes as
+  `script.setup` left them, as the run's own residual pass resolved it. What no
+  sample records is not reproduced: a `script.pre` or other `step.before`
+  element's edit to the request and its own scope writes (an inline one ran on
+  that submission alone, an un-inlined one never ran), a credential refreshed
+  mid-run (the replay reads the one the run started with), and a scenario
+  user's cookies. A deferred `script.post` beside an inline `script.pre` that
+  rewrites `pm.request` therefore reads the request before that rewrite
 - `pm.response.redirects` is **absent** here, inline or deferred: a load run
   follows redirects without recording the chain, so there is no list to read and
   an empty one would claim there was nothing to find (see
@@ -4383,6 +4441,13 @@ bound an empty environment and no other scope at all, so
 `pm.environment.get('region')` read `undefined` under load and the same test
 gave opposite verdicts on Send and under load.
 
+**The replay starts from the scopes as `script.setup` left them** (#3460), not
+from a fresh read of the stored rows, so a value setup wrote reads the same in a
+deferred script as in an inline one. It works on a copy, so `script.teardown`
+still reads what setup left, whatever the replay wrote. What a virtual user's or
+a submission's own inline scripts wrote during the run is not in it: those writes
+lived in the user's (or the submission's) own overlay, which no sample records.
+
 Writes are the deliberate exception. A `set()`, `unset()` or `clear()` in a
 deferred script is visible to the samples replayed after it - one set of scopes
 serves the whole pass - but **nothing is persisted**: only design mode writes
@@ -4400,8 +4465,8 @@ over a sequence says something failed, not which step - while the aggregate
 still appears as `testValidation`. Three differences from the single-request
 shape:
 
-- `pm.request` is the step's own request, and `pm.info.requestId` /
-  `requestName` are that step's, not a run-level one.
+- `pm.request` is the step's own request as that sample sent it, and
+  `pm.info.requestId` / `requestName` are that step's, not a run-level one.
 - `pm.info.iteration` is the virtual user's own iteration index and
   `pm.info.vu` is that user's number, so a script can tell two users' responses
   apart - beside the `pm.iterationData` a single-request run's rows also
@@ -4556,14 +4621,18 @@ What has no text of its own reads as a sentence:
 | `throw undefined` | `Script threw undefined` |
 | `throw ''` | `Script threw an empty string` |
 | Throws an object whose `toString` gives `''` or throws | `Script threw a value with no text` |
-| `throw null` | `Script threw null (QuickJS also throws null when it runs out of memory at the 1 MiB limit with no room to build an error)` |
+| `throw null` | `Script threw null` |
 
-The last row names both causes because QuickJS cannot tell them apart: when the
-heap is so full that not even the error object can be built, it throws a bare
-`null`, the same value a script's own `throw null` is, and nothing about the
-heap afterwards separates the two. (`require()` of a library that cannot load
-is the one place the engine knows, and it reports the out-of-memory sentence.)
-With the limit at `0` (an embedder's "no limit") it reads `Script threw null`.
+Running out of memory is read from the engine's record that the limit refused
+an allocation, never from the thrown value (#3460). QuickJS words a refusal by
+where it lands: its own out-of-memory error, a bare `null` when there was no
+room left to build that, or, inside its parser, a `SyntaxError` such as
+`invalid assignment left-hand side`. A `null` with no refusal behind it is the
+script's own `throw null`. Any other error after a refusal keeps its text
+after the sentence, because a script can catch the `null` and throw something
+else: `Script ran out of memory at the 1 MiB limit (then failed with:
+SyntaxError: invalid assignment left-hand side)`. A `pm.test` row that runs out
+reports it on its row, and the rows after it report their own errors.
 The same text stands in for the reason of an unhandled promise rejection
 (`Unhandled promise rejection: Script threw undefined`).
 

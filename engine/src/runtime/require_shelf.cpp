@@ -323,11 +323,19 @@ JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
 /// Makes the exception pending after a failed library evaluation the
 /// out-of-memory error QuickJS would have thrown had it room to build one.
 /// With the heap full it throws a bare `null` instead, which no library
-/// source throws and a script cannot tell from its own `throw null`; the
-/// evaluation's work is freed by now, so there is room for the error here.
+/// source throws, and a refusal inside its parser can come out as a
+/// `SyntaxError` the library's source does not have; the script heap's record
+/// of the refusal says which. The evaluation's work is freed by now, so there
+/// is room for the error here.
 void restore_out_of_memory_error (JSContext* ctx) {
-    JSValue pending = JS_GetException (ctx);
-    if (!JS_IsNull (pending) && !JS_IsUninitialized (pending)) {
+    const auto* state =
+    static_cast<const RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    const bool refused = state != nullptr && state->allocation_refused;
+    JSValue pending    = JS_GetException (ctx);
+    const bool out_of_memory =
+    refused || JS_IsNull (pending) || JS_IsUninitialized (pending);
+    // The deadline's own abort stays one, whatever ran out before it.
+    if (!out_of_memory || script_deadline_expired (ctx)) {
         JS_Throw (ctx, pending);
         return;
     }

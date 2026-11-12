@@ -555,20 +555,27 @@ TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchCarriesTheRunsDefaultH
     EXPECT_FALSE (reports[0].correlation_id.empty ()) << reports[0].body;
 }
 
-// A Stop leaves `should_stop` raised for the replay after it, so the replay's
-// fetch is cancelled at once (#3371). The script throws whatever its fetch
-// answered, and a cancelled fetch is the run ending, not a failed sample.
-// Mutation-checks: drop the `send_cancelled` return from
-// `tally_replay_result` and the sample fails; drop `context->script_send.cancel
-// = ...` from `configure_event_loop` and the fetch times out and fails it.
+// A Stop that lands while a replayed script's fetch hangs cancels the fetch
+// (#3371) and ends the script (#3460). The script throws whatever its fetch
+// answered, and the run ending is not a failed sample. (A Stop latched before
+// the replay replays nothing: `run_script_stop_test.cpp`.) Mutation-checks:
+// drop the `ended_by_stop` return from `tally_replay_result` and the sample
+// fails; drop `context->script_send.cancel = ...` and `.stop = ...` from
+// `configure_event_loop` and the fetch times out and fails it.
 TEST_F (ScriptSendRequestCapLoadTest, AReplayedScriptFetchTheStopCancelledIsNoVerdict) {
     auto context = run_with_script (fetch_reporting (server_->hang_url ()));
     vayu::core::configure_event_loop (*db_, context->config, context,
     /*concurrency=*/1, /*timeout_ms=*/5000, /*configured_workers=*/1,
     /*default_max_per_host=*/1);
-    context->request_stop ();
+    std::thread stopper ([this, &context] () {
+        if (vayu::tests::wait_until (
+            [this] () { return server_->hang_hits () > 0; })) {
+            context->request_stop ();
+        }
+    });
 
     const auto validation = vayu::core::validate_scripts (context, *db_);
+    stopper.join ();
 
     ASSERT_HAS_VALUE (validation.run);
     EXPECT_EQ (validation.run->sampled, 1u);
@@ -591,6 +598,7 @@ TEST (ScriptSendInputs, DefaultInputsChangeNothing) {
     EXPECT_EQ (applied.default_headers.correlation_header,
     fresh.default_headers.correlation_header);
     EXPECT_EQ (applied.cancel, nullptr);
+    EXPECT_EQ (applied.stop, nullptr);
 }
 
 // Mutation-check: drop `ctx.cancel = cancel` from `ScriptSendInputs::apply`.
@@ -603,6 +611,18 @@ TEST (ScriptSendInputs, ACancelReachesTheScriptContext) {
     inputs.apply (applied);
 
     EXPECT_EQ (applied.cancel, &stop);
+}
+
+// Mutation-check: drop `ctx.stop = stop` from `ScriptSendInputs::apply`.
+TEST (ScriptSendInputs, AStopReachesTheScriptContext) {
+    const std::atomic<bool> stop{ false };
+    vayu::runtime::ScriptSendInputs inputs;
+    inputs.stop = &stop;
+    vayu::runtime::ScriptContext applied;
+
+    inputs.apply (applied);
+
+    EXPECT_EQ (applied.stop, &stop);
 }
 
 /**

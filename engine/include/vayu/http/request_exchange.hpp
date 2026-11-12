@@ -628,6 +628,11 @@ struct ExchangeInputs {
     /// `RunContext::should_stop` for every step (#3397), which a Stop and an
     /// engine shutdown both raise; null leaves all three uncancellable.
     const std::atomic<bool>* cancel = nullptr;
+    /// `ScriptContext::stop` for both scripts (#3460): the scenario runner
+    /// passes `RunContext::should_stop`, so a Stop ends a step's running script
+    /// rather than waiting out its `scriptTimeout`. Null for `POST /execute`,
+    /// whose scripts no flag ends early.
+    const std::atomic<bool>* stop = nullptr;
     /// The data row this iteration binds to `pm.iterationData`, or null when
     /// the run has none. Borrowed for the length of the call and outlived by
     /// the run's `ScenarioExecution` (issue #356).
