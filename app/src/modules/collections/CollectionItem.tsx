@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useId, useMemo, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, Loader2 } from "lucide-react";
 import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
@@ -88,6 +88,7 @@ function CollectionItemRow({
 	);
 	const requests = getRequestsByCollection(collection.id);
 	const isRenaming = renamingId === collection.id;
+	const nameId = useId();
 	const isDeleting = deletingCollectionId === collection.id;
 
 	const entity = useMemo(() => collectionEntity(collection), [collection]);
@@ -194,6 +195,11 @@ function CollectionItemRow({
 			aria-posinset={posInSet}
 			aria-setsize={setSize}
 			aria-describedby={emptyPlaceholderId ?? undefined}
+			// The row's own name, not the text of everything inside it: left to
+			// content, Chromium reads the chevron's "Collapse collection" and the
+			// menu trigger into it (#3450). Omitted while renaming, where the name
+			// element is the field and has no text to point at.
+			aria-labelledby={isRenaming ? undefined : nameId}
 			onClick={(e) => isRowSurface(e) && handleClick(e)}
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			data-drop-blocked={dnd.isBlocked || undefined}
@@ -289,6 +295,7 @@ function CollectionItemRow({
 						 * sideways instead of ellipsing.
 						 */}
 						<TruncatedText
+							id={nameId}
 							className={cn(
 								"cap-centred text-sm text-foreground cursor-pointer",
 								depth === 0 && "font-medium"

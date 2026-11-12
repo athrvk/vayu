@@ -78,6 +78,8 @@ interface MethodBadgeProps {
 	/** Dim in secondary contexts - e.g. an inactive tab. */
 	muted?: boolean;
 	className?: string;
+	/** For an `aria-labelledby` that names a row by this badge's label. */
+	id?: string;
 }
 
 export function MethodBadge({
@@ -86,6 +88,7 @@ export function MethodBadge({
 	size = "sm",
 	muted = false,
 	className,
+	id,
 }: MethodBadgeProps) {
 	const c = getMethodColor(method);
 	const upperMethod = method.toUpperCase();
@@ -95,6 +98,7 @@ export function MethodBadge({
 
 	return (
 		<span
+			id={id}
 			className={cn(
 				"font-mono font-semibold uppercase shrink-0 transition-opacity",
 				size === "sm" ? "text-micro" : "text-label",

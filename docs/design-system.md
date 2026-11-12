@@ -1930,9 +1930,20 @@ see.
 | A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+| A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
 | Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**A tree row is named by its name, not by what is inside it.** A `treeitem`
+with no name of its own is named from its content, and Chromium reads every
+descendant into that: the chevron's "Collapse collection", the count, the
+`⋯` menu trigger's label (#3450). The row therefore takes `aria-labelledby`
+naming the name element (`TruncatedText` and `MethodBadge` forward an `id` for
+it), with the method badge first on a request so the row reads "GET Get
+invoices". While the row renames, the name element is the field and has no text
+to point at, so the attribute is omitted. The variables tree builds its ids from
+one `useId` plus the row's id, since its rows are drawn in a loop.
 
 **An operation that takes seconds announces its progress.** A dialog that sits
 on a spinner and a bar reports nothing to a screen reader: the bar's value is

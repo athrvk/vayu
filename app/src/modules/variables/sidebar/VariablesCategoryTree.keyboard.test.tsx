@@ -66,9 +66,10 @@ const deleteEnvironment = vi.fn();
  * that landing is a later render than the dialog's close.
  */
 let environments: Environment[] = [];
+let collections: Collection[] = [];
 
 vi.mock("@/queries", () => ({
-	useCollectionsQuery: () => ({ ...idle, data: [COLLECTION] }),
+	useCollectionsQuery: () => ({ ...idle, data: collections }),
 	useEnvironmentsQuery: () => ({ ...idle, data: environments }),
 	useCreateEnvironmentMutation: () => ({ mutateAsync: createEnvironment, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -146,6 +147,7 @@ beforeEach(() => {
 	createEnvironment.mockReset();
 	updateEnvironment.mockReset();
 	environments = [STAGING, PRODUCTION];
+	collections = [COLLECTION];
 	deleteEnvironment.mockResolvedValue(undefined);
 	redraw = null;
 });
@@ -574,5 +576,33 @@ describe("a failed environment write is reported, never swallowed", () => {
 		await waitFor(() => expect(screen.queryByDisplayValue("Staging")).not.toBeInTheDocument());
 		expect(updateEnvironment).not.toHaveBeenCalled();
 		expect(reportSaving).not.toHaveBeenCalled();
+	});
+});
+
+// Left to content, a row's name was computed from everything inside it: the
+// variable-count badge and the ⋯ menu's label (#3450).
+describe("a row's accessible name is its own name", () => {
+	it("names the Globals, environment and collection rows by their name alone", () => {
+		environments = [
+			{ ...STAGING, variables: { host: { value: "staging.test", enabled: true } } },
+			PRODUCTION,
+		];
+		collections = [
+			{ ...COLLECTION, variables: { host: { value: "acme.test", enabled: true } } },
+		];
+		const tree = renderTree();
+
+		expect(within(tree).getByRole("treeitem", { name: "Globals" })).toBeInTheDocument();
+		expect(within(tree).getByRole("treeitem", { name: "Staging" })).toBe(row(tree, "Staging"));
+		expect(within(tree).getByRole("treeitem", { name: "Production" })).toBeInTheDocument();
+		expect(within(tree).getByRole("treeitem", { name: "Acme API" })).toBeInTheDocument();
+	});
+
+	it("leaves a renaming environment row to the field it holds", () => {
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+
+		expect(row(tree, "Staging")).not.toHaveAttribute("aria-labelledby");
 	});
 });
