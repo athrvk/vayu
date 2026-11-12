@@ -27,12 +27,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { useTreeCrud } from "./useTreeCrud";
-import { useSaveStore, useToastStore } from "@/stores";
+import { useSaveStore, useTabsStore, useToastStore } from "@/stores";
+import { queryKeys } from "@/queries/keys";
 import { resetSaveStoreForTests, type SaveOutcome } from "@/stores/save-store";
-import type { Collection, Request, RequestSummary } from "@/types";
+import type { Collection, Request, RequestExample, RequestSummary } from "@/types";
 
 const createRequest = vi.fn();
+const updateRequest = vi.fn();
+const listRequestExamples = vi.fn<(id: string) => Promise<RequestExample[]>>();
+const createRequestExample = vi.fn();
 const getRequest = vi.fn<(id: string) => Promise<Request>>();
+
+vi.mock("@/services/api", () => ({
+	apiService: {
+		listRequestExamples: (id: string) => listRequestExamples(id),
+		createRequestExample: (id: string, body: unknown) => createRequestExample(id, body),
+	},
+}));
 
 vi.mock("@/queries", () => ({
 	useCreateCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -40,7 +51,7 @@ vi.mock("@/queries", () => ({
 	useDeleteCollectionMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useCreateRequestMutation: () => ({ mutateAsync: createRequest, isPending: false }),
 	useDeleteRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
-	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useUpdateRequestMutation: () => ({ mutateAsync: updateRequest, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: [] }),
 	requestDetailOptions: (id: string) => ({
@@ -137,6 +148,14 @@ function renderCrud() {
 beforeEach(() => {
 	createRequest.mockReset();
 	createRequest.mockResolvedValue({ id: "r-1-copy", collectionId: "c-1" });
+	updateRequest.mockReset();
+	listRequestExamples.mockReset();
+	listRequestExamples.mockResolvedValue([]);
+	createRequestExample.mockReset();
+	createRequestExample.mockImplementation(async (_id: string, body: { name: string }) => ({
+		...body,
+		id: `new-${body.name}`,
+	}));
 	getRequest.mockReset();
 	getRequest.mockResolvedValue(source);
 	useToastStore.setState({ toasts: [] });
@@ -205,6 +224,177 @@ describe("duplicating a request", () => {
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0].variant).toBe("error");
 		expect(toasts[0].message).toContain("Couldn't duplicate the request");
+	});
+});
+
+/**
+ * #3450: examples are a nested resource, so the request's create copied none
+ * of them, and a fixed mock example was left naming the source's row.
+ */
+describe("duplicating a request that has saved examples", () => {
+	const ok: RequestExample = {
+		id: "ex-1",
+		name: "200 - ok",
+		status: 200,
+		headers: [{ key: "Content-Type", value: "application/json", enabled: true }],
+		body: '{"ok":true}',
+		contentType: "application/json",
+		origin: "import",
+	};
+	const gone: RequestExample = {
+		id: "ex-2",
+		name: "404 - gone",
+		status: 404,
+		headers: [],
+		body: "",
+		contentType: "",
+		origin: "user",
+		bodyTruncated: true,
+	};
+	const fixedOnGone: Request = { ...source, mockResponseMode: "fixed", mockExampleId: "ex-2" };
+
+	async function duplicate() {
+		const hook = renderCrud();
+		await act(async () => {
+			await hook.result.current.handlers.onDuplicateRequest(listRow);
+		});
+		return hook;
+	}
+
+	it("posts every example to the copy in source order, as the user's own", async () => {
+		listRequestExamples.mockResolvedValue([ok, gone]);
+
+		await duplicate();
+
+		expect(listRequestExamples).toHaveBeenCalledExactlyOnceWith("r-1");
+		expect(createRequestExample.mock.calls).toEqual([
+			[
+				"r-1-copy",
+				{
+					name: "200 - ok",
+					status: 200,
+					headers: ok.headers,
+					body: ok.body,
+					contentType: "application/json",
+					bodyTruncated: false,
+					origin: "user",
+				},
+			],
+			[
+				"r-1-copy",
+				{
+					name: "404 - gone",
+					status: 404,
+					headers: [],
+					body: "",
+					contentType: "",
+					bodyTruncated: true,
+					origin: "user",
+				},
+			],
+		]);
+	});
+
+	it("points a fixed mock example at the copy's own twin, never the source's", async () => {
+		getRequest.mockResolvedValue(fixedOnGone);
+		listRequestExamples.mockResolvedValue([ok, gone]);
+
+		await duplicate();
+
+		const sent = createRequest.mock.calls[0][0];
+		expect(sent).not.toHaveProperty("mockExampleId");
+		expect(sent.mockResponseMode).toBe("first");
+		expect(updateRequest).toHaveBeenCalledExactlyOnceWith({
+			id: "r-1-copy",
+			mockResponseMode: "fixed",
+			mockExampleId: "new-404 - gone",
+		});
+	});
+
+	it("leaves the copy on first when the fixed example is no longer saved", async () => {
+		getRequest.mockResolvedValue({ ...fixedOnGone, mockExampleId: "ex-deleted" });
+		listRequestExamples.mockResolvedValue([ok]);
+
+		await duplicate();
+
+		expect(createRequest.mock.calls[0][0].mockResponseMode).toBe("first");
+		expect(updateRequest).not.toHaveBeenCalled();
+	});
+
+	it("keeps a random mock mode as it was", async () => {
+		getRequest.mockResolvedValue({ ...source, mockResponseMode: "random" });
+		listRequestExamples.mockResolvedValue([ok]);
+
+		await duplicate();
+
+		expect(createRequest.mock.calls[0][0].mockResponseMode).toBe("random");
+		expect(updateRequest).not.toHaveBeenCalled();
+	});
+
+	it("copies a request with no examples and posts nothing", async () => {
+		await duplicate();
+
+		expect(createRequest).toHaveBeenCalledTimes(1);
+		expect(createRequestExample).not.toHaveBeenCalled();
+		expect(updateRequest).not.toHaveBeenCalled();
+		expect(useToastStore.getState().toasts).toHaveLength(0);
+	});
+
+	it("reads the examples past a cached list", async () => {
+		listRequestExamples.mockResolvedValue([ok]);
+		const { result, client } = renderCrud();
+		client.setQueryData(queryKeys.requests.examples("r-1"), []);
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(createRequestExample).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the copy and says so when the examples cannot be listed", async () => {
+		getRequest.mockResolvedValue(fixedOnGone);
+		listRequestExamples.mockRejectedValue(new Error("engine unreachable"));
+
+		await duplicate();
+
+		expect(createRequest).toHaveBeenCalledTimes(1);
+		expect(createRequestExample).not.toHaveBeenCalled();
+		expect(updateRequest).not.toHaveBeenCalled();
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].variant).toBe("error");
+		expect(toasts[0].message).toContain("couldn't copy all its examples");
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toContain("r-1-copy");
+		expect(toasts[0].message).toContain("engine unreachable");
+	});
+
+	it("keeps the copy, stops there and leaves the mock on first when a post fails", async () => {
+		getRequest.mockResolvedValue(fixedOnGone);
+		listRequestExamples.mockResolvedValue([ok, gone]);
+		createRequestExample.mockRejectedValueOnce(new Error("example cap reached"));
+
+		await duplicate();
+
+		expect(createRequestExample).toHaveBeenCalledTimes(1);
+		expect(updateRequest).not.toHaveBeenCalled();
+		const toasts = useToastStore.getState().toasts;
+		expect(toasts).toHaveLength(1);
+		expect(toasts[0].message).toContain("example cap reached");
+	});
+
+	it("refreshes the copy's examples even when copying them failed", async () => {
+		listRequestExamples.mockRejectedValue(new Error("engine unreachable"));
+		const { result, client } = renderCrud();
+		const invalidate = vi.spyOn(client, "invalidateQueries");
+
+		await act(async () => {
+			await result.current.handlers.onDuplicateRequest(listRow);
+		});
+
+		expect(invalidate).toHaveBeenCalledWith({
+			queryKey: queryKeys.requests.examples("r-1-copy"),
+		});
 	});
 });
 
