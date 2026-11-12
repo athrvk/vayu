@@ -8,17 +8,19 @@
 /**
  * UnifiedResponseViewer Component
  *
- * The compact, embedded response viewer used by Load Test History
- * (`SampleRequestCard`). It used to also have a full mode, selected by the
- * `compact` prop, for `DesignRunDetail`'s inline response pane - that caller
- * was deleted, so the full-mode branch had no reachable path left and was
- * removed along with the props that only steered it (`compact`, `showActions`,
- * `hiddenTabs`, `trace`). This component is the compact layout now; there is
- * no other mode to switch on.
+ * The embedded exchange viewer: Load Test History's sampled responses
+ * (`SampleRequestCard`, `ScenarioStepCard`) and an inbox capture
+ * (`CaptureDetail`).
  *
- * Features:
- * - Response body view
- * - Request and response headers
+ * Two shapes, told apart by whether `response` is present:
+ * - With a `response`: the first tab is "Response" and holds the response body,
+ *   in a fixed-height panel (the callers cap the card with `max-h-*`).
+ * - Request only (a capture has no response): the first tab is "Body" and holds
+ *   `request.body`, and the panels fill the card instead of a fixed height,
+ *   because the caller sizes the card.
+ *
+ * Both list the request and response headers on the Headers tab, plus an Events
+ * tab when the sample streamed.
  */
 
 import { useState } from "react";
@@ -29,17 +31,27 @@ import { EmptyState } from "../EmptyState";
 import ResponseBody from "./ResponseBody";
 import ResponseEvents from "./ResponseEvents";
 import { CompactHeadersViewer } from "./HeadersViewer";
-import type { UnifiedResponseViewerProps } from "./types";
+import type { ResponseData, UnifiedResponseViewerProps } from "./types";
 
 type ResponseTab = "body" | "headers" | "events";
 
-export default function UnifiedResponseViewer({
-	response,
-	request,
-	events,
-	className,
-}: UnifiedResponseViewerProps) {
+type BodySource = Pick<ResponseData, "body" | "bodyRaw" | "rawBytes" | "headers">;
+
+/**
+ * What the first tab shows: the response's body, or - with no response - the
+ * request's own.
+ */
+function bodySource({ response, request }: UnifiedResponseViewerProps): BodySource | null {
+	if (response) return response;
+	if (!request) return null;
+	return { body: request.body ?? "", rawBytes: request.rawBytes, headers: request.headers ?? {} };
+}
+
+export default function UnifiedResponseViewer(props: UnifiedResponseViewerProps) {
+	const { response, request, events, className } = props;
 	const [activeTab, setActiveTab] = useState<ResponseTab>("body");
+	const requestOnly = !response && !!request;
+	const source = bodySource(props);
 
 	// Empty state. Headers count as content, not just a body: a load-run sample
 	// whose body was binary or dropped for the run's capture budget (#174) has
@@ -48,7 +60,7 @@ export default function UnifiedResponseViewer({
 	const hasHeaders = !!response?.headers && Object.keys(response.headers).length > 0;
 	// A body with no text view (`rawBytes`, issue #2458) has an empty `body`
 	// and is still a body.
-	const hasBody = !!response?.body || !!response?.rawBytes;
+	const hasBody = !!source?.body || !!source?.rawBytes;
 	if (!hasBody && !hasHeaders && !request && !events) {
 		return (
 			<div className={cn("flex-1 flex surface-card", className)}>
@@ -60,6 +72,13 @@ export default function UnifiedResponseViewer({
 			</div>
 		);
 	}
+
+	// A sampled response sits in a card its caller caps (`max-h-*`), so its panels
+	// carry their own height. A request-only card is sized by its caller, and the
+	// panels fill it: `ResponseBody`'s `h-full` needs a sized parent.
+	const panelClass = requestOnly
+		? "flex min-h-0 flex-1 flex-col overflow-auto"
+		: "h-[500px] overflow-auto";
 
 	return (
 		<Card className={cn("flex flex-col overflow-hidden", className)}>
@@ -79,7 +98,7 @@ export default function UnifiedResponseViewer({
 				<TabsList variant="pane">
 					<TabsTrigger value="body">
 						<FileText className="size-icon-sm" />
-						<TabLabel>Response</TabLabel>
+						<TabLabel>{requestOnly ? "Body" : "Response"}</TabLabel>
 					</TabsTrigger>
 					<TabsTrigger value="headers">
 						<TabLabel>Headers</TabLabel>
@@ -98,23 +117,27 @@ export default function UnifiedResponseViewer({
 					)}
 				</TabsList>
 
-				<TabsContent value="body" className="h-[500px] overflow-auto">
-					{response && hasBody ? (
+				<TabsContent value="body" className={panelClass}>
+					{source && hasBody ? (
 						<ResponseBody
-							body={response.body}
-							bodyRaw={response.bodyRaw}
-							rawBytes={response.rawBytes}
-							headers={response.headers || {}}
+							body={source.body}
+							bodyRaw={source.bodyRaw}
+							rawBytes={source.rawBytes}
+							headers={source.headers || {}}
 							showModeToggle
 						/>
 					) : (
 						// `h-full` because this scroll container is not a flex column,
 						// so the primitive's `flex-1` has nothing to grow against.
-						<EmptyState icon={FileText} title="No response body" className="h-full" />
+						<EmptyState
+							icon={FileText}
+							title={requestOnly ? "No body" : "No response body"}
+							className="h-full"
+						/>
 					)}
 				</TabsContent>
 
-				<TabsContent value="headers" className="h-[500px] overflow-auto">
+				<TabsContent value="headers" className={panelClass}>
 					<div className="p-4 space-y-4 overflow-auto h-full">
 						{request?.headers && Object.keys(request.headers).length > 0 && (
 							<CompactHeadersViewer
@@ -136,7 +159,7 @@ export default function UnifiedResponseViewer({
 					</div>
 				</TabsContent>
 				{events && (
-					<TabsContent value="events" className="h-[500px] overflow-auto">
+					<TabsContent value="events" className={panelClass}>
 						{/* `isStream` is what the presence of the node already
 						    means, and the stream has ended by the time a sample is
 						    stored - so neither is a question this caller has to
