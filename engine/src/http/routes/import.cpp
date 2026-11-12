@@ -1155,7 +1155,10 @@ const nlohmann::json& candidates) {
         "POST /import/apply - skipped an imported client certificate candidate",
         { { "status", status },
         { "host",
-        candidate.is_object () ? candidate.value ("host", std::string ()) : std::string () } });
+        candidate.is_object () && candidate.contains ("host") &&
+        candidate["host"].is_string () ?
+        candidate["host"].get<std::string> () :
+        std::string () } });
     }
 }
 

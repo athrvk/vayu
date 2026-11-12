@@ -792,6 +792,17 @@ AnEmptyClientCertificatesSectionRegistersNothingEvenWhenThePreviewHadOne) {
     EXPECT_TRUE (db_->get_client_certificates ().empty ());
 }
 
+TEST_F (ImportApplyRouteTest, AClientCertificateCandidateWithANonStringHostIsSkippedNotThrown) {
+    // The skip is logged by host after the tree has committed; reading a
+    // non-string host there must not throw the import's answer away (#3482).
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+    { "clientCertificates",
+    json::array ({ json{ { "host", 5 }, { "certPath", "x.pem" } } }) } });
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_TRUE (db_->get_client_certificates ().empty ());
+}
+
 TEST_F (ImportApplyRouteTest, ACarriedClientCertificateCandidateRegistersExactlyOneRow) {
     const ScratchFile cert ("import_apply_cert_carried.pem");
     const ScratchFile key ("import_apply_key_carried.pem");
