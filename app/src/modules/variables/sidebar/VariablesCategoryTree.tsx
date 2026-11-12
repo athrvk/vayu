@@ -190,6 +190,13 @@ export default function VariablesCategoryTree() {
 	// header row claims its list with `aria-owns` instead.
 	const environmentsGroupId = useId();
 	const collectionsGroupId = useId();
+	const treeId = useId();
+	/**
+	 * The element a row's `aria-labelledby` points at (#3450): the row's own
+	 * name, so its accessible name is not computed from the ⋯ menu's label and
+	 * the variable-count badge inside it.
+	 */
+	const nameIdFor = (scope: string, id = "") => `${treeId}-${scope}-${id}-name`;
 
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
 
@@ -441,6 +448,7 @@ export default function VariablesCategoryTree() {
 							aria-level={1}
 							aria-posinset={1}
 							aria-setsize={SCOPE_SECTIONS}
+							aria-labelledby={nameIdFor("globals")}
 							data-tree-label="Globals"
 							className={cn(
 								// h-8: shared drawer row height (see CollectionItem).
@@ -461,7 +469,9 @@ export default function VariablesCategoryTree() {
 								className="flex flex-1 self-stretch items-center gap-2 px-8 text-left text-sm"
 							>
 								<Globe className="size-icon-sm" />
-								<span className="cap-centred">Globals</span>
+								<span id={nameIdFor("globals")} className="cap-centred">
+									Globals
+								</span>
 							</button>
 						</div>
 					</div>
@@ -664,6 +674,16 @@ export default function VariablesCategoryTree() {
 													aria-level={2}
 													aria-posinset={index + 1}
 													aria-setsize={environments.length}
+													// Omitted while renaming: the name element is
+													// then the field, with no text to point at.
+													aria-labelledby={
+														isRenaming
+															? undefined
+															: nameIdFor(
+																	"environment",
+																	environment.id
+																)
+													}
 													onClick={(e) => {
 														if (e.target !== e.currentTarget) return;
 														if (isDeleting) return;
@@ -713,7 +733,13 @@ export default function VariablesCategoryTree() {
 															// collection and request rows.
 															className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left"
 														>
-															<TruncatedText className="cap-centred flex-1">
+															<TruncatedText
+																id={nameIdFor(
+																	"environment",
+																	environment.id
+																)}
+																className="cap-centred flex-1"
+															>
 																{environment.name}
 															</TruncatedText>
 															{/* `chip`: `secondary` brings
@@ -869,6 +895,10 @@ export default function VariablesCategoryTree() {
 												aria-level={2}
 												aria-posinset={index + 1}
 												aria-setsize={collections.length}
+												aria-labelledby={nameIdFor(
+													"collection",
+													collection.id
+												)}
 												className={cn(
 													"focus-row flex h-8 items-center hover:bg-accent transition-colors",
 													isSelected({
@@ -897,7 +927,10 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													<TruncatedText className="flex-1">
+													<TruncatedText
+														id={nameIdFor("collection", collection.id)}
+														className="flex-1"
+													>
 														{collection.name}
 													</TruncatedText>
 													{/* `chip` - same reason as the environment

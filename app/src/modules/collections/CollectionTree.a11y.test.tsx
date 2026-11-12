@@ -230,6 +230,33 @@ describe("the tree's shape as assistive tech sees it", () => {
 	});
 });
 
+describe("a row's accessible name is its own name", () => {
+	// Left to content, Chromium computed "Collapse collection Acme (1) More actions
+	// for Acme" from the chevron's label, the count and the menu trigger (#3450).
+	it("names a collection row by its name alone, not its chevron, count or menu", () => {
+		renderTree();
+
+		expect(screen.getByRole("treeitem", { name: "Acme" })).toBe(collectionRow("acme"));
+		expect(screen.getByRole("treeitem", { name: "Beta" })).toBe(collectionRow("beta"));
+	});
+
+	it("names a request row by its method and name", () => {
+		renderTree();
+
+		expect(screen.getByRole("treeitem", { name: "GET Ping" })).toBe(requestRow("r-ping"));
+	});
+
+	it.each([
+		["collection", () => collectionRow("beta")],
+		["request", () => requestRow("r-ping")],
+	])("leaves a renaming %s row to the field it holds", (_kind, row) => {
+		renderTree();
+		startRename(row());
+
+		expect(row()).not.toHaveAttribute("aria-labelledby");
+	});
+});
+
 describe("ArrowLeft leaves the group", () => {
 	// On the shipped DOM, not the hook's fixture: Ping is the *second* row of
 	// Acme's group, which is the row the old parent walk got wrong - it took the

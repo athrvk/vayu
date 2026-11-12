@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useId, useMemo, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { useCollectionTreeHandlers, useCollectionTreeState } from "./context/CollectionTreeContext";
 import { RowDropIndicator, RowMoveControls } from "./TreeRowDnd";
@@ -71,6 +71,8 @@ function RequestItemRow({
 	const isSelected = selectedRequestId === request.id;
 	const isDeleting = deletingRequestId === request.id;
 	const isRenaming = renamingRequestId === request.id;
+	const methodId = useId();
+	const nameId = useId();
 
 	const entity = useMemo(() => requestEntity(request, collectionId), [request, collectionId]);
 	const dnd = useRowDnd(entity);
@@ -165,6 +167,10 @@ function RequestItemRow({
 			aria-level={depth + 1}
 			aria-posinset={posInSet}
 			aria-setsize={setSize}
+			// Method then name, not the text of everything inside the row: left to
+			// content, Chromium reads the menu trigger's label into it (#3450).
+			// Omitted while renaming, where the name element is the field.
+			aria-labelledby={isRenaming ? undefined : `${methodId} ${nameId}`}
 			onClick={(e) => isRowSurface(e) && handleClick(e)}
 			onDoubleClick={(e) => isRowSurface(e) && handleDoubleClick(e)}
 			data-drop-blocked={dnd.isBlocked || undefined}
@@ -214,6 +220,7 @@ function RequestItemRow({
 				 * and reveals the full name on hover, so no method overflows the box.
 				 */}
 				<MethodBadge
+					id={methodId}
 					method={request.method}
 					variant="text"
 					size="sm"
@@ -229,7 +236,10 @@ function RequestItemRow({
 						onClick={(e) => e.stopPropagation()}
 					/>
 				) : (
-					<TruncatedText className="cap-centred text-sm text-foreground cursor-pointer">
+					<TruncatedText
+						id={nameId}
+						className="cap-centred text-sm text-foreground cursor-pointer"
+					>
 						{request.name}
 					</TruncatedText>
 				)}

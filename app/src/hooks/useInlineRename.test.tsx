@@ -55,6 +55,19 @@ function renderRow(initialValue?: string) {
 beforeEach(() => onCommit.mockReset());
 
 describe("useInlineRename", () => {
+	// Typing over the name must replace it (#3450); a caret at the end made
+	// "List orders" into "List ordersList orders renamed". The field here has no
+	// `autoFocus`, so focusing it is the only thing that can select.
+	it("selects the whole name when the field takes focus", () => {
+		const field = renderRow();
+
+		field.focus();
+
+		expect(field.selectionStart).toBe(0);
+		expect(field.selectionEnd).toBe(field.value.length);
+		expect(field.value).toBe("Get users");
+	});
+
 	it("opens with the current name and commits it trimmed on Enter", () => {
 		const field = renderRow();
 		expect(field.value).toBe("Get users");

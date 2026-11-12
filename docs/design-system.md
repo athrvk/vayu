@@ -1930,9 +1930,20 @@ see.
 | A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+| A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
 | Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
+
+**A tree row is named by its name, not by what is inside it.** A `treeitem`
+with no name of its own is named from its content, and Chromium reads every
+descendant into that: the chevron's "Collapse collection", the count, the
+`⋯` menu trigger's label (#3450). The row therefore takes `aria-labelledby`
+naming the name element (`TruncatedText` and `MethodBadge` forward an `id` for
+it), with the method badge first on a request so the row reads "GET Get
+invoices". While the row renames, the name element is the field and has no text
+to point at, so the attribute is omitted. The variables tree builds its ids from
+one `useId` plus the row's id, since its rows are drawn in a loop.
 
 **An operation that takes seconds announces its progress.** A dialog that sits
 on a spinner and a bar reports nothing to a screen reader: the bar's value is
@@ -3548,7 +3559,7 @@ for, so interrupting what they are reading is the wrong trade.
 
 Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
-sidebar's environments and the element list. The field is an ordinary `Input`
+sidebar's environments and the element list (four call sites). The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
 label's position on both axes: every renaming row puts its label a `gap-2`
 from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
@@ -3571,9 +3582,15 @@ owns the behaviour:
   tree is one tab stop and the field replaces the row's only focusable control,
   so an Escape that left focus on `<body>` would drop the user out of the tree.
   After a blur, focus has already gone where the user put it.
+- **The field opens with the whole name selected** (#3450), as Finder, Explorer
+  and VS Code do, so typing replaces the name instead of appending to it. The
+  hook's `onFocus` selects it and the field's `autoFocus` triggers that on
+  mount, which is why the hook sets the draft during the render that opens the
+  rename rather than in an effect: a field that mounts empty would select
+  nothing.
 
-A surface that renames something in place uses the hook rather than a fourth
-copy of those four rules.
+A surface that renames something in place uses the hook rather than a fifth
+copy of those five rules.
 
 ### Copy feedback
 
