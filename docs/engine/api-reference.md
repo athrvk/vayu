@@ -6449,6 +6449,8 @@ applies to collections, requests and environments), ids are not restorable
 across restarts, and `POST /inbox/start` is a verb path for that reason. Stopping
 an inbox frees its listener but keeps the record - and therefore its captures -
 readable until the engine exits; `DELETE /inbox/:inboxId` is what removes both.
+After an engine restart the app names the inboxes, issuers and mocks that
+stopped with it in one notice (`app/src/lib/services-stopped-by-restart.ts`).
 
 **Binding is a trust decision.** The default is `127.0.0.1`. Any other address
 is refused unless the caller also sends `"confirmNonLoopback": true`, and the
@@ -6772,7 +6774,8 @@ verb path starts it, ids are not restorable across restarts, and stopping one
 that outlives its listener, unlike an inbox and its captures. Trashing the
 collection a mock serves, or any collection above it, stops the mock the same
 way ([`DELETE /collections/:id`](#delete-collectionsid)), and a restore does
-not start it again.
+not start it again. A mock an engine restart stopped is named in the app's
+restart notice, as an inbox is.
 
 **Load-testing against a mock is a supported workflow**, and it is the one this
 listener exists for as much as frontend development: a mock is a

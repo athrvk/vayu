@@ -9,9 +9,10 @@
  * What local services are running - for the Dock's ambient indicator, and for
  * the close that would stop them (issue #1363).
  *
- * One hook rather than each surface counting for itself: the drawer, the
- * indicator and the main process have to agree about what "running" means, and
- * the three lists disagree on their own terms. An inbox keeps its record after
+ * One definition rather than each surface counting for itself: the drawer, the
+ * indicator, the main process and the restart notice (`runningServicesIn`,
+ * `lib/services-stopped-by-restart.ts`) have to agree about what "running"
+ * means, and the three lists disagree on their own terms. An inbox keeps its record after
  * it is stopped (`running` is the flag that says so); a stopped issuer or mock
  * server is *gone* from the engine's list, so every one of those listed is a
  * running one.
@@ -39,6 +40,7 @@ import { useEffect, useMemo } from "react";
 
 import { useInboxesQuery, useMockIssuersQuery, useMockServersQuery } from "@/queries";
 import { selectKnownEngineStatus, useEngineStore } from "@/stores";
+import { runningServicesIn } from "@/lib/services-stopped-by-restart";
 import type { RunningServiceSummary } from "@/types/electron";
 
 /** One identity for "nothing", so a disconnected engine re-publishes nothing. */
@@ -64,23 +66,12 @@ export function useRunningServices(): RunningServiceSummary[] {
 
 	return useMemo(() => {
 		if (!serving) return NOTHING_RUNNING;
-		return [
-			...inboxes
-				.filter((inbox) => inbox.running)
-				.map((inbox) => ({ kind: "inbox" as const, name: null, port: inbox.port })),
-			...mocks.map((mock) => ({
-				kind: "mock-server" as const,
-				// The name it was started under, which is how the drawer lists it and
-				// the only part of a mock a user recognises at a glance.
-				name: mock.collectionName,
-				port: mock.port,
-			})),
-			...issuers.map((issuer) => ({
-				kind: "issuer" as const,
-				name: null,
-				port: issuer.port,
-			})),
-		];
+		// The summary main reads carries no id: it names, it never compares.
+		return runningServicesIn({ inboxes, issuers, mocks }).map(({ kind, name, port }) => ({
+			kind,
+			name,
+			port,
+		}));
 	}, [serving, inboxes, issuers, mocks]);
 }
 

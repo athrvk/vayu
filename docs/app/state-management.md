@@ -989,6 +989,23 @@ Every registered context is safe to flush here, unlike the quit flush's
 urgency: a context with nothing pending is a no-op, and one that has never
 failed loses nothing by saving now instead of on its own schedule.
 
+**A reconnect also names the services the outage stopped** (issue #3493).
+Inboxes, mock servers and OAuth issuers live in the engine process, so the
+engine that comes back runs none of them. `recordServicesBeforeOutage`
+(`lib/services-stopped-by-restart.ts`) reads `queryKeys.inbox.list()`,
+`queryKeys.mockIssuer.list()` and `queryKeys.mockServer.list()` out of the
+cache at the outage's first sign, `useHealthQuery`'s first failed poll or
+`useEngineRestart` before it asks for the restart, because the lists' own
+poll can reach the new engine before any reconnect is noticed. What counts as
+running is `runningServicesIn`, the definition `useRunningServices` shares.
+Both reconnect branches then call `reportServicesStoppedByOutage`, which takes
+the one pending snapshot (the second caller finds none), fetches the three
+lists fresh, and raises one warning toast naming each service that was running
+and is absent or `running: false` now, compared by id. A failed fetch raises
+nothing and puts the snapshot back for the next reconnect. An ordinary list
+change (an MCP stop, a Stop in the drawer) records nothing, so it never
+reaches the notice.
+
 **`triggerSave` will not report a success the context did not have.** A
 registered context can report its own failure under its id and then *resolve*
 rather than reject (`SettingsMain`), so `runSave` cannot take a resolved promise

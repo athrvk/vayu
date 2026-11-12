@@ -527,7 +527,9 @@ which case the app picks a fallback (below).
   fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
   held port with Retry), which takes precedence over a crash. One restart runs
-  at a time across the Dock button and the Settings banner.
+  at a time across the Dock button and the Settings banner. The engine that
+  comes back is running none of the services the old one held, so the
+  reconnect names them (local services, below).
 - **A dirty editor flushes itself the moment the engine comes back**, on an
   automatic reconnect (`useHealthQuery`) or a manual restart
   (`useEngineRestart`) alike - both invalidate every query and then flush
@@ -580,6 +582,15 @@ which case the app picks a fallback (below).
   an answer nobody is there to give (issue #1363). The flush-failure dialog above
   is no exception: a signal quit that cannot save its edits would stall on it
   until `install.sh` killed the app and orphaned the engine (issue #1908).
+  An engine restart stops them too, whether a crash ended the old engine or
+  the user pressed Restart, and neither asks first. What it does instead is
+  say so afterwards: the renderer keeps what the cached Services lists said
+  was running when the outage began, and once the health poll or the Restart
+  sees the engine back it compares that by id with the engine's fresh lists
+  and raises one toast naming what is no longer running, with a View services
+  action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
+  reconnect paths report, and one snapshot is pending per outage, so the user
+  hears it once.
 - **A taken port is a loud failure, not a silent one.** The engine binds its
   port (`--port`, default 9876) before it serves, so anything already holding
   it makes it print `Could not bind 127.0.0.1:<port> - ...` to stderr and exit

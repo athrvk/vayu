@@ -1103,7 +1103,9 @@ both reveal it.
   missing from the sum until issue #792, so a mock holding a port counted as nothing. The count is now the list's length rather than a second sum
   (issue #1363): the Dock saying 2 while the close dialog names 3 is a disagreement no test that
   reads one of them can see. `useRunningServicesPublisher()`, mounted once in `App.tsx`, pushes that
-  list to the main process on every change.
+  list to the main process on every change. The definition of "running" itself is
+  `runningServicesIn` (`lib/services-stopped-by-restart.ts`), which the engine-restart notice reads
+  too (issue #3493).
 
 **Closing Vayu stops everything in this drawer, and says so first** (issue #1363). These services
 live in the engine and the engine goes down with the app, so a close - the X on Windows and Linux,

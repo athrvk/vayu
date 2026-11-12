@@ -23,6 +23,10 @@ import {
 	engineStatusAfterFailedPoll,
 	readEngineStartFailure,
 } from "@/lib/engine-start-window";
+import {
+	recordServicesBeforeOutage,
+	reportServicesStoppedByOutage,
+} from "@/lib/services-stopped-by-restart";
 
 /**
  * How hard to poll `/health`, given how the last poll went.
@@ -154,6 +158,7 @@ export function useHealthQuery() {
 			if (sawDisconnect.current) {
 				sawDisconnect.current = false;
 				void queryClient.invalidateQueries();
+				void reportServicesStoppedByOutage(queryClient);
 				// The same gap one layer down: a dirty editor's own auto-save
 				// retry backs off up to SAVE_RETRY_MAX_DELAY_MS, and an engine
 				// that came back sooner than that should not wait for it. Every
@@ -164,6 +169,9 @@ export function useHealthQuery() {
 				void useSaveStore.getState().flushAll();
 			}
 		} else if (query.isError) {
+			// Before the flag: the first failure of an outage is the moment the
+			// cache still describes the engine that just went.
+			if (!sawDisconnect.current) recordServicesBeforeOutage(queryClient);
 			sawDisconnect.current = true;
 			adoptEngineStartFailure();
 			// Read before the status is written: the notification below is about
