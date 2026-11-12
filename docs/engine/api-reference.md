@@ -2157,7 +2157,10 @@ in `params` only. A raw API, MCP or import caller that puts the query only in
 `params` stores a request that sends none of it (issue #590). The
 [Postman export](#post-exportpostman) writes the query the URL states as
 `url.query[]` even when `params` holds no row for it (issue #3242); a pair in
-`params` only is written there too, but it is still not sent.
+`params` only is written there too, but it is still not sent. The other
+direction is the app's to bridge: a request stored with its query only in `url`
+(`params` absent or `[]`) opens in the Params table with those pairs as rows,
+merged with any stored rows, and is not marked unsaved by it (issue #3491).
 
 **A path row is the one row composition reads** (issue #1764). A row carrying
 `"in": "path"` is a Postman-style path variable: `key` is the name without its

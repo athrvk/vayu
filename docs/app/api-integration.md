@@ -757,6 +757,17 @@ absent keeps the stored value and `null` resets it, so the builder's
 refuses a number outside the range with a 400 naming `timeout`, so the Settings
 tab clamps what is typed.
 
+**The builder seeds its Params rows from the stored `params` and the URL's
+query together** (issue #3491, `initialRequest` in `modules/request-builder/index.tsx`).
+A request stored with its query only in `url` (an API, MCP or import write that
+left `params` absent or `[]`) opens with those pairs as rows, through
+`mergeParamsFromUrl` - the rule a URL-bar edit already uses, so stored disabled
+rows stay and a stored row keeps its id and description. Without it the table
+opened empty and its first edit rebuilt `url` from the rows alone, deleting the
+query. The seed is not an edit: the draft's saved baseline is seeded from the
+same rows, so the request is not marked unsaved, and nothing is written back
+until the user changes something.
+
 #### Trash
 
 ```typescript
