@@ -10,6 +10,7 @@ import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 import {
+	selectEngineRestartOffered,
 	selectKnownEngineStatus,
 	useEngineStore,
 	useLayoutStore,
@@ -127,6 +128,7 @@ function EngineStatus() {
 	const engineError = useEngineStore((s) => s.engineError);
 	const engineStartFailure = useEngineStore((s) => s.engineStartFailure);
 	const engineCrash = useEngineStore((s) => s.engineCrash);
+	const restartOffered = useEngineStore(selectEngineRestartOffered);
 
 	/*
 	 * `status-success-text`: not the general `success-text`, and not the bare
@@ -190,7 +192,7 @@ function EngineStatus() {
 		<span className={className}>{label}</span>
 	);
 
-	if (!engineStartFailure && !engineCrash) return status;
+	if (!restartOffered) return status;
 
 	return (
 		<>

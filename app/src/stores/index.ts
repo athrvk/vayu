@@ -9,6 +9,7 @@
 export {
 	useEngineStore,
 	selectKnownEngineStatus,
+	selectEngineRestartOffered,
 	type EngineCrash,
 	type EngineStatus,
 } from "./engine-store";

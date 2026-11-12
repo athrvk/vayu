@@ -179,6 +179,17 @@ export function selectKnownEngineStatus(
 	return s.engineStatus;
 }
 
+/**
+ * Whether the Dock is showing a Restart (after a crash) or Retry (after a
+ * start failure) button. Read by the Dock itself and by copy that points at it,
+ * so a tip never names a button the Dock is not drawing (#3493).
+ */
+export function selectEngineRestartOffered(
+	s: Pick<EngineState, "engineStartFailure" | "engineCrash">
+): boolean {
+	return Boolean(s.engineStartFailure) || Boolean(s.engineCrash);
+}
+
 export const useEngineStore = create<EngineState>()((set) => ({
 	// Initial state. `starting`, not `unreachable`: this value is what the Dock
 	// renders on first paint, before any poll has been answered or refused.

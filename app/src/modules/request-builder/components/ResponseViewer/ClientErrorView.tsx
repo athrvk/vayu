@@ -28,6 +28,7 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
+import { selectEngineRestartOffered, useEngineStore } from "@/stores";
 
 interface ErrorIconDisplayProps {
 	icon: LucideIcon;
@@ -58,6 +59,14 @@ const ENGINE_ANSWERED_HINT =
  * server that was never reached - which is the misdiagnosis the whole
  * behind-real-networks epic exists to end.
  */
+/**
+ * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
+ * Without one (the engine is not known to have left, so the Dock offers
+ * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
+ */
+const ENGINE_RESTART_IN_DOCK_HINT =
+	"Vayu's engine isn't running or didn't answer. Restart it with the button beside Engine disconnected at the bottom of the window.";
+
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
 		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Request timeout in this request's Settings tab or Default request timeout in Settings › Network & connectivity, or check the server.",
@@ -160,13 +169,20 @@ function getErrorIcon(errorCode?: string) {
 	}
 }
 
+function errorHint(errorCode: string | undefined, restartOffered: boolean): string | undefined {
+	if (!errorCode) return undefined;
+	if (errorCode === "ENGINE_ERROR" && restartOffered) return ENGINE_RESTART_IN_DOCK_HINT;
+	return ErrorHints[errorCode];
+}
+
 export interface ClientErrorViewProps {
 	errorCode?: string;
 	errorMessage?: string;
 }
 
 export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
-	const hint = errorCode ? ErrorHints[errorCode] : undefined;
+	const restartOffered = useEngineStore(selectEngineRestartOffered);
+	const hint = errorHint(errorCode, restartOffered);
 	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Couldn't get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 
