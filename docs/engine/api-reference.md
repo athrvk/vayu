@@ -561,6 +561,27 @@ credential, and a `PUT` of other fields still succeeds. The MCP `create_` and
 `update_` collection tools refuse `inherit` as an input error before calling the
 engine.
 
+### Auth modes
+
+A stored `auth` object's `mode` is one of `none`, `noauth`, `inherit`,
+`bearer`, `basic`, `apikey`, `oauth2`, `digest`, `aws`, `ntlm`, `hawk`,
+`oauth1`, `edgegrid` and `jwt`, spelled exactly so (#3464). The last seven are
+stored and never executed: a send names the mode in `authNotice` and goes out
+without a credential. Modes match by exact lowercase string, so `Bearer`,
+`" inherit"` or a non-string `mode` would be stored and then read as a concrete
+credential that stops the inherit walk and is sent as none.
+`POST`/`PUT /collections` and `POST`/`PUT /requests` therefore answer `400`
+(`Invalid 'auth.mode': must be a string, one of: ...`) when the body states an
+`auth` object whose `mode` is missing, not a string, or outside that set, and
+write nothing. `inherit` stays valid for a request and is refused for a
+collection ([#3445](#collection-auth)). `"auth": null` and an absent `auth` are
+not judged, and an `auth` that is not an object is the
+[shape](#accepted-field-shapes) `400`. `POST /import/apply` and
+`POST /specs/sync` are not held to this, as with [blank names](#blank-names): an
+importer's unrecognised mode is stored as written, so one odd block cannot fail
+an atomic import. The MCP `create_` and `update_` tools for both resources refuse
+an unknown mode as an input error before calling the engine.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1675,7 +1696,8 @@ the null-vs-absent rule.
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
-([#3445](#collection-auth)), if an `openapi` binding names no stored spec
+([#3445](#collection-auth)) or a mode outside the
+[known set](#auth-modes), if an `openapi` binding names no stored spec
 (below), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1711,6 +1733,25 @@ A `parentId` that changes the collection's parent and states no `order` appends
 the collection among its new siblings, rather than carrying a position from the
 list it just left. See [Ordering](#ordering).
 
+A `parentId` that takes the collection out of the spec contract that answers
+for the requests beneath it is removing them from that contract (#3470), the
+rule [`PUT /requests/:id`](#put-requestsid) applies to one request, with the
+same meaning of out: every request in the subtree that records an operation
+(`specOperation`) and whose nearest binding after the move names another
+document, none, or the same document from a collection outside the source's
+contract has its stamp cleared, and the operation is recorded as declined
+under the binding it left, in the same transaction as the collection's own
+row, so the source's [`POST /specs/diff`](#post-specsdiff) lists it under
+`declined` rather than `added`. The binding after is read against the tree the
+`PUT` writes, so an `openapi: null` in the same body counts: a bound
+collection unbound and moved out at once clears its requests' stamps, and the
+decline that records under it is forgotten with the binding's other records
+(below). A move within one contract keeps every stamp, and so does moving the
+bound collection itself. The response is the collection; the cleared requests
+are read back with [`GET /requests/:id`](#get-requestsid) or arrive on the
+[change feed](#get-changes). This is the decline
+[`POST /reorder`](#post-reorder) records for a moved folder.
+
 **Headers:** `If-Match` (optional), see
 [Conditional updates](#conditional-updates-with-if-match).
 
@@ -1720,7 +1761,8 @@ list it just left. See [Ordering](#ordering).
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
-`auth` that states mode `inherit` ([#3445](#collection-auth)), an
+`auth` that states mode `inherit` ([#3445](#collection-auth)) or a mode outside
+the [known set](#auth-modes), an
 `openapi` that is neither `null` nor `{}` (binding is
 [`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
 (below); `409` if `parentId` names a collection in the
@@ -1855,6 +1897,13 @@ ancestor, in the same transaction. Deleting a tag folder is the user declining
 everything in it. Deleting the bound collection itself records nothing - that
 is the whole contract going, not a choice about any operation of it - and a
 purge of a bound collection takes its records with it.
+
+**The delete stops every running [mock](#mock-server) of what it trashed**
+(issue #3449): a mock of the collection itself or of any folder under it,
+whichever client sent the delete, before the response is sent, so it is gone
+from [`GET /mock`](#get-mock) by then. A mock of a collection outside the
+subtree keeps running. Restoring the collection does not start its mock again;
+`POST /mock/start` does.
 
 **Response:**
 ```json
@@ -2030,7 +2079,7 @@ the null-vs-absent rule.
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
-  "auth": {},                        // Optional, authentication config
+  "auth": {"mode": "inherit"},       // Optional, default {"mode":"inherit"}; mode must be a known one - see Auth modes
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
@@ -2208,6 +2257,7 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
 on a `mockExampleId` that is not a non-empty string or `null`,
+on an `auth` whose `mode` is not a [known one](#auth-modes) (#3464),
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -2310,7 +2360,8 @@ that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
 `methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
 not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
-non-empty string or `null`, a malformed protocol setting (see
+non-empty string or `null`, an `auth` whose `mode` is not a
+[known one](#auth-modes) (#3464), a malformed protocol setting (see
 [POST /requests](#post-requests)), or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
@@ -2342,7 +2393,9 @@ sync that creates the operation on purpose; purging the request, by hand or by
 Unbinding the collection, or binding it to a document with other bytes, forgets
 every record under it. A sync's own deletes record nothing. Moving the request
 out of the contract records the same decline (#3446, see
-[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder));
+[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder)),
+and so does moving a folder above it out with
+[`PUT /collections/:id`](#put-collectionsid) (#3470);
 the move clears the stamp, and a restore forgets only the record of a request
 that still records an operation, so deleting and restoring the moved request
 later leaves the source's record standing.
@@ -2439,7 +2492,10 @@ Two rules decide what a restore of a collection or request puts back:
 - **Re-parent.** A restored collection whose parent is gone, or is itself in the
   trash, comes back at the tree root (`parentId` cleared). A *request* has no
   such root - `collectionId` is required - so restoring one whose collection is
-  in the trash is a `409` naming the collection to restore first.
+  in the trash is a `409` naming the request and its collection by name, and
+  the trash root to restore first by name and id (issue #3449). That root is
+  the listed entry holding the collection: the collection itself, or the
+  ancestor whose delete took it.
 
 An environment needs neither: it owns no rows and hangs under nothing, so its
 delete stamps one row, it is always a root, and its restore is unconditional.
@@ -2453,8 +2509,10 @@ its collection, and follows the request's rule. Its delete stamps its one row.
 It is a root only while its request is live: under a trashed request it is part
 of what that request's entry stands for, and restoring the request leaves the
 example's own earlier delete in the trash as a root again. Restoring an example
-whose request is in the trash or gone is a `409` naming the request to restore
-first, and so is restoring one into a request that already holds the maximum of
+whose request is in the trash is a `409` naming the example and its request by
+name, and the trash root to restore first by name and id: the request, or the
+collection whose delete took it. One whose request is gone is a `409` saying
+so, and so is restoring one into a request that already holds the maximum of
 100 examples. A stamped example whose request row is gone entirely is listed
 nowhere. The delete clears the request's `mockExampleId` when it named the
 example, and the restore does not set it again: choosing it as the fixed mock
@@ -2479,8 +2537,10 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment and client
-certificate is a root; a deleted example is one while its request is live.
+`collections` and `requests` count, and `purgeCollections` and `purgeRequests`
+count what a purge would destroy. Every deleted environment and client
+certificate is a root; a deleted request is one while its collection is live,
+and a deleted example while its request is.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2500,7 +2560,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745600000,
       "parentId": null,
       "collections": 2,
-      "requests": 14
+      "requests": 14,
+      "purgeCollections": 3,
+      "purgeRequests": 16
     },
     {
       "id": "env_1234567890",
@@ -2510,6 +2572,8 @@ certificate is a root; a deleted example is one while its request is live.
       "parentId": null,
       "collections": 0,
       "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0,
       "variables": 6
     },
     {
@@ -2518,8 +2582,11 @@ certificate is a root; a deleted example is one while its request is live.
       "name": "200 - created",
       "deletedAt": 1787745400000,
       "parentId": "req_1234567890",
+      "parentName": "Create payment",
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     },
     {
       "id": "cert_1234567890",
@@ -2528,7 +2595,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745300000,
       "parentId": null,
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     }
   ],
   "total": 4
@@ -2540,9 +2609,23 @@ certificate is a root; a deleted example is one while its request is live.
 `host:port`, which is what `q` matches. `parentId` is a collection's parent
 (`null` at the tree root), a request's owning collection, an example's owning
 **request**, or `null` for an environment and a client certificate.
-`collections` and `requests` are `0` for every kind but a collection.
-`variables` is carried by an environment entry only - the number of variables
-its stored map holds - and is absent, not `0`, on the other four kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+`parentName` (issue #3449) is the name of the row `parentId` names, carried by
+a request and an example entry only, so two same-named entries tell apart by
+their owner. It is absent on the other three kinds, and on a request or
+example whose owner row is gone, which no write path leaves behind.
+
+`collections` and `requests` are the **cohort**: the sub-collections (the root
+not counted) and requests this delete took, which is exactly what a restore
+puts back. `purgeCollections` and `purgeRequests` (issue #3449) are what a
+[purge](#delete-trashid) destroys: every deleted sub-collection and request
+under the root, whichever delete stamped it, stopping at a live collection as
+the purge does. They are never below the cohort counts, and exceed them when
+an earlier delete inside the subtree - a request, or a folder with its
+requests - is waiting under the root, unlisted. All four are `0` for every
+kind but a collection. `variables` is carried by an environment entry only -
+the number of variables its stored map holds - and is absent, not `0`, on the
+other four kinds. An empty trash is `{"items": [], "total": 0}`, never a
+`404`.
 
 ### POST /trash/:id/restore
 
@@ -2566,6 +2649,8 @@ claimed again.
   "parentId": null,
   "collections": 2,
   "requests": 14,
+  "purgeCollections": 3,
+  "purgeRequests": 16,
   "restored": true,
   "reparentedToRoot": false
 }
@@ -2576,8 +2661,8 @@ claimed again.
 | Status | When |
 |--------|------|
 | `404` | Nothing in the trash carries that id - a live row, or one already purged |
-| `409` | A request whose collection is itself deleted or gone; restore the collection first |
-| `409` | An example whose request is itself deleted or gone; restore the request first |
+| `409` | A request whose collection is itself deleted or gone; the message names the request and its collection, and the trash root to restore first by name and id |
+| `409` | An example whose request is itself deleted or gone; the message names the example and its request, and the trash root to restore first by name and id |
 | `409` | An example whose request already holds the maximum of 100 examples; delete one first |
 | `409` | A client certificate whose host and port a live entry now claims; the message names that entry, to delete first |
 
@@ -2602,10 +2687,11 @@ emptying the trash, not changing one's mind. A purged *bound* collection takes
 the declined operations recorded under it, which nothing could read any more.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
-`collections` / `requests` are the deleted row's own cohort, so they are a floor
-here rather than the whole: a purge that also swept up an earlier delete's rows
-destroyed more than they count. A `404` if the trash does not hold that id -
-which is also what stops a mistyped id from destroying a live collection.
+`purgeCollections` / `purgeRequests` count what this purge destroyed, an
+earlier delete's rows under the root included; its `collections` /
+`requests` are still the deleted row's own cohort. A `404` if the trash does
+not hold that id - which is also what stops a mistyped id from destroying a
+live collection.
 
 ## Request examples
 
@@ -4045,7 +4131,8 @@ meaning of out. A request that records an operation (`specOperation`) and that
 the batch leaves outside its contract comes back with `specOperation: null`,
 and the operation is recorded as declined under the binding it left, in the
 batch's transaction. A moved collection does this for every stamped request
-beneath it. The binding after and the contract are read against the tree the
+beneath it, as a `parentId` sent to
+[`PUT /collections/:id`](#put-collectionsid) does (#3470). The binding after and the contract are read against the tree the
 batch writes, so a request moved into a folder the same batch moves away is
 judged by where the folder lands. A move within one contract keeps the stamp,
 and so does moving the bound collection itself. Each request this clears is in the
@@ -5160,9 +5247,10 @@ is absent here until it is added on purpose:
    parameter value, never the body.
 3. Text the engine copied from a script or a response is carried as counts
    only: `schemaValidation` keeps `failuresTotal` and drops `failures[]`, a
-   `lifecycle` outcome drops its `message`, an element row (a step's or the
-   run's `elements`) drops `messages`, `console` and their dropped counts
-   (#3127), and the report's `auth` section (whose `lastError` is a token
+   `lifecycle` outcome drops its `message`, `messages`, `console` and their
+   dropped counts, an
+   element row (a step's or the run's `elements`) drops `messages`, `console`
+   and their dropped counts (#3127), and the report's `auth` section (whose `lastError` is a token
    endpoint's words) is left out.
 4. Text the user wrote (the request name, the run comment, the data file's
    display name, step, transaction, metric and series names) is carried as
@@ -6634,7 +6722,10 @@ from Postman may expect. Resolving them would be a feature, not a docs fix.
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
-that outlives its listener, unlike an inbox and its captures.
+that outlives its listener, unlike an inbox and its captures. Trashing the
+collection a mock serves, or any collection above it, stops the mock the same
+way ([`DELETE /collections/:id`](#delete-collectionsid)), and a restore does
+not start it again.
 
 **Load-testing against a mock is a supported workflow**, and it is the one this
 listener exists for as much as frontend development: a mock is a
@@ -9842,8 +9933,9 @@ sources of truth for the same run boundary.
 `script.setup` runs once, before the run's first submission (before
 `test_start` is captured, so its own time is never folded into the run's
 duration figures, live or stored: the live stream's `elapsedSeconds` reads `0`
-until it ends); a throwing setup fails the run - `Failed`, nothing sent -
-the same as a collection-backed run. `script.teardown` runs once, after the
+until it ends); a throwing setup, or one that fails a `pm.test`, fails the
+run - `Failed`, nothing sent, its outcome under the report's
+`lifecycle.setup` - the same as a collection-backed run. `script.teardown` runs once, after the
 last submission settles, and sees `pm.info.run` (`requestsSent`,
 `errorRate`, `assertionsPassed`, `assertionsFailed`); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's
@@ -13000,7 +13092,9 @@ are HTTP-only, the same rule a failed assertion follows
   },
   "lifecycle": {
     "setup": [ { "id": "el_setup1", "kind": "script.setup", "outcome": "ok" } ],
-    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom" } ]
+    "teardown": [ { "id": "el_teardown1", "kind": "script.teardown", "outcome": "error", "message": "Error: boom",
+                    "messages": [ { "kind": "error", "text": "Error: boom" } ],
+                    "console": [ { "level": "log", "text": "tearing down" } ] } ]
   },
   "elements": [
     { "id": "el_1", "kind": "assert.status", "name": "Is 200",
@@ -13253,14 +13347,25 @@ scenario step report the same warning for the same mistake.
 **`lifecycle` (issue #1499) is `script.setup` / `script.teardown`'s outcomes** -
 what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
-`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`); absent entirely,
+`id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`, plus the two lists
+below); absent entirely,
 not `{}`, for a run whose collection (or, for a single-request run, whose own
 `lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
-other than `"ok"` or `"skipped"` already means the run never sent anything - `status` is
-`Failed` and every other section above is absent or zeroed - so a reader who
-finds one here knows why the rest of the report is empty. A `script.teardown`
+other than `"ok"` or `"skipped"` means setup refused the run before it sent
+anything: `status` is `Failed`, no step ran, and the run still stores a summary
+whose `lifecycle.setup` holds that outcome with its `message` (#3455), every
+other section above absent or zeroed - so a reader who finds one here knows why
+the rest of the report is empty. No teardown runs on such a run, so it has no
+`teardown` key. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
-teardown failure is reported, not fatal. A script whose `pm.sendRequest` the run's
+teardown failure is reported, not fatal. A script that ran and failed only
+`pm.test`s is `"failed"`, its `message` the first failing test, as a `script.post`'s is.
+A script element's row also carries **`messages`** (what it threw, then each
+failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
+console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
+the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
+element row's lists (#3127), each key present only when the script said something.
+A script whose `pm.sendRequest` the run's
 Stop cancelled is `"skipped"` (#3371), with a `message` saying so: the run ended
 under it, nothing failed, and the app shows the row muted rather than as a failure.
 

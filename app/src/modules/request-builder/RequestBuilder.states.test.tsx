@@ -83,6 +83,10 @@ describe("the request lookup failed", () => {
 		renderPane();
 
 		expect(screen.getByText(/no longer exists/i)).toBeTruthy();
+		// The delete is soft, so the pane must not call the request unrecoverable
+		// and must say where it may be (#3449).
+		expect(screen.getByText(/it may be in the trash/i)).toBeTruthy();
+		expect(screen.queryByText(/nothing here can be recovered/i)).toBeNull();
 		// A 404 can only 404 again, so a Try again here is a dead end dressed up
 		// as a way out.
 		expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
@@ -168,5 +172,7 @@ describe("a request that was open before it was deleted", () => {
 		expect(screen.queryByTestId("builder-layout")).toBeNull();
 		expect(screen.getByRole("button", { name: /copy as curl/i })).toBeTruthy();
 		expect(screen.getByRole("button", { name: /close tab/i })).toBeTruthy();
+		// The draft banner points at the Trash too: a restore brings the tab back.
+		expect(screen.getByText(/restoring it there brings this tab back/i)).toBeTruthy();
 	});
 });

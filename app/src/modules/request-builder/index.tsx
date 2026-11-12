@@ -224,7 +224,7 @@ function DeletedRequestBanner({ onCloseTab }: { onCloseTab?: () => void }) {
 	return (
 		<ErrorState
 			title="This request no longer exists"
-			detail="It was deleted, or the collection it lived in was. Your edits are still here - copy them out before closing the tab."
+			detail="It was deleted, or the collection it lived in was. Your edits are still here - copy them out before closing the tab. If it is in the Trash, restoring it there brings this tab back."
 			action={
 				<div className="flex gap-2">
 					<Button variant="outline" size="sm" onClick={handleCopyCurl}>
@@ -1002,7 +1002,9 @@ export default function RequestBuilder() {
 	 *
 	 * Deleting a request already closes its tabs (`closeTabsForEntities`), so the
 	 * usual cause of the deleted branch is a delete from another window or a
-	 * database restored underneath the app.
+	 * database restored underneath the app. The delete is soft, so the pane
+	 * points at the Trash (#3449): a restore invalidates `requests.all`, which
+	 * holds this tab's detail query, so the lookup runs again and the tab loads.
 	 */
 	const requestWasDeleted =
 		isRequestNotFound(requestLookupError) || (!isError && !fetchedRequest);
@@ -1024,7 +1026,7 @@ export default function RequestBuilder() {
 		return requestWasDeleted ? (
 			<ErrorState
 				title="This request no longer exists"
-				detail="It was deleted, or the collection it lived in was. Nothing here can be recovered - closing the tab is safe."
+				detail="It was deleted, or the collection it lived in was. It may be in the Trash - restoring it there brings this tab back."
 				action={closeTabAction}
 			/>
 		) : (

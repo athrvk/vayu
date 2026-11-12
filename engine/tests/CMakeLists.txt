@@ -465,6 +465,7 @@ set(vayu_scratch_database_suites
     LoadStrategyTest
     MetricsCollectorFlushTest
     MidRunRefreshTest
+    MockCollectionTrashTest
     MockIssuerTest
     MockServerTest
     MonitorLimitsTest

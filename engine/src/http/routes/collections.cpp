@@ -14,6 +14,7 @@
 #include "vayu/core/import_document.hpp"
 #include "vayu/core/spec_binding.hpp"
 #include "vayu/http/list_page.hpp"
+#include "vayu/http/mock_server.hpp"
 #include "vayu/http/routes.hpp"
 #include "vayu/utils/id.hpp"
 #include "vayu/utils/json.hpp"
@@ -28,8 +29,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace vayu::http::routes {
 
@@ -232,9 +235,9 @@ static RouteResult reject_binding_on_update (const nlohmann::json& json) {
  * composer walks past an `inherit` link, so one that was stored would show the
  * parent's credential in the app and hold it back at send time.
  *
- * Only a stated `auth` object is judged: absent keeps the stored value (which
- * may be a legacy `inherit` the composer already steps past, so an unrelated
- * PUT must not fail on it) and `null` resets to none. The create and update
+ * Runs after `reject_unknown_auth_mode`. Only a stated `auth` object is judged:
+ * absent keeps the stored value (which may be a legacy `inherit` the composer
+ * already steps past, so an unrelated PUT must not fail on it) and `null` resets to none. The create and update
  * cores call it and `apply_collection_fields` does not, because `POST
  * /import/apply` and `POST /specs/sync` share that applier and an importer's
  * `inherit` must not fail an atomic import (the `reject_blank_name` split).
@@ -492,6 +495,9 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     if (auto outcome = reject_blank_name (json); !outcome) {
         return as_response (outcome.error ());
     }
+    if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
+        return as_response (outcome.error ());
+    }
     if (auto outcome = reject_inherit_auth (json); !outcome) {
         return as_response (outcome.error ());
     }
@@ -533,6 +539,71 @@ create_collection_response (vayu::db::Database& db, const nlohmann::json& json) 
     return result;
 }
 
+/// The requests a reparent takes out of a spec contract (#3470), stamps
+/// cleared, and each one's id with the bound collection its operation is
+/// declined under: `Database::apply_reorder`'s last two parameters.
+struct ContractDepartures {
+    std::vector<vayu::db::Request> requests;
+    std::unordered_map<std::string, std::string> declined_under;
+};
+
+/**
+ * The stamped requests beneath @p moved that its reparent takes out of the
+ * contract that answered for them: `POST /reorder`'s rule for a moved folder
+ * (`stage_binding_departures`), for the one folder this write moves. Each
+ * request stays in its own collection; only the tree above it changes, and
+ * @p moved is that row as this write leaves it, so an unbind in the same body
+ * is judged too.
+ */
+static ContractDepartures stage_reparent_departures (vayu::db::Database& db,
+const vayu::db::Collection& moved) {
+    ContractDepartures departures;
+    std::vector<vayu::db::Request> stamped;
+    for (auto& request : db.get_requests_in_subtree (moved.id)) {
+        if (request.spec_operation) {
+            stamped.push_back (std::move (request));
+        }
+    }
+    if (stamped.empty ()) {
+        return departures;
+    }
+
+    const SpecTreeMove tree (db.get_collections (), { { moved.id, moved } });
+    for (auto& request : stamped) {
+        const auto under = tree.declined_under (request, request.collection_id);
+        if (!under) {
+            continue;
+        }
+        departures.declined_under.emplace (request.id, *under);
+        request.spec_operation = std::nullopt;
+        request.updated_at     = next_updated_at (request.updated_at);
+        departures.requests.push_back (std::move (request));
+    }
+    return departures;
+}
+
+/**
+ * Stores the merged row of PUT /collections/:id and what its reparent took out
+ * of a contract in one transaction. Unbinding forgets the operations deletes
+ * declined under the old document (#3031).
+ */
+static void write_collection_update (vayu::db::Database& db,
+const vayu::db::Collection& existing,
+const vayu::db::Collection& merged,
+const nlohmann::json& json,
+const ContractDepartures& departures) {
+    if (json.contains ("openapi") &&
+    binding_leaves_document (existing.openapi, merged.openapi)) {
+        db.rebind_collection (merged, departures.requests, departures.declined_under);
+        return;
+    }
+    if (!departures.requests.empty ()) {
+        db.apply_reorder ({ merged }, departures.requests, departures.declined_under);
+        return;
+    }
+    db.create_collection (merged);
+}
+
 /** The read-merge-write of PUT /collections/:id, run under the caller's lock. */
 static std::pair<int, nlohmann::json> update_collection_locked (vayu::db::Database& db,
 const std::string& id,
@@ -543,6 +614,9 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_blank_name (json); !outcome) {
+        return as_response (outcome.error ());
+    }
+    if (auto outcome = reject_unknown_auth_mode (json); !outcome) {
         return as_response (outcome.error ());
     }
     if (auto outcome = reject_inherit_auth (json); !outcome) {
@@ -564,17 +638,21 @@ const std::function<void ()>& before_write) {
         return as_response (outcome.error ());
     }
     c.updated_at = next_updated_at (existing->updated_at);
+    // A folder moved out of a contract declines its requests' operations
+    // there (#3470), as a move through `POST /reorder` does.
+    const ContractDepartures departures = c.parent_id != existing->parent_id ?
+    stage_reparent_departures (db, c) :
+    ContractDepartures{};
 
     if (before_write) {
         before_write ();
     }
-    // Unbinding forgets the operations deletes declined under the old
-    // document (#3031).
-    if (json.contains ("openapi") &&
-    binding_leaves_document (existing->openapi, c.openapi)) {
-        db.rebind_collection (c);
-    } else {
-        db.create_collection (c);
+    try {
+        write_collection_update (db, *existing, c, json, departures);
+    } catch (const vayu::db::MissingRowError& e) {
+        // Unreachable while every writer takes the DB mutex, as in
+        // `POST /reorder`, which answers the same 409: nothing was written.
+        return { 409, error_body (409, e.what ()) };
     }
     return { 200, vayu::json::serialize (c) };
 }
@@ -659,6 +737,29 @@ delete_collection_response (vayu::db::Database& db, const std::string& id) {
     });
     return result;
 }
+
+namespace {
+
+/**
+ * Stop every running mock whose collection no longer resolves (#3449), so a
+ * trashed collection stops serving whichever client deleted it, a folder
+ * trashed with an ancestor included. Called outside `with_lock`: a stop joins
+ * the mock's listener thread. A start that read the collection before the
+ * delete committed and registers after this scan still survives it.
+ */
+void stop_mocks_of_trashed_collections (vayu::db::Database& db, MockServerManager& mocks) {
+    for (const auto& mock : mocks.list ()) {
+        if (db.get_collection (mock.collection_id)) {
+            continue;
+        }
+        if (mocks.stop (mock.mock_id)) {
+            vayu::utils::log_info ("mock", "Stopped the mock of a trashed collection",
+            { { "mockId", mock.mock_id }, { "collectionId", mock.collection_id } });
+        }
+    }
+}
+
+} // namespace
 
 /**
  * Testable core of GET /collections, returning {http_status, json_body}: every
@@ -806,7 +907,8 @@ void register_collection_routes (RouteContext& ctx) {
      * DELETE /collections/:id
      * Moves a collection and its whole subtree to the trash; beneath a bound
      * collection, the operations its requests record are recorded as
-     * declined (#3031).
+     * declined (#3031). Every running mock of the subtree stops (#3449); a
+     * restore does not start it again.
      * Path params: id - The collection ID to delete.
      * Returns: Success message or 404 if not found.
      */
@@ -823,6 +925,7 @@ void register_collection_routes (RouteContext& ctx) {
             } else {
                 vayu::utils::log_info ("http",
                 "Successfully deleted collection", { { "id", collection_id } });
+                stop_mocks_of_trashed_collections (ctx.db, ctx.mock_server_manager);
             }
             res.status = status;
             res.set_content (body.dump (), "application/json");

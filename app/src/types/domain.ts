@@ -2979,6 +2979,21 @@ export interface RunScenarioStepElementTally {
 	consoleDropped?: number;
 }
 
+/**
+ * One `lifecycle.setup[]` / `teardown[]` row (#3455): the outcome of
+ * {@link ElementOutcome} plus the script's own words, bounded and shaped as an
+ * inline element's tally row carries them. `message` is empty or absent for a
+ * row that ran clean; a failed row's carries the reason, including a failing
+ * `pm.test`.
+ */
+export interface LifecycleElementOutcome
+	extends
+		ElementOutcome,
+		Pick<
+			RunScenarioStepElementTally,
+			"messages" | "messagesDropped" | "console" | "consoleDropped"
+		> {}
+
 /** One thing an inline script element reported: the error it threw, or a failing test as `name: message`. */
 export interface ElementTallyMessage {
 	kind: "error" | "test";
@@ -3635,8 +3650,8 @@ export interface RunReport {
 	 * collection to declare them on.
 	 */
 	lifecycle?: {
-		setup?: ElementOutcome[];
-		teardown?: ElementOutcome[];
+		setup?: LifecycleElementOutcome[];
+		teardown?: LifecycleElementOutcome[];
 	};
 	/**
 	 * A single-request run's own step-level element outcomes (issues #1594,

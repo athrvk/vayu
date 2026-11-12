@@ -1718,10 +1718,17 @@ sequential collection run it is the share of steps that errored.
 **A throwing `script.setup` fails the run before anything is sent.** Its
 outcome is checked the same way any element's is (`"error"` fails the check);
 the run reaches `Failed` before either run mode's strategy starts, so nothing
-is sent and no duration is measured. **A throwing `script.teardown` is
+is sent and no duration is measured. The failed run's report still carries
+`lifecycle.setup`, the refusing setup's row with its outcome and message, so it
+says which script failed and why (#3455). **A throwing `script.teardown` is
 recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
-`"error"` outcome and the thrown message.
+`"error"` outcome and the thrown message. A script that only fails a `pm.test`
+is `"failed"` rather than `"error"`, with the first failing test as its message,
+and a failing test in `script.setup` fails the run the way a throw does. Either
+script's `console.*` lines and test results are kept on its `lifecycle` row, as
+`console` and `messages` lists (the first ten distinct entries, a repeat counted
+once with a `count`), so they can be read after the run.
 
 **What `script.teardown` writes is saved only by a design run** (#3249). A
 collection run writes its variable scopes back once, after teardown, so a
@@ -2895,7 +2902,9 @@ never its path or rows.
 
 ## Console Output
 
-Log messages that appear in test results:
+Log messages that appear in test results. A `script.setup` or `script.teardown`
+has no step to show them under, so a run's report keeps them on that script's
+`lifecycle` row instead (see [Setup and teardown scripts](#setup-and-teardown-scripts)):
 
 ```javascript
 console.log('Response:', pm.response.json());
