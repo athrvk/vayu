@@ -3619,6 +3619,7 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     }
 
     // Call the test function
+    const AllocationRefusalWatch refusal_watch (ctx);
     JSValue ret = JS_Call (
     ctx, argv[1], JS_UNDEFINED, arity > 0 ? 1 : 0, arity > 0 ? &done : nullptr);
 

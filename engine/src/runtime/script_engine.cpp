@@ -28,8 +28,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -769,45 +772,12 @@ std::string out_of_memory_message (std::size_t memory_limit) {
     return "Script ran out of memory at the " + format_byte_limit (memory_limit) + " limit";
 }
 
-/// A thrown `null` is two events QuickJS does not tell apart: a script's own
-/// `throw null`, and a refused allocation so tight that not even the error
-/// object could be built, where QuickJS throws `null` instead (a bare JS null,
-/// not an absent exception). Neither the value nor the heap afterwards says
-/// which - the failed work is unwound and freed - so the text names both.
-std::string threw_null_message (std::size_t memory_limit) {
-    if (memory_limit == 0) {
-        return "Script threw null";
-    }
-    return "Script threw null (QuickJS also throws null when it runs out of "
-           "memory at the " +
-    format_byte_limit (memory_limit) + " limit with no room to build an error)";
-}
-
-/// The `scriptMemoryLimit` this context's runtime was built with.
-std::size_t script_memory_limit (JSContext* ctx) {
-    const auto* state =
-    static_cast<const RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
-    return state != nullptr ? state->memory_limit : 0;
-}
-
-} // namespace
-
-/// The error text for @p thrown, a value a script threw or the pending
-/// exception taken off @p ctx. Never empty, and never the bare `null` or
-/// `undefined` that `String(value)` gives: a script error reading `null` names
-/// nothing a user can act on.
-///
-/// QuickJS's absent exception (`JS_UNINITIALIZED`, what an allocation refused
-/// inside its own out-of-memory handling leaves) is out of memory for certain.
-/// An Error with an empty message reads as its name, which is what its own
-/// `toString` answers.
-std::string thrown_value_message (JSContext* ctx, JSValueConst thrown) {
-    const std::size_t memory_limit = script_memory_limit (ctx);
-    if (JS_IsUninitialized (thrown)) {
-        return out_of_memory_message (memory_limit);
-    }
+/// What @p thrown reads as on its own: never empty, and never the bare `null`
+/// or `undefined` that `String(value)` gives. An Error with an empty message
+/// reads as its name, which is what its own `toString` answers.
+std::string thrown_value_text (JSContext* ctx, JSValueConst thrown) {
     if (JS_IsNull (thrown)) {
-        return threw_null_message (memory_limit);
+        return "Script threw null";
     }
     if (JS_IsUndefined (thrown)) {
         return "Script threw undefined";
@@ -818,14 +788,42 @@ std::string thrown_value_message (JSContext* ctx, JSValueConst thrown) {
     if (JS_HasException (ctx)) {
         discard_pending_exception (ctx);
     }
-    if (text == QUICKJS_OUT_OF_MEMORY_TEXT) {
-        return out_of_memory_message (memory_limit);
-    }
     if (!text.empty ()) {
         return text;
     }
     return JS_IsString (thrown) ? "Script threw an empty string" :
                                   "Script threw a value with no text";
+}
+
+} // namespace
+
+/// The error text for @p thrown, a value a script threw or the pending
+/// exception taken off @p ctx. Never empty: a script error reading `null`
+/// names nothing a user can act on.
+///
+/// Whether memory ran out is the script heap's answer
+/// (`RuntimeState::allocation_refused`), not the value's: QuickJS leaves no
+/// value (`JS_UNINITIALIZED`) or a bare `null` when it had no room to build its
+/// error, and its parser can raise a `SyntaxError` in place of one. A `null`
+/// thrown with no refusal is the script's own `throw null`. Any other error
+/// after a refusal is named after the out-of-memory sentence, because a script
+/// can catch the `null` and throw something else.
+std::string thrown_value_message (JSContext* ctx, JSValueConst thrown) {
+    const auto* state =
+    static_cast<const RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    const std::size_t memory_limit = state != nullptr ? state->memory_limit : 0;
+    const bool refused = state != nullptr && state->allocation_refused;
+    if (JS_IsUninitialized (thrown) || (refused && JS_IsNull (thrown))) {
+        return out_of_memory_message (memory_limit);
+    }
+    std::string text = thrown_value_text (ctx, thrown);
+    if (text == QUICKJS_OUT_OF_MEMORY_TEXT) {
+        return out_of_memory_message (memory_limit);
+    }
+    if (!refused) {
+        return text;
+    }
+    return out_of_memory_message (memory_limit) + " (then failed with: " + text + ")";
 }
 
 // Reads a hash input: a string contributes its UTF-8 bytes, a Uint8Array its
@@ -1035,6 +1033,137 @@ void* opaque) {
     forget_rejection (ctx, *state, promise);
 }
 
+namespace {
+
+// The script heap: QuickJS's allocator (`JS_NewRuntime2`) over the C heap,
+// holding a runtime to `scriptMemoryLimit` itself instead of through
+// `JS_SetMemoryLimit`. QuickJS refuses against its own limit before the
+// allocator is called, so the allocator could not tell the engine a refusal
+// happened; here the refusal is the allocator's, and it records it
+// (`RuntimeState::allocation_refused`). QuickJS's arena carves small blocks out
+// of 4 KiB pages it asks for here, so a page is what the limit counts.
+
+/// The size of the block that follows, recorded ahead of it: the limit counts
+/// what was asked for, where QuickJS's own accounting reads the platform's
+/// usable size (`malloc_usable_size`, `malloc_size`, `_msize`, which round
+/// differently) plus an overhead it sets to 8 bytes everywhere but Apple.
+/// Sixteen bytes keep the block aligned as `malloc` aligned the header.
+struct alignas (16) HeapBlockHeader {
+    std::size_t bytes = 0;
+};
+static_assert (alignof (HeapBlockHeader) >= alignof (std::max_align_t));
+
+RuntimeState& heap_state (void* opaque) {
+    return *static_cast<RuntimeState*> (opaque);
+}
+
+HeapBlockHeader* header_of (void* block) {
+    return static_cast<HeapBlockHeader*> (block) - 1;
+}
+
+/// The bytes a block of @p size takes with its header, or nullopt when that
+/// does not fit in a `size_t`.
+std::optional<std::size_t> heap_bytes_for (std::size_t size) {
+    if (size > SIZE_MAX - sizeof (HeapBlockHeader)) {
+        return std::nullopt;
+    }
+    return size + sizeof (HeapBlockHeader);
+}
+
+/// Whether @p bytes more fit under the runtime's limit. `heap_bytes` never
+/// passes the limit, so the subtraction cannot wrap.
+bool heap_admits (const RuntimeState& state, std::size_t bytes) {
+    return state.memory_limit == 0 || bytes <= state.memory_limit - state.heap_bytes;
+}
+
+/// Records @p base, @p bytes long, as a held block and returns what QuickJS
+/// sees of it; null, with the refusal recorded, when the C heap gave nothing.
+void* adopt_block (RuntimeState& state, void* base, std::size_t bytes) {
+    if (base == nullptr) {
+        state.allocation_refused = true;
+        return nullptr;
+    }
+    auto* header = ::new (base) HeapBlockHeader{ bytes };
+    state.heap_bytes += bytes;
+    return header + 1;
+}
+
+/// Allocates @p size bytes, zeroed when @p zeroed, or refuses.
+void* heap_allocate (void* opaque, std::size_t size, bool zeroed) {
+    auto& state      = heap_state (opaque);
+    const auto bytes = heap_bytes_for (size);
+    if (!bytes || !heap_admits (state, *bytes)) {
+        state.allocation_refused = true;
+        return nullptr;
+    }
+    return adopt_block (
+    state, zeroed ? std::calloc (1, *bytes) : std::malloc (*bytes), *bytes);
+}
+
+void* heap_malloc (void* opaque, std::size_t size) {
+    return heap_allocate (opaque, size, false);
+}
+
+void* heap_calloc (void* opaque, std::size_t count, std::size_t size) {
+    if (size != 0 && count > SIZE_MAX / size) {
+        heap_state (opaque).allocation_refused = true;
+        return nullptr;
+    }
+    return heap_allocate (opaque, count * size, true);
+}
+
+void heap_free (void* opaque, void* block) {
+    if (block == nullptr) {
+        return;
+    }
+    HeapBlockHeader* header = header_of (block);
+    heap_state (opaque).heap_bytes -= header->bytes;
+    std::free (header);
+}
+
+void* heap_realloc (void* opaque, void* block, std::size_t size) {
+    if (block == nullptr) {
+        return heap_malloc (opaque, size);
+    }
+    if (size == 0) {
+        heap_free (opaque, block);
+        return nullptr;
+    }
+    auto& state                 = heap_state (opaque);
+    HeapBlockHeader* header     = header_of (block);
+    const std::size_t old_bytes = header->bytes;
+    const auto bytes            = heap_bytes_for (size);
+    if (!bytes || (*bytes > old_bytes && !heap_admits (state, *bytes - old_bytes))) {
+        state.allocation_refused = true;
+        return nullptr;
+    }
+    void* moved = std::realloc (header, *bytes);
+    if (moved == nullptr) {
+        // The block is untouched and still held, as realloc leaves it.
+        state.allocation_refused = true;
+        return nullptr;
+    }
+    state.heap_bytes -= old_bytes;
+    return adopt_block (state, moved, *bytes);
+}
+
+std::size_t heap_usable_size (const void* block) {
+    if (block == nullptr) {
+        return 0;
+    }
+    return header_of (const_cast<void*> (block))->bytes - sizeof (HeapBlockHeader);
+}
+
+constexpr JSMallocFunctions SCRIPT_HEAP = {
+    &heap_calloc,
+    &heap_malloc,
+    &heap_free,
+    &heap_realloc,
+    &heap_usable_size,
+};
+
+} // namespace
+
 class ScriptEngine::Impl {
     public:
     ScriptConfig config;
@@ -1067,20 +1196,21 @@ class ScriptEngine::Impl {
             return pair;
         }
 
-        // Create new runtime and context
-        JSRuntime* rt = JS_NewRuntime ();
+        // The RuntimeState is owned by the runtime (freed after it, by
+        // free_runtime) and refreshed before each execute(). It exists first
+        // because the script heap counts the runtime's own allocation.
+        auto owned_state          = std::make_unique<RuntimeState> ();
+        owned_state->stack_size   = config.stack_size;
+        owned_state->memory_limit = config.memory_limit;
+        JSRuntime* rt = JS_NewRuntime2 (&SCRIPT_HEAP, owned_state.get ());
         if (!rt)
             return { nullptr, nullptr };
+        auto* rt_state = owned_state.release ();
 
-        JS_SetMemoryLimit (rt, config.memory_limit);
         JS_SetMaxStackSize (rt, config.stack_size);
 
         // Install a wall-clock deadline interrupt so infinite-loop scripts
-        // cannot hang the thread. The RuntimeState is owned by this runtime
-        // (freed with it) and refreshed before each execute().
-        auto* rt_state         = new RuntimeState ();
-        rt_state->stack_size   = config.stack_size;
-        rt_state->memory_limit = config.memory_limit;
+        // cannot hang the thread.
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
         JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);
@@ -1435,8 +1565,9 @@ class ScriptEngine::Impl {
         // script gets a fresh budget; timeout_ms == 0 disables the wall-clock limit.
         // acquire_context sets the opaque on every runtime it hands out.
         auto& rt_state = *static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
-        rt_state.enabled     = config.timeout_ms != 0;
-        rt_state.interrupted = false;
+        rt_state.enabled            = config.timeout_ms != 0;
+        rt_state.interrupted        = false;
+        rt_state.allocation_refused = false;
         if (rt_state.enabled) {
             rt_state.deadline = std::chrono::steady_clock::now () +
             std::chrono::milliseconds (config.timeout_ms);

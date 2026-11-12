@@ -10529,43 +10529,34 @@ ScriptConfig minimum_memory_config () {
     return cfg;
 }
 
-// Where QuickJS's allocator refuses decides whether it has room left to build
-// the InternalError (the "ran out of memory" sentence) or throws a bare null
-// (the "threw null" sentence), and it gives no signal to tell the two apart. An
-// allocation loop lands on either by the platform's allocator and layout, so a
-// test that provokes a real refusal accepts both sentences and nothing else. A deterministic cause (a
-// script's own `throw null`, the `require()` restore) asserts its one sentence.
-::testing::AssertionResult
-IsAnOutOfMemorySentenceNaming (const std::string& message, size_t limit_mib) {
-    const std::string limit   = std::to_string (limit_mib) + " MiB limit";
-    const std::string ran_out = "Script ran out of memory at the " + limit;
-    const std::string threw_null =
-    "Script threw null (QuickJS also throws null when it runs out of memory at "
-    "the " +
-    limit + " with no room to build an error)";
-    if (message == ran_out || message == threw_null) {
-        return ::testing::AssertionSuccess ();
+// What the out-of-memory sentence reads as at @p limit bytes, with the limit
+// in the unit `scriptMemoryLimit` would be chosen in.
+std::string out_of_memory_sentence (size_t limit) {
+    std::string named = std::to_string (limit) + " bytes";
+    if (limit % ONE_MIB == 0) {
+        named = std::to_string (limit / ONE_MIB) + " MiB";
+    } else if (limit % 1024 == 0) {
+        named = std::to_string (limit / 1024) + " KiB";
     }
-    return ::testing::AssertionFailure () << "\"" << message << "\" is neither \"" << ran_out
-                                          << "\" nor \"" << threw_null << "\"";
+    return "Script ran out of memory at the " + named + " limit";
 }
+
+constexpr std::string_view ALLOCATION_LOOP =
+"const held = []; for (;;) { held.push(new Array(1000).fill(1)); }";
 
 } // namespace
 
-// At the floor QuickJS has no room to build the error for the refused
-// allocation and throws a bare null, which used to be the whole message.
-//
-// Where the refusal lands moves with every allocation a context makes before
-// the script runs, and a refusal inside QuickJS's parser can come out as a
-// `SyntaxError` or a bare `InternalError` that no sentence of ours replaces
-// (a sweep of limits above the floor measured about one in twenty, with or
-// without the Math.random replacement). So the floor is read as a window of
-// limits rather than at one layout: lodash never loads in it, and the report
-// names the memory limit in all but a few of them.
+// Where the limit refuses moves with every allocation a context makes before
+// the script runs, and QuickJS words the refusal by where it lands: its own
+// out-of-memory error, a bare null when there was no room to build that, or a
+// `SyntaxError` its parser raises instead. The report is the script heap's
+// record of the refusal, so it is the one sentence at every layout: the
+// window of limits stands for layouts another platform's allocator makes.
+// Mutation check: drop `refused` from `restore_out_of_memory_error` and
+// limits in the window report `SyntaxError: invalid assignment left-hand side`.
 TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemory) {
-    constexpr size_t WINDOW       = 32;
-    constexpr size_t STEP         = 64;
-    size_t reported_out_of_memory = 0;
+    constexpr size_t WINDOW = 32;
+    constexpr size_t STEP   = 64;
     for (size_t i = 0; i < WINDOW; ++i) {
         ScriptConfig cfg;
         cfg.memory_limit = ONE_MIB + (i * STEP);
@@ -10573,24 +10564,26 @@ TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemo
         auto ctx    = ScriptContext::for_test (request, response);
         auto result = bounded.execute ("const _ = require('lodash');", ctx);
         EXPECT_FALSE (result.success) << "at " << cfg.memory_limit << " bytes";
-        if (result.error_message.starts_with (
-            "Script ran out of memory at the ")) {
-            ++reported_out_of_memory;
-        }
+        EXPECT_EQ (result.error_message, out_of_memory_sentence (cfg.memory_limit));
     }
-    EXPECT_GE (reported_out_of_memory, WINDOW * 3 / 4);
 }
 
-// An allocation loop reports QuickJS's own out-of-memory error when there was
-// room to build it and the null sentence when there was not; see
-// IsAnOutOfMemorySentenceNaming. Never a bare null.
-TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsAnOutOfMemorySentence) {
-    ScriptEngine bounded (minimum_memory_config ());
-    auto ctx    = ScriptContext::for_test (request, response);
-    auto result = bounded.execute (
-    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
-    EXPECT_FALSE (result.success);
-    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 1));
+// The loop runs out at a different point at each limit, and with no room left
+// QuickJS throws a bare null, which reads as the out-of-memory sentence because
+// the heap refused. Mutation check: drop `refused && JS_IsNull` from
+// `thrown_value_message` and limits in the window read "Script threw null".
+TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsOutOfMemory) {
+    constexpr size_t WINDOW = 32;
+    constexpr size_t STEP   = 64;
+    for (size_t i = 0; i < WINDOW; ++i) {
+        ScriptConfig cfg;
+        cfg.memory_limit = ONE_MIB + (i * STEP);
+        ScriptEngine bounded (cfg);
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = bounded.execute (std::string (ALLOCATION_LOOP), ctx);
+        EXPECT_FALSE (result.success);
+        EXPECT_EQ (result.error_message, out_of_memory_sentence (cfg.memory_limit));
+    }
 }
 
 TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
@@ -10598,22 +10591,67 @@ TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
     cfg.memory_limit = size_t{ 2 } * 1024 * 1024;
     ScriptEngine bounded (cfg);
     auto ctx    = ScriptContext::for_test (request, response);
-    auto result = bounded.execute (
-    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
+    auto result = bounded.execute (std::string (ALLOCATION_LOOP), ctx);
     EXPECT_FALSE (result.success);
-    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 2));
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 2 MiB limit");
 }
 
-// A script's own `throw null` is not an out-of-memory error, and QuickJS gives
-// the two the same value, so the sentence admits both rather than pick one.
+// A script whose bytecode alone needs more than the limit fails inside the
+// parser, where QuickJS can drop the refused write to its bytecode buffer and
+// then read the assignment it lost as `SyntaxError: invalid assignment
+// left-hand side` (what Linux measures). Whichever error QuickJS raised, the
+// sentence leads. Mutation check: return `text` whatever `refused` says in
+// `thrown_value_message` and the message is the bare `SyntaxError`.
+TEST_F (ScriptEngineTest, AScriptTooLargeToCompileUnderTheLimitReportsOutOfMemory) {
+    std::string script = "let a = 0;\n";
+    for (int i = 0; i < 200000; ++i) {
+        script += "a = 1;\n";
+    }
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx          = ScriptContext::for_test (request, response);
+    const auto result = bounded.execute (script, ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (result.error_message.starts_with (out_of_memory_sentence (ONE_MIB)))
+    << result.error_message;
+}
+
+// A test row that ran out of memory reports it, and the rows after it report
+// their own errors: the refusal belongs to the call that met it. Mutation
+// check: drop the `AllocationRefusalWatch` from `pm.test` and the second row
+// reads "... (then failed with: Error: boom)".
+TEST_F (ScriptEngineTest, ARowThatRanOutOfMemoryLeavesTheNextRowsErrorItsOwn) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test ("pm.test('a', () => { " +
+    std::string (ALLOCATION_LOOP) + " }); pm.test('b', () => { throw new Error('boom'); });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_EQ (result.tests[0].error_message, out_of_memory_sentence (ONE_MIB));
+    EXPECT_EQ (result.tests[1].error_message, "Error: boom");
+}
+
+// The same holds for the legacy `tests[name]` rows, whose getters run after
+// the script. Mutation check: drop the watch from `legacy_test_result`.
+TEST_F (ScriptEngineTest, ALegacyRowThatRanOutOfMemoryLeavesTheNextRowsErrorItsOwn) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test (
+    "Object.defineProperty(tests, 'a', { enumerable: true, get() { " +
+    std::string (ALLOCATION_LOOP) +
+    " } }); Object.defineProperty(tests, 'b', { enumerable: true, get() { "
+    "throw new Error('boom'); } });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 2u);
+    EXPECT_EQ (result.tests[0].error_message, out_of_memory_sentence (ONE_MIB));
+    EXPECT_EQ (result.tests[1].error_message, "Error: boom");
+}
+
+// A script's own `throw null` meets no refused allocation, so it reads as
+// what it is at any limit.
 TEST_F (ScriptEngineTest, AThrownNullIsNeverReportedAsABareNull) {
     ScriptEngine bounded (minimum_memory_config ());
     auto ctx    = ScriptContext::for_test (request, response);
     auto result = bounded.execute ("throw null;", ctx);
     EXPECT_FALSE (result.success);
-    EXPECT_EQ (result.error_message,
-    "Script threw null (QuickJS also throws null when it runs out of memory at "
-    "the 1 MiB limit with no room to build an error)");
+    EXPECT_EQ (result.error_message, "Script threw null");
 }
 
 TEST_F (ScriptEngineTest, AThrownNullWithNoMemoryLimitIsOnlyANull) {
@@ -10675,15 +10713,13 @@ TEST_F (ScriptEngineTest, ARejectionAndATimerThrowReadAsSentencesToo) {
 
 // A `pm.test` row names its failure the way a script error does (#3461): the
 // row is where a user reads it, so a bare `null` there is the same dead end.
-TEST_F (ScriptEngineTest, ATestRowThatThrowsNullReadsAsASentenceNamingTheLimit) {
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullReadsAsASentence) {
     ScriptEngine bounded (minimum_memory_config ());
     const auto result = bounded.execute_test (
     "pm.test('x', function () { throw null; });", request, response, env);
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_FALSE (result.tests[0].passed);
-    EXPECT_EQ (result.tests[0].error_message,
-    "Script threw null (QuickJS also throws null when it runs out of memory at "
-    "the 1 MiB limit with no room to build an error)");
+    EXPECT_EQ (result.tests[0].error_message, "Script threw null");
 }
 
 TEST_F (ScriptEngineTest, ATestRowThatThrowsNullWithNoMemoryLimitIsOnlyANull) {
