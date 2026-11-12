@@ -535,6 +535,15 @@ struct RunContext {
     /// step_base_vars for the same reason (issue #1594).
     vayu::runtime::ScriptConfig step_script_config;
 
+    /// The `pm.info.requestId` / `pm.info.requestName` an inline step script
+    /// reads (#3460): the saved request the run was started from, resolved
+    /// once with the same `read_run_script_identity` the deferred replay uses
+    /// (`run_manager.cpp`). Populated alongside @ref step_script_config, so
+    /// only for a run whose @ref step_elements is non-empty; unset for a run
+    /// started from no saved request, which a script reads as `undefined`.
+    std::optional<std::string> script_request_id;
+    std::optional<std::string> script_request_name;
+
     /// Per-element pass/fail/skip tallies for @ref step_elements (issue
     /// #1594), sized from it at construction. Default-constructed (empty)
     /// for a run with none, so `record` is always a safe no-op there too.

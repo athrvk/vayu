@@ -764,14 +764,17 @@ class SubmissionRequest {
     size_t cursor_            = 0;
 };
 
-/// This submission's iteration, virtual user and row, for `pm.info` and
-/// `pm.iterationData` inside an inline script (#3124) - what the deferred
-/// replay binds off the stored record (`run_manager.cpp`), read here off the
-/// live submission. The row points into the run's own set, which outlives
-/// every script of the run; `iteration_count` stays unset, as it does there.
+/// This submission's request, iteration, virtual user and row, for `pm.info`
+/// and `pm.iterationData` inside an inline script (#3124, #3460) - what the
+/// deferred replay binds off the stored record (`run_manager.cpp`), read here
+/// off the live submission. The row points into the run's own set, which
+/// outlives every script of the run; `iteration_count` stays unset, as it does
+/// there.
 void bind_submission_identity (vayu::runtime::ScriptContext& script_ctx,
 const RunContext& context,
 const ResultAnnotations& annotations) {
+    script_ctx.request_id   = context.script_request_id;
+    script_ctx.request_name = context.script_request_name;
     script_ctx.iteration    = annotations.iteration;
     script_ctx.vu           = annotations.vu;
     const LoadDataSet* data = context.load_data.get ();

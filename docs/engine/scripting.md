@@ -4333,7 +4333,8 @@ The **language** is current; what is missing is the **host environment**:
   is two entries. The number of responses replayed is `testValidation`'s
   `samplesTested`, not a field of the row
 - `pm.info` reports the same identity a Send does: `eventName` is `"test"`, and
-  `requestId` / `requestName` are the run's linked request when it has one. It
+  `requestId` / `requestName` are the run's linked request when it has one,
+  in an inline `script.pre` / `script.post` as in the deferred replay (#3460). It
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))

@@ -3264,6 +3264,118 @@ TEST_F (LoadStrategyTest, AnInlineScriptPreReadsTheRowIterationAndUserOfItsSubmi
     << summary.dump ();
 }
 
+namespace {
+
+/// What an inline script reads about the saved request it runs for, as one
+/// string; `typeof` keeps an unset field a readable word.
+constexpr const char* SEEN_REQUEST_JS =
+"(typeof pm.info.requestId === 'undefined' ? 'no-id' : pm.info.requestId) + "
+"'/' +"
+" (typeof pm.info.requestName === 'undefined' ? 'no-name' : "
+"pm.info.requestName)";
+
+/// An inline `script.pre` that puts what `SEEN_REQUEST_JS` read on the wire.
+nlohmann::json pre_request_identity_elements () {
+    return nlohmann::json::array ({ vayu::tests::script_element_json ("el_pre", "script.pre",
+    std::string ("pm.request.headers['X-Seen'] = ") + SEEN_REQUEST_JS + ";",
+    /*inline_script=*/true) });
+}
+
+} // namespace
+
+// #3460: an inline `script.pre` reads the request the run was started from as
+// `pm.info.requestId` / `requestName`, the way the deferred replay and a Send
+// do. Mutation check: drop the two `request_id` / `request_name` binds from
+// `bind_submission_identity` and every header reads `no-id/no-name`.
+TEST_F (LoadStrategyTest, AnInlineScriptPreReadsTheRequestIdAndNameOfItsRun) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    auto config =
+    request_elements_payload (echo.url (), 2, 1, pre_request_identity_elements ());
+    config["requestId"]   = "req_orders";
+    config["requestName"] = "Place order";
+
+    const auto summary =
+    run_single_request_summary (db, "run-inline-pre-request-identity", config);
+
+    EXPECT_EQ (echo.header_per_request ("X-Seen"),
+    (std::vector<std::string>{ "req_orders/Place order", "req_orders/Place order" }))
+    << summary.dump ();
+}
+
+// The name falls back to the linked row's when the payload carries only the
+// id, as it does for the replay (`read_run_script_identity`). Mutation check:
+// as above.
+TEST_F (LoadStrategyTest, AnInlineScriptPreReadsTheLinkedRowsNameWhenThePayloadHasOnlyTheId) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    vayu::db::Collection collection;
+    collection.id   = "col_orders";
+    collection.name = "Orders";
+    db.create_collection (collection);
+    vayu::db::Request saved;
+    saved.id            = "req_orders";
+    saved.collection_id = collection.id;
+    saved.name          = "Place order";
+    saved.method        = vayu::HttpMethod::GET;
+    saved.url           = echo.url ();
+    saved.created_at    = 1;
+    saved.updated_at    = 1;
+    db.save_request (saved);
+
+    auto config =
+    request_elements_payload (echo.url (), 1, 1, pre_request_identity_elements ());
+    config["requestId"] = saved.id;
+
+    const auto summary =
+    run_single_request_summary (db, "run-inline-pre-request-fallback", config);
+
+    EXPECT_EQ (echo.header_per_request ("X-Seen"),
+    (std::vector<std::string>{ "req_orders/Place order" }))
+    << summary.dump ();
+}
+
+// A run started from no saved request leaves both undefined rather than empty
+// strings, which is what keeps a script's `if (pm.info.requestId)` honest.
+TEST_F (LoadStrategyTest, AnInlineScriptPreReadsNoRequestIdentityOnARunWithoutOne) {
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const auto summary = run_single_request_summary (db, "run-inline-pre-no-request",
+    request_elements_payload (echo.url (), 1, 1, pre_request_identity_elements ()));
+
+    EXPECT_EQ (echo.header_per_request ("X-Seen"),
+    (std::vector<std::string>{ "no-id/no-name" }))
+    << summary.dump ();
+}
+
+// The completion side: an inline `script.post` reads the same identity.
+// Mutation check: drop the two binds and the element tallies `failed`.
+TEST_F (LoadStrategyTest, AnInlineScriptPostReadsTheRequestIdAndNameOfItsRun) {
+    const size_t ITERATIONS = 2;
+    vayu::tests::EchoServer echo;
+    vayu::db::Database db (TEST_DB_PATH);
+
+    const std::string script =
+    std::string ("pm.test('names its request', function () { pm.expect (") +
+    SEEN_REQUEST_JS + ").to.equal ('req_orders/Place order'); });";
+    auto config         = request_elements_payload (echo.url (), ITERATIONS, 1,
+    nlohmann::json::array ({ vayu::tests::script_element_json (
+    "el_post", "script.post", script, /*inline_script=*/true) }));
+    config["requestId"] = "req_orders";
+    config["requestName"] = "Place order";
+
+    const auto summary =
+    run_single_request_summary (db, "run-inline-post-request-identity", config);
+
+    const auto entry = element_entry (summary, "el_post");
+    ASSERT_FALSE (entry.is_null ()) << summary.dump ();
+    EXPECT_EQ (entry["passed"], ITERATIONS) << summary.dump ();
+    EXPECT_EQ (entry["failed"], 0u) << summary.dump ();
+}
+
 // The same on the completion side: an inline `script.post` reads what the
 // request it ran beside was bound with, which that request carries in
 // `X-Bound` through the binder's own `{{$vu}}`, `{{$iteration}}` and

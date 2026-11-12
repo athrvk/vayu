@@ -9988,14 +9988,14 @@ Nothing shares this overlay across submissions - each one gets its own,
 discarded after - which is what keeps many concurrent submissions from
 writing through one shared map.
 
-**`pm.info.requestName` is not bound for an inline element on this path.**
-The deferred replay (the un-inlined `script.post` case, `test_scripts`) reads
-`requestName` off the run's own config exactly as it always has; an inline
-`script.pre` / `script.post` element's `ScriptContext` does not carry it:
-this path's `bind_submission_identity` (`load_strategy.cpp`) binds the
-submission's iteration, its virtual user (`1`) and its data row (#3124), but
-not a name. An inline script reading `pm.info.requestName` sees `undefined`,
-not the name a deferred one on the same run would.
+**An inline element's `pm.info` carries the run's request identity** (#3460).
+`bind_submission_identity` (`load_strategy.cpp`) binds the submission's
+iteration, its virtual user (`1`) and its data row (#3124), and the run's
+`requestId` / `requestName`, resolved once when the run starts by the same
+`read_run_script_identity` (`run_manager.cpp`) the deferred replay reads - the
+payload's own fields, the linked row's name when only an id was sent. A run
+started from no saved request reads both as `undefined`, inline and deferred
+alike.
 
 #### The `lifecycleElements` array (a single-request run's own setup/teardown)
 

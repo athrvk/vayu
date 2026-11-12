@@ -415,47 +415,44 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     return inputs;
 }
 
-/**
- * The run-level request and identity a single-request replay reads.
- *
- * A load run's `tests` script is the same script a Send runs, so it must not
- * read `pm.info.requestId` as undefined here and as a value there. Both fields
- * ride in on the composed payload for a run started from a saved request;
- * resolved once, not per sample. The linked row is read only for the
- * `pm.info.requestName` fallback - a failure is left to propagate, as the
- * scopes' read does (see `validate_scripts`).
- */
-void read_run_script_identity (vayu::db::Database& db,
-const nlohmann::json& config,
-vayu::Request& dummy_request,
-std::optional<std::string>& script_request_id,
-std::optional<std::string>& script_request_name) {
-    // Build a dummy request for script context (HTTP request fields are at root level)
-    auto request_result = vayu::json::deserialize_request (config);
-    if (request_result.is_ok ()) {
-        dummy_request = request_result.value ();
-    }
+/// The saved request a single-request load run was started from, as `pm.info`
+/// names it to a script.
+struct RunScriptIdentity {
+    std::optional<std::string> request_id;
+    std::optional<std::string> request_name;
+};
 
-    // Identity for `pm.info`. A load run's `tests` script is the same script a
-    // Send runs, so it must not read `pm.info.requestId` as undefined here and
-    // as a value there. Both fields ride in on the composed payload for a run
-    // started from a saved request; resolved once, not per sample.
+/**
+ * The identity a single-request run's scripts read as `pm.info.requestId` and
+ * `pm.info.requestName`, inline or replayed.
+ *
+ * A load run's script is the same script a Send runs, so it must not read the
+ * two as undefined here and as a value there. Both fields ride in on the
+ * composed payload for a run started from a saved request; resolved once, not
+ * per sample. The linked row is read only for the `pm.info.requestName`
+ * fallback - a failure is left to propagate, as the scopes' read does (see
+ * `validate_scripts`).
+ */
+RunScriptIdentity
+read_run_script_identity (vayu::db::Database& db, const nlohmann::json& config) {
+    RunScriptIdentity identity;
     if (auto id = config.find ("requestId");
     id != config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
-        script_request_id = id->get<std::string> ();
+        identity.request_id = id->get<std::string> ();
     }
     if (auto name = config.find ("requestName"); name != config.end () &&
     name->is_string () && !name->get<std::string> ().empty ()) {
-        script_request_name = name->get<std::string> ();
-        return;
+        identity.request_name = name->get<std::string> ();
+        return identity;
     }
-    if (!script_request_id) {
-        return;
+    if (!identity.request_id) {
+        return identity;
     }
-    if (auto linked_request = db.get_request (*script_request_id);
+    if (auto linked_request = db.get_request (*identity.request_id);
     linked_request && !linked_request->name.empty ()) {
-        script_request_name = linked_request->name;
+        identity.request_name = linked_request->name;
     }
+    return identity;
 }
 
 /**
@@ -661,11 +658,14 @@ vayu::db::Database& db) {
     // scenario takes both off the plan step it is replaying instead, so it does
     // not pay for a payload lookup whose answer it would discard.
     vayu::Request dummy_request;
-    std::optional<std::string> script_request_id;
-    std::optional<std::string> script_request_name;
+    RunScriptIdentity script_identity;
     if (!per_step) {
-        read_run_script_identity (db, context->config, dummy_request,
-        script_request_id, script_request_name);
+        // HTTP request fields are at the root of the run's payload.
+        if (auto request_result = vayu::json::deserialize_request (context->config);
+        request_result.is_ok ()) {
+            dummy_request = request_result.value ();
+        }
+        script_identity = read_run_script_identity (db, context->config);
     }
 
     // The scopes the replayed scripts read (issue #728). A load run's `tests`
@@ -727,8 +727,8 @@ vayu::db::Database& db) {
         // `pm.iterationData` `undefined` there.
         replay.data_rows =
         context->load_data == nullptr ? nullptr : &context->load_data->rows;
-        replay.request_id   = script_request_id;
-        replay.request_name = script_request_name;
+        replay.request_id   = script_identity.request_id;
+        replay.request_name = script_identity.request_name;
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
@@ -2245,6 +2245,9 @@ const std::shared_ptr<RunContext>& context) {
     if (has_step_elements) {
         context->step_base_vars = vayu::http::routes::flatten_variable_scopes (scopes);
         context->step_script_config = read_lifecycle_script_config (db, context->config);
+        const auto identity = read_run_script_identity (db, context->config);
+        context->script_request_id   = identity.request_id;
+        context->script_request_name = identity.request_name;
     }
     return lifecycle_refusal (context->setup_outcomes);
 }
