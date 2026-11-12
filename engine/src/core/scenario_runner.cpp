@@ -1274,12 +1274,8 @@ TransactionHistograms& transactions) {
     return 0;
 }
 
-namespace {
-
-/// The first refusing outcome's message among @p outcomes from @p first on:
-/// an `"error"` or a `"failed"` refuses a setup.
 std::optional<std::string>
-refusal_from (const std::vector<vayu::core::ElementOutcome>& outcomes, size_t first) {
+lifecycle_refusal (const std::vector<vayu::core::ElementOutcome>& outcomes, size_t first) {
     for (size_t i = first; i < outcomes.size (); ++i) {
         const auto& outcome = outcomes[i];
         if (outcome.status == "error" || outcome.status == "failed") {
@@ -1289,9 +1285,7 @@ refusal_from (const std::vector<vayu::core::ElementOutcome>& outcomes, size_t fi
     return std::nullopt;
 }
 
-/// One lifecycle collection's `run.start` elements, run against @p scopes
-/// bound to it, their outcomes appended to @p setup_outcomes.
-void run_collection_setups (vayu::runtime::ScriptEngine& script_engine,
+void run_setup_elements (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const vayu::runtime::ScriptSendInputs& script_send,
 const std::vector<vayu::core::CompiledElement>& elements,
@@ -1324,10 +1318,7 @@ std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
     vayu::core::Phase::RunStart, setup_ctx, elements, setup_outcomes);
 }
 
-/// One lifecycle collection's `run.end` elements, run against @p scopes
-/// bound to it with @p run_summary_info as `pm.info.run`, their outcomes
-/// appended to @p teardown_outcomes.
-void run_collection_teardowns (vayu::runtime::ScriptEngine& script_engine,
+void run_teardown_elements (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const vayu::runtime::ScriptSendInputs& script_send,
 const std::vector<vayu::core::CompiledElement>& elements,
@@ -1361,19 +1352,6 @@ std::vector<vayu::core::ElementOutcome>& teardown_outcomes) {
     vayu::core::Phase::RunEnd, teardown_ctx, elements, teardown_outcomes);
 }
 
-} // namespace
-
-/**
- * `script.setup` (#1499, #3456): each collection of the run's lifecycle set
- * in order, root first, its scripts reading and writing @p scopes bound to
- * that collection, so a folder's setup write is what that folder's steps
- * read, as a prior step's own write would be. A pass stops at the first
- * collection whose setup refuses; the ones after it do not run. A
- * `pm.sendRequest` there takes @p script_send, the run's own (#2841).
- *
- * @return the refusing outcome's message, or `nullopt` on success - the
- *         caller throws to fail the run before any step runs.
- */
 std::optional<std::string> run_scenario_setup (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::RunVariableScopes& scopes,
 const vayu::runtime::ScriptSendInputs& script_send,
@@ -1381,24 +1359,15 @@ const std::vector<LifecycleCollection>& lifecycle,
 std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
     for (const auto& collection : lifecycle) {
         const size_t first = setup_outcomes.size ();
-        run_collection_setups (script_engine, scopes.bind (collection.collection_id),
+        run_setup_elements (script_engine, scopes.bind (collection.collection_id),
         script_send, collection.elements, setup_outcomes);
-        if (auto refusal = refusal_from (setup_outcomes, first)) {
+        if (auto refusal = lifecycle_refusal (setup_outcomes, first)) {
             return refusal;
         }
     }
     return std::nullopt;
 }
 
-/**
- * `script.teardown` (#1499, #3456): the lifecycle set `run_scenario_setup`
- * walked, in reverse, each collection's scripts bound to it as its setup's
- * were and run with @p run_summary_info as `pm.info.run`. Never throws out -
- * `ElementPipeline::run` already turns one into this element's own `"error"`
- * outcome rather than propagating - so a failing teardown is recorded, not
- * fatal, and the collections above it still tear down. A `pm.sendRequest`
- * there takes @p script_send, as setup's does.
- */
 std::vector<vayu::core::ElementOutcome> run_scenario_teardown (
 vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::RunVariableScopes& scopes,
@@ -1407,7 +1376,7 @@ const std::vector<LifecycleCollection>& lifecycle,
 const vayu::runtime::RunSummaryInfo& run_summary_info) {
     std::vector<vayu::core::ElementOutcome> teardown_outcomes;
     for (auto collection = lifecycle.rbegin (); collection != lifecycle.rend (); ++collection) {
-        run_collection_teardowns (script_engine, scopes.bind (collection->collection_id),
+        run_teardown_elements (script_engine, scopes.bind (collection->collection_id),
         script_send, collection->elements, run_summary_info, teardown_outcomes);
     }
     return teardown_outcomes;

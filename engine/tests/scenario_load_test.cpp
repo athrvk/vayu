@@ -294,8 +294,8 @@ class ScenarioLoadTest : public ::testing::Test {
         context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
         context->event_loop->start ();
 
-        auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-        *db_, environment_id, context->scenario->request.collection_id);
+        auto base_scopes =
+        vayu::core::scenario_load_scopes (*db_, environment_id, *context->scenario);
         auto state = vayu::core::execute_scenario_load (
         context, *db_, *context->scenario, std::move (base_scopes));
         context->event_loop->stop (true, std::chrono::milliseconds (10000));
@@ -999,8 +999,8 @@ TEST_F (ScenarioLoadTest, AStoppedIterationsRunKeepsTheExpectedUpperBound) {
         << "both virtual users never had a transfer in flight";
         context->request_stop ();
     });
-    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto base_scopes =
+    vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
     auto state = vayu::core::execute_scenario_load (
     context, *db_, *context->scenario, std::move (base_scopes));
     stopper.join ();
@@ -1048,8 +1048,8 @@ TEST_F (ScenarioLoadTest, AStepTheStopCancelledMovesNoStepTally) {
         }
         context->request_stop ();
     });
-    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto base_scopes =
+    vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
     auto state = vayu::core::execute_scenario_load (
     context, *db_, *context->scenario, std::move (base_scopes));
     stopper.join ();
@@ -1962,8 +1962,9 @@ TEST_F (ScenarioLoadTest, AStepWithAnUnresolvedTokenCountsAndWarnsWithoutRefusin
 // it, and its `pm.collectionVariables` reads and writes that folder. The write
 // answers the later step in its sub-folder and not the one in a sibling
 // folder, where `{{seen}}` is a genuine miss and is counted as one. Mutation
-// check: give every step the run collection's base (`LoadScopeBases::for_step`
-// answering `bases_.front ()`) and the writer sends `/row/{{f}}`.
+// check: bind every base to the run collection in `LoadScopeBases`'
+// constructor (`run_scopes.bind (run_collection_id)`) and the writer sends
+// `/row/{{f}}`.
 TEST_F (ScenarioLoadTest, ARecursiveRunSendsAndScriptsEachStepWithItsOwnFoldersVariables) {
     ScenarioMockServer server;
     const auto folder = [this] (const std::string& id, std::optional<std::string> parent,
@@ -4213,8 +4214,8 @@ TEST_F (ScenarioLoadTest, ARampAsLongAsTheRunPeaksAtTheConfiguredUserCount) {
     context->event_loop = std::make_unique<vayu::http::EventLoop> ();
     context->event_loop->start ();
 
-    auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-    *db_, std::nullopt, context->scenario->request.collection_id);
+    auto base_scopes =
+    vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
     auto state = vayu::core::execute_scenario_load (
     context, *db_, *context->scenario, std::move (base_scopes));
     context->event_loop->stop (false);

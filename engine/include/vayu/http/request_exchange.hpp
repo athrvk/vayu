@@ -208,6 +208,12 @@ class RunVariableScopes {
     /// Every scope's change written back, by @ref persist_script_variables.
     void persist (vayu::db::Database& db, const std::function<void ()>& before_write = {});
 
+    /// Empties the run-local scope (`pm.variables`), which every binding
+    /// shares.
+    void clear_local () {
+        scopes_.local.clear ();
+    }
+
     private:
     /// Copy the bound leaf's variables back to its state.
     void stow_bound_leaf ();

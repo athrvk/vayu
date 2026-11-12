@@ -10700,12 +10700,16 @@ knob.
   users is not the thing being measured.
 - **Variables are each step's own folder's** (#3248), as in a design-mode
   collection run: the environment and globals the run loaded, and the chain
-  from the root collection down to the folder the step's request sits in, the
-  run collection's entry as `script.setup` left it. All of it is read once,
-  before the first request, so a recursive run sends a sub-folder's `{{name}}`
-  with that folder's value whether or not the plan carries a script. A
-  `script.setup` and `script.teardown` read the collection being run. Nothing
-  a load run's scripts write is saved.
+  from the root collection down to the folder the step's request sits in,
+  each entry as the run's `script.setup` scripts left it. All of it is read
+  once, before the first request, so a recursive run sends a sub-folder's
+  `{{name}}` with that folder's value whether or not the plan carries a
+  script. A `script.setup` and `script.teardown` read and write the collection
+  that declares them, from the same lifecycle set a design-mode run uses
+  (#3456; see `lifecycle` under
+  [`GET /runs/:runId/report`](#get-runsrunidreport)), so what a folder's setup
+  writes reaches the steps in that folder and the folders below it. Nothing a
+  load run's scripts write is saved.
 - **The element pipeline runs here too, per virtual user (issue #1495).**
   `extract.*` and `assert.*` always run - before the send (`step.before`) and
   after the response (`step.after`). A `script.pre` / `script.post` element

@@ -4454,8 +4454,9 @@ boundary, where `pm.cookies`' per-VU jar is. An inline script's `unset()` or
 `clear()` of a name the run loaded hides that stored value from the same VU
 alone, until a later write sets the name again (#3088). The base a step's
 overlay sits on is its own folder's (#3248): the environment and globals the
-run loaded and `script.setup` left, and the chain from the root down to the
-step's folder, read once before the first submission. The overlay keeps a
+run loaded, and the chain from the root down to the step's folder, each as
+the run's `script.setup` scripts left them (#3456), read once before the
+first submission. The overlay keeps a
 collection write per folder, so it answers that VU's later steps in the same
 folder and in folders below it, and never a step in a sibling folder.
 

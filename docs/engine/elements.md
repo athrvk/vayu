@@ -351,10 +351,14 @@ beneath it depth-first in sidebar order (each parent's sub-folders in `get_colle
 `sibling_order.hpp`'s rule among folders), a visited set ending a `parent_id` cycle. A collection
 declaring neither kind is left out, and each kept element is compiled with
 `collection_element_origin`'s stamp, the one `compose_elements` gives a step's inherited elements,
-so a `lifecycle` row's `origin` names its collection. The sequential runner runs each collection's
-setups with `RunVariableScopes` bound to that collection, stops after the first collection whose
-setup refuses, and tears down over the same held list in reverse; the load path's
-`execute_load_test` compiles the run collection's own `elements` once. A **single-request** load
+so a `lifecycle` row's `origin` names its collection. Both run modes dispatch it through the same
+`run_scenario_setup` / `run_scenario_teardown` (`scenario_runner.cpp`): each collection's setups
+run with `RunVariableScopes` bound to that collection, the pass stops after the first collection
+whose setup refuses, and teardown walks the same held list in reverse. A load run resolves the set
+once in `execute_load_test` and holds it on `RunContext::lifecycle` for teardown; its scopes
+(`scenario_load_scopes`, every lifecycle and step collection's chain) are what `LoadScopeBases`
+binds each step's base from after setup, and what `ScenarioLoadState::lifecycle_scopes` keeps for
+teardown. A **single-request** load
 run has no collection row to compile that array from - it compiles `POST /runs`'s own top-level
 `lifecycleElements` array instead (issue #1573), the same two kinds only, checked the same
 `ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright

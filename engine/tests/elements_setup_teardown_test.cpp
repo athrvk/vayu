@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -359,14 +360,15 @@ class ScriptLifecycleTest : public ::testing::Test {
         return await_terminal (run_id);
     }
 
-    /// Runs `col_1`'s plan as a scenario load run (through the same
+    /// Runs @p execution's plan as a scenario load run (through the same
     /// `execute_load_test` / `finish_load_test` production uses) and waits
     /// for a terminal status.
     vayu::RunStatus run_load (const vayu::core::ScenarioExecution& execution,
     size_t iterations,
     size_t concurrency,
     bool allow_script_requests = false) {
-        const json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
+        const json scenario{ { "source", "collection" },
+            { "collectionId", execution.request.collection_id } };
         const json config{ { "scenario", scenario }, { "mode", "iterations" },
             { "iterations", iterations }, { "concurrency", concurrency },
             { "allowScriptRequests", allow_script_requests } };
@@ -1014,15 +1016,16 @@ TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesTheActualSentCount) {
 
 /// A `script.setup` and a `script.teardown`, each pinging `/ok?mark=<who>-...`
 /// so the mock's hit order shows when it ran beside the steps; @p setup_extra
-/// runs after the setup's ping.
+/// runs after the setup's ping. The teardown's ping also carries `saw=`, the
+/// `subToken` its collection's chain answers, which says which collection it
+/// was bound to.
 json marking_lifecycle (const LifecycleMockServer& server,
 const std::string& who,
 const std::string& setup_extra = "") {
-    const auto ping = [&] (const std::string& mark) {
-        return "pm.sendRequest('" + server.url ("/ok") + "?mark=" + mark + "', function () {});";
-    };
+    const std::string url = server.url ("/ok") + "?mark=" + who;
     return setup_and_teardown_elements (
-    ping (who + "-setup") + setup_extra, ping (who + "-teardown"));
+    "pm.sendRequest('" + url + "-setup', function () {});" + setup_extra,
+    "pm.sendRequest('" + url + "-teardown&saw=' + pm.collectionVariables.get('subToken'), function () {});");
 }
 
 /// Every hit's query, in the order the mock saw them.
@@ -1044,7 +1047,12 @@ std::vector<std::string> origin_ids (const json& rows) {
     return ids;
 }
 
-class LifecycleSetRunTest : public ScriptLifecycleTest {
+enum class RunMode : std::uint8_t { Sequential, Load };
+
+/// Every case runs as a sequential collection run and as a scenario load run
+/// of one iteration on one virtual user, so the mock sees one order either way.
+class LifecycleSetRunTest : public ScriptLifecycleTest,
+                            public ::testing::WithParamInterface<RunMode> {
     protected:
     /// `col_1` (one request) holding the sub-folder `col_sub` (one request
     /// whose URL reads `{{subToken}}`, which only `col_sub`'s setup writes),
@@ -1056,38 +1064,52 @@ class LifecycleSetRunTest : public ScriptLifecycleTest {
         marking_lifecycle (*server_, "sub", "pm.collectionVariables.set('subToken', 'from-sub');"));
         seed_request_in ("req_sub", "col_sub", 0, "step=sub&tok={{subToken}}");
     }
+
+    /// Runs @p execution in this case's mode, script requests allowed.
+    vayu::RunStatus run (const vayu::core::ScenarioExecution& execution) {
+        if (GetParam () == RunMode::Load) {
+            return run_load (execution, /*iterations=*/1, /*concurrency=*/1,
+            /*allow_script_requests=*/true);
+        }
+        return run_sequential (execution, /*allow_script_requests=*/true);
+    }
+
+    [[nodiscard]] json lifecycle () {
+        return report_lifecycle_of (GetParam () == RunMode::Load ? "run_load" : "run_seq");
+    }
 };
 
-// Mutation checks: make `resolve_lifecycle_collections` (scenario_plan.cpp)
-// return before it walks the subtree and the `sub-*` hits and rows disappear,
-// and the sub-folder's step sends its literal `{{subToken}}`; bind every
-// setup to the run collection in `run_scenario_setup` (scenario_runner.cpp)
-// and `subToken` lands on `col_1`.
-TEST_F (LifecycleSetRunTest, ARecursiveRunSetsUpRootFirstAndTearsDownInReverse) {
+INSTANTIATE_TEST_SUITE_P (BothRunModes,
+LifecycleSetRunTest,
+::testing::Values (RunMode::Sequential, RunMode::Load),
+[] (const ::testing::TestParamInfo<RunMode>& info) {
+    return info.param == RunMode::Load ? "Load" : "Sequential";
+});
+
+// The sub-folder's setup writes the sub-folder's variables: its step and its
+// teardown read `subToken`, the root's teardown does not. Mutation checks:
+// make `resolve_lifecycle_collections` (scenario_plan.cpp) return before it
+// walks the subtree and the `sub-*` hits and rows disappear; bind every setup
+// to the run collection in `run_scenario_setup` (scenario_runner.cpp) and the
+// root's teardown sees `from-sub`; under load, bind every base to the run
+// collection in `LoadScopeBases`' constructor (scenario_load.cpp) and the
+// sub-folder's step sends its literal `{{subToken}}`.
+TEST_P (LifecycleSetRunTest, ARecursiveRunSetsUpRootFirstAndTearsDownInReverse) {
     seed_root_and_sub_folder ();
     auto execution = resolve (1, "col_1", /*recursive=*/true);
 
-    EXPECT_EQ (run_sequential (execution, /*allow_script_requests=*/true),
-    vayu::RunStatus::Completed);
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
 
     EXPECT_EQ (hit_queries (server_->requests ()),
-    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=root",
-    "step=sub&tok=from-sub", "mark=sub-teardown", "mark=root-teardown" }));
-    // The sub-folder's setup wrote the sub-folder's own variables, as a step
-    // in it would, not the run collection's.
-    const auto sub  = db_->get_collection ("col_sub");
-    const auto root = db_->get_collection ("col_1");
-    ASSERT_HAS_VALUE (sub);
-    ASSERT_HAS_VALUE (root);
-    EXPECT_NE (sub->variables.find ("subToken"), std::string::npos) << sub->variables;
-    EXPECT_EQ (root->variables.find ("subToken"), std::string::npos) << root->variables;
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=root", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
 
-    const auto lifecycle = report_lifecycle_of ("run_seq");
-    EXPECT_EQ (origin_ids (lifecycle.value ("setup", json::array ())),
+    const auto report = lifecycle ();
+    EXPECT_EQ (origin_ids (report.value ("setup", json::array ())),
     (std::vector<std::string>{ "col_1", "col_sub" }));
-    EXPECT_EQ (origin_ids (lifecycle.value ("teardown", json::array ())),
+    EXPECT_EQ (origin_ids (report.value ("teardown", json::array ())),
     (std::vector<std::string>{ "col_sub", "col_1" }));
-    const auto setup = lifecycle.value ("setup", json::array ());
+    const auto setup = report.value ("setup", json::array ());
     ASSERT_EQ (setup.size (), 2u);
     EXPECT_EQ (setup[0]["origin"],
     (json{ { "kind", "collection" }, { "scope", "collection" },
@@ -1097,38 +1119,40 @@ TEST_F (LifecycleSetRunTest, ARecursiveRunSetsUpRootFirstAndTearsDownInReverse) 
     { "name", "Collection col_sub" } }));
 }
 
-// Mutation check: drop the ancestor half of `resolve_lifecycle_collections`
-// (start the list at the run collection) and the `root-*` hits disappear.
-TEST_F (LifecycleSetRunTest, RunningTheSubFolderAloneRunsTheRootsSetupFirst) {
+// Mutation checks: drop the ancestor half of `resolve_lifecycle_collections`
+// (start the list at the run collection) and the `root-*` hits disappear;
+// walk teardown forwards in `run_scenario_teardown` and the two teardowns
+// swap.
+TEST_P (LifecycleSetRunTest, RunningTheSubFolderAloneRunsTheRootsSetupFirst) {
     seed_root_and_sub_folder ();
     auto execution = resolve (1, "col_sub");
 
-    EXPECT_EQ (run_sequential (execution, /*allow_script_requests=*/true),
-    vayu::RunStatus::Completed);
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
 
     EXPECT_EQ (hit_queries (server_->requests ()),
-    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup",
-    "step=sub&tok=from-sub", "mark=sub-teardown", "mark=root-teardown" }));
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
 }
 
 // A run that is not recursive sends only the run collection's own requests,
 // so no folder beneath it is one the run sends from.
-TEST_F (LifecycleSetRunTest, ARunThatIsNotRecursiveLeavesTheSubFoldersOut) {
+TEST_P (LifecycleSetRunTest, ARunThatIsNotRecursiveLeavesTheSubFoldersOut) {
     seed_root_and_sub_folder ();
     auto execution = resolve (1, "col_1", /*recursive=*/false);
 
-    EXPECT_EQ (run_sequential (execution, /*allow_script_requests=*/true),
-    vayu::RunStatus::Completed);
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
 
     EXPECT_EQ (hit_queries (server_->requests ()),
-    (std::vector<std::string>{ "mark=root-setup", "step=root", "mark=root-teardown" }));
+    (std::vector<std::string>{
+    "mark=root-setup", "step=root", "mark=root-teardown&saw=undefined" }));
 }
 
 // A refusing folder setup fails the run as the run collection's would, its
 // row naming the folder; the collections after it set up nothing and nothing
-// tears down. Mutation check: drop the per-collection `refusal_from` check in
-// `run_scenario_setup` (scenario_runner.cpp) and `col_later`'s setup runs.
-TEST_F (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
+// tears down. Mutation check: drop the per-collection `lifecycle_refusal`
+// check in `run_scenario_setup` (scenario_runner.cpp) and `col_later`'s setup
+// runs.
+TEST_P (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
     seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
     seed_folder ("col_sub", "col_1", 0,
     marking_lifecycle (*server_, "sub", "throw new Error('sub boom');"));
@@ -1136,14 +1160,13 @@ TEST_F (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
     seed_request_in ("req_sub", "col_sub", 0, "step=sub");
     auto execution = resolve (1, "col_1", /*recursive=*/true);
 
-    EXPECT_EQ (run_sequential (execution, /*allow_script_requests=*/true),
-    vayu::RunStatus::Failed);
+    EXPECT_EQ (run (execution), vayu::RunStatus::Failed);
 
     EXPECT_EQ (hit_queries (server_->requests ()),
     (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup" }));
-    const auto lifecycle = report_lifecycle_of ("run_seq");
-    EXPECT_FALSE (lifecycle.contains ("teardown")) << lifecycle.dump ();
-    const auto setup = lifecycle.value ("setup", json::array ());
+    const auto report = lifecycle ();
+    EXPECT_FALSE (report.contains ("teardown")) << report.dump ();
+    const auto setup = report.value ("setup", json::array ());
     EXPECT_EQ (origin_ids (setup), (std::vector<std::string>{ "col_1", "col_sub" }));
     ASSERT_EQ (setup.size (), 2u);
     EXPECT_EQ (setup[0].value ("outcome", ""), "ok");
