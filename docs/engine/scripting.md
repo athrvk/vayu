@@ -1737,7 +1737,9 @@ Both read and write the same three variable scopes every other script does
 (`pm.environment`, `pm.globals`, `pm.collectionVariables`) - a name
 `script.setup` sets is visible to the very first step or submission of the run,
 because it writes through the same scopes object every other script of that
-run shares, before either run mode's own work begins. A collection's setup
+run shares, before either run mode's own work begins. A load run's deferred
+test replay reads it too: the replay starts from a copy of the scopes setup
+left (#3460), so a replayed write never reaches what teardown reads. A collection's setup
 and teardown read the chain down to that collection and write that
 collection's variables, as a step in it does, so a folder's setup writes a
 value that folder's own steps (and the folders below it) read. `pm.info.eventName` reads
@@ -4394,6 +4396,13 @@ a single-request run's is the collection of its linked request. Earlier engines
 bound an empty environment and no other scope at all, so
 `pm.environment.get('region')` read `undefined` under load and the same test
 gave opposite verdicts on Send and under load.
+
+**The replay starts from the scopes as `script.setup` left them** (#3460), not
+from a fresh read of the stored rows, so a value setup wrote reads the same in a
+deferred script as in an inline one. It works on a copy, so `script.teardown`
+still reads what setup left, whatever the replay wrote. What a virtual user's or
+a submission's own inline scripts wrote during the run is not in it: those writes
+lived in the user's (or the submission's) own overlay, which no sample records.
 
 Writes are the deliberate exception. A `set()`, `unset()` or `clear()` in a
 deferred script is visible to the samples replayed after it - one set of scopes

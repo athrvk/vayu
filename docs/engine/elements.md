@@ -534,7 +534,8 @@ off the kind's registered `hotPath`, never a `kind ==` comparison (the extensibi
 1). A **script** kind (`script.pre`, `script.post`) runs there only when its own
 `config.inline` is `true` or the run's `elements.scripts` override forces it one way or the
 other; otherwise the step keeps its pre-#1495 behaviour, deferred to the post-run `tests`
-replay, which now skips a step whose script already ran inline
+replay (which reads a copy of the scopes every `script.setup` left, #3460, and not a virtual
+user's own writes), which now skips a step whose script already ran inline
 (`RunContext::script_element_runs_inline` is the one place that decision is made, read by
 both sides). The app sets `config.inline` from the **Run inline** switch under a
 `script.pre` / `script.post` editor (the kind's schema declares it `x-vayu-group: "advanced"`,
@@ -680,7 +681,8 @@ uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
 scenario step. An unmarked `script.post` defers to this run's own completion
 replay (`RunContext::test_scripts`, one entry per un-inlined element taken at
 compile time so the replay does not need to know `elements` exist, each
-replayed as its own script, #3125); an
+replayed as its own script, #3125, against a copy of the scopes `script.setup`
+left, #3460); an
 unmarked `script.pre` simply never runs, since there is no pre-request replay
 on this path to defer it to.
 

@@ -1379,6 +1379,22 @@ struct ScriptValidation {
 };
 
 /**
+ * @brief What a load run's worker hands its deferred replay to start from
+ *        (#3460), read and never written.
+ *
+ * Default-constructed for a context built by hand, as a test builds one,
+ * which has the replay read the stored rows instead.
+ */
+struct ReplayBase {
+    /// A single-request run's scopes as `script.setup` left them
+    /// (`RunContext::lifecycle_scopes`); null when setup loaded none.
+    const vayu::http::routes::ScriptVariableScopes* request_scopes = nullptr;
+    /// A scenario load run's state, whose `lifecycle_scopes` are the scopes
+    /// as every `script.setup` left them; null when its driver never started.
+    const ScenarioLoadState* scenario_state = nullptr;
+};
+
+/**
  * @brief Replay the run's deferred test scripts against its sampled responses.
  *
  * Runs after the load test has drained, which is what keeps it off the hot
@@ -1399,13 +1415,20 @@ struct ScriptValidation {
  * already run against a recorded response cannot redirect a sequence that
  * already happened.
  *
+ * The replay starts from @p base: a copy of the scopes as `script.setup` left
+ * them (#3460), so a deferred script reads what an inline one would and
+ * `script.teardown` still reads what setup left. A virtual user's or a
+ * submission's own writes are not among them. An empty @p base reads the
+ * stored rows instead.
+ *
  * Declared here rather than kept file-local so the per-step behaviour can be
  * tested directly against a drained run; the production caller is
  * `execute_load_test`. Logs its tallies at DEBUG unconditionally - the
  * console shows them at `-v 2`, as the run's own logging does.
  */
-[[nodiscard]] ScriptValidation
-validate_scripts (const std::shared_ptr<RunContext>& context, vayu::db::Database& db);
+[[nodiscard]] ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
+vayu::db::Database& db,
+const ReplayBase& base = {});
 
 /**
  * @brief Check a drained load run's sampled responses against the contract it

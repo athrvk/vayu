@@ -321,9 +321,10 @@ RecordFailure& record_failure) {
 /**
  * @brief Replay @p replay's scripts against its samples, tallying the results.
  *
- * @param scopes The run's stored variable scopes, shared by every replay of the
- *        pass and mutated in place by any `set()` a script performs - see
- *        `validate_scripts` for why those writes are never persisted.
+ * @param scopes The pass's copy of the run's scopes as setup left them, shared
+ *        by every replay of the pass and mutated in place by any `set()` a
+ *        script performs - see `validate_scripts` for why those writes are
+ *        never persisted.
  * @param failures Recorded into, and keeps at most MAX_FAILURE_MESSAGES
  *        distinct messages across the whole run - a forty-step plan must not
  *        multiply the cap by forty.
@@ -606,7 +607,8 @@ size_t failed) {
 }
 
 ScriptValidation validate_scripts (const std::shared_ptr<RunContext>& context,
-vayu::db::Database& db) {
+vayu::db::Database& db,
+const ReplayBase& base) {
     ScriptValidation validation;
 
     // Which shape this run is. A scenario load run's scripts hang off its plan
@@ -689,18 +691,23 @@ vayu::db::Database& db) {
     // not be reported as "judged and passed".
     const auto environment_id = named_id (context->config, "environmentId");
 
-    // Loaded once and shared by every replay of the pass, so a `set()` is
-    // readable by the samples replayed after it - the same within-a-run
-    // visibility a sequential run gives. Never persisted:
-    // `persist_script_variables` is design-mode only, and a reservoir sample is
-    // not an iteration, so writing back whichever replay ran last would store a
-    // value no ordering justifies.
+    // Copied from what setup left (#3460), so a deferred script reads setup's
+    // writes as an inline one does; a copy, because teardown reads the
+    // original after this pass. Only a context with no worker behind it
+    // (`ReplayBase` empty) loads the stored rows. One set shared by every
+    // replay of the pass, so a `set()` is readable by the samples replayed
+    // after it - the same within-a-run visibility a sequential run gives.
+    // Never persisted: `persist_script_variables` is design-mode only, and a
+    // reservoir sample is not an iteration, so writing back whichever replay
+    // ran last would store a value no ordering justifies.
     ScriptValidationTotals totals;
     ReplayFailures failures;
 
     if (per_step) {
-        auto scopes = scenario_load_scopes (db, environment_id, *context->scenario);
-        totals = replay_scenario_steps (
+        auto scopes = base.scenario_state != nullptr ?
+        base.scenario_state->lifecycle_scopes :
+        scenario_load_scopes (db, environment_id, *context->scenario);
+        totals      = replay_scenario_steps (
         engine, scopes, context, sse_limits, script_send, validation, failures);
         // Every scripted step drew a blank, so the run validated nothing.
         if (totals.sampled == 0) {
@@ -732,8 +739,10 @@ vayu::db::Database& db) {
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
-        auto scopes = vayu::http::routes::load_script_variable_scopes (db,
-        environment_id, single_request_lifecycle_collection_id (db, context->config));
+        auto scopes = base.request_scopes != nullptr ?
+        *base.request_scopes :
+        vayu::http::routes::load_script_variable_scopes (db, environment_id,
+        single_request_lifecycle_collection_id (db, context->config));
         totals      = run_replay (engine, scopes, replay, failures);
     }
 
@@ -2343,6 +2352,24 @@ double total_duration_s) {
 }
 
 /**
+ * What this run's worker left its deferred replay to start from. A
+ * single-request run's setup loads its scopes whenever the run carries
+ * `requestElements` (`run_request_lifecycle_setup`), which is where every
+ * replayed script comes from.
+ */
+ReplayBase replay_base (const RunContext& context, const ScenarioLoadState* scenario_state) {
+    ReplayBase base;
+    if (context.scenario) {
+        base.scenario_state = scenario_state;
+        return base;
+    }
+    if (context.step_elements && !context.step_elements->empty ()) {
+        base.request_scopes = &context.lifecycle_scopes;
+    }
+    return base;
+}
+
+/**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
  * the stored summary and the terminal status.
  *
@@ -2386,7 +2413,8 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     // go into the summary below, so it has to run before the summary write.
     ScriptValidation validation;
     try {
-        validation = validate_scripts (context, db);
+        validation = validate_scripts (
+        context, db, replay_base (*context, scenario_state.get ()));
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "Script validation failed: " + std::string (e.what ()),

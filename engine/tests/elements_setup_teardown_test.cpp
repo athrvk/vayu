@@ -297,14 +297,16 @@ class ScriptLifecycleTest : public ::testing::Test {
     /// `{{lifecycleToken}}` query token - unresolvable at plan-resolve time
     /// (the collection declares no such variable), so it survives compose and
     /// is filled in only by the residual pass at send time, off whatever
-    /// `script.setup` wrote into the run's own scopes.
-    void seed_request () {
+    /// `script.setup` wrote into the run's own scopes. @p elements are the
+    /// request's own.
+    void seed_request (const json& elements = json::array ()) {
         vayu::db::Request r;
         r.id            = "req_1";
         r.collection_id = "col_1";
         r.name          = "Step 1";
         r.method        = vayu::HttpMethod::GET;
         r.url           = server_->url ("/ok") + "?tok={{lifecycleToken}}";
+        r.elements      = elements.dump ();
         r.order         = 0;
         r.created_at    = 1;
         r.updated_at    = 1;
@@ -364,15 +366,18 @@ class ScriptLifecycleTest : public ::testing::Test {
     /// Runs @p execution's plan as a scenario load run (through the same
     /// `execute_load_test` / `finish_load_test` production uses) and waits
     /// for a terminal status.
+    /// @p extra is merged into the payload last.
     vayu::RunStatus run_load (const vayu::core::ScenarioExecution& execution,
     size_t iterations,
     size_t concurrency,
-    bool allow_script_requests = false) {
+    bool allow_script_requests = false,
+    const json& extra          = json::object ()) {
         const json scenario{ { "source", "collection" },
             { "collectionId", execution.request.collection_id } };
-        const json config{ { "scenario", scenario }, { "mode", "iterations" },
+        json config{ { "scenario", scenario }, { "mode", "iterations" },
             { "iterations", iterations }, { "concurrency", concurrency },
             { "allowScriptRequests", allow_script_requests } };
+        config.update (extra);
 
         const std::string run_id = "run_load";
         vayu::db::Run run;
@@ -394,11 +399,13 @@ class ScriptLifecycleTest : public ::testing::Test {
 
     /// Runs a **single-request** load run - no `scenario`, no collection -
     /// against `/ok`, with @p lifecycle_elements as its own `lifecycleElements`
-    /// override (issue #1573), and waits for a terminal status.
+    /// override (issue #1573), and waits for a terminal status. @p extra is
+    /// merged into the payload last.
     vayu::RunStatus run_single_request_load (const json& lifecycle_elements,
     size_t iterations,
     size_t concurrency,
-    bool allow_script_requests = false) {
+    bool allow_script_requests = false,
+    const json& extra          = json::object ()) {
         json config{ { "method", "GET" }, { "url", server_->url ("/ok") },
             { "mode", "iterations" }, { "iterations", iterations },
             { "concurrency", concurrency },
@@ -406,6 +413,7 @@ class ScriptLifecycleTest : public ::testing::Test {
         if (!lifecycle_elements.empty ()) {
             config["lifecycleElements"] = lifecycle_elements;
         }
+        config.update (extra);
 
         const std::string run_id = "run_single";
         vayu::db::Run run;
@@ -463,6 +471,46 @@ class ScriptLifecycleTest : public ::testing::Test {
         return report["lifecycle"];
     }
 
+    /// The `testValidation` node `GET /runs/:id/report` answers for @p run_id:
+    /// the deferred replay's tallies.
+    [[nodiscard]] json report_tests_of (const std::string& run_id) {
+        const auto [status, report] =
+        vayu::http::routes::run_report_response (*db_, run_id);
+        if (status != 200 || !report.contains ("testValidation")) {
+            ADD_FAILURE () << "no testValidation in the report: " << report.dump ();
+            return json::object ();
+        }
+        return report["testValidation"];
+    }
+
+    /// The deferred replay's failure messages for @p run_id, joined, so an
+    /// assertion on its tallies can say why.
+    [[nodiscard]] std::string replay_failures_of (const std::string& run_id) {
+        std::string joined;
+        for (const auto& result : db_->get_results (run_id)) {
+            const auto trace = json::parse (result.trace_data, nullptr, false);
+            if (trace.is_discarded () || !trace.contains ("failures")) {
+                continue;
+            }
+            for (const auto& failure : trace["failures"]) {
+                joined += failure.get<std::string> () + "; ";
+            }
+        }
+        return joined;
+    }
+
+    /// Environment `env_1`, whose stored `fromSetup` is the stale value a
+    /// `script.setup` overwrites.
+    void seed_environment () {
+        vayu::db::Environment environment;
+        environment.id   = "env_1";
+        environment.name = "Env 1";
+        environment.variables = R"({"fromSetup":{"value":"stale-stored","enabled":true}})";
+        environment.created_at = 1;
+        environment.updated_at = 1;
+        db_->save_environment (environment);
+    }
+
     std::unique_ptr<vayu::db::Database> db_;
     std::unique_ptr<LifecycleMockServer> server_;
     vayu::core::RunManager manager_;
@@ -471,6 +519,12 @@ class ScriptLifecycleTest : public ::testing::Test {
 
 json script_setup_element (const std::string& script) {
     return json::array ({ json{ { "id", "el_setup" }, { "kind", "script.setup" },
+    { "enabled", true }, { "config", { { "script", script } } } } });
+}
+
+/// One deferred `script.post` (no `inline`, the default) running @p script.
+json deferred_post_script (const std::string& script) {
+    return json::array ({ json{ { "id", "el_post" }, { "kind", "script.post" },
     { "enabled", true }, { "config", { { "script", script } } } } });
 }
 
@@ -1014,6 +1068,81 @@ TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesTheActualSentCount) {
     ASSERT_NE (teardown_hit, hits.end ());
     EXPECT_NE (teardown_hit->target.find ("teardownSawSent=3"), std::string::npos)
     << teardown_hit->target;
+}
+
+// ============================================================================
+// The deferred replay starts from what setup left (#3460)
+// ============================================================================
+
+/// The setup that overwrites `seed_environment`'s stale `fromSetup`.
+constexpr const char* SETUP_WRITES_FROM_SETUP =
+"pm.environment.set('fromSetup', 'yes');";
+
+/// A deferred test asserting the value `SETUP_WRITES_FROM_SETUP` wrote.
+constexpr const char* ASSERTS_FROM_SETUP =
+"pm.test('setup', () => "
+"pm.expect(pm.environment.get('fromSetup')).to.eql('yes'));";
+
+// The issue's own case: the stored environment says `stale-stored`, setup
+// writes `yes`, and the deferred script reads `yes`, as an inline one does.
+// Mutation check: load the replay's scopes from the database in
+// `validate_scripts` (ignore `base.request_scopes`) and both samples fail on
+// `stale-stored`.
+TEST_F (ScriptLifecycleTest, SingleRequestDeferredScriptSeesWhatSetupWrote) {
+    seed_environment ();
+    const json extra{ { "environmentId", "env_1" }, { "response_sample_rate", 1 },
+        { "requestElements", deferred_post_script (ASSERTS_FROM_SETUP) } };
+
+    EXPECT_EQ (
+    run_single_request_load (script_setup_element (SETUP_WRITES_FROM_SETUP),
+    /*iterations=*/2, /*concurrency=*/1, /*allow_script_requests=*/false, extra),
+    vayu::RunStatus::Completed);
+
+    const auto tests = report_tests_of ("run_single");
+    EXPECT_EQ (tests.value ("testsFailed", -1), 0)
+    << replay_failures_of ("run_single");
+    EXPECT_EQ (tests.value ("testsPassed", -1), 2) << tests.dump ();
+}
+
+// The replay works on a copy, so a deferred script's write never reaches the
+// scopes teardown reads. Mutation check: replay against
+// `context->lifecycle_scopes` itself rather than a copy and teardown reads
+// `replayed`.
+TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesSetupsValueAfterTheReplayWroteOverIt) {
+    const json extra{ { "response_sample_rate", 1 },
+        { "requestElements", deferred_post_script ("pm.environment.set('fromSetup', 'replayed');") } };
+
+    EXPECT_EQ (
+    run_single_request_load (setup_and_teardown_elements (SETUP_WRITES_FROM_SETUP, ASSERTS_FROM_SETUP),
+    /*iterations=*/1, /*concurrency=*/1, /*allow_script_requests=*/false, extra),
+    vayu::RunStatus::Completed);
+
+    EXPECT_EQ (report_tests_of ("run_single").value ("samplesTested", -1), 1);
+    const auto teardown =
+    report_lifecycle_of ("run_single").value ("teardown", json::array ());
+    ASSERT_EQ (teardown.size (), 1u);
+    EXPECT_EQ (teardown[0].value ("outcome", ""), "ok") << teardown[0].dump ();
+}
+
+// The scenario shape: a collection's setup writes, and its request's deferred
+// `script.post` reads the write. Mutation check: load the replay's scopes with
+// `scenario_load_scopes` in `validate_scripts` (ignore `base.scenario_state`)
+// and every sample fails on `stale-stored`.
+TEST_F (ScriptLifecycleTest, LoadDeferredScriptSeesWhatSetupWrote) {
+    seed_environment ();
+    seed_collection (script_setup_element (SETUP_WRITES_FROM_SETUP));
+    seed_request (deferred_post_script (ASSERTS_FROM_SETUP));
+    auto execution = resolve (1);
+    const json extra{ { "environmentId", "env_1" }, { "response_sample_rate", 1 } };
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/3, /*concurrency=*/3,
+               /*allow_script_requests=*/false, extra),
+    vayu::RunStatus::Completed);
+
+    const auto tests = report_tests_of ("run_load");
+    EXPECT_EQ (tests.value ("testsFailed", -1), 0)
+    << replay_failures_of ("run_load");
+    EXPECT_EQ (tests.value ("testsPassed", -1), 3) << tests.dump ();
 }
 
 // ============================================================================
