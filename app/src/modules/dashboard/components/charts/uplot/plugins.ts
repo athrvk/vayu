@@ -17,6 +17,7 @@
  */
 
 import type uPlot from "uplot";
+import { formatFixed } from "@/lib/format-number";
 import type { UplotTheme, ColorRole } from "./uplotTheme";
 import { layoutChartLabels } from "./labelLayout";
 
@@ -387,7 +388,7 @@ export function tooltipPlugin(opts: {
 	let tip: HTMLDivElement | null = null;
 	const fmt = opts.format ?? {};
 	const skip = opts.skip ?? new Set<number>();
-	const xLabel = opts.xLabel ?? ((x: number) => `${x.toFixed(1)}s`);
+	const xLabel = opts.xLabel ?? ((x: number) => `${formatFixed(x, 1)}s`);
 
 	return {
 		hooks: {

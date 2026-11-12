@@ -68,7 +68,7 @@
 
 import { asRecord, asStr } from "@/lib/json-node";
 import { apiService } from "@/services/api";
-import { formatBytes } from "@/modules/settings/utils/format-size";
+import { formatBytes } from "@/lib/format-number";
 import { ApiError } from "@/services/http-client";
 import type { ImportFetchOptions } from "@/types/api";
 

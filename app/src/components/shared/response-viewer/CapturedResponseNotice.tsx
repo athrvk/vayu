@@ -24,7 +24,7 @@
  */
 
 import { Callout } from "../Callout";
-import { formatBytes } from "@/modules/settings/utils/format-size";
+import { formatBytes } from "@/lib/format-number";
 import type { RunSample } from "@/types/domain";
 
 export interface CapturedResponseNoticeProps {

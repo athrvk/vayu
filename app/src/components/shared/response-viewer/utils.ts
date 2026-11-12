@@ -9,7 +9,7 @@
  * Utility functions for response body type detection and formatting
  */
 
-import { formatLatencyParts } from "@/lib/format-number";
+import { formatBytes, formatFixed, formatLatencyParts } from "@/lib/format-number";
 import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
 import { resolveHeaderLines } from "@/lib/header-lines";
@@ -227,9 +227,9 @@ export function formatDuration(ms: number): { value: string; unit: DurationUnit 
  * phases across a row matters more than the unit.
  */
 export function formatPhaseMs(ms: number): string {
-	if (ms >= 100) return ms.toFixed(0);
-	if (ms >= 10) return ms.toFixed(1);
-	return ms.toFixed(2);
+	if (ms >= 100) return formatFixed(ms, 0);
+	if (ms >= 10) return formatFixed(ms, 1);
+	return formatFixed(ms, 2);
 }
 
 export type DurationUnit = "ms" | "s";
@@ -251,16 +251,7 @@ export type DurationUnit = "ms" | "s";
  */
 export function formatPhaseDuration(ms: number): { value: string; unit: DurationUnit } {
 	if (ms < 1000) return { value: formatPhaseMs(ms), unit: "ms" };
-	return { value: (ms / 1000).toFixed(2), unit: "s" };
-}
-
-/**
- * Format bytes to human readable size
- */
-export function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	return { value: formatFixed(ms / 1000, 2), unit: "s" };
 }
 
 /**
@@ -281,7 +272,7 @@ export function responseSizeTip(headers: Record<string, string> | undefined): st
 	const encoding = headerValueOf(headers, "content-encoding").trim().toLowerCase();
 	const length = headerValueOf(headers, "content-length").trim();
 	if (!encoding || encoding === "identity" || !/^\d+$/.test(length)) return RESPONSE_SIZE_TIP;
-	return `${RESPONSE_SIZE_TIP} ${formatSize(Number(length))} on the wire.`;
+	return `${RESPONSE_SIZE_TIP} ${formatBytes(Number(length))} on the wire.`;
 }
 
 /**

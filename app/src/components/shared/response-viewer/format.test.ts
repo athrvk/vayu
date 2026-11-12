@@ -6,7 +6,7 @@
  */
 
 /**
- * Response time and size formatting.
+ * Response time formatting.
  *
  * `formatResponseTime` exists because `time.toFixed(4)` was written twice, in
  * two response viewers. Fixing one left the other rendering `340.1235 ms` - the
@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { formatResponseTime, formatSize } from "./utils";
+import { formatResponseTime } from "./utils";
 
 describe("formatResponseTime", () => {
 	it("rounds to whole milliseconds from 10 ms up", () => {
@@ -48,20 +48,5 @@ describe("formatResponseTime", () => {
 		for (const ms of [0.5, 1, 12.3456, 340.1235, 999, 1000, 98_765.4321]) {
 			expect(formatResponseTime(ms), String(ms)).not.toMatch(/\.\d{3,}/);
 		}
-	});
-});
-
-describe("formatSize", () => {
-	it("steps through B, KB and MB", () => {
-		expect(formatSize(512)).toBe("512 B");
-		expect(formatSize(2048)).toBe("2.0 KB");
-		expect(formatSize(5 * 1024 * 1024)).toBe("5.0 MB");
-	});
-
-	it("switches unit exactly at the boundary", () => {
-		expect(formatSize(1023)).toBe("1023 B");
-		expect(formatSize(1024)).toBe("1.0 KB");
-		expect(formatSize(1024 * 1024 - 1)).toContain("KB");
-		expect(formatSize(1024 * 1024)).toBe("1.0 MB");
 	});
 });

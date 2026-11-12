@@ -30,6 +30,7 @@
 import { buildClientSchema, getIntrospectionQuery, type GraphQLSchema } from "graphql";
 import { apiService } from "@/services/api";
 import { humanizeOAuth2Error } from "@/constants/oauth2-fields";
+import { formatBytes } from "@/lib/format-number";
 import { headerLinesOf } from "@/lib/header-lines";
 import type { ComposedRequest, ExecuteRequestRequest, HeaderLine, KeyValueEntry } from "@/types";
 import { composePathParams } from "@/modules/request-builder/utils/path-variables";
@@ -229,7 +230,7 @@ export async function introspectSchema(target: IntrospectionTarget): Promise<Gra
 	if (res.bodyRaw.length > MAX_INTROSPECTION_CHARS) {
 		throw new IntrospectionError(
 			"too-large",
-			`The introspection response is ${Math.round(res.bodyRaw.length / (1024 * 1024))}MB, over the ${MAX_INTROSPECTION_CHARS / (1024 * 1024)}MB limit.`
+			`The introspection response is ${formatBytes(res.bodyRaw.length)}, over the ${formatBytes(MAX_INTROSPECTION_CHARS)} limit.`
 		);
 	}
 
