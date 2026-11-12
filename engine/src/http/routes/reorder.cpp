@@ -390,14 +390,9 @@ stamped_requests_moved (vayu::db::Database& db, const std::vector<Move>& moves) 
 /**
  * Stages the requests the batch takes out of the contract that answered for
  * them (#3446), and answers each one's id with the bound collection its
- * operation is declined under (`declined_by_move`).
- *
- * The binding before is read off the stored tree, and the binding after and the
- * contract walk off the staged one, because a batch can move a folder and its
- * requests together and only the tree it is about to write says where each
- * request ends up. Both come from one read of the collections rather than a
- * query per ancestor per request. A departing request is staged with its stamp
- * cleared, so the response shows the row as written.
+ * operation is declined under (`declined_by_move`, read over the staged tree
+ * by `SpecTreeMove`). A departing request is staged with its stamp cleared, so
+ * the response shows the row as written.
  */
 std::unordered_map<std::string, std::string> stage_binding_departures (vayu::db::Database& db,
 const std::vector<Move>& moves,
@@ -409,42 +404,13 @@ WriteSet& writes) {
         return departures;
     }
 
-    std::unordered_map<std::string, vayu::db::Collection> stored_tree;
-    for (auto& collection : db.get_collections ()) {
-        stored_tree.emplace (collection.id, std::move (collection));
-    }
-    const vayu::core::CollectionLookup before =
-    [&stored_tree] (const std::string& id) -> std::optional<vayu::db::Collection> {
-        const auto found = stored_tree.find (id);
-        if (found == stored_tree.end ()) {
-            return std::nullopt;
-        }
-        return found->second;
-    };
-    const vayu::core::CollectionLookup after =
-    [&writes, &before] (const std::string& id) -> std::optional<vayu::db::Collection> {
-        const auto staged = writes.collections.find (id);
-        if (staged != writes.collections.end ()) {
-            return staged->second;
-        }
-        return before (id);
-    };
-    std::vector<vayu::db::Collection> staged_tree;
-    staged_tree.reserve (stored_tree.size ());
-    for (const auto& [id, collection] : stored_tree) {
-        const auto staged = writes.collections.find (id);
-        staged_tree.push_back (
-        staged != writes.collections.end () ? staged->second : collection);
-    }
-
+    const SpecTreeMove tree (db.get_collections (), writes.collections);
     for (const auto& [id, stored] : stamped) {
         const auto staged    = writes.requests.find (id);
         const bool is_staged = staged != writes.requests.end ();
         const std::string destination =
         is_staged ? staged->second.collection_id : stored.collection_id;
-        const auto under = declined_by_move (stored,
-        vayu::core::nearest_spec_binding (before, stored.collection_id),
-        vayu::core::nearest_spec_binding (after, destination), staged_tree);
+        const auto under = tree.declined_under (stored, destination);
         if (!under) {
             continue;
         }

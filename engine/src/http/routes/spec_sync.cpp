@@ -53,6 +53,7 @@
 #include <algorithm>
 #include <functional>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -198,6 +199,42 @@ const std::vector<vayu::db::Collection>& tree) {
         return std::nullopt;
     }
     return before->collection_id;
+}
+
+SpecTreeMove::SpecTreeMove (std::vector<vayu::db::Collection> stored,
+std::map<std::string, vayu::db::Collection> staged)
+: staged_ (std::move (staged)) {
+    stored_.reserve (stored.size ());
+    written_tree_.reserve (stored.size ());
+    for (auto& collection : stored) {
+        const auto row = staged_.find (collection.id);
+        written_tree_.push_back (row != staged_.end () ? row->second : collection);
+        std::string id = collection.id;
+        stored_.emplace (std::move (id), std::move (collection));
+    }
+}
+
+std::optional<std::string> SpecTreeMove::declined_under (const vayu::db::Request& stored,
+const std::string& destination) const {
+    const vayu::core::CollectionLookup before =
+    [this] (const std::string& id) -> std::optional<vayu::db::Collection> {
+        const auto found = stored_.find (id);
+        if (found == stored_.end ()) {
+            return std::nullopt;
+        }
+        return found->second;
+    };
+    const vayu::core::CollectionLookup after =
+    [this, &before] (const std::string& id) -> std::optional<vayu::db::Collection> {
+        const auto staged = staged_.find (id);
+        if (staged != staged_.end ()) {
+            return staged->second;
+        }
+        return before (id);
+    };
+    return declined_by_move (stored,
+    vayu::core::nearest_spec_binding (before, stored.collection_id),
+    vayu::core::nearest_spec_binding (after, destination), written_tree_);
 }
 
 bool binding_leaves_document (const std::string& before, const std::string& after) {

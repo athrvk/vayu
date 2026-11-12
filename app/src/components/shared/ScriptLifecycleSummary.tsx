@@ -19,7 +19,8 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import type { ElementOutcome, RunReport } from "@/types/domain";
+import { ElementMessages } from "./ElementMessages";
+import type { LifecycleElementOutcome, RunReport } from "@/types/domain";
 
 const PHASE_LABELS: Record<"setup" | "teardown", string> = {
 	setup: "Setup",
@@ -35,7 +36,7 @@ export interface ScriptLifecycleSummaryProps {
  * `skipped` is the run's Stop cancelling the script's `pm.sendRequest`: the
  * run ended under it, so it is neither a pass nor a failure (#3371).
  */
-function isFailure(outcome: ElementOutcome): boolean {
+function isFailure(outcome: LifecycleElementOutcome): boolean {
 	return outcome.outcome !== "ok" && outcome.outcome !== "skipped";
 }
 
@@ -50,16 +51,21 @@ function LifecycleRow({
 	outcome,
 }: {
 	phase: "setup" | "teardown";
-	outcome: ElementOutcome;
+	outcome: LifecycleElementOutcome;
 }) {
 	const ran = outcome.outcome === "ok";
 	const tone = ROW_TONES[ran ? "ran" : isFailure(outcome) ? "failed" : "skipped"];
-	// A passing script has nothing to say; the other two carry the engine's reason.
-	const label = ran ? tone.fallback : (outcome.message ?? tone.fallback);
+	// A passing script has nothing to say; the other two carry the engine's
+	// reason, and a blank one reads as no reason at all (#3455).
+	const reason = outcome.message?.trim();
+	const label = ran || !reason ? tone.fallback : reason;
 	return (
-		<li className="flex items-baseline justify-between gap-3 text-sm">
-			<span className="text-muted-foreground">{PHASE_LABELS[phase]}</span>
-			<span className={cn("font-medium", tone.className)}>{label}</span>
+		<li className="text-sm">
+			<div className="flex items-baseline justify-between gap-3">
+				<span className="text-muted-foreground">{PHASE_LABELS[phase]}</span>
+				<span className={cn("font-medium", tone.className)}>{label}</span>
+			</div>
+			<ElementMessages element={outcome} />
 		</li>
 	);
 }

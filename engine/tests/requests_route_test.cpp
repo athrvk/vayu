@@ -33,6 +33,7 @@
 #include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/list_page.hpp"
 #include "vayu/utils/json.hpp"
 
@@ -686,6 +687,106 @@ TEST_F (RequestsRouteTest, AnAppendAfterTheHighestOrderIsRefused) {
     EXPECT_EQ (row->order, 3);
 }
 
+// -- A stored auth names a known mode (#3464) -------------------------------
+//
+// Mutation check: drop `reject_unknown_auth_mode` from either core and the
+// matching test reds (each case is a loop, so all of its rows go with it); make
+// it fire on null or on an absent `auth` and the valid-write test reds.
+
+// Every body here parsed as stored and sent with no credential before the check.
+const std::vector<json>& unknown_auth_blocks () {
+    static const std::vector<json> blocks = {
+        json{ { "mode", "Inherit" } },
+        json{ { "mode", "Bearer" }, { "token", "t" } },
+        json{ { "mode", " inherit" } },
+        json{ { "mode", "" } },
+        json{ { "mode", 7 } },
+        json{ { "mode", nullptr } },
+        json{ { "mode", json::array ({ "inherit" }) } },
+        json{ { "token", "t" } },
+        json::object (),
+    };
+    return blocks;
+}
+
+TEST_F (RequestsRouteTest, ACreateWithAnUnknownAuthModeIsRefusedAndWritesNothing) {
+    seed_collection_at ("col_p", "", 0);
+
+    for (const json& auth : unknown_auth_blocks ()) {
+        json write    = new_request ("col_p");
+        write["auth"] = auth;
+        auto [status, response] =
+        vayu::http::routes::create_request_response (*db_, write);
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << response.dump ();
+        EXPECT_NE (
+        response["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << response.dump ();
+    }
+    EXPECT_TRUE (db_->get_requests_in_collection ("col_p").empty ());
+}
+
+TEST_F (RequestsRouteTest, AnUpdateWithAnUnknownAuthModeIsRefusedAndLeavesTheRowAlone) {
+    const std::string id = seed_request ();
+    const auto before    = db_->get_request (id);
+    ASSERT_HAS_VALUE (before);
+
+    for (const json& auth : unknown_auth_blocks ()) {
+        auto [status, response] = vayu::http::routes::update_request_response (
+        *db_, id, json{ { "name", "Renamed" }, { "auth", auth } });
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << response.dump ();
+        EXPECT_NE (
+        response["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << response.dump ();
+    }
+    const auto after = db_->get_request (id);
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, before->name);
+    EXPECT_EQ (after->auth, before->auth);
+    EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+// A bare array was already a 400 from `apply_json_field`; it must still store
+// nothing on either verb now that the mode check sits ahead of it.
+TEST_F (RequestsRouteTest, AnAuthThatIsNotAnObjectIsStillRefusedOnBothVerbs) {
+    const std::string id = seed_request ();
+    json write           = new_request ("col_1");
+    write["auth"]        = json::array ({ "inherit" });
+
+    auto [created_status, created] =
+    vayu::http::routes::create_request_response (*db_, write);
+    auto [status, response] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "auth", json::array ({ "inherit" }) } });
+
+    EXPECT_EQ (created_status, 400) << created.dump ();
+    EXPECT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (db_->get_requests_in_collection ("col_1").size (), 1U);
+}
+
+// `inherit` is a request's own default (a collection refuses it, #3445), and
+// the modes Vayu stores without executing stay writable so an imported request
+// can be edited.
+TEST_F (RequestsRouteTest, EveryKnownAuthModeIsStoredOnBothVerbsAndNullResetsToInherit) {
+    const std::string id = seed_request ();
+    for (const std::string_view mode : vayu::http::AUTH_MODES) {
+        json write    = new_request ("col_1");
+        write["auth"] = { { "mode", std::string (mode) } };
+        auto [created_status, created] =
+        vayu::http::routes::create_request_response (*db_, write);
+        auto [status, response] = vayu::http::routes::update_request_response (
+        *db_, id, json{ { "auth", { { "mode", std::string (mode) } } } });
+
+        EXPECT_EQ (created_status, 200) << mode << " -> " << created.dump ();
+        EXPECT_EQ (status, 200) << mode << " -> " << response.dump ();
+        EXPECT_EQ (response["auth"]["mode"], std::string (mode));
+    }
+
+    auto [reset_status, reset] = vayu::http::routes::update_request_response (
+    *db_, id, json{ { "auth", nullptr } });
+    ASSERT_EQ (reset_status, 200) << reset.dump ();
+    EXPECT_EQ (reset["auth"]["mode"], "inherit");
+}
 
 // -- Leaving a spec binding (#3446) -----------------------------------------
 //

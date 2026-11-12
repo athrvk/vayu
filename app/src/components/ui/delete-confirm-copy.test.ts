@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
 	clientCertificateDeleteDescription,
 	clientCertificatePurgeDescription,
+	collectionPurgeDescription,
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";
@@ -104,5 +105,28 @@ describe("clientCertificatePurgeDescription", () => {
 		expect(description).toContain('"api.example.com" is removed permanently');
 		expect(description).toContain("stored passphrase");
 		expect(description).toContain("files on disk are not touched");
+	});
+});
+
+describe("collectionPurgeDescription", () => {
+	it("states every collection and request the purge destroys", () => {
+		expect(collectionPurgeDescription("Payments", { collections: 2, requests: 11 })).toBe(
+			'"Payments" is removed permanently, along with 2 collections and 11 requests inside it. This can\'t be undone.'
+		);
+	});
+
+	it("leaves out a kind that is not there and singularises the one that is", () => {
+		expect(collectionPurgeDescription("Payments", { collections: 0, requests: 1 })).toContain(
+			"along with 1 request inside it"
+		);
+		expect(collectionPurgeDescription("Payments", { collections: 1, requests: 0 })).toContain(
+			"along with 1 collection inside it"
+		);
+	});
+
+	it("reads as the generic sentence for a collection that holds nothing", () => {
+		expect(collectionPurgeDescription("Payments", { collections: 0, requests: 0 })).toBe(
+			'"Payments" is removed permanently. This can\'t be undone.'
+		);
 	});
 });

@@ -28,6 +28,12 @@ export function retentionDaysFrom(entries: ConfigEntry[] | undefined): number | 
 /**
  * The sentence the Trash view puts under its title.
  *
+ * The sweep runs once, when the engine starts, not on a timer: an item past the
+ * window stays until the next launch, and lowering the setting purges nothing
+ * until then. The sentence says "the next time Vayu starts" because anything
+ * that sounds like a clock ("N days after they land here") promises a deletion
+ * the engine will not make (#3449).
+ *
  * `0` is not "deleted immediately" - it turns the startup purge off, so the
  * trash keeps everything until someone empties it by hand. Getting that
  * backwards would be the worst sentence on the screen.
@@ -35,6 +41,6 @@ export function retentionDaysFrom(entries: ConfigEntry[] | undefined): number | 
 export function retentionCopy(retentionDays: number | null): string | null {
 	if (retentionDays === null) return null;
 	if (retentionDays <= 0) return "Items are kept here until you permanently delete them.";
-	if (retentionDays === 1) return "Items are permanently deleted a day after they land here.";
-	return `Items are permanently deleted ${retentionDays} days after they land here.`;
+	const age = retentionDays === 1 ? "a day" : `${retentionDays} days`;
+	return `Items more than ${age} old are permanently deleted the next time Vayu starts.`;
 }

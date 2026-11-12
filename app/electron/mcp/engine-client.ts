@@ -812,8 +812,8 @@ export class EngineClient {
 	 * Put one deleted root back, with everything its delete took along:
 	 * `POST /trash/:id/restore`. A 404 arrives as an {@link EngineRequestError}
 	 * for an id the trash does not hold; a 409 the same way for a request whose
-	 * collection is itself deleted or gone, with the engine naming the collection
-	 * to restore first - callers surface `EngineRequestError.body` rather than
+	 * collection is itself deleted or gone, with the engine naming the item and
+	 * the Trash root to restore first - callers surface `EngineRequestError.body` rather than
 	 * inventing wording for either.
 	 */
 	restoreTrashEntry(id: string, signal?: AbortSignal): Promise<unknown> {

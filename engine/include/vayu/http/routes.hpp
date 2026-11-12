@@ -22,6 +22,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -1123,6 +1124,40 @@ inline RouteResult reject_blank_name (const nlohmann::json& json) {
 }
 
 /**
+ * A stated `auth` object whose `mode` is not a string in `AUTH_MODES` is a 400
+ * naming `auth.mode` (#3464). Modes match by exact lowercase string, so `Bearer`
+ * or ` inherit` would be stored, treated by the composer as a concrete
+ * credential that stops the inherit walk, and sent by `parse_auth` with none.
+ * A missing `mode` is refused too: the credential fields beside it would
+ * silently go nowhere.
+ *
+ * Absent and `null` pass (keep, reset to the default); a non-object `auth` is
+ * `apply_json_field`'s 400. The create and update cores of collections and
+ * requests call it and the appliers do not, because `POST /import/apply` and
+ * `POST /specs/sync` share those and an importer's unrecognised mode must not
+ * fail an atomic import (the `reject_blank_name` split). Whether a collection
+ * may state `inherit` is the collection cores' own rule (#3445).
+ */
+inline RouteResult reject_unknown_auth_mode (const nlohmann::json& json) {
+    const auto auth = json.find ("auth");
+    if (auth == json.end () || !auth->is_object ()) {
+        return {};
+    }
+    const auto mode = auth->find ("mode");
+    if (mode != auth->end () && mode->is_string () &&
+    is_known_auth_mode (mode->get_ref<const std::string&> ())) {
+        return {};
+    }
+    std::string known;
+    for (const std::string_view name : AUTH_MODES) {
+        known += known.empty () ? "" : ", ";
+        known += name;
+    }
+    return route_error (400,
+    std::format ("Invalid 'auth.mode': must be a string, one of: {}", known));
+}
+
+/**
  * `id` is engine-owned (issue #97): every id in the database comes from
  * `generate_id`, so a create that carries one is a 400 rather than a silently
  * honoured - or silently ignored - field. `POST /import/apply` already rejects
@@ -1390,6 +1425,37 @@ const std::string& root);
 const std::optional<vayu::core::BoundSpec>& before,
 const std::optional<vayu::core::BoundSpec>& after,
 const std::vector<vayu::db::Collection>& tree);
+
+/**
+ * A write that moves collections, as `declined_by_move` reads it: the binding
+ * before off the tree as stored, the binding after and the contract walk off
+ * the same tree with the write's rows in place. A write can move a folder and
+ * a request under it together, and only the tree it is about to store says
+ * where each request ends up. One read of the collections answers for every
+ * request the write carries along, rather than a query per ancestor per
+ * request. Shared by `POST /reorder` (#3446) and `PUT /collections/:id`
+ * (#3470). Defined in spec_sync.cpp.
+ */
+class SpecTreeMove {
+    public:
+    /**
+     * @param stored every live collection, as `Database::get_collections`
+     *        answers before the write.
+     * @param staged the collection rows the write is about to store, by id.
+     */
+    SpecTreeMove (std::vector<vayu::db::Collection> stored,
+    std::map<std::string, vayu::db::Collection> staged);
+
+    /// `declined_by_move` for @p stored, which sits under its stored
+    /// `collection_id` before the write and under @p destination after it.
+    [[nodiscard]] std::optional<std::string>
+    declined_under (const vayu::db::Request& stored, const std::string& destination) const;
+
+    private:
+    std::unordered_map<std::string, vayu::db::Collection> stored_;
+    std::map<std::string, vayu::db::Collection> staged_;
+    std::vector<vayu::db::Collection> written_tree_;
+};
 
 /**
  * Every request stored beneath @p subtree, in one canonical order.

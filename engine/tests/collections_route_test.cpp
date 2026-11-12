@@ -22,7 +22,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -33,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include "optional_assert.hpp"
+#include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/list_page.hpp"
@@ -47,12 +51,17 @@ namespace vayu::http::routes {
 RouteResult validate_parent_assignment (vayu::db::Database& db,
 const std::string& id,
 const std::optional<std::string>& parent_id);
-// Defined in collections.cpp; each returns {http_status, json_body}.
-std::pair<int, nlohmann::json>
-create_collection_response (vayu::db::Database& db, const nlohmann::json& json);
+// Defined in collections.cpp; each returns {http_status, json_body}. The
+// create core this file also calls is declared in spec_move_fixture.hpp.
 std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
 const std::string& id,
 const nlohmann::json& json);
+// The update core with its `before_write` seam, invoked inside the lock scope
+// with the merged row staged and immediately before it is written.
+std::pair<int, nlohmann::json> update_collection_response (vayu::db::Database& db,
+const std::string& id,
+const nlohmann::json& json,
+const std::function<void ()>& before_write);
 // Defined in collections.cpp; the GET /collections answer, {status, body}.
 std::pair<int, nlohmann::json> list_collections_response (vayu::db::Database& db,
 const ListPageQuery& page_query);
@@ -511,6 +520,93 @@ TEST_F (CollectionsRouteTest, ANullAuthResetsToNoneOnBothVerbs) {
     EXPECT_EQ (body["auth"]["mode"], "none");
 }
 
+// -- A stored auth names a known mode (#3464) -------------------------------
+//
+// Mutation check: drop `reject_unknown_auth_mode` from either core and the
+// matching test reds (each case is a loop, so all of its rows go with it); make
+// it fire on null or on an absent `auth` and the valid-write test reds.
+
+// Every body here parsed as stored and sent with no credential before the check.
+const std::vector<json>& unknown_auth_blocks () {
+    static const std::vector<json> blocks = {
+        json{ { "mode", "Inherit" } },
+        json{ { "mode", "Bearer" }, { "token", "t" } },
+        json{ { "mode", " inherit" } },
+        json{ { "mode", "" } },
+        json{ { "mode", 7 } },
+        json{ { "mode", nullptr } },
+        json{ { "mode", json::array ({ "bearer" }) } },
+        json{ { "token", "t" } },
+        json::object (),
+    };
+    return blocks;
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithAnUnknownAuthModeIsRefusedAndWritesNothing) {
+    for (const json& auth : unknown_auth_blocks ()) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", auth } });
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << body.dump ();
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithAnUnknownAuthModeIsRefusedAndLeavesTheRowAlone) {
+    seed_collection ("col_a", "A");
+    const auto before = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (before);
+
+    for (const json& auth : unknown_auth_blocks ()) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "name", "Renamed" }, { "auth", auth } });
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << body.dump ();
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << body.dump ();
+    }
+    const auto after = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "A");
+    EXPECT_EQ (after->auth, before->auth);
+    EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+// A bare array was already a 400 from `apply_json_field`; it must still store
+// nothing on either verb now that the mode check sits ahead of it.
+TEST_F (CollectionsRouteTest, AnAuthThatIsNotAnObjectIsStillRefusedOnBothVerbs) {
+    seed_collection ("col_a", "A");
+
+    auto [created_status, created] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "X" }, { "auth", json::array ({ "inherit" }) } });
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_a", json{ { "auth", json::array ({ "inherit" }) } });
+
+    EXPECT_EQ (created_status, 400) << created.dump ();
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), 1U);
+}
+
+TEST_F (CollectionsRouteTest, EveryKnownAuthModeButInheritIsStoredOnBothVerbs) {
+    seed_collection ("col_a", "A");
+    for (const std::string_view mode : vayu::http::AUTH_MODES) {
+        if (mode == "inherit") {
+            continue; // #3445, above.
+        }
+        auto [created_status, created] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", { { "mode", std::string (mode) } } } });
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "auth", { { "mode", std::string (mode) } } } });
+
+        EXPECT_EQ (created_status, 200) << mode << " -> " << created.dump ();
+        EXPECT_EQ (status, 200) << mode << " -> " << body.dump ();
+    }
+}
+
 // -- GET /collections: `q` / `limit` / `offset` (#2443) ----------------------
 
 std::vector<std::string> ids_of (const json& rows) {
@@ -590,6 +686,201 @@ TEST_F (CollectionsRouteTest, PagedListRefusesABadLimitOrOffset) {
         EXPECT_EQ (status, 400) << body.dump ();
         EXPECT_EQ (body["error"]["code"], code);
     }
+}
+
+// -- Leaving a spec binding (#3470) -----------------------------------------
+//
+// `PUT /collections/:id` with a `parentId` is the door a folder moves through
+// besides `POST /reorder` (any API client); it answers as the reorder does for
+// a moved folder, over the whole subtree.
+
+class CollectionMoveSpecBindingTest : public CollectionsRouteTest {
+    protected:
+    void SetUp () override {
+        CollectionsRouteTest::SetUp ();
+        trees_  = std::make_unique<vayu::tests::SpecMoveTrees> (*db_);
+        nested_ = make_folder ("nested", trees_->owners);
+        // `listPets` again, a level deeper than `listOwners`.
+        deep_pets_ = trees_->create_stamped (nested_, "GET", "/pets", "listPets");
+        seed_request (unstamped_, nested_, 1);
+    }
+    void TearDown () override {
+        trees_.reset ();
+        CollectionsRouteTest::TearDown ();
+    }
+
+    json put (const std::string& id, const json& body) {
+        auto [status, response] =
+        vayu::http::routes::update_collection_response (*db_, id, body);
+        EXPECT_EQ (status, 200) << response.dump ();
+        return response;
+    }
+
+    std::string make_folder (const std::string& name, const std::string& parent_id) {
+        auto [status, response] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", name }, { "parentId", parent_id } });
+        EXPECT_EQ (status, 200) << response.dump ();
+        return vayu::tests::id_of (response);
+    }
+
+    bool stored_stamp (const std::string& id) {
+        const auto row = db_->get_request (id);
+        if (!row) {
+            ADD_FAILURE () << "no request " << id;
+            return false;
+        }
+        return row->spec_operation.has_value ();
+    }
+
+    /// The operation ids declined under @p collection_id, sorted.
+    std::vector<std::string> declined_at (const std::string& collection_id) {
+        std::vector<std::string> ids;
+        for (const auto& record : db_->get_declined_operations (collection_id)) {
+            ids.push_back (record.operation_id);
+        }
+        std::ranges::sort (ids);
+        return ids;
+    }
+
+    /// What `owners` holds once it has left `pets`'s contract: both stamps
+    /// cleared and both operations declined there, with the unstamped request
+    /// beside them never written.
+    void expect_owners_left_pets () {
+        for (const auto& id : { trees_->list_owners, deep_pets_ }) {
+            EXPECT_FALSE (stored_stamp (id)) << id;
+        }
+        const auto unstamped = db_->get_request (unstamped_);
+        ASSERT_HAS_VALUE (unstamped);
+        EXPECT_EQ (unstamped->updated_at, 2)
+        << "a request with no stamp has nothing to clear";
+        EXPECT_EQ (declined_at (trees_->pets),
+        (std::vector<std::string>{ "listOwners", "listPets" }));
+        const json pets = trees_->diff_pets ();
+        EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+        // `listPets` is still claimed by the request at the root, which
+        // outranks its record.
+        EXPECT_EQ (pets["declined"].size (), 1u) << pets.dump ();
+        EXPECT_EQ (trees_->safe_sync_pets_created (), 0u);
+    }
+
+    void expect_nothing_declined () {
+        for (const auto& id : { trees_->list_pets, trees_->list_owners, deep_pets_ }) {
+            EXPECT_TRUE (stored_stamp (id)) << id;
+        }
+        EXPECT_TRUE (declined_at (trees_->pets).empty ());
+        const json pets = trees_->diff_pets ();
+        EXPECT_TRUE (pets["added"].empty ()) << pets.dump ();
+        EXPECT_TRUE (pets["declined"].empty ()) << pets.dump ();
+    }
+
+    std::unique_ptr<vayu::tests::SpecMoveTrees> trees_;
+    std::string nested_;
+    std::string deep_pets_;
+    const std::string unstamped_ = "req_unstamped";
+};
+
+// The issue's acceptance. Mutation checks: drop the `spec_operation` clear in
+// `stage_reparent_departures` and both stamps survive into `cars`, which lists
+// them as removed; pass no departures to `apply_reorder` and `pets` lists
+// `listOwners` as added and a safe sync creates it again; walk only the moved
+// folder's own requests and the nested one keeps its stamp; judge the binding
+// after off the stored tree alone (ignore `SpecTreeMove`'s staged rows) and
+// nothing is declined.
+TEST_F (CollectionMoveSpecBindingTest, AFolderMovedToAnotherBindingIsDeclinedAtTheSource) {
+    const json response = put (trees_->owners, json{ { "parentId", trees_->cars } });
+
+    EXPECT_EQ (response["parentId"], trees_->cars) << response.dump ();
+    expect_owners_left_pets ();
+    const json cars = trees_->diff (trees_->cars, vayu::tests::CARS_DOC);
+    EXPECT_TRUE (cars["removed"].empty ()) << "nothing foreign: " << cars.dump ();
+}
+
+TEST_F (CollectionMoveSpecBindingTest, AFolderMovedToAnUnboundCollectionIsDeclinedAtTheSource) {
+    put (trees_->owners, json{ { "parentId", trees_->plain } });
+
+    expect_owners_left_pets ();
+}
+
+TEST_F (CollectionMoveSpecBindingTest, AFolderMovedToTheTopLevelIsDeclinedAtTheSource) {
+    const json response = put (trees_->owners, json{ { "parentId", nullptr } });
+
+    EXPECT_TRUE (response["parentId"].is_null ()) << response.dump ();
+    expect_owners_left_pets ();
+}
+
+// Mutation check: compare the two bindings' `specId` alone in
+// `declined_by_move` and the stamps survive the move.
+TEST_F (CollectionMoveSpecBindingTest, AFolderMovedToASiblingRootBoundToTheSameDocumentIsDeclined) {
+    const std::string twin = trees_->create_bound ("Pets copy", trees_->pets_spec);
+
+    put (trees_->owners, json{ { "parentId", twin } });
+
+    expect_owners_left_pets ();
+    EXPECT_TRUE (declined_at (twin).empty ());
+}
+
+// A reparent inside the contract, into a sub-folder bound to the root's own
+// document included, and an edit that moves nothing keep every stamp.
+TEST_F (CollectionMoveSpecBindingTest, AReparentWithinTheContractKeepsEveryStamp) {
+    const std::string inner =
+    trees_->create_bound ("pets again", trees_->pets_spec, trees_->pets);
+
+    put (nested_, json{ { "parentId", trees_->pets } });
+    put (trees_->owners, json{ { "parentId", inner } });
+    put (trees_->owners, json{ { "name", "owners, renamed" } });
+
+    expect_nothing_declined ();
+    EXPECT_TRUE (declined_at (inner).empty ());
+}
+
+// Moving the bound collection itself moves the contract with its requests.
+TEST_F (CollectionMoveSpecBindingTest, MovingTheBoundCollectionKeepsItsStamps) {
+    put (trees_->pets, json{ { "parentId", trees_->plain } });
+
+    expect_nothing_declined ();
+}
+
+// An unbind and a reparent in one body: the stamps leave with the folder, and
+// the declines are recorded in the same transaction as the unbind's forget.
+// Mutation check: write the unbind with `rebind_collection (merged)` alone and
+// both stamps survive.
+TEST_F (CollectionMoveSpecBindingTest, AnUnbindThatAlsoReparentsStillDeclinesAtTheSource) {
+    put (trees_->owners, json{ { "parentId", trees_->cars }, { "openapi", nullptr } });
+
+    expect_owners_left_pets ();
+}
+
+// A bound folder unbound and moved out at once leaves the contract it was: its
+// request's stamp is cleared, and the decline that records is forgotten with
+// the binding, as an unbind forgets every earlier one. Mutation check: forget
+// before recording in `rebind_collection` and the record survives.
+TEST_F (CollectionMoveSpecBindingTest, UnbindingAndMovingTheBoundCollectionForgetsWhatItDeclined) {
+    const json response =
+    put (trees_->cars, json{ { "parentId", trees_->plain }, { "openapi", nullptr } });
+
+    EXPECT_EQ (response["openapi"], json::object ()) << response.dump ();
+    EXPECT_FALSE (stored_stamp (trees_->list_cars));
+    EXPECT_TRUE (declined_at (trees_->cars).empty ());
+}
+
+// The decline is part of the write's one transaction: a commit that fails
+// leaves the folder, the stamps and the records as they were. The victim sits
+// after `listOwners`, so the write has recorded that decline before it meets
+// the missing row.
+TEST_F (CollectionMoveSpecBindingTest, AReparentThatFailsAtCommitRecordsNoDecline) {
+    const std::string victim =
+    trees_->create_stamped (trees_->owners, "GET", "/pets", "listPets");
+
+    auto [status, response] =
+    vayu::http::routes::update_collection_response (*db_, trees_->owners,
+    json{ { "parentId", trees_->plain } }, [&] { db_->delete_request (victim); });
+
+    ASSERT_EQ (status, 409) << response.dump ();
+    const auto owners = db_->get_collection (trees_->owners);
+    ASSERT_HAS_VALUE (owners);
+    EXPECT_EQ (owners->parent_id, std::optional<std::string> (trees_->pets));
+    EXPECT_TRUE (stored_stamp (trees_->list_owners));
+    EXPECT_TRUE (declined_at (trees_->pets).empty ());
 }
 
 } // namespace

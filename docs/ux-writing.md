@@ -184,7 +184,10 @@ scattered strings land the same way.
   exceptions today: all three moved to the Trash and kept their dialog, whose
   body says the Trash can restore it instead of calling the delete final. The
   Trash's own "Delete forever" dialog for a certificate names what is lost (the
-  stored passphrase) and what is not (the files on disk). An imported example's delete keeps a dialog too,
+  stored passphrase) and what is not (the files on disk), and for a collection
+  the sub-collections and requests the purge destroys, an earlier delete's
+  included (#3449). The Trash's retention line says when the sweep runs ("...
+  the next time Vayu starts"), never a clock the engine does not keep. An imported example's delete keeps a dialog too,
   but it is not trashed, so its body says what a sync and a re-import do.
 - **Keyboard shortcuts in tooltips**, platform-aware glyphs, one format: the
   label, then the chord in a `TooltipHint` beside it, no parentheses

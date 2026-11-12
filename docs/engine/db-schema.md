@@ -1344,23 +1344,26 @@ each in the transaction of the write named:
   `Database` reads no binding itself). Deleting the bound collection itself
   writes nothing. A sync's own (hard) deletes write nothing.
 - **Written** too by a person's move out of the contract (#3446): a
-  `PUT /requests/:id` with a `collectionId`, or a `POST /reorder` batch (every
-  stamped request under a moved collection included), that leaves a stamped
-  request where the nearest binding is not the same contract
-  (`declined_by_move` in `routes.hpp`: another document, none, or the same
-  document bound by a collection outside the source's contract walk). The
-  collection is the source's nearest binding, read before the move, and the
-  same write clears the request's `spec_operation` (`Database::save_request` /
-  `apply_reorder`, given the decision by the route).
+  `PUT /requests/:id` with a `collectionId`, a `POST /reorder` batch (every
+  stamped request under a moved collection included), or a
+  `PUT /collections/:id` with a `parentId` (every stamped request in the moved
+  subtree, #3470), that leaves a stamped request where the nearest binding is
+  not the same contract (`declined_by_move` in `routes.hpp`: another document,
+  none, or the same document bound by a collection outside the source's
+  contract walk). The collection is the source's nearest binding, read before
+  the move, and the same write clears the request's `spec_operation`
+  (`Database::save_request` / `apply_reorder`, or `rebind_collection` when the
+  same `PUT` also unbinds, given the decision by the route).
 - **Forgotten** when the request comes back from the trash (by `request_id`,
   alone or with its collection's cohort) while it still records an operation
   (`forget_declined_by_locked`'s guard): a request a move unstamped claims
   nothing back, so its move's row stands; when a `POST /specs/sync` creates a
   request for the same operation (`core::declines_taken_back`, the diff's own
   identity rule run against the document being stored); when
-  `PUT /collections/:id` unbinds the collection, or `POST /specs/bind` binds it
-  to a document with another `specHash`; and when the bound collection
-  itself is purged.
+  `PUT /collections/:id` unbinds the collection (after the rows a move in the
+  same body wrote, so one written under the collection itself goes too), or
+  `POST /specs/bind` binds it to a document with another `specHash`; and when
+  the bound collection itself is purged.
 - **Kept** when the deleted request is purged, by hand or by
   `trashRetentionDays`: emptying the trash is not changing one's mind.
 

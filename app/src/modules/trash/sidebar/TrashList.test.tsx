@@ -14,9 +14,10 @@
  *
  * Three of these cases exist because the engine answers with something the view
  * is the last chance to show. `reparentedToRoot` moves the user's folder and
- * the tree cannot say so; a 409 names the collection blocking a restore; the
- * cascade counts are the only place a folder in the trash is distinguishable
- * from an empty one. Each of them is a field that would otherwise be written by
+ * the tree cannot say so; a 409 names the root blocking a restore; the
+ * purge totals are the only place a folder in the trash is distinguishable
+ * from an empty one, and `parentName` the only place two same-named entries
+ * are. Each of them is a field that would otherwise be written by
  * the engine and read by nobody.
  */
 
@@ -46,8 +47,8 @@ function collectionEntry(over: Partial<TrashEntry> = {}): TrashEntry {
 		kind: "collection",
 		name: "Billing",
 		deletedAt: Date.now() - 60_000,
-		collections: 0,
-		requests: 0,
+		purgeCollections: 0,
+		purgeRequests: 0,
 		...over,
 	};
 }
@@ -235,20 +236,71 @@ describe("the list", () => {
 		expect(rowFor("e2")?.textContent).not.toMatch(/with/);
 	});
 
-	it("says what the delete took with it, so a restore's size is visible", () => {
+	it("says what a purge destroys, so the size of the loss is visible", () => {
 		// A collection in the trash is indistinguishable from an empty one
-		// without this - and restoring it is a very different act at 11 requests.
-		state.items = [collectionEntry({ collections: 2, requests: 11 })];
+		// without this - and deleting it forever is a very different act at 11
+		// requests.
+		state.items = [collectionEntry({ purgeCollections: 2, purgeRequests: 11 })];
 		renderTrash();
 
 		expect(screen.getByText(/with 2 collections, 11 requests/)).toBeInTheDocument();
 	});
 
+	it("reads the purge totals, not the cohort a restore would bring back (#3449)", () => {
+		// An earlier delete left a request under this folder: the cohort counts 2
+		// requests, the purge destroys 3. The type no longer claims the cohort pair,
+		// but the engine still sends it, so the row is built with it on the wire.
+		state.items = [
+			collectionEntry({
+				purgeCollections: 2,
+				purgeRequests: 3,
+				...({ collections: 1, requests: 2 } as object),
+			}),
+		];
+		renderTrash();
+
+		expect(screen.getByText(/with 2 collections, 3 requests$/)).toBeInTheDocument();
+		expect(rowFor("c1")?.textContent).not.toMatch(/with 1 collection/);
+	});
+
 	it("does not pluralise a single child", () => {
-		state.items = [collectionEntry({ collections: 1, requests: 1 })];
+		state.items = [collectionEntry({ purgeCollections: 1, purgeRequests: 1 })];
 		renderTrash();
 
 		expect(screen.getByText(/with 1 collection, 1 request$/)).toBeInTheDocument();
+	});
+
+	it("shows the owner of a request and of an example (#3449)", () => {
+		state.items = [
+			collectionEntry({ id: "r1", kind: "request", name: "Charge", parentName: "Payments" }),
+			exampleEntry({ parentName: "Create payment" }),
+		];
+		renderTrash();
+
+		expect(rowFor("r1")?.textContent).toMatch(/^ChargeRequest · from Payments · Deleted /);
+		expect(rowFor("x1")?.textContent).toMatch(
+			/^Happy pathExample · from Create payment · Deleted /
+		);
+	});
+
+	it("tells two same-named examples from different requests apart by their owner (#3449)", () => {
+		state.items = [
+			exampleEntry({ id: "x1", name: "200 OK", parentName: "List users" }),
+			exampleEntry({ id: "x2", name: "200 OK", parentName: "Create user" }),
+		];
+		renderTrash();
+
+		expect(rowFor("x1")?.textContent).toContain("from List users");
+		expect(rowFor("x2")?.textContent).toContain("from Create user");
+		expect(screen.getByText(/from List users/)).toBeInTheDocument();
+		expect(screen.getByText(/from Create user/)).toBeInTheDocument();
+	});
+
+	it("names no owner on a kind the engine sends none for", () => {
+		state.items = [collectionEntry(), environmentEntry(), certificateEntry()];
+		renderTrash();
+
+		expect(document.body.textContent).not.toMatch(/from /);
 	});
 
 	it("states the retention window it read from the engine's config", () => {
@@ -256,7 +308,9 @@ describe("the list", () => {
 		renderTrash();
 
 		expect(
-			screen.getByText("Items are permanently deleted 30 days after they land here.")
+			screen.getByText(
+				"Items more than 30 days old are permanently deleted the next time Vayu starts."
+			)
 		).toBeInTheDocument();
 	});
 
@@ -357,7 +411,7 @@ describe("restore", () => {
 		state.items = [collectionEntry({ id: "r1", kind: "request", name: "Charge" })];
 		restore.mockRejectedValue(
 			new Error(
-				"Request 'r1' cannot be restored on its own - the collection it belongs to is in the trash, so restore that first"
+				"Request 'Charge' cannot be restored on its own - the collection it belongs to, 'Payments', is in the trash under 'Archive' (c9), so restore that first"
 			)
 		);
 		renderTrash();
@@ -375,7 +429,10 @@ describe("restore", () => {
 
 describe("restoring an example", () => {
 	it.each([
-		["its request is in the trash", "Request 'r1' is in the trash, so restore that first"],
+		[
+			"its request is in the trash",
+			"Example 'Happy path' cannot be restored on its own - the request it belongs to, 'Charge' (r1), is in the trash, so restore that first",
+		],
 		[
 			"its request already holds the most examples",
 			"Request 'r1' already holds the maximum of 100 examples - delete one first",
@@ -455,15 +512,19 @@ describe("delete forever", () => {
 		expect(purge).not.toHaveBeenCalled();
 	});
 
-	it("names what goes with a collection, since the confirm is the last word", async () => {
-		state.items = [collectionEntry({ requests: 4 })];
+	it("counts everything a purge removes, since the confirm is the last word", async () => {
+		// An earlier delete left rows under the folder that its cohort does not
+		// count, and the purge takes them too (#3449).
+		state.items = [collectionEntry({ purgeCollections: 2, purgeRequests: 4 })];
 		renderTrash();
 
 		fireEvent.click(screen.getByRole("button", { name: "Delete Billing forever" }));
 
-		expect(
-			await screen.findByText(/"Billing" and everything inside it is removed permanently/)
-		).toBeInTheDocument();
+		const dialog = await screen.findByRole("dialog");
+		expect(dialog).toHaveTextContent(
+			'"Billing" is removed permanently, along with 2 collections and 4 requests inside it.'
+		);
+		expect(dialog.textContent).not.toMatch(/1 collection /);
 	});
 
 	it("purges once confirmed", async () => {

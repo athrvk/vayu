@@ -1321,9 +1321,17 @@ export interface WorkspaceBackupResult {
  * **Roots only.** Deleting a collection stamps its whole subtree in one
  * transaction, and the engine reports the row the user actually deleted rather
  * than every row that went with it - a request whose collection is in the trash
- * is not listed separately. `collections` and `requests` are how many went along
- * with this one, counted over that same delete (rows an *earlier* delete left
- * inside the subtree are not in the cohort and are not counted here).
+ * is not listed separately. A request is a root only while its collection is
+ * live, and an example only while its request is.
+ *
+ * A collection entry's `purgeCollections` and `purgeRequests` are what a
+ * **purge** destroys: every deleted row under the root, an *earlier* delete's
+ * included, which the list does not show (#3449). A purge prompt and a row that
+ * tell the user what leaves for good read them. The engine also sends the
+ * **cohort** pair `collections` / `requests` - what that one delete took, which
+ * is exactly what a restore puts back, and never above the purge totals - and
+ * this type deliberately does not claim it: nothing here reads it. Add it back
+ * with its reader, not before.
  *
  * An environment (#2970) is always a root and takes nothing with it: its
  * variables live on its own row, so they are counted in `variables` rather than
@@ -1340,18 +1348,24 @@ export interface TrashEntry {
 	/*
 	 * The engine also sends `parentId` - the collection's old parent, the
 	 * request's owning collection, the example's owning request, null for an
-	 * environment or a client certificate - and this type deliberately does not claim it, the way
-	 * `RequestExample` omits the `order` and timestamps it does not use. Nothing
-	 * here reads it: a trash row names the item, not its old location, and
-	 * resolving the id to a name would fail for exactly the parents worth naming
-	 * (a parent that is itself deleted is not in the live tree). Add it back
-	 * with the reader, not before. The whole wire shape is in
+	 * environment or a client certificate - and this type deliberately does not
+	 * claim it, the way `RequestExample` omits the `order` and timestamps it does
+	 * not use. Nothing here reads it: a row names the owner through `parentName`,
+	 * which the engine resolves, because the id would have to be looked up in a
+	 * live tree that need not hold a parent that is itself deleted. Add `parentId`
+	 * back with its reader, not before. The whole wire shape is in
 	 * `docs/engine/api-reference.md` under Trash.
 	 */
-	/** Sub-collections this delete took with it. Always 0 for every kind but a collection. */
-	collections: number;
-	/** Requests this delete took with it. Always 0 for every kind but a collection. */
-	requests: number;
+	/**
+	 * The live owner's name: the collection a request came from, the request an
+	 * example came from. Sent on request and example entries only, so two
+	 * same-named entries tell apart by it (#3449).
+	 */
+	parentName?: string;
+	/** Sub-collections a purge destroys, an earlier delete's included (#3449). Always 0 for every kind but a collection. */
+	purgeCollections: number;
+	/** Requests a purge destroys, an earlier delete's included (#3449). Always 0 for every kind but a collection. */
+	purgeRequests: number;
 	/** How many variables the environment holds. Sent on environment entries only. */
 	variables?: number;
 }
@@ -1369,8 +1383,8 @@ export interface ListTrashResponse {
  * whose parent is gone or itself in the trash cannot go back where it came
  * from, so the engine clears its parent and it returns as a tree root - which
  * moves a folder the user has to be told about. A *request* in that position is
- * refused instead (409, `restore that first`), because a request has no root to
- * land on.
+ * refused instead (409, naming the Trash root to restore first), because a
+ * request has no root to land on.
  */
 export interface RestoreTrashResponse extends TrashEntry {
 	restored: true;

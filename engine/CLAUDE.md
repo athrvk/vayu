@@ -492,7 +492,7 @@ Key endpoints:
 | GET | `/health` | Health check: `status`, `version`, `workers`, `dataDir` (the absolute data directory, `core::absolute_data_dir`, so a client can tell its own engine from another's, #3328) and, after a startup recovery, `recovery` |
 | GET | `/request-defaults` | What the engine adds to a request that names none of it (#1229): the `User-Agent`, negotiated `Accept-Encoding`, an opt-in correlation id and, when `sendExpectContinue` is on, the `Expect: 100-continue` libcurl may add above 1 MiB (#2468), so a client renders them instead of re-deriving them. `?scope=design\|load` (default `design`, anything else a `400`) names which send is being described, because a load run resolves compression from its own key (#1338) |
 | POST | `/workspace/backup` | One `VACUUM INTO` snapshot of the workspace into `backups/` beside the database, with retention (#987); no restore endpoint, see `docs/engine/architecture.md` |
-| GET | `/trash` | What deleting a collection, request, environment, user-saved example or client certificate left recoverable (#988, environments #2970, examples #2971, certificates #2973): roots only, each with what its cascade took (an environment entry alone carries `variables`, its count; an example's `parentId` is its request, and it is a root only while that request is live; a `clientCertificate` is named `host` or `host:port`, and a trashed one is in no transport policy); `POST /trash/:id/restore` puts one back (an environment inactive; an example `409`s under a trashed or missing request or a full one; a certificate `409`s while a live entry holds its target), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
+| GET | `/trash` | What deleting a collection, request, environment, user-saved example or client certificate left recoverable (#988, environments #2970, examples #2971, certificates #2973): roots only, each with what its cascade took (`collections`/`requests`, the cohort a restore puts back) and what a purge would destroy (`purgeCollections`/`purgeRequests`, every stamped row under the root, #3449); an environment entry alone carries `variables`, its count; a request's and an example's carry `parentName`, the live owner's name (#3449); an example's `parentId` is its request, and it is a root only while that request is live; a `clientCertificate` is named `host` or `host:port`, and a trashed one is in no transport policy; `POST /trash/:id/restore` puts one back (an environment inactive; a request or example under a trashed owner `409`s naming the trash root to restore first by name and id, and an example also under a missing request or a full one; a certificate `409`s while a live entry holds its target), `DELETE /trash/:id` destroys it, `trashRetentionDays` purges the rest at startup |
 | POST | `/import/parse` | Read a raw import document (OpenAPI 2.0/3.x, Postman v2.0/v2.1, a Postman environment or globals export, Insomnia v4, an Insomnia v5 collection or environment, a JMeter test plan) into the tree `/import/apply` persists (#877); reads only |
 | POST | `/import` | The same parse, flattened and applied in one call; what MCP `import_document` wraps. The app parses and applies separately because a person previews in between |
 | POST | `/import/document` | A document's bytes as a JSON DOM through the engine's one reader; what the app's `$ref` bundler needs |
@@ -554,7 +554,11 @@ logged as a warning: it means a client skipped composition.
   A collection's or environment's blank `name` is refused by
   `reject_blank_name` (`routes.hpp`, #3253), which the four create/update
   cores call and the appliers do not, because an importer can write a blank
-  name that `POST /import/apply` and `POST /specs/sync` store today.
+  name that `POST /import/apply` and `POST /specs/sync` store today. The same
+  split holds a stored `auth` to a known `mode` (`reject_unknown_auth_mode`,
+  #3464, in the collection and request cores): the closed set is
+  `vayu::http::AUTH_MODES` (`auth_resolver.hpp`), read by the route check and by
+  the Vayu-extension reader, never restated.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`
@@ -842,13 +846,15 @@ logged as a warning: it means a client skipped composition.
     ancestor, which the route resolves (`core::nearest_spec_binding`) and
     passes to `Database::delete_request` / `delete_collection`, so `Database`
     reads no binding. A move out of the contract is the same decision (#3446):
-    `PUT /requests/:id` and `POST /reorder` (a moved folder's whole subtree,
-    judged against the tree the batch writes) compare the nearest binding
-    before and after (`declined_by_move`, `routes.hpp`: the same binding, or
-    the same document with one inside the other's `spec_contract_subtree_ids`,
-    is one contract; a sibling root bound to the same document is not), clear
-    the stamp and pass the record down to `save_request` / `apply_reorder`; a
-    move within one contract keeps it. The diff lists it under `declined`, never `added`;
+    `PUT /requests/:id`, `POST /reorder` and a `parentId` on
+    `PUT /collections/:id` (#3470; a moved folder's whole subtree, judged
+    against the tree the write stores through `SpecTreeMove`, an unbind in the
+    same body included) compare the nearest binding before and after
+    (`declined_by_move`, `routes.hpp`: the same binding, or the same document
+    with one inside the other's `spec_contract_subtree_ids`, is one contract; a
+    sibling root bound to the same document is not), clear the stamp and pass
+    the record down to `save_request` / `apply_reorder` / `rebind_collection`,
+    in the write's one transaction; a move within one contract keeps it. The diff lists it under `declined`, never `added`;
     `SafeSpecApply::recreate` is all-false, so `policy: "safe"` never creates
     it. A restore of a request that still records the operation, a sync that
     creates it, an unbind and a bind to other bytes forget the record; a purge

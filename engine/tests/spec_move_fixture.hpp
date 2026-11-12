@@ -12,9 +12,10 @@
  * @brief Two spec-bound trees and an unbound collection, for the move paths
  *        that take a stamped request out of its binding (#3446).
  *
- * `POST /reorder` and `PUT /requests/:id` both answer the same question, so
- * both suites build the same ground through the real route cores and ask the
- * source binding the same three things afterwards: what the diff of its
+ * `POST /reorder`, `PUT /requests/:id` and `PUT /collections/:id` (#3470) all
+ * answer the same question, so their suites build the same ground through the
+ * real route cores and ask the source binding the same three things
+ * afterwards: what the diff of its
  * unchanged document adds, what it lists as declined, and what a safe sync
  * of a revision that changes nothing but `info.version` creates.
  */

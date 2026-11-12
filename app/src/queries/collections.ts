@@ -488,6 +488,13 @@ export function useDeleteCollectionMutation() {
 			// The spec-file and data-file bindings are not cleared: they are
 			// columns of the trashed row (#2765), so a restore brings them back
 			// and a purge takes them, both engine-side.
+			/*
+			 * The engine stops the mocks of the subtree itself (#3449), so the
+			 * list of running mocks is stale from this moment. The list only:
+			 * a stopped mock's route table is a 404 now, and refetching it
+			 * would be a call that fails.
+			 */
+			void queryClient.invalidateQueries({ queryKey: queryKeys.mockServer.list() });
 		},
 	});
 }
