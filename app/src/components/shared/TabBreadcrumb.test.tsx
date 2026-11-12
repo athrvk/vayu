@@ -17,11 +17,11 @@
  *      show is what the builder's description band charged every request ~30px
  *      for until it became the Info tab. Nothing to say must mean no element,
  *      not an element with no text - and only absence can be asserted for.
- *   2. **Which segment gives way.** The last crumb is where you are, so the
- *      ancestors truncate and it does not. jsdom has no layout, so the classes
- *      are the assertion: `min-w-0` + `truncate` is what makes `truncate`
- *      engage at all inside a flex row, and `shrink-0` on the current crumb is
- *      what keeps it out of the negotiation.
+ *   2. **How each segment gives way.** The ancestors truncate down to a 3ch
+ *      floor, so a chevron never lands on a first letter; the current crumb
+ *      truncates too and carries its full text (#3495). jsdom has
+ *      no layout, so the classes are the assertion: `truncate` with a `min-w-*`
+ *      is what makes it engage at all inside a flex row.
  *   3. **Only a crumb with somewhere to go is a control.** The current crumb is
  *      inert, and so is an ancestor the caller gave no handler - a button that
  *      does nothing is worse than text.
@@ -74,19 +74,43 @@ describe("TabBreadcrumb", () => {
 		expect(screen.getByText("History").tagName).not.toBe("BUTTON");
 	});
 
-	it("truncates ancestors and never the current crumb", () => {
+	it("gives ancestors a floor, so a chevron never lands on a label's first letter", () => {
 		renderCrumbs([
 			{ id: "a", label: "A collection with a very long name indeed", onSelect: () => {} },
+			{ id: "b", label: "A folder with a very long name indeed" },
 			{ id: "c", label: "List settlements" },
 		]);
 
-		const ancestor = screen.getByText("A collection with a very long name indeed");
-		expect(ancestor.className).toContain("truncate");
-		expect(screen.getByRole("button").className).toContain("min-w-0");
+		const button = screen.getByRole("button");
+		const linked = screen.getByText("A collection with a very long name indeed");
+		const plain = screen.getByText("A folder with a very long name indeed");
+		expect(linked.className).toContain("truncate");
+		expect(plain.className).toContain("truncate");
+		// The floor is on the flex item that sits beside the chevron.
+		expect(button.className).toContain("min-w-[3ch]");
+		expect(button.className).toContain("max-w-[16ch]");
+		expect(plain.className).toContain("min-w-[3ch]");
+		expect(plain.className).toContain("max-w-[16ch]");
+		// And no wrapper sits between that item and the shared row, where a
+		// `min-w-0` would let the pair shrink below the floor.
+		expect(button.parentElement).toBe(plain.parentElement);
+		expect(button.parentElement?.className).toContain("min-w-0");
+	});
 
-		const current = screen.getByText("List settlements");
-		expect(current.className).toContain("shrink-0");
-		expect(current.className).not.toContain("truncate");
+	it("lets the current crumb truncate, with its full text on hover", () => {
+		const name = "Create a customer with every optional field filled in";
+		renderCrumbs([
+			{ id: "a", label: "Acme API", onSelect: () => {} },
+			{ id: "c", label: name },
+		]);
+
+		const current = screen.getByText(name);
+		const classes = current.className.split(/\s+/);
+		expect(classes).toEqual(expect.arrayContaining(["truncate", "min-w-0"]));
+		expect(classes).not.toContain("shrink-0");
+		// `TruncatedText` renders a block box so `truncate` engages; the title it
+		// sets only while clipped is covered by its own tests.
+		expect(classes).toContain("block");
 	});
 
 	it("drops blank labels rather than drawing an empty segment", () => {

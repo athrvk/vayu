@@ -2468,6 +2468,29 @@ a pixel.
   Secret and action columns would otherwise leave all of the slack to the two
   inputs. The scroller already computes `overflow-x: auto`.
 
+- **In a two-span row, the descriptor gives way and the name does not**
+  (#3495). A palette row is a title and a subtitle (a collection path, often the
+  longer of the two). The title keeps a floor (`min-w-[12ch]`), the subtitle is
+  `min-w-0 max-w-[50%]` and truncates, and neither carries `shrink-0`: a
+  `shrink-0 truncate` subtitle never truncates (it keeps its intrinsic width, so
+  its ellipsis has nothing to cut) and left the title 0px. Both are
+  `TruncatedText`, so a clipped path still has its full text on hover. A row's
+  *action cluster* (the chip, a button, a chord) is the opposite and stays
+  `shrink-0`.
+- **A name in a table is one token and never wraps.** `HeadersViewer`'s name
+  cell is `whitespace-nowrap` and its text a `TruncatedText` capped at `40ch`
+  (the longest registered header names are about 35), so "Content-Type" never
+  reads as "Content-" over "Type" and a pathological name cannot take the
+  value's column. The value keeps `break-all`: it is the part that is allowed to
+  wrap. `CompactHeadersViewer`'s name is the same cap on a `shrink-0` label.
+- **A breadcrumb's every crumb can be cut, none to nothing.** `TabBreadcrumb`'s
+  ancestors truncate down to `min-w-[3ch]` (and never past `16ch`), so a chevron
+  cannot land on a label's first letter; the current crumb is `min-w-0` and a
+  `TruncatedText`, so a long name ellipses with its full text on hover instead of
+  running under the nav's clip (it was `shrink-0` with no `title`). The ancestor
+  labels and their chevrons are direct children of one row: a wrapper per pair
+  with `min-w-0` would shrink below the label's floor.
+
 The title bar is the one surface where these are viewport-sized (see the note
 under "A run pane's grids answer to the pane"). Its side columns are
 `minmax(0,1fr)`, the search bar is `clamp(2.5rem, 100vw - 36rem, 28rem)`, so each

@@ -1574,9 +1574,10 @@ The one "where am I" line a detail tab draws, and the answer to the builder
 being the only surface that had one (#1691). Takes a `label` for the `nav`'s
 accessible name and an ordered `crumbs` array of `{ id, label, onSelect? }`.
 
-- **The last crumb is where you are**, and it never gives way: the ancestors get
-  `min-w-0`/`truncate` and shrink, the current crumb is `shrink-0`. A deep chain
-  gives way; the part you were looking for does not.
+- **Every crumb can be cut, none to nothing** (#3495). The ancestors truncate
+  down to a `min-w-[3ch]` floor, so a chevron never lands on a label's first
+  letter; the current crumb is `min-w-0` and a `TruncatedText`, so a long name is
+  cut with its full text on hover rather than running under the nav's clip.
 - **A crumb navigates only if the caller gave it an `onSelect`.** The current one
   is inert, because you are already there, and a control that does nothing is
   worse than text.
