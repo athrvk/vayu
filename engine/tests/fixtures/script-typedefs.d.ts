@@ -2326,7 +2326,7 @@ declare const pm: {
 	 * 
 	 * Example:
 	 * pm.sendRequest('https://auth.example.com/token', function (err, res) {
-	 *   if (err) { return; }
+	 *   if (err) { console.error(err); return; }
 	 *   pm.environment.set('token', res.json().access_token);
 	 * });
 	 */

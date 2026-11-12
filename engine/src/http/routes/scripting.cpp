@@ -2022,7 +2022,7 @@ nlohmann::json get_script_completions () {
     "called, so a request sent from inside a script would bypass it. When a "
     "run comes from the MCP server this throws instead of "
     "sending.\n\nExample:\npm.sendRequest('https://auth.example.com/token', "
-    "function (err, res) {\n  if (err) { return; }\n  "
+    "function (err, res) {\n  if (err) { console.error(err); return; }\n  "
     "pm.environment.set('token', res.json().access_token);\n});" },
     { "sortText", "0_pm_sendRequest" } });
 
