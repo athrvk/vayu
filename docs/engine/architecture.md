@@ -992,7 +992,10 @@ rule (#3125): each un-inlined `script.post` element (a single-request run's
 replayed as its own script against every sample, never a joined text. The
 replay starts from a copy of the scopes `script.setup` left (`ReplayBase`,
 #3460: `RunContext::lifecycle_scopes`, or `ScenarioLoadState::lifecycle_scopes`),
-never a fresh read of the stored rows, and teardown reads the original - see
+never a fresh read of the stored rows, and teardown reads the original. Each
+sample's `pm.request` is re-derived from the request the run built and the
+row and identity the sample recorded (`request_as_submitted`,
+`step_request_as_submitted`), so nothing is retained per sample - see
 [scripting.md](scripting.md#load-test-scripts).
 
 ### Database (`SQLite`)

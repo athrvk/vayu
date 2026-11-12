@@ -682,7 +682,7 @@ scenario step. An unmarked `script.post` defers to this run's own completion
 replay (`RunContext::test_scripts`, one entry per un-inlined element taken at
 compile time so the replay does not need to know `elements` exist, each
 replayed as its own script, #3125, against a copy of the scopes `script.setup`
-left, #3460); an
+left and each sample's request as sent, #3460); an
 unmarked `script.pre` simply never runs, since there is no pre-request replay
 on this path to defer it to.
 

@@ -484,6 +484,23 @@ struct ResultAnnotations {
 };
 
 /**
+ * @brief The request a single-request run's submission @p annotations sent,
+ * re-derived for the deferred replay (#3460).
+ *
+ * @p shared, the request every submission copied (`build_load_request`'s),
+ * taken through `submit_one_request`'s own steps: the bind of the
+ * submission's row and iteration, then the residual pass against
+ * `RunContext::step_base_vars`, the scopes as `script.setup` left them; or,
+ * for a run that sends the shared request, the one settle it got. What a
+ * `step.before` element wrote into the request or its scopes is not
+ * reproduced (no sample records it), and neither is a credential refreshed
+ * mid-run: the replay reads the one the run was built with.
+ */
+[[nodiscard]] vayu::Request request_as_submitted (const RunContext& context,
+const vayu::Request& shared,
+const ResultAnnotations& annotations);
+
+/**
  * @brief Whether @p error is a transfer a user Stop cancelled (#2136).
  *
  * The event loop cancels with `ErrorCode::Cancelled` on both of a run's ways

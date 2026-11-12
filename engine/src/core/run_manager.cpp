@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -117,8 +118,12 @@ struct ScriptReplay {
     /// One entry per `script.post` element, in compile order, each executed
     /// on its own (#3125): joined, two elements that both declare `const json`
     /// are a SyntaxError here while Send and a collection run pass them.
-    const std::vector<std::string>* scripts    = nullptr;
-    const vayu::Request* request               = nullptr;
+    const std::vector<std::string>* scripts = nullptr;
+    /// `pm.request` for every sample, unless @ref request_as_sent is set.
+    const vayu::Request* request = nullptr;
+    /// The request a sample was sent as, re-derived per sample (#3460); unset
+    /// where the replay has no run behind it to re-derive from.
+    std::function<vayu::Request (const ResponseSample&)> request_as_sent;
     const std::vector<ResponseSample>* samples = nullptr;
     /// The run's data rows, so a sampled iteration reads the row it was bound
     /// to as `pm.iterationData`. Null for a run sent without `data`.
@@ -235,15 +240,16 @@ vayu::Response sample_response (const ResponseSample& sample) {
  * Read-only for the engine (`execute` takes it by `const&` and opens a fresh
  * JavaScript context per call), so one context serves each element in turn;
  * only a scope write carries from one element to the next, through @p scopes.
- * @p response and @p stream_events are bound by address and must outlive
- * every execute that reads the result.
+ * @p request, @p response and @p stream_events are bound by address and must
+ * outlive every execute that reads the result.
  */
 vayu::runtime::ScriptContext replay_context (const ScriptReplay& replay,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ResponseSample& sample,
+const vayu::Request& request,
 const vayu::Response& response,
 nlohmann::json& stream_events) {
-    auto script_ctx = vayu::runtime::ScriptContext::for_test (*replay.request, response);
+    auto script_ctx = vayu::runtime::ScriptContext::for_test (request, response);
     // All four scopes, through the one function that knows which of them a
     // script may write (issue #728). Binding only `environment` here - and an
     // empty one at that - is what made the same test script pass on Send and
@@ -302,8 +308,14 @@ ScriptValidationTotals& totals,
 DistinctMessageSample& console,
 RecordFailure& record_failure) {
     const vayu::Response response = sample_response (sample);
+    std::optional<vayu::Request> sent;
+    if (replay.request_as_sent) {
+        sent = replay.request_as_sent (sample);
+    }
+    const vayu::Request& request = sent ? *sent : *replay.request;
     nlohmann::json stream_events;
-    const auto script_ctx = replay_context (replay, scopes, sample, response, stream_events);
+    const auto script_ctx =
+    replay_context (replay, scopes, sample, request, response, stream_events);
     for (const auto& script : *replay.scripts) {
         try {
             const vayu::ScriptResult result = engine.execute (script, script_ctx);
@@ -489,16 +501,27 @@ RunContext::ScriptsOverrideMode scripts_mode) {
     return scripts;
 }
 
+/// The virtual user and iteration a scenario load sample was sent as, which
+/// its executor records on every sample (`submit_one`).
+IterationIdentity scenario_sample_identity (const ResponseSample& sample) {
+    return { vayu::utils::invariant_value (sample.vu, "a scenario load sample records its virtual user"),
+        vayu::utils::invariant_value (
+        sample.iteration, "a scenario load sample records its iteration") };
+}
+
 /**
  * The per-step replays of a scenario load run.
  *
  * A step with no script, or one whose script never got a sample to run against,
  * reports nothing rather than a row of zeros - the same distinction the
  * whole-run section has always kept. Returns the steps' counts summed; each
- * step's console lines stay on its own entry of `validation.steps`.
+ * step's console lines stay on its own entry of `validation.steps`. @p state,
+ * null when the run's driver never started, is what each sample's request is
+ * re-derived from.
  */
 ScriptValidationTotals replay_scenario_steps (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::RunVariableScopes& scopes,
+const ScenarioLoadState* state,
 const std::shared_ptr<RunContext>& context,
 const vayu::http::SseLimits& sse_limits,
 const vayu::runtime::ScriptSendInputs& send,
@@ -536,8 +559,17 @@ ReplayFailures& failures) {
         "moment are not recorded. See docs/engine/scripting.md.";
         // The step's own request, so `pm.request` describes the step the
         // script is asserting on rather than a run-level request a
-        // scenario payload does not have.
-        replay.request    = &step.request;
+        // scenario payload does not have; as each sample sent it, where the
+        // run's state is there to re-derive it from (#3460).
+        replay.request = &step.request;
+        if (state != nullptr) {
+            replay.request_as_sent = [&execution = *context->scenario,
+                                     &bases      = state->scope_bases,
+                                     i] (const ResponseSample& sample) {
+                return step_request_as_submitted (execution, bases, i,
+                sample.data_row_index, scenario_sample_identity (sample));
+            };
+        }
         replay.samples    = &samples;
         replay.data_rows  = data_rows.empty () ? nullptr : &data_rows;
         replay.request_id = step.request_id.empty () ?
@@ -707,8 +739,8 @@ const ReplayBase& base) {
         auto scopes = base.scenario_state != nullptr ?
         base.scenario_state->lifecycle_scopes :
         scenario_load_scopes (db, environment_id, *context->scenario);
-        totals      = replay_scenario_steps (
-        engine, scopes, context, sse_limits, script_send, validation, failures);
+        totals = replay_scenario_steps (engine, scopes, base.scenario_state,
+        context, sse_limits, script_send, validation, failures);
         // Every scripted step drew a blank, so the run validated nothing.
         if (totals.sampled == 0) {
             return validation;
@@ -721,6 +753,14 @@ const ReplayBase& base) {
         ScriptReplay replay;
         replay.scripts = &context->test_scripts;
         replay.request = &dummy_request;
+        if (base.shared_request != nullptr) {
+            replay.request_as_sent = [&run = *context, &shared = *base.shared_request] (
+                                     const ResponseSample& sample) {
+                const ResultAnnotations annotations{ sample.data_row_index,
+                    std::nullopt, sample.iteration, sample.vu };
+                return request_as_submitted (run, shared, annotations);
+            };
+        }
         replay.samples = &samples;
         replay.cookie_read_refusal =
         "pm.cookies.%s is not available here: a single-request load run "
@@ -2352,17 +2392,21 @@ double total_duration_s) {
 }
 
 /**
- * What this run's worker left its deferred replay to start from. A
- * single-request run's setup loads its scopes whenever the run carries
- * `requestElements` (`run_request_lifecycle_setup`), which is where every
- * replayed script comes from.
+ * What this run's worker left its deferred replay to start from, @p request
+ * being the one `build_load_request` built. A single-request run's setup loads
+ * its scopes whenever the run carries `requestElements`
+ * (`run_request_lifecycle_setup`), which is where every replayed script comes
+ * from.
  */
-ReplayBase replay_base (const RunContext& context, const ScenarioLoadState* scenario_state) {
+ReplayBase replay_base (const RunContext& context,
+const vayu::Request& request,
+const ScenarioLoadState* scenario_state) {
     ReplayBase base;
     if (context.scenario) {
         base.scenario_state = scenario_state;
         return base;
     }
+    base.shared_request = &request;
     if (context.step_elements && !context.step_elements->empty ()) {
         base.request_scopes = &context.lifecycle_scopes;
     }
@@ -2371,7 +2415,9 @@ ReplayBase replay_base (const RunContext& context, const ScenarioLoadState* scen
 
 /**
  * Everything a finished run leaves behind: the flush, the two deferred passes,
- * the stored summary and the terminal status.
+ * the stored summary and the terminal status. @p request is the one a
+ * single-request run's submissions copied, which the replay re-derives each
+ * sample's from.
  *
  * Each step is guarded on its own, so one that fails costs only what it was
  * about to write - a run that measured something must still be reported as
@@ -2383,6 +2429,7 @@ double total_duration_s,
 const SendingWindow& sending,
 const RunOverheads& overheads,
 double target_rps,
+const vayu::Request& request,
 const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     size_t completed   = context->total_requests ();
     double avg_latency = context->average_latency_ms ();
@@ -2414,7 +2461,7 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     ScriptValidation validation;
     try {
         validation = validate_scripts (
-        context, db, replay_base (*context, scenario_state.get ()));
+        context, db, replay_base (*context, request, scenario_state.get ()));
     } catch (const std::exception& e) {
         vayu::utils::log_error ("run",
         "Script validation failed: " + std::string (e.what ()),
@@ -2715,7 +2762,7 @@ RunManager& manager) {
         };
 
         finish_load_test (context, db, total_duration_s, sending, overheads,
-        target_rps, scenario_state);
+        target_rps, request, scenario_state);
     } catch (const std::exception& e) {
         // Stop background metrics collection and join it, like the two inner
         // failure paths do. Deferring the join to ~RunContext instead would run

@@ -507,6 +507,23 @@ class LoadScopeBases {
 };
 
 /**
+ * @brief The request plan step @p step_index sent as @p identity with @p row,
+ *        re-derived for the deferred replay (#3460).
+ *
+ * The step's request taken through `submit_one`'s own steps: the bind
+ * (`bind_step_iteration`), then the residual pass against the step's base in
+ * @p bases, the scopes as `script.setup` left them. Not reproduced, because no
+ * sample records them: what a virtual user's own scope held, what a
+ * `step.before` element wrote into the request, a credential refreshed mid-run
+ * and the user's cookies.
+ */
+[[nodiscard]] vayu::Request step_request_as_submitted (const ScenarioExecution& execution,
+const LoadScopeBases& bases,
+size_t step_index,
+std::optional<size_t> row,
+IterationIdentity identity);
+
+/**
  * @brief Everything a scenario load run accumulates, shared with its callbacks.
  *
  * Held by `shared_ptr` and captured by value into every completion callback,

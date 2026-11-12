@@ -298,14 +298,15 @@ class ScriptLifecycleTest : public ::testing::Test {
     /// (the collection declares no such variable), so it survives compose and
     /// is filled in only by the residual pass at send time, off whatever
     /// `script.setup` wrote into the run's own scopes. @p elements are the
-    /// request's own.
-    void seed_request (const json& elements = json::array ()) {
+    /// request's own, and @p query replaces the URL's query.
+    void seed_request (const json& elements = json::array (),
+    const std::string& query                = "tok={{lifecycleToken}}") {
         vayu::db::Request r;
         r.id            = "req_1";
         r.collection_id = "col_1";
         r.name          = "Step 1";
         r.method        = vayu::HttpMethod::GET;
-        r.url           = server_->url ("/ok") + "?tok={{lifecycleToken}}";
+        r.url           = server_->url ("/ok") + "?" + query;
         r.elements      = elements.dump ();
         r.order         = 0;
         r.created_at    = 1;
@@ -1137,6 +1138,58 @@ TEST_F (ScriptLifecycleTest, LoadDeferredScriptSeesWhatSetupWrote) {
 
     EXPECT_EQ (run_load (execution, /*iterations=*/3, /*concurrency=*/3,
                /*allow_script_requests=*/false, extra),
+    vayu::RunStatus::Completed);
+
+    const auto tests = report_tests_of ("run_load");
+    EXPECT_EQ (tests.value ("testsFailed", -1), 0)
+    << replay_failures_of ("run_load");
+    EXPECT_EQ (tests.value ("testsPassed", -1), 3) << tests.dump ();
+}
+
+// `pm.request` in the replay is the request as sent (#3460): the iteration
+// bound and the name setup wrote resolved, as on the wire. Mutation check:
+// drop the bind from `request_as_submitted` (load_strategy.cpp) and the URL
+// reads `{{$iteration}}`; drop its residual pass and it reads `{{fromSetup}}`;
+// leave `ReplayBase::shared_request` unset in `replay_base` and it reads both.
+TEST_F (ScriptLifecycleTest, SingleRequestDeferredScriptReadsTheRequestAsSent) {
+    const json extra{ { "url", server_->url ("/ok") + "?i={{$iteration}}&v={{fromSetup}}" },
+        { "response_sample_rate", 1 },
+        { "requestElements",
+        deferred_post_script (
+        "pm.test('as sent', () => "
+        "pm.expect(pm.request.url.toString())"
+        ".to.include('?i=' + pm.info.iteration + '&v=yes'));") } };
+
+    EXPECT_EQ (
+    run_single_request_load (script_setup_element (SETUP_WRITES_FROM_SETUP),
+    /*iterations=*/2, /*concurrency=*/1, /*allow_script_requests=*/false, extra),
+    vayu::RunStatus::Completed);
+
+    for (const auto& hit : server_->requests ()) {
+        EXPECT_NE (hit.target.find ("&v=yes"), std::string::npos) << hit.target;
+    }
+    const auto tests = report_tests_of ("run_single");
+    EXPECT_EQ (tests.value ("testsFailed", -1), 0)
+    << replay_failures_of ("run_single");
+    EXPECT_EQ (tests.value ("testsPassed", -1), 2) << tests.dump ();
+}
+
+// The scenario shape of the same: a step's `pm.request` carries the virtual
+// user bound and the token setup wrote resolved. Mutation check: drop the
+// residual pass from `step_request_as_submitted` (scenario_load.cpp) and the
+// URL reads `{{lifecycleToken}}`; drop its bind and it reads `{{$vu}}`.
+TEST_F (ScriptLifecycleTest, LoadDeferredScriptReadsTheRequestAsSent) {
+    seed_collection (script_setup_element (
+    "pm.environment.set('lifecycleToken', 'set-by-setup');"));
+    seed_request (
+    deferred_post_script ("pm.test('as sent', () => "
+                          "pm.expect(pm.request.url.toString())"
+                          ".to.include('tok=set-by-setup&vu=' + pm.info.vu));"),
+    "tok={{lifecycleToken}}&vu={{$vu}}");
+    auto execution = resolve (1);
+
+    EXPECT_EQ (run_load (execution, /*iterations=*/3, /*concurrency=*/3,
+               /*allow_script_requests=*/false, { { "response_sample_rate", 1 } }),
     vayu::RunStatus::Completed);
 
     const auto tests = report_tests_of ("run_load");

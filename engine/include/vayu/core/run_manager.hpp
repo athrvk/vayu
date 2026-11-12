@@ -1389,8 +1389,14 @@ struct ReplayBase {
     /// A single-request run's scopes as `script.setup` left them
     /// (`RunContext::lifecycle_scopes`); null when setup loaded none.
     const vayu::http::routes::ScriptVariableScopes* request_scopes = nullptr;
+    /// A single-request run's request as `build_load_request` built it, which
+    /// every submission copied (`request_as_submitted`). Null: `pm.request` is
+    /// the payload's request as written.
+    const vayu::Request* shared_request = nullptr;
     /// A scenario load run's state, whose `lifecycle_scopes` are the scopes
-    /// as every `script.setup` left them; null when its driver never started.
+    /// as every `script.setup` left them and whose `scope_bases` each step's
+    /// residual pass read (`step_request_as_submitted`); null when its driver
+    /// never started, and `pm.request` is then the step's request as planned.
     const ScenarioLoadState* scenario_state = nullptr;
 };
 
@@ -1417,9 +1423,11 @@ struct ReplayBase {
  *
  * The replay starts from @p base: a copy of the scopes as `script.setup` left
  * them (#3460), so a deferred script reads what an inline one would and
- * `script.teardown` still reads what setup left. A virtual user's or a
- * submission's own writes are not among them. An empty @p base reads the
- * stored rows instead.
+ * `script.teardown` still reads what setup left, and each sample's
+ * `pm.request` re-derived as it was sent, its row and identity bound and its
+ * residual names resolved. A virtual user's or a submission's own writes are
+ * not among them. An empty @p base reads the stored rows and the request as
+ * written instead.
  *
  * Declared here rather than kept file-local so the per-step behaviour can be
  * tested directly against a drained run; the production caller is

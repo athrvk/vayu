@@ -4351,6 +4351,17 @@ The **language** is current; what is missing is the **host environment**:
   also reports `iteration` - the index the sampled submission claimed before it
   was sent - and `vu`, which is `1` here because a single request repeated is
   one user's iterations (issue #994; see [`pm.info`](#script-identity-pminfo))
+- `pm.request` in the deferred replay is the request each sample was sent as
+  (#3460), re-derived rather than stored: the request the run built, with that
+  submission's row and iteration (a scenario step's virtual user and iteration)
+  bound into it, and every name the bind left resolved against the scopes as
+  `script.setup` left them, as the run's own residual pass resolved it. What no
+  sample records is not reproduced: a `script.pre` or other `step.before`
+  element's edit to the request and its own scope writes (an inline one ran on
+  that submission alone, an un-inlined one never ran), a credential refreshed
+  mid-run (the replay reads the one the run started with), and a scenario
+  user's cookies. A deferred `script.post` beside an inline `script.pre` that
+  rewrites `pm.request` therefore reads the request before that rewrite
 - `pm.response.redirects` is **absent** here, inline or deferred: a load run
   follows redirects without recording the chain, so there is no list to read and
   an empty one would claim there was nothing to find (see
@@ -4421,8 +4432,8 @@ over a sequence says something failed, not which step - while the aggregate
 still appears as `testValidation`. Three differences from the single-request
 shape:
 
-- `pm.request` is the step's own request, and `pm.info.requestId` /
-  `requestName` are that step's, not a run-level one.
+- `pm.request` is the step's own request as that sample sent it, and
+  `pm.info.requestId` / `requestName` are that step's, not a run-level one.
 - `pm.info.iteration` is the virtual user's own iteration index and
   `pm.info.vu` is that user's number, so a script can tell two users' responses
   apart - beside the `pm.iterationData` a single-request run's rows also

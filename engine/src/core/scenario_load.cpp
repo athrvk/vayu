@@ -510,6 +510,35 @@ const LoadScopeBases::Base& LoadScopeBases::for_step (size_t step) const {
     return bases_.at (base_of_step_.at (step));
 }
 
+namespace {
+
+/// Whether @p step binds anything per iteration: a row or identity token in
+/// its request or credentials, or auth waiting on its scripts. A step that
+/// binds none is not walked at all, which keeps a token-free plan free.
+bool step_binds_per_iteration (const ScenarioStep& step) {
+    return !step.data_template.empty () || !step.auth_template.empty () || step.auth_after_scripts;
+}
+
+} // namespace
+
+vayu::Request step_request_as_submitted (const ScenarioExecution& execution,
+const LoadScopeBases& bases,
+size_t step_index,
+std::optional<size_t> row,
+IterationIdentity identity) {
+    const ScenarioStep& step = execution.plan.steps.at (step_index);
+    vayu::Request request    = step.request;
+    std::optional<vayu::http::Auth> late_auth;
+    if (step_binds_per_iteration (step) &&
+    !bind_step_iteration (request, step, execution.data_rows, row, identity, late_auth)
+    .ok) {
+        return request;
+    }
+    (void)vayu::http::routes::resolve_load_residuals (
+    request, bases.for_step (step_index).vars, std::move (late_auth));
+    return request;
+}
+
 // ============================================================================
 // The virtual-user state machine
 // ============================================================================
@@ -897,8 +926,7 @@ class ScenarioLoadDriver {
         // its scripts, has empty templates and is not walked at all, which is
         // what makes a token-free plan free per iteration.
         std::optional<vayu::http::Auth> late_auth;
-        if (!step.data_template.empty () || !step.auth_template.empty () ||
-        step.auth_after_scripts) {
+        if (step_binds_per_iteration (step)) {
             // Every half through the one binder the single-request load path
             // also drives (issues #993, #994), so a request binds identically
             // whether it is repeated on its own or walked as a step - including

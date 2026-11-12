@@ -715,6 +715,21 @@ bool sends_the_shared_request (const RunContext& context) {
     return sends_the_shared_request (context, context.load_template);
 }
 
+/**
+ * What a run that sends the shared request does to it once, before the first
+ * submission. A path value composition left waiting (issue #1764) is answered
+ * by a bind or the residual pass, and such a run runs neither: nothing will
+ * ever answer its token, so it is written now, exactly as the residual pass
+ * would have written it.
+ */
+void settle_shared_request (vayu::Request& request) {
+    settle_path_variables (request, PathSettle::All);
+    // Once here rather than in every transfer's `wire_url` and DNS-cache pin,
+    // which then take their ASCII fast path. A host with no ASCII name stays
+    // as typed for `validate_transferable` to refuse.
+    (void)vayu::http::to_ascii_host (request.url);
+}
+
 class SubmissionRequest {
     public:
     SubmissionRequest (const std::shared_ptr<RunContext>& context, vayu::Request request)
@@ -722,16 +737,8 @@ class SubmissionRequest {
       nullptr :
       context->auth_refresh_states.front ()),
       request_ (std::move (request)) {
-        // A path value composition left waiting (issue #1764) is answered by a
-        // bind or the residual pass, and a run that sends the shared request
-        // runs neither: nothing will ever answer its token, so it is written
-        // now, once, exactly as the residual pass would have written it.
         if (sends_the_shared_request (*context)) {
-            settle_path_variables (request_, PathSettle::All);
-            // Once here rather than in every transfer's `wire_url` and DNS-cache
-            // pin, which then take their ASCII fast path. A host with no ASCII
-            // name stays as typed for `validate_transferable` to refuse.
-            (void)vayu::http::to_ascii_host (request_.url);
+            settle_shared_request (request_);
         }
     }
 
@@ -1175,6 +1182,31 @@ bool submissions_run_the_residual_pass (const RunContext& context,
 const StepDataTemplate& bind_template) {
     return context.step_elements && !context.step_elements->empty () &&
     !sends_the_shared_request (context, bind_template);
+}
+
+vayu::Request request_as_submitted (const RunContext& context,
+const vayu::Request& shared,
+const ResultAnnotations& annotations) {
+    vayu::Request request = shared;
+    if (sends_the_shared_request (context)) {
+        settle_shared_request (request);
+        return request;
+    }
+    // `submit_one_request`'s steps in its order, less what the replay cannot
+    // reproduce: the `step.before` elements between the bind and the residual
+    // pass, and the overlay they wrote, which no sample records.
+    std::optional<vayu::http::Auth> late_auth;
+    if (!bind_submission (request, context, context.load_data.get (), annotations, late_auth)
+        .ok) {
+        return request;
+    }
+    if (context.step_elements && !context.step_elements->empty ()) {
+        (void)vayu::http::routes::resolve_load_residuals (
+        request, context.step_base_vars, std::move (late_auth));
+    } else {
+        settle_path_variables (request, PathSettle::All);
+    }
+    return request;
 }
 
 // Declared in load_strategy.hpp - the scenario load executor drives the same
