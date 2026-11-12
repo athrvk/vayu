@@ -777,12 +777,17 @@ only shape.
 `listTrash` returns **roots only** - the row a user actually asked to delete,
 never a descendant the same cascade took with it. A deleted collection's whole
 subtree is represented by that one root entry, with `collections` / `requests`
-counting what that delete took along. `kind` is `"collection"`, `"request"`,
+counting what that delete took along (the cohort a restore puts back) and
+`purgeCollections` / `purgeRequests` counting everything a purge would destroy
+under it, an earlier delete's rows included (#3449). The row and the purge
+prompts read the purge totals; the cohort counts are a floor there. `kind` is `"collection"`, `"request"`,
 `"environment"`, `"example"` or `"clientCertificate"`; an environment entry is
 always a root, counts `0` for both, and alone carries `variables`, how many
 variables it holds. An example entry counts `0` for both too; the engine's
-`parentId` on it is the owning request, which `TrashEntry` does not claim
-because no reader needs it. A client-certificate entry is a root with both
+`parentId` on it is the owning request, which `TrashEntry` does not claim:
+it carries the owner's name as `parentName` instead (#3449), sent on request
+and example entries only, which the row shows as "from <name>" so two
+same-named entries tell apart. A client-certificate entry is a root with both
 counts `0` and a `null` `parentId`; its `name` is its target, `host` or
 `host:port`.
 
@@ -793,8 +798,10 @@ the trash, so the engine clears its parent and returns it as a tree root
 instead. It rejects with a `404` for an id the trash does not hold (a live row,
 or one already purged) and a `409` for a request whose collection is itself
 deleted or gone - a request has no root to land on the way a collection does,
-so the engine's message names the collection to restore first - and the same
-`409` for an example whose request is deleted or gone, or already holds the
+so the engine's message names the request, its collection and the Trash root to
+restore first (the collection, or the ancestor whose delete took it), by name
+and id - and the same `409` for an example whose request is in the trash
+(naming the example, the request and the root to restore) or gone, or already holds the
 most examples a request may (100), and for a client certificate while a live
 entry holds the same host and port (the message names that entry); surface
 `ApiError.message` rather than

@@ -1414,6 +1414,15 @@ vayu::RunStatus final_status) {
     db.transition_run_status (run_id, { vayu::RunStatus::Running }, final_status);
 }
 
+/// A throw after teardown leaves its lifecycle node in place; any earlier one,
+/// a refusing setup included, reports what setup recorded (#3455).
+void keep_or_report_setup (nlohmann::json& lifecycle,
+const std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
+    if (lifecycle.empty ()) {
+        lifecycle = vayu::core::build_lifecycle_node (setup_outcomes, {});
+    }
+}
+
 } // namespace
 
 void execute_scenario_run (const std::shared_ptr<RunContext>& context,
@@ -1451,6 +1460,9 @@ RunManager& manager) {
     // `validate_step_response` turns it into the reason the binding recorded.
     const auto schema_index = ResponseSchemaIndex::parse (execution->spec.response_schemas);
 
+    // Outside the `try` so a failing setup's outcome reaches the report from
+    // the `catch` below (#3455).
+    std::vector<vayu::core::ElementOutcome> setup_outcomes;
     try {
         // Only from Pending (#3340): a Stop that reached the row before this
         // run registered found no context and left the row Stopped, and a
@@ -1570,7 +1582,6 @@ RunManager& manager) {
             }
         }
 
-        std::vector<vayu::core::ElementOutcome> setup_outcomes;
         if (auto setup_failure =
             run_scenario_setup (script_engine, scopes.bind (asked.collection_id),
             script_send, collection_elements, setup_outcomes)) {
@@ -1657,6 +1668,7 @@ RunManager& manager) {
         { { "runId", context->run_id },
         { "error", vayu::utils::bounded_log_text (e.what ()) } });
         final_status = vayu::RunStatus::Failed;
+        keep_or_report_setup (summary.lifecycle, setup_outcomes);
     }
 
     // Everything below runs on every path, including the failed one: a run that

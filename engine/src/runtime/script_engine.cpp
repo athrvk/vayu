@@ -1404,6 +1404,7 @@ class ScriptEngine::Impl {
         // through a pooled context.
         ctx_data.allow_send_request  = config.allow_send_request;
         ctx_data.send_request_count  = 0;
+        ctx_data.console_enabled     = config.enable_console;
         ctx_data.cookie_jar          = ctx.cookie_jar;
         ctx_data.cookie_scope        = ctx.cookie_scope;
         ctx_data.cookie_writes       = ctx.cookie_writes;

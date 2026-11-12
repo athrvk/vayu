@@ -58,10 +58,10 @@ export {
 	deleteConfirmCopy,
 	clientCertificateDeleteDescription,
 	clientCertificatePurgeDescription,
+	collectionPurgeDescription,
 	environmentDeleteDescription,
 	exampleDeleteDescription,
 } from "./delete-confirm-copy";
-export type { DeleteScope } from "./delete-confirm-copy";
 
 export {
 	DropdownMenu,

@@ -307,8 +307,8 @@ TEST_F (RequestBodyDepthRouteTest, ADeepValueIsRefusedOnEveryRouteBeforeAnything
 // then `kBodyDepthBound - 2` arrays.
 TEST_F (RequestBodyDepthRouteTest, AValueAtTheBoundIsStored) {
     const std::string at_bound = vayu::tests::nested_array_text (kBodyDepthBound - 2);
-    const auto [status, body] = send_text (
-    "POST", "/collections", R"({"name":"c","auth":{"a":)" + at_bound + "}}");
+    const auto [status, body] = send_text ("POST", "/collections",
+    R"({"name":"c","auth":{"mode":"none","a":)" + at_bound + "}}");
     EXPECT_EQ (status, 200) << body.dump ();
 }
 

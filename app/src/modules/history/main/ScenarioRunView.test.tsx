@@ -1210,3 +1210,26 @@ describe("steps that did not run", () => {
 		expect(screen.queryByText(/Ended this iteration/)).toBeNull();
 	});
 });
+
+describe("a run whose setup refused it (#3455)", () => {
+	it("shows the setup's reason beside the empty step list", () => {
+		reportQuery.data = report({
+			results: [],
+			lifecycle: {
+				setup: [
+					{
+						id: "el_1",
+						kind: "script.setup",
+						outcome: "failed",
+						message: "setup assertion failed: token missing",
+					},
+				],
+			},
+		});
+
+		render(<ScenarioRunView run={{ ...RUN, status: "failed" }} />);
+
+		expect(screen.getByText("setup assertion failed: token missing")).toBeTruthy();
+		expect(screen.getByText("No steps recorded")).toBeTruthy();
+	});
+});

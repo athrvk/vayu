@@ -409,6 +409,8 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
     inputs.send_rate =
     elapsed_s > 0 ? static_cast<double> (inputs.requests_sent) / elapsed_s : 0.0;
     inputs.auth = AuthRefreshState::summarize (context.auth_refresh_states);
+    // No teardown runs on a failed run, so setup's rows are the whole node.
+    inputs.lifecycle = vayu::core::build_lifecycle_node (context.setup_outcomes, {});
     return inputs;
 }
 
@@ -2556,6 +2558,29 @@ const std::shared_ptr<ScenarioLoadState>& scenario_state) {
     { "p50", percentiles.p50 }, { "p95", percentiles.p95 }, { "p99", percentiles.p99 } });
 }
 
+namespace {
+
+/**
+ * A failed run's summary, from whatever its collector holds. Without one the
+ * report route takes the legacy path and finds nothing, reporting an empty run.
+ *
+ * Call it after `join_aux_threads` and before the status flips to Failed: the
+ * terminal status is what tells a polling client the report is ready, so one
+ * that fetches on seeing it must not race a summary still being written.
+ */
+void store_failed_run_summary (vayu::db::Database& db, const RunContext& context) {
+    try {
+        db.update_run_summary (context.run_id,
+        build_run_summary_payload (failed_run_summary_inputs (context)).dump ());
+    } catch (const std::exception& ex) {
+        vayu::utils::log_error ("run",
+        "Failed to store run summary for failed run: " + std::string (ex.what ()),
+        { { "runId", context.run_id } });
+    }
+}
+
+} // namespace
+
 void execute_load_test (const std::shared_ptr<RunContext>& context,
 vayu::db::Database* db_ptr,
 RunManager& manager) {
@@ -2633,10 +2658,11 @@ RunManager& manager) {
             vayu::utils::log_error ("run", "script.setup failed",
             { { "runId", context->run_id },
             { "scriptError", vayu::utils::bounded_log_text (*setup_failure) } });
-            db.transition_run_status (context->run_id,
-            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             context->is_running = false;
             context->join_aux_threads ();
+            store_failed_run_summary (db, *context);
+            db.transition_run_status (context->run_id,
+            { vayu::RunStatus::Running }, vayu::RunStatus::Failed);
             manager.retain_run (context->run_id);
             return;
         }
@@ -2748,23 +2774,8 @@ RunManager& manager) {
         vayu::utils::log_error ("run", "Load test error: " + std::string (e.what ()),
         { { "runId", context->run_id } });
 
-        // A crashed run still gets a summary, with whatever the collector holds
-        // and a duration from load start (0 if load never began) - without
-        // one the report route would take the legacy path and find nothing,
-        // reporting an empty run.
-        //
-        // Written *before* the status flips to Failed, matching the success
-        // path: the terminal status is what tells a polling client the report
-        // is ready, so a client that fetches on seeing it must not race a
-        // summary still being written and get the empty-run answer instead.
-        try {
-            db.update_run_summary (context->run_id,
-            build_run_summary_payload (failed_run_summary_inputs (*context)).dump ());
-        } catch (const std::exception& ex) {
-            vayu::utils::log_error ("run",
-            "Failed to store run summary for failed run: " + std::string (ex.what ()),
-            { { "runId", context->run_id } });
-        }
+        // A duration from load start, 0 if load never began.
+        store_failed_run_summary (db, *context);
 
         // From Pending too: the throw may have come from the move to Running.
         try {

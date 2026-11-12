@@ -73,13 +73,19 @@ describe("the sentence", () => {
 	});
 
 	it("does not say '1 days'", () => {
-		expect(retentionCopy(1)).toBe("Items are permanently deleted a day after they land here.");
+		expect(retentionCopy(1)).toBe(
+			"Items more than a day old are permanently deleted the next time Vayu starts."
+		);
 	});
 
-	it("names the window it was given", () => {
+	it("names the window it was given, and that the sweep runs at startup", () => {
+		// The engine sweeps once, at start (#3449): the copy must not read as a
+		// clock that deletes an item the moment it turns N days old.
 		expect(retentionCopy(30)).toBe(
-			"Items are permanently deleted 30 days after they land here."
+			"Items more than 30 days old are permanently deleted the next time Vayu starts."
 		);
-		expect(retentionCopy(7)).toBe("Items are permanently deleted 7 days after they land here.");
+		expect(retentionCopy(7)).toBe(
+			"Items more than 7 days old are permanently deleted the next time Vayu starts."
+		);
 	});
 });

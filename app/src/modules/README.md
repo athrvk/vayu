@@ -88,7 +88,11 @@ Some modules have components displayed in both the sidebar and main content area
 - **Components:** `sidebar/TrashList.tsx` - deleted collections, requests, environments, saved examples and client certificates,
   newest first, each with restore and purge-for-good actions; `sidebar/TrashItem.tsx` - one row
 - **Also exports** `retentionCopy()` and `retentionDaysFrom()` (`retention.ts`), which turn the
-  engine's `trashRetentionDays` config entry into the sentence the view puts under its title
+  engine's `trashRetentionDays` config entry into the sentence the view puts under its title; it
+  says the sweep runs at the next start of Vayu, because the engine sweeps once at start (#3449)
+- **A row shows what a purge destroys, not what a restore brings back:** a collection reads the
+  engine's `purgeCollections` / `purgeRequests`, and a request or example names its owner
+  (`parentName`) so same-named entries tell apart
 - **Usage:**
     ```tsx
     import {

@@ -189,11 +189,16 @@
  * to 221,541 / 217,274 B; those two caps went to 221,600 / 217,300 and the
  * writes-off rows are untouched.
  *
+ * #3449's Trash wording (`list_trash` names the purge totals and `parentName`,
+ * `restore_trash_entry` the root a 409 names, `delete_collection` the mock it
+ * stops) added 73 / 73 / 185 / 185 B, taking the rows to 150,524 / 147,928 /
+ * 221,679 / 217,412 B; the four caps went to 150,600 / 148,000 / 221,700 /
+ * 217,500.
+ *
  * #3461's clause in `run_request` (an ad-hoc `requestId` scopes the scripts'
  * collection, said in the description and in the argument) added 68 B to every
- * row, taking them to 150,519 / 147,923 / 221,562 / 217,295 B; the first two caps went to
- * 150,600 / 148,000, the least that holds them; 221,600 / 217,300 already held
- * the writes-on rows and are unchanged.
+ * row, taking them to 150,592 / 147,996 / 221,747 / 217,480 B; only the third
+ * cap moved, to 221,800, because the other three still hold their rows.
  */
 
 import { describe, it, expect } from "vitest";
@@ -215,8 +220,8 @@ interface Budget {
 const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_600 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_000 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_300 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_800 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_500 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */

@@ -390,22 +390,44 @@ std::optional<size_t> ElementSlotIndex::find (const ElementOutcome& outcome) con
     return slots.front ().index;
 }
 
+namespace {
+
+/// A lifecycle element's `to_json` plus the `messages` and `console` lists an
+/// inline element's report row carries (#3455): the same samples, so the same
+/// cap, repeat counts and `*Dropped` keys. `to_json` stays without them, as a
+/// step trace already shows the whole script result.
+nlohmann::json lifecycle_row (const ElementOutcome& outcome) {
+    nlohmann::json row = outcome.to_json ();
+    DistinctMessageSample messages;
+    DistinctMessageSample console;
+    for (const auto& message : outcome.messages) {
+        (message.kind == ElementMessage::Kind::Console ? console : messages).offer (message);
+    }
+    write_message_sample (
+    row, "messages", "messagesDropped", messages.kept (), messages.dropped ());
+    write_message_sample (
+    row, "console", "consoleDropped", console.kept (), console.dropped ());
+    return row;
+}
+
+nlohmann::json lifecycle_rows (const std::vector<ElementOutcome>& outcomes) {
+    nlohmann::json rows = nlohmann::json::array ();
+    for (const auto& outcome : outcomes) {
+        rows.push_back (lifecycle_row (outcome));
+    }
+    return rows;
+}
+
+} // namespace
+
 nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
 const std::vector<ElementOutcome>& run_end) {
     nlohmann::json node = nlohmann::json::object ();
     if (!run_start.empty ()) {
-        nlohmann::json setup = nlohmann::json::array ();
-        for (const auto& outcome : run_start) {
-            setup.push_back (outcome.to_json ());
-        }
-        node["setup"] = std::move (setup);
+        node["setup"] = lifecycle_rows (run_start);
     }
     if (!run_end.empty ()) {
-        nlohmann::json teardown = nlohmann::json::array ();
-        for (const auto& outcome : run_end) {
-            teardown.push_back (outcome.to_json ());
-        }
-        node["teardown"] = std::move (teardown);
+        node["teardown"] = lifecycle_rows (run_end);
     }
     return node;
 }

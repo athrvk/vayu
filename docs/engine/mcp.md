@@ -316,7 +316,7 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `diagnose_connection`  | execute  | `POST /diagnostics/connection`               | allowlist; one `HEAD`, verification on, redirects off, 10 s deadline; answers which hop failed (`outcome`) and never a body or headers; `proxy.url` arrives from the engine without its `user:password@` (#3258), which reveal does not change |
 | `create_collection`    | write    | `POST /collections`                          | write toggle; a blank or whitespace-only `name` is an input error, as on `update_collection`, and never reaches the engine (#3253); takes `variables`, `auth` and `elements` (extractors, assertions, timers, scripts) - `preRequestScript`/`postRequestScript` fold into `script.pre`/`script.post` sugar; returns the row shaped and withheld as `list_collections` answers it |
 | `update_collection`    | write    | `GET /collections` (scan, when variables change or a script argument is given with no explicit `elements`) + `PUT /collections/:id` (merge-patch, with `If-Match` after that read; a `412` re-reads and merges once) | write toggle; a blank or whitespace-only `name` is an input error, never sent to the engine (#3253); `variables` merges like `update_environment`'s (a blank or whitespace-padded name is a `400` naming the key), `removeVariables` deletes names; `elements` replaces the stored list whole, script sugar folds into it; `secret: false` over a stored secret is refused unless revealed; returns the row shaped and withheld as `list_collections` answers it |
-| `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm |
+| `delete_collection`    | write    | `GET /collections` + `GET /requests?…` (×N) + `DELETE /collections/:id` | write toggle + confirm; the engine stops every running mock of the subtree as part of the delete, for any client (#3449) |
 | `get_spec`             | read     | `GET /collections` (scan, only for `collectionId`) + `GET /specs/:id/meta`, or `GET /specs/:id` with `includeContent` | - (document text off by default and capped at 32 KB; a collection binding nothing answers `bound: false`) |
 | `diff_spec`            | read     | `POST /specs/diff` + `GET /requests/:id` (×N, reveal off, one per entry with a `headers`, `url` or `params` change) | - (each bucket - `added`, `declined`, `removed`, `changed` - capped at 50 entries, with `summary` carrying the true totals; `declined` lists operations whose request the user deleted, which `sync_spec` never re-creates; the per-entry `draft` is dropped; the current side of a `headers`, `url` or `params` change that could carry a credential withheld unless revealed) |
 | `preview_spec_bind`    | read     | `POST /specs/describe` + `POST /specs/match` + `GET /collections` + `GET /requests?…` (×N) | - (stores nothing; relays the `basePaths` describe answers to match, so literal-URL requests under a server's base path pair as the bind would (#3030); `wouldClear` names the requests a bind would strip of the operation they carry; lists capped at 50, counts true) |
@@ -331,8 +331,8 @@ toggle), **load** (starts/stops load tests - allowlist + caps + confirmation).
 | `update_request`       | write    | `GET /requests/:id` (scan, only for a script argument with no explicit `elements`) + `PUT /requests/:id` (merge-patch) | write toggle; same fields, and only the ones named are written; `elements` replaces the stored list whole, script sugar folds into it; `mockResponseMode` / `mockExampleId` set which saved example a mock answers with, `fixed` refused without an example id; the returned row is withheld as `list_requests` answers it |
 | `delete_request`       | write    | `GET /requests/:id` + `DELETE /requests/:id` | write toggle + confirm     |
 | `list_trash`           | read     | `GET /trash?q=&limit=&offset=`               | - (paged as `list_collections`, each entry as the engine answers it; collections, requests, environments, saved examples and client certificates, whose `name` is `host` or `host:port`) |
-| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a saved example is refused with the engine's 409 when its request is gone or full, and a client certificate when a live entry holds its host and port |
-| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - an environment's variable count, a saved example's name, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
+| `restore_trash_entry`  | write    | `POST /trash/:id/restore`                    | write toggle (not destructive - no confirmation); names the entry with `entryId`; a restored row is withheld as the read of it is; an environment comes back inactive; a request or saved example is refused with the engine's 409 (naming the item and the Trash entry to restore first) when its owner is in the trash, an example also when its request is gone or full, and a client certificate when a live entry holds its host and port |
+| `purge_trash_entry`    | write    | `GET /trash` + `DELETE /trash/:id`           | write toggle + confirm (the prompt names the entry and what it holds - a collection's purge totals, an environment's variable count, a saved request's or example's name and owner, that a client certificate's registry entry and stored passphrase go while its files stay); names the entry with `entryId` |
 | `list_request_examples`| read     | `GET /requests/:id/examples`                 | - (bodies capped at 32 KB each, 96 KB across the list; credential-header values withheld unless revealed) |
 | `create_request_example`| write   | `POST /requests/:id/examples`                | write toggle; always stored as `origin: "user"` - an agent cannot claim an import; `headers` is ordered `{key, value, enabled?}` rows (repeats kept) or a string map; the returned row has credential-header values withheld unless revealed |
 | `update_request_example`| write   | `PUT /requests/:id/examples/:exampleId` (merge-patch) | write toggle; `origin` is not writable; `headers` (rows or map) replaces the whole list; the returned row has credential-header values withheld unless revealed |
@@ -813,24 +813,31 @@ Notes:
   it in Settings): its entry is `kind: "clientCertificate"`, named by its
   target, a root with `parentId` null and both counts 0. `list_trash`
   answers a page of `GET /trash` (#2443), each entry unchanged - roots only,
-  with `collections` / `requests` counting what each entry's delete took, an
-  environment entry carrying `variables` and an example entry carrying its
-  request as `parentId`, exactly as the route documents. `restore_trash_entry` is the one write tool here that is **not**
+  with `collections` / `requests` counting what each entry's delete took (what
+  a restore puts back) and `purgeCollections` / `purgeRequests` counting what a
+  purge would destroy under it (#3449), an environment entry carrying
+  `variables`, an example entry carrying its request as `parentId`, and a
+  request or example entry carrying its owner's name as `parentName`, exactly
+  as the route documents. `restore_trash_entry` is the one write tool here that is **not**
   destructive - it puts a row back rather than removing one - so it carries the
   write toggle alone, with no confirmation step; it surfaces the engine's own
   404/409 text verbatim instead of writing a second sentence that could
   disagree with it, and reports `reparentedToRoot` in its result text when a
   restored collection came back at the top level because its parent is gone or
   itself in the trash; a restored environment comes back inactive, and
-  `activate_environment` is what makes it the active one again. A saved
-  example whose request is deleted or gone, or already holds the 100 examples a
-  request may, is refused with the engine's 409 text, and so is a client
+  `activate_environment` is what makes it the active one again. A request
+  or saved example whose owner is in the trash is refused with the engine's 409
+  text, which names the item and the Trash entry to restore first by name and
+  id (#3449); so is an example whose request is gone or already holds the 100
+  examples a request may, and so is a client
   certificate while a live entry holds the same host and port.
   `purge_trash_entry` is the Trash's own hard delete and is gated exactly like
   `delete_collection`: it reads the entry off `GET /trash` first, so the
   confirmation prompt names what a mistyped id would otherwise destroy sight
-  unseen (a collection's sub-collections and requests, an environment's
-  variable count, a saved example's name, a client certificate's registry entry
+  unseen (a collection's sub-collections and requests, counted by the purge
+  totals so an earlier delete's rows under it are included, #3449; an
+  environment's variable count; a saved request's or example's name and the
+  collection or request it came from; a client certificate's registry entry
   and stored passphrase with its files untouched), and an entry the trash does not hold - or one of a kind this
   build does not know - is a refusal before any prompt is shown. Both name the entry with `entryId`, not a bare `id`
   (#2446: an `id` beside `requestId` / `runId` / `environmentId` reads as "the

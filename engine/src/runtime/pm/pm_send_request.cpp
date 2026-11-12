@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "vayu/core/url_encoding.hpp"
+#include "vayu/core/vayu_extensions.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -844,6 +846,43 @@ JSValue settled_send_promise (JSContext* ctx, JSValue err, JSValue res) {
     return promise;
 }
 
+// The one Console line a script-issued request leaves, so the Console lists
+// what a script sent - without it a failed token fetch is invisible (#3462).
+// Info level whatever the outcome: the script's own callback decides whether a
+// failure matters. Written before the callback runs, so a line the callback
+// logs follows the line for the call that produced it.
+//
+// @p script_url is the URL as the script gave it, before auth is composed: an
+// api key `apply_auth` appends to the query is not the script's text. It goes
+// through the same credential blanking an export uses (userinfo password and
+// secret-named query values), which keeps the rest of the query - the part
+// that says which call this was.
+//
+// Nothing is built when the console is off (`scriptEnableConsole`, which a load
+// test is advised to turn off), so a run that has asked for no console output
+// formats no line.
+void record_send_request (ContextData& data,
+HttpMethod method,
+const std::string& script_url,
+const Result<Response>& sent,
+std::chrono::milliseconds elapsed) {
+    if (!data.console_enabled) {
+        return;
+    }
+    const ErrorCode error_code =
+    sent.is_error () ? sent.error ().code : sent.value ().error_code;
+    int blanked = 0;
+    std::string line = "pm.sendRequest " + std::string (vayu::to_string (method)) +
+    " " + vayu::core::vayu_ext::redact_url_credentials (script_url, {}, blanked);
+    if (error_code == ErrorCode::None) {
+        line += " -> " + std::to_string (sent.value ().status_code);
+    } else {
+        line += std::string (" failed: ") + vayu::to_string (error_code);
+    }
+    line += " (" + std::to_string (elapsed.count ()) + " ms)";
+    data.add_console_entry (ConsoleLevel::Info, std::move (line));
+}
+
 } // namespace
 
 /**
@@ -917,6 +956,7 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
     // is written here too so the reserved-port check below reads the host the
     // transfer will dial, leading whitespace dropped and lowercased (#2465).
     request.url = vayu::core::encode_url_as_postman (request.url);
+    const std::string script_url = request.url;
     // The engine's own composition rather than a second copy of it: a header
     // the script set still wins, and an api key sent as a query parameter is
     // percent-encoded onto the URL exactly as every other send does it. `db` is
@@ -990,7 +1030,11 @@ JSValue js_pm_send_request (JSContext* ctx, JSValueConst this_val, int argc, JSV
         data->cookie_writes->clear ();
     }
     vayu::http::Client client (client_config);
-    auto sent = client.send (request);
+    const auto started = std::chrono::steady_clock::now ();
+    auto sent          = client.send (request);
+    record_send_request (*data, request.method, script_url, sent,
+    std::chrono::duration_cast<std::chrono::milliseconds> (
+    std::chrono::steady_clock::now () - started));
 
     const auto error_code =
     sent.is_error () ? sent.error ().code : sent.value ().error_code;
