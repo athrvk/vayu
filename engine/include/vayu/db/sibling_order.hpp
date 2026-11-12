@@ -28,7 +28,12 @@ namespace vayu::db {
  * `tests/fixtures/tree-order-conformance.json` pins the two together.
  */
 
-/// The highest `order` a row stores (#3451): the column is an `int`.
+/**
+ * The highest `order` a row stores (#3451). The column is an `int`, and an
+ * append takes one past the highest sibling, so this is where appending stops
+ * (`Database::next_sibling_order`) instead of wrapping to a negative slot that
+ * sorts first.
+ */
 inline constexpr int MAX_SIBLING_ORDER = std::numeric_limits<int>::max ();
 
 /**

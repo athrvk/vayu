@@ -995,7 +995,11 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        folder.order = plan.slots.take (db, parent);
+        if (auto outcome = apply_item_fields (
+            [&] { return plan.slots.take (db, parent, folder.order); }, "collection", temp);
+        !outcome) {
+            return outcome;
+        }
     }
     plan.batch.new_collections.push_back (std::move (folder));
     return {};
@@ -1115,7 +1119,11 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        row.order = plan.slots.take (db, owner);
+        if (auto outcome = apply_item_fields (
+            [&] { return plan.slots.take (db, owner, row.order); }, "request", temp);
+        !outcome) {
+            return outcome;
+        }
     }
     if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan);
     !outcome) {

@@ -596,7 +596,9 @@ TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
 // Parsed from text, as a wire body is: nlohmann reads a non-negative literal
 // as unsigned. Mutation checks: read `order` through `apply_int_field` again
 // and `"3"` / `2.5` create at 0 and move at the old slot; read it with a bare
-// `get<int> ()` and 2^31 stores a negative.
+// `get<int> ()` and 2^31 stores a negative; drop the `MAX_SIBLING_ORDER` stop
+// in `Database::next_sibling_order` and the append after INT_MAX stores a
+// negative.
 
 constexpr auto UNSTORABLE_ORDERS = std::to_array<std::string_view> (
 { "2147483648", "4294967296", "9223372036854775808", "-1", "\"3\"", "2.5" });
@@ -659,6 +661,31 @@ TEST_F (RequestsRouteTest, TheHighestOrderIsStoredOnBothVerbs) {
     ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->order, 2147483647);
 }
+
+// A folder at the last slot leaves a request nothing to append after, on a
+// create and on a move that states no `order` alike.
+TEST_F (RequestsRouteTest, AnAppendAfterTheHighestOrderIsRefused) {
+    seed_collection_at ("col_full", "", 0);
+    seed_collection_at ("col_f", "col_full", 2147483647);
+    seed_collection_at ("col_s", "", 1);
+    seed_request_at ("req_moving", "col_s", 3);
+
+    auto [status, created] =
+    vayu::http::routes::create_request_response (*db_, new_request ("col_full"));
+    EXPECT_EQ (status, 400) << created.dump ();
+    EXPECT_TRUE (names_order (created)) << created.dump ();
+    EXPECT_TRUE (db_->get_requests_in_collection ("col_full").empty ());
+
+    auto [move_status, moved] = vayu::http::routes::update_request_response (
+    *db_, "req_moving", json{ { "collectionId", "col_full" } });
+    EXPECT_EQ (move_status, 400) << moved.dump ();
+    EXPECT_TRUE (names_order (moved)) << moved.dump ();
+    const auto row = db_->get_request ("req_moving");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->collection_id, "col_s");
+    EXPECT_EQ (row->order, 3);
+}
+
 
 // -- Leaving a spec binding (#3446) -----------------------------------------
 //

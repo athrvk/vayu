@@ -777,8 +777,8 @@ const std::string& collection_id) {
  * `reject_missing_collection` is: bulk import cannot scan rows it has yet to
  * write, and hands out its own slots.
  */
-static int append_order (vayu::db::Database& db, const vayu::db::Request& r) {
-    return db.next_sibling_order (r.collection_id, r.id);
+static RouteResult append_order (vayu::db::Database& db, vayu::db::Request& r) {
+    return append_sibling_order (db, r.collection_id, r.order, r.id);
 }
 
 /**
@@ -818,7 +818,10 @@ create_request_response (vayu::db::Database& db, const nlohmann::json& json) {
             return;
         }
         if (order_is_defaulted (json)) {
-            r.order = append_order (db, r);
+            if (auto outcome = append_order (db, r); !outcome) {
+                result = as_response (outcome.error ());
+                return;
+            }
         }
         db.save_request (r);
         result = { 200,
@@ -864,7 +867,9 @@ const std::function<void ()>& before_write) {
     // collection is still the caller's to state.
     const bool moved = r.collection_id != existing->collection_id;
     if (order_is_defaulted (json) && (moved || json.contains ("order"))) {
-        r.order = append_order (db, r);
+        if (auto outcome = append_order (db, r); !outcome) {
+            return as_response (outcome.error ());
+        }
     }
     // A move out of the contract that stamped the request declines its
     // operation there (#3446), as `delete_request_response` does. A body that

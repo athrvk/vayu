@@ -289,7 +289,9 @@ TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
 //
 // Parsed from text, as a wire body is: nlohmann reads a non-negative literal
 // as unsigned. Mutation checks: read `order` with the bare `get<int> ()` again
-// and 1.7 stores 1, 2^31 a negative and `"x"` answers nlohmann's own text.
+// and 1.7 stores 1, 2^31 a negative and `"x"` answers nlohmann's own text;
+// drop the `MAX_SIBLING_ORDER` stop in `Database::next_sibling_order` and the
+// append after INT_MAX stores a negative.
 
 constexpr auto UNSTORABLE_ORDERS = std::to_array<std::string_view> (
 { "2147483648", "4294967296", "9223372036854775808", "-1", "1.7", "\"x\"" });
@@ -342,6 +344,22 @@ TEST_F (CollectionsRouteTest, TheHighestOrderIsStoredOnBothVerbs) {
     const auto row = db_->get_collection ("col_a");
     ASSERT_HAS_VALUE (row);
     EXPECT_EQ (row->order, 2147483647);
+}
+
+// A root, and a request under a parent, at the last slot leave a folder
+// nothing to append after.
+TEST_F (CollectionsRouteTest, AnAppendAfterTheHighestOrderIsRefused) {
+    seed_collection ("col_full_root", "Full", std::nullopt, 2147483647);
+    seed_request ("req_last", "col_full_root", 2147483647);
+
+    for (const json& body : { json{ { "name", "root" } },
+         json{ { "name", "nested" }, { "parentId", "col_full_root" } } }) {
+        auto [status, refused] =
+        vayu::http::routes::create_collection_response (*db_, body);
+        EXPECT_EQ (status, 400) << body.dump () << " -> " << refused.dump ();
+        EXPECT_TRUE (names_order (refused)) << refused.dump ();
+    }
+    EXPECT_EQ (db_->get_collections ().size (), 1u);
 }
 
 // -- A collection never inherits auth (#3445) -------------------------------

@@ -1175,6 +1175,38 @@ const nlohmann::json& json,
 bool is_create);
 
 /**
+ * The refusal of an append under a parent whose last slot is taken (#3451):
+ * one past `MAX_SIBLING_ORDER` does not fit the column, and wrapping would
+ * put the row first. `POST /reorder` with the parent in `normalize`
+ * renumbers it dense and frees the end again.
+ */
+[[nodiscard]] inline std::unexpected<RouteError> no_sibling_slot_left () {
+    return route_error (400,
+    std::format (
+    "Cannot append: a sibling already holds 'order' {}, the highest "
+    "there is. State an 'order', or renumber the parent with "
+    "POST /reorder's 'normalize'",
+    vayu::db::MAX_SIBLING_ORDER));
+}
+
+/**
+ * The `order` a row appended under @p parent takes
+ * (`Database::next_sibling_order`, leaving @p excluded_id out of the scan)
+ * into @p out, or `no_sibling_slot_left`.
+ */
+[[nodiscard]] inline RouteResult append_sibling_order (vayu::db::Database& db,
+const std::optional<std::string>& parent,
+int& out,
+const std::string& excluded_id = {}) {
+    const std::optional<int> slot = db.next_sibling_order (parent, excluded_id);
+    if (!slot) {
+        return no_sibling_slot_left ();
+    }
+    out = *slot;
+    return {};
+}
+
+/**
  * Consecutive `order`s for the rows a batch writer (`POST /import/apply`,
  * `POST /specs/sync`) creates without stating one. The single-row default,
  * `Database::next_sibling_order`, reads rows that are stored, and none of a
@@ -1184,17 +1216,27 @@ bool is_create);
  */
 class SiblingSlots {
     public:
-    /// The next slot under @p parent (`std::nullopt` for the roots).
-    int take (vayu::db::Database& db, const std::optional<std::string>& parent) {
+    /// The next slot under @p parent (`std::nullopt` for the roots) into
+    /// @p out, or `no_sibling_slot_left` once the parent's slots are spent.
+    [[nodiscard]] RouteResult
+    take (vayu::db::Database& db, const std::optional<std::string>& parent, int& out) {
         auto slot = next_.find (parent);
         if (slot == next_.end ()) {
             slot = next_.emplace (parent, db.next_sibling_order (parent)).first;
         }
-        return slot->second++;
+        std::optional<int>& next = slot->second;
+        if (!next) {
+            return no_sibling_slot_left ();
+        }
+        out = *next;
+        next = out < vayu::db::MAX_SIBLING_ORDER ? std::optional<int> (out + 1) :
+                                                   std::nullopt;
+        return {};
     }
 
     private:
-    std::map<std::optional<std::string>, int> next_;
+    /// Empty once the parent's last slot is taken.
+    std::map<std::optional<std::string>, std::optional<int>> next_;
 };
 
 /**

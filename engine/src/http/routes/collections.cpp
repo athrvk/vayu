@@ -401,7 +401,9 @@ bool is_create) {
         // a reparent used to keep a position from the list it had just left.
         // The siblings are the parent's requests too (#2535). On a create the
         // id is not stored yet, so excluding it is a no-op there.
-        c.order = db.next_sibling_order (c.parent_id, c.id);
+        if (auto outcome = append_sibling_order (db, c.parent_id, c.order, c.id); !outcome) {
+            return outcome;
+        }
     }
 
     if (auto outcome = apply_variables_field (json, c.variables, is_create); !outcome) {

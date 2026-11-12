@@ -435,7 +435,11 @@ a `400` naming the field on every route that writes one
 (`POST`/`PUT /collections`, `POST`/`PUT /requests`,
 [`POST /reorder`](#post-reorder), `POST /import/apply`, `POST /specs/sync`),
 for example `Invalid 'order': must be an integer from 0 to 2147483647 (got 2.5)`,
-and nothing is written. An import document's
+and nothing is written. An append under a parent where a sibling already holds
+`2147483647` has no slot left, so it is a `400` naming `order` too
+(`Cannot append: a sibling already holds 'order' 2147483647 ...`) rather than a
+row that wraps to the top; state an `order`, or renumber the parent with
+`POST /reorder`'s `normalize`, which frees the end again. An import document's
 own stated order (`x-vayu-request.order`, an `x-vayu-collection.folders`
 entry's `order`) outside the range counts as unstated, so the row takes the
 position an unordered one would.
@@ -1689,8 +1693,8 @@ the null-vs-absent rule.
 `variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
 ([#3445](#collection-auth)), if an `openapi` binding names no stored spec
-(below), if `order` is not an integer from `0` to `2147483647`
-([Ordering](#ordering)), or on a cycle (below); `409` if
+(below), if `order` is not an integer from `0` to `2147483647` or an append
+finds no slot left ([Ordering](#ordering)), or on a cycle (below); `409` if
 `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1738,8 +1742,8 @@ a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
 `auth` that states mode `inherit` ([#3445](#collection-auth)), an
 `openapi` that is neither `null` nor `{}` (binding is
 [`POST /specs/bind`](#post-specsbind), issue #3348, below), an `order`
-that is not an integer from `0` to `2147483647` ([Ordering](#ordering)) or on
-a cycle
+that is not an integer from `0` to `2147483647` or an append with no slot
+left ([Ordering](#ordering)) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -2225,8 +2229,8 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
 on a `mockExampleId` that is not a non-empty string or `null`,
-on an `order` that is not an integer from `0` to `2147483647`
-([Ordering](#ordering)),
+on an `order` that is not an integer from `0` to `2147483647` or an append
+that finds no slot left ([Ordering](#ordering)),
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over

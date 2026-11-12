@@ -493,9 +493,12 @@ class Database {
      * (`sibling_order.hpp`, #2535). `std::nullopt` is the roots, which hold
      * collections only. @p excluded_id is left out of the scan, so a row
      * asked to reset its own position lands after its *other* siblings
-     * rather than one past itself. `0` for a parent with no live child.
+     * rather than one past itself. `0` for a parent with no live child, and
+     * nothing when a sibling already holds `MAX_SIBLING_ORDER` (#3451): there
+     * is no slot after it, and the caller refuses the append.
      */
-    int next_sibling_order (const std::optional<std::string>& parent_id,
+    [[nodiscard]] std::optional<int> next_sibling_order (
+    const std::optional<std::string>& parent_id,
     const std::string& excluded_id = {}); // db_collections.cpp
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge

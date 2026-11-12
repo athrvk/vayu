@@ -349,6 +349,26 @@ TEST_F (ImportApplyRouteTest, AnUnstorableStatedOrderRefusesTheTree) {
     EXPECT_EQ (stored_rows (), 0u);
 }
 
+// The batch's consecutive slots stop at the last one rather than wrapping
+// (#3451): after a stored root at INT_MAX - 1 the first imported root takes
+// INT_MAX and the second has none. Mutation check: let `SiblingSlots::take`
+// count past INT_MAX and the second root stores a negative.
+TEST_F (ImportApplyRouteTest, ConsecutiveSlotsStopAtTheHighestOrder) {
+    auto [existing_status, existing] = create_collection_response (
+    *db_, json{ { "name", "nearly last" }, { "order", 2147483646 } });
+    ASSERT_EQ (existing_status, 200) << existing.dump ();
+
+    auto [status, response] = import_apply_response (*db_,
+    json{ { "collections",
+    json::array ({ collection_item ("c1", "last"), collection_item ("c2", "past it") }) } });
+
+    EXPECT_EQ (status, 400) << response.dump ();
+    EXPECT_EQ (response["error"]["item"], "c2") << response.dump ();
+    EXPECT_NE (response.dump ().find ("'order'"), std::string::npos) << response.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), 1u)
+    << "the refused tree was partly written";
+}
+
 TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
     json bad_request = request_item ("r2", "c1", "no method");
     bad_request.erase ("method");
