@@ -13979,6 +13979,12 @@ globals (`tests`, `responseBody`, `responseCode`, ...) are not among them: they
 run (#2577), and are declared from the completion table like `pm` itself, each
 as the value it is.
 
+It also carries interface augmentations for standard-library members the runtime
+runs but the TypeScript bundled with the editor does not declare yet
+(`RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON`, `Uint8Array.fromBase64` and
+`toHex`, and their siblings), under their own banner; a row retires when that
+TypeScript declares its members (#3485).
+
 That is not padding: the app suppresses "Cannot find name" (2304), so a name that
 is merely undeclared draws nothing. A name typed `never` makes the call, member
 access or assignment that follows an error ("not callable", "property does not

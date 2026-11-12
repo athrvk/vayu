@@ -373,7 +373,7 @@ constexpr auto SHELF_MODULES = std::to_array<ShelfModule> ({
 
 /**
  * @brief Standard-library members quickjs-ng runs that the TypeScript lib the
- *        editor loads (`esnext`, SCRIPT_LIB) does not declare yet (#3462).
+ *        editor loads (`esnext`, SCRIPT_LIB) does not declare yet (#3462; retired by #3485).
  *
  * Each row is an interface augmentation: it merges into the lib's own
  * interface, so `RegExp.escape(...)` stops being a false "Property does not
