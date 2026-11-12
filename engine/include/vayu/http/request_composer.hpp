@@ -97,6 +97,17 @@ std::string trim_variable_name (std::string_view written);
  */
 bool is_addressable_variable_name (std::string_view key);
 
+/**
+ * Why a variable written under @p name could never be read back by a
+ * `{{name}}` token, as a phrase that completes "<subject> <phrase>"; `nullopt`
+ * when it can. The one wording shared by every writer that refuses such a name
+ * with a message of its own: an extractor's `variable` (#3055) and a script's
+ * `pm.*.set` (#3461). It is the union of `is_addressable_variable_name` (blank,
+ * edge whitespace) and the brace rule, since a reference stops at a brace and
+ * no stored name containing one is ever matched. The phrases are static.
+ */
+std::optional<std::string_view> variable_name_refusal (std::string_view name);
+
 /** True for a name written as a dynamic variable (`$...`), known or not. */
 bool is_dynamic_variable_name (const std::string& name);
 

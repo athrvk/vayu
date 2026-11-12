@@ -3166,6 +3166,83 @@ TEST_F (ScriptEngineTest, ConsoleRecordsTheLevelItWasCalledWith) {
     EXPECT_EQ (result.console_output[3].message, "broken");
 }
 
+// `scriptEnableConsole: false` is the recommended load-test setting, and it
+// used to leave `console` undefined, so the first `console.log` threw a
+// ReferenceError and every later `pm.test` of the script never ran (#3461).
+// The console stays defined and its four methods record nothing.
+class ScriptEngineConsoleOffTest : public ScriptEngineTest {
+    protected:
+    static ScriptConfig console_off_config () {
+        ScriptConfig cfg;
+        cfg.enable_console = false;
+        return cfg;
+    }
+};
+
+TEST_F (ScriptEngineConsoleOffTest, LoggingScriptKeepsRunningItsTests) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx = ScriptContext::for_test (request, response);
+    auto result = quiet.execute ("console.log('x'); pm.test('t', () => {});", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+TEST_F (ScriptEngineConsoleOffTest, AllFourMethodsAreCallableAndRecordNothing) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = quiet.execute (R"JS(
+        console.log('a', { nested: [1, 2] });
+        console.info('b');
+        console.warn('c');
+        console.error('d');
+        pm.test('methods are functions', () => {
+            for (const name of ['log', 'info', 'warn', 'error']) {
+                pm.expect(typeof console[name]).to.equal('function');
+            }
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+// A rebuilt pooled context goes through the same `build_context`, so the
+// second execution on one engine proves the no-op console survives the reuse.
+TEST_F (ScriptEngineConsoleOffTest, PooledContextReuseKeepsTheNoOpConsole) {
+    ScriptEngine quiet (console_off_config ());
+    for (int run = 0; run < 2; ++run) {
+        auto ctx = ScriptContext::for_test (request, response);
+        auto result =
+        quiet.execute ("console.warn('again'); pm.test('t', () => {});", ctx);
+
+        ASSERT_TRUE (result.success) << "execution " << run << ": " << result.error_message;
+        ASSERT_EQ (result.tests.size (), 1u) << "execution " << run;
+        EXPECT_TRUE (result.console_output.empty ()) << "execution " << run;
+    }
+    EXPECT_EQ (quiet.idle_runtime_count (), 1U);
+}
+
+// The control: the flag's default still records, so the tests above cannot
+// pass by the console never recording at all.
+TEST_F (ScriptEngineConsoleOffTest, ConsoleOnStillRecordsEveryLevel) {
+    ScriptConfig cfg;
+    cfg.enable_console = true;
+    ScriptEngine loud (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = loud.execute ("console.log('x'); console.info('y'); "
+                                "console.warn('z'); console.error('w');",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.console_output.size (), 4u);
+}
+
 // The wire spellings are what the app matches on, so they are part of the
 // contract rather than an implementation detail of the enum.
 TEST_F (ScriptEngineTest, ConsoleLevelWireSpellings) {
@@ -10431,4 +10508,193 @@ TEST_F (ScriptEngineTest, RequireShelfSignedHeaderReachesTheWire) {
         "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
     vayu::http::global_cleanup ();
+}
+
+// ============================================================================
+// What a script error reads as when the thrown value says nothing (#3461)
+// ============================================================================
+
+namespace {
+
+constexpr size_t ONE_MIB = size_t{ 1 } * 1024 * 1024;
+
+// `scriptMemoryLimit`'s floor, the one a library as large as lodash cannot be
+// loaded under.
+ScriptConfig minimum_memory_config () {
+    ScriptConfig cfg;
+    cfg.memory_limit = ONE_MIB;
+    return cfg;
+}
+
+// Where QuickJS's allocator refuses decides whether it has room left to build
+// the InternalError (the "ran out of memory" sentence) or throws a bare null
+// (the "threw null" sentence), and it gives no signal to tell the two apart. An
+// allocation loop lands on either by the platform's allocator and layout, so a
+// test that provokes a real refusal accepts both sentences and nothing else. A deterministic cause (a
+// script's own `throw null`, the `require()` restore) asserts its one sentence.
+::testing::AssertionResult
+IsAnOutOfMemorySentenceNaming (const std::string& message, size_t limit_mib) {
+    const std::string limit   = std::to_string (limit_mib) + " MiB limit";
+    const std::string ran_out = "Script ran out of memory at the " + limit;
+    const std::string threw_null =
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the " +
+    limit + " with no room to build an error)";
+    if (message == ran_out || message == threw_null) {
+        return ::testing::AssertionSuccess ();
+    }
+    return ::testing::AssertionFailure () << "\"" << message << "\" is neither \"" << ran_out
+                                          << "\" nor \"" << threw_null << "\"";
+}
+
+} // namespace
+
+// At the floor QuickJS has no room to build the error for the refused
+// allocation and throws a bare null, which used to be the whole message.
+TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemory) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("const _ = require('lodash');", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
+}
+
+// An allocation loop reports QuickJS's own out-of-memory error when there was
+// room to build it and the null sentence when there was not; see
+// IsAnOutOfMemorySentenceNaming. Never a bare null.
+TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsAnOutOfMemorySentence) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute (
+    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 1));
+}
+
+TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
+    ScriptConfig cfg;
+    cfg.memory_limit = size_t{ 2 } * 1024 * 1024;
+    ScriptEngine bounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute (
+    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 2));
+}
+
+// A script's own `throw null` is not an out-of-memory error, and QuickJS gives
+// the two the same value, so the sentence admits both rather than pick one.
+TEST_F (ScriptEngineTest, AThrownNullIsNeverReportedAsABareNull) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("throw null;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the 1 MiB limit with no room to build an error)");
+}
+
+TEST_F (ScriptEngineTest, AThrownNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = unbounded.execute ("throw null;", ctx);
+    EXPECT_EQ (result.error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, AThrownUndefinedReadsAsASentence) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw undefined;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
+
+TEST_F (ScriptEngineTest, AnErrorWithAnEmptyMessageReadsAsItsType) {
+    auto plain       = ScriptContext::for_test (request, response);
+    auto plain_error = engine.execute ("throw new Error('');", plain);
+    EXPECT_EQ (plain_error.error_message, "Error");
+
+    auto typed      = ScriptContext::for_test (request, response);
+    auto type_error = engine.execute ("throw new TypeError('');", typed);
+    EXPECT_EQ (type_error.error_message, "TypeError");
+}
+
+TEST_F (ScriptEngineTest, AThrownErrorWithAMessageIsUnchanged) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw new Error('boom');", ctx);
+    EXPECT_EQ (result.error_message, "Error: boom");
+}
+
+TEST_F (ScriptEngineTest, AThrownValueWithNoTextReadsAsASentence) {
+    auto empty_string = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw '';", empty_string).error_message,
+    "Script threw an empty string");
+
+    auto blank = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { return ''; } };", blank).error_message,
+    "Script threw a value with no text");
+
+    // A `toString` that itself throws leaves nothing pending behind.
+    auto hostile = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { throw 1; } };", hostile).error_message,
+    "Script threw a value with no text");
+}
+
+TEST_F (ScriptEngineTest, ARejectionAndATimerThrowReadAsSentencesToo) {
+    auto rejected = ScriptContext::for_test (request, response);
+    auto result   = engine.execute ("Promise.reject(undefined);", rejected);
+    EXPECT_EQ (result.error_message, "Unhandled promise rejection: Script threw undefined");
+
+    auto timed = ScriptContext::for_test (request, response);
+    result = engine.execute ("setTimeout(() => { throw undefined; }, 0);", timed);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
+
+// A `pm.test` row names its failure the way a script error does (#3461): the
+// row is where a user reads it, so a bare `null` there is the same dead end.
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullReadsAsASentenceNamingTheLimit) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message,
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the 1 MiB limit with no room to build an error)");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result = unbounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsUndefinedOrAnEmptyErrorReadsAsASentence) {
+    EXPECT_EQ (verdict_of ("throw undefined"), "Script threw undefined");
+    EXPECT_EQ (verdict_of ("throw new Error('')"), "Error");
+    EXPECT_EQ (verdict_of ("throw ''"), "Script threw an empty string");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsAnErrorWithAMessageIsUnchanged) {
+    EXPECT_EQ (verdict_of ("throw new Error('boom')"), "Error: boom");
+}
+
+// The legacy `tests[name]` row can fail the same way: a getter the script
+// defined on the object is the row's verdict when it throws.
+TEST_F (ScriptEngineTest, ALegacyTestRowWhoseGetterThrowsNullReadsAsASentence) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result =
+    unbounded.execute_test ("Object.defineProperty(tests, 'x', { enumerable: "
+                            "true, get() { throw undefined; } });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw undefined");
 }

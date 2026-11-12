@@ -383,22 +383,15 @@ const std::string& collection_id) {
     return scopes;
 }
 
-// The variable scopes a design run's scripts read. The collection scope is the
-// request's own collection *chain* - the same walk `{{variable}}` composition
-// does (`collection_chain`) - so a name an ancestor collection defines answers
-// the same in a script as it does in the URL (issue #234). Only the leaf is
-// handed over writable; ancestors ride along read-only, which is what keeps a
-// script's `set()` from copying inherited variables down into the leaf on the
-// next persist.
-ScriptVariableScopes
-load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run) {
-    std::string collection_id;
-    if (run.request_id.has_value ()) {
-        if (auto db_request = db.get_request (*run.request_id)) {
-            collection_id = db_request->collection_id;
+std::string scope_collection_id (vayu::db::Database& db,
+const std::optional<std::string>& request_id,
+const std::optional<std::string>& collection_id) {
+    if (request_id && !request_id->empty ()) {
+        if (auto row = db.get_request (*request_id); row && !row->collection_id.empty ()) {
+            return row->collection_id;
         }
     }
-    return load_script_variable_scopes (db, run.environment_id, collection_id);
+    return collection_id.value_or (std::string ());
 }
 
 std::vector<std::string> secret_variable_values (const ScriptVariableScopes& scopes) {

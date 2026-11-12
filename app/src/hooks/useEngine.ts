@@ -25,7 +25,8 @@ interface UseEngineReturn {
 	 *
 	 * Without `deferredVariables` (#2521): that answer is for display, and these
 	 * callers spread the result into `/execute` and `/runs` bodies. The Code
-	 * section reads it from `apiService.composeRequest` directly.
+	 * section reads it from `apiService.composeRequest` directly. The answer's
+	 * `collectionId` stays (#3461): it is the scope the send's scripts read.
 	 */
 	composeRequest: (params: ComposeRequestRequest) => Promise<ComposedRequest>;
 	/**

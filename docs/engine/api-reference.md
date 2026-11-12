@@ -7495,7 +7495,7 @@ never re-resolved - see [POST /execute](#post-execute) and
     "auth": { "mode": "inherit" },
     "elements": []
   },
-  "collectionId": "col_1234567890", // Optional: chain scope for an inline request
+  "collectionId": "col_1234567890", // Optional: chain scope for an inline request, echoed on the answer
   "environmentId": "env_1234567890", // Optional: environment scope
   "dataColumns": ["username", "city"], // Optional: bare names a bound row will substitute
   "deferDynamicVariables": true      // Optional: this payload is for a run that repeats it
@@ -7622,6 +7622,29 @@ a deferred variable cannot be checked here, so the refusals described under
 at send time instead, in the same words and under the same codes: a buffered
 `POST /execute` answers `statusCode: 0` with the code as `refusalCode`, and a
 streaming send answers a `400` carrying it.
+
+#### collectionId on the answer
+
+The answer names the collection whose chain this composition read, as
+`collectionId`: the leaf, so a sub-folder's id rather than its root's. That is
+the stored request's own collection for `requestId`, else the body's
+`collectionId`, and the member is **omitted when composition read no chain**:
+an inline request with no `collectionId`, or one naming a collection that does
+not exist or is in the Trash (issue #3461). Like `deferredVariables` it is
+composition's own answer, never taken from the input: a `collectionId` inside
+`request` is dropped, so an inline request cannot claim a scope composition did
+not read.
+
+It is what lets an inline request keep its scope past composition. A request
+composed by `requestId`, or sent with one linked (the app's Send does both),
+carries the id onward and `POST /execute` reads the stored request's
+collection again; an inline one that links no row (MCP's ad-hoc `run_request`
+with a `collectionId`, a direct caller) has nothing else to name it, so without
+the member the names deferred past its pre-request script would meet no
+collection scope at the send, and the script would read an empty
+`pm.collectionVariables`. `POST /execute` and `POST /runs`
+read it as described under [POST /execute](#post-execute). An engine older
+than issue #3461 neither writes nor reads it, and ignores it in a body.
 
 #### Query encoding
 
@@ -7918,8 +7941,8 @@ conformance fixture (`engine/tests/fixtures/variable-resolution-conformance.json
 
 **Response:** `200` with the composed payload - the `POST /execute` body shape,
 with `requestId` / `environmentId` echoed so the result can be POSTed onward
-unchanged, and `deferredVariables` when a pre-request script defers names
-(above). An auth that resolves to "send nothing" is an absent `auth` field.
+unchanged, the [`collectionId`](#collectionid-on-the-answer) whose chain it
+read, and `deferredVariables` when a pre-request script defers names (above). An auth that resolves to "send nothing" is an absent `auth` field.
 `headers` always comes back as the line array (issue #2466), whichever shape an
 inline request used, so a repeated header survives compose to execute; it is
 absent when there are no lines.
@@ -8124,6 +8147,7 @@ never refuses: see [Authentication](#authentication) and
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by scripts as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, uses environment variables
+  "collectionId": "col_1234567890",   // Optional, the collection scope of a request no row names - see below
   "timeout": 30000,                    // Optional, ms, 1-86400000 - see below
   "elements": [                        // Optional, typed behaviours - see Elements. The only
                                        // script source; preRequestScript/postRequestScript(s)/tests
@@ -8205,10 +8229,25 @@ the send's scripts make, buffered or streamed; a call's own `timeout` option
 replaces it, and the script's remaining budget can only lower either
 ([Scripting](scripting.md#sending-a-request-from-a-script-pmsendrequest)).
 
-**`requestId` and `environmentId` must be strings** (issue #1917): an id of any
-other JSON type (`"requestId": 7`) is a `400` naming the field - `'requestId'
-must be a string (got number)` - before any run row exists. Absent and `null`
-mean no link. `POST /runs` reads the same two fields under the same rule.
+**`requestId`, `environmentId` and `collectionId` must be strings** (issue
+#1917, `collectionId` since #3461): an id of any other JSON type
+(`"requestId": 7`) is a `400` naming the field - `'requestId' must be a string
+(got number)` - before any run row exists. Absent and `null` mean no link.
+`POST /runs` reads the same three fields under the same rule.
+
+**The collection scope of a send is decided once** (issue #3461): the
+collection of the request row `requestId` names, when there is a live one, and
+otherwise `collectionId`, the member [`POST /compose`](#collectionid-on-the-answer)
+writes on an inline request's answer - composition's own precedence, so a
+request field and a script read one chain. Its chain is what the pre-request
+and post-request scripts read and write (`pm.collectionVariables` answers the
+leaf's names and its ancestors', and a `set()` is stored on the leaf alone,
+never on an ancestor), what the names deferred past the pre-request script
+resolve against, and what the run's `configSnapshot` is masked against. An id
+naming nothing, unknown or in the Trash since composition, is an empty
+collection scope and the send goes out, never a refusal, as composition treats
+it. The field rides into `configSnapshot` with the rest of the payload, which
+is how a stored run records the scope it sent under.
 
 **`disabledDefaultHeaders` refuses what the engine would add** (issue #1229).
 The engine adds a small declared set to every request that does not name it -
@@ -8816,7 +8855,10 @@ field carries no `scope` and is the request's own; so is one from a payload
 whose `elements` carry no `origin`. `success` folds the same way: a failing
 `pm.test` at any level is a failed assertion, and the first level that throws
 is the error. `preScriptError` / `postScriptError` hold the thrown message as
-they always have when the request's own script threw; when an inherited level
+they always have when the request's own script threw (never empty or a bare
+`null`: a script that runs out of memory reads `Script ran out of memory at the
+1 MiB limit`, see
+[Error Handling](scripting.md#error-handling)); when an inherited level
 threw, they name it - "Collection pre-request script failed - <message>",
 "Folder test script failed - <message>". An `assert.*` or `extract.*`
 element's entry carries the `scope` of the level that declared it.
@@ -9313,6 +9355,7 @@ Start a load test run (Vayu Mode).
   "requestId": "req_1234567890",      // Optional, links to saved request
   "requestName": "Create user",       // Optional, read by the deferred validation script as pm.info.requestName
   "environmentId": "env_1234567890",  // Optional, what {{variables}} resolve against - see below
+  "collectionId": "col_1234567890",   // Optional, the composed collection scope when no requestId row names one - see below
   "origin": { "kind": "mcp", "client": "claude-code" },  // Optional, who started the run - see below
   "targetPolicy": { "allowAll": false, "allowedHosts": ["api.example.com"] },  // Optional, the hosts this run may reach - see below
   "requestElements": [],     // Optional step-level elements for THIS request - see below
@@ -9351,12 +9394,16 @@ explicit `null` is treated exactly like an absent key. An unrecognized string
 is a `400` naming the field and the valid values, the same validation
 `POST /requests` uses.
 
-**`requestId` / `environmentId` on `POST /runs`** are read exactly as on
-[`POST /execute`](#post-execute): a non-string is a `400` naming the field
-(`'environmentId' must be a string (got boolean)`) and no run row is created.
-A single-request run that names either resolves a `{{name}}` still in its URL,
-path values, headers or body against the same scopes a Send reads (the
-environment, the linked request's collection chain, globals) (#3253). It is one
+**`requestId` / `environmentId` / `collectionId` on `POST /runs`** are read
+exactly as on [`POST /execute`](#post-execute): a non-string is a `400` naming
+the field (`'environmentId' must be a string (got boolean)`) and no run row is
+created. A single-request run's collection scope is decided by the same rule
+(the linked request's collection, else the composed
+[`collectionId`](#collectionid-on-the-answer), issue #3461), for its scripts,
+its residual pass and its snapshot's masking alike. A single-request run that
+names any of the three resolves a `{{name}}` still in its URL, path values,
+headers or body against the same scopes a Send reads (the environment, that
+collection's chain, globals) (#3253). It is one
 pass at run start, over the request every submission shares, never one per
 submission, so a request holding no `{{` costs nothing more. An
 id naming nothing is an empty scope, as on `POST /execute`, never a refusal.
@@ -9987,8 +10034,9 @@ last submission settles, and sees `pm.info.run` (`requestsSent`,
 recorded under the report's `lifecycle.teardown` and never changes the run's
 terminal status. Both read and write the same variable scopes every other
 script of the run shares - the environment named by `environmentId`, and the
-collection scope of the request `requestId` links, when the run links one;
-a bare URL run with no `requestId` gets no collection scope. Unlike a
+collection scope of the request `requestId` links, when the run links one,
+else of the composed `collectionId` (issue #3461); a bare URL run naming
+neither gets no collection scope. Unlike a
 collection-backed run, `script.setup` / `script.teardown` alone do not make
 what a script writes reach the request: the stored values do, through the
 start-of-run pass ([`POST /runs`](#post-runs), #3253), but that pass runs
@@ -12627,7 +12675,8 @@ into `sanitize_config_snapshot`.
 (`Authorization`, `Cookie`, `X-Api-Key`, ...) or by the request's `apikey` auth
 keeps its name with the value `"<redacted>"`, and every value of a variable
 marked secret in the payload's scopes (globals, `environmentId`, the collection
-chain of `requestId`'s request; for a scenario run, the chain of the run
+chain of `requestId`'s request, else of the composed `collectionId`, issue
+#3461; for a scenario run, the chain of the run
 collection and of every folder a step sits in, so a recursive run masks a
 secret held on a sub-folder, issue #3270) is written as `<redacted>` wherever
 it landed in `url`, `params`, `headers` or `body`, in its raw, percent-encoded,

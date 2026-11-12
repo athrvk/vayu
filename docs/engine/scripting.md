@@ -1917,7 +1917,7 @@ effect.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused-3461)) |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -1931,6 +1931,21 @@ if (pm.environment.has('auth_token')) {
 
 console.log(pm.environment.toObject());
 ```
+
+#### A name a token cannot read back is refused (#3461)
+
+`{{ name }}` is looked up with the spaces, tabs and line breaks cut from both
+ends, and a reference stops at a brace. A variable stored as `''`, `' pad '`
+or `'a}}b'` could therefore never be referenced, and the next save of that
+scope through the API would answer `400` for the key. So `set` on any scope
+(`pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`, and
+the legacy `postman.setEnvironmentVariable` / `setGlobalVariable`, which
+delegate to them) throws a `TypeError` for such a name, naming the call and the
+reason, and stores nothing. An extractor's `variable` is refused for the same
+names, in the same words (`variable_name_refusal`). Spaces inside a name
+(`my var`), Unicode and dots are fine. `unset` does not check, so a bad name
+that is already stored can still be removed. Postman stores such a name; Vayu
+refuses it because nothing could ever read it.
 
 `unset()` is not the same as `set(name, '')`. An emptied variable is still an
 enabled row, so `{{auth_token}}` resolves to the empty string; an unset one is
@@ -1972,6 +1987,15 @@ collection being run reads and writes that sub-folder, as a Send of it does
 folder and below it read (under load, that virtual user's later steps). A
 sibling folder does not see it. `script.setup` and `script.teardown` read and
 write the collection being run.
+
+A request sent inline with no saved row linked (MCP's ad-hoc `run_request`
+with a `collectionId`, a direct API caller) reads the chain of the collection
+it was composed in: `POST
+/compose` writes that `collectionId` on its answer and `POST /execute` and
+`POST /runs` read the scope from it, so the script sees the same chain the
+request's `{{names}}` resolve against (issue #3461). A linked saved request's
+own collection comes first; a collection that no longer exists is an empty
+scope.
 
 **Writes stay on the request's own collection.** `set`, `unset` and `clear`
 never reach an ancestor, so `set` on a descendant *shadows* an inherited name
@@ -2966,6 +2990,17 @@ console.error('Error message');
 Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
 rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
+
+**`scriptEnableConsole` off keeps `console` defined** (#3461). The setting is
+the recommended one for a load test, where recording and storing output nobody
+reads costs throughput. With it off, `console.log`, `console.info`,
+`console.warn` and `console.error` are still bound, to a function that formats
+nothing and records nothing, so a script that logs keeps running and its later
+`pm.test` calls still execute; the result's console output is empty. The two
+settings bind the same four names (`setup_console`), so no script can tell them
+apart by a thrown `ReferenceError`. `console.debug`, `console.table` and the
+rest stay undefined either way, as [pm API
+compatibility](../app/pm-api-compatibility.md) lists.
 
 Four built-in objects have no useful JSON form and print the way Node prints
 them (#3130):
@@ -4139,9 +4174,15 @@ The **language** is current; what is missing is the **host environment**:
   10 requests per script, bounded by the script's own deadline and by the
   response byte bound its path reads, and refused outright for agent-started
   runs.
-- **Memory limit**: 64MB per script execution. Running out ends the script:
+- **Memory limit**: 64MB per script execution (`scriptMemoryLimit`, 1 MiB to
+  256 MiB). Running out ends the script:
   since quickjs-ng 0.18.0 the out-of-memory error cannot be caught by the
-  script itself, so a `try` cannot swallow it and keep allocating.
+  script itself, so a `try` cannot swallow it and keep allocating. It is
+  reported as `Script ran out of memory at the 64 MiB limit`, naming the limit
+  in force. At the 1 MiB floor a library as large as lodash cannot load:
+  `require('lodash')` fails with that sentence, so raise the limit rather than
+  load it. See [Error Handling](#error-handling) for what a thrown `null`
+  reads as.
 - **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
   execution; the rest is dropped behind one warning line
   ([Console Output](#console-output)).
@@ -4475,6 +4516,33 @@ try {
 ```
 
 Test failures don't stop script execution - all tests run and results are collected.
+
+The message is never empty and never the bare `null` or `undefined` a value
+stringifies to (#3461). An error with a message reads as it always has
+(`Error: boom`), and one with an empty message reads as its type (`TypeError`).
+What has no text of its own reads as a sentence:
+
+| The script | The message |
+|------------|-------------|
+| Runs out of memory | `Script ran out of memory at the 1 MiB limit` (the configured `scriptMemoryLimit`) |
+| `throw undefined` | `Script threw undefined` |
+| `throw ''` | `Script threw an empty string` |
+| Throws an object whose `toString` gives `''` or throws | `Script threw a value with no text` |
+| `throw null` | `Script threw null (QuickJS also throws null when it runs out of memory at the 1 MiB limit with no room to build an error)` |
+
+The last row names both causes because QuickJS cannot tell them apart: when the
+heap is so full that not even the error object can be built, it throws a bare
+`null`, the same value a script's own `throw null` is, and nothing about the
+heap afterwards separates the two. (`require()` of a library that cannot load
+is the one place the engine knows, and it reports the out-of-memory sentence.)
+With the limit at `0` (an embedder's "no limit") it reads `Script threw null`.
+The same text stands in for the reason of an unhandled promise rejection
+(`Unhandled promise rejection: Script threw undefined`).
+
+A failed `pm.test` row (and a legacy `tests[name]` getter that throws) reads the
+same way: `pm.test('x', () => { throw undefined })` gives the row the error
+`Script threw undefined`, `throw new Error('')` gives `Error`, and
+`throw new Error('boom')` still gives `Error: boom`.
 
 In a collection run an uncaught error marks the step `errored`, with the message
 on its row, and the iteration moves on to the next request, as Postman's runner

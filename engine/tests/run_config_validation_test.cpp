@@ -1131,13 +1131,14 @@ TEST_F (RunConfigValidationRouteTest, AcceptedCarriedBudgetsAreStoredWithTheRun)
 
 // `requestId` / `environmentId` were read with `get<std::string> ()`, so a
 // number threw a nlohmann `type_error` the server answered as a 500 with an
-// empty body (#1917). Mutation check: restore the unchecked `get<std::string> ()`
-// in `read_run_scope_ids` and every case answers 500 instead of 400.
+// empty body (#1917); `collectionId` joined them with #3461. Mutation check:
+// restore the unchecked `get<std::string> ()` in `read_run_scope` and every
+// case answers 500 instead of 400.
 TEST_F (RunConfigValidationRouteTest, ANonStringScopeIdIsRefusedNamingTheFieldBeforeAnyRowOrSend) {
     const vayu::tests::EchoServer echo;
     const json send{ { "method", "GET" }, { "url", echo.url () } };
     for (const char* path : { "/execute", "/runs" }) {
-        for (const char* field : { "requestId", "environmentId" }) {
+        for (const char* field : { "requestId", "environmentId", "collectionId" }) {
             for (const auto& bad : { json (7), json (true), json::object () }) {
                 auto payload = path == std::string ("/runs") ? iterations_run (echo) : send;
                 payload[field]            = bad;

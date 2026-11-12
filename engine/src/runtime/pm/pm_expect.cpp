@@ -3484,8 +3484,9 @@ constexpr const char* DONE_MESSAGE = "message";
  *
  * Mocha's contract, which postman-sandbox follows: no argument (or a falsy one)
  * completes the test, and any truthy argument fails it - an `Error` being the
- * documented shape, reported by the same `js_to_string` the throw path reports
- * a thrown one with, so the two spellings of "this test failed" read alike.
+ * documented shape, reported as the text the throw path reports a thrown one
+ * with, so the two spellings of "this test failed" read alike. A truthy value
+ * never reaches the null and undefined wording `thrown_value_message` adds.
  *
  * A second call is refused rather than allowed to overwrite the first verdict:
  * called twice inside the callback it throws, and the throw fails the test
@@ -3624,7 +3625,7 @@ JSValue js_pm_test (JSContext* ctx, JSValueConst this_val, int argc, JSValueCons
     if (JS_IsException (ret)) {
         JSValue exc          = JS_GetException (ctx);
         result.passed        = false;
-        result.error_message = js_to_string (ctx, exc);
+        result.error_message = thrown_value_message (ctx, exc);
         JS_FreeValue (ctx, exc);
     } else if (arity > 0) {
         apply_done_verdict (ctx, state, result);

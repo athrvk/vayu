@@ -673,9 +673,15 @@ export interface ComposeRequestRequest {
  * `{{name}}` in the payload because the script may replace them. Sorted, and
  * absent when nothing was deferred. It is for display; `useEngine` strips it
  * from the payload a send hands on to `/execute` or `/runs`.
+ *
+ * `collectionId` (#3461) is the leaf of the chain composition read, absent when
+ * it read none. Unlike `deferredVariables` it is part of the send: `/execute`
+ * and `/runs` read the scripts' collection scope from it when no `requestId`
+ * row names one, so a spread of the answer carries it.
  */
 export type ComposedRequest = ExecuteRequestRequest &
 	Record<string, unknown> & {
+		collectionId?: string;
 		deferredVariables?: string[];
 	};
 

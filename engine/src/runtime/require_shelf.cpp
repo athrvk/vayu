@@ -320,6 +320,21 @@ JSValue evaluate_library (JSContext* ctx, const ShelfLibrary& library) {
     return exported;
 }
 
+/// Makes the exception pending after a failed library evaluation the
+/// out-of-memory error QuickJS would have thrown had it room to build one.
+/// With the heap full it throws a bare `null` instead, which no library
+/// source throws and a script cannot tell from its own `throw null`; the
+/// evaluation's work is freed by now, so there is room for the error here.
+void restore_out_of_memory_error (JSContext* ctx) {
+    JSValue pending = JS_GetException (ctx);
+    if (!JS_IsNull (pending) && !JS_IsUninitialized (pending)) {
+        JS_Throw (ctx, pending);
+        return;
+    }
+    JS_FreeValue (ctx, pending);
+    JS_ThrowInternalError (ctx, "out of memory");
+}
+
 /// The module SHELF[@p index] evaluates to in this execution, evaluating it on
 /// the first call. While it evaluates, its entry holds `undefined`, so a
 /// library that reads its own global or requires itself as it loads (lodash
@@ -339,6 +354,7 @@ JSValue load_library (JSContext* ctx, std::size_t index) {
     JSValue exported = evaluate_library (ctx, library);
     if (JS_IsException (exported)) {
         data->shelf_modules.erase (slot);
+        restore_out_of_memory_error (ctx);
         return exported;
     }
     slot->second = JS_DupValue (ctx, exported);

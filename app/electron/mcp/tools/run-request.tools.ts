@@ -63,7 +63,7 @@ import {
 const NO_TARGET_ERROR = 'Pass "url" for an ad-hoc send, or "requestId" to send a saved request.';
 
 const LINK_ONLY_CAVEAT =
-	'Both "url" and "requestId" were given, so this was sent ad hoc: the saved request\'s stored auth, scripts, elements and settings were NOT applied, and "requestId" only linked the run in History. Omit "url" to send the saved request as stored.';
+	'Both "url" and "requestId" were given, so this was sent ad hoc: the saved request\'s stored auth, scripts, elements and settings were NOT applied, and "requestId" only linked the run in History and named the collection its scripts read. Omit "url" to send the saved request as stored.';
 
 /**
  * The ad-hoc scripts as the `elements` entries `/execute` takes: it refuses
@@ -160,7 +160,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 		retry: "never-blind",
 		invalidates: ["run", "cookie", "variables"],
 		description: (config) =>
-			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then only links the run in History and nothing stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain, using the same precedence as the app; the environment's cookie jar is the one the send uses, and its History row names it. " +
+			"Send a single HTTP request through Vayu (Design mode) and return the response, timing, and any test results. Omit `url` and pass `requestId` to send the saved request as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings); `headers`, `body`, `method`, `auth` and the other fields you add then replace the stored ones for this send, and a `preRequestScript`, `postRequestScript` or `elements` you add run after the stored ones. Pass `url` to send ad hoc; `requestId` then links the run in History and scopes its scripts' collection, and nothing else stored is applied. The target host must be on Vayu's MCP allowlist, checked on the resolved URL. {{variables}} in the URL, headers, and body are resolved against the environment and, with a collectionId, its chain, using the same precedence as the app; the environment's cookie jar is the one the send uses, and its History row names it. " +
 			VARIABLE_PRECEDENCE_SENTENCE +
 			` See ${VARIABLE_RESOLUTION_URI}.` +
 			" Pass an `auth` block to have the engine apply bearer/basic/apikey/oauth2 auth. Pass a `preRequestScript` to sign or otherwise rewrite the request before it goes out - its pm.request edits are applied to what is actually sent. " +
@@ -212,7 +212,7 @@ export const RUN_REQUEST_TOOLS: McpTool[] = [
 				.string()
 				.optional()
 				.describe(
-					"Saved request ID. Without `url`, the saved request is sent as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings). With `url`, the send is ad hoc: `requestId` only links the run in History and nothing stored is applied."
+					"Saved request ID. Without `url`, the saved request is sent as the app's Send does (stored auth, inherited auth, the chain's and the request's scripts and elements, settings). With `url`, the send is ad hoc: `requestId` links the run in History and scopes its scripts' collection; nothing else stored is applied."
 				),
 			environmentId: environmentIdInput,
 			collectionId: collectionIdInput,

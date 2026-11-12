@@ -26,10 +26,12 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -225,7 +227,19 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
     return JS_UNDEFINED;
 }
 
-void setup_console (JSContext* ctx) {
+/// What `console.*` is bound to when `scriptEnableConsole` is off: the methods
+/// stay defined so a script that logs keeps running (#3461), but nothing is
+/// formatted or recorded. Binding a different function, rather than testing
+/// the flag inside `js_console_log`, keeps the per-call cost of a load test at
+/// one C call.
+JSValue js_console_discard (JSContext*, JSValueConst, int, JSValueConst*, int) {
+    return JS_UNDEFINED;
+}
+
+/// Installs `console` with the four methods a script may call. `record` picks
+/// what they are bound to; the set of names does not depend on it, because a
+/// script must not be able to tell the two configurations apart by a throw.
+void setup_console (JSContext* ctx, bool record) {
     JSValue global  = JS_GetGlobalObject (ctx);
     JSValue console = JS_NewObject (ctx);
 
@@ -243,9 +257,10 @@ void setup_console (JSContext* ctx) {
         { "error", ConsoleLevel::Error },
     };
 
+    JSCFunctionMagic* const handler = record ? js_console_log : js_console_discard;
     for (const auto& method : METHODS) {
         JS_SetPropertyStr (ctx, console, method.name,
-        JS_NewCFunctionMagic (ctx, js_console_log, method.name, 1,
+        JS_NewCFunctionMagic (ctx, handler, method.name, 1,
         JS_CFUNC_generic_magic, static_cast<int> (method.level)));
     }
 
@@ -665,6 +680,94 @@ std::mutex& class_id_registration_mutex () {
 
 } // anonymous namespace
 
+namespace {
+
+/// What QuickJS's own out-of-memory error reads as; the one text a refused
+/// allocation produces when there was room left to build the error.
+constexpr std::string_view QUICKJS_OUT_OF_MEMORY_TEXT =
+"InternalError: out of memory";
+
+/// A byte count the way `scriptMemoryLimit` is chosen: "64 MiB", "512 KiB",
+/// or "1500 bytes" for a value neither unit divides.
+std::string format_byte_limit (std::size_t bytes) {
+    constexpr std::size_t kib = 1024;
+    constexpr std::size_t mib = kib * 1024;
+    if (bytes % mib == 0) {
+        return std::to_string (bytes / mib) + " MiB";
+    }
+    if (bytes % kib == 0) {
+        return std::to_string (bytes / kib) + " KiB";
+    }
+    return std::to_string (bytes) + " bytes";
+}
+
+/// Limit 0 is QuickJS's "no limit": the heap is only bounded by the host.
+std::string out_of_memory_message (std::size_t memory_limit) {
+    if (memory_limit == 0) {
+        return "Script ran out of memory";
+    }
+    return "Script ran out of memory at the " + format_byte_limit (memory_limit) + " limit";
+}
+
+/// A thrown `null` is two events QuickJS does not tell apart: a script's own
+/// `throw null`, and a refused allocation so tight that not even the error
+/// object could be built, where QuickJS throws `null` instead (a bare JS null,
+/// not an absent exception). Neither the value nor the heap afterwards says
+/// which - the failed work is unwound and freed - so the text names both.
+std::string threw_null_message (std::size_t memory_limit) {
+    if (memory_limit == 0) {
+        return "Script threw null";
+    }
+    return "Script threw null (QuickJS also throws null when it runs out of "
+           "memory at the " +
+    format_byte_limit (memory_limit) + " limit with no room to build an error)";
+}
+
+/// The `scriptMemoryLimit` this context's runtime was built with.
+std::size_t script_memory_limit (JSContext* ctx) {
+    const auto* state =
+    static_cast<const RuntimeState*> (JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+    return state != nullptr ? state->memory_limit : 0;
+}
+
+} // namespace
+
+/// The error text for @p thrown, a value a script threw or the pending
+/// exception taken off @p ctx. Never empty, and never the bare `null` or
+/// `undefined` that `String(value)` gives: a script error reading `null` names
+/// nothing a user can act on.
+///
+/// QuickJS's absent exception (`JS_UNINITIALIZED`, what an allocation refused
+/// inside its own out-of-memory handling leaves) is out of memory for certain.
+/// An Error with an empty message reads as its name, which is what its own
+/// `toString` answers.
+std::string thrown_value_message (JSContext* ctx, JSValueConst thrown) {
+    const std::size_t memory_limit = script_memory_limit (ctx);
+    if (JS_IsUninitialized (thrown)) {
+        return out_of_memory_message (memory_limit);
+    }
+    if (JS_IsNull (thrown)) {
+        return threw_null_message (memory_limit);
+    }
+    if (JS_IsUndefined (thrown)) {
+        return "Script threw undefined";
+    }
+    std::string text = js_to_string (ctx, thrown);
+    // A `toString` that throws leaves its exception pending; it is not the
+    // script's reported error.
+    if (JS_HasException (ctx)) {
+        discard_pending_exception (ctx);
+    }
+    if (text == QUICKJS_OUT_OF_MEMORY_TEXT) {
+        return out_of_memory_message (memory_limit);
+    }
+    if (!text.empty ()) {
+        return text;
+    }
+    return JS_IsString (thrown) ? "Script threw an empty string" :
+                                  "Script threw a value with no text";
+}
+
 // Reads a hash input: a string contributes its UTF-8 bytes, a Uint8Array its
 // bytes as they are. Anything else throws rather than being stringified -
 // hashing the text "[object Object]" would be a silent wrong answer, and the
@@ -915,8 +1018,9 @@ class ScriptEngine::Impl {
         // Install a wall-clock deadline interrupt so infinite-loop scripts
         // cannot hang the thread. The RuntimeState is owned by this runtime
         // (freed with it) and refreshed before each execute().
-        auto* rt_state       = new RuntimeState ();
-        rt_state->stack_size = config.stack_size;
+        auto* rt_state         = new RuntimeState ();
+        rt_state->stack_size   = config.stack_size;
+        rt_state->memory_limit = config.memory_limit;
         JS_SetRuntimeOpaque (rt, rt_state);
         JS_SetInterruptHandler (rt, &script_interrupt_handler, rt_state);
         JS_SetHostPromiseRejectionTracker (rt, &script_rejection_tracker, rt_state);
@@ -983,9 +1087,7 @@ class ScriptEngine::Impl {
         if (!ctx) {
             return nullptr;
         }
-        if (config.enable_console) {
-            setup_console (ctx);
-        }
+        setup_console (ctx, config.enable_console);
         setup_base64_globals (ctx);
         setup_timers (ctx);
         setup_require_shelf (ctx);
@@ -1061,8 +1163,9 @@ class ScriptEngine::Impl {
         // function the handler never gets to interrupt. Comparing the clock
         // here replaced the sentence naming the fault with a timeout line
         // the user could not act on.
-        std::string message =
-        script_deadline_expired (ctx) ? timeout_message () : js_to_string (ctx, exc);
+        std::string message = script_deadline_expired (ctx) ?
+        timeout_message () :
+        thrown_value_message (ctx, exc);
         JS_FreeValue (ctx, exc);
         return message;
     }
@@ -1130,16 +1233,16 @@ class ScriptEngine::Impl {
     /// Reports the script body's throw as the throw itself, the message a
     /// synchronous script has always reported, rather than as an unhandled
     /// rejection of the wrapper's promise.
-    static void record_body_rejection (JSContext* js_ctx,
+    void record_body_rejection (JSContext* js_ctx,
     RuntimeState& state,
     ContextData& data,
-    ScriptResult& result) {
+    ScriptResult& result) const {
         if (JS_PromiseState (js_ctx, data.script_body) != JS_PROMISE_REJECTED) {
             return;
         }
         forget_rejection (js_ctx, state, data.script_body);
         JSValue reason = JS_PromiseResult (js_ctx, data.script_body);
-        record_script_error (result, js_to_string (js_ctx, reason));
+        record_script_error (result, thrown_value_message (js_ctx, reason));
         JS_FreeValue (js_ctx, reason);
         JS_FreeValue (js_ctx, data.script_body);
         data.script_body = JS_UNDEFINED;
@@ -1181,9 +1284,9 @@ class ScriptEngine::Impl {
     /// The first promise the script left unobserved once the queue drained:
     /// a rejection nothing handled, then a body or a `pm.test` promise that
     /// never settled. nullopt when there is none.
-    static std::optional<std::string> unobserved_promise_error (JSContext* js_ctx,
+    std::optional<std::string> unobserved_promise_error (JSContext* js_ctx,
     const RuntimeState& state,
-    const ContextData& data) {
+    const ContextData& data) const {
         if (!state.unhandled_rejections.empty ()) {
             return unhandled_rejection_message (js_ctx, state.unhandled_rejections, data);
         }
@@ -1201,9 +1304,9 @@ class ScriptEngine::Impl {
         return std::nullopt;
     }
 
-    static std::string unhandled_rejection_message (JSContext* js_ctx,
+    std::string unhandled_rejection_message (JSContext* js_ctx,
     const std::vector<JSValue>& rejections,
-    const ContextData& data) {
+    const ContextData& data) const {
         JSValueConst first  = rejections.front ();
         std::string message = "Unhandled promise rejection";
         for (const auto& [promise, test_name] : data.async_tests) {
@@ -1216,7 +1319,7 @@ class ScriptEngine::Impl {
         // script code, and can settle or handle more promises.
         const size_t others = rejections.size () - 1;
         JSValue reason      = JS_PromiseResult (js_ctx, first);
-        message += ": " + js_to_string (js_ctx, reason);
+        message += ": " + thrown_value_message (js_ctx, reason);
         JS_FreeValue (js_ctx, reason);
         if (others > 0) {
             message += " (and " + std::to_string (others) + " more unhandled " +

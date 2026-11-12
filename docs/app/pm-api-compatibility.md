@@ -49,7 +49,7 @@ supported is listed [below](#not-yet-supported).
 | Legacy `postman`    | `postman.setEnvironmentVariable` and the other ten pre-`pm.*` helper methods, each an alias of the `pm.*` method Postman names - see [The legacy `postman` object](#the-legacy-postman-object) |
 | Legacy globals      | `tests[...]`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration` and `request`, each read off the `pm.*` member Postman names - see [Postman's legacy globals](#postmans-legacy-globals) |
 | Visualizer          | `pm.visualizer.set(template, data?, options?)`, `.clear()` - accepted and not drawn, one console warning per call - see [Visualizer](#visualizer-pmvisualizer) |
-| Console             | `console.log/info/warn/error`                                                    |
+| Console             | `console.log/info/warn/error`; with `scriptEnableConsole` off they stay defined and record nothing |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
 Postman's `HeaderList` - but it carries `get()` / `has()` plus the read half of a
@@ -94,6 +94,12 @@ next run on, not within the run that set it. `pm.variables.set` takes the argume
 but the local scope is never stored or masked, so a flag there has no effect.
 `unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
 variable is still an enabled row that `{{name}}` resolves to.
+
+**`set` refuses a name no `{{name}}` could read back** (issue #3461): a blank name, one that
+starts or ends with whitespace, or one containing `{` or `}` throws a `TypeError` naming the
+call and stores nothing, on every scope and through the legacy `postman.set*Variable`
+aliases. Postman stores such a name; Vayu does not, because `{{ pad }}` looks up `pad` and a
+reference stops at a brace. `unset` accepts any name, so one already stored can be removed.
 
 **A value a script sets keeps its JavaScript type for the rest of the run**, as in
 Postman (issue #2529): after `pm.environment.set('n', 0)`,
@@ -1720,7 +1726,8 @@ accepted and warns:
   path `pm.response.json` and not a callback's parameter
 - `console.debug` and every other console method beyond `log`, `info`, `warn` and
   `error` (`console.table`, `console.dir`, `console.time`, ...) - use
-  `console.log`
+  `console.log`. This holds with `scriptEnableConsole` on or off: the four
+  supported methods stay defined when it is off, and nothing else is added
 - **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment`,
   `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`, `script.packages` and
   the libraries Postman bundles beyond `CryptoJS`, `_`, `xml2Json` and `tv4`** -

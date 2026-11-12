@@ -89,6 +89,9 @@ struct RuntimeState {
     /// `load_library` restores after a library's evaluation raised it. 0 is
     /// QuickJS's "no limit".
     std::size_t stack_size = 0;
+    /// The `scriptMemoryLimit` this runtime was configured with, which the
+    /// text of an out-of-memory error names. 0 is QuickJS's "no limit".
+    std::size_t memory_limit = 0;
     /// Promises rejected with no handler attached, in rejection order, each a
     /// reference the rejection tracker took (#2531). Emptied, every reference
     /// freed, before an execution releases its context: a held promise pins
@@ -394,6 +397,12 @@ inline std::string js_to_string (JSContext* ctx, JSValue val) {
     JS_FreeCString (ctx, str);
     return result;
 }
+
+// The text a failed script or `pm.test` row reports for @p thrown (a value a
+// script threw, or the pending exception taken off @p ctx): never empty, and
+// never the bare `null` or `undefined` that `String(value)` gives. Defined in
+// script_engine.cpp, which owns the out-of-memory wording it shares.
+std::string thrown_value_message (JSContext* ctx, JSValueConst thrown);
 
 // Each class's id, process-wide: assigned once, under
 // `class_id_registration_mutex ()`, by the first `ScriptEngine::Impl` to build
