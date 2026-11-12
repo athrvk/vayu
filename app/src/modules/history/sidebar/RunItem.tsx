@@ -32,7 +32,7 @@ import {
 import { TimeTooltip } from "@/components/shared/TimeValue";
 import { DEFAULT_REQUEST_NAME, HTTP_VERSIONS, isHttpVersion } from "@/constants/request";
 import { formatConcurrency } from "@/constants/load-test-modes";
-import { resultSubtitle } from "./result-subtitle";
+import { collectionSubtitle, resultSubtitle } from "./result-subtitle";
 import {
 	Activity,
 	Clock,
@@ -92,6 +92,14 @@ interface RunItemProps {
 	 * every other run type, and for a collection deleted since the run.
 	 */
 	collectionName?: string;
+}
+
+/** The line under a row's identity: a load run's headline numbers, or a collection run's step counts. */
+function resultLineOf(run: Run): string | null {
+	if (!run.resultSummary) return null;
+	if (run.type === "load") return resultSubtitle(run.resultSummary);
+	if (run.type === "scenario") return collectionSubtitle(run.resultSummary);
+	return null;
 }
 
 function RunItem({
@@ -286,15 +294,15 @@ function RunItem({
 	// collection name already was.
 	const identityTitle = requestName ? (requestUrl ?? undefined) : (identitySuffix ?? undefined);
 
-	// What a finished load run did (#2130): the verdict `completed` leaves out,
-	// drawn as the glyph's shape and said in words in the activator's name, and
-	// the headline numbers as a line. A row with no `resultSummary` has neither.
+	// What a finished load run did (#2130), or a collection run whose steps did
+	// not all pass (#3458): the verdict `completed` leaves out, drawn as the
+	// glyph's shape and said in words in the activator's name, and the headline
+	// numbers as a line. A row with no `resultSummary` has neither.
 	const judgement = rowOutcome(run);
 	const verdictName = judgement
 		? `, verdict ${OUTCOME_TITLE[judgement.outcome].toLowerCase()}`
 		: "";
-	const resultLine =
-		run.type === "load" && run.resultSummary ? resultSubtitle(run.resultSummary) : null;
+	const resultLine = resultLineOf(run);
 	// Why the run was run: the one line a user writes about it. A permanent line,
 	// not a hover row - it is what tells two runs of one url apart.
 	const comment = run.summary?.comment;

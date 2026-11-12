@@ -4399,12 +4399,12 @@ json vayu_folder_of (const std::optional<json>& object, ImportTally& tally) {
 
 /// The integer `order` @p object states, if any: a position among a parent's
 /// sub-folders and requests together (#2535), on a draft or on the
-/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote.
+/// `x-vayu-request` / `x-vayu-collection.folders` entry an export wrote. A
+/// value no row can store (`storable_order`, #3451) states nothing, rather
+/// than wrapping to a negative that sorts first.
 std::optional<int> stated_order (const json& object) {
     const json* order = prop (&object, "order");
-    return order != nullptr && order->is_number_integer () ?
-    std::make_optional (order->get<int> ()) :
-    std::nullopt;
+    return order != nullptr ? vayu::db::storable_order (*order) : std::nullopt;
 }
 
 /// The request's position among its folder's, from `x-vayu-request.order`.

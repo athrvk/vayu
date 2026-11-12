@@ -205,38 +205,80 @@ describe("RunItem run types", () => {
 		expect(load.querySelector(".text-purple-500")).not.toBeNull();
 	});
 
-	// #2954: the engine's collection row carries its step counts, and the sidebar
-	// row neither prints them nor lets a failed verdict change its glyph - those
-	// stay a load run's (`rowOutcome` is gated on `type === "load"`).
-	// Mutation check: drop the `type === "load"` gate in `rowOutcome` and the
-	// markup differs.
-	it("renders a collection row the same with or without its step counts", () => {
+	// #3458: the engine's collection row carries its step counts (#2954), and a
+	// completed run with a failed or errored step reads as failed: the glyph, the
+	// counts under the identity and the verdict in the activator's name. A clean
+	// row stays as it was.
+	// Mutation check: drop the `scenario` branch in `rowOutcome` and the glyph and
+	// name cases redden; drop `collectionSubtitle` from `resultLineOf` and the
+	// counts case reddens.
+	describe("a collection row's step counts", () => {
 		const props = { onSelect: noop, onDelete: vi.fn(), isDeleting: false };
-		const scenario = { collectionId: "col_1", stepCount: 4, iterations: 2 };
-		const bare = render(<RunItem run={scenarioRun(scenario)} {...props} />);
-		const bareMarkup = bare.container.innerHTML;
-		bare.unmount();
+		const scenario = { collectionId: "col_1", stepCount: 8, iterations: 1 };
 
-		const counted = render(
-			<RunItem
-				run={
-					{
-						...scenarioRun(scenario),
-						resultSummary: {
-							passed: 1,
-							failed: 1,
-							skipped: 0,
-							errored: 2,
-							verdict: "failed",
-						},
-					} as Run
-				}
-				{...props}
-			/>
-		);
+		function counted(resultSummary: Record<string, unknown>): Run {
+			return { ...scenarioRun(scenario), resultSummary } as Run;
+		}
 
-		expect(bareMarkup).not.toBe("");
-		expect(counted.container.innerHTML).toBe(bareMarkup);
+		it("marks a run with failed or errored steps as failed and prints the counts", () => {
+			const bare = render(<RunItem run={scenarioRun(scenario)} {...props} />);
+			const bareMarkup = bare.container.innerHTML;
+			bare.unmount();
+
+			const { container } = render(
+				<RunItem
+					run={counted({ passed: 2, failed: 1, skipped: 0, errored: 4 })}
+					{...props}
+					collectionName="Checkout flow"
+				/>
+			);
+
+			expect(container.innerHTML).not.toBe(bareMarkup);
+			expect(screen.getByText("2 passed, 1 failed, 4 errored")).toBeInTheDocument();
+			expect(
+				screen.getByRole("button", {
+					name: "Open Collection run, completed, verdict failed, Checkout flow",
+				})
+			).toBeInTheDocument();
+		});
+
+		it("draws the failed glyph where a clean row draws the completed one", () => {
+			const glyphOf = (run: Run) => {
+				const view = render(<RunItem run={run} {...props} />);
+				const glyph = view.container.querySelector("svg")?.getAttribute("class") ?? "";
+				view.unmount();
+				return glyph;
+			};
+
+			const clean = glyphOf(counted({ passed: 8 }));
+			const failed = glyphOf(counted({ passed: 7, errored: 1 }));
+
+			expect(clean).toMatch(/lucide-/);
+			expect(failed).toMatch(/lucide-/);
+			expect(failed).not.toBe(clean);
+		});
+
+		it("renders a clean collection row the same with or without its step counts", () => {
+			const bare = render(<RunItem run={scenarioRun(scenario)} {...props} />);
+			const bareMarkup = bare.container.innerHTML;
+			bare.unmount();
+
+			const clean = render(
+				<RunItem
+					run={counted({
+						passed: 8,
+						failed: 0,
+						skipped: 0,
+						errored: 0,
+						verdict: "passed",
+					})}
+					{...props}
+				/>
+			);
+
+			expect(bareMarkup).not.toBe("");
+			expect(clean.container.innerHTML).toBe(bareMarkup);
+		});
 	});
 
 	/**

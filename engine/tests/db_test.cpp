@@ -20,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -4282,6 +4283,119 @@ TEST_F (DatabaseTest, ARefusedSiblingOrderShiftLeavesTheDatabaseAtSix) {
     }
     EXPECT_EQ (read_user_version (TEST_DB_PATH), vayu::db::SCHEMA_VERSION);
     EXPECT_EQ (request_orders (TEST_DB_PATH).at ("req_1"), 3);
+}
+
+namespace {
+
+/// How many collections of the file at @p path match @p where, read through
+/// a connection of its own so no `Database` mapping reinterprets the column.
+int64_t count_collections (const std::string& path, const std::string& where) {
+    sqlite3* handle = nullptr;
+    if (sqlite3_open (path.c_str (), &handle) != SQLITE_OK) {
+        ADD_FAILURE () << "cannot open " << path;
+        sqlite3_close (handle);
+        return -1;
+    }
+    const std::string sql = "SELECT COUNT (*) FROM collections WHERE " + where;
+    sqlite3_stmt* stmt    = nullptr;
+    int64_t count         = -1;
+    if (sqlite3_prepare_v2 (handle, sql.c_str (), -1, &stmt, nullptr) == SQLITE_OK &&
+    sqlite3_step (stmt) == SQLITE_ROW) {
+        count = sqlite3_column_int64 (stmt, 0);
+    } else {
+        ADD_FAILURE () << sql << ": " << sqlite3_errmsg (handle);
+    }
+    sqlite3_finalize (stmt);
+    sqlite3_close (handle);
+    return count;
+}
+
+/// The copies a repair pass took before rewriting `TEST_DB_PATH`
+/// (`backups/vayu-<stamp>-pre-repair.db`).
+size_t pre_repair_snapshot_count () {
+    namespace fs = std::filesystem;
+    size_t found = 0;
+    std::error_code ec;
+    const fs::path backups = fs::path (TEST_DB_PATH).parent_path () / "backups";
+    for (fs::directory_iterator it (backups, ec), end; !ec && it != end; it.increment (ec)) {
+        if (it->path ().filename ().string ().ends_with ("-pre-repair.db")) {
+            ++found;
+        }
+    }
+    return found;
+}
+
+/// A root, and two collections stored with `parent_id = ''` as engines before
+/// #3451 wrote them, one of them trashed.
+void seed_empty_parent_workspace () {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    for (const char* id : { "col_root", "col_empty", "col_empty_trashed" }) {
+        Collection col;
+        col.id   = id;
+        col.name = id;
+        if (std::string_view (id) != "col_root") {
+            col.parent_id = "";
+        }
+        db.create_collection (col);
+    }
+    db.delete_collection ("col_empty_trashed");
+}
+
+} // namespace
+
+// `''` was a second spelling of the root (#3451): a start rewrites every such
+// row to NULL, trashed ones too, so a delete and restore of one comes back in
+// place instead of re-parented as if its parent were gone. Mutation check:
+// drop the `clear_empty_parent_ids` call from `init` and the rows keep `''`
+// and the restore answers `reparented`.
+TEST_F (DatabaseTest, AStartStoresAnEmptyCollectionParentAsTheRoot) {
+    seed_empty_parent_workspace ();
+    ASSERT_EQ (count_collections (TEST_DB_PATH, "parent_id = ''"), 2);
+
+    Database db (TEST_DB_PATH);
+    db.init ();
+
+    EXPECT_EQ (count_collections (TEST_DB_PATH, "parent_id = ''"), 0);
+    EXPECT_EQ (count_collections (TEST_DB_PATH, "parent_id IS NULL"), 3);
+    EXPECT_EQ (pre_repair_snapshot_count (), 1u)
+    << "no copy was saved before the rewrite";
+
+    const auto restored = db.restore_deleted ("col_empty_trashed");
+    ASSERT_HAS_VALUE (restored);
+    EXPECT_FALSE (restored->reparented) << "a root restores in place";
+    const auto row = db.get_collection ("col_empty_trashed");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_FALSE (row->parent_id.has_value ());
+    EXPECT_FALSE (row->deleted_at.has_value ());
+
+    EXPECT_EQ (db.clear_empty_parent_ids (), 0)
+    << "a second pass finds nothing";
+    EXPECT_EQ (pre_repair_snapshot_count (), 1u) << "and copies nothing";
+}
+
+// With no copy the pass rewrites nothing, and the next call does the work.
+// Mutation check: ignore what `snapshot_before_rewrite` answers in
+// `clear_empty_parent_ids` and the row is rewritten without a copy.
+TEST_F (DatabaseTest, WithNoCopyTheEmptyParentRepairRewritesNothing) {
+    Database db (TEST_DB_PATH);
+    db.init ();
+    Collection col;
+    col.id        = "col_empty";
+    col.name      = "Empty";
+    col.parent_id = "";
+    db.create_collection (col);
+
+    // A file where the folder goes, so the folder cannot be created.
+    const std::string backups = db.backups_directory ();
+    std::ofstream (backups) << "not a directory";
+
+    EXPECT_THROW (db.clear_empty_parent_ids (), std::runtime_error);
+    EXPECT_EQ (count_collections (TEST_DB_PATH, "parent_id = ''"), 1);
+
+    std::filesystem::remove (backups);
+    EXPECT_EQ (db.clear_empty_parent_ids (), 1);
+    EXPECT_EQ (count_collections (TEST_DB_PATH, "parent_id = ''"), 0);
 }
 
 // The column round-trips, and a tombstone clears it with the body it

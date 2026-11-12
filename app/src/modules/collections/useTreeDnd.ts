@@ -37,7 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { createStore, useStore } from "zustand";
 import { ArrowDown, ArrowRightLeft, ArrowUp } from "lucide-react";
 import { useReorderMutation } from "@/queries";
-import { useToastStore, useSaveStore } from "@/stores";
+import { useToastStore } from "@/stores";
 import { useCollectionsStore } from "@/modules/collections/collections-store";
 import type { Collection, RequestSummary } from "@/types";
 import { isDescendant } from "./tree-utils";
@@ -59,7 +59,8 @@ import type {
 	CollectionTreeDragState,
 	CollectionTreeDropTarget,
 } from "./context/CollectionTreeContext";
-import { TREE_ITEM } from "./tree-focus";
+import { EMPTY_OWNER_ATTR, TREE_ITEM } from "./tree-focus";
+import { collectionEntity, entityRowKey, folderRowKey, type DropLine } from "./tree-rows";
 import type { RowAction } from "@/components/shared";
 import { TIMING } from "@/config/timing";
 import { useStableCallback } from "@/hooks/useStableCallback";
@@ -84,6 +85,12 @@ export interface TreeDndOptions {
 	 * model; `null` for anything that is not one. Called from events only.
 	 */
 	entityAt: (element: Element) => TreeEntity | null;
+	/**
+	 * Where the line for a drop beside the row `key` names is drawn, from the
+	 * rows model (`dropLineBeside`), which alone knows what is visible under an
+	 * open folder. Called from events only.
+	 */
+	dropLineBeside: (key: string, position: "before" | "after") => DropLine | null;
 	/** Rows mid-rename or mid-delete are neither drag sources nor drop targets. */
 	isRowBusy: (entityId: string) => boolean;
 	/** Re-expand and re-focus a row after it moves - see `useRevealActiveSelection`. */
@@ -145,6 +152,33 @@ function withOwner(entity: TreeEntity, ownerId: string | null): TreeEntity | nul
  */
 const ROW_CONTROLS = "[data-tree-menu],[data-tree-toggle],input,textarea";
 
+/** A drop or keyboard move the planner refused; its own message says why. */
+function failedMoveMessage(entity: TreeEntity, error: unknown): string {
+	return error instanceof Error
+		? `Couldn't move ${entity.name}: ${error.message}`
+		: `Couldn't move ${entity.name}`;
+}
+
+/**
+ * An Undo whose row is no longer where the move left it. The planner's own
+ * message names a row id, which says nothing a user can act on.
+ */
+function staleUndoMessage(entity: TreeEntity): string {
+	return `${entity.name} has moved since; Undo is no longer available`;
+}
+
+/**
+ * A folder cannot be dropped into its own subtree; the engine's cycle guard
+ * stays the backstop, this is what greys the rows.
+ */
+function isInOwnSubtree(
+	dragged: TreeEntity,
+	targetId: string,
+	collections: readonly Collection[]
+): boolean {
+	return dragged.kind === "collection" && isDescendant(targetId, dragged.id, collections);
+}
+
 /**
  * The index a destination names, among the siblings *without* the moved row -
  * which is the index `reorder-math` splices into. `null` when the anchor is not
@@ -162,11 +196,22 @@ function indexAmongSiblings(
 	return destination.placement === "after" ? at + 1 : at;
 }
 
+/** Whether two indicators draw the same thing, so a move between them renders nothing. */
+function sameDropTarget(
+	a: CollectionTreeDropTarget | null,
+	b: CollectionTreeDropTarget | null
+): boolean {
+	if (!a || !b) return a === b;
+	if (a.rowKey !== b.rowKey || a.position !== b.position) return false;
+	return a.position === "inside" || (b.position !== "inside" && a.depth === b.depth);
+}
+
 export function useTreeDnd({
 	collections,
 	getRequestsByCollection,
 	treeRef,
 	entityAt: entityAtNow,
+	dropLineBeside: dropLineBesideNow,
 	isRowBusy: isRowBusyNow,
 	revealEntity: revealEntityNow,
 }: TreeDndOptions): TreeDnd {
@@ -186,6 +231,7 @@ export function useTreeDnd({
 	 */
 	const isRowBusy = useStableCallback(isRowBusyNow);
 	const entityAt = useStableCallback(entityAtNow);
+	const dropLineBeside = useStableCallback(dropLineBesideNow);
 	const revealEntity = useStableCallback(revealEntityNow);
 	const isExpanded = useStableCallback((id: string) => expandedCollectionIds.has(id));
 
@@ -216,6 +262,12 @@ export function useTreeDnd({
 		null
 	);
 	const destinationRef = useRef<DropDestination | null>(null);
+	/**
+	 * Where the pointer was at the last move of a live drag: an auto-scroll
+	 * frame moves the rows under a pointer that has not moved, and hit-tests
+	 * again from here.
+	 */
+	const pointerRef = useRef<{ x: number; y: number } | null>(null);
 	const springRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
 	const autoScrollRef = useRef<{ direction: number; frame: number | null }>({
 		direction: 0,
@@ -268,7 +320,11 @@ export function useTreeDnd({
 	 * an Undo needs: the same call, with the two swapped.
 	 */
 	const writeMove = useCallback(
-		(entity: TreeEntity, to: Placement): { from: Placement; moved: TreeEntity } | null => {
+		(
+			entity: TreeEntity,
+			to: Placement,
+			options: { isUndo?: boolean } = {}
+		): { from: Placement; moved: TreeEntity } | null => {
 			// The row as it is *after* the move, so a reveal expands the folder it
 			// landed in and an Undo plans from its new parent rather than its old.
 			const moved = withOwner(entity, to.ownerId);
@@ -294,10 +350,9 @@ export function useTreeDnd({
 				// move did not happen and the user has to know that, but it is not a
 				// crash inside a toast's click handler.
 				useToastStore.getState().showToast({
-					message:
-						error instanceof Error
-							? `Couldn't move ${entity.name}: ${error.message}`
-							: `Couldn't move ${entity.name}`,
+					message: options.isUndo
+						? staleUndoMessage(entity)
+						: failedMoveMessage(entity, error),
 					variant: "error",
 				});
 				return null;
@@ -335,7 +390,7 @@ export function useTreeDnd({
 				action: {
 					label: "Undo",
 					altText: `Undo moving ${entity.name}`,
-					onClick: () => writeMove(result.moved, result.from),
+					onClick: () => writeMove(result.moved, result.from, { isUndo: true }),
 				},
 			});
 		},
@@ -346,71 +401,27 @@ export function useTreeDnd({
 	 * The row and edge the indicator draws on, derived from the destination
 	 * rather than from the pointer: a drop into a folder lands after its last
 	 * child, and the line has to be drawn there rather than on the folder row.
+	 * A line after an open folder is the rows model's to place
+	 * (`dropLineBeside`), since only it knows the folder's last visible row.
 	 */
 	const indicatorFor = useCallback(
 		(entity: TreeEntity, destination: DropDestination): CollectionTreeDropTarget | null => {
+			const siblings = siblingsOf(destination.ownerId);
 			if (destination.anchorId) {
-				return { id: destination.anchorId, position: destination.placement };
+				const anchor = siblings.find((row) => row.id === destination.anchorId);
+				return anchor ? dropLineBeside(entityRowKey(anchor), destination.placement) : null;
 			}
-			const rows = siblingsOf(destination.ownerId).filter((row) => row.id !== entity.id);
+			const rows = siblings.filter((row) => row.id !== entity.id);
 			if (rows.length === 0) {
-				return destination.ownerId ? { id: destination.ownerId, position: "inside" } : null;
+				return destination.ownerId
+					? { rowKey: folderRowKey(destination.ownerId), position: "inside" }
+					: null;
 			}
 			return destination.placement === "before"
-				? { id: rows[0].id, position: "before" }
-				: { id: rows[rows.length - 1].id, position: "after" };
+				? dropLineBeside(entityRowKey(rows[0]), "before")
+				: dropLineBeside(entityRowKey(rows[rows.length - 1]), "after");
 		},
-		[siblingsOf]
-	);
-
-	/* ── Auto-scroll ──────────────────────────────────────────────────────── */
-
-	const scrollContainer = useCallback(
-		() => treeRef.current?.closest<HTMLElement>("[data-drawer-body]") ?? null,
-		[treeRef]
-	);
-
-	const stopAutoScroll = useCallback(() => {
-		const state = autoScrollRef.current;
-		if (state.frame !== null) cancelAnimationFrame(state.frame);
-		autoScrollRef.current = { direction: 0, frame: null };
-	}, []);
-
-	const startAutoScroll = useCallback(
-		(direction: number) => {
-			// The loop function is local so it can recurse: a `useCallback` that
-			// schedules itself is a value referring to itself across renders, and
-			// the frame would keep calling whichever version armed it.
-			const step = () => {
-				const container = scrollContainer();
-				if (!container || autoScrollRef.current.direction === 0) return;
-				container.scrollTop += autoScrollRef.current.direction * AUTO_SCROLL_STEP_PX;
-				autoScrollRef.current.frame = requestAnimationFrame(step);
-			};
-			autoScrollRef.current = { direction, frame: requestAnimationFrame(step) };
-		},
-		[scrollContainer]
-	);
-
-	const updateAutoScroll = useCallback(
-		(clientY: number) => {
-			const container = scrollContainer();
-			// Nothing to scroll (and jsdom, where every box measures zero): a band
-			// test against a zero-height rect would otherwise scroll forever.
-			if (!container || container.scrollHeight <= container.clientHeight) {
-				stopAutoScroll();
-				return;
-			}
-			const rect = container.getBoundingClientRect();
-			let direction = 0;
-			if (clientY < rect.top + AUTO_SCROLL_BAND_PX) direction = -1;
-			else if (clientY > rect.bottom - AUTO_SCROLL_BAND_PX) direction = 1;
-			if (direction === autoScrollRef.current.direction) return;
-			stopAutoScroll();
-			if (direction === 0) return;
-			startAutoScroll(direction);
-		},
-		[scrollContainer, startAutoScroll, stopAutoScroll]
+		[dropLineBeside, siblingsOf]
 	);
 
 	/* ── Spring-loaded folders ────────────────────────────────────────────── */
@@ -454,48 +465,22 @@ export function useTreeDnd({
 		[clearSpring, expandCollection, isExpanded]
 	);
 
-	/* ── The drag itself ──────────────────────────────────────────────────── */
+	/* ── Hit testing ──────────────────────────────────────────────────────── */
 
-	const endDrag = useCallback(() => {
-		clearSpring();
-		stopAutoScroll();
-		const pressed = pressedRef.current;
-		if (pressed?.el.hasPointerCapture?.(pressed.pointerId)) {
-			pressed.el.releasePointerCapture(pressed.pointerId);
-		}
-		pressedRef.current = null;
-		destinationRef.current = null;
-		dragState.setState({ dragging: null, dropTarget: null });
-	}, [clearSpring, dragState, stopAutoScroll]);
-
-	const hasUnsavedEdits = useCallback((entity: TreeEntity): boolean => {
-		if (entity.kind !== "request") return false;
-		// Two writers on one row is the clobber family: the tab's auto-save holds
-		// the row's contents while a move rewrites its owner and order.
-		return (
-			useSaveStore.getState().contexts.get(`request-${entity.id}`)?.hasPendingChanges === true
-		);
-	}, []);
-
-	const onPointerDown = useCallback(
-		(e: React.PointerEvent<HTMLElement>) => {
-			if (e.button !== 0) return;
-			// An open row menu is a React child of the tree but not a DOM one.
-			if (!isOwnEvent(e)) return;
-			if (!(e.target instanceof Element) || e.target.closest(ROW_CONTROLS)) return;
-			const entity = entityAt(e.target);
-			if (!entity || isRowBusy(entity.id)) return;
-			if (hasUnsavedEdits(entity)) {
-				useToastStore.getState().showToast({
-					message: `Saving ${entity.name} - try again in a moment`,
-					variant: "info",
-				});
-				return;
-			}
-			gestureRef.current = pressGesture({ x: e.clientX, y: e.clientY });
-			pressedRef.current = { entity, pointerId: e.pointerId, el: e.currentTarget };
+	/**
+	 * A drop on an empty folder's "Empty collection" line means "inside that
+	 * folder": the line is not a treeitem, so no row resolves it. It carries no
+	 * spring, because the line only shows while its folder is open.
+	 */
+	const dropIntoEmptyFolder = useCallback(
+		(dragged: TreeEntity, ownerId: string): DropDestination | null => {
+			const { collections: loaded } = dataRef.current;
+			const owner = loaded.find((c) => c.id === ownerId);
+			if (!owner || isRowBusy(ownerId)) return null;
+			if (isInOwnSubtree(dragged, ownerId, loaded)) return null;
+			return resolveDrop({ dragged, target: collectionEntity(owner), zone: "inside" });
 		},
-		[entityAt, hasUnsavedEdits, isRowBusy]
+		[isRowBusy]
 	);
 
 	/**
@@ -512,21 +497,129 @@ export function useTreeDnd({
 			under: Element | null,
 			clientY: number
 		): { destination: DropDestination | null; spring: TreeEntity | null } => {
+			const emptyOwnerId = under
+				?.closest(`[${EMPTY_OWNER_ATTR}]`)
+				?.getAttribute(EMPTY_OWNER_ATTR);
+			if (emptyOwnerId) {
+				return { destination: dropIntoEmptyFolder(dragged, emptyOwnerId), spring: null };
+			}
 			const row = under?.closest<HTMLElement>(TREE_ITEM) ?? null;
 			const target = row ? entityAt(row) : null;
 			if (!row || !target || isRowBusy(target.id)) return { destination: null, spring: null };
-			// A folder cannot be dropped into its own subtree; the engine's cycle
-			// guard stays the backstop, this is what greys the rows.
-			if (
-				dragged.kind === "collection" &&
-				isDescendant(target.id, dragged.id, dataRef.current.collections)
-			) {
+			if (isInOwnSubtree(dragged, target.id, dataRef.current.collections)) {
 				return { destination: null, spring: null };
 			}
 			const rect = row.getBoundingClientRect();
 			const zone = zoneAt(clientY - rect.top, rect.height, target.kind === "collection");
 			const destination = resolveDrop({ dragged, target, zone });
 			return { destination, spring: destination && zone === "inside" ? target : null };
+		},
+		[dropIntoEmptyFolder, entityAt, isRowBusy]
+	);
+
+	/**
+	 * Resolve the drop under the drag's last pointer position, and draw it. On
+	 * every move, and after every auto-scroll frame: a scroll brings a different
+	 * row under a pointer that has not moved, and both the indicator and the
+	 * release read what this last found.
+	 */
+	const hitTestDrop = useCallback(() => {
+		const pressed = pressedRef.current;
+		const pointer = pointerRef.current;
+		if (!pressed || !pointer) return;
+		const under = document.elementFromPoint?.(pointer.x, pointer.y) ?? null;
+		const { destination, spring } = dropUnder(pressed.entity, under, pointer.y);
+		destinationRef.current = destination;
+		const indicator = destination ? indicatorFor(pressed.entity, destination) : null;
+		dragState.setState((current) =>
+			sameDropTarget(current.dropTarget, indicator) ? current : { dropTarget: indicator }
+		);
+		armSpring(spring);
+	}, [armSpring, dragState, dropUnder, indicatorFor]);
+
+	/* ── Auto-scroll ──────────────────────────────────────────────────────── */
+
+	const scrollContainer = useCallback(
+		() => treeRef.current?.closest<HTMLElement>("[data-drawer-body]") ?? null,
+		[treeRef]
+	);
+
+	const stopAutoScroll = useCallback(() => {
+		const state = autoScrollRef.current;
+		if (state.frame !== null) cancelAnimationFrame(state.frame);
+		autoScrollRef.current = { direction: 0, frame: null };
+	}, []);
+
+	const startAutoScroll = useCallback(
+		(direction: number) => {
+			// The loop function is local so it can recurse: a `useCallback` that
+			// schedules itself is a value referring to itself across renders, and
+			// the frame would keep calling whichever version armed it.
+			const step = () => {
+				const container = scrollContainer();
+				if (!container || autoScrollRef.current.direction === 0) return;
+				container.scrollTop += autoScrollRef.current.direction * AUTO_SCROLL_STEP_PX;
+				hitTestDrop();
+				autoScrollRef.current.frame = requestAnimationFrame(step);
+			};
+			autoScrollRef.current = { direction, frame: requestAnimationFrame(step) };
+		},
+		[hitTestDrop, scrollContainer]
+	);
+
+	const updateAutoScroll = useCallback(
+		(clientY: number) => {
+			const container = scrollContainer();
+			// Nothing to scroll (and jsdom, where every box measures zero): a band
+			// test against a zero-height rect would otherwise scroll forever.
+			if (!container || container.scrollHeight <= container.clientHeight) {
+				stopAutoScroll();
+				return;
+			}
+			const rect = container.getBoundingClientRect();
+			let direction = 0;
+			if (clientY < rect.top + AUTO_SCROLL_BAND_PX) direction = -1;
+			else if (clientY > rect.bottom - AUTO_SCROLL_BAND_PX) direction = 1;
+			if (direction === autoScrollRef.current.direction) return;
+			stopAutoScroll();
+			if (direction === 0) return;
+			startAutoScroll(direction);
+		},
+		[scrollContainer, startAutoScroll, stopAutoScroll]
+	);
+
+	/* ── The drag itself ──────────────────────────────────────────────────── */
+
+	const endDrag = useCallback(() => {
+		clearSpring();
+		stopAutoScroll();
+		const pressed = pressedRef.current;
+		if (pressed?.el.hasPointerCapture?.(pressed.pointerId)) {
+			pressed.el.releasePointerCapture(pressed.pointerId);
+		}
+		pressedRef.current = null;
+		pointerRef.current = null;
+		destinationRef.current = null;
+		dragState.setState({ dragging: null, dropTarget: null });
+	}, [clearSpring, dragState, stopAutoScroll]);
+
+	const onPointerDown = useCallback(
+		(e: React.PointerEvent<HTMLElement>) => {
+			if (e.button !== 0) return;
+			// An open row menu is a React child of the tree but not a DOM one.
+			if (!isOwnEvent(e)) return;
+			// A new press ends the last gesture wherever it lands. An Escape cancel
+			// arms a click suppression for a click that never arrives when the
+			// release is outside the tree, and a press on a row control returns
+			// below without pressing anything - the suppression would eat that
+			// control's own click.
+			gestureRef.current = IDLE_GESTURE;
+			pressedRef.current = null;
+			if (!(e.target instanceof Element) || e.target.closest(ROW_CONTROLS)) return;
+			const entity = entityAt(e.target);
+			if (!entity || isRowBusy(entity.id)) return;
+			gestureRef.current = pressGesture({ x: e.clientX, y: e.clientY });
+			pressedRef.current = { entity, pointerId: e.pointerId, el: e.currentTarget };
 		},
 		[entityAt, isRowBusy]
 	);
@@ -555,20 +648,11 @@ export function useTreeDnd({
 			}
 			if (gestureRef.current.phase !== "dragging") return;
 
-			const under = document.elementFromPoint?.(e.clientX, e.clientY) ?? null;
-			const { destination, spring } = dropUnder(pressed.entity, under, e.clientY);
-			destinationRef.current = destination;
-			const indicator = destination ? indicatorFor(pressed.entity, destination) : null;
-			dragState.setState((current) =>
-				current.dropTarget?.id === indicator?.id &&
-				current.dropTarget?.position === indicator?.position
-					? current
-					: { dropTarget: indicator }
-			);
-			armSpring(spring);
+			pointerRef.current = { x: e.clientX, y: e.clientY };
+			hitTestDrop();
 			updateAutoScroll(e.clientY);
 		},
-		[armSpring, dragState, dropUnder, indicatorFor, updateAutoScroll]
+		[dragState, hitTestDrop, updateAutoScroll]
 	);
 
 	const onPointerUp = useCallback(
@@ -796,12 +880,7 @@ export function useTreeDnd({
 
 	const isDropBlocked = useCallback((dragged: TreeEntity, entity: TreeEntity) => {
 		if (entity.id === dragged.id) return true;
-		if (
-			dragged.kind === "collection" &&
-			isDescendant(entity.id, dragged.id, dataRef.current.collections)
-		) {
-			return true;
-		}
+		if (isInOwnSubtree(dragged, entity.id, dataRef.current.collections)) return true;
 		// No band of this row names a destination the dragged row could
 		// take - a request over a root folder's edges. Asked of the same
 		// resolver the drop uses, so what is greyed and what is refused cannot

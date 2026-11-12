@@ -184,7 +184,7 @@ const std::string& target_id) {
         }
         reversed.push_back (*found->second);
         const auto& parent_id = found->second->parent_id;
-        if (current == root_id || !parent_id || parent_id->empty ()) {
+        if (current == root_id || !parent_id) {
             break;
         }
         current = *parent_id;

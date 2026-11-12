@@ -193,7 +193,7 @@ export_postman_response (vayu::db::Database& db, const nlohmann::json& json) {
     const auto collections = db.get_collections ();
     Children children;
     for (const auto& collection : collections) {
-        if (collection.parent_id && !collection.parent_id->empty ()) {
+        if (collection.parent_id) {
             children[*collection.parent_id].push_back (&collection);
         }
     }

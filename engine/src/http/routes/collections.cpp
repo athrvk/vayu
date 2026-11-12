@@ -381,9 +381,9 @@ bool is_create) {
 
     const std::optional<std::string> previous_parent = c.parent_id;
     if (json.contains ("parentId")) {
-        c.parent_id = json["parentId"].is_null () ?
-        std::nullopt :
-        std::optional<std::string> (json["parentId"].get<std::string> ());
+        if (auto outcome = read_parent_id_field (json["parentId"], c.parent_id); !outcome) {
+            return outcome;
+        }
     } else if (is_create) {
         c.parent_id = std::nullopt;
     }
@@ -392,7 +392,9 @@ bool is_create) {
     const bool reparented = !is_create && c.parent_id != previous_parent;
 
     if (json.contains ("order") && !json["order"].is_null ()) {
-        c.order = json["order"].get<int> ();
+        if (auto outcome = read_order_field (json["order"], c.order); !outcome) {
+            return outcome;
+        }
     } else if (is_create || reparented || json.contains ("order")) {
         // "Append after the current siblings" *is* this field's default, so the
         // one null-vs-absent rule lands all three of these on it: create (absent
@@ -402,7 +404,9 @@ bool is_create) {
         // a reparent used to keep a position from the list it had just left.
         // The siblings are the parent's requests too (#2535). On a create the
         // id is not stored yet, so excluding it is a no-op there.
-        c.order = db.next_sibling_order (c.parent_id, c.id);
+        if (auto outcome = append_sibling_order (db, c.parent_id, c.order, c.id); !outcome) {
+            return outcome;
+        }
     }
 
     if (auto outcome = apply_variables_field (json, c.variables, is_create); !outcome) {

@@ -826,7 +826,11 @@ std::vector<vayu::db::Collection>& out) {
         }
 
         if (!item.contains ("order") || item["order"].is_null ()) {
-            c.order = slots.take (db, c.parent_id);
+            if (auto outcome = apply_item_fields (
+                [&] { return slots.take (db, c.parent_id, c.order); }, "collection", temp);
+            !outcome) {
+                return outcome;
+            }
         }
         out.push_back (std::move (c));
     }
@@ -945,7 +949,11 @@ std::vector<vayu::db::RequestExample>& examples_out) {
             return outcome;
         }
         if (!item.contains ("order") || item["order"].is_null ()) {
-            r.order = slots.take (db, r.collection_id);
+            if (auto outcome = apply_item_fields (
+                [&] { return slots.take (db, r.collection_id, r.order); }, "request", temp);
+            !outcome) {
+                return outcome;
+            }
         }
         const size_t examples_start = examples_out.size ();
         if (auto outcome = build_example_rows (item, r.id, temp, now, examples_out); !outcome) {

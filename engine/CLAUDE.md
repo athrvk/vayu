@@ -269,7 +269,9 @@ a change touches (#946), so nothing else holds an untouched file at zero.
   `migrate_before_sync` and refuses to migrate without it. `<db>.bak` is not
   that copy: the same start refreshes it, once it listens, from a file the
   repair has already rewritten, and a clean shutdown refreshes it again
-  (`refresh_recovery_backup_on_shutdown`, #2421).
+  (`refresh_recovery_backup_on_shutdown`, #2421). A pass whose predicate is
+  index-served and idempotent may skip the marker: the probe costs one index
+  lookup per start (`Database::clear_empty_parent_ids`, #3451).
 - **Removing a column from a `make_table` mapping is `ALTER TABLE DROP COLUMN`
   at the constructor's probe `sync_schema ()`** (sqlite_orm on SQLite 3.35 or
   later; the bundled one is 3.54), which runs before `init ()` and therefore

@@ -533,6 +533,42 @@ describe("a drag in a windowed tree", () => {
 			/^Moved Request 2 to position \d+ of 1000 in Big$/
 		);
 	});
+
+	/*
+	 * The pointer held still in the edge band: every frame scrolls the drawer
+	 * and brings a different row under it, so the hit test must re-run on each
+	 * scroll frame, not only on a pointer move (#3447).
+	 */
+	it("re-aims the drop at the row each scroll frame brings under a still pointer", () => {
+		renderTree();
+		const source = requestRow(2)!;
+		const startY = source.getBoundingClientRect().top + ROW_PX / 2;
+		fireEvent.pointerDown(source, { button: 0, pointerId: 1, clientX: 10, clientY: startY });
+		fireEvent.pointerMove(source, { pointerId: 1, clientX: 10, clientY: startY + 6 });
+
+		const bandY = VIEWPORT_PX - 4;
+		fireEvent.pointerMove(treeList(), { pointerId: 1, clientX: 10, clientY: bandY });
+		const beforeScroll = rowAtPoint(10, bandY)!;
+		expect(beforeScroll).toBe(requestRow(14));
+		expect(beforeScroll.querySelector("[data-drop-indicator]")).not.toBeNull();
+
+		// 25 frames of 8px: 200px down, which puts the point 6px into r20's box,
+		// its upper half - "before r20".
+		for (let frame = 0; frame < 25; frame++) flushFrame();
+		expect(scroller().scrollTop).toBe(200);
+		const afterScroll = rowAtPoint(10, bandY)!;
+		expect(afterScroll).toBe(requestRow(20));
+		expect(afterScroll.querySelector('[data-drop-indicator="before"]')).not.toBeNull();
+		expect(beforeScroll.querySelector("[data-drop-indicator]")).toBeNull();
+
+		// Released where it was held, with no move since the scroll.
+		fireEvent.pointerUp(treeList(), { pointerId: 1, clientX: 10, clientY: bandY });
+		expect(reorderMutate).toHaveBeenCalledTimes(1);
+		// Before r20 among Big's rows without r2: position 20, where r14 was 14.
+		expect(document.querySelector("[data-tree-live]")?.textContent).toBe(
+			"Moved Request 2 to position 20 of 1000 in Big"
+		);
+	});
 });
 
 describe("one menu and one set of drag handlers for the whole tree", () => {

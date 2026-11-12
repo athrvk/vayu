@@ -36,6 +36,7 @@
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/entity_tag.hpp"
@@ -925,6 +926,58 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
 }
 
 /**
+ * Reads a stated `order` into @p out (#3451): a JSON integer from 0 to
+ * `MAX_SIBLING_ORDER` (`vayu::db::storable_order`), otherwise a 400 naming
+ * the field. `null` is refused like any other non-integer, so a caller that
+ * gives absent or `null` a meaning (append) tests for it first. @p where
+ * names the entry of a batch (`move at index 2`), empty for a whole body.
+ *
+ * Not `apply_int_field`: it ignores a non-integer and narrows without a bound.
+ */
+[[nodiscard]] inline RouteResult
+read_order_field (const nlohmann::json& value, int& out, std::string_view where = {}) {
+    if (const auto order = vayu::db::storable_order (value)) {
+        out = *order;
+        return {};
+    }
+    const std::string got =
+    value.is_number () ? value.dump () : std::string (value.type_name ());
+    const std::string rule = std::format (
+    "must be an integer from 0 to {} (got {})", vayu::db::MAX_SIBLING_ORDER, got);
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'order': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'order' {}", where, rule));
+}
+
+/**
+ * Reads a stated collection `parentId` into @p out (#3451): a collection id,
+ * or `null` for the tree root. `""` is the root as well and is stored as
+ * `null`, so the tree has one spelling of it; `Database::clear_empty_parent_ids`
+ * rewrites the rows written before this. Anything else is a 400 naming the
+ * field, never nlohmann's exception text. @p where is `read_order_field`'s.
+ */
+[[nodiscard]] inline RouteResult read_parent_id_field (const nlohmann::json& value,
+std::optional<std::string>& out,
+std::string_view where = {}) {
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    if (value.is_string ()) {
+        const auto& id = value.get_ref<const std::string&> ();
+        out = id.empty () ? std::nullopt : std::optional<std::string> (id);
+        return {};
+    }
+    const std::string rule =
+    std::format ("must be a collection id or null (got {})", value.type_name ());
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'parentId': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'parentId' {}", where, rule));
+}
+
+/**
  * Same rule for an integer field whose default is "none stated", stored as
  * NULL: absent on create and `null` on either verb leave @p out empty. Unlike
  * `apply_int_field`, a value @p field refuses (not a number, or out of its
@@ -1182,6 +1235,38 @@ const nlohmann::json& json,
 bool is_create);
 
 /**
+ * The refusal of an append under a parent whose last slot is taken (#3451):
+ * one past `MAX_SIBLING_ORDER` does not fit the column, and wrapping would
+ * put the row first. `POST /reorder` with the parent in `normalize`
+ * renumbers it dense and frees the end again.
+ */
+[[nodiscard]] inline std::unexpected<RouteError> no_sibling_slot_left () {
+    return route_error (400,
+    std::format (
+    "Cannot append: a sibling already holds 'order' {}, the highest "
+    "there is. State an 'order', or renumber the parent with "
+    "POST /reorder's 'normalize'",
+    vayu::db::MAX_SIBLING_ORDER));
+}
+
+/**
+ * The `order` a row appended under @p parent takes
+ * (`Database::next_sibling_order`, leaving @p excluded_id out of the scan)
+ * into @p out, or `no_sibling_slot_left`.
+ */
+[[nodiscard]] inline RouteResult append_sibling_order (vayu::db::Database& db,
+const std::optional<std::string>& parent,
+int& out,
+const std::string& excluded_id = {}) {
+    const std::optional<int> slot = db.next_sibling_order (parent, excluded_id);
+    if (!slot) {
+        return no_sibling_slot_left ();
+    }
+    out = *slot;
+    return {};
+}
+
+/**
  * Consecutive `order`s for the rows a batch writer (`POST /import/apply`,
  * `POST /specs/sync`) creates without stating one. The single-row default,
  * `Database::next_sibling_order`, reads rows that are stored, and none of a
@@ -1191,17 +1276,27 @@ bool is_create);
  */
 class SiblingSlots {
     public:
-    /// The next slot under @p parent (`std::nullopt` for the roots).
-    int take (vayu::db::Database& db, const std::optional<std::string>& parent) {
+    /// The next slot under @p parent (`std::nullopt` for the roots) into
+    /// @p out, or `no_sibling_slot_left` once the parent's slots are spent.
+    [[nodiscard]] RouteResult
+    take (vayu::db::Database& db, const std::optional<std::string>& parent, int& out) {
         auto slot = next_.find (parent);
         if (slot == next_.end ()) {
             slot = next_.emplace (parent, db.next_sibling_order (parent)).first;
         }
-        return slot->second++;
+        std::optional<int>& next = slot->second;
+        if (!next) {
+            return no_sibling_slot_left ();
+        }
+        out = *next;
+        next = out < vayu::db::MAX_SIBLING_ORDER ? std::optional<int> (out + 1) :
+                                                   std::nullopt;
+        return {};
     }
 
     private:
-    std::map<std::optional<std::string>, int> next_;
+    /// Empty once the parent's last slot is taken.
+    std::map<std::optional<std::string>, std::optional<int>> next_;
 };
 
 /**

@@ -523,6 +523,39 @@ const nlohmann::json& summary) {
         .failed                                 = failed->get<size_t> () };
 }
 
+// A single-request load run's failed assertions (#3458), or nothing when the
+// summary recorded none of the two places they live: the top-level `elements`
+// rows (`failed` is `assert.*` and inline `script.*` outcomes, tallied exactly
+// per submission) and the replay's `tests` (sampled). The two never overlap: a
+// script that ran inline is tallied in its element row and skipped by the
+// replay, one that did not is `deferred` in its row and counted by the replay
+// alone. An element that is only missing or errored is not a failed assertion
+// and stays out. A scenario run keeps these per step under `scenario`, so the
+// caller reads this for a summary with none.
+std::optional<size_t> read_single_request_failed_assertions (const nlohmann::json& summary) {
+    std::optional<size_t> failed;
+    const auto add_failed = [&failed] (const nlohmann::json& source) {
+        const auto count = source.find ("failed");
+        if (count == source.end () || !count->is_number_unsigned ()) {
+            return;
+        }
+        failed = failed.value_or (0) + count->get<size_t> ();
+    };
+    const auto elements = summary.find ("elements");
+    if (elements != summary.end () && elements->is_array ()) {
+        for (const auto& element : *elements) {
+            if (element.is_object ()) {
+                add_failed (element);
+            }
+        }
+    }
+    const auto tests = summary.find ("tests");
+    if (tests != summary.end () && tests->is_object ()) {
+        add_failed (*tests);
+    }
+    return failed;
+}
+
 // Read a boolean out of a JSON object as an optional, so a key an older engine
 // never wrote stays *absent* rather than becoming `false`. A number reads as
 // nothing on purpose: the report says what the summary recorded, and a
@@ -1050,11 +1083,30 @@ void record_verdict (const nlohmann::json& summary, nlohmann::json& outcome) {
     }
 }
 
+// The assertion counts a load row carries: a scenario run's stored pair, both
+// keys or neither (#2820), and for a run with no `scenario` block only
+// `assertionsFailed`, derived from what a single-request run stored (#3458).
+// No `assertionsPassed` there: an element row counts executions, a replay
+// counts `pm.test` calls, and their sum is no one population.
+void record_assertions (const nlohmann::json& summary, nlohmann::json& outcome) {
+    if (summary.contains ("scenario")) {
+        if (const auto assertions = read_scenario_assertions (summary)) {
+            outcome["assertionsPassed"] = assertions->passed;
+            outcome["assertionsFailed"] = assertions->failed;
+        }
+        return;
+    }
+    if (const auto failed = read_single_request_failed_assertions (summary)) {
+        outcome["assertionsFailed"] = *failed;
+    }
+}
+
 /**
  * A terminal load run's `resultSummary` (#2130): throughput, tail latency,
  * error rate, budget verdict and, for a scenario load run, its exact assertion
- * counts (#2820) or, for a capacity run, the search's headline (#2930), read
- * from the run's stored `summary` - the load-run counterpart of a design row's
+ * counts (#2820), for a single-request run its failed-assertion count (#3458)
+ * or, for a capacity run, the search's headline (#2930), read from the run's
+ * stored `summary` - the load-run counterpart of a design row's
  * `{statusCode, latencyMs}`.
  *
  * Each key is omitted when the summary does not record it, never zeroed: no
@@ -1088,10 +1140,7 @@ nlohmann::json build_load_result_summary (const std::string& summary_json) {
         }
     }
     record_verdict (summary, outcome);
-    if (const auto assertions = read_scenario_assertions (summary)) {
-        outcome["assertionsPassed"] = assertions->passed;
-        outcome["assertionsFailed"] = assertions->failed;
-    }
+    record_assertions (summary, outcome);
     if (summary.contains ("capacity") && summary["capacity"].is_object ()) {
         if (auto headline = read_capacity_headline (summary["capacity"])) {
             outcome["capacity"] = std::move (*headline);
@@ -1238,7 +1287,8 @@ const std::optional<std::string>& before) {
  * same `{data, pagination}` envelope GET /runs/:id/metrics uses (post-#86). A
  * design run's row also carries `resultSummary` (statusCode + latencyMs), a
  * terminal load run's carries its own (rps, p95Ms, errorRate, verdict, the
- * assertion counts, capacity, each only when recorded; #2130) and a terminal
+ * assertion counts or a single-request run's failed count, capacity, each only
+ * when recorded; #2130, #3458) and a terminal
  * collection run's carries its step counts and verdict (#2954) - what a reader
  * would otherwise fetch a report per row to learn. A row whose run finished
  * with warnings carries `summary.hasWarnings: true` (#1527), read fresh off

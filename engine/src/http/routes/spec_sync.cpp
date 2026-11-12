@@ -90,7 +90,7 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into) {
     }
     std::unordered_map<std::string, std::vector<std::string>> children;
     for (const auto& col : all) {
-        if (col.parent_id && !col.parent_id->empty ()) {
+        if (col.parent_id) {
             children[*col.parent_id].push_back (col.id);
         }
     }
@@ -1003,21 +1003,23 @@ SyncPlan& plan) {
         temp));
     }
 
-    nlohmann::json fields = item;
-    std::string parent    = request.collection_id;
-    if (item.contains ("parentId") && !item["parentId"].is_null ()) {
-        if (!item["parentId"].is_string ()) {
-            return std::unexpected (
-            item_error (400, "Invalid 'parentId': must be a string", temp));
-        }
-        parent = item["parentId"].get<std::string> ();
-        if (!scope.subtree.contains (parent)) {
-            return std::unexpected (item_error (400,
-            "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
-            temp));
+    // Absent, `null` and `""` all place the folder under the synced collection.
+    std::optional<std::string> stated;
+    if (item.contains ("parentId")) {
+        if (auto outcome = apply_item_fields (
+            [&] { return read_parent_id_field (item["parentId"], stated); }, "collection", temp);
+        !outcome) {
+            return outcome;
         }
     }
-    fields["parentId"] = parent;
+    if (stated && !scope.subtree.contains (*stated)) {
+        return std::unexpected (item_error (400,
+        "Invalid 'parentId': '" + *stated + "' is not the collection being synced or one beneath it",
+        temp));
+    }
+    const std::string parent = stated.value_or (request.collection_id);
+    nlohmann::json fields    = item;
+    fields["parentId"]       = parent;
 
     vayu::db::Collection folder;
     folder.id         = plan.claimed.real.at (temp);
@@ -1032,7 +1034,11 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        folder.order = plan.slots.take (db, parent);
+        if (auto outcome = apply_item_fields (
+            [&] { return plan.slots.take (db, parent, folder.order); }, "collection", temp);
+        !outcome) {
+            return outcome;
+        }
     }
     plan.batch.new_collections.push_back (std::move (folder));
     return {};
@@ -1152,7 +1158,11 @@ SyncPlan& plan) {
         return outcome;
     }
     if (!item.contains ("order") || item["order"].is_null ()) {
-        row.order = plan.slots.take (db, owner);
+        if (auto outcome = apply_item_fields (
+            [&] { return plan.slots.take (db, owner, row.order); }, "request", temp);
+        !outcome) {
+            return outcome;
+        }
     }
     if (auto outcome = plan_created_examples (row, temp, scope.now, documented, plan);
     !outcome) {

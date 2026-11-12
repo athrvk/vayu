@@ -32,6 +32,51 @@ export function assertionsFailedPhrase(failed: number | undefined): string | nul
 	return `${formatNumber(failed)} ${pluralize(failed, "assertion")} failed`;
 }
 
+/** A load run's failed assertions, split by how they were counted. */
+export interface FailedAssertions {
+	/** Every response: a scenario's `assertions`, or a single request's inline `elements`. */
+	exact: number;
+	/** Only the responses the post-run replay was drawn over (`testValidation`). */
+	sampled: number;
+}
+
+/**
+ * The failed assertions a report states, kept as two populations because the
+ * verdict's wording has to say which one it is (#3458).
+ *
+ * A scenario run's exact count is `scenario.assertions`. A single-request run
+ * has no `scenario`: its exact tallies are the failed counts of the top-level
+ * `elements` and its sampled ones `testValidation.testsFailed`. The two never
+ * overlap - a script that ran inline is tallied in its element row and skipped
+ * by the replay, one that did not is `deferred` there and counted by the replay
+ * alone - so summing within a population is safe and across them is not done.
+ * `exactAssertionsOf` stays the card-facing read: it answers `undefined` for a
+ * single-request run, which is how the cards know there is no Assertions block.
+ */
+export function failedAssertionsOf(
+	report: Pick<RunReport, "scenario" | "elements" | "testValidation">
+): FailedAssertions {
+	if (report.scenario) return { exact: exactAssertionsOf(report)?.failed ?? 0, sampled: 0 };
+	const exact = (report.elements ?? []).reduce((total, element) => total + element.failed, 0);
+	return { exact, sampled: report.testValidation?.testsFailed ?? 0 };
+}
+
+/**
+ * Why a run that met its budgets is still not a pass, for failed assertions:
+ * `150 assertions failed`, `4 assertions failed in the sampled replay`, or both.
+ * `null` when none failed.
+ */
+export function failedAssertionsReason(
+	exact: number | undefined,
+	sampled: number | undefined
+): string | null {
+	const exactPhrase = assertionsFailedPhrase(exact);
+	const sampledPhrase = assertionsFailedPhrase(sampled);
+	if (!sampledPhrase) return exactPhrase;
+	if (!exactPhrase) return `${sampledPhrase} in the sampled replay`;
+	return `${exactPhrase}, ${formatNumber(sampled)} more in the sampled replay`;
+}
+
 export const TEST_VALIDATION_TITLE = "Test validation";
 export const SAMPLED_REPLAY_TITLE = "Sampled replay";
 

@@ -43,15 +43,14 @@ import type { StoreApi } from "zustand";
 import type { Collection, RequestSummary } from "@/types";
 import type { RowAction } from "@/components/shared";
 import type { TreeEntity } from "../drop-position";
+import type { DropLine } from "../tree-rows";
 
 /**
- * Where a drop would land: `inside` reparents into a folder, `before` / `after`
- * reorder among the target's siblings.
+ * What the indicator draws, on the row `rowKey` names: `inside` rings a folder
+ * the drop reparents into; a `DropLine` is a line among siblings, starting at
+ * the indent of its own `depth` rather than the carrying row's (#3447).
  */
-export interface CollectionTreeDropTarget {
-	id: string;
-	position: "before" | "after" | "inside";
-}
+export type CollectionTreeDropTarget = { rowKey: string; position: "inside" } | DropLine;
 
 /** Alt+Arrow, in tree terms: among siblings, into the folder above, out to the parent. */
 export type TreeMoveDirection = "up" | "down" | "in" | "out";
@@ -59,13 +58,13 @@ export type TreeMoveDirection = "up" | "down" | "in" | "out";
 /**
  * What the drag indicator is drawn from. Held in a store rather than a context
  * value because `dropTarget` changes on every row the pointer crosses: a row
- * subscribes to the one fact it draws (`dropTarget?.id === its id`) and a
+ * subscribes to the one fact it draws (`dropTarget?.rowKey === its key`) and a
  * crossing renders the two rows whose answer changed, not the tree.
  */
 export interface CollectionTreeDragState {
 	/** The entity being dragged, or null when no drag is in progress. */
 	dragging: TreeEntity | null;
-	/** The row the pointer is over, and where the drop would land on it. */
+	/** Where the indicator for the drop the pointer names is drawn. */
 	dropTarget: CollectionTreeDropTarget | null;
 }
 

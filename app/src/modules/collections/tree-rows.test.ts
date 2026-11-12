@@ -8,10 +8,12 @@
 import { describe, it, expect } from "vitest";
 import type { Collection, Request } from "@/types";
 import {
+	dropLineBeside,
 	flattenVisibleRows,
 	folderIdOfRowKey,
 	folderRowKey,
 	navigableRows,
+	newFolderFormRowKey,
 	requestRowKey,
 	rowKeysUnder,
 	rowsAroundFocus,
@@ -289,6 +291,68 @@ describe("rowKeysUnder", () => {
 		const rows = flatten([folder("acme", 0), folder("hidden", 0, "acme")]);
 		expect(rowKeysUnder(rows, "acme").size).toBe(0);
 		expect(rowKeysUnder(rows, "hidden").size).toBe(0);
+	});
+});
+
+describe("dropLineBeside", () => {
+	/** acme > billing > r2, r1; beta, a sibling of acme. */
+	const nested = () =>
+		flatten([folder("acme", 0), folder("billing", 0, "acme"), folder("beta", 1)], {
+			expanded: ["acme", "billing"],
+			requests: {
+				acme: [request("r1", "acme", 1)],
+				billing: [request("r2", "billing", 0)],
+			},
+		});
+
+	it("puts a line after an open folder under its last visible row, at the folder's depth", () => {
+		// "After acme" lands after everything in it: under r1, not on acme's own
+		// bottom edge above billing.
+		expect(dropLineBeside(nested(), folderRowKey("acme"), "after")).toEqual({
+			rowKey: requestRowKey("r1"),
+			position: "after",
+			depth: 0,
+		});
+		// A nested open folder's subtree ends at its own last row.
+		expect(dropLineBeside(nested(), folderRowKey("billing"), "after")).toEqual({
+			rowKey: requestRowKey("r2"),
+			position: "after",
+			depth: 1,
+		});
+	});
+
+	it("counts an open, empty folder's placeholder and an open form as its rows", () => {
+		const rows = flatten([folder("acme", 0), folder("beta", 1)], { expanded: ["acme"] });
+		expect(dropLineBeside(rows, folderRowKey("acme"), "after")?.rowKey).toBe("empty:acme");
+
+		const creating = flatten([folder("acme", 0)], {
+			expanded: ["acme"],
+			creatingSubfolder: "acme",
+		});
+		expect(dropLineBeside(creating, folderRowKey("acme"), "after")?.rowKey).toBe(
+			newFolderFormRowKey("acme")
+		);
+	});
+
+	it("keeps the line on the row itself for a collapsed folder, a request and any before", () => {
+		const rows = nested();
+		expect(dropLineBeside(rows, folderRowKey("beta"), "after")).toEqual({
+			rowKey: folderRowKey("beta"),
+			position: "after",
+			depth: 0,
+		});
+		expect(dropLineBeside(rows, requestRowKey("r1"), "after")?.rowKey).toBe(
+			requestRowKey("r1")
+		);
+		expect(dropLineBeside(rows, folderRowKey("acme"), "before")).toEqual({
+			rowKey: folderRowKey("acme"),
+			position: "before",
+			depth: 0,
+		});
+	});
+
+	it("is null for a row that is not on screen", () => {
+		expect(dropLineBeside(nested(), requestRowKey("missing"), "after")).toBeNull();
 	});
 });
 

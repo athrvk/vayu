@@ -221,7 +221,7 @@ function CollectionItemRow({
 			)}
 			style={{ paddingLeft: indentPx, ...treeGuideStyle(depth, activeGuideLevel) }}
 		>
-			<RowDropIndicator edge={dnd.dropEdge} indentPx={indentPx} />
+			<RowDropIndicator line={dnd.dropLine} />
 			<button
 				onClick={handleToggleClick}
 				tabIndex={-1}

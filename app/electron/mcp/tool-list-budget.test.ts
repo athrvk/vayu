@@ -195,10 +195,16 @@
  * 221,679 / 217,412 B; the four caps went to 150,600 / 148,000 / 221,700 /
  * 217,500.
  *
+ * #3458's `assertionsFailed` clause in `list_runs` (a single-request load row
+ * carries it alone) is paid once per row, 51 B, which on top of #3449 takes the
+ * rows to 150,622 / 148,026 / 221,777 / 217,510 B; the four caps went to
+ * 150,700 / 148,100 / 221,800 / 217,600.
+ *
  * #3461's clause in `run_request` (an ad-hoc `requestId` scopes the scripts'
  * collection, said in the description and in the argument) added 68 B to every
- * row, taking them to 150,592 / 147,996 / 221,747 / 217,480 B; only the third
- * cap moved, to 221,800, because the other three still hold their rows.
+ * row, which on top of #3449 and #3458 takes them to 150,690 / 148,094 /
+ * 221,845 / 217,578 B; only the third cap moved, to 221,900, because the other
+ * three still hold their rows.
  */
 
 import { describe, it, expect } from "vitest";
@@ -218,10 +224,10 @@ interface Budget {
 }
 
 const BUDGETS: Budget[] = [
-	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_600 },
-	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_000 },
-	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_800 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_500 },
+	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_700 },
+	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_100 },
+	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_900 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_600 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
