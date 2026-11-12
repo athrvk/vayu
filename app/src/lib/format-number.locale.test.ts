@@ -71,6 +71,14 @@ describe.each(LOCALES)("digits under $locale", ({ locale, mark, group }) => {
 		expect(numbers.formatTrimmed(-0.0001, 1)).toBe("0");
 	});
 
+	it("a size takes the decimal mark from the same place", async () => {
+		const { numbers } = await loadIn(locale);
+		expect(numbers.formatBytes(1536)).toBe(`1${mark}5 KB`);
+		expect(numbers.formatBytes(3 * 1024 ** 3)).toBe(`3${mark}0 GB`);
+		// Whole bytes are ungrouped, as the template literal they replaced was.
+		expect(numbers.formatBytes(1023)).toBe("1023 B");
+	});
+
 	it("a response phase keeps its magnitude ladder", async () => {
 		const { viewer } = await loadIn(locale);
 		expect(viewer.formatPhaseMs(0.04)).toBe(`0${mark}04`);

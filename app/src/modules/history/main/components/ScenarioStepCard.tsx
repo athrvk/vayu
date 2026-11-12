@@ -57,6 +57,7 @@ import {
 	SentBodyFileNote,
 	UnresolvedTokens,
 } from "@/components/shared";
+import { formatBytes } from "@/lib/format-number";
 import { sentBodyFileOf } from "@/lib/sent-body-file";
 import { useTabsStore } from "@/stores";
 import {
@@ -66,7 +67,6 @@ import {
 	UnifiedResponseViewer,
 	ValidationChip,
 	phasesFromTrace,
-	formatSize,
 	type ExchangeState,
 } from "@/components/shared/response-viewer";
 import ConsoleOutput from "@/modules/request-builder/components/ResponseViewer/ConsoleOutput";
@@ -373,8 +373,8 @@ function ScenarioStepCard({
 					    reason. */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="Body truncated for storage">
-							Only the first {formatSize(heldBodySize(response))} of{" "}
-							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept.
+							Only the first {formatBytes(heldBodySize(response))} of{" "}
+							{formatBytes(response.bodyBytes ?? heldBodySize(response))} was kept.
 						</Callout>
 					)}
 					{/* The viewer below has no status bar to carry it (#3262). */}

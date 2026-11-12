@@ -21,18 +21,13 @@
 
 import { useEffect, useState } from "react";
 import { Clock, FileText, History, ShieldCheck } from "lucide-react";
+import { formatBytes } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import type { ResponseValidation } from "@/types";
 import { TIMING } from "@/config/timing";
 import { TimeValue } from "@/components/shared/TimeValue";
 import type { TimeRow } from "@/lib/time-value";
-import {
-	ENGINE_COST_TIP,
-	formatResponseTime,
-	formatSize,
-	isReportedMs,
-	responseSizeTip,
-} from "./utils";
+import { ENGINE_COST_TIP, formatResponseTime, isReportedMs, responseSizeTip } from "./utils";
 import { HttpVersionDowngradeNote } from "./HttpVersionDowngradeNote";
 import { StatusCodeBadge } from "./StatusCodeBadge";
 import { ValidationChip } from "./ValidationChip";
@@ -243,7 +238,7 @@ export function ResponseStatusBar({
 					title={responseSizeTip(headers)}
 				>
 					<FileText className="size-icon-sm" />
-					<span className="tabular-nums">{formatSize(size)}</span>
+					<span className="tabular-nums">{formatBytes(size)}</span>
 				</div>
 			)}
 

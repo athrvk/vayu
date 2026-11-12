@@ -72,12 +72,12 @@ import { CodeEditor } from "@/components/ui";
 import { EmptyState } from "@/components/shared";
 import {
 	buildRawResponse,
-	formatSize,
 	LARGE_BODY_BYTES,
 	LargeBodyNotice,
 } from "@/components/shared/response-viewer";
 import { receivedBody, type ResponseBytes } from "../../utils/response-bytes";
 import type { HeaderLine } from "@/types/domain";
+import { formatBytes } from "@/lib/format-number";
 import { markLines, SENT_MARKER, RECEIVED_MARKER } from "@/lib/http-language";
 
 export interface RawRequestResponseProps {
@@ -195,7 +195,7 @@ function bodyToPrint(response: RawRequestResponseProps["response"]): {
 	const { rawBytes } = response;
 	if (rawBytes && !rawBytes.isText) {
 		return {
-			text: `[${formatSize(rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`,
+			text: `[${formatBytes(rawBytes.data.length)} of binary data, not shown as text. Download it from the Body tab.]`,
 			bodyLength: null,
 		};
 	}

@@ -45,6 +45,7 @@ import {
 	ICON_MOTION,
 } from "@/components/ui";
 import { EmptyState, ErrorState } from "@/components/shared";
+import { formatBytes } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import ClientSettingsPanel from "./panels/ClientSettingsPanel";
 import {
@@ -58,7 +59,7 @@ import { APP_PANEL_COMPONENTS } from "./app-panel-components";
 import { getEngineCategory } from "../engine-categories";
 import { appEditorFor } from "../engine-settings-edited-in-app";
 import { useRevealedSetting } from "../useRevealedSetting";
-import { isByteUnit, formatBytes, formatSizeRange } from "../utils/format-size";
+import { isByteUnit, formatSizeRange } from "../utils/format-size";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 

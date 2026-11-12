@@ -9,7 +9,7 @@
  * Utility functions for response body type detection and formatting
  */
 
-import { formatFixed, formatLatencyParts } from "@/lib/format-number";
+import { formatBytes, formatFixed, formatLatencyParts } from "@/lib/format-number";
 import { formatJson } from "@/lib/json-format";
 import { formatXml } from "@/lib/xml-format";
 import { resolveHeaderLines } from "@/lib/header-lines";
@@ -255,15 +255,6 @@ export function formatPhaseDuration(ms: number): { value: string; unit: Duration
 }
 
 /**
- * Format bytes to human readable size
- */
-export function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
  * What the status bar's size counts (#2787). `size` is the decoded body, so a
  * gzipped 12 KB reply that inflates to 80 KB reads as 80 KB; saying so stops it
  * being compared with a DevTools or curl figure that counts something else.
@@ -281,7 +272,7 @@ export function responseSizeTip(headers: Record<string, string> | undefined): st
 	const encoding = headerValueOf(headers, "content-encoding").trim().toLowerCase();
 	const length = headerValueOf(headers, "content-length").trim();
 	if (!encoding || encoding === "identity" || !/^\d+$/.test(length)) return RESPONSE_SIZE_TIP;
-	return `${RESPONSE_SIZE_TIP} ${formatSize(Number(length))} on the wire.`;
+	return `${RESPONSE_SIZE_TIP} ${formatBytes(Number(length))} on the wire.`;
 }
 
 /**

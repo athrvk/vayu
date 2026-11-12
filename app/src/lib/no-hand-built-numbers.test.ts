@@ -11,7 +11,7 @@
  * next, a percent grew one decimal in one table and two in another, and a
  * count of 10000 never got its separator. The digits come from
  * `lib/format-number.ts` (`formatNumber`, `formatLatency`, `formatSeconds`,
- * `formatRate`, `formatPercent`); a file may call `toFixed` only when it is on
+ * `formatRate`, `formatPercent`, `formatBytes`); a file may call `toFixed` only when it is on
  * the list below with the reason it is not one of those.
  */
 
@@ -37,14 +37,9 @@ const TO_FIXED = /\.toFixed\(/;
 const ALLOWED: Record<string, string> = {
 	"lib/run-compare.ts":
 		"run-compare's duration text is pinned by the MCP conformance contract, shared with electron/mcp/compare.ts",
-	"components/shared/response-viewer/utils.ts":
-		"the response viewer's byte formatter (formatSize), spaced units by design",
 	"modules/dashboard/utils/detectAnomalies.ts": "the `Nx baseline` multiplier is not a percent",
 	"modules/dashboard/utils/detectAnomalies.testkit.ts":
 		"the testkit twin of the `Nx baseline` multiplier",
-	"modules/settings/utils/format-size.ts": "byte sizes, not latency, rate or percent",
-	"modules/settings/main/panels/WorkspaceBackupCard.tsx":
-		"byte sizes, not latency, rate or percent",
 };
 
 const files = sources(srcRoot).map((f) => ({
