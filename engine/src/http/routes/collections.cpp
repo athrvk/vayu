@@ -357,6 +357,19 @@ Validate validate) {
     return {};
 }
 
+/// `parentId` is absent-means-root on create and absent-means-keep on update.
+static RouteResult apply_parent_id_field (const nlohmann::json& json,
+std::optional<std::string>& parent_id,
+bool is_create) {
+    if (json.contains ("parentId")) {
+        return read_parent_id_field (json["parentId"], parent_id);
+    }
+    if (is_create) {
+        parent_id = std::nullopt;
+    }
+    return {};
+}
+
 /**
  * Applies the request body onto `c` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
@@ -383,12 +396,8 @@ bool is_create) {
     }
 
     const std::optional<std::string> previous_parent = c.parent_id;
-    if (json.contains ("parentId")) {
-        if (auto outcome = read_parent_id_field (json["parentId"], c.parent_id); !outcome) {
-            return outcome;
-        }
-    } else if (is_create) {
-        c.parent_id = std::nullopt;
+    if (auto outcome = apply_parent_id_field (json, c.parent_id, is_create); !outcome) {
+        return outcome;
     }
     // A collection that changed parent is a newcomer among its new siblings; its
     // stored `order` was a position in a list it has left.
