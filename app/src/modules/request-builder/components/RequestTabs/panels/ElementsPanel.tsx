@@ -48,9 +48,9 @@ export default function ElementsPanel() {
 	const openRows = useOpenElementRows(request.id);
 	// `script.setup` / `script.teardown` are collection-only (issue #1499):
 	// the engine refuses them on a request's own `elements`, so a request's
-	// Add menu never offers them - `InheritedElementsNotice` below still shows
-	// them when a collection above declares one, unfiltered, since that is
-	// display rather than an offer to add.
+	// Add menu never offers them, and `InheritedElementsNotice` below leaves a
+	// collection's out of "Runs before your own" - they run at the run's
+	// boundary, not before this request (#3457).
 	const addableKinds = (kinds ?? []).filter((kind) => !kind.collectionOnly);
 
 	return (

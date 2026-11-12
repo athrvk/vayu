@@ -355,10 +355,16 @@ load run's live `elapsedSeconds` reads `0` until setup ends (issue #2395) - and
 writes through the same `ScriptVariableScopes` (`scopes` / `scope_bases`) every other script of the
 run shares, so its writes are visible from the very first step or submission (a scenario load
 run's folder bases are built from what it left, #3248). A throwing setup fails
-the run - `Failed`, nothing sent - before either mode's strategy starts; a throwing teardown is
+the run - `Failed`, nothing sent - before either mode's strategy starts, and the failed run's stored
+summary still carries `lifecycle.setup` (the sequential runner's `catch`, the load path's
+`failed_run_summary_inputs`, #3455); a throwing teardown is
 recorded under the report's `lifecycle.teardown` and never changes the run's terminal status, since
 `ElementPipeline::run` already turns a throw into that element's own `"error"` outcome rather than
-propagating one. A design (sequential) run writes its variable scopes back after teardown, so a
+propagating one. Either kind reads its script's result as `script.post` does (`record_script_outcome`):
+a throw is `"error"`, a script that only failed `pm.test`s is `"failed"` with the first failing test as
+its message, and its console lines and tests are kept on the outcome and serialised by
+`build_lifecycle_node` (not by `ElementOutcome::to_json`) as the row's `console` and `messages` lists, the
+shape and cap of an inline element's (#3455). A design (sequential) run writes its variable scopes back after teardown, so a
 teardown's `pm.environment.set` / `pm.globals.set` is saved with the steps' (#3249); a load run
 persists none. Teardown's script sees `pm.info.run` (`requestsSent`, `errorRate` - on a load run
 the report's, by the [one error definition](api-reference.md#what-counts-as-an-error) -
@@ -516,7 +522,10 @@ off the kind's registered `hotPath`, never a `kind ==` comparison (the extensibi
 other; otherwise the step keeps its pre-#1495 behaviour, deferred to the post-run `tests`
 replay, which now skips a step whose script already ran inline
 (`RunContext::script_element_runs_inline` is the one place that decision is made, read by
-both sides).
+both sides). The app sets `config.inline` from the **Run inline** switch under a
+`script.pre` / `script.post` editor (the kind's schema declares it `x-vayu-group: "advanced"`,
+so it sits in the card's Advanced disclosure, #3457); `script.setup` / `script.teardown` have
+no such property and their form renders none.
 
 **Per-VU isolation.** A load run's VUs share one event loop, so what an element writes
 (`extract.*`'s target variable, an inline `script.*`'s `pm.environment.set`) cannot land in
@@ -651,7 +660,8 @@ run-level `elements` override (above) - compiled once at run start into
 `Phase::StepAfter` once the response is in, the same phases a design send
 uses; `extract.*` / `assert.*` always run there, and a `script.pre` /
 `script.post` element runs inline only when its own `config.inline` is
-`true` or the run's `elements.scripts` override forces it -
+`true` (the app's **Run inline** switch on the script's card, #3457) or the run's
+`elements.scripts` override forces it -
 `RunContext::script_element_runs_inline` deciding exactly as it does for a
 scenario step. An unmarked `script.post` defers to this run's own completion
 replay (`RunContext::test_scripts`, one entry per un-inlined element taken at

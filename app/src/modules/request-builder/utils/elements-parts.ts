@@ -49,6 +49,31 @@ export function hasReplayedPostScript(parts: ElementDef[] | undefined): boolean 
 	);
 }
 
+/** The enabled, non-blank `script.pre` elements of a list. */
+function livePreScripts(elements: ElementDef[] | undefined): ElementDef[] {
+	return (elements ?? []).filter(
+		(el) => el.kind === "script.pre" && el.enabled && !isBlankScriptElement(el)
+	);
+}
+
+/**
+ * Whether the list holds an enabled, non-blank `script.pre` that is not marked
+ * `config.inline`: the one the load engine skips at Scripts = As marked and
+ * All deferred (`script_element_runs_inline`), so the dialog warns about it.
+ */
+export function hasUnmarkedPreScript(elements: ElementDef[] | undefined): boolean {
+	return livePreScripts(elements).some((el) => el.config.inline !== true);
+}
+
+/**
+ * Whether the list holds an enabled, non-blank `script.pre` marked
+ * `config.inline`: it runs at As marked, but All deferred overrides the mark
+ * and skips it.
+ */
+export function hasInlinePreScript(elements: ElementDef[] | undefined): boolean {
+	return livePreScripts(elements).some((el) => el.config.inline === true);
+}
+
 /**
  * `parts` without its switched-off elements, `undefined` when none are left -
  * `elementsParts`' own empty answer. For a load run's `requestElements` only

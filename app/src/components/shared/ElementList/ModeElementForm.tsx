@@ -43,6 +43,7 @@ import { SelectSettingRow } from "@/modules/settings/main/panels/SettingControls
 import { errorsWithin } from "@/lib/elements";
 import type { ElementConfigProperty, ElementConfigSchema } from "@/types";
 import { GenericElementForm } from "./GenericElementForm";
+import { subsetSchema } from "./schema-subset";
 import {
 	ELEMENT_MODES,
 	detectMode,
@@ -82,29 +83,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: {};
-}
-
-/**
- * The named properties of `schema` as a schema of their own, carrying only the
- * `required` entries that survived the cut. A name the catalogue does not
- * declare (an older engine build) is dropped rather than rendered blank.
- */
-function subsetSchema(
-	properties: Record<string, ElementConfigProperty | null | undefined>,
-	required: string[] | undefined,
-	names: string[]
-): ElementConfigSchema {
-	const kept: Record<string, ElementConfigProperty | null> = {};
-	for (const name of names) {
-		if (Object.prototype.hasOwnProperty.call(properties, name)) {
-			kept[name] = properties[name] ?? null;
-		}
-	}
-	return {
-		type: "object",
-		properties: kept,
-		required: (required ?? []).filter((name) => name in kept),
-	};
 }
 
 /** A nested `object` property as the schema of its own level. */

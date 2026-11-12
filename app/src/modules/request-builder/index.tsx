@@ -71,8 +71,9 @@ import type { LeftOutElement } from "@/lib/elements";
 import { toHeaderRows } from "./utils/key-value";
 import {
 	elementsParts,
+	hasInlinePreScript,
 	hasReplayedPostScript,
-	scriptTextFor,
+	hasUnmarkedPreScript,
 	withoutDisabled,
 	withoutInheritedCollectionOnly,
 } from "./utils/elements-parts";
@@ -1074,9 +1075,8 @@ export default function RequestBuilder() {
 					onClose={handleCloseLoadTestDialog}
 					onStart={handleConfirmLoadTest}
 					isStarting={isStartingLoadTest}
-					hasPreRequestScript={
-						!!scriptTextFor(pendingLoadTestRequest?.elements ?? [], "script.pre")
-					}
+					hasPreRequestScript={hasUnmarkedPreScript(pendingLoadTestRequest?.elements)}
+					hasInlinePreScript={hasInlinePreScript(pendingLoadTestRequest?.elements)}
 					hasPostRequestScript={hasReplayedPostScript(pendingLoadTestParts)}
 					scenarioOnlyElements={pendingScenarioOnlyElements}
 					onRunCollection={requestCollection ? handleRunCollectionInstead : undefined}

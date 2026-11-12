@@ -11,8 +11,11 @@
  * Generalizes `InheritedScriptsNotice` from scripts alone to every element
  * kind. Walks the ancestor chain of the request's collection (root first, via
  * `useCollectionAncestors` - the same hook `AuthInheritBanner` uses for auth)
- * and lists every enabled element a collection in the chain carries - the
- * ones that will run before the request's own. A blank `script.pre`/
+ * and lists every enabled element a collection in the chain carries that
+ * will run before the request's own. A collection's `script.setup` /
+ * `script.teardown` are not among them (#3457): they run once at the run's
+ * boundary, never before a request, so listing them under "Runs before your
+ * own" would claim a run that never happens. A blank `script.pre`/
  * `script.post` (empty or whitespace-only text) is excluded: it is inert
  * everywhere else (#1609), so counting it here would claim a run that never
  * happens. A disable toggle writes an `inherit.disable` entry into the
@@ -32,6 +35,7 @@ import { useCollectionAncestors } from "@/queries/collections";
 import { Button } from "@/components/ui";
 import { isBlankScriptElement } from "@/lib/elements";
 import type { Collection, ElementDef, ElementKindSchema, ResolvedElement } from "@/types";
+import { COLLECTION_ONLY_KINDS } from "../../../utils/elements-parts";
 import ChainCard from "./ChainCard";
 
 interface InheritedElementsNoticeProps {
@@ -78,6 +82,7 @@ export default function InheritedElementsNotice({
 		(e) =>
 			e.enabled &&
 			e.kind !== "inherit.disable" &&
+			!COLLECTION_ONLY_KINDS.has(e.kind) &&
 			e.origin?.kind === "collection" &&
 			!isBlankScriptElement(e)
 	);

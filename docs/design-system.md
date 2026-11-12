@@ -2049,8 +2049,8 @@ not rule names - two of these lines silence two rules at once.
   `jsx-a11y/no-noninteractive-element-interactions`: the window splitter, with
   its arrow/Page/Home/End handling in the `onKeyDown` beside it.
 - `components/shared/ElementList/ScriptElementForm.tsx` (1) -
-  `jsx-a11y/no-noninteractive-element-interactions`: the `script.pre`/
-  `script.post` editor's height handle, the same window-splitter shape as
+  `jsx-a11y/no-noninteractive-element-interactions`: the script editor's
+  (every `script.*` kind's) height handle, the same window-splitter shape as
   `PanelResizeHandle` above, with its pointer drag and arrow-key handling in
   the `onPointerDown`/`onKeyDown` beside it (issue #1605).
 - `components/shared/VariableInput/index.tsx` (2) -
