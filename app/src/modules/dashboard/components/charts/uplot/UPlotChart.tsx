@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import { formatFixed } from "@/lib/format-number";
 import { readUplotTheme, currentThemeKey, type ColorRole } from "./uplotTheme";
 import {
 	overlaysPlugin,
@@ -194,19 +195,19 @@ function visibleSplits(
 }
 
 function defaultY(v: number): string {
-	return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}`;
+	return v >= 1000 ? `${formatFixed(v / 1000, 1)}s` : `${Math.round(v)}`;
 }
 
 /** Default 0.5 s tooltip time formatter for elapsed-seconds x axes. */
 function defaultTimeTooltip(v: number): string {
-	return `${v.toFixed(1)}s`;
+	return `${formatFixed(v, 1)}s`;
 }
 
 export function UPlotChart({
 	data,
 	series,
 	height = 220,
-	xFormat = (v) => `${v.toFixed(0)}s`,
+	xFormat = (v) => `${formatFixed(v, 0)}s`,
 	xSplits,
 	xTooltipFormat,
 	xTime = false,

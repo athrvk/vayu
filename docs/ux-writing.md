@@ -148,7 +148,13 @@ scattered strings land the same way.
   The response viewer's total and queue wait (`formatDuration`,
   `formatResponseTime`) follow the same rule, so a 2.27 ms send reads `2.27 ms`
   there and as a load p50; only its phase breakdown (`formatPhaseDuration`)
-  keeps a ladder of its own, one decimal in the tens of milliseconds.
+  keeps a ladder of its own, one decimal in the tens of milliseconds. Every
+  digit follows the user's locale, the decimal mark included (a decimal-comma
+  locale reads `2,5ms` and `1,23s`, never one of each): a fixed number of
+  decimals is `formatFixed(value, digits)` and "up to n, trailing zeros drop"
+  is `formatTrimmed(value, digits)`, both in `lib/format-number.ts`, ungrouped as the `toFixed` they replace was, and cached
+  per digit count, so a new surface calls one of them rather than building an
+  `Intl.NumberFormat` or a `toFixed` of its own.
   A chart axis labels its ticks
   with `axisMs` (`0.5ms`, `2ms`, `1.5s`), `axisRate` (`1.2k/s`) or `axisVitals`
   (`1.2k`), which take their decimals from the tick spacing so no two
@@ -158,7 +164,8 @@ scattered strings land the same way.
   `formatSeconds` of your own: a source scan fails on it
   (`lib/no-local-format-ms.test.ts`), and a second one
   (`lib/no-hand-built-numbers.test.ts`) fails on any `.toFixed(` outside its
-  short list of axis, byte-size and viewer-phase formatters. The screen-reader announcer takes the
+  short list (the MCP run-compare text, the `Nx baseline` multiplier and the
+  byte-size formatters). The screen-reader announcer takes the
   same digits and speaks the unit as a word (`2.40 seconds`). Name a latency series for what it
   measures: the average that includes generator queue wait is "average latency
   (incl. queue wait)" and the time on the wire is "wire time", never a bare

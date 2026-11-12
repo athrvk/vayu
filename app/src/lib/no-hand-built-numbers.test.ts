@@ -35,32 +35,16 @@ const TO_FIXED = /\.toFixed\(/;
 
 /** Paths relative to `src/`, each with why its `toFixed` is not a display number to route. */
 const ALLOWED: Record<string, string> = {
-	"lib/format-number.ts": "the shared formatters themselves",
 	"lib/run-compare.ts":
 		"run-compare's duration text is pinned by the MCP conformance contract, shared with electron/mcp/compare.ts",
 	"components/shared/response-viewer/utils.ts":
-		"the response viewer's own phase and size formatters (formatPhaseMs, formatPhaseDuration, formatSize), spaced units by design",
-	"components/shared/CustomMetricsSummary.tsx":
-		"a user-defined metric has no unit, so its digits are not a latency, rate or percent",
-	"components/shared/ThresholdVerdict.tsx":
-		"a threshold limit is a user-defined number in the metric's own unit",
-	"components/shared/ContractCoverage.tsx": "a coverage share that drops its decimal when whole",
-	"modules/dashboard/utils/format.ts":
-		"formatErrorPercent, which keeps a non-zero error rate from rounding to 0%",
+		"the response viewer's byte formatter (formatSize), spaced units by design",
 	"modules/dashboard/utils/detectAnomalies.ts": "the `Nx baseline` multiplier is not a percent",
 	"modules/dashboard/utils/detectAnomalies.testkit.ts":
 		"the testkit twin of the `Nx baseline` multiplier",
-	"modules/dashboard/components/charts/uplot/formatters.ts":
-		"chart axis ticks, tuned for axis width (#2276)",
-	"modules/dashboard/components/charts/uplot/UPlotChart.tsx":
-		"chart axis and default hover formatters (#2276)",
-	"modules/dashboard/components/charts/uplot/plugins.ts":
-		"chart default x-label formatter (#2276)",
 	"modules/settings/utils/format-size.ts": "byte sizes, not latency, rate or percent",
 	"modules/settings/main/panels/WorkspaceBackupCard.tsx":
 		"byte sizes, not latency, rate or percent",
-	"modules/request-builder/components/ResponseViewer/ResponseTimingTab.tsx":
-		"a phase's share of the response, a whole percent beside the response viewer's phase bars",
 };
 
 const files = sources(srcRoot).map((f) => ({
