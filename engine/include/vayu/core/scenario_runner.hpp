@@ -502,9 +502,13 @@ struct ScenarioSummaryInputs {
 const ScenarioSummaryInputs& inputs);
 
 /**
- * The message of the first outcome in @p outcomes, from position @p first on,
- * that refuses a run's setup: an `"error"` or a `"failed"`. `nullopt` when
- * none does.
+ * Why a run's setup refused, from the first outcome in @p outcomes, from
+ * position @p first on, that refuses it: an `"error"` or a `"failed"`. The
+ * outcome's message, led by the collection that declared it (#3456), as
+ * `folder '<name>': <message>` or `collection '<name>': <message>` from its
+ * `origin` (the id where it names no name); the message alone for an element
+ * no collection declared (a single-request run's `lifecycleElements`).
+ * `nullopt` when no outcome refuses.
  */
 [[nodiscard]] std::optional<std::string>
 lifecycle_refusal (const std::vector<ElementOutcome>& outcomes, size_t first = 0);

@@ -1769,10 +1769,14 @@ is sent and no duration is measured. The failed run's report still carries
 with its outcome, message and `origin`, so it says which collection's script
 failed and why (#3455). Setups are checked a collection at a time: once one
 collection's setup refuses, the collections after it set up nothing, and no
-teardown runs. **A throwing `script.teardown` is
+teardown runs. The engine log's record of the refusal leads with the same
+collection, `folder '<name>': <message>` (or `collection '<name>'` for the
+root, the id where it has no name; a single-request run's
+`lifecycleElements` name none). **A throwing `script.teardown` is
 recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
-`"error"` outcome and the thrown message. A script that only fails a `pm.test`
+`"error"` outcome and the thrown message, and the collections above it still
+tear down after it. A script that only fails a `pm.test`
 is `"failed"` rather than `"error"`, with the first failing test as its message,
 and a failing test in `script.setup` fails the run the way a throw does. Either
 script's `console.*` lines and test results are kept on its `lifecycle` row, as

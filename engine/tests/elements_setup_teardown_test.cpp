@@ -46,6 +46,7 @@
 #include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/scenario_runner.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -939,12 +940,18 @@ TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissi
     expect_refusing_setup (report_lifecycle_of ("run_single"), "error", "boom");
 }
 
+// A `lifecycleElements` entry has no collection, so its logged refusal is the
+// outcome's message alone (#3456).
 TEST_F (ScriptLifecycleTest, SingleRequestSetupWithAFailingTestFailsTheRunAndSaysWhich) {
+    const vayu::tests::LogCapture log;
     EXPECT_EQ (run_single_request_load (script_setup_element (FAILING_TEST_SETUP),
                /*iterations=*/1, /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
     expect_refusing_setup (report_lifecycle_of ("run_single"), "failed", FAILING_TEST_MESSAGE);
+    const auto records = log.with_msg_prefix ("script.setup failed");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].value ("scriptError", ""), FAILING_TEST_MESSAGE);
 }
 
 // The single-request half of LoadSetupFailureLogsTheThrownTextAsABoundedField.
@@ -1016,16 +1023,18 @@ TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesTheActualSentCount) {
 
 /// A `script.setup` and a `script.teardown`, each pinging `/ok?mark=<who>-...`
 /// so the mock's hit order shows when it ran beside the steps; @p setup_extra
-/// runs after the setup's ping. The teardown's ping also carries `saw=`, the
-/// `subToken` its collection's chain answers, which says which collection it
-/// was bound to.
+/// and @p teardown_extra run after each one's ping. The teardown's ping also
+/// carries `saw=`, the `subToken` its collection's chain answers, which says
+/// which collection it was bound to.
 json marking_lifecycle (const LifecycleMockServer& server,
 const std::string& who,
-const std::string& setup_extra = "") {
+const std::string& setup_extra    = "",
+const std::string& teardown_extra = "") {
     const std::string url = server.url ("/ok") + "?mark=" + who;
     return setup_and_teardown_elements (
     "pm.sendRequest('" + url + "-setup', function () {});" + setup_extra,
-    "pm.sendRequest('" + url + "-teardown&saw=' + pm.collectionVariables.get('subToken'), function () {});");
+    "pm.sendRequest('" + url + "-teardown&saw=' + pm.collectionVariables.get('subToken'), function () {});" +
+    teardown_extra);
 }
 
 /// Every hit's query, in the order the mock saw them.
@@ -1076,6 +1085,20 @@ class LifecycleSetRunTest : public ScriptLifecycleTest,
 
     [[nodiscard]] json lifecycle () {
         return report_lifecycle_of (GetParam () == RunMode::Load ? "run_load" : "run_seq");
+    }
+
+    /// The refusal text this case's mode logged for a failed setup: a load
+    /// run's `script.setup failed` record's `scriptError`, or the error a
+    /// sequential run threw, on its `Scenario run error` record.
+    [[nodiscard]] std::string logged_refusal (const vayu::tests::LogCapture& log) const {
+        const bool load = GetParam () == RunMode::Load;
+        const auto records =
+        log.with_msg_prefix (load ? "script.setup failed" : "Scenario run error");
+        if (records.size () != 1) {
+            ADD_FAILURE () << "expected one refusal record, got " << records.size ();
+            return {};
+        }
+        return records[0].value (load ? "scriptError" : "error", "");
     }
 };
 
@@ -1148,11 +1171,13 @@ TEST_P (LifecycleSetRunTest, ARunThatIsNotRecursiveLeavesTheSubFoldersOut) {
 }
 
 // A refusing folder setup fails the run as the run collection's would, its
-// row naming the folder; the collections after it set up nothing and nothing
-// tears down. Mutation check: drop the per-collection `lifecycle_refusal`
-// check in `run_scenario_setup` (scenario_runner.cpp) and `col_later`'s setup
-// runs.
+// row and the logged refusal naming the folder; the collections after it set
+// up nothing and nothing tears down. Mutation checks: drop the per-collection
+// `lifecycle_refusal` check in `run_scenario_setup` (scenario_runner.cpp) and
+// `col_later`'s setup runs; return the bare message from `lifecycle_refusal`
+// and the logged text names no folder.
 TEST_P (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
+    const vayu::tests::LogCapture log;
     seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
     seed_folder ("col_sub", "col_1", 0,
     marking_lifecycle (*server_, "sub", "throw new Error('sub boom');"));
@@ -1174,6 +1199,65 @@ TEST_P (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
     EXPECT_NE (setup[1].value ("message", "").find ("sub boom"), std::string::npos)
     << setup[1].dump ();
     EXPECT_EQ (setup[1]["origin"].value ("name", ""), "Collection col_sub");
+
+    const std::string refusal = logged_refusal (log);
+    const std::string named   = "folder 'Collection col_sub': ";
+    EXPECT_TRUE (refusal.starts_with (
+    GetParam () == RunMode::Load ? named : "script.setup failed: " + named))
+    << refusal;
+    EXPECT_NE (refusal.find ("sub boom"), std::string::npos) << refusal;
+}
+
+// A throwing folder teardown is recorded under `lifecycle.teardown` and the
+// run collection's teardown still runs after it; the run's status is the
+// steps'. Mutation check: stop `run_scenario_teardown` (scenario_runner.cpp)
+// at the first teardown that refuses and the root's teardown never runs.
+TEST_P (LifecycleSetRunTest, AThrowingFolderTeardownStillTearsDownItsAncestors) {
+    seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
+    seed_folder ("col_sub", "col_1", 0,
+    marking_lifecycle (*server_, "sub", "pm.collectionVariables.set('subToken', 'from-sub');",
+    "throw new Error('sub teardown boom');"));
+    seed_request_in ("req_sub", "col_sub", 0, "step=sub&tok={{subToken}}");
+    auto execution = resolve (1, "col_1", /*recursive=*/true);
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
+    const auto teardown = lifecycle ().value ("teardown", json::array ());
+    EXPECT_EQ (origin_ids (teardown), (std::vector<std::string>{ "col_sub", "col_1" }));
+    ASSERT_EQ (teardown.size (), 2u);
+    EXPECT_EQ (teardown[0].value ("outcome", ""), "error");
+    EXPECT_NE (teardown[0].value ("message", "").find ("sub teardown boom"), std::string::npos)
+    << teardown[0].dump ();
+    EXPECT_EQ (teardown[1].value ("outcome", ""), "ok");
+}
+
+/// A refusing setup outcome carrying @p origin.
+vayu::core::ElementOutcome refusing_outcome (const json& origin) {
+    vayu::core::ElementOutcome outcome;
+    outcome.status  = "error";
+    outcome.message = "Error: boom";
+    outcome.origin  = origin;
+    return outcome;
+}
+
+// The refusal leads with the collection's name, then its id, then nothing:
+// an element no collection declared, or an origin a client wrote that names
+// neither as a string. Mutation check: drop the id fallback in
+// `refusing_collection` (scenario_runner.cpp) and the second case loses it.
+TEST (LifecycleRefusalTest, LeadsWithTheCollectionTheOriginNames) {
+    const auto refusal_of = [] (const json& origin) {
+        return vayu::core::lifecycle_refusal ({ refusing_outcome (origin) }).value_or ("");
+    };
+    EXPECT_EQ (
+    refusal_of ({ { "scope", "folder" }, { "id", "col_sub" }, { "name", "Users" } }),
+    "folder 'Users': Error: boom");
+    EXPECT_EQ (refusal_of ({ { "scope", "collection" }, { "id", "col_1" } }),
+    "collection 'col_1': Error: boom");
+    EXPECT_EQ (refusal_of (json::object ()), "Error: boom");
+    EXPECT_EQ (refusal_of ({ { "name", 7 }, { "id", json::array () } }), "Error: boom");
 }
 
 // ============================================================================

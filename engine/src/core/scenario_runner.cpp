@@ -1274,13 +1274,49 @@ TransactionHistograms& transactions) {
     return 0;
 }
 
+namespace {
+
+/// @p origin's @p member when it is a string, else empty: a single-request
+/// run's `lifecycleElements` entry carries whatever `origin` its client sent.
+std::string origin_text (const nlohmann::json& origin, const char* member) {
+    if (!origin.is_object ()) {
+        return {};
+    }
+    const auto found = origin.find (member);
+    return found != origin.end () && found->is_string () ? found->get<std::string> () :
+                                                           std::string{};
+}
+
+/// The collection @p origin names, as a setup refusal leads with it:
+/// `folder '<name>'` or `collection '<name>'`, the id standing in for a
+/// missing name, and empty when it names neither.
+std::string refusing_collection (const nlohmann::json& origin) {
+    std::string label = origin_text (origin, "name");
+    if (label.empty ()) {
+        label = origin_text (origin, "id");
+    }
+    if (label.empty ()) {
+        return {};
+    }
+    const char* level = origin_text (origin, "scope") == "folder" ? "folder" : "collection";
+    return std::string (level) + " '" + label + "'";
+}
+
+} // namespace
+
 std::optional<std::string>
 lifecycle_refusal (const std::vector<vayu::core::ElementOutcome>& outcomes, size_t first) {
     for (size_t i = first; i < outcomes.size (); ++i) {
         const auto& outcome = outcomes[i];
-        if (outcome.status == "error" || outcome.status == "failed") {
-            return outcome.message.value_or ("unknown error");
+        if (outcome.status != "error" && outcome.status != "failed") {
+            continue;
         }
+        std::string refusal = refusing_collection (outcome.origin);
+        if (!refusal.empty ()) {
+            refusal += ": ";
+        }
+        refusal += outcome.message.value_or ("unknown error");
+        return refusal;
     }
     return std::nullopt;
 }
