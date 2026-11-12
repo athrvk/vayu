@@ -204,9 +204,9 @@ describe("useRunningServiceCount", () => {
 		const { result } = countHook();
 		await waitFor(() => expect(result.current).toBe(1));
 
-		useEngineStore.setState({
-			engineCrash: { code: null, signal: "SIGKILL", stderrTail: [], error: null },
-		});
+		useEngineStore
+			.getState()
+			.setEngineCrash({ code: null, signal: "SIGKILL", stderrTail: [], error: null });
 
 		await waitFor(() => expect(result.current).toBe(0));
 	});

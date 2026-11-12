@@ -27,7 +27,7 @@ import ClientErrorView from "./ClientErrorView";
 
 const CRASH: EngineCrash = { code: 1, signal: null, stderrTail: [], error: null };
 
-const BUTTON_TIP = /Restart it with the button beside Engine disconnected at the bottom/;
+const BUTTON_TIP = /Start it again with the button in the status bar at the bottom of the window/;
 
 beforeEach(() => {
 	useEngineStore.setState({ engineCrash: null, engineStartFailure: null });

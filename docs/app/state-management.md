@@ -720,8 +720,13 @@ only classifier of `engineStatus`**, and `engineCrash` never writes it. A
 poll's verdict follows within a retry rather than a whole healthy interval
 (issue #3493). For the gap until it does, `selectKnownEngineStatus` (exported
 beside the store) derives the status the app shows: `unreachable` when a crash
-is recorded and `engineStatus` still reads `connected`, `engineStatus` itself
-otherwise. The Dock's light and `useEngineServing` (the gate behind the
+was pushed after the poll's last verdict and that verdict is `connected`,
+`engineStatus` itself otherwise. `engineCrashAheadOfPoll` carries the "after":
+`setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
+including the one `useHealthQuery` makes for each answered poll, an unchanged
+answer too (structural sharing would otherwise keep the sync effect from
+running). The crash alone cannot decide, because it stays until `ready`, which
+can trail the poll that already sees a restarted engine answer. The Dock's light and `useEngineServing` (the gate behind the
 running-services count and the Services drawer's rows) read it, so neither says
 "connected" beside the Restart a crash put there. The Dock reads `engineCrash`
 for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:

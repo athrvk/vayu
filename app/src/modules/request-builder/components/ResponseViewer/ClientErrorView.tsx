@@ -51,6 +51,16 @@ const ENGINE_ANSWERED_HINT =
 	"This is Vayu's failure, not the server's. Send again; if it repeats, Vayu's engine log in Settings › General › Logs has the reason.";
 
 /**
+ * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
+ * Without one (the engine is not known to have left, so the Dock offers
+ * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
+ * The button's label is not named: it reads Retry after a start failure and a
+ * disabled Restarting… while a restart runs.
+ */
+const ENGINE_RESTART_IN_DOCK_HINT =
+	"Vayu's engine isn't running or didn't answer. Start it again with the button in the status bar at the bottom of the window.";
+
+/**
  * Error hints for common error codes
  *
  * The proxy and TLS hints name the *setting* to go to, not just the condition
@@ -59,14 +69,6 @@ const ENGINE_ANSWERED_HINT =
  * server that was never reached - which is the misdiagnosis the whole
  * behind-real-networks epic exists to end.
  */
-/**
- * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
- * Without one (the engine is not known to have left, so the Dock offers
- * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
- */
-const ENGINE_RESTART_IN_DOCK_HINT =
-	"Vayu's engine isn't running or didn't answer. Restart it with the button beside Engine disconnected at the bottom of the window.";
-
 const ErrorHints: Record<string, string> = {
 	TIMEOUT:
 		"The request didn't finish in time - the connection may never have opened, or the server took too long to answer. Raise Request timeout in this request's Settings tab or Default request timeout in Settings › Network & connectivity, or check the server.",

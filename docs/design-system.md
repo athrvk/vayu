@@ -3102,10 +3102,13 @@ running, the light's tooltip says why, and a button beside it recovers: Retry
 for a start that cannot succeed (a held port), Restart for an engine that left
 on its own, whose tooltip names the signal, exit code or error and quotes the
 last lines it printed (#3336). Both are the same `EngineRestartButton`, in the
-strip's existing height. A crash the main process reported turns the light at
-once: it reads `selectKnownEngineStatus`, so "Engine connected" never stands
-beside Restart while the health poll's refetch is still on its way (#3493). The
-running-services button reads the same derivation and drops out with it.
+strip's existing height, and drawn while `selectEngineRestartOffered` holds,
+which is also what the response pane's "Vayu's engine didn't respond" tip reads
+before it points at the status bar's button. A crash the main process reported
+turns the light at once: it reads `selectKnownEngineStatus`, so "Engine
+connected" from a poll older than the crash never stands beside Restart (#3493),
+and the poll's next answer is what turns it back. The running-services button
+reads the same derivation and drops out with it.
 
 The right cluster renders **only while the active tab is a request tab**; every
 other tab keeps the centred strip alone. Its one control is

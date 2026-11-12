@@ -52,6 +52,8 @@ vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
 
 const restartEngine = vi.fn();
 
+const HEALTHY = { status: "ok", version: "1.0.0", workers: 8 };
+
 /** What `App` does: mounts the poll once, above the strip that renders it. */
 function HealthPoll() {
 	useHealthQuery();
@@ -282,6 +284,63 @@ describe("the Dock after the engine crashes", () => {
 		});
 		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
 		expect(screen.getByText("Engine disconnected")).toBeTruthy();
+	});
+
+	/*
+	 * The crash stays on record until the sidecar's `ready`, which can trail the
+	 * poll that sees the engine back by half a second, or never come for an
+	 * engine nobody here started. A verdict newer than the push is the poll's
+	 * word again. Mutation-check: make `selectKnownEngineStatus` override on
+	 * `engineCrash` alone and both cases fail.
+	 */
+	it("says Engine connected when the engine answers again, ahead of the sidecar's ready", async () => {
+		getHealth.mockResolvedValueOnce(HEALTHY);
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+
+		getHealth.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:9876"));
+		pushCrash();
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+
+		getHealth.mockResolvedValue(HEALTHY);
+		await act(async () => {
+			await client.refetchQueries({ queryKey: queryKeys.health.status() });
+		});
+
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+		expect(useEngineStore.getState().engineCrash).not.toBeNull();
+		expect(screen.queryByText("Engine disconnected")).toBeNull();
+	});
+
+	it("says Engine connected when the refetch the crash asked for is answered, unchanged", async () => {
+		// The same payload as the last answer, so structural sharing hands the
+		// hook the same `data`. Mutation-check: drop the per-answer verdict in
+		// `useHealthQuery` and this stays on Engine disconnected.
+		getHealth.mockResolvedValueOnce(HEALTHY);
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+		const pollsBefore = getHealth.mock.calls.length;
+
+		let answer!: (value: unknown) => void;
+		getHealth.mockReturnValueOnce(
+			new Promise((resolve) => {
+				answer = resolve;
+			})
+		);
+		pushCrash();
+		await waitFor(() => expect(getHealth.mock.calls.length).toBeGreaterThan(pollsBefore));
+		expect(screen.getByText("Engine disconnected")).toBeTruthy();
+
+		await act(async () => {
+			answer({ ...HEALTHY });
+		});
+
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+		expect(useEngineStore.getState().engineCrash).not.toBeNull();
 	});
 
 	it("still says Starting… when the crash lands inside a restart's start window", async () => {

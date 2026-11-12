@@ -84,6 +84,18 @@ interface EngineState {
 	engineCrash: EngineCrash | null;
 
 	/**
+	 * The crash in `engineCrash` was pushed after the health poll's last verdict
+	 * (#3493), so a `connected` there describes the process that left.
+	 *
+	 * Set by `setEngineCrash` with a crash and cleared by every `setEngineStatus`,
+	 * which only the poll calls: a verdict that lands after the push, `connected`
+	 * from the restarted engine included, is the newer word. `engineCrash` itself
+	 * stays until the sidecar reports `ready`, which can trail that verdict, so it
+	 * cannot be what decides.
+	 */
+	engineCrashAheadOfPoll: boolean;
+
+	/**
 	 * A restart is in flight. One flag for every surface that offers the action
 	 * (the Dock and the Settings banner), so a second click or the other surface
 	 * does not start another; see `useEngineRestart`.
@@ -162,20 +174,22 @@ interface EngineState {
 
 /**
  * The engine's status as the app shows it: the health poll's verdict, except
- * that a crash the sidecar reported outranks a `connected` the poll has not
- * revisited yet (#3493).
+ * that a crash the sidecar reported outranks a `connected` the poll gave before
+ * the push (#3493).
  *
  * Derived on read, never written back: the poll stays the one writer of
  * `engineStatus`, and the crash push only asks it to look again
- * (`useEngineLifecycle`). The overlap lasts until that refetch answers, but a
- * strip reading "Engine connected" beside a Restart button, or a drawer of
- * green services the dead process took with it, is wrong for all of it.
- * `starting` passes through: a restart in flight is the crash's successor.
+ * (`useEngineLifecycle`). The override lasts until the poll's next verdict,
+ * whatever it says, but a strip reading "Engine connected" beside a Restart
+ * button, or a drawer of green services the dead process took with it, is
+ * wrong for all of it. `starting` passes through: a restart in flight is the
+ * crash's successor.
  */
 export function selectKnownEngineStatus(
-	s: Pick<EngineState, "engineStatus" | "engineCrash">
+	s: Pick<EngineState, "engineStatus" | "engineCrash" | "engineCrashAheadOfPoll">
 ): EngineStatus {
-	if (s.engineCrash !== null && s.engineStatus === "connected") return "unreachable";
+	const crashIsNewer = s.engineCrash !== null && s.engineCrashAheadOfPoll;
+	if (crashIsNewer && s.engineStatus === "connected") return "unreachable";
 	return s.engineStatus;
 }
 
@@ -197,6 +211,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	engineError: null,
 	engineStartFailure: null,
 	engineCrash: null,
+	engineCrashAheadOfPoll: false,
 	engineRestarting: false,
 	recovery: null,
 	workers: null,
@@ -207,10 +222,10 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	restartRequiredKeys: [],
 
 	// Connection actions
-	setEngineStatus: (status) => set({ engineStatus: status }),
+	setEngineStatus: (status) => set({ engineStatus: status, engineCrashAheadOfPoll: false }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineStartFailure: (failure) => set({ engineStartFailure: failure }),
-	setEngineCrash: (crash) => set({ engineCrash: crash }),
+	setEngineCrash: (crash) => set({ engineCrash: crash, engineCrashAheadOfPoll: crash !== null }),
 	setEngineRestarting: (restarting) => set({ engineRestarting: restarting }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 	setWorkers: (workers) => set({ workers }),

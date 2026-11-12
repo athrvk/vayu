@@ -515,11 +515,14 @@ which case the app picks a fallback (below).
   facts only: the `/health` poll is still the one writer of the renderer's
   `engineStatus`, and a `crashed` push asks it to look again (it invalidates
   the health query alone) rather than waiting out its 30 s healthy interval
-  (issue #3493). Until that refetch answers, the Dock and the Services drawer
-  read `selectKnownEngineStatus`, which lets a recorded crash outrank a
-  `connected` verdict, so the light reads "Engine disconnected" beside Restart
-  and the drawer shows its services stopped, never "Engine connected" and
-  green dots on listeners the crash took with it. A crash pushed inside a
+  (issue #3493). The Dock and the Services drawer read
+  `selectKnownEngineStatus`, which lets a crash outrank a `connected` verdict
+  the poll gave before the push, so the light reads "Engine disconnected"
+  beside Restart and the drawer shows its services stopped, never "Engine
+  connected" and green dots on listeners the crash took with it. The poll's
+  next verdict ends the override, whatever it says: the crash itself stays
+  recorded until `ready`, which can trail the poll that sees a restarted engine
+  answer, and that engine is connected. A crash pushed inside a
   restart's start window refetches like any poll there and reads "Starting…".
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is

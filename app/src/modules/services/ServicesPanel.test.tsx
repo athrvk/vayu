@@ -883,9 +883,15 @@ describe("while Vayu's engine is down", () => {
 	}
 
 	it.each([
-		["the poll reads it unreachable", { engineStatus: "unreachable" as const }],
-		["the sidecar reported a crash the poll has not seen", { engineCrash: CRASH }],
-	])("shows the cached services as stopped when %s", async (_, down) => {
+		[
+			"the poll reads it unreachable",
+			() => useEngineStore.getState().setEngineStatus("unreachable"),
+		],
+		[
+			"the sidecar reported a crash the poll has not seen",
+			() => useEngineStore.getState().setEngineCrash(CRASH),
+		],
+	])("shows the cached services as stopped when %s", async (_, goDown) => {
 		renderRunningServices();
 		// Warm and green first, so the case proves the gate and not a slow query.
 		for (const name of ROWS) {
@@ -894,7 +900,7 @@ describe("while Vayu's engine is down", () => {
 			);
 		}
 
-		act(() => useEngineStore.setState(down));
+		act(goDown);
 
 		await waitFor(() =>
 			expect(screen.getByRole("button", { name: ROWS[0] }).textContent).toContain("Stopped")

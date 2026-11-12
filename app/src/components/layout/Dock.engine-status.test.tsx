@@ -262,9 +262,10 @@ describe("an engine that left on its own", () => {
 	it("does not wait for the poll: the sidecar's word turns the light, explains and offers Restart", async () => {
 		// The poll's last verdict is still `connected` (#3493): "Engine connected"
 		// beside Restart is two answers to one question, so the crash outranks it
-		// until the refetch the push asked for lands. Mutation-check: drop the
-		// crash branch of `selectKnownEngineStatus` and the first assertion fails.
-		useEngineStore.setState({ engineStatus: "connected", engineCrash: CRASH });
+		// until the poll's next verdict. Mutation-check: drop the crash branch of
+		// `selectKnownEngineStatus` and the first assertion fails.
+		useEngineStore.setState({ engineStatus: "connected" });
+		useEngineStore.getState().setEngineCrash(CRASH);
 		renderDock();
 
 		expect(screen.queryByText("Engine connected")).toBeNull();

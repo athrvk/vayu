@@ -228,5 +228,17 @@ export function useHealthQuery() {
 		queryClient,
 	]);
 
+	/*
+	 * Every answered poll restates its verdict, an unchanged one included. A
+	 * crash pushed since the last answer holds the app off `connected` until the
+	 * poll speaks again (`selectKnownEngineStatus`, #3493), and an answer equal to
+	 * the last keeps `query.data` (structural sharing), so the effect above does
+	 * not run for it.
+	 */
+	const answeredOkAt = query.data?.status === "ok" ? query.dataUpdatedAt : 0;
+	useEffect(() => {
+		if (answeredOkAt > 0) setEngineStatus("connected");
+	}, [answeredOkAt, setEngineStatus]);
+
 	return query;
 }

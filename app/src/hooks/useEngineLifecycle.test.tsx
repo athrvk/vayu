@@ -120,8 +120,6 @@ describe("useEngineLifecycle", () => {
 		expect(useEngineStore.getState().engineCrash?.code).toBe(139);
 	});
 
-	// A restart from a crash walks these, and one that fails before a child
-	// exists ends on idle: the Dock must still have its Restart button.
 	/*
 	 * #3493. The poll is healthy and on its slow cadence, so without this it
 	 * keeps its `connected` for up to a whole interval after the crash. Only the
@@ -154,6 +152,8 @@ describe("useEngineLifecycle", () => {
 		expect(client.getQueryState(queryKeys.health.status())?.isInvalidated).toBe(false);
 	});
 
+	// A restart from a crash walks these, and one that fails before a child
+	// exists ends on idle: the Dock must still have its Restart button.
 	it.each(["choosingPort", "replacing", "spawning", "idle"] as const)(
 		"keeps the crash through %s",
 		async (kind) => {
