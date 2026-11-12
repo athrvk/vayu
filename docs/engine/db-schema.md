@@ -1855,7 +1855,8 @@ snapshot in place breaks that**, and would have to invalidate the cache in
 The list row's `resultSummary` on a terminal load run (#2130) *is* read from
 this results summary (`rps`, `latency.p95`, the `status_codes` error rate, the
 `thresholds` verdict, for a scenario load run `scenario.assertions` as
-`assertionsPassed` / `assertionsFailed`, and for a capacity run the
+`assertionsPassed` / `assertionsFailed`, for a single-request run the summed
+`failed` of `elements` and `tests` as `assertionsFailed` (#3458), and for a capacity run the
 `capacity` section's `stop_reason`, `max_healthy_concurrency` and
 `knee_concurrency` (#2930); `build_load_result_summary` in
 `http/routes/runs.cpp`) and, on a terminal collection run, from `scenario.passed`

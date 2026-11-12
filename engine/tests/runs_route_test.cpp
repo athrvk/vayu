@@ -3388,10 +3388,12 @@ TEST_F (RunsRouteTest, TerminalLoadRowCarriesItsResultSummary) {
     const auto& row = body["data"][0];
     ASSERT_TRUE (row.contains ("resultSummary"));
     const auto& outcome = row["resultSummary"];
-    EXPECT_EQ (outcome.size (), 4u);
-    for (const char* key : { "rps", "p95Ms", "errorRate", "verdict" }) {
+    // The fixture's replay recorded one failed test (#3458).
+    EXPECT_EQ (outcome.size (), 5u);
+    for (const char* key : { "rps", "p95Ms", "errorRate", "verdict", "assertionsFailed" }) {
         ASSERT_TRUE (outcome.contains (key)) << key;
     }
+    EXPECT_EQ (outcome["assertionsFailed"], 1);
     EXPECT_DOUBLE_EQ (outcome["rps"].get<double> (), 50.0);
     EXPECT_DOUBLE_EQ (outcome["p95Ms"].get<double> (), 25.0);
     // 7 server errors and 3 with no response, of 100: a percentage, not 0.1.
@@ -3448,7 +3450,7 @@ TEST_F (RunsRouteTest, LoadResultSummaryOmitsWhatTheSummaryDoesNotRecord) {
 
     const auto unjudged = row_of (body, "run_unjudged");
     ASSERT_TRUE (unjudged.contains ("resultSummary"));
-    EXPECT_EQ (unjudged["resultSummary"].size (), 3u);
+    EXPECT_EQ (unjudged["resultSummary"].size (), 4u); // + the replay's failed test
     EXPECT_FALSE (unjudged["resultSummary"].contains ("verdict"));
 
     const auto no_codes_row = row_of (body, "run_no_codes");
@@ -3505,6 +3507,94 @@ TEST_F (RunsRouteTest, ScenarioLoadRowCarriesItsAssertionCountsOnlyWhenStored) {
     }
 }
 
+/// A single-request load run's stored summary with no `tests` and no
+/// `elements`, the fixture's own replay totals taken out.
+nlohmann::json single_request_summary () {
+    auto stored = nlohmann::json::parse (judged_summary (true));
+    stored.erase ("tests");
+    return stored;
+}
+
+// A single-request load run has no `scenario` block, so its row derives
+// `assertionsFailed` from the two places it stored failures (#3458): the
+// exact `elements` rows and the replay's `tests`. A run that stored neither
+// carries no key, and a stored zero is a recorded zero.
+// Mutation check: drop `record_assertions`' non-scenario branch and the first
+// three rows lose the key.
+TEST_F (RunsRouteTest, SingleRequestLoadRowDerivesItsFailedAssertions) {
+    auto inline_failures        = single_request_summary ();
+    inline_failures["elements"] = nlohmann::json::array (
+    { { { "kind", "script.post" }, { "passed", 0 }, { "failed", 150 } } });
+    seed ({ .id = "run_inline", .start_time = 1 });
+    db_->update_run_summary ("run_inline", inline_failures.dump ());
+
+    auto replayed     = single_request_summary ();
+    replayed["tests"] = { { "sampled", 8 }, { "passed", 4 }, { "failed", 4 } };
+    seed ({ .id = "run_replayed", .start_time = 2 });
+    db_->update_run_summary ("run_replayed", replayed.dump ());
+
+    auto both        = single_request_summary ();
+    both["elements"] = nlohmann::json::array ({
+    { { "kind", "assert.status" }, { "failed", 2 } },
+    { { "kind", "extract.json" }, { "failed", 0 }, { "missing", 9 } },
+    { { "kind", "script.post" }, { "failed", 3 } },
+    });
+    both["tests"]    = { { "sampled", 8 }, { "passed", 4 }, { "failed", 4 } };
+    seed ({ .id = "run_both", .start_time = 3 });
+    db_->update_run_summary ("run_both", both.dump ());
+
+    auto clean     = single_request_summary ();
+    clean["tests"] = { { "sampled", 8 }, { "passed", 8 }, { "failed", 0 } };
+    seed ({ .id = "run_clean", .start_time = 4 });
+    db_->update_run_summary ("run_clean", clean.dump ());
+
+    seed ({ .id = "run_unasserted", .start_time = 5 });
+    db_->update_run_summary ("run_unasserted", single_request_summary ().dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+
+    const auto failed_of = [&body] (const char* id) {
+        return row_of (body, id)["resultSummary"].value ("assertionsFailed", -1);
+    };
+    EXPECT_EQ (failed_of ("run_inline"), 150);
+    EXPECT_EQ (failed_of ("run_replayed"), 4);
+    EXPECT_EQ (failed_of ("run_both"), 9);
+    EXPECT_EQ (failed_of ("run_clean"), 0);
+    EXPECT_EQ (failed_of ("run_unasserted"), -1);
+    for (const char* id : { "run_inline", "run_replayed", "run_both", "run_clean" }) {
+        EXPECT_FALSE (
+        row_of (body, id)["resultSummary"].contains ("assertionsPassed"))
+        << id;
+    }
+}
+
+// What a stored summary can hold that is not a count: a non-numeric `failed`,
+// a row that is not an object, an `elements` that is not an array.
+TEST_F (RunsRouteTest, SingleRequestLoadRowIgnoresMalformedAssertionTallies) {
+    auto junk        = single_request_summary ();
+    junk["elements"] = nlohmann::json::array (
+    { 7, { { "kind", "script.post" }, { "failed", "3" } }, { { "kind", "x" } } });
+    junk["tests"] = { { "sampled", 1 }, { "failed", -2 } };
+    seed ({ .id = "run_junk", .start_time = 1 });
+    db_->update_run_summary ("run_junk", junk.dump ());
+
+    auto not_array        = single_request_summary ();
+    not_array["elements"] = 5;
+    seed ({ .id = "run_scalar", .start_time = 2 });
+    db_->update_run_summary ("run_scalar", not_array.dump ());
+
+    auto [status, body] =
+    vayu::http::routes::get_runs_response (*db_, {}, 50, 0, summaries_);
+    ASSERT_EQ (status, 200);
+    for (const char* id : { "run_junk", "run_scalar" }) {
+        EXPECT_FALSE (
+        row_of (body, id)["resultSummary"].contains ("assertionsFailed"))
+        << id;
+    }
+}
+
 /// The fixture's summary with the capacity search @p levels ended in, against
 /// a 100 ms budget and a 256 ceiling.
 std::string capacity_summary (const std::vector<vayu::core::CapacityWindow>& levels,
@@ -3546,7 +3636,7 @@ TEST_F (RunsRouteTest, CapacityRowCarriesTheHeldAndKneeLevels) {
     (nlohmann::json{ { "stopReason", "slo_exceeded" },
     { "maxHealthyConcurrency", 16 }, { "kneeConcurrency", 32 } }));
     // The rest of the row is untouched beside it.
-    EXPECT_EQ (knee.size (), 4u) << knee.dump ();
+    EXPECT_EQ (knee.size (), 5u) << knee.dump ();
 
     auto [report_status, report] =
     vayu::http::routes::run_report_response (*db_, "run_capacity_knee");
@@ -3591,7 +3681,7 @@ TEST_F (RunsRouteTest, LoadRowWithoutACapacitySearchCarriesNoCapacity) {
     for (const char* id : { "run_plain", "run_capacity_scalar", "run_capacity_no_levels" }) {
         const auto outcome = row_of (body, id)["resultSummary"];
         EXPECT_FALSE (outcome.contains ("capacity")) << id << ": " << outcome.dump ();
-        EXPECT_EQ (outcome.size (), 4u) << id << ": " << outcome.dump ();
+        EXPECT_EQ (outcome.size (), 5u) << id << ": " << outcome.dump ();
     }
 }
 

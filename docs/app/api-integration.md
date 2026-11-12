@@ -1183,13 +1183,15 @@ why the context bar's Recent sends section is one list call and no report fetch.
 A terminal collection run's row carries `{passed, failed, skipped, errored,
 stopped, verdict}` from its stored summary (#2954, `stopped` #3397: a step a Stop
 cut short, in no failure count), each key only when recorded; the
-renderer does not read it - no badge or glyph on the row changes - and the MCP
-`list_runs` rows are its consumer. A load run's results are
+renderer reads `failed` and `errored` (a completed run with either gets the
+failed glyph and a step-counts line, #3458) and the MCP `list_runs` rows are
+the consumer of the rest. A load run's results are
 unbounded and are never read for one; once the run is terminal its row carries
 `{rps, p95Ms, errorRate, verdict}` from the run's stored summary instead (#2130,
 [GET /runs](../engine/api-reference.md#get-runs)), plus `assertionsPassed` and
 `assertionsFailed` (both or neither) on a scenario load run that made an exact
-assertion (#2820). The renderer reads `assertionsFailed` (the row's verdict and
+assertion (#2820), or `assertionsFailed` alone on a single-request run that
+stored `elements` or a test replay (#3458). The renderer reads `assertionsFailed` (the row's verdict and
 its result line); `assertionsPassed` has no renderer reader and is there for the
 MCP `list_runs` rows. A terminal capacity run's row also carries `capacity`
 (`{stopReason, maxHealthyConcurrency, kneeConcurrency}`, the last two omitted

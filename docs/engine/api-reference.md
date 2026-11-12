@@ -12385,14 +12385,17 @@ run stored, never from its result rows, which are many and unbounded:
 | `errorRate` | Percentage (0-100) of the run's status-code distribution that was errors: a status outside 2xx/3xx, or no response at all |
 | `verdict` | `"passed"` or `"failed"`: the run's verdict against its declared `thresholds`, the same one the report's `thresholdValidation.verdict` prints |
 | `assertionsPassed`, `assertionsFailed` | A scenario load run's exact assertion counts (#2820), the report's `scenario.assertions`: `assert.*` outcomes, required `extract.*` misses and inline `pm.test` calls, never the sampled replay. Beside `errorRate`, not folded into it |
+| `assertionsFailed` (alone) | A single-request load run's failed assertions (#3458), derived from what the run stored: the `failed` of every row of the report's top-level `elements` (an `assert.*` or inline `script.*` outcome counted per submission) plus `testValidation.testsFailed` (the sampled replay of the scripts that did not run inline, so no outcome is counted twice). A required `extract.*` miss is reported `missing`, not `failed`, and is not in it. There is no `assertionsPassed` beside it: an element row counts executions and the replay counts `pm.test` calls |
 | `capacity` | A capacity run's headline (#2930), the same three keys of the report's [`capacity` section](#get-runsrunidreport): `stopReason`, and `maxHealthyConcurrency` / `kneeConcurrency` each only when the search found that level |
 
 Each key is **omitted** when the stored summary does not record it, never
 zeroed: `errorRate` is absent when the run recorded no status codes, and
 `verdict` is absent when the run declared no budgets - it was never judged,
 which is not the same claim as passing. The two assertion counts are absent
-for a single-request run, a scenario load run that made no assertion and one
-stored before #2820. A scenario load run whose every assertion failed against
+for a scenario load run that made no assertion and one stored before #2820; a
+single-request run carries `assertionsFailed` alone, absent when it stored
+neither `elements` nor `testValidation` (and `0` when it stored them and nothing
+failed). A scenario load run whose every assertion failed against
 `200`s reads `"resultSummary": { "rps": 172.0, "p95Ms": 12.4, "errorRate": 0,
 "assertionsPassed": 0, "assertionsFailed": 4580 }`. `capacity` is absent on
 every run that was not a capacity search; inside it, `maxHealthyConcurrency`
