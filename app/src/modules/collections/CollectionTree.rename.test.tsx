@@ -113,6 +113,15 @@ const ROW_KINDS = [
 ];
 
 describe.each(ROW_KINDS)("renaming a $kind", ({ selector, update, id, newName, storedName }) => {
+	it("opens with the whole name selected, so typing replaces it", () => {
+		renderTree();
+		const field = startRename(selector);
+
+		expect(field.value).toBe(storedName);
+		expect(field.selectionStart).toBe(0);
+		expect(field.selectionEnd).toBe(storedName.length);
+	});
+
 	it("sends nothing when the name is unchanged", async () => {
 		renderTree();
 		const field = startRename(selector);

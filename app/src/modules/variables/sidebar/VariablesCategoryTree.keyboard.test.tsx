@@ -294,6 +294,16 @@ describe("the actions that had no keyboard path", () => {
 		expect(document.activeElement).toBe(row(tree, "Staging"));
 	});
 
+	it("opens the rename with the whole name selected", () => {
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+		const field = screen.getByDisplayValue("Staging") as HTMLInputElement;
+
+		expect(field.selectionStart).toBe(0);
+		expect(field.selectionEnd).toBe("Staging".length);
+	});
+
 	it("cancels the edit it was asked to cancel", () => {
 		const tree = renderTree();
 		press(row(tree, "Staging"), "F2");

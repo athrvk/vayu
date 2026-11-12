@@ -3548,7 +3548,7 @@ for, so interrupting what they are reading is the wrong trade.
 
 Every tree that renames a row in place does it through one hook,
 `app/src/hooks/useInlineRename.ts` - the collections tree, the variables
-sidebar's environments and the element list. The field is an ordinary `Input`
+sidebar's environments and the element list (four call sites). The field is an ordinary `Input`
 at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
 label's position on both axes: every renaming row puts its label a `gap-2`
 from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
@@ -3571,9 +3571,15 @@ owns the behaviour:
   tree is one tab stop and the field replaces the row's only focusable control,
   so an Escape that left focus on `<body>` would drop the user out of the tree.
   After a blur, focus has already gone where the user put it.
+- **The field opens with the whole name selected** (#3450), as Finder, Explorer
+  and VS Code do, so typing replaces the name instead of appending to it. The
+  hook's `onFocus` selects it and the field's `autoFocus` triggers that on
+  mount, which is why the hook sets the draft during the render that opens the
+  rename rather than in an effect: a field that mounts empty would select
+  nothing.
 
-A surface that renames something in place uses the hook rather than a fourth
-copy of those four rules.
+A surface that renames something in place uses the hook rather than a fifth
+copy of those five rules.
 
 ### Copy feedback
 
