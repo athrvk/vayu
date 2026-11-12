@@ -31,7 +31,7 @@ supported is listed [below](#not-yet-supported).
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`), `.auth` (basic, bearer, apikey, noauth; see [Request mutation](#request-mutation--url-variables)) |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `getPathWithQuery()`, `getRemote()`, `getRaw()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`), `.auth` (basic, bearer, apikey, noauth; see [Request mutation](#request-mutation--url-variables)) |
 | Request methods     | `pm.request.addHeader()`, `.upsertHeader()`, `.removeHeader()`, `.forEachHeader()`, `.getHeaders(options?)`, `.addQueryParams()`, `.removeQueryParams()`, `.toJSON()` - each the member method it names - and `.authorizeUsing()`, which assigns `.auth`; see [Request methods](#request-methods) |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
@@ -1837,8 +1837,10 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   script author is told which line was wrong rather than reading it off the write-back.
 - **`url` is Postman's `Url` object, not a string** (#991 - the owner decision that
   compatibility wins over the shipped string shape). `protocol`, `host`, `port`, `path`,
-  `hash`, `query` with `get`/`has`/`all`/`toObject`/`count`, plus `getHost()`,
-  `getPath()`, `getQueryString()`, `toString()`, `update()`, `addQueryParams()` and
+  `hash`, `query` with `get`/`has`/`all`/`toObject`/`count` and, since #3462, the rest of
+  the `PropertyList` reads (`each`, `map`, `filter`, `find`, `one`, `indexOf`, `idx`),
+  plus `getHost()`, `getPath()`, `getQueryString()`, `getPathWithQuery()`,
+  `getRemote()`, `getRaw()`, `toString()`, `update()`, `addQueryParams()` and
   `removeQueryParams()`. It still behaves as a
   string in every context JavaScript allows - concatenation, template literals, `==`,
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
@@ -1846,8 +1848,11 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   text, as Postman's parser reads it (#3454): a pre-request script on the
   `{{baseUrl}}/users?page=2` an imported collection stores sees `getHost()`
   `'{{baseUrl}}'`, `getPath()` `'/users'` and the query, and its edits keep the token
-  for the resolution after the script. One divergence: with no path after the token,
-  `getPath()` is `''` where Postman answers `'/'`. The full surface and the migration
+  for the resolution after the script. Divergences: with no path after the token,
+  `getPath()` is `''` where Postman answers `'/'`; the query's walks take a function only
+  (Postman also takes an object or a property name as the rule), `indexOf` matches a
+  `{key, value}` on both fields rather than by identity; and `getRemote()` takes no
+  `forcePort`. The full surface and the migration
   note are in [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
 - **The URL is writable a member at a time, not only whole** (#1040). `path` and
   `host` are arrays a script mutates in place (`push`, `splice`, index assignment,

@@ -656,7 +656,8 @@ nlohmann::json get_script_completions () {
     { "documentation",
     "The full request URL, as Postman's Url object: protocol, host, port, "
     "path, query and hash, plus getHost(), getPath(), getQueryString(), "
-    "addQueryParams(), removeQueryParams() and toString(). In a pre-request "
+    "getRaw(), getPathWithQuery(), getRemote(), addQueryParams(), "
+    "removeQueryParams() and toString(). In a pre-request "
     "script a {{variable}} is still written as its token, and resolves after "
     "the script against what it set; a test script reads the URL as "
     "sent.\n\nIt "
@@ -717,8 +718,9 @@ nlohmann::json get_script_completions () {
     { "insertText", "pm.request.url.query" }, { "detail", "Url query object" },
     { "documentation",
     "The query parameters, with Postman's PropertyList reads over them - "
-    "get(name), has(name), all(), toObject(), count() - and its writers: "
-    "add, upsert, remove, clear. Values are the wire bytes, not decoded - a "
+    "get(name), has(name), all(), toObject(), count(), each, map, filter, "
+    "find, one, indexOf, idx - and its writers: add, upsert, remove, clear. "
+    "Values are the wire bytes, not decoded - a "
     "signature has to canonicalize what was sent." },
     { "sortText", "2_pm_request_url_query" } });
 
@@ -811,6 +813,90 @@ nlohmann::json get_script_completions () {
     { "documentation", "Drop every query parameter. The URL loses its \"?\" with them." },
     { "sortText", "3_pm_request_url_query_clear" } });
 
+    completions.push_back ({ { "label", "pm.request.url.query.each" }, { "kind", KIND_FUNCTION },
+    { "insertText", "pm.request.url.query.each((param) => {\n\t$0\n})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.query.each(fn: (param: { key: string; value: string | null "
+    "}, "
+    "index: number, all: { key: string; value: string | null }[]) => void, "
+    "thisArg?: any): void" },
+    { "documentation",
+    "Call fn for each parameter with { key, value }, in wire order, duplicates "
+    "kept. fn also gets the index and the list, and the optional second "
+    "argument is its this. The list is taken once, so editing the query from "
+    "inside the callback does not change the walk. A parameter with no value "
+    "has value null." },
+    { "sortText", "3_pm_request_url_query_each" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.map" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.map((param) => $0)" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.query.map(fn: (param: { key: string; value: string | null "
+    "}, "
+    "index: number, all: { key: string; value: string | null }[]) => any, "
+    "thisArg?: any): any[]" },
+    { "documentation",
+    "The answers of fn, one per parameter in wire order, as Array.map gives "
+    "them: query.map(p => p.key + \"=\" + p.value)." },
+    { "sortText", "3_pm_request_url_query_map" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.filter" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.filter((param) => $0)" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.query.filter(fn: (param: { key: string; value: string | "
+    "null }, "
+    "index: number, all: { key: string; value: string | null }[]) => any, "
+    "thisArg?: any): { key: string; value: string | null }[]" },
+    { "documentation",
+    "The parameters fn answers truthy for, as { key, value } in wire order, "
+    "duplicates kept." },
+    { "sortText", "3_pm_request_url_query_filter" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.find" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.find((param) => $0)" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail",
+    "pm.request.url.query.find(fn: (param: { key: string; value: string | null "
+    "}, "
+    "index: number, all: { key: string; value: string | null }[]) => any, "
+    "thisArg?: any): { key: string; value: string | null } | undefined" },
+    { "documentation",
+    "The first parameter fn answers truthy for, as { key, value }, or "
+    "undefined when none does." },
+    { "sortText", "3_pm_request_url_query_find" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.one" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.one(\"${1:page}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.one(name: string): { key: string; value: string | null } | undefined" },
+    { "documentation",
+    "The first parameter of that name as { key, value } rather than its "
+    "value, or undefined when the name is absent. get() is the value half "
+    "of the same lookup." },
+    { "sortText", "3_pm_request_url_query_one" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.indexOf" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.indexOf(\"${1:page}\")" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.indexOf(item: string | { key: string; value?: string | null }): number" },
+    { "documentation",
+    "The position in all() of the first parameter of that name, or of the "
+    "{ key, value } member given - key and value both have to match, which "
+    "tells the rows of a repeated name apart. -1 when there is none." },
+    { "sortText", "3_pm_request_url_query_indexOf" } });
+
+    completions.push_back ({ { "label", "pm.request.url.query.idx" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.query.idx(${1:0})" },
+    { "insertTextRules", INSERT_AS_SNIPPET },
+    { "detail", "pm.request.url.query.idx(index: number): { key: string; value: string | null } | undefined" },
+    { "documentation",
+    "The parameter at that position of all() as { key, value }, or undefined "
+    "past either end." },
+    { "sortText", "3_pm_request_url_query_idx" } });
+
     completions.push_back ({ { "label", "pm.request.url.getHost" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getHost()" },
     { "detail", "pm.request.url.getHost(): string" },
@@ -832,6 +918,31 @@ nlohmann::json get_script_completions () {
     "The query exactly as it appears on the wire, with no leading ?. Empty "
     "when the URL carries none." },
     { "sortText", "2_pm_request_url_getQueryString" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getRaw" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getRaw()" },
+    { "detail", "pm.request.url.getRaw(): string" },
+    { "documentation",
+    "The whole URL as one string, exactly as toString() gives it - Postman's "
+    "spelling, for a script lifted from there." },
+    { "sortText", "2_pm_request_url_getRaw" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getPathWithQuery" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getPathWithQuery()" },
+    { "detail", "pm.request.url.getPathWithQuery(): string" },
+    { "documentation",
+    "The decoded path followed by ? and the query as sent "
+    "(\"/v2/users?page=2\"), "
+    "or the path alone when the URL carries no query." },
+    { "sortText", "2_pm_request_url_getPathWithQuery" } });
+
+    completions.push_back ({ { "label", "pm.request.url.getRemote" },
+    { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.getRemote()" },
+    { "detail", "pm.request.url.getRemote(): string" },
+    { "documentation",
+    "The host, with :port when the URL states one (\"api.example.com:8443\"). "
+    "A scheme's default port is not filled in." },
+    { "sortText", "2_pm_request_url_getRemote" } });
 
     completions.push_back ({ { "label", "pm.request.url.toString" },
     { "kind", KIND_FUNCTION }, { "insertText", "pm.request.url.toString()" },

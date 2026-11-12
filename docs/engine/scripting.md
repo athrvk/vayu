@@ -1459,6 +1459,9 @@ pm.request.url.query             // the query, with the reads below
 pm.request.url.getHost();        // 'api.example.com'
 pm.request.url.getPath();        // '/v2/users'
 pm.request.url.getQueryString(); // 'page=2&sort=name' - no '?'
+pm.request.url.getPathWithQuery(); // '/v2/users?page=2&sort=name'
+pm.request.url.getRemote();      // 'api.example.com:8443' - ':port' only when stated
+pm.request.url.getRaw();         // the whole URL, as toString() gives it
 pm.request.url.toString();       // the whole URL
 ```
 
@@ -1468,9 +1471,17 @@ pm.request.url.query.has('page');     // boolean
 pm.request.url.query.all();           // [{key, value}, ...] in wire order
 pm.request.url.query.toObject();      // {page: '2'} - last wins
 pm.request.url.query.count();         // 3
+
+pm.request.url.query.each((p) => console.log(p.key, p.value)); // (member, index, list), thisArg?
+pm.request.url.query.map((p) => p.key);                        // ['page', 'sort', 'page']
+pm.request.url.query.filter((p) => p.key === 'page');          // every match, duplicates kept
+pm.request.url.query.find((p) => p.key === 'page');            // first match, or undefined
+pm.request.url.query.one('page');     // {key: 'page', value: '2'} - first match, or undefined
+pm.request.url.query.indexOf('page'); // 0 - the position in all(), -1 when absent
+pm.request.url.query.idx(2);          // {key: 'page', value: '3'}, or undefined past the end
 ```
 
-Five rules behind those answers:
+Six rules behind those answers:
 
 - **A `{{variable}}` in the scheme or host is opaque host text**, as in
   Postman. A scripted request's URL reaches its script with its scope names
@@ -1487,12 +1498,27 @@ Five rules behind those answers:
   built from the bytes that were sent. `getQueryString()` is byte-exact against
   the wire.
 - **`all()` keeps wire order and duplicates**, which is the whole reason it
-  exists beside `toObject()`. `get(name)` answers the **first** match (Postman's
-  `PropertyList.one`); `toObject()` is last-wins and says so.
+  exists beside `toObject()`. `get(name)` and `one(name)` answer the **first**
+  match (Postman's `PropertyList.one`); `toObject()` is last-wins and says so.
+- **The walks (`each`, `map`, `filter`, `find`) take a function and run over a
+  list taken once.** The callback gets `(member, index, list)` and the optional
+  second argument as its `this`, as `headers.each` does, so a callback that adds
+  or removes a parameter, or calls `url.update()`, edits the URL without
+  changing the walk in progress. A `false` answer does not stop `each`; `filter`
+  and `find` read the answer as truthy or falsy; a throw out of the callback
+  reaches the script as thrown. Postman also takes an object or a property name
+  as `filter`'s and `find`'s rule and `map`'s iterator - here anything that is
+  not a function is a `TypeError`. `indexOf(item)` takes a name or a
+  `{key, value}`: a member is matched on both, so the second `page` of
+  `page=2&page=3` is `1`, where Postman's identity match cannot hold across
+  two calls that each build their members.
 - **A bare `?flag` reads as `null`, an empty `?flag=` as `''`.** Both are
   `has()`-true.
 - **A URL the parser cannot read has no parts.** `toString()` still answers the
-  whole string, and every part is empty rather than a plausible half. A URL
+  whole string, and every part is empty rather than a plausible half:
+  `getRaw()` is the text, `getPathWithQuery()` and `getRemote()` are `''`,
+  and the query reads find nothing. `getRemote()` takes no `forcePort`
+  argument, since a scheme's default port is never filled in. A URL
   with no scheme and no token before its path (`example.com/users`) is one: no
   scheme is guessed.
 

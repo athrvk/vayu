@@ -1444,7 +1444,7 @@ declare const pm: {
 		 */
 		upsertHeader(header: { key: string, value: string | number | boolean } | string, value?: string | number | boolean): void;
 		/**
-		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
+		 * The full request URL, as Postman's Url object: protocol, host, port, path, query and hash, plus getHost(), getPath(), getQueryString(), getRaw(), getPathWithQuery(), getRemote(), addQueryParams(), removeQueryParams() and toString(). In a pre-request script a {{variable}} is still written as its token, and resolves after the script against what it set; a test script reads the URL as sent.
 		 * 
 		 * It still behaves as the string it used to be - concatenation, template literals, ==, the String methods and .length all give the full URL - so `===` and `typeof` are the two things that changed. Assign a string to retarget the request before it is sent, or call url.update(...); either way it must be non-empty.
 		 */
@@ -1462,9 +1462,21 @@ declare const pm: {
 			 */
 			getPath(): string;
 			/**
+			 * The decoded path followed by ? and the query as sent ("/v2/users?page=2"), or the path alone when the URL carries no query.
+			 */
+			getPathWithQuery(): string;
+			/**
 			 * The query exactly as it appears on the wire, with no leading ?. Empty when the URL carries none.
 			 */
 			getQueryString(): string;
+			/**
+			 * The whole URL as one string, exactly as toString() gives it - Postman's spelling, for a script lifted from there.
+			 */
+			getRaw(): string;
+			/**
+			 * The host, with :port when the URL states one ("api.example.com:8443"). A scheme's default port is not filled in.
+			 */
+			getRemote(): string;
 			/**
 			 * The fragment with no leading #. Empty when there is none.
 			 */
@@ -1494,7 +1506,7 @@ declare const pm: {
 			 */
 			protocol: string;
 			/**
-			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count() - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
+			 * The query parameters, with Postman's PropertyList reads over them - get(name), has(name), all(), toObject(), count(), each, map, filter, find, one, indexOf, idx - and its writers: add, upsert, remove, clear. Values are the wire bytes, not decoded - a signature has to canonicalize what was sent.
 			 */
 			query: {
 				/**
@@ -1514,6 +1526,18 @@ declare const pm: {
 				 */
 				count(): number;
 				/**
+				 * Call fn for each parameter with { key, value }, in wire order, duplicates kept. fn also gets the index and the list, and the optional second argument is its this. The list is taken once, so editing the query from inside the callback does not change the walk. A parameter with no value has value null.
+				 */
+				each(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => void, thisArg?: any): void;
+				/**
+				 * The parameters fn answers truthy for, as { key, value } in wire order, duplicates kept.
+				 */
+				filter(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): { key: string; value: string | null }[];
+				/**
+				 * The first parameter fn answers truthy for, as { key, value }, or undefined when none does.
+				 */
+				find(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): { key: string; value: string | null } | undefined;
+				/**
 				 * The first value of that parameter, or null when the name is absent or carries no value ("?flag"). First rather than last, matching Postman's PropertyList - all() is the view that keeps duplicates.
 				 */
 				get(name: string): string | null;
@@ -1521,6 +1545,22 @@ declare const pm: {
 				 * Whether the query carries that parameter at all, including a bare "?flag" that has no value.
 				 */
 				has(name: string): boolean;
+				/**
+				 * The parameter at that position of all() as { key, value }, or undefined past either end.
+				 */
+				idx(index: number): { key: string; value: string | null } | undefined;
+				/**
+				 * The position in all() of the first parameter of that name, or of the { key, value } member given - key and value both have to match, which tells the rows of a repeated name apart. -1 when there is none.
+				 */
+				indexOf(item: string | { key: string; value?: string | null }): number;
+				/**
+				 * The answers of fn, one per parameter in wire order, as Array.map gives them: query.map(p => p.key + "=" + p.value).
+				 */
+				map(fn: (param: { key: string; value: string | null }, index: number, all: { key: string; value: string | null }[]) => any, thisArg?: any): any[];
+				/**
+				 * The first parameter of that name as { key, value } rather than its value, or undefined when the name is absent. get() is the value half of the same lookup.
+				 */
+				one(name: string): { key: string; value: string | null } | undefined;
 				/**
 				 * Remove every parameter of that name, not just the first. A name that is not there is a no-op, the same rule pm.request.headers.remove follows.
 				 */
