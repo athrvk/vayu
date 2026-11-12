@@ -552,7 +552,11 @@ logged as a warning: it means a client skipped composition.
   A collection's or environment's blank `name` is refused by
   `reject_blank_name` (`routes.hpp`, #3253), which the four create/update
   cores call and the appliers do not, because an importer can write a blank
-  name that `POST /import/apply` and `POST /specs/sync` store today.
+  name that `POST /import/apply` and `POST /specs/sync` store today. The same
+  split holds a stored `auth` to a known `mode` (`reject_unknown_auth_mode`,
+  #3464, in the collection and request cores): the closed set is
+  `vayu::http::AUTH_MODES` (`auth_resolver.hpp`), read by the route check and by
+  the Vayu-extension reader, never restated.
 - **A route's `catch (const std::exception&)` answers through `send_exception`,
   never `send_error (res, 400, e.what ())`** (#2423, `routes.hpp`). A SQLite
   failure is not the request's fault: `vayu::db::classify_storage_error`

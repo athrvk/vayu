@@ -24,6 +24,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -355,6 +356,93 @@ TEST_F (CollectionsRouteTest, ANullAuthResetsToNoneOnBothVerbs) {
     *db_, "col_a", json{ { "auth", nullptr } });
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["auth"]["mode"], "none");
+}
+
+// -- A stored auth names a known mode (#3464) -------------------------------
+//
+// Mutation check: drop `reject_unknown_auth_mode` from either core and the
+// matching test reds (each case is a loop, so all of its rows go with it); make
+// it fire on null or on an absent `auth` and the valid-write test reds.
+
+// Every body here parsed as stored and sent with no credential before the check.
+const std::vector<json>& unknown_auth_blocks () {
+    static const std::vector<json> blocks = {
+        json{ { "mode", "Inherit" } },
+        json{ { "mode", "Bearer" }, { "token", "t" } },
+        json{ { "mode", " inherit" } },
+        json{ { "mode", "" } },
+        json{ { "mode", 7 } },
+        json{ { "mode", nullptr } },
+        json{ { "mode", json::array ({ "bearer" }) } },
+        json{ { "token", "t" } },
+        json::object (),
+    };
+    return blocks;
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithAnUnknownAuthModeIsRefusedAndWritesNothing) {
+    for (const json& auth : unknown_auth_blocks ()) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", auth } });
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << body.dump ();
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithAnUnknownAuthModeIsRefusedAndLeavesTheRowAlone) {
+    seed_collection ("col_a", "A");
+    const auto before = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (before);
+
+    for (const json& auth : unknown_auth_blocks ()) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "name", "Renamed" }, { "auth", auth } });
+
+        EXPECT_EQ (status, 400) << auth.dump () << " -> " << body.dump ();
+        EXPECT_NE (
+        body["error"]["message"].get<std::string> ().find ("auth.mode"), std::string::npos)
+        << body.dump ();
+    }
+    const auto after = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (after);
+    EXPECT_EQ (after->name, "A");
+    EXPECT_EQ (after->auth, before->auth);
+    EXPECT_EQ (after->updated_at, before->updated_at);
+}
+
+// A bare array was already a 400 from `apply_json_field`; it must still store
+// nothing on either verb now that the mode check sits ahead of it.
+TEST_F (CollectionsRouteTest, AnAuthThatIsNotAnObjectIsStillRefusedOnBothVerbs) {
+    seed_collection ("col_a", "A");
+
+    auto [created_status, created] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "X" }, { "auth", json::array ({ "inherit" }) } });
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_a", json{ { "auth", json::array ({ "inherit" }) } });
+
+    EXPECT_EQ (created_status, 400) << created.dump ();
+    EXPECT_EQ (status, 400) << body.dump ();
+    EXPECT_EQ (db_->get_collections ().size (), 1U);
+}
+
+TEST_F (CollectionsRouteTest, EveryKnownAuthModeButInheritIsStoredOnBothVerbs) {
+    seed_collection ("col_a", "A");
+    for (const std::string_view mode : vayu::http::AUTH_MODES) {
+        if (mode == "inherit") {
+            continue; // #3445, above.
+        }
+        auto [created_status, created] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "X" }, { "auth", { { "mode", std::string (mode) } } } });
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "auth", { { "mode", std::string (mode) } } } });
+
+        EXPECT_EQ (created_status, 200) << mode << " -> " << created.dump ();
+        EXPECT_EQ (status, 200) << mode << " -> " << body.dump ();
+    }
 }
 
 // -- GET /collections: `q` / `limit` / `offset` (#2443) ----------------------

@@ -561,6 +561,27 @@ credential, and a `PUT` of other fields still succeeds. The MCP `create_` and
 `update_` collection tools refuse `inherit` as an input error before calling the
 engine.
 
+### Auth modes
+
+A stored `auth` object's `mode` is one of `none`, `noauth`, `inherit`,
+`bearer`, `basic`, `apikey`, `oauth2`, `digest`, `aws`, `ntlm`, `hawk`,
+`oauth1`, `edgegrid` and `jwt`, spelled exactly so (#3464). The last seven are
+stored and never executed: a send names the mode in `authNotice` and goes out
+without a credential. Modes match by exact lowercase string, so `Bearer`,
+`" inherit"` or a non-string `mode` would be stored and then read as a concrete
+credential that stops the inherit walk and is sent as none.
+`POST`/`PUT /collections` and `POST`/`PUT /requests` therefore answer `400`
+(`Invalid 'auth.mode': must be a string, one of: ...`) when the body states an
+`auth` object whose `mode` is missing, not a string, or outside that set, and
+write nothing. `inherit` stays valid for a request and is refused for a
+collection ([#3445](#collection-auth)). `"auth": null` and an absent `auth` are
+not judged, and an `auth` that is not an object is the
+[shape](#accepted-field-shapes) `400`. `POST /import/apply` and
+`POST /specs/sync` are not held to this, as with [blank names](#blank-names): an
+importer's unrecognised mode is stored as written, so one odd block cannot fail
+an atomic import. The MCP `create_` and `update_` tools for both resources refuse
+an unknown mode as an input error before calling the engine.
+
 ### The request `body` union
 
 `body` is a discriminated union on `mode`, and the shape of what it carries
@@ -1675,7 +1696,8 @@ the null-vs-absent rule.
 `null`, if `name` is empty or whitespace-only ([#3253](#blank-names)), if a
 `variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
-([#3445](#collection-auth)), if an `openapi` binding names no stored spec
+([#3445](#collection-auth)) or a mode outside the
+[known set](#auth-modes), if an `openapi` binding names no stored spec
 (below), or on a cycle (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1720,7 +1742,8 @@ list it just left. See [Ordering](#ordering).
 longer names the stored row; `400` on a `null` or empty or whitespace-only
 `name` ([#3253](#blank-names)), a malformed `If-Match`,
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
-`auth` that states mode `inherit` ([#3445](#collection-auth)), an
+`auth` that states mode `inherit` ([#3445](#collection-auth)) or a mode outside
+the [known set](#auth-modes), an
 `openapi` that is neither `null` nor `{}` (binding is
 [`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
 (below); `409` if `parentId` names a collection in the
@@ -2030,7 +2053,7 @@ the null-vs-absent rule.
   "headers": [],                     // Optional, array of {key, value, enabled}
   "body": {"mode": "none"},          // Optional, request body
   "bodyType": "none",                // Optional, mirrors body.mode - see The request body union
-  "auth": {},                        // Optional, authentication config
+  "auth": {"mode": "inherit"},       // Optional, default {"mode":"inherit"}; mode must be a known one - see Auth modes
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
@@ -2208,6 +2231,7 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
 on a `mockExampleId` that is not a non-empty string or `null`,
+on an `auth` whose `mode` is not a [known one](#auth-modes) (#3464),
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
 and the cap, when a serialized `params` / `headers` / `body` / `auth` is over
@@ -2310,7 +2334,8 @@ that does not exist, an unrecognized `method`, a
 malformed `params` / `headers` entry, a malformed `specOperation`, a
 `methodSource` that is not `"graphql"` or `null`, a `mockResponseMode` that is
 not `"first"` / `"fixed"` / `"random"`, a `mockExampleId` that is not a
-non-empty string or `null`, a malformed protocol setting (see
+non-empty string or `null`, an `auth` whose `mode` is not a
+[known one](#auth-modes) (#3464), a malformed protocol setting (see
 [POST /requests](#post-requests)), or an
 `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"`; `413` naming the
 field, its size and the cap, when a serialized `params` / `headers` / `body` /
