@@ -1882,7 +1882,7 @@ effect.
 | Method | Returns | Notes |
 |---|---|---|
 | `get(name)` | the value a script set this run, as it was set; otherwise the stored text cast by its declared type; or `undefined` | a disabled variable reads as `undefined`; a declared `number` / `boolean` / `json` row always casts |
-| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on |
+| `set(name, value, options?)` | `undefined` | stores the value's string form (`undefined` as `""`; an object or array on a declared `json` row as its JSON text); keeps `secret` / `type` / creation time unless `options` names one ([above](#the-third-argument-of-set-2664)); turns `enabled` on; a name no `{{name}}` could read back (blank, starting or ending in whitespace, or containing `{` or `}`) is a `TypeError` naming the call, and nothing is stored ([below](#a-name-a-token-cannot-read-back-is-refused-3461)) |
 | `has(name)` | `boolean` | true only for the rows `get()` can read, so a disabled variable is `false` |
 | `unset(name)` | `undefined` | removes the name; removing one that is not there is not an error |
 | `clear()` | `undefined` | empties **this** scope only, disabled rows included |
@@ -1896,6 +1896,21 @@ if (pm.environment.has('auth_token')) {
 
 console.log(pm.environment.toObject());
 ```
+
+#### A name a token cannot read back is refused (#3461)
+
+`{{ name }}` is looked up with the spaces, tabs and line breaks cut from both
+ends, and a reference stops at a brace. A variable stored as `''`, `' pad '`
+or `'a}}b'` could therefore never be referenced, and the next save of that
+scope through the API would answer `400` for the key. So `set` on any scope
+(`pm.environment`, `pm.globals`, `pm.collectionVariables`, `pm.variables`, and
+the legacy `postman.setEnvironmentVariable` / `setGlobalVariable`, which
+delegate to them) throws a `TypeError` for such a name, naming the call and the
+reason, and stores nothing. An extractor's `variable` is refused for the same
+names, in the same words (`variable_name_refusal`). Spaces inside a name
+(`my var`), Unicode and dots are fine. `unset` does not check, so a bad name
+that is already stored can still be removed. Postman stores such a name; Vayu
+refuses it because nothing could ever read it.
 
 `unset()` is not the same as `set(name, '')`. An emptied variable is still an
 enabled row, so `{{auth_token}}` resolves to the empty string; an unset one is

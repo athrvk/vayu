@@ -383,6 +383,23 @@ bool is_addressable_variable_name (std::string_view key) {
     return !key.empty () && trim_variable_name (key) == key;
 }
 
+std::optional<std::string_view> variable_name_refusal (std::string_view name) {
+    if (name.empty ()) {
+        return "cannot be empty - a {{name}} reference needs at least one "
+               "character";
+    }
+    // A token is `{{` then one or more characters but braces, trimmed.
+    if (name.find_first_of ("{}") != std::string_view::npos) {
+        return "cannot contain '{' or '}' - a {{name}} reference stops at a "
+               "brace, so nothing could read it back";
+    }
+    if (!is_addressable_variable_name (name)) {
+        return "cannot start or end with whitespace - a {{name}} reference "
+               "trims the name it reads, so nothing could read it back";
+    }
+    return std::nullopt;
+}
+
 bool is_dynamic_variable_name (const std::string& name) {
     return !name.empty () && name.front () == '$';
 }

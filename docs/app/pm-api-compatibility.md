@@ -95,6 +95,12 @@ but the local scope is never stored or masked, so a flag there has no effect.
 `unset(name)` removes it outright, which is not the same as setting it to `""`: an emptied
 variable is still an enabled row that `{{name}}` resolves to.
 
+**`set` refuses a name no `{{name}}` could read back** (issue #3461): a blank name, one that
+starts or ends with whitespace, or one containing `{` or `}` throws a `TypeError` naming the
+call and stores nothing, on every scope and through the legacy `postman.set*Variable`
+aliases. Postman stores such a name; Vayu does not, because `{{ pad }}` looks up `pad` and a
+reference stops at a brace. `unset` accepts any name, so one already stored can be removed.
+
 **A value a script sets keeps its JavaScript type for the rest of the run**, as in
 Postman (issue #2529): after `pm.environment.set('n', 0)`,
 `pm.environment.set('n', pm.environment.get('n') + 1)` stores `1`, not `"01"`, and

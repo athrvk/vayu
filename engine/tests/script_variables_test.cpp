@@ -447,6 +447,147 @@ TEST_F (ScriptVariablesTest, SetWithAnObjectOptionDeclaresTypeAndSecretTogether)
     EXPECT_TRUE (variable.secret);
 }
 
+// ---------------------------------------------------------------------------
+// A name no `{{name}}` can read back is refused, as the write API and the
+// extractors refuse it (#3461)
+// ---------------------------------------------------------------------------
+
+// One way of writing a variable from a script, and what its refusal names.
+struct SetCall {
+    const char* call;     // the JavaScript before `(name, 'x')`
+    const char* named_in; // what the TypeError's message must name
+};
+
+constexpr SetCall SET_CALLS[] = {
+    { "pm.environment.set", "pm.environment.set" },
+    { "pm.globals.set", "pm.globals.set" },
+    { "pm.collectionVariables.set", "pm.collectionVariables.set" },
+    { "pm.variables.set", "pm.variables.set" },
+    // The legacy aliases delegate to the scope's own set.
+    { "postman.setEnvironmentVariable", "pm.environment.set" },
+    { "postman.setGlobalVariable", "pm.globals.set" },
+};
+
+// The script catches what the call throws and fails unless it is a TypeError
+// whose message names @p named_in and quotes @p reason.
+std::string
+refused_set_script (const SetCall& set, const std::string& name, const std::string& reason) {
+    const std::string literal = json (name).dump ();
+    return std::string ("let thrown = null;\n") + "try { " + set.call + "(" +
+    literal + ", 'x'); } catch (e) { thrown = e; }\n" +
+    "if (!(thrown instanceof TypeError)) throw new Error('not refused: ' + " +
+    json (set.call).dump () + ");\n" + "if (!thrown.message.includes(" +
+    json (set.named_in).dump () +
+    ")) throw new Error('does not name the call: ' + thrown.message);\n" +
+    "if (!thrown.message.includes(" + json (reason).dump () +
+    ")) throw new Error('does not give the reason: ' + thrown.message);\n";
+}
+
+// Mutation check: remove the refusal in `js_pm_scope_set` and every case runs
+// to `not refused`; the stored maps then also differ.
+TEST_F (ScriptVariablesTest, ANameNoTokenCanReadBackThrowsAndStoresNothing) {
+    constexpr const char* BRACES    = "cannot contain '{' or '}'";
+    constexpr const char* PADDING   = "cannot start or end with whitespace";
+    constexpr const char* EMPTINESS = "cannot be empty";
+    const struct {
+        const char* name;
+        const char* reason;
+    } bad_names[] = {
+        { "", EMPTINESS },
+        { " pad ", PADDING },
+        { "  ", PADDING },
+        { "\t", PADDING },
+        { "tail\n", PADDING },
+        { "a}}b", BRACES },
+        { "{", BRACES },
+        { "}", BRACES },
+        { "{{x}}", BRACES },
+    };
+
+    scopes_.environment["kept"] = vayu::Variable{ "e", false, true, "string" };
+    scopes_.globals["kept"]     = vayu::Variable{ "g", false, true, "string" };
+    scopes_.collection["kept"]  = vayu::Variable{ "c", false, true, "string" };
+    scopes_.local["kept"]       = vayu::Variable{ "l", false, true, "string" };
+    const auto environment      = scopes_.environment;
+    const auto globals          = scopes_.globals;
+    const auto collection       = scopes_.collection;
+    const auto local            = scopes_.local;
+
+    for (const auto& set : SET_CALLS) {
+        for (const auto& bad : bad_names) {
+            run (refused_set_script (set, bad.name, bad.reason));
+            ASSERT_EQ (scopes_.environment, environment)
+            << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.globals, globals) << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.collection, collection) << set.call << " " << bad.name;
+            ASSERT_EQ (scopes_.local, local) << set.call << " " << bad.name;
+        }
+    }
+}
+
+// A refused call that nothing catches fails the script, like any TypeError.
+TEST_F (ScriptVariablesTest, AnUncaughtRefusalFailsTheScript) {
+    vayu::runtime::ScriptContext ctx;
+    vayu::http::routes::bind_variable_scopes (ctx, scopes_);
+    vayu::runtime::ScriptEngine engine;
+
+    const auto result = engine.execute ("pm.environment.set('a}b', 'x');", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_NE (result.error_message.find ("pm.environment.set"), std::string::npos)
+    << result.error_message;
+    EXPECT_TRUE (scopes_.environment.empty ());
+}
+
+TEST_F (ScriptVariablesTest, AnyOtherNameStillStoresInEveryScope) {
+    run (R"JS(
+        const names = ['my var', 'a.b-c_d', 'ключ', '日本', '$x', 'data.id', '5'];
+        for (const name of names) {
+            pm.environment.set(name, 'e');
+            pm.globals.set(name, 'g');
+            pm.collectionVariables.set(name, 'c');
+            pm.variables.set(name, 'l');
+        }
+        postman.setEnvironmentVariable('legacy var', 'e');
+        postman.setGlobalVariable('legacy var', 'g');
+    )JS");
+
+    for (const char* name : { "my var", "a.b-c_d", "ключ", "日本", "$x", "data.id", "5" }) {
+        EXPECT_EQ (scopes_.environment.at (name).value, "e") << name;
+        EXPECT_EQ (scopes_.globals.at (name).value, "g") << name;
+        EXPECT_EQ (scopes_.collection.at (name).value, "c") << name;
+        EXPECT_EQ (scopes_.local.at (name).value, "l") << name;
+    }
+    EXPECT_EQ (scopes_.environment.at ("legacy var").value, "e");
+    EXPECT_EQ (scopes_.globals.at ("legacy var").value, "g");
+}
+
+// `unset` does not check, so a name an older engine or a hand-edited blob left
+// behind can still be removed.
+TEST_F (ScriptVariablesTest, AStoredNameTheSetRefusesCanStillBeUnset) {
+    for (vayu::Environment* scope :
+    { &scopes_.environment, &scopes_.globals, &scopes_.collection, &scopes_.local }) {
+        (*scope)[" pad "] = vayu::Variable{ "x", false, true, "string" };
+        (*scope)["a}b"]   = vayu::Variable{ "x", false, true, "string" };
+        (*scope)["keep"]  = vayu::Variable{ "x", false, true, "string" };
+    }
+
+    run (R"JS(
+        for (const name of [' pad ', 'a}b']) {
+            pm.environment.unset(name);
+            pm.globals.unset(name);
+            pm.collectionVariables.unset(name);
+            pm.variables.unset(name);
+        }
+    )JS");
+
+    for (const vayu::Environment* scope :
+    { &scopes_.environment, &scopes_.globals, &scopes_.collection, &scopes_.local }) {
+        EXPECT_EQ (scope->size (), 1U);
+        EXPECT_EQ (scope->count ("keep"), 1U);
+    }
+}
+
 // Postman's `object` and `array` are Vayu's `json`; its `any` and `default`,
 // and a word it has no type for, declare nothing.
 TEST_F (ScriptVariablesTest, SetMapsPostmanTypeNamesOntoVayuTypes) {

@@ -421,11 +421,27 @@ stored_text (JSContext* ctx, JSValueConst value, const ScriptValue& carried, boo
     return js_to_string (ctx, value);
 }
 
+// What a script calls the scope behind @p magic: `pm.environment` and its
+// siblings from the binding table, `pm.variables` for the run-local scope.
+std::string scope_api (int magic) {
+    for (const auto& binding : variable_scope_bindings) {
+        if (binding.scope == magic) {
+            return std::string ("pm.") + binding.property;
+        }
+    }
+    return "pm.variables";
+}
+
 // The value itself rides beside the text for the run's own reads (#2529).
 //
 // The third argument is read for every scope, `pm.variables.set` included. The
 // local scope (#2564) is never persisted and `secret_variable_values` never
 // reads it, so a flag set there has no effect beyond the run's own variable.
+//
+// A name no `{{name}}` can read back, and the write API and the extractors
+// refuse, is a TypeError and stores nothing (#3461). `unset` does not check, so
+// a bad name already stored stays removable. The legacy `postman.set*Variable`
+// calls reach this function too, so one throw covers them.
 JSValue
 js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
@@ -433,12 +449,17 @@ js_pm_scope_set (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* 
         return JS_UNDEFINED;
     }
 
+    const std::string key = js_to_string (ctx, argv[0]);
+    if (const auto refusal = vayu::http::variable_name_refusal (key)) {
+        return JS_ThrowTypeError (ctx, "%s.set: variable name '%s' %s",
+        scope_api (magic).c_str (), key.c_str (), std::string (*refusal).c_str ());
+    }
+
     Environment* variables = scope_variables (ctx, magic);
     if (!variables) {
         return JS_UNDEFINED;
     }
 
-    std::string key = js_to_string (ctx, argv[0]);
     const SetOptions options = argc > 2 ? read_set_options (ctx, argv[2]) : SetOptions{};
     ScriptValue carried = script_value_of (ctx, argv[1]);
     const bool declared_json =
@@ -893,13 +914,7 @@ JSValue js_pm_variables_replace_in (JSContext* ctx, JSValueConst this_val, int a
 JSValue
 js_pm_scope_replace_in (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* argv, int magic) {
     (void)this_val;
-    std::string api = "pm.";
-    for (const auto& binding : variable_scope_bindings) {
-        if (binding.scope == magic) {
-            api += binding.property;
-        }
-    }
-    api += ".replaceIn";
+    const std::string api = scope_api (magic) + ".replaceIn";
     return replace_in (
     ctx, argc, argv, api, [&] (const std::string& input, std::string& missing) {
         return resolve_against (ctx, input, scope_variable_values (ctx, magic), {}, missing);
