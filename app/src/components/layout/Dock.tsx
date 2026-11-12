@@ -10,6 +10,7 @@ import { Info, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TIMING } from "@/config/timing";
 import {
+	selectKnownEngineStatus,
 	useEngineStore,
 	useLayoutStore,
 	useSaveStore,
@@ -74,22 +75,17 @@ function EngineCrashDetail({ crash }: { crash: EngineCrash }) {
  * that address. Unreachable, it is the reason: the main process's own sentence
  * when it has one (it is written for the user), then how the engine's process
  * left (#3336), else what the transport said. Starting is quiet.
- *
- * `troubled` is the caller's judgement that there is a reason to read; a crash
- * the sidecar reported ahead of the poll that confirms it counts.
  */
 function engineStatusDetail(
 	status: EngineConnectionStatus,
-	troubled: boolean,
 	startFailure: string | null,
 	crash: EngineCrash | null,
 	engineError: string | null
 ): ReactNode {
-	if (!troubled) {
-		return status === "connected" ? (
-			<TooltipValue hint="Engine address">{ENGINE_BASE_URL}</TooltipValue>
-		) : null;
+	if (status === "connected") {
+		return <TooltipValue hint="Engine address">{ENGINE_BASE_URL}</TooltipValue>;
 	}
+	if (status === "starting") return null;
 	if (startFailure) return startFailure;
 	if (crash) return <EngineCrashDetail crash={crash} />;
 	return engineError;
@@ -121,12 +117,13 @@ function engineStatusDetail(
  * A start failure the main process reports (every engine port held, #2118)
  * also offers Retry, because the sentence tells the user to press it and the
  * Dock is where they are reading it. An engine that left on its own (#3336)
- * offers Restart for the same reason, and names how it left; the light itself
- * stays the health poll's word, so the button can appear a poll before the
- * light turns.
+ * offers Restart for the same reason, and names how it left. The light reads
+ * `selectKnownEngineStatus`, so a crash the sidecar reported turns it at once,
+ * ahead of the health refetch the push asks for (#3493): "Engine connected"
+ * never stands beside the Restart a dead engine needs.
  */
 function EngineStatus() {
-	const engineStatus = useEngineStore((s) => s.engineStatus);
+	const engineStatus = useEngineStore(selectKnownEngineStatus);
 	const engineError = useEngineStore((s) => s.engineError);
 	const engineStartFailure = useEngineStore((s) => s.engineStartFailure);
 	const engineCrash = useEngineStore((s) => s.engineCrash);
@@ -161,17 +158,7 @@ function EngineStatus() {
 		</>
 	);
 
-	// Not while starting: a restart in flight is the crash's successor, and
-	// "Starting…" is quiet by design.
-	const troubled =
-		engineStatus === "unreachable" || (engineCrash !== null && engineStatus !== "starting");
-	const detail = engineStatusDetail(
-		engineStatus,
-		troubled,
-		engineStartFailure,
-		engineCrash,
-		engineError
-	);
+	const detail = engineStatusDetail(engineStatus, engineStartFailure, engineCrash, engineError);
 	const status = detail ? (
 		<Tooltip>
 			<TooltipTrigger asChild>

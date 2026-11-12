@@ -22,7 +22,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { useEngineLifecycle } from "./useEngineLifecycle";
+import { queryKeys } from "@/queries/keys";
 import { useEngineStore } from "@/stores";
 import type { EngineLifecyclePayload } from "@/types/electron";
 
@@ -76,6 +79,14 @@ function stubBridge(): Bridge {
 	};
 }
 
+/** Mounts the hook under its own client, which a case reads the cache from. */
+function mountLifecycle(client = new QueryClient()) {
+	const wrapper = ({ children }: { children: ReactNode }) => (
+		<QueryClientProvider client={client}>{children}</QueryClientProvider>
+	);
+	return { client, ...renderHook(() => useEngineLifecycle(), { wrapper }) };
+}
+
 beforeEach(() => {
 	useEngineStore.setState({ engineCrash: null, engineStartWindow: 1000 });
 });
@@ -87,7 +98,7 @@ afterEach(() => {
 describe("useEngineLifecycle", () => {
 	it("reads the current lifecycle on mount", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		await bridge.answerSnapshot(CRASHED);
 
@@ -101,7 +112,7 @@ describe("useEngineLifecycle", () => {
 
 	it("sets the crash on a pushed crashed", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 		await bridge.answerSnapshot({ kind: "ready" });
 
 		bridge.push(CRASHED);
@@ -111,11 +122,43 @@ describe("useEngineLifecycle", () => {
 
 	// A restart from a crash walks these, and one that fails before a child
 	// exists ends on idle: the Dock must still have its Restart button.
+	/*
+	 * #3493. The poll is healthy and on its slow cadence, so without this it
+	 * keeps its `connected` for up to a whole interval after the crash. Only the
+	 * health query: the reconnect is what refetches everything else, and a
+	 * blanket invalidate here would spend a request per query on a dead engine.
+	 * Mutation-check: drop the invalidate and the first assertion fails.
+	 */
+	it("asks the health poll, and only it, to look again on a pushed crash", async () => {
+		const bridge = stubBridge();
+		const { client } = mountLifecycle();
+		client.setQueryData(queryKeys.health.status(), { status: "ok" });
+		client.setQueryData(queryKeys.inbox.list(), []);
+		await bridge.answerSnapshot({ kind: "ready" });
+		expect(client.getQueryState(queryKeys.health.status())?.isInvalidated).toBe(false);
+
+		bridge.push(CRASHED);
+
+		expect(client.getQueryState(queryKeys.health.status())?.isInvalidated).toBe(true);
+		expect(client.getQueryState(queryKeys.inbox.list())?.isInvalidated).toBe(false);
+	});
+
+	it("leaves the health poll alone on a transition that is not a crash", async () => {
+		const bridge = stubBridge();
+		const { client } = mountLifecycle();
+		client.setQueryData(queryKeys.health.status(), { status: "ok" });
+		await bridge.answerSnapshot({ kind: "ready" });
+
+		bridge.push({ kind: "stopping" });
+
+		expect(client.getQueryState(queryKeys.health.status())?.isInvalidated).toBe(false);
+	});
+
 	it.each(["choosingPort", "replacing", "spawning", "idle"] as const)(
 		"keeps the crash through %s",
 		async (kind) => {
 			const bridge = stubBridge();
-			renderHook(() => useEngineLifecycle());
+			mountLifecycle();
 			await bridge.answerSnapshot({ kind: "ready" });
 			bridge.push(CRASHED);
 
@@ -127,7 +170,7 @@ describe("useEngineLifecycle", () => {
 
 	it("keeps the crash through a restart that fails before it spawns", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 		await bridge.answerSnapshot({ kind: "ready" });
 		bridge.push(CRASHED);
 
@@ -142,7 +185,7 @@ describe("useEngineLifecycle", () => {
 		"clears the crash on %s",
 		async (kind) => {
 			const bridge = stubBridge();
-			renderHook(() => useEngineLifecycle());
+			mountLifecycle();
 			await bridge.answerSnapshot({ kind: "ready" });
 			bridge.push(CRASHED);
 
@@ -155,7 +198,7 @@ describe("useEngineLifecycle", () => {
 	it("keeps a crash that the snapshot reports through a restart's transient state", async () => {
 		useEngineStore.setState({ engineCrash: CRASH_FACTS });
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		await bridge.answerSnapshot({ kind: "idle" });
 
@@ -165,7 +208,7 @@ describe("useEngineLifecycle", () => {
 	it("clears the crash when the snapshot reports an engine that is up", async () => {
 		useEngineStore.setState({ engineCrash: CRASH_FACTS });
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		await bridge.answerSnapshot({ kind: "ready" });
 
@@ -174,7 +217,7 @@ describe("useEngineLifecycle", () => {
 
 	it("carries a failure to run, which has an error and no exit code", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 		await bridge.answerSnapshot({ kind: "ready" });
 
 		bridge.push({
@@ -195,7 +238,7 @@ describe("useEngineLifecycle", () => {
 
 	it("ignores a snapshot that a push overtook", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		// The engine crashed and was already replaced before the read answered.
 		bridge.push({ kind: "spawning" });
@@ -206,7 +249,7 @@ describe("useEngineLifecycle", () => {
 
 	it("ignores a snapshot about the crash a restart has since replaced", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		// Restart opens a new start window (useEngineRestart) before the read answers.
 		act(() => useEngineStore.getState().openEngineStartWindow(2000));
@@ -217,7 +260,7 @@ describe("useEngineLifecycle", () => {
 
 	it("unsubscribes on unmount, and a snapshot that answers later writes nothing", async () => {
 		const bridge = stubBridge();
-		const { unmount } = renderHook(() => useEngineLifecycle());
+		const { unmount } = mountLifecycle();
 
 		unmount();
 		expect(bridge.unsubscribe).toHaveBeenCalledTimes(1);
@@ -228,7 +271,7 @@ describe("useEngineLifecycle", () => {
 
 	it("survives a main process that cannot answer the read", async () => {
 		const bridge = stubBridge();
-		renderHook(() => useEngineLifecycle());
+		mountLifecycle();
 
 		await bridge.rejectSnapshot();
 		bridge.push(CRASHED);
@@ -237,7 +280,7 @@ describe("useEngineLifecycle", () => {
 	});
 
 	it("does nothing without the preload bridge", () => {
-		expect(() => renderHook(() => useEngineLifecycle())).not.toThrow();
+		expect(() => mountLifecycle()).not.toThrow();
 		expect(useEngineStore.getState().engineCrash).toBeNull();
 	});
 });

@@ -512,8 +512,15 @@ which case the app picks a fallback (below).
   keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
   how the engine left (signal, exit code or error, with the last lines it
   printed) and offers **Restart**, which a crash never did. The lifecycle is
-  facts only: the light itself is still the renderer's `/health` poll, so the
-  Restart button can appear a poll before the light turns "Engine disconnected".
+  facts only: the `/health` poll is still the one writer of the renderer's
+  `engineStatus`, and a `crashed` push asks it to look again (it invalidates
+  the health query alone) rather than waiting out its 30 s healthy interval
+  (issue #3493). Until that refetch answers, the Dock and the Services drawer
+  read `selectKnownEngineStatus`, which lets a recorded crash outrank a
+  `connected` verdict, so the light reads "Engine disconnected" beside Restart
+  and the drawer shows its services stopped, never "Engine connected" and
+  green dots on listeners the crash took with it. A crash pushed inside a
+  restart's start window refetches like any poll there and reads "Starting…".
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that

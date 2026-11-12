@@ -23,10 +23,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useEngineStore, useTabsStore, useToastStore } from "@/stores";
 import type { Inbox, MockIssuer } from "@/types";
 import ServicesPanel from "./ServicesPanel";
 import { stubNumberLocale } from "@/test/number-locale";
@@ -157,6 +157,9 @@ beforeEach(() => {
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useToastStore.setState({ toasts: [] });
+	// The rows read as running only while the engine is up (`useEngineServing`),
+	// and a list that answered at all came from an engine that was.
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 });
 
 describe("the services drawer", () => {
@@ -833,5 +836,91 @@ describe("starting an issuer", () => {
 		fireEvent.change(dialog.getByLabelText(/delay/i), { target: { value: "-1" } });
 		expect(dialog.getByText(/whole number of milliseconds, 0 to 60,000/i)).toBeInTheDocument();
 		expect(dialog.getByRole("button", { name: /start issuer/i })).toBeDisabled();
+	});
+});
+
+/*
+ * #3493. Every service lives in the engine's process, and TanStack keeps the
+ * last good lists through failed refetches, so a crashed engine left the
+ * drawer drawing green dots on listeners that died with it. While the engine
+ * is down the cached rows stay - they are the record of what was running -
+ * but read as stopped, and the groups do not fall back to the first-run
+ * invitations. Both kinds of evidence count: the poll's `unreachable`, and a
+ * crash the sidecar pushed while the poll still reads `connected`.
+ *
+ * Mutation-check: hard-code `useEngineServing` to `true` in the panel and
+ * every row here is green again with its Stop action back.
+ */
+describe("while Vayu's engine is down", () => {
+	const CRASH = { code: null, signal: "SIGKILL", stderrTail: [], error: null };
+
+	const ROWS = [/open inbox.*port 41234/i, /expand issuer on port 42000/i, /open mock server/i];
+
+	function renderRunningServices() {
+		listInboxes.mockResolvedValue([inbox()]);
+		listMockIssuers.mockResolvedValue([issuer()]);
+		listMockServers.mockResolvedValue([
+			{
+				mockId: "mock_a",
+				collectionId: "col_1",
+				collectionName: "Pet Store",
+				url: "http://127.0.0.1:43100",
+				port: 43100,
+				latencyMs: 0,
+				errorRatePct: 0,
+				routeCount: 3,
+				routesWithoutExample: 0,
+				createdAt: 1700000000000,
+				allowedOrigins: [],
+			},
+		]);
+		renderPanel();
+	}
+
+	/** The row's status dot, which inherits its colour through `bg-current`. */
+	function dotOf(row: HTMLElement): string {
+		return row.querySelector("span.rounded-full")?.className ?? "";
+	}
+
+	it.each([
+		["the poll reads it unreachable", { engineStatus: "unreachable" as const }],
+		["the sidecar reported a crash the poll has not seen", { engineCrash: CRASH }],
+	])("shows the cached services as stopped when %s", async (_, down) => {
+		renderRunningServices();
+		// Warm and green first, so the case proves the gate and not a slow query.
+		for (const name of ROWS) {
+			expect(dotOf(await screen.findByRole("button", { name }))).toContain(
+				"text-status-success-text"
+			);
+		}
+
+		act(() => useEngineStore.setState(down));
+
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: ROWS[0] }).textContent).toContain("Stopped")
+		);
+		for (const name of ROWS) {
+			const row = screen.getByRole("button", { name });
+			expect(row.textContent).toContain("Stopped");
+			expect(dotOf(row)).toContain("text-muted-foreground");
+			expect(dotOf(row)).not.toContain("text-status-success-text");
+		}
+		expect(screen.queryByText(/no inbox yet/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/no issuer running/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/no mock running/i)).not.toBeInTheDocument();
+
+		// Nothing left to stop: the process that held the listeners took them.
+		for (const menu of [
+			INBOX_MENU,
+			/more actions for issuer on port 42000/i,
+			/more actions for mock server on port 43100/i,
+		]) {
+			const items = within(await openRowMenu(menu)).getAllByRole("menuitem");
+			expect(items.map((item) => item.textContent)).not.toContainEqual(
+				expect.stringMatching(/^Stop/)
+			);
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+			await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+		}
 	});
 });

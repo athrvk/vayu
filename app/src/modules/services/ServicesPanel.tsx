@@ -91,6 +91,7 @@ import { isCommitEnter } from "@/lib/keyboard";
 import { describeOriginPolicy, summarizeOriginPolicy } from "@/lib/allowed-origins";
 import { InboxStartOptions } from "@/modules/inbox/InboxStartOptions";
 import { useInboxWatchSummary } from "./useInboxWatchSummary";
+import { useEngineServing } from "./useRunningServices";
 import { FAILURE_MODE_LABELS, MAX_SLOW_MS, failureModeSummary } from "./failure-modes";
 import { NewIssuerDialog } from "./NewIssuerDialog";
 
@@ -120,6 +121,7 @@ interface ServiceRowProps {
 	onActivate: () => void;
 	/** The verb, prefixed to the row's own content to name the activator. */
 	actionLabel: string;
+	/** Listening now; false paints the dot muted and ends the row on "Stopped". */
 	running: boolean;
 	children: React.ReactNode;
 	/**
@@ -193,6 +195,7 @@ function ServiceRow({
 				<span className="sr-only">{actionLabel}</span>
 				<StatusDot running={running} />
 				{children}
+				{!running && <span className="text-xs text-muted-foreground">Stopped</span>}
 			</button>
 			{actions && actions.length > 0 && (
 				<RowActionsMenu
@@ -220,8 +223,13 @@ const GROUP_NOTE_CLASS = "px-3 py-2 text-left text-xs";
  * and the cause spelled out took the whole of it, leaving the URL beside it
  * truncated to two characters.
  */
-function isNotNotifying(inbox: Inbox, notifies: boolean, summary: InboxWatchSummary): boolean {
-	if (!notifies || !inbox.running) return false;
+function isNotNotifying(
+	inbox: Inbox,
+	running: boolean,
+	notifies: boolean,
+	summary: InboxWatchSummary
+): boolean {
+	if (!notifies || !running) return false;
 	return summary.unwatched.includes(inbox.inboxId) || summary.stalled.includes(inbox.inboxId);
 }
 
@@ -269,7 +277,20 @@ function OriginPolicyNote({ allowedOrigins }: { allowedOrigins: readonly string[
 	);
 }
 
-function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
+/**
+ * `running` is the inbox's own flag gated on the engine being up
+ * (`useEngineServing`): the record outlives its listener, and the cache
+ * outlives the engine process that held both (#3493).
+ */
+function InboxRow({
+	inbox,
+	running,
+	flashed,
+}: {
+	inbox: Inbox;
+	running: boolean;
+	flashed: boolean;
+}) {
 	const openTab = useTabsStore((s) => s.openTab);
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
@@ -279,12 +300,12 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 	const deletion = useInboxDeletion(inbox);
 	const notifies = useInboxNotifyStore((s) => s.enabled[inbox.inboxId] === true);
 	const watchSummary = useInboxWatchSummary();
-	const notNotifying = isNotNotifying(inbox, notifies, watchSummary);
+	const notNotifying = isNotNotifying(inbox, running, notifies, watchSummary);
 
 	return (
 		<>
 			<ServiceRow
-				running={inbox.running}
+				running={running}
 				flashed={flashed}
 				// The tab is a singleton pointed at one inbox, so the row hands it the
 				// id it names - without it the tab showed whichever inbox it had last
@@ -300,7 +321,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 						// stopped inbox says so here too - the URL copies fine and
 						// then refuses connections, a long way from the cause.
 						label: "Copy inbox URL",
-						hint: inbox.running ? inbox.url : `${inbox.url} - stopped, not listening`,
+						hint: running ? inbox.url : `${inbox.url} - stopped, not listening`,
 						icon: Copy,
 						onSelect: () => void copy(inbox.url, "Inbox URL"),
 					},
@@ -312,7 +333,7 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 					},
 					// Absent rather than disabled on a stopped inbox: there is nothing
 					// to stop, and the engine keeps the record rather than the listener.
-					...(inbox.running
+					...(running
 						? [
 								{
 									label: `Stop inbox on port ${inbox.port}`,
@@ -358,7 +379,6 @@ function InboxRow({ inbox, flashed }: { inbox: Inbox; flashed: boolean }) {
 				<OriginPolicyNote allowedOrigins={inbox.allowedOrigins} />
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				{notNotifying && <NotNotifyingBadge />}
-				{!inbox.running && <span className="text-xs text-muted-foreground">Stopped</span>}
 			</ServiceRow>
 			<DeleteInboxDialog deletion={deletion} />
 		</>
@@ -452,10 +472,13 @@ function SigningKeyRow({ signingKey }: { signingKey: string }) {
 
 function IssuerRow({
 	issuer,
+	running,
 	expanded,
 	onToggle,
 }: {
 	issuer: MockIssuer;
+	/** Whether the engine holding it is up (`useEngineServing`). */
+	running: boolean;
 	expanded: boolean;
 	onToggle: () => void;
 }) {
@@ -485,10 +508,10 @@ function IssuerRow({
 	return (
 		<Collapsible open={expanded} onOpenChange={onToggle}>
 			<ServiceRow
-				// Every listed issuer is running: stopping one drops it from the
-				// engine's list rather than leaving a stopped record behind, which
-				// is where this differs from an inbox.
-				running
+				// Every listed issuer is running while the engine is: stopping one
+				// drops it from the engine's list rather than leaving a stopped
+				// record behind, which is where this differs from an inbox.
+				running={running}
 				onActivate={onToggle}
 				actionLabel={`${expanded ? "Collapse" : "Expand"} issuer on port ${issuer.port}`}
 				leading={
@@ -512,26 +535,32 @@ function IssuerRow({
 						icon: Copy,
 						onSelect: () => void copy(issuerLine, "Reference"),
 					},
-					{
-						// Destructive, unlike an inbox's Stop: stopping an issuer drops
-						// it from the engine's list rather than leaving a stopped record
-						// behind, so it is the delete of this group.
-						label: `Stop issuer on port ${issuer.port}`,
-						icon: Square,
-						destructive: true,
-						disabled: stopIssuer.isPending,
-						disabledReason: "Stopping",
-						onSelect: () =>
-							stopIssuer.mutate(issuer.issuerId, {
-								onError: (error) =>
-									showToast(
-										error instanceof Error
-											? error.message
-											: "Couldn't stop the issuer",
-										"error"
-									),
-							}),
-					},
+					// Absent while the engine is down, as an inbox's is once stopped:
+					// the process that held the listener already took it.
+					...(running
+						? [
+								{
+									// Destructive, unlike an inbox's Stop: stopping an issuer
+									// drops it from the engine's list rather than leaving a
+									// stopped record behind, so it is the delete of this group.
+									label: `Stop issuer on port ${issuer.port}`,
+									icon: Square,
+									destructive: true,
+									disabled: stopIssuer.isPending,
+									disabledReason: "Stopping",
+									onSelect: () =>
+										stopIssuer.mutate(issuer.issuerId, {
+											onError: (error) =>
+												showToast(
+													error instanceof Error
+														? error.message
+														: "Couldn't stop the issuer",
+													"error"
+												),
+										}),
+								} satisfies RowAction,
+							]
+						: []),
 				]}
 			>
 				<TruncatedText className="font-mono text-xs">{issuer.issuerUrl}</TruncatedText>
@@ -692,7 +721,7 @@ function IssuerDelayControl({
  * feed, keeping a second, narrower route table here duplicated it for no
  * reason the inbox row's own history didn't already answer the same way.
  */
-function MockServerRow({ mock }: { mock: MockServer }) {
+function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }) {
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
@@ -701,18 +730,18 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 
 	return (
 		<ServiceRow
-			// Every listed mock is running: stopping one drops it from the
-			// engine's list rather than leaving a stopped record, since a mock
-			// holds nothing that outlives its listener. Same as an issuer,
-			// unlike an inbox and its captures.
-			running
+			// Every listed mock is running while the engine is: stopping one
+			// drops it from the engine's list rather than leaving a stopped
+			// record, since a mock holds nothing that outlives its listener.
+			// Same as an issuer, unlike an inbox and its captures.
+			running={running}
 			onActivate={() => openTab({ type: "mock-server", entityId: mock.mockId })}
 			actionLabel="Open mock server"
 			actionsLabel={`More actions for mock server on port ${mock.port}`}
 			actions={[
 				{
 					label: "Copy mock server URL",
-					hint: mock.url,
+					hint: running ? mock.url : `${mock.url} - stopped, not listening`,
 					icon: Copy,
 					onSelect: () => void copy(mock.url, "Mock server URL"),
 				},
@@ -722,25 +751,29 @@ function MockServerRow({ mock }: { mock: MockServer }) {
 					icon: Copy,
 					onSelect: () => void copy(mockLine, "Reference"),
 				},
-				{
-					// Terminal like an issuer's, for the same reason: the record goes
-					// with the listener.
-					label: `Stop mock server on port ${mock.port}`,
-					icon: Square,
-					destructive: true,
-					disabled: stopMock.isPending,
-					disabledReason: "Stopping",
-					onSelect: () =>
-						stopMock.mutate(mock.mockId, {
-							onError: (error) =>
-								showToast(
-									error instanceof Error
-										? error.message
-										: "Couldn't stop the mock server",
-									"error"
-								),
-						}),
-				},
+				...(running
+					? [
+							{
+								// Terminal like an issuer's, for the same reason: the record
+								// goes with the listener.
+								label: `Stop mock server on port ${mock.port}`,
+								icon: Square,
+								destructive: true,
+								disabled: stopMock.isPending,
+								disabledReason: "Stopping",
+								onSelect: () =>
+									stopMock.mutate(mock.mockId, {
+										onError: (error) =>
+											showToast(
+												error instanceof Error
+													? error.message
+													: "Couldn't stop the mock server",
+												"error"
+											),
+									}),
+							} satisfies RowAction,
+						]
+					: []),
 			]}
 		>
 			{/* The collection is what distinguishes one mock from another -
@@ -784,6 +817,9 @@ export default function ServicesPanel() {
 	const issuersQuery = useMockIssuersQuery();
 	const mocksQuery = useMockServersQuery();
 	const startInbox = useStartInboxMutation();
+	// The cached lists outlive the engine process that held every service on
+	// them, so while it is down they read as a record of what was running.
+	const serving = useEngineServing();
 	const [expandedIssuerId, setExpandedIssuerId] = useState<string | null>(null);
 	const [newIssuerOpen, setNewIssuerOpen] = useState(false);
 	// A mock is started from a collection's header, so the empty group points
@@ -893,6 +929,7 @@ export default function ServicesPanel() {
 							<InboxRow
 								key={inbox.inboxId}
 								inbox={inbox}
+								running={inbox.running && serving}
 								flashed={inbox.inboxId === flashedInboxId}
 							/>
 						))
@@ -932,6 +969,7 @@ export default function ServicesPanel() {
 							<IssuerRow
 								key={issuer.issuerId}
 								issuer={issuer}
+								running={serving}
 								expanded={expandedIssuerId === issuer.issuerId}
 								onToggle={() =>
 									setExpandedIssuerId((current) =>
@@ -969,7 +1007,9 @@ export default function ServicesPanel() {
 							}
 						/>
 					) : (
-						orderedMocks.map((mock) => <MockServerRow key={mock.mockId} mock={mock} />)
+						orderedMocks.map((mock) => (
+							<MockServerRow key={mock.mockId} mock={mock} running={serving} />
+						))
 					)}
 				</DrawerSection>
 			</div>

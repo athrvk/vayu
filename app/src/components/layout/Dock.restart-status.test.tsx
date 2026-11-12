@@ -24,6 +24,10 @@
  * is what the user actually reads. The second case is the mutation check
  * pointing the other way - an engine that drops on its own must still owe a
  * reason, so a window that were simply always open would redden it.
+ *
+ * The same contradiction from the other side (#3493): an engine that crashed
+ * while the poll was healthy left "Engine connected" beside the Restart its
+ * crash put there, for up to a whole poll interval.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -38,8 +42,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { Dock } from "./Dock";
 import { useHealthQuery } from "@/queries/health";
+import { useEngineLifecycle } from "@/hooks/useEngineLifecycle";
 import { queryKeys } from "@/queries/keys";
 import { useEngineStore } from "@/stores";
+import type { EngineLifecyclePayload } from "@/types/electron";
 
 // The Dock prints the app version, which Vite `define`s at build time.
 vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
@@ -49,6 +55,12 @@ const restartEngine = vi.fn();
 /** What `App` does: mounts the poll once, above the strip that renders it. */
 function HealthPoll() {
 	useHealthQuery();
+	return null;
+}
+
+/** The sidecar's lifecycle push, as `App` mounts it after the poll. */
+function Lifecycle() {
+	useEngineLifecycle();
 	return null;
 }
 
@@ -63,6 +75,7 @@ function renderDock(client: QueryClient) {
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
 				<HealthPoll />
+				<Lifecycle />
 				<Dock />
 			</TooltipProvider>
 		</QueryClientProvider>
@@ -82,13 +95,38 @@ beforeEach(() => {
 		engineStatus: "starting",
 		engineError: null,
 		engineStartWindow: null,
+		engineCrash: null,
+		engineStartFailure: null,
 		pendingRestart: false,
 		engineRestarting: false,
 		restartRequiredKeys: [],
 	});
 	restartEngine.mockResolvedValue({ success: true });
-	(window as unknown as { electronAPI: unknown }).electronAPI = { restartEngine };
+	lifecycleListener = null;
+	(window as unknown as { electronAPI: unknown }).electronAPI = {
+		restartEngine,
+		getEngineLifecycle: () => Promise.resolve({ kind: "ready" }),
+		onEngineLifecycle: (listener: (lifecycle: EngineLifecyclePayload) => void) => {
+			lifecycleListener = listener;
+			return () => undefined;
+		},
+	};
 });
+
+let lifecycleListener: ((lifecycle: EngineLifecyclePayload) => void) | null = null;
+
+/** What the sidecar pushes when its child exits unasked: a SIGKILL, here. */
+function pushCrash() {
+	act(() =>
+		lifecycleListener?.({
+			kind: "crashed",
+			code: null,
+			signal: "SIGKILL",
+			stderrTail: [],
+			error: null,
+		})
+	);
+}
 
 describe("the Dock during a restart the user asked for", () => {
 	it("says Starting…, not Disconnected, while the engine is coming back", async () => {
@@ -208,5 +246,66 @@ describe("the Dock during a restart the user asked for", () => {
 		await waitFor(() => expect(screen.getByText("Engine disconnected")).toBeTruthy());
 		expect(useEngineStore.getState().engineError).toContain("socket hang up");
 		expect(reasonAffordance()).not.toBeNull();
+	});
+});
+
+describe("the Dock after the engine crashes", () => {
+	it("leaves Engine connected at once, and the poll's verdict follows the push", async () => {
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+		const pollsBefore = getHealth.mock.calls.length;
+
+		// Held, so the label is read while only the push has spoken.
+		let refuse!: (error: Error) => void;
+		getHealth.mockReturnValueOnce(
+			new Promise((_, reject) => {
+				refuse = reject;
+			})
+		);
+		getHealth.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:9876"));
+		pushCrash();
+
+		// The poll was asked again rather than left to its healthy interval.
+		// Mutation-check: drop the invalidate in `useEngineLifecycle` and this
+		// waits out its budget.
+		await waitFor(() => expect(getHealth.mock.calls.length).toBeGreaterThan(pollsBefore));
+		expect(useEngineStore.getState().engineStatus).toBe("connected");
+		expect(screen.queryByText("Engine connected")).toBeNull();
+		expect(screen.getByText("Engine disconnected")).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+
+		await act(async () => {
+			refuse(new Error("connect ECONNREFUSED 127.0.0.1:9876"));
+		});
+		await waitFor(() => expect(useEngineStore.getState().engineStatus).toBe("unreachable"));
+		expect(screen.getByText("Engine disconnected")).toBeTruthy();
+	});
+
+	it("still says Starting… when the crash lands inside a restart's start window", async () => {
+		// The refetch the push asks for fails like any poll during a restart, and
+		// the window is what classifies it: the push must not undo #1227.
+		getHealth.mockResolvedValueOnce({ status: "ok", version: "1.0.0", workers: 8 });
+		restartEngine.mockReturnValue(new Promise(() => {}));
+		useEngineStore.getState().addRestartRequiredKey("dbCacheSize");
+
+		const client = makeClient();
+		renderDock(client);
+		await waitFor(() => expect(screen.getByText("Engine connected")).toBeTruthy());
+
+		getHealth.mockRejectedValue(new Error("connect ECONNREFUSED 127.0.0.1:9876"));
+		fireEvent.click(restartButton());
+		await waitFor(() => expect(restartEngine).toHaveBeenCalledTimes(1));
+		const pollsBefore = getHealth.mock.calls.length;
+
+		pushCrash();
+
+		await waitFor(() => expect(getHealth.mock.calls.length).toBeGreaterThan(pollsBefore));
+		await waitFor(() => expect(screen.getByText("Starting…")).toBeTruthy());
+		expect(useEngineStore.getState().engineStatus).toBe("starting");
+		expect(useEngineStore.getState().engineError).toBeNull();
+		expect(reasonAffordance()).toBeNull();
 	});
 });

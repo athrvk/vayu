@@ -6,7 +6,12 @@
  */
 
 // Engine store
-export { useEngineStore, type EngineCrash, type EngineStatus } from "./engine-store";
+export {
+	useEngineStore,
+	selectKnownEngineStatus,
+	type EngineCrash,
+	type EngineStatus,
+} from "./engine-store";
 
 // Domain stores
 export {

@@ -715,10 +715,16 @@ button, and while the restart runs the button reads Restarting... through
 yields to a push that landed while it was in flight and to a restart that
 opened a new start window, so a late reply cannot put a crash back over the
 engine replacing it. **It is a fact, not a status: `useHealthQuery` stays the
-only classifier of `engineStatus`**, and `engineCrash` never writes it. It
-explains an unreachable engine and lets the Dock offer Restart, so that button
-can appear a poll before the light turns. The Dock reads it for the connection
-tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
+only classifier of `engineStatus`**, and `engineCrash` never writes it. A
+`crashed` push invalidates `queryKeys.health.status()`, and nothing else, so the
+poll's verdict follows within a retry rather than a whole healthy interval
+(issue #3493). For the gap until it does, `selectKnownEngineStatus` (exported
+beside the store) derives the status the app shows: `unreachable` when a crash
+is recorded and `engineStatus` still reads `connected`, `engineStatus` itself
+otherwise. The Dock's light and `useEngineServing` (the gate behind the
+running-services count and the Services drawer's rows) read it, so neither says
+"connected" beside the Restart a crash put there. The Dock reads `engineCrash`
+for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
 `engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
 both the tooltip and the button (Retry, not Restart).

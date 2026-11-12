@@ -31,27 +31,39 @@
  * services" in green beside its own "Disconnected" light. The gate lives here
  * rather than at the one call site because the count is what is untrue: any
  * later reader inherits the answer instead of re-deriving the caveat.
+ * `useEngineServing` is that gate, and the drawer reads it too, so its rows
+ * turn stopped on the same evidence the Dock's count drops to zero on.
  */
 
 import { useEffect, useMemo } from "react";
 
 import { useInboxesQuery, useMockIssuersQuery, useMockServersQuery } from "@/queries";
-import { useEngineStore } from "@/stores";
+import { selectKnownEngineStatus, useEngineStore } from "@/stores";
 import type { RunningServiceSummary } from "@/types/electron";
 
 /** One identity for "nothing", so a disconnected engine re-publishes nothing. */
 const NOTHING_RUNNING: RunningServiceSummary[] = [];
 
+/**
+ * Whether the engine is up to hold any service at all.
+ *
+ * Both not-connected states read false: an engine that has not answered yet is
+ * running no more than one that stopped answering. A crash the sidecar
+ * reported counts before the health poll confirms it (#3493), through the same
+ * `selectKnownEngineStatus` the Dock's light reads.
+ */
+export function useEngineServing(): boolean {
+	return useEngineStore((s) => selectKnownEngineStatus(s) === "connected");
+}
+
 export function useRunningServices(): RunningServiceSummary[] {
-	const engineStatus = useEngineStore((s) => s.engineStatus);
+	const serving = useEngineServing();
 	const { data: inboxes = [] } = useInboxesQuery();
 	const { data: issuers = [] } = useMockIssuersQuery();
 	const { data: mocks = [] } = useMockServersQuery();
 
 	return useMemo(() => {
-		// Both of the not-connected states gate the same way: an engine that has
-		// not answered yet is running no more than one that stopped answering.
-		if (engineStatus !== "connected") return NOTHING_RUNNING;
+		if (!serving) return NOTHING_RUNNING;
 		return [
 			...inboxes
 				.filter((inbox) => inbox.running)
@@ -69,7 +81,7 @@ export function useRunningServices(): RunningServiceSummary[] {
 				port: issuer.port,
 			})),
 		];
-	}, [engineStatus, inboxes, issuers, mocks]);
+	}, [serving, inboxes, issuers, mocks]);
 }
 
 export function useRunningServiceCount(): number {

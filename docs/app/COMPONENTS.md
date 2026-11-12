@@ -1096,8 +1096,11 @@ both reveal it.
   terms: a stopped inbox stays listed with `running: false`, while a stopped issuer or mock server
   is gone from the engine's list entirely - and because a **disconnected engine is running none of
   them**, which is the gate this hook holds so that no caller renders a green count off a stale
-  cache (issue #555). The mock-server list was missing from the sum until issue #792, so a mock
-  holding a port counted as nothing. The count is now the list's length rather than a second sum
+  cache (issue #555). The gate is `useEngineServing()`, which reads `selectKnownEngineStatus` so a
+  crash the sidecar reported counts before the health poll confirms it (issue #3493); the drawer
+  reads it too and draws its cached rows stopped (muted dot, "Stopped", no Stop action) while the
+  engine is down, rather than green or the first-run empty states. The mock-server list was
+  missing from the sum until issue #792, so a mock holding a port counted as nothing. The count is now the list's length rather than a second sum
   (issue #1363): the Dock saying 2 while the close dialog names 3 is a disagreement no test that
   reads one of them can see. `useRunningServicesPublisher()`, mounted once in `App.tsx`, pushes that
   list to the main process on every change.

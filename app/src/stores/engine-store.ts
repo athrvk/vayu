@@ -76,9 +76,10 @@ interface EngineState {
 	 * (#3336); `null` while it runs or once a start is under way again.
 	 *
 	 * A fact about the process, not a status: `engineStatus` stays the health
-	 * poll's verdict, and this only explains it and offers the Dock's Restart.
-	 * Written by `useEngineLifecycle` from each pushed transition, so it clears
-	 * when the sidecar moves on rather than when a restart is asked for.
+	 * poll's verdict, and this explains it, offers the Dock's Restart, and keeps
+	 * a stale `connected` off screen (`selectKnownEngineStatus`). Written by
+	 * `useEngineLifecycle` from each pushed transition, so it clears when the
+	 * sidecar moves on rather than when a restart is asked for.
 	 */
 	engineCrash: EngineCrash | null;
 
@@ -157,6 +158,25 @@ interface EngineState {
 	// Restart actions
 	addRestartRequiredKey: (key: string) => void;
 	clearRestartRequired: () => void;
+}
+
+/**
+ * The engine's status as the app shows it: the health poll's verdict, except
+ * that a crash the sidecar reported outranks a `connected` the poll has not
+ * revisited yet (#3493).
+ *
+ * Derived on read, never written back: the poll stays the one writer of
+ * `engineStatus`, and the crash push only asks it to look again
+ * (`useEngineLifecycle`). The overlap lasts until that refetch answers, but a
+ * strip reading "Engine connected" beside a Restart button, or a drawer of
+ * green services the dead process took with it, is wrong for all of it.
+ * `starting` passes through: a restart in flight is the crash's successor.
+ */
+export function selectKnownEngineStatus(
+	s: Pick<EngineState, "engineStatus" | "engineCrash">
+): EngineStatus {
+	if (s.engineCrash !== null && s.engineStatus === "connected") return "unreachable";
+	return s.engineStatus;
 }
 
 export const useEngineStore = create<EngineState>()((set) => ({
