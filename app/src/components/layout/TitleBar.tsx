@@ -413,7 +413,10 @@ function EnvSwitcher() {
 						// this bounds how long an environment name can grow before it
 						// truncates, not chrome rhythm, and `max-w-44` rode `--spacing`,
 						// truncating names shorter at the Default density.
-						"flex items-center gap-1.5 max-w-3xs text-xs pl-2.5 pr-2 py-0.5 rounded-md shrink-0",
+						// `min-w-0`, not `shrink-0`: in a narrow window the switcher gives way
+						// (the name truncates to the icon and chevron) instead of overlapping
+						// the search bar beside it (#3494).
+						"flex items-center gap-1.5 max-w-3xs min-w-0 text-xs pl-2.5 pr-2 py-0.5 rounded-md",
 						// Explicit property list, not `transition-colors`: a hand-rolled
 						// button carries no `[data-slot="button"]`, so it misses the
 						// baseline's `scale` press-feedback transition (`index.css`) -
@@ -515,8 +518,10 @@ export default function TitleBar() {
 		// has one, and equal 1fr side columns are the only way to get that when the
 		// two clusters are different widths. Both sides carry `min-w-0` so a long
 		// environment name truncates instead of pushing the bar off centre.
+		// `minmax(0,1fr)` spells that minimum out rather than leaving it to the
+		// items' own `min-w-0`, so a side cluster can never widen its column.
 		<header
-			className="titlebar h-[var(--titlebar-height)] grid grid-cols-[1fr_auto_1fr] items-center bg-panel border-b border-border shrink-0 select-none"
+			className="titlebar h-[var(--titlebar-height)] grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center bg-panel border-b border-border shrink-0 select-none"
 			style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
 			// A stop in the F6 cycle - see `region-focus.ts`. Absent outside
 			// Electron, where this whole bar is, and the cycle simply has three
@@ -541,8 +546,13 @@ export default function TitleBar() {
 
 			{/* The palette's entry point. Bounded rather than fluid: a search field
 			    the width of the window reads as a document title, and the row's whole
-			    remaining area stays draggable. */}
-			<CommandSearchBar className="w-[min(44vw,28rem)]" />
+			    remaining area stays draggable.
+			    The width is 28rem down to the 1024px window minimum, then gives way
+			    to a 2.5rem floor: with the bar centred, each side keeps 18rem, the
+			    room the environment switcher and Linux's window buttons need. The
+			    old `min(44vw,28rem)` held 44vw at a narrow window (a 200% interface
+			    scale is a 512px one) and left the switcher 18px (#3494). */}
+			<CommandSearchBar className="w-[clamp(2.5rem,100vw_-_36rem,28rem)]" />
 
 			{/* Right controls.
 			    No `no-drag` here: this wrapper is the whole third 1fr column, so

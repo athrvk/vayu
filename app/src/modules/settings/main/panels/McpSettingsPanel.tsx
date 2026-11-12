@@ -721,8 +721,8 @@ export default function McpSettingsPanel() {
 
 					{connectSnippets(endpoint).map((snippet) => (
 						<div key={snippet.label} className="space-y-1.5">
-							<div className="flex items-center justify-between">
-								<span className="text-xs font-medium text-muted-foreground">
+							<div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+								<span className="min-w-0 text-xs font-medium text-muted-foreground">
 									{snippet.label}
 								</span>
 								<div className="flex items-center gap-1">

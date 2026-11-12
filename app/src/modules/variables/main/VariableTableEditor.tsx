@@ -1243,14 +1243,20 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 			 * left edge loses the outer half of its focus ring; standalone it
 			 * carries `p-4` and nothing notices. The clearance that fixes it lives
 			 * on the checkbox cell below, not here - see the comment there.
+			 *
+			 * The same scroll is what a narrow pane or a 200% scale lands on
+			 * (#3494): the Variable and Value headers carry a width floor, so
+			 * below the sum of the columns the table scrolls sideways instead of
+			 * squeezing the two inputs, which the other columns' fixed widths
+			 * leave all of the slack to.
 			 */}
 			<div className={cn("flex-1 overflow-y-auto", embedded ? "p-0" : "p-4")}>
 				<table className="w-full">
 					<thead>
 						<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
 							<th className="pb-2 w-8"></th>
-							<th className="pb-2 px-2">Variable</th>
-							<th className="pb-2 px-2">Value</th>
+							<th className="pb-2 px-2 min-w-[8rem]">Variable</th>
+							<th className="pb-2 px-2 min-w-[10rem]">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
 							{/*
 							 * A word, like every other column. This was a bare key icon

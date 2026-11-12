@@ -83,7 +83,7 @@ Tabs used to live in the title row. They are content-width and overflow into a d
 
 ### `TitleBar` (`components/layout/TitleBar.tsx`)
 
-Custom window title bar (Electron frameless window, `--titlebar-height`). Renders nothing outside Electron - there is no window chrome to draw. A 3-column grid (`1fr auto 1fr`), so the search bar is centred on the *window* rather than on whatever space the two clusters leave.
+Custom window title bar (Electron frameless window, `--titlebar-height`). Renders nothing outside Electron - there is no window chrome to draw. A 3-column grid (`minmax(0,1fr) auto minmax(0,1fr)`), so the search bar is centred on the *window* rather than on whatever space the two clusters leave. The bar is `clamp(2.5rem, 100vw - 36rem, 28rem)` wide - 28rem down to the 1024px window minimum, then it gives way - and the environment switcher shrinks and truncates rather than overlapping it; the chord caps hide by CSS below a 46rem window (#3494).
 
 - **All platforms:** `NavigationControls` (Back / Forward, leading edge, issue #1245), `<CommandSearchBar />` (centre), `EnvPill` (right).
 - **macOS:** Native traffic light inset (`--traffic-light-inset`, 104px left); no HTML window controls.

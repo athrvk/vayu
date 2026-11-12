@@ -1100,6 +1100,15 @@ Both live in `appearance-store` (source of truth `constants/appearance.ts`),
 persisted to localStorage, and applied pre-paint in `index.html`. Code/mono
 text stays JetBrains Mono regardless.
 
+**Reflow guarantee** (#3494). The window's minimum is 1024px and the scale
+slider reaches 200%, so the smallest layout the app promises is **512 CSS px
+wide** (a pane beside the context bar is narrower again). At that width nothing
+may overlap, clip a word, or break a label into a column of characters: a
+control that cannot fit **wraps or truncates**, and the thing that gives way is
+the one the user can read least of (a timestamp, a button label, a hint), never
+the one they came for (a run's name, the URL, the status code). The class-level
+rules that hold it are under [Overflowing Text](#overflowing-text) below.
+
 **Interface density** (issue #1670) is a fourth Interface control, next to
 Roundedness: `Default` and `Comfortable`, toggled by a `data-density`
 attribute on `documentElement` rather than a computed value, because the two
@@ -2434,6 +2443,38 @@ animate under the cursor.
 
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
 tooltip.
+
+### A row that holds a name, a chip and some controls (#3494)
+
+The "reflow guarantee" (Interface scale, above) is met with four class rules,
+not a media query per surface. jsdom has no layout, so each is held as a class
+guard (`reflow-floors.test.ts` and the component's own test), and none can prove
+a pixel.
+
+- **A chip never shrinks or breaks.** A status chip, a pill or a metric group is
+  `shrink-0 whitespace-nowrap`. A flex item that may shrink breaks "503 Service
+  Unavailable" or "120 ms" into a column of characters *before* its row wraps.
+  `StatusCodeBadge` and `RunStatusPill` carry it themselves; a metric group in
+  `ResponseStatusBar` carries it on its own wrapper.
+- **The row wraps, between groups.** A header or status row is `flex-wrap` with
+  `gap-x-*` and `gap-y-*`, so what does not fit drops to a second line whole.
+  `ResponseStatusBar`, the run header in `HistoryDetail` and `UrlBar` do.
+- **The thing the user came for keeps a floor, and the rest yield first.** The
+  run's name group is `min-w-[12rem]`, the URL field `min-w-[12rem]`: below that
+  the controls wrap under it instead of squeezing it. A floor in `rem`, not a
+  `--spacing` step, so density does not move it.
+- **A table scrolls before it squeezes.** `VariableTableEditor`'s Variable and
+  Value headers carry `min-w-[8rem]` / `min-w-[10rem]`; the fixed-width Type,
+  Secret and action columns would otherwise leave all of the slack to the two
+  inputs. The scroller already computes `overflow-x: auto`.
+
+The title bar is the one surface where these are viewport-sized (see the note
+under "A run pane's grids answer to the pane"). Its side columns are
+`minmax(0,1fr)`, the search bar is `clamp(2.5rem, 100vw - 36rem, 28rem)`, so each
+side keeps 18rem for the environment switcher and Linux's window buttons down to
+the 1024px minimum and the bar alone gives way below it; the switcher is
+`min-w-0` (truncating) and the chord caps hide by CSS (`max-[46rem]:hidden`),
+never by removing the nodes.
 
 **A URL is the exception, and it gives way at the head.** Both treatments above
 keep the beginning of a string, which is right for a name and wrong for a URL:

@@ -218,10 +218,18 @@ export default function HistoryDetail() {
 			 * drawer open/closed rather than navigating anywhere.
 			 */}
 			<div className="border-b border-border bg-card px-6 py-3 shrink-0">
-				<div className="flex items-center gap-3">
-					<div className="flex-1 min-w-0 flex items-center gap-2">
+				{/*
+				 * Wraps instead of squeezing (#3494). The name group keeps a floor
+				 * (`min-w-[12rem]`), so when the buttons would take it below that they drop
+				 * to a second line; inside the group the status pill and the timestamp
+				 * wrap under the name before the name is clipped. Without the floor a
+				 * long timestamp and two labelled buttons left the name a few
+				 * characters wide at a narrow pane or a 200% scale.
+				 */}
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+					<div className="flex min-w-[12rem] flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
 						<h1
-							className="min-w-0 truncate text-sm font-semibold text-foreground"
+							className="min-w-0 max-w-full truncate text-sm font-semibold text-foreground"
 							title={title}
 						>
 							{title}
@@ -229,7 +237,7 @@ export default function HistoryDetail() {
 						<RunStatusPill status={run.status} outcome={judgement?.outcome} />
 						<TimeValue
 							value={run.startTime}
-							className="shrink-0 text-xs text-muted-foreground"
+							className="shrink-0 whitespace-nowrap text-xs text-muted-foreground"
 						/>
 					</div>
 					<Button
