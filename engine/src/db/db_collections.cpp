@@ -52,17 +52,21 @@ void Database::create_collection (const Collection& c) {
     changes_.publish (collection_change (c, op));
 }
 
-void Database::rebind_collection (const Collection& collection) {
+void Database::rebind_collection (const Collection& collection,
+const std::vector<Request>& departed,
+const std::unordered_map<std::string, std::string>& declined_under) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     vayu::utils::log_debug ("db", "Rebinding collection", { { "id", collection.id } });
-    const ChangeOp op = upsert_op<Collection> (impl_->storage, collection.id);
+    std::vector<Change> changes{ collection_change (
+    collection, upsert_op<Collection> (impl_->storage, collection.id)) };
     impl_->storage.transaction ([&] {
         impl_->storage.replace (collection);
+        update_moved_requests_locked (departed, declined_under, changes);
         impl_->storage.remove_all<DeclinedOperation> (
         where (c (&DeclinedOperation::collection_id) == collection.id));
         return true; // Commit
     });
-    changes_.publish (collection_change (collection, op));
+    changes_.publish (std::move (changes));
 }
 
 std::vector<Collection> Database::get_collections () {
@@ -993,26 +997,31 @@ const std::unordered_map<std::string, std::string>& declined_under) {
                 impl_->storage.update (row);
                 moved.push_back (collection_change (row, ChangeOp::Update));
             }
-            for (const auto& row : requests) {
-                if (impl_->storage.count<Request> (where (
-                    c (&Request::id) == row.id && is_null (&Request::deleted_at))) == 0) {
-                    throw MissingRowError ("Request", row.id);
-                }
-                // Read off the stored row, before the write clears its stamp.
-                if (const auto under = declined_under.find (row.id);
-                under != declined_under.end ()) {
-                    for (const auto& stored : impl_->storage.get_all<Request> (
-                         where (c (&Request::id) == row.id))) {
-                        record_declined_operation_locked (under->second, stored);
-                    }
-                }
-                impl_->storage.update (row);
-                moved.push_back (request_change (row, ChangeOp::Update));
-            }
+            update_moved_requests_locked (requests, declined_under, moved);
             return true; // Commit
         });
         changes_.publish (std::move (moved));
     });
+}
+
+void Database::update_moved_requests_locked (const std::vector<Request>& requests,
+const std::unordered_map<std::string, std::string>& declined_under,
+std::vector<Change>& changes) {
+    for (const auto& row : requests) {
+        if (impl_->storage.count<Request> (where (
+            c (&Request::id) == row.id && is_null (&Request::deleted_at))) == 0) {
+            throw MissingRowError ("Request", row.id);
+        }
+        if (const auto under = declined_under.find (row.id);
+        under != declined_under.end ()) {
+            for (const auto& stored :
+            impl_->storage.get_all<Request> (where (c (&Request::id) == row.id))) {
+                record_declined_operation_locked (under->second, stored);
+            }
+        }
+        impl_->storage.update (row);
+        changes.push_back (request_change (row, ChangeOp::Update));
+    }
 }
 
 } // namespace vayu::db

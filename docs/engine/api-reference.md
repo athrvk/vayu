@@ -1711,6 +1711,25 @@ A `parentId` that changes the collection's parent and states no `order` appends
 the collection among its new siblings, rather than carrying a position from the
 list it just left. See [Ordering](#ordering).
 
+A `parentId` that takes the collection out of the spec contract that answers
+for the requests beneath it is removing them from that contract (#3470), the
+rule [`PUT /requests/:id`](#put-requestsid) applies to one request, with the
+same meaning of out: every request in the subtree that records an operation
+(`specOperation`) and whose nearest binding after the move names another
+document, none, or the same document from a collection outside the source's
+contract has its stamp cleared, and the operation is recorded as declined
+under the binding it left, in the same transaction as the collection's own
+row, so the source's [`POST /specs/diff`](#post-specsdiff) lists it under
+`declined` rather than `added`. The binding after is read against the tree the
+`PUT` writes, so an `openapi: null` in the same body counts: a bound
+collection unbound and moved out at once clears its requests' stamps, and the
+decline that records under it is forgotten with the binding's other records
+(below). A move within one contract keeps every stamp, and so does moving the
+bound collection itself. The response is the collection; the cleared requests
+are read back with [`GET /requests/:id`](#get-requestsid) or arrive on the
+[change feed](#get-changes). This is the decline
+[`POST /reorder`](#post-reorder) records for a moved folder.
+
 **Headers:** `If-Match` (optional), see
 [Conditional updates](#conditional-updates-with-if-match).
 
@@ -2349,7 +2368,9 @@ sync that creates the operation on purpose; purging the request, by hand or by
 Unbinding the collection, or binding it to a document with other bytes, forgets
 every record under it. A sync's own deletes record nothing. Moving the request
 out of the contract records the same decline (#3446, see
-[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder));
+[`PUT /requests/:id`](#put-requestsid) and [`POST /reorder`](#post-reorder)),
+and so does moving a folder above it out with
+[`PUT /collections/:id`](#put-collectionsid) (#3470);
 the move clears the stamp, and a restore forgets only the record of a request
 that still records an operation, so deleting and restoring the moved request
 later leaves the source's record standing.
@@ -4085,7 +4106,8 @@ meaning of out. A request that records an operation (`specOperation`) and that
 the batch leaves outside its contract comes back with `specOperation: null`,
 and the operation is recorded as declined under the binding it left, in the
 batch's transaction. A moved collection does this for every stamped request
-beneath it. The binding after and the contract are read against the tree the
+beneath it, as a `parentId` sent to
+[`PUT /collections/:id`](#put-collectionsid) does (#3470). The binding after and the contract are read against the tree the
 batch writes, so a request moved into a folder the same batch moves away is
 judged by where the folder lands. A move within one contract keeps the stamp,
 and so does moving the bound collection itself. Each request this clears is in the
