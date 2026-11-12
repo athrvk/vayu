@@ -5,12 +5,17 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useCallback } from "react";
+import { flushSync } from "react-dom";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { useLayoutStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { Collapsible } from "@/components/ui";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { regionProps } from "./region-focus";
+import { DrawerItemOpenedProvider } from "./drawer-item-opened";
+import { focusActiveTab } from "./tab-focus";
+import { useOverlayPanel } from "./useOverlayPanel";
 import { DEFAULT_DRAWER_WIDTH, type SidePanelMode } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
@@ -26,14 +31,29 @@ import { TrashList } from "@/modules/trash";
 
 interface DrawerProps {
 	mode?: SidePanelMode;
+	/** The context bar's mode, for the one-overlay-at-a-time rule (`useOverlayPanel`). */
+	siblingMode?: SidePanelMode;
 }
 
-export function Drawer({ mode = "push" }: DrawerProps) {
+export function Drawer({ mode = "push", siblingMode = "push" }: DrawerProps) {
 	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
 	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
 	const drawerView = useLayoutStore((s) => s.drawerView);
 	const drawerWidth = useLayoutStore((s) => s.drawerWidth);
 	const setDrawerWidth = useLayoutStore((s) => s.setDrawerWidth);
+	const panelRef = useOverlayPanel({ panel: "drawer", mode, siblingMode });
+
+	// What the views call once they have opened a tab (`drawer-item-opened.ts`).
+	// An overlay has done its job and leaves, with focus on the tab it opened.
+	const onItemOpened = useCallback(() => {
+		if (mode !== "overlay") return;
+		// Commit the tab the caller just opened first. `Shell` reveals the drawer
+		// when the active tab's type changes, from an effect that this flush runs;
+		// closing before it would be undone by it.
+		flushSync(() => {});
+		setDrawerOpen(false);
+		focusActiveTab();
+	}, [mode, setDrawerOpen]);
 
 	return (
 		// See `ContextBar.tsx` for why `Collapsible`/`CollapsibleContent` sit
@@ -51,6 +71,7 @@ export function Drawer({ mode = "push" }: DrawerProps) {
 				   z-index, on the content's left edge where the bar takes its right
 				   one (`Shell` gives the drawer a positioned box of its own). */}
 				<aside
+					ref={panelRef}
 					className={cn(
 						"flex shrink-0 bg-panel",
 						mode === "overlay"
@@ -82,12 +103,14 @@ export function Drawer({ mode = "push" }: DrawerProps) {
 						    collections and environments purely to hand them to the
 						    Variables view, which meant the loading state was lost at the
 						    boundary and an in-flight query rendered as an empty tree. */}
-						{drawerView === "collections" && <CollectionTree />}
-						{drawerView === "history" && <HistoryList />}
-						{drawerView === "variables" && <VariablesCategoryTree />}
-						{drawerView === "services" && <ServicesPanel />}
-						{drawerView === "trash" && <TrashList />}
-						{drawerView === "settings" && <SettingsCategoryTree />}
+						<DrawerItemOpenedProvider value={onItemOpened}>
+							{drawerView === "collections" && <CollectionTree />}
+							{drawerView === "history" && <HistoryList />}
+							{drawerView === "variables" && <VariablesCategoryTree />}
+							{drawerView === "services" && <ServicesPanel />}
+							{drawerView === "trash" && <TrashList />}
+							{drawerView === "settings" && <SettingsCategoryTree />}
+						</DrawerItemOpenedProvider>
 					</div>
 
 					<PanelResizeHandle

@@ -3047,9 +3047,37 @@ leaves out its rail (the drawer box above leaves out `ActivityRail`, the
 main+ContextBar row leaves out `ContextRail`), so an open panel never covers
 the button that closes it. Both boxes exist in either mode, so crossing a
 threshold changes a class list and never remounts the tab. An overlay keeps its
-width, its `rail-collapse` animation and its F6 stop, and closes the way it
-opens (its rail button or chord); neither overlay closes on Escape or a click
-outside.
+width, its `rail-collapse` animation and its F6 stop.
+
+**An overlay dismisses like one** (#3507). The rules live in one hook,
+`useOverlayPanel` (`app/src/components/layout/useOverlayPanel.ts`), called by
+both panels, and none of them applies to a panel that pushes:
+
+- **One overlay at a time.** A panel that opens as an overlay closes the other
+  if that one is overlaying too; a pushing panel is never closed, and its
+  persisted open flag is never rewritten. The rule watches the open transition,
+  so the rail buttons, the chords, the palette and `revealDrawerView` are all
+  covered without each knowing it. `Shell` hands each panel both modes
+  (`siblingMode`). The context bar counts only while it has sections to show.
+- **The drawer closes on a selection**: a drawer item that opens or switches a
+  tab (a request, a collection, a run, a variables scope, a settings category)
+  calls `onItemOpened` from `useDrawerItemOpened()`
+  (`drawer-item-opened.ts`), and an overlay drawer closes and moves focus to the
+  opened tab. It is an explicit call, not a watch on the active tab, which also
+  changes for a closed tab, Back and every chord. Duplicate and the undo of a
+  delete open a tab too and are not selections; expand, rename, filter and the
+  row menu keep it open. The context bar never closes on selection.
+- **Escape closes it** when focus is inside it and nothing of its own is open
+  above it - no menu, listbox or popover (by role, not closed) and no dialog -
+  and no one has already answered the key (`defaultPrevented`, which Radix sets
+  for the layer it dismisses). A text field keeps its own Escape. Focus returns
+  to the rail button that toggles the panel (`data-rail-side` on `RailButton`),
+  the active tab if the rail is not drawn.
+- **A pointer press outside closes it**, heard on `document` in the capture phase
+  and never cancelled, so the click still reaches what it was aimed at. Presses
+  on the panel, on its own rail's buttons (the click toggles it; closing on the
+  press would reopen it), on a menu or dialog it opened (portalled out of it) and
+  anything while a dialog is up are not outside.
 
 ### The panels that resize, and the one handle that resizes them
 
