@@ -529,6 +529,7 @@ message `Invalid 'auth': must be a JSON object`.
 | `body` (request) | object - see [The request `body` union](#the-request-body-union) |
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
 | `order` (collection / request) | integer from `0` to `2147483647` - see [Ordering](#ordering) |
+| `parentId` (collection) | string: a collection id, or `""` for the root |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
 quietly when it is not an object - `variables` reads back empty, a request `body`
@@ -536,6 +537,16 @@ is dropped, and `auth` resolves to none, so a request the caller believes carrie
 credentials goes out bare. The write is therefore rejected rather than stored:
 `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
 stored value is left untouched.
+
+**`parentId: ""` is the root, the same as `null`** (#3451). It is stored as
+`null` on `POST`/`PUT /collections` (a folder `POST /specs/sync` creates
+with `""` or `null` lands under the synced collection), and
+[`POST /reorder`](#post-reorder) reads it as `null` in a move and in a
+`normalize` scope, so the tree has one spelling of the root: a collection
+created with `""` is appended among the roots and lists with them. A value
+that is neither a string nor `null` (`5`, `true`, an object, an array) is a
+`400` such as
+`Invalid 'parentId': must be a collection id or null (got number)`.
 
 **A `variables` key must be one a `{{ name }}` token can reach (#3251).** A token
 is looked up with the spaces, tabs, CR and LF around its text cut, so a stored
@@ -1674,7 +1685,7 @@ the null-vs-absent rule.
 ```json
 {
   "name": "My API",        // Required, no default (null is a 400)
-  "parentId": null,         // Optional, null for root; a trashed collection is a 409
+  "parentId": null,         // Optional, null or "" for root (stored as null); a trashed collection is a 409
   "order": 0,               // Optional, 0..2147483647; appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "auth": {"mode": "none"}, // Optional, default none; never mode "inherit" - see Collection auth
@@ -1693,8 +1704,10 @@ the null-vs-absent rule.
 `variables` key is blank or padded
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
 ([#3445](#collection-auth)), if an `openapi` binding names no stored spec
-(below), if `order` is not an integer from `0` to `2147483647` or an append
-finds no slot left ([Ordering](#ordering)), or on a cycle (below); `409` if
+(below), if `parentId` is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), if `order` is not an integer
+from `0` to `2147483647` or an append finds no slot left
+([Ordering](#ordering)), or on a cycle (below); `409` if
 `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -1715,7 +1728,7 @@ its value, an explicit `null` resets it to the default.
 ```json
 {
   "name": "Renamed",       // Optional; null is a 400 (no default)
-  "parentId": null,         // Optional, null moves it to the root; a trashed collection is a 409
+  "parentId": null,         // Optional, null or "" moves it to the root; a trashed collection is a 409
   "order": 3,               // Optional, 0..2147483647; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "auth": null,             // Optional, null resets to {"mode":"none"}; never mode "inherit" - see Collection auth
@@ -1741,7 +1754,9 @@ longer names the stored row; `400` on a `null` or empty or whitespace-only
 a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
 `auth` that states mode `inherit` ([#3445](#collection-auth)), an
 `openapi` that is neither `null` nor `{}` (binding is
-[`POST /specs/bind`](#post-specsbind), issue #3348, below), an `order`
+[`POST /specs/bind`](#post-specsbind), issue #3348, below), a `parentId`
+that is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), an `order`
 that is not an integer from `0` to `2147483647` or an append with no slot
 left ([Ordering](#ordering)) or on a cycle
 (below); `409` if `parentId` names a collection in the
@@ -4037,7 +4052,7 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 | `type` | `"collection"` or `"request"`; anything else is a `400` |
 | `id` | Non-empty string naming a **stored** row of that type |
 | `order` | Required, an integer from `0` to `2147483647`. Not a float, not negative, not past the column - this endpoint writes dense positions, and each would be a silently truncated, unreachable or wrapped slot. Anything else is a `400`, e.g. `Invalid move at index 0: 'order' must be an integer from 0 to 2147483647 (got 2147483648)` |
-| `parentId` (collection) | Absent keeps the current parent; `null` moves to the root; a string moves under that collection, which must exist |
+| `parentId` (collection) | Absent keeps the current parent; `null` or `""` moves to the root; any other string moves under that collection, which must exist; anything else is a `400` naming `parentId` |
 | `collectionId` (request) | Absent keeps the current owner; a string moves to that collection, which must exist |
 
 A row may appear in `moves` at most once - two positions for one row is a `400`
@@ -4048,8 +4063,8 @@ renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
 applies. The children are the parent's sub-collections and its requests as one
 list (#2535), so a tie across the two kinds comes out as distinct numbers with
 the sub-collection first. An entry is `{"parentId": <collection id>}`, or
-`{"parentId": null}` for the root collections (the roots hold collections
-only). The named collection must exist, and `parentId` must be *stated* rather
+`{"parentId": null}` (`""` reads the same) for the root collections (the roots
+hold collections only). The named collection must exist, and `parentId` must be *stated* rather
 than omitted, so a renumber can never land on a scope the caller did not mean.
 The per-kind shapes engines before #2535 took, `{"type": "collection",
 "parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`

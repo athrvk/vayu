@@ -101,12 +101,13 @@ R"(a scope is {"parentId": <collection id, or null for the roots>} and covers )"
 /**
  * Reads one `normalize` entry.
  *
- * A scope must *state* `parentId` (`null` for the roots) rather than omitting
- * it: absent would have to mean either "the roots" or "whatever parent you
- * infer", and a renumber that silently picked the wrong scope is a whole folder
- * reshuffled. A named parent must exist - unlike the single-row `PUT`, which
- * tolerates an unresolvable parent because bulk import writes rows that cannot
- * see each other yet. Nothing here is bulk-created, so a scope that resolves to
+ * A scope must *state* `parentId` (`null` or `""` for the roots, through
+ * `read_parent_id_field`) rather than omitting it: absent would have to mean
+ * either "the roots" or "whatever parent you infer", and a renumber that
+ * silently picked the wrong scope is a whole folder reshuffled. A named
+ * parent must exist - unlike the single-row `PUT`, which tolerates an
+ * unresolvable parent because bulk import writes rows that cannot see each
+ * other yet. Nothing here is bulk-created, so a scope that resolves to
  * no row is a client bug, not an ordering artifact.
  *
  * The per-kind shapes from before #2535 (`type` with `parentId` or
@@ -127,17 +128,10 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
         return std::unexpected (body_error ("Invalid " + at +
         ": 'parentId' must be stated; " + std::string (SCOPE_SHAPE)));
     }
-    const auto& parent = entry["parentId"];
-    if (parent.is_null ()) {
-        out.parent = std::nullopt;
-        return {};
+    if (auto outcome = read_parent_id_field (entry["parentId"], out.parent, at); !outcome) {
+        return outcome;
     }
-    if (!parent.is_string ()) {
-        return std::unexpected (
-        body_error ("Invalid " + at + ": 'parentId' must be a string or null"));
-    }
-    out.parent = parent.get<std::string> ();
-    if (!db.get_collection (*out.parent).has_value ()) {
+    if (out.parent && !db.get_collection (*out.parent).has_value ()) {
         return std::unexpected (
         body_error ("Collection '" + *out.parent + "' does not exist"));
     }
@@ -178,19 +172,14 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
             return std::unexpected (body_error ("Collection '" + out.id + "' does not exist"));
         }
         if (entry.contains ("parentId")) {
-            out.states_owner   = true;
-            const auto& parent = entry["parentId"];
-            if (parent.is_null ()) {
-                out.parent = std::nullopt;
-            } else if (parent.is_string ()) {
-                out.parent = parent.get<std::string> ();
-                if (!db.get_collection (*out.parent).has_value ()) {
-                    return std::unexpected (
-                    body_error ("Collection '" + *out.parent + "' does not exist"));
-                }
-            } else {
-                return std::unexpected (body_error (
-                "Invalid " + at + ": 'parentId' must be a string or null"));
+            out.states_owner = true;
+            if (auto outcome = read_parent_id_field (entry["parentId"], out.parent, at);
+            !outcome) {
+                return outcome;
+            }
+            if (out.parent && !db.get_collection (*out.parent).has_value ()) {
+                return std::unexpected (
+                body_error ("Collection '" + *out.parent + "' does not exist"));
             }
         }
         return {};

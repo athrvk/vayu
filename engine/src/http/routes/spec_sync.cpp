@@ -966,21 +966,23 @@ SyncPlan& plan) {
         temp));
     }
 
-    nlohmann::json fields = item;
-    std::string parent    = request.collection_id;
-    if (item.contains ("parentId") && !item["parentId"].is_null ()) {
-        if (!item["parentId"].is_string ()) {
-            return std::unexpected (
-            item_error (400, "Invalid 'parentId': must be a string", temp));
-        }
-        parent = item["parentId"].get<std::string> ();
-        if (!scope.subtree.contains (parent)) {
-            return std::unexpected (item_error (400,
-            "Invalid 'parentId': '" + parent + "' is not the collection being synced or one beneath it",
-            temp));
+    // Absent, `null` and `""` all place the folder under the synced collection.
+    std::optional<std::string> stated;
+    if (item.contains ("parentId")) {
+        if (auto outcome = apply_item_fields (
+            [&] { return read_parent_id_field (item["parentId"], stated); }, "collection", temp);
+        !outcome) {
+            return outcome;
         }
     }
-    fields["parentId"] = parent;
+    if (stated && !scope.subtree.contains (*stated)) {
+        return std::unexpected (item_error (400,
+        "Invalid 'parentId': '" + *stated + "' is not the collection being synced or one beneath it",
+        temp));
+    }
+    const std::string parent = stated.value_or (request.collection_id);
+    nlohmann::json fields    = item;
+    fields["parentId"]       = parent;
 
     vayu::db::Collection folder;
     folder.id         = plan.claimed.real.at (temp);

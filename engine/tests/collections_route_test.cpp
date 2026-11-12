@@ -362,6 +362,81 @@ TEST_F (CollectionsRouteTest, AnAppendAfterTheHighestOrderIsRefused) {
     EXPECT_EQ (db_->get_collections ().size (), 1u);
 }
 
+// -- `parentId` is a collection id or null (#3451) --------------------------
+//
+// Mutation checks: read `parentId` with the bare `get<std::string> ()` again
+// and every non-string answers nlohmann's own text, and `""` is stored as
+// `""` (tied with the first root, and never a root to `parent_id IS NULL`).
+
+constexpr auto NON_STRING_PARENT_IDS =
+std::to_array<std::string_view> ({ "5", "true", "{}", "[]" });
+
+bool names_parent_id (const json& body) {
+    const auto message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    return message.find ("'parentId'") != std::string::npos;
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithAnEmptyParentIdIsARootAppendedAfterTheRoots) {
+    seed_collection ("col_a", "A", std::nullopt, 2);
+
+    auto [status, body] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "root" }, { "parentId", "" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_TRUE (body["parentId"].is_null ()) << body.dump ();
+    EXPECT_EQ (body["order"], 3)
+    << "appended among the roots, not tied with the first";
+    const auto row = db_->get_collection (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (row);
+    EXPECT_FALSE (row->parent_id.has_value ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithAnEmptyParentIdMovesTheCollectionToTheRoot) {
+    seed_collection ("col_a", "A", std::nullopt, 2);
+    seed_collection ("col_nested", "Nested", "col_a", 0);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_nested", json{ { "parentId", "" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto row = db_->get_collection ("col_nested");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_FALSE (row->parent_id.has_value ());
+    EXPECT_EQ (row->order, 3);
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithANonStringParentIdIsRefusedAndWritesNothing) {
+    for (const std::string_view text : NON_STRING_PARENT_IDS) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "new" }, { "parentId", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_parent_id (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithANonStringParentIdIsRefusedAndLeavesTheRow) {
+    seed_collection ("col_a", "A");
+    seed_collection ("col_nested", "Nested", "col_a", 4);
+    for (const std::string_view text : NON_STRING_PARENT_IDS) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_nested", json{ { "parentId", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_parent_id (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    const auto row = db_->get_collection ("col_nested");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->parent_id, std::optional<std::string> ("col_a"));
+    EXPECT_EQ (row->order, 4);
+}
+
 // -- A collection never inherits auth (#3445) -------------------------------
 //
 // Mutation check: drop `reject_inherit_auth` from either core and the matching

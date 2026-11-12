@@ -378,9 +378,9 @@ bool is_create) {
 
     const std::optional<std::string> previous_parent = c.parent_id;
     if (json.contains ("parentId")) {
-        c.parent_id = json["parentId"].is_null () ?
-        std::nullopt :
-        std::optional<std::string> (json["parentId"].get<std::string> ());
+        if (auto outcome = read_parent_id_field (json["parentId"], c.parent_id); !outcome) {
+            return outcome;
+        }
     } else if (is_create) {
         c.parent_id = std::nullopt;
     }

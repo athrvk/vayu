@@ -952,6 +952,33 @@ read_order_field (const nlohmann::json& value, int& out, std::string_view where 
 }
 
 /**
+ * Reads a stated collection `parentId` into @p out (#3451): a collection id,
+ * or `null` for the tree root. `""` is the root as well and is stored as
+ * `null`, so the tree has one spelling of it. Anything else is a 400 naming
+ * the field, never nlohmann's exception text. @p where is
+ * `read_order_field`'s.
+ */
+[[nodiscard]] inline RouteResult read_parent_id_field (const nlohmann::json& value,
+std::optional<std::string>& out,
+std::string_view where = {}) {
+    if (value.is_null ()) {
+        out = std::nullopt;
+        return {};
+    }
+    if (value.is_string ()) {
+        const auto& id = value.get_ref<const std::string&> ();
+        out = id.empty () ? std::nullopt : std::optional<std::string> (id);
+        return {};
+    }
+    const std::string rule =
+    std::format ("must be a collection id or null (got {})", value.type_name ());
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'parentId': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'parentId' {}", where, rule));
+}
+
+/**
  * Same rule for an integer field whose default is "none stated", stored as
  * NULL: absent on create and `null` on either verb leave @p out empty. Unlike
  * `apply_int_field`, a value @p field refuses (not a number, or out of its

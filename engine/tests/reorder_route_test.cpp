@@ -384,6 +384,58 @@ TEST_F (ReorderRouteTest, RefusesAPerKindNormalizeScopeNamingTheParentShape) {
     EXPECT_EQ (request_orders (col), (std::vector<int>{ 0, 0 }));
 }
 
+// `parentId: ""` is the root, as `null` is, in a move and in a scope (#3451).
+// Mutation check: restore the pre-#3451 string reads in `read_scope` and
+// `read_move` and both answer `Collection '' does not exist`.
+TEST_F (ReorderRouteTest, AnEmptyParentIdIsTheRootInAMoveAndInAScope) {
+    const std::string a     = make_collection ("A");
+    const std::string b     = make_collection ("B");
+    const std::string child = make_collection ("child", a);
+    set_collection_position (a, 0, EARLIER);
+    set_collection_position (b, 0, LATER);
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "normalize", json::array ({ normalize_parent ("") }) },
+    { "moves", json::array ({ move_collection (child, 2, "") }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    const auto child_row = db_->get_collection (child);
+    ASSERT_HAS_VALUE (child_row);
+    EXPECT_FALSE (child_row->parent_id.has_value ())
+    << "stored as null, not as \"\"";
+    EXPECT_EQ (child_row->order, 2);
+    const auto b_row = db_->get_collection (b);
+    ASSERT_HAS_VALUE (b_row);
+    EXPECT_EQ (b_row->order, 1) << "the roots were renumbered";
+}
+
+// A non-string `parentId` is a 400 naming the field, never nlohmann's text,
+// in either list. Mutation check: read the move's `parentId` with a bare
+// `get<std::string> ()` in `read_move` and the move half throws nlohmann's
+// type error.
+TEST_F (ReorderRouteTest, RejectsANonStringParentIdNamingTheField) {
+    const std::string parent = make_collection ("parent");
+    const std::string child  = make_collection ("child", parent);
+    for (const char* text : { "5", "true", "{}", "[]" }) {
+        for (const json& body :
+        { json{ { "moves", json::array ({ move_collection (child, 0, json::parse (text)) }) } },
+        json{ { "normalize", json::array ({ normalize_parent (json::parse (text)) }) } } }) {
+            auto [status, response] = reorder_response (*db_, body);
+
+            EXPECT_EQ (status, 400) << body.dump () << " -> " << response.dump ();
+            const auto message = response["error"]["message"].get<std::string> ();
+            EXPECT_NE (
+            message.find ("'parentId' must be a collection id or null"), std::string::npos)
+            << message;
+            EXPECT_EQ (response.dump ().find ("json.exception"), std::string::npos)
+            << response.dump ();
+        }
+    }
+    const auto child_row = db_->get_collection (child);
+    ASSERT_HAS_VALUE (child_row);
+    EXPECT_EQ (child_row->parent_id, std::optional<std::string> (parent));
+}
+
 // ---------------------------------------------------------------------------
 // Cycles, validated against the post-move shape
 // ---------------------------------------------------------------------------
