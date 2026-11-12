@@ -891,9 +891,11 @@ sent to it, so building a webhook consumer needs no cloud tunnel. Engine contrac
   pane is a **Body** tab holding the capture's body, sized to the card (#3492); a request you
   received should read like one you sent. A base64 body reaches the pane as its decoded bytes
   (the "Binary data" pane, or the image), never as base64 text, and bytes that do not decode
-  fall back to the Raw view's placeholder line. The list's `CaptureRow` shows a long path
-  through `truncateUrl`, so the tail that tells captures apart survives, with the full path
-  as its `title`.
+  fall back to the Raw view's placeholder line (shown as text whatever type the capture
+  declared, so its content-type is left off that request), and an empty one reads "No body".
+  The list's `CaptureRow` shows a long path through `truncateUrl`, so the tail that tells
+  captures apart survives, with the full path in a `Tooltip` on the row that opens on hover
+  and on focus; a path that is not cut has no tooltip.
 - `useInboxLive.ts` - the view's reference to the stream, not the stream itself. It retains the
   addressed inbox in `services/inbox-watch-service.ts` while the tab is mounted, renders the
   `watching` / `stopped` that service reports, and offers its Resume. Releasing the reference does

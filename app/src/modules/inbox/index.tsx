@@ -49,6 +49,10 @@ import {
 	SelectTrigger,
 	SelectValue,
 	Switch,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+	TooltipValue,
 	ICON_MOTION,
 } from "@/components/ui";
 import {
@@ -135,18 +139,15 @@ interface CaptureRowProps {
 }
 
 /**
- * How much of a capture's path the row spends characters on. The path sits in a
- * `w-72` list beside a method column and the time, which leaves about 11
- * characters of `text-xs` mono at the default (compact) density with a 12-hour
- * clock; Comfortable and 24-hour clocks have room to spare. Sized to the tight
- * case because a path wider than its box is cut by CSS `truncate` from the
- * right, which is the end that tells captures apart - `truncateUrl` keeps that
- * end and the full path is the `title`.
+ * Characters of a capture's path the row shows: what fits the `w-72` list beside
+ * the method and time at compact density. `truncateUrl` keeps the tail, which
+ * CSS `truncate` (the net under this) would cut and which tells captures apart.
  */
 const CAPTURE_PATH_CHARS = 11;
 
 function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
-	return (
+	const shownPath = truncateUrl(capture.path, CAPTURE_PATH_CHARS);
+	const row = (
 		<button
 			type="button"
 			onClick={onSelect}
@@ -158,9 +159,7 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 		>
 			<span className="flex w-full items-center gap-2">
 				<MethodBadge method={capture.method} variant="text" size="sm" className="w-[5ch]" />
-				<span className="truncate font-mono text-xs" title={capture.path}>
-					{truncateUrl(capture.path, CAPTURE_PATH_CHARS)}
-				</span>
+				<span className="truncate font-mono text-xs">{shownPath}</span>
 				<span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
 					<TimeValue value={capture.receivedAt} style="time" />
 				</span>
@@ -174,6 +173,18 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 				{capture.query ? ` · ?${capture.query}` : ""}
 			</span>
 		</button>
+	);
+	if (shownPath === capture.path) return row;
+
+	// The row is the trigger, so focus reveals the path as well as hover: a native
+	// `title` never shows on focus (#3492).
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>{row}</TooltipTrigger>
+			<TooltipContent side="right">
+				<TooltipValue className="font-mono">{capture.path}</TooltipValue>
+			</TooltipContent>
+		</Tooltip>
 	);
 }
 

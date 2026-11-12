@@ -106,4 +106,40 @@ describe("the capture's main pane", () => {
 		expect(shown).toBe("[2.0 KB of binary data, not shown as text.]");
 		expect(screen.queryByText(garbled, { exact: false })).not.toBeInTheDocument();
 	});
+
+	it("shows the placeholder as text when undecodable base64 is declared an image", () => {
+		const garbled = "!!! not base64 !!!";
+		renderDetail(
+			capture({
+				headers: { "Content-Type": "image/png" },
+				body: garbled,
+				bodyEncoding: "base64",
+				bodyBytes: 2048,
+			})
+		);
+
+		const panel = screen.getByRole("tabpanel");
+		// The declared type describes bytes that are not here, so the viewer must
+		// not keep its image pane over the placeholder line.
+		expect(within(panel).getByTestId("code-editor").textContent).toBe(
+			"[2.0 KB of binary data, not shown as text.]"
+		);
+		expect(within(panel).queryByText(/^Image \(/)).not.toBeInTheDocument();
+		expect(panel.querySelector("img")).toBeNull();
+	});
+
+	it("says there is no body for an empty base64 body, not a 0 B binary", () => {
+		renderDetail(
+			capture({
+				headers: { "content-type": "application/octet-stream" },
+				body: "",
+				bodyEncoding: "base64",
+				bodyBytes: 0,
+			})
+		);
+
+		const panel = screen.getByRole("tabpanel");
+		expect(within(panel).getByText("No body")).toBeInTheDocument();
+		expect(screen.queryByText(/Binary data/)).not.toBeInTheDocument();
+	});
 });

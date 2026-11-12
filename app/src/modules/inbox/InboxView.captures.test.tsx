@@ -210,26 +210,54 @@ describe("a capture row's path (#3492)", () => {
 	// at the end.
 	const LONG_PATH = "/webhooks/stripe/events/evt_1Nk2xYz";
 
-	it("keeps the tail of a long path and shows the whole of it on hover", async () => {
+	async function renderLongPathRow() {
 		listInboxCaptures.mockResolvedValueOnce({
 			...page(0, 0, 1),
 			data: [capture(1, { path: LONG_PATH })],
 		});
 		renderTab();
+		const shown = await screen.findByText("…vt_1Nk2xYz");
+		return { shown, row: shown.closest("button")! };
+	}
 
-		const row = await screen.findByTitle(LONG_PATH);
+	it("keeps the tail of a long path, with the CSS clip as the net under it", async () => {
+		const { shown } = await renderLongPathRow();
+
 		// One character for the ellipsis, then the last ten of the path.
-		expect(row.textContent).toBe("…vt_1Nk2xYz");
-		// The CSS clip stays as the net under the character budget.
-		expect(row.className).toContain("truncate");
+		expect(shown.textContent).toBe("…vt_1Nk2xYz");
+		expect(shown.className).toContain("truncate");
 	});
 
-	it("leaves a short path whole", async () => {
+	it("shows the whole path when the row takes keyboard focus", async () => {
+		const { row } = await renderLongPathRow();
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		fireEvent.focus(row);
+
+		// A native `title` would never open here: this is the focus half of
+		// "full path on hover or focus".
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+		expect(row).not.toHaveAttribute("title");
+	});
+
+	it("shows the whole path on hover", async () => {
+		const { row } = await renderLongPathRow();
+
+		fireEvent.pointerMove(row);
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+	});
+
+	it("leaves a short path whole, with nothing to reveal", async () => {
 		listInboxCaptures.mockResolvedValueOnce(page(1, 1, 1));
 		renderTab();
 
-		const row = await screen.findByText("/hook/1");
-		expect(row).toHaveAttribute("title", "/hook/1");
+		const row = (await screen.findByText("/hook/1")).closest("button")!;
+		fireEvent.focus(row);
+		fireEvent.pointerMove(row);
+
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		expect(row).not.toHaveAttribute("title");
 	});
 });
 

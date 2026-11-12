@@ -33,6 +33,13 @@ import type { InboxCapture } from "@/types";
 import { CaptureRaw } from "./CaptureRaw";
 import { binaryBodyPlaceholder, captureBinaryBytes, captureUrl } from "./utils";
 
+/** `headers` without any content-type, whatever its case. */
+function withoutContentType(headers: Record<string, string>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(headers).filter(([name]) => name.toLowerCase() !== "content-type")
+	);
+}
+
 /**
  * The `UnifiedResponseViewer` request for a capture. A base64 body is its
  * decoded bytes, which the viewer draws as an image or a "Binary data" pane;
@@ -43,8 +50,18 @@ function viewerRequest(capture: InboxCapture, url: string): RequestData {
 	if (capture.bodyEncoding !== "base64") return { ...head, body: capture.body };
 
 	const bytes = captureBinaryBytes(capture);
-	if (!bytes) return { ...head, body: binaryBodyPlaceholder(capture, undefined) };
-	return { ...head, rawBytes: { data: bytes, isText: false } };
+	// Zero bytes is no body: `rawBytes` would draw "Binary data, 0 B" over it.
+	if (bytes?.length === 0) return { ...head, body: "" };
+	if (bytes) return { ...head, rawBytes: { data: bytes, isText: false } };
+
+	// The placeholder is text. The viewer keeps a declared image or PDF type
+	// when there are no `rawBytes` and would draw it as a broken image, so the
+	// type is left off: it describes bytes that are not here.
+	return {
+		...head,
+		headers: withoutContentType(capture.headers),
+		body: binaryBodyPlaceholder(capture, undefined),
+	};
 }
 
 interface CaptureDetailProps {
