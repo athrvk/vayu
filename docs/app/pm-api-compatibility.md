@@ -2114,6 +2114,15 @@ documentation); and `target: ESNext`, because an older lib or target would flag
 `Object.hasOwn`, `Array.prototype.at`, `toSorted`, `Object.groupBy` and
 `Promise.withResolvers`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
 
+The newest library members, `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON`,
+`JSON.isRawJSON` and the `Uint8Array` base64 and hex methods, are not in the TypeScript
+that Monaco bundles, so `esnext` alone would underline each as "Property does not exist"
+though the engine runs it. The engine's file declares them as interface augmentations
+(`LIBRARY_GAPS` in `script_types.cpp`); `script_types_test.cpp` runs every one in the
+script engine, so a declared member the runtime lacks fails there. The set retires with a
+Monaco upgrade: `script-typedefs.docs-compile.test.ts` compiles the bare lib and fails
+when it declares one, naming the row to delete.
+
 **Semantic diagnostics are on**, which is what makes `pm.response.staus` squiggle with a
 "Did you mean 'status'?" - and, through the same analysis, what makes quick fixes, rename,
 find-references and go-to-definition work inside a script. Those providers all default to

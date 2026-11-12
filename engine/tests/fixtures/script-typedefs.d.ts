@@ -2838,6 +2838,28 @@ declare const cheerio: never;
  */
 declare const Backbone: never;
 
+// Library members the runtime has and TypeScript's lib does not declare yet.
+interface RegExpConstructor {
+	escape(string: string): string;
+}
+interface Math {
+	sumPrecise(values: Iterable<number>): number;
+}
+interface JSON {
+	rawJSON(text: string): { readonly rawJSON: string };
+	isRawJSON(value: unknown): value is { readonly rawJSON: string };
+}
+interface Uint8ArrayConstructor {
+	fromBase64(string: string, options?: { alphabet?: 'base64' | 'base64url'; lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' }): Uint8Array<ArrayBuffer>;
+	fromHex(string: string): Uint8Array<ArrayBuffer>;
+}
+interface Uint8Array<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> {
+	toBase64(options?: { alphabet?: 'base64' | 'base64url'; omitPadding?: boolean }): string;
+	toHex(): string;
+	setFromBase64(string: string, options?: { alphabet?: 'base64' | 'base64url'; lastChunkHandling?: 'loose' | 'strict' | 'stop-before-partial' }): { read: number; written: number };
+	setFromHex(string: string): { read: number; written: number };
+}
+
 declare module 'crypto-js' {
 	export = CryptoJS;
 }

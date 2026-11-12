@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -513,6 +514,88 @@ TEST (ScriptTypesTest, DeclaredAbsentGlobalsAreGenuinelyAbsentFromTheRuntime) {
 
     EXPECT_GT (checked, 15u)
     << "too few absent globals were probed - the scan found nothing";
+#else
+    GTEST_SKIP () << "QuickJS not compiled in";
+#endif
+}
+
+// The library members declared on top of TypeScript's lib (LIBRARY_GAPS, #3462)
+// are the same promise as a declared module: the editor offers them, so the
+// runtime must run them. Each is exercised for what it does, not just that it
+// exists, and the set is read back out of the generated file so a row added to
+// the table without a probe here (or a probe for a row removed) fails.
+TEST (ScriptTypesTest, EveryDeclaredLibraryMemberRunsInTheRuntime) {
+#ifdef VAYU_HAS_QUICKJS
+    const std::string dts = generate_script_typedefs ();
+
+    const std::string banner = "// Library members the runtime has and "
+                               "TypeScript's lib does not declare yet.\n";
+    const size_t start       = dts.find (banner);
+    ASSERT_NE (start, std::string::npos)
+    << "the library augmentations are missing";
+    const size_t end = dts.find ("\ndeclare module '", start);
+    ASSERT_NE (end, std::string::npos);
+    const std::set<std::string> declared =
+    declared_members (dts.substr (start, end - start));
+
+    const std::map<std::string, std::string> probes = {
+        { "escape",
+        "const re = new RegExp(RegExp.escape('a.b')); "
+        "if (!re.test('a.b') || re.test('axb')) throw new Error('escape');" },
+        { "sumPrecise",
+        "if (Math.sumPrecise([1e20, 0.1, -1e20]) !== 0.1) "
+        "throw new Error('sumPrecise');" },
+        { "rawJSON",
+        "const raw = JSON.rawJSON('12345678901234567890'); "
+        "if (JSON.stringify({ n: raw }) !== '{\"n\":12345678901234567890}' "
+        "|| raw.rawJSON !== '12345678901234567890') "
+        "throw new Error('rawJSON');" },
+        { "isRawJSON",
+        "if (!JSON.isRawJSON(JSON.rawJSON('1')) || JSON.isRawJSON({})) "
+        "throw new Error('isRawJSON');" },
+        { "fromBase64",
+        "const b = Uint8Array.fromBase64('AQID'); "
+        "if (!(b instanceof Uint8Array) || b.join() !== '1,2,3' "
+        "|| Uint8Array.fromBase64('-_8', { alphabet: 'base64url' })"
+        ".join() !== '251,255') throw new Error('fromBase64');" },
+        { "fromHex",
+        "if (Uint8Array.fromHex('0a0b').join() !== '10,11') "
+        "throw new Error('fromHex');" },
+        { "toBase64",
+        "if (new Uint8Array([1, 2]).toBase64() !== 'AQI=' "
+        "|| new Uint8Array([1, 2]).toBase64({ omitPadding: true }) "
+        "!== 'AQI') throw new Error('toBase64');" },
+        { "toHex",
+        "if (new Uint8Array([10, 11]).toHex() !== '0a0b') "
+        "throw new Error('toHex');" },
+        { "setFromBase64",
+        "const t = new Uint8Array(3); "
+        "const r = t.setFromBase64('AQID'); "
+        "if (r.read !== 4 || r.written !== 3 || t.join() !== '1,2,3') "
+        "throw new Error('setFromBase64');" },
+        { "setFromHex",
+        "const t = new Uint8Array(2); const r = t.setFromHex('0a0b'); "
+        "if (r.read !== 4 || r.written !== 2 || t.join() !== '10,11') "
+        "throw new Error('setFromHex');" },
+    };
+
+    std::set<std::string> probed;
+    for (const auto& [name, _] : probes) {
+        probed.insert (name);
+    }
+    EXPECT_EQ (declared, probed)
+    << "LIBRARY_GAPS and this test's probes name different members";
+
+    vayu::runtime::ScriptEngine engine;
+    vayu::Environment env;
+    vayu::runtime::ScriptContext ctx;
+    ctx.environment = &env;
+    for (const auto& [name, script] : probes) {
+        const auto result = engine.execute (script, ctx);
+        EXPECT_TRUE (result.success)
+        << "'" << name << "' is declared but the runtime does not run it ("
+        << result.error_message << ")";
+    }
 #else
     GTEST_SKIP () << "QuickJS not compiled in";
 #endif

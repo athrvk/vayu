@@ -4099,9 +4099,14 @@ The **language** is current; what is missing is the **host environment**:
   (`??`) are ES2020 and supported, as are later additions like
   `Array.prototype.at`, `Object.hasOwn`, `String.prototype.replaceAll`, the
   ES2023 copying methods (`toSorted`, `toReversed`, `with`), `findLast`,
-  `Object.groupBy` and `Promise.withResolvers`. The script editor's type
-  declarations use TypeScript's `esnext` library, so none of them is marked as
-  an error. This section used to say the opposite, listing `?.` and `??` as
+  `Object.groupBy` and `Promise.withResolvers`, and the newest library
+  members: `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON` and
+  `JSON.isRawJSON`, and `Uint8Array`'s `fromBase64`, `fromHex`, `toBase64`,
+  `toHex`, `setFromBase64` and `setFromHex`. The script editor's type
+  declarations use TypeScript's `esnext` library, so none of the first group is
+  marked as an error; the engine's own declarations add the newest ones, which
+  TypeScript's bundled lib does not have yet (`LIBRARY_GAPS` in
+  `script_types.cpp`). This section used to say the opposite, listing `?.` and `??` as
   "ES2021+" and unavailable - wrong on both counts, so any workaround written
   around that claim can go. What limits a script is the global list above, not the syntax.
 - **No host globals**: no `fetch`, `URL`, `TextEncoder`,
