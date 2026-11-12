@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -291,6 +292,158 @@ TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
 
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"], 3);
+}
+
+// -- `order` is an integer from 0 to INT_MAX (#3451) ------------------------
+//
+// Parsed from text, as a wire body is: nlohmann reads a non-negative literal
+// as unsigned. Mutation checks: read `order` with the bare `get<int> ()` again
+// and 1.7 stores 1, 2^31 a negative and `"x"` answers nlohmann's own text;
+// drop the `MAX_SIBLING_ORDER` stop in `Database::next_sibling_order` and the
+// append after INT_MAX stores a negative.
+
+constexpr auto UNSTORABLE_ORDERS = std::to_array<std::string_view> (
+{ "2147483648", "4294967296", "9223372036854775808", "-1", "1.7", "\"x\"" });
+
+bool names_order (const json& body) {
+    const auto message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    return message.find ("'order'") != std::string::npos;
+}
+
+TEST_F (CollectionsRouteTest, ACreateStatingAnUnstorableOrderIsRefusedAndWritesNothing) {
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "new" }, { "order", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_order (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateStatingAnUnstorableOrderIsRefusedAndLeavesTheRow) {
+    seed_collection ("col_a", "A", std::nullopt, 4);
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "order", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_order (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    const auto row = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 4);
+}
+
+TEST_F (CollectionsRouteTest, TheHighestOrderIsStoredOnBothVerbs) {
+    auto [status, created] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "new" }, { "order", json::parse ("2147483647") } });
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["order"], 2147483647);
+
+    seed_collection ("col_a", "A");
+    auto [update_status, updated] = vayu::http::routes::update_collection_response (
+    *db_, "col_a", json{ { "order", json::parse ("2147483647") } });
+    ASSERT_EQ (update_status, 200) << updated.dump ();
+    const auto row = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 2147483647);
+}
+
+// A root, and a request under a parent, at the last slot leave a folder
+// nothing to append after.
+TEST_F (CollectionsRouteTest, AnAppendAfterTheHighestOrderIsRefused) {
+    seed_collection ("col_full_root", "Full", std::nullopt, 2147483647);
+    seed_request ("req_last", "col_full_root", 2147483647);
+
+    for (const json& body : { json{ { "name", "root" } },
+         json{ { "name", "nested" }, { "parentId", "col_full_root" } } }) {
+        auto [status, refused] =
+        vayu::http::routes::create_collection_response (*db_, body);
+        EXPECT_EQ (status, 400) << body.dump () << " -> " << refused.dump ();
+        EXPECT_TRUE (names_order (refused)) << refused.dump ();
+    }
+    EXPECT_EQ (db_->get_collections ().size (), 1u);
+}
+
+// -- `parentId` is a collection id or null (#3451) --------------------------
+//
+// Mutation checks: read `parentId` with the bare `get<std::string> ()` again
+// and every non-string answers nlohmann's own text, and `""` is stored as
+// `""` (tied with the first root, and never a root to `parent_id IS NULL`).
+
+constexpr auto NON_STRING_PARENT_IDS =
+std::to_array<std::string_view> ({ "5", "true", "{}", "[]" });
+
+bool names_parent_id (const json& body) {
+    const auto message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    return message.find ("'parentId'") != std::string::npos;
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithAnEmptyParentIdIsARootAppendedAfterTheRoots) {
+    seed_collection ("col_a", "A", std::nullopt, 2);
+
+    auto [status, body] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "root" }, { "parentId", "" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    EXPECT_TRUE (body["parentId"].is_null ()) << body.dump ();
+    EXPECT_EQ (body["order"], 3)
+    << "appended among the roots, not tied with the first";
+    const auto row = db_->get_collection (body["id"].get<std::string> ());
+    ASSERT_HAS_VALUE (row);
+    EXPECT_FALSE (row->parent_id.has_value ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithAnEmptyParentIdMovesTheCollectionToTheRoot) {
+    seed_collection ("col_a", "A", std::nullopt, 2);
+    seed_collection ("col_nested", "Nested", "col_a", 0);
+
+    auto [status, body] = vayu::http::routes::update_collection_response (
+    *db_, "col_nested", json{ { "parentId", "" } });
+
+    ASSERT_EQ (status, 200) << body.dump ();
+    const auto row = db_->get_collection ("col_nested");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_FALSE (row->parent_id.has_value ());
+    EXPECT_EQ (row->order, 3);
+}
+
+TEST_F (CollectionsRouteTest, ACreateWithANonStringParentIdIsRefusedAndWritesNothing) {
+    for (const std::string_view text : NON_STRING_PARENT_IDS) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "new" }, { "parentId", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_parent_id (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateWithANonStringParentIdIsRefusedAndLeavesTheRow) {
+    seed_collection ("col_a", "A");
+    seed_collection ("col_nested", "Nested", "col_a", 4);
+    for (const std::string_view text : NON_STRING_PARENT_IDS) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_nested", json{ { "parentId", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_parent_id (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    const auto row = db_->get_collection ("col_nested");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->parent_id, std::optional<std::string> ("col_a"));
+    EXPECT_EQ (row->order, 4);
 }
 
 // -- A collection never inherits auth (#3445) -------------------------------

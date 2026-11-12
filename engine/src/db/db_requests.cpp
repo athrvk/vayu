@@ -198,7 +198,7 @@ std::vector<Request> Database::get_requests_in_subtree (const std::string& root_
     const std::vector<Collection> collections = get_collections ();
     std::unordered_map<std::string, std::vector<const Collection*>> folders_of;
     for (const auto& collection : collections) {
-        if (collection.parent_id && !collection.parent_id->empty ()) {
+        if (collection.parent_id) {
             folders_of[*collection.parent_id].push_back (&collection);
         }
     }

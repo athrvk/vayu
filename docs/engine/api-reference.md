@@ -417,8 +417,8 @@ the highest `order` any sibling of either kind holds:
 | Write | `order` |
 |---|---|
 | Create, `order` absent or `null` | appended |
-| Create, `order` stated | as given |
-| Update, `order` stated | as given |
+| Create, `order` stated | as given, if an integer from `0` to `2147483647`; otherwise a `400` |
+| Update, `order` stated | as given, if an integer from `0` to `2147483647`; otherwise a `400` |
 | Update, `order` absent, no move | unchanged |
 | Update, `order` absent or `null`, **and** the row changes parent (a collection's `parentId`, a request's `collectionId`) | appended in the destination |
 | Update, `order` `null`, no move | appended among its current siblings |
@@ -427,6 +427,22 @@ A move that states no order therefore lands at the end of the destination rather
 than at whatever slot its position in the *old* list happened to name, after its
 folders and its requests alike. Ordering *within* a list is always the caller's
 to state, and a stated `order` may put a request between two sub-collections.
+
+**A stored `order` is an integer from `0` to `2147483647`** (#3451), so a
+negative, truncated or wrapped slot cannot be written. A stated `order` outside
+that range or that is not a JSON integer (`"3"`, `2.5`, `-1`, `2147483648`) is
+a `400` naming the field on every route that writes one
+(`POST`/`PUT /collections`, `POST`/`PUT /requests`,
+[`POST /reorder`](#post-reorder), `POST /import/apply`, `POST /specs/sync`),
+for example `Invalid 'order': must be an integer from 0 to 2147483647 (got 2.5)`,
+and nothing is written. An append under a parent where a sibling already holds
+`2147483647` has no slot left, so it is a `400` naming `order` too
+(`Cannot append: a sibling already holds 'order' 2147483647 ...`) rather than a
+row that wraps to the top; state an `order`, or renumber the parent with
+`POST /reorder`'s `normalize`, which frees the end again. An import document's
+own stated order (`x-vayu-request.order`, an `x-vayu-collection.folders`
+entry's `order`) outside the range counts as unstated, so the row takes the
+position an unordered one would.
 
 **Bulk import** is the one exception to the append scan: `POST /import/apply`
 writes rows that cannot see each other yet, so an omitted `order` gives the
@@ -512,6 +528,8 @@ message `Invalid 'auth': must be a JSON object`.
 | `auth` (collection / request) | object |
 | `body` (request) | object - see [The request `body` union](#the-request-body-union) |
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
+| `order` (collection / request) | integer from `0` to `2147483647` - see [Ordering](#ordering) |
+| `parentId` (collection) | string: a collection id, or `null` or `""` for the root |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
 quietly when it is not an object - `variables` reads back empty, a request `body`
@@ -519,6 +537,20 @@ is dropped, and `auth` resolves to none, so a request the caller believes carrie
 credentials goes out bare. The write is therefore rejected rather than stored:
 `{"variables": 42}` and `{"auth": "bearer"}` are `400`s, and the previously
 stored value is left untouched.
+
+**`parentId: ""` is the root, the same as `null`** (#3451). It is stored as
+`null` on `POST`/`PUT /collections` (a folder `POST /specs/sync` creates
+with `""` or `null` lands under the synced collection), and
+[`POST /reorder`](#post-reorder) reads it as `null` in a move and in a
+`normalize` scope, so the tree has one spelling of the root: a collection
+created with `""` is appended among the roots and lists with them. A value
+that is neither a string nor `null` (`5`, `true`, an object, an array) is a
+`400` such as
+`Invalid 'parentId': must be a collection id or null (got number)`. Rows an
+older engine stored with `""` are rewritten to `null` at startup
+([the empty-parent pass](db-schema.md#the-empty-parent-pass-issue-3451)), so a
+delete and restore of one comes back where it was instead of re-parented to the
+root.
 
 **A `variables` key must be one a `{{ name }}` token can reach (#3251).** A token
 is looked up with the spaces, tabs, CR and LF around its text cut, so a stored
@@ -1678,8 +1710,8 @@ the null-vs-absent rule.
 ```json
 {
   "name": "My API",        // Required, no default (null is a 400)
-  "parentId": null,         // Optional, null for root; a trashed collection is a 409
-  "order": 0,               // Optional, appended after siblings if omitted - see Ordering
+  "parentId": null,         // Optional, null or "" for root (stored as null); a trashed collection is a 409
+  "order": 0,               // Optional, 0..2147483647; appended after siblings if omitted - see Ordering
   "variables": {},          // Optional, collection-scoped variables
   "auth": {"mode": "none"}, // Optional, default none; never mode "inherit" - see Collection auth
   "dataSchema": {},         // Optional, the declared data contract - see below
@@ -1698,7 +1730,11 @@ the null-vs-absent rule.
 ([#3251](#accepted-field-shapes)), if `auth` states mode `inherit`
 ([#3445](#collection-auth)) or a mode outside the
 [known set](#auth-modes), if an `openapi` binding names no stored spec
-(below), or on a cycle (below); `409` if `parentId` names a collection in the
+(below), if `parentId` is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), if `order` is not an integer
+from `0` to `2147483647` or an append finds no slot left
+([Ordering](#ordering)), or on a cycle (below); `409` if `parentId` names a
+collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap,
 when a serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
 `dataFile` is over the engine's
@@ -1718,8 +1754,8 @@ its value, an explicit `null` resets it to the default.
 ```json
 {
   "name": "Renamed",       // Optional; null is a 400 (no default)
-  "parentId": null,         // Optional, null moves it to the root; a trashed collection is a 409
-  "order": 3,               // Optional; a move with no order appends - see Ordering
+  "parentId": null,         // Optional, null or "" moves it to the root; a trashed collection is a 409
+  "order": 3,               // Optional, 0..2147483647; a move with no order appends - see Ordering
   "variables": null,        // Optional, null resets to {}
   "auth": null,             // Optional, null resets to {"mode":"none"}; never mode "inherit" - see Collection auth
   "dataSchema": null,       // Optional, null clears the declared contract
@@ -1764,7 +1800,11 @@ a blank or padded `variables` key ([#3251](#accepted-field-shapes)), an
 `auth` that states mode `inherit` ([#3445](#collection-auth)) or a mode outside
 the [known set](#auth-modes), an
 `openapi` that is neither `null` nor `{}` (binding is
-[`POST /specs/bind`](#post-specsbind), issue #3348, below) or on a cycle
+[`POST /specs/bind`](#post-specsbind), issue #3348, below), a `parentId`
+that is neither a string nor `null`
+([Accepted field shapes](#accepted-field-shapes)), an `order`
+that is not an integer from `0` to `2147483647` or an append with no slot
+left ([Ordering](#ordering)) or on a cycle
 (below); `409` if `parentId` names a collection in the
 [trash](#trash) (below); `413` naming the field, its size and the cap, when a
 serialized `variables` / `auth` / `dataSchema` / `openapi` / `specFile` /
@@ -2083,8 +2123,8 @@ the null-vs-absent rule.
   "elements": [],                    // Optional, typed behaviours - see Elements. The only
                                       // script source; preRequestScript/postRequestScript/tests
                                       // are refused (400, naming "elements")
-  "order": 0,                        // Optional, appended after the collection's sub-collections
-                                      // and requests if omitted - see Ordering
+  "order": 0,                        // Optional, 0..2147483647; appended after the collection's
+                                      // sub-collections and requests if omitted - see Ordering
   "followRedirects": true,           // Optional, follow 3xx responses. Default true
   "maxRedirects": 10,                // Optional, hops while following, clamped to 0..100. Default 10
   "timeout": null,                   // Optional, this request's timeout in ms, 1..86400000.
@@ -2257,6 +2297,8 @@ does not exist (message `Collection '<id>' does not exist`), on an unrecognized
 on a `methodSource` that is not `"graphql"` or `null`,
 on a `mockResponseMode` that is not `"first"` / `"fixed"` / `"random"`,
 on a `mockExampleId` that is not a non-empty string or `null`,
+on an `order` that is not an integer from `0` to `2147483647` or an append
+that finds no slot left ([Ordering](#ordering)),
 on an `auth` whose `mode` is not a [known one](#auth-modes) (#3464),
 or on an `httpVersion` that is not `"auto"` / `"http1.1"` / `"http2"` (the body
 names the field and lists the valid values); `413` naming the field, its size
@@ -2306,6 +2348,10 @@ A non-boolean `followRedirects`, `verifySSL` or `stream`, or a non-integer
 `maxRedirects`, is ignored rather than rejected. `maxRedirects` is clamped to `0..100` on the way in.
 `timeout` is the exception among them: a value outside `1`-`86400000` or one
 that is not a number is a `400` naming `'timeout'`, and nothing is written.
+`order` is held the same way (#3451): a stated value that is not an integer
+from `0` to `2147483647` is a `400` naming `'order'`, so
+`{"collectionId": "col_2", "order": "9"}` refuses the move rather than making
+it at the old position - see [Ordering](#ordering).
 
 **`httpVersion`** follows the same [null-vs-absent rule](#the-null-vs-absent-rule)
 as the fields above, but validates more strictly: absent keeps the stored
@@ -4095,8 +4141,8 @@ Both arrays are optional (absent or `null` means none); an empty batch is a
 |---|---|
 | `type` | `"collection"` or `"request"`; anything else is a `400` |
 | `id` | Non-empty string naming a **stored** row of that type |
-| `order` | Required, a non-negative integer. Not a float, not negative - this endpoint writes dense positions, and either would be a silently truncated or unreachable slot |
-| `parentId` (collection) | Absent keeps the current parent; `null` moves to the root; a string moves under that collection, which must exist |
+| `order` | Required, an integer from `0` to `2147483647`. Not a float, not negative, not past the column - this endpoint writes dense positions, and each would be a silently truncated, unreachable or wrapped slot. Anything else is a `400`, e.g. `Invalid move at index 0: 'order' must be an integer from 0 to 2147483647 (got 2147483648)` |
+| `parentId` (collection) | Absent keeps the current parent; `null` or `""` moves to the root; any other string moves under that collection, which must exist; anything else is a `400` naming `parentId` |
 | `collectionId` (request) | Absent keeps the current owner; a string moves to that collection, which must exist |
 
 A row may appear in `moves` at most once - two positions for one row is a `400`
@@ -4107,8 +4153,8 @@ renumbered dense `0..n-1` in the [sibling order](#ordering) **before** any move
 applies. The children are the parent's sub-collections and its requests as one
 list (#2535), so a tie across the two kinds comes out as distinct numbers with
 the sub-collection first. An entry is `{"parentId": <collection id>}`, or
-`{"parentId": null}` for the root collections (the roots hold collections
-only). The named collection must exist, and `parentId` must be *stated* rather
+`{"parentId": null}` (`""` reads the same) for the root collections (the roots
+hold collections only). The named collection must exist, and `parentId` must be *stated* rather
 than omitted, so a renumber can never land on a scope the caller did not mean.
 The per-kind shapes engines before #2535 took, `{"type": "collection",
 "parentId": ...}` and `{"type": "request", "collectionId": ...}`, are a `400`

@@ -513,9 +513,12 @@ class Database {
      * (`sibling_order.hpp`, #2535). `std::nullopt` is the roots, which hold
      * collections only. @p excluded_id is left out of the scan, so a row
      * asked to reset its own position lands after its *other* siblings
-     * rather than one past itself. `0` for a parent with no live child.
+     * rather than one past itself. `0` for a parent with no live child, and
+     * nothing when a sibling already holds `MAX_SIBLING_ORDER` (#3451): there
+     * is no slot after it, and the caller refuses the append.
      */
-    int next_sibling_order (const std::optional<std::string>& parent_id,
+    [[nodiscard]] std::optional<int> next_sibling_order (
+    const std::optional<std::string>& parent_id,
     const std::string& excluded_id = {}); // db_collections.cpp
     /// Stamps the request as deleted (issue #988). Its examples stay on the
     /// row - nothing can read them while the request is stamped, and a purge
@@ -739,6 +742,21 @@ class Database {
      * someone actually brings it back.
      */
     int64_t strip_stored_managed_headers (); // db_maintenance.cpp
+
+    /**
+     * @brief Rewrite every collection stored with `parent_id = ''` to NULL,
+     *        trashed rows included, and answer how many were rewritten.
+     *
+     * `""` was a second spelling of the tree root until #3451; the write
+     * paths store NULL now (`read_parent_id_field`).
+     *
+     * Idempotent and unmarked, unlike `strip_stored_managed_headers`: both
+     * statements are served by `idx_collections_parent_id`, so a clean
+     * workspace pays one index probe per start.
+     * Saves a `pre-repair` snapshot before the first rewrite and throws,
+     * rewriting nothing, when it cannot.
+     */
+    int64_t clear_empty_parent_ids (); // db_maintenance.cpp
 
     /**
      * @brief Persist a whole import in one transaction (issue #96).

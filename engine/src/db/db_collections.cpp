@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "vayu/core/constants.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/default_headers.hpp"
 #include "vayu/http/transport_policy.hpp"
 #include "vayu/utils/invariant.hpp"
@@ -108,7 +109,7 @@ std::optional<Collection> Database::get_collection (const std::string& id) {
     return cols.front ();
 }
 
-int Database::next_sibling_order (const std::optional<std::string>& parent_id,
+std::optional<int> Database::next_sibling_order (const std::optional<std::string>& parent_id,
 const std::string& excluded_id) {
     std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
     int highest      = -1;
@@ -121,14 +122,17 @@ const std::string& excluded_id) {
         raise (impl_->storage.max (&Collection::order,
         where (c (&Collection::id) != excluded_id &&
         is_null (&Collection::parent_id) && is_null (&Collection::deleted_at))));
-        return highest + 1;
+    } else {
+        raise (impl_->storage.max (&Collection::order,
+        where (c (&Collection::id) != excluded_id && c (&Collection::parent_id) == *parent_id &&
+        is_null (&Collection::deleted_at))));
+        raise (impl_->storage.max (&Request::order,
+        where (c (&Request::id) != excluded_id &&
+        c (&Request::collection_id) == *parent_id && is_null (&Request::deleted_at))));
     }
-    raise (impl_->storage.max (&Collection::order,
-    where (c (&Collection::id) != excluded_id &&
-    c (&Collection::parent_id) == *parent_id && is_null (&Collection::deleted_at))));
-    raise (impl_->storage.max (&Request::order,
-    where (c (&Request::id) != excluded_id &&
-    c (&Request::collection_id) == *parent_id && is_null (&Request::deleted_at))));
+    if (highest == MAX_SIBLING_ORDER) {
+        return std::nullopt;
+    }
     return highest + 1;
 }
 
