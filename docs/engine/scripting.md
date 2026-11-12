@@ -495,7 +495,9 @@ pm.response.responseTimeQueueWait // Wait before the wire in ms - generator
 pm.response.headers           // Plain object, lower-cased keys, with
                               // case-insensitive get()/has() over it - see below
 pm.response.text()            // Body as string
-pm.response.json()            // Parse JSON (throws if invalid)
+pm.response.json()            // Parse JSON (throws if invalid). Takes no
+                              // reviver: an argument is ignored, and a Postman
+                              // import names a call that passes one
 pm.response.reason()          // Status reason phrase ('OK', 'Not Found')
 pm.response.size()            // { body, header, total } in bytes
 pm.response.responseSize      // The body's bytes: size().body
@@ -1459,6 +1461,9 @@ pm.request.url.query             // the query, with the reads below
 pm.request.url.getHost();        // 'api.example.com'
 pm.request.url.getPath();        // '/v2/users'
 pm.request.url.getQueryString(); // 'page=2&sort=name' - no '?'
+pm.request.url.getPathWithQuery(); // '/v2/users?page=2&sort=name'
+pm.request.url.getRemote();      // 'api.example.com:8443' - ':port' only when stated
+pm.request.url.getRaw();         // the whole URL, as toString() gives it
 pm.request.url.toString();       // the whole URL
 ```
 
@@ -1468,9 +1473,17 @@ pm.request.url.query.has('page');     // boolean
 pm.request.url.query.all();           // [{key, value}, ...] in wire order
 pm.request.url.query.toObject();      // {page: '2'} - last wins
 pm.request.url.query.count();         // 3
+
+pm.request.url.query.each((p) => console.log(p.key, p.value)); // (member, index, list), thisArg?
+pm.request.url.query.map((p) => p.key);                        // ['page', 'sort', 'page']
+pm.request.url.query.filter((p) => p.key === 'page');          // every match, duplicates kept
+pm.request.url.query.find((p) => p.key === 'page');            // first match, or undefined
+pm.request.url.query.one('page');     // {key: 'page', value: '2'} - first match, or undefined
+pm.request.url.query.indexOf('page'); // 0 - the position in all(), -1 when absent
+pm.request.url.query.idx(2);          // {key: 'page', value: '3'}, or undefined past the end
 ```
 
-Five rules behind those answers:
+Six rules behind those answers:
 
 - **A `{{variable}}` in the scheme or host is opaque host text**, as in
   Postman. A scripted request's URL reaches its script with its scope names
@@ -1487,12 +1500,27 @@ Five rules behind those answers:
   built from the bytes that were sent. `getQueryString()` is byte-exact against
   the wire.
 - **`all()` keeps wire order and duplicates**, which is the whole reason it
-  exists beside `toObject()`. `get(name)` answers the **first** match (Postman's
-  `PropertyList.one`); `toObject()` is last-wins and says so.
+  exists beside `toObject()`. `get(name)` and `one(name)` answer the **first**
+  match (Postman's `PropertyList.one`); `toObject()` is last-wins and says so.
+- **The walks (`each`, `map`, `filter`, `find`) take a function and run over a
+  list taken once.** The callback gets `(member, index, list)` and the optional
+  second argument as its `this`, as `headers.each` does, so a callback that adds
+  or removes a parameter, or calls `url.update()`, edits the URL without
+  changing the walk in progress. A `false` answer does not stop `each`; `filter`
+  and `find` read the answer as truthy or falsy; a throw out of the callback
+  reaches the script as thrown. Postman also takes an object or a property name
+  as `filter`'s and `find`'s rule and `map`'s iterator - here anything that is
+  not a function is a `TypeError`. `indexOf(item)` takes a name or a
+  `{key, value}`: a member is matched on both, so the second `page` of
+  `page=2&page=3` is `1`, where Postman's identity match cannot hold across
+  two calls that each build their members.
 - **A bare `?flag` reads as `null`, an empty `?flag=` as `''`.** Both are
   `has()`-true.
 - **A URL the parser cannot read has no parts.** `toString()` still answers the
-  whole string, and every part is empty rather than a plausible half. A URL
+  whole string, and every part is empty rather than a plausible half:
+  `getRaw()` is the text, `getPathWithQuery()` and `getRemote()` are `''`,
+  and the query reads find nothing. `getRemote()` takes no `forcePort`
+  argument, since a scheme's default port is never filled in. A URL
   with no scheme and no token before its path (`example.com/users`) is one: no
   scheme is guessed.
 
@@ -2194,6 +2222,28 @@ same sentence. Every other local server is reachable as before. See
 `toObject()`/`one()`/`indexOf()` - the same read methods documented under
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.
 It is a subset of `pm.response` and has no `to.*` assertion chain.
+
+**Every request leaves one line in the Console** (#3462), so what a script sent
+is listed even when nothing logs it - a token fetch that failed and a callback
+that returns on `err` would otherwise leave no trace. It is an `info` line,
+written when the transfer ends and before the callback runs, naming the method,
+the URL, the status or the error code, and how long the transfer took:
+
+```text
+pm.sendRequest POST https://auth.example.com/token -> 200 (143 ms)
+pm.sendRequest GET https://auth.example.com/token failed: CONNECTION_FAILED (3 ms)
+```
+
+A 4xx or 5xx answer is a status, not a failure; `failed:` is the `err.code` the
+callback receives. The URL is the one the script gave, after its variables
+resolve, with its credentials blanked the way an export blanks them: the
+password of `user:pass@` and the value of a query parameter named like a
+credential (`token`, `api_key`, `client_secret`, ...) are dropped, the rest of
+the query stays, and a key that `auth` appends is never shown. Only a request
+that was sent has a line: a call refused before it goes out (the cap, a bad
+option, the capability being off) throws and writes none. The line counts
+against the [console caps](#console-output) like any other, and with
+`scriptEnableConsole` off it is not recorded.
 
 **Three bounds, all hard.**
 
@@ -2956,9 +3006,10 @@ that bounds the script does not bound them. Three caps, the constants
   is dropped, as is every line after it. Exactly one final `warn` entry,
   `[console output limit reached: further output of this script is dropped]`,
   says so; a script that stops at a cap without exceeding it gets none.
-- The warnings the engine writes for a script (`pm.cookies.jar()` refusals,
-  `pm.visualizer`) count against the same caps. Nothing is thrown into the
-  script.
+- The lines the engine writes for a script (`pm.cookies.jar()` refusals,
+  `pm.visualizer`, and the [`info` line each `pm.sendRequest`
+  leaves](#sending-a-request-from-a-script-pmsendrequest)) count against the
+  same caps. Nothing is thrown into the script.
 
 The caps are per execution: each level's script has its own, so a request with
 a collection, a folder and a request script can show up to three times as much,
@@ -4057,9 +4108,14 @@ The **language** is current; what is missing is the **host environment**:
   (`??`) are ES2020 and supported, as are later additions like
   `Array.prototype.at`, `Object.hasOwn`, `String.prototype.replaceAll`, the
   ES2023 copying methods (`toSorted`, `toReversed`, `with`), `findLast`,
-  `Object.groupBy` and `Promise.withResolvers`. The script editor's type
-  declarations use TypeScript's `esnext` library, so none of them is marked as
-  an error. This section used to say the opposite, listing `?.` and `??` as
+  `Object.groupBy` and `Promise.withResolvers`, and the newest library
+  members: `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON` and
+  `JSON.isRawJSON`, and `Uint8Array`'s `fromBase64`, `fromHex`, `toBase64`,
+  `toHex`, `setFromBase64` and `setFromHex`. The script editor's type
+  declarations use TypeScript's `esnext` library, so none of the first group is
+  marked as an error; the engine's own declarations add the newest ones, which
+  TypeScript's bundled lib does not have yet (`LIBRARY_GAPS` in
+  `script_types.cpp`). This section used to say the opposite, listing `?.` and `??` as
   "ES2021+" and unavailable - wrong on both counts, so any workaround written
   around that claim can go. What limits a script is the global list above, not the syntax.
 - **No host globals**: no `fetch`, `URL`, `TextEncoder`,

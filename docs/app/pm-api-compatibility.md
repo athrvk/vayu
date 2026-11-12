@@ -31,7 +31,7 @@ supported is listed [below](#not-yet-supported).
 | Redirect hops       | `pm.response.redirects` (array of `{ code, status, url, schemeDowngrade, headers }`, one per followed 3xx, oldest first) - a design send and a sequential run; absent where the chain is not recorded, see below. **Vayu-specific** |
 | Cookie jar          | `pm.cookies.get(name)`, `.has(name)`, `.toObject()`, `.each(fn)`, `.all()`, `.count()` - the stored session for this URL; `pm.cookies.jar()` for `get`/`getAll`/`set`/`unset`/`clear(url?)` (reads and writes limited to the request's site), see below |
 | Response assertions | `pm.response.to.have.status(code \| reason)`, `.statusCode(code)`, `.statusReason(reason)`, `.statusCodeClass(digit)`, `.header(name[, value])`, `.body([expected])`, `.jsonBody(path?[, value])` (a lodash path), `.jsonSchema(schema[, options])`, `.responseTime` and `.responseSize` (a call and a chain), the `pm.response.to.be.*` status classes below, and `pm.response.to.not` negating every one of them - see [Response assertions](#response-status-classes-pmresponsetobe) |
-| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`), `.auth` (basic, bearer, apikey, noauth; see [Request mutation](#request-mutation--url-variables)) |
+| Request             | `pm.request.url` (Postman's `Url` object - `protocol`/`host`/`port`/`path`/`hash`/`query`, `getHost()`, `getPath()`, `getQueryString()`, `getPathWithQuery()`, `getRemote()`, `getRaw()`, `query.each/map/filter/find/one/indexOf/idx`, `update()`, `addQueryParams()`, `removeQueryParams()`), `.method`, `.headers`, `.body` (with `.update()`), `.auth` (basic, bearer, apikey, noauth; see [Request mutation](#request-mutation--url-variables)) |
 | Request methods     | `pm.request.addHeader()`, `.upsertHeader()`, `.removeHeader()`, `.forEachHeader()`, `.getHeaders(options?)`, `.addQueryParams()`, `.removeQueryParams()`, `.toJSON()` - each the member method it names - and `.authorizeUsing()`, which assigns `.auth`; see [Request methods](#request-methods) |
 | Request headers     | `pm.request.headers.get(name)`, `.has(name[, value])`, `.upsert({key, value})`, `.add({key, value})`, `.remove(name)`, `.each(fn, thisArg?)`, `.all()`, `.count()`, `.toObject(excludeDisabled?, caseSensitive?)`, `.one(name)`, `.indexOf(name)` |
 | Environment         | `pm.environment.get/set/has/unset/clear/toObject/replaceIn`, see [scoped `replaceIn`](#scoped-replacein) |
@@ -338,6 +338,15 @@ together in #1000; a script reading `res.status` as a number wants `res.code`,
 and [the migration
 note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
 names the one pattern that degrades silently.
+
+**Every call is listed in the Console, as it is in Postman's** (#3462): one
+`info` line per request that was sent, naming the method, the URL, the status
+(or `failed:` and the error code when the transfer did not complete) and the
+duration, written before the callback runs. A callback that returns on `err`
+therefore leaves a trace, and the "Fetch a token before the send" snippet logs
+the failure itself. The URL has credentials blanked as an export blanks them
+and `scriptEnableConsole` off records nothing; the line is described under
+[`pm.sendRequest`](../engine/scripting.md#sending-a-request-from-a-script-pmsendrequest).
 
 **It is bounded three ways, and two of them throw.** The request's timeout is
 clamped to whatever is left of the script's own time budget (`scriptTimeout`,
@@ -1699,6 +1708,16 @@ accepted and warns:
   template in. The script keeps running
 - `pm.test.skip`, `pm.test.index`, `pm.require`, `pm.execution.runRequest`,
   `pm.execution.location` and `pm.response.dataURI()`
+- `pm.request.url.variables` (Postman's path-variable list, `:id` segments) and
+  `pm.response.jsonp(...)` - both read as `undefined`, so a call throws
+- **A reviver passed to `pm.response.json(reviver)`** - `json()` takes no
+  argument here, and one that is passed is *ignored*: the body is parsed as
+  plain JSON and nothing throws, so a script that revives dates or big numbers
+  gets the unrevived values. Parse the text yourself instead:
+  `JSON.parse(pm.response.text(), reviver)`. The same holds for the response a
+  `pm.sendRequest` callback receives, which shares the implementation; the
+  import notice cannot name that spelling, since the scan matches the written
+  path `pm.response.json` and not a callback's parameter
 - `console.debug` and every other console method beyond `log`, `info`, `warn` and
   `error` (`console.table`, `console.dir`, `console.time`, ...) - use
   `console.log`
@@ -1743,7 +1762,9 @@ under `meta.unsupportedScriptApis` (see
 the scan table (`API_RULES` in `engine/src/core/script_api_scan.cpp`), and only
 when written out: `pm.test.skip`, `pm.test.index`, `pm.require`,
 `pm.execution.runRequest`, `pm.execution.location`, `pm.response.dataURI`,
-`pm.response.headers.map`, `pm.request.headers.map`, `pm.cookies.set`,
+`pm.response.jsonp`, `pm.response.json(reviver)` (a call with an argument; the
+empty `json()` runs and is not named), `pm.response.headers.map`,
+`pm.request.headers.map`, `pm.request.url.variables`, `pm.cookies.set`,
 `pm.cookies.unset` and `pm.cookies.clear` (each its own name; `pm.cookies.jar()`
 is not among them), `console.debug`, `console.table`, `console.dir` and
 `console.time`, `fetch`, `XMLHttpRequest`, `URL`, `URLSearchParams`,
@@ -1760,7 +1781,8 @@ that uses them imports with no notice and throws at first run:
   `console.group`, `console.count`, `console.timeEnd`, ...)
 - `pm.environment.name`, `pm.request.clone()` / `.size()` / `.update()`, the
   `PropertyList` methods of a header object other than `map`, and a name read
-  through an alias (`const h = pm.response.headers; h.map(f)`)
+  through an alias (`const h = pm.response.headers; h.map(f)`), which includes a
+  reviver passed to the `json()` of a `pm.sendRequest` response
 
 Postman's pre-`pm.*` globals and the `postman.*` methods are not named either:
 they run (see [above](#postmans-legacy-globals)).
@@ -1837,8 +1859,10 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   script author is told which line was wrong rather than reading it off the write-back.
 - **`url` is Postman's `Url` object, not a string** (#991 - the owner decision that
   compatibility wins over the shipped string shape). `protocol`, `host`, `port`, `path`,
-  `hash`, `query` with `get`/`has`/`all`/`toObject`/`count`, plus `getHost()`,
-  `getPath()`, `getQueryString()`, `toString()`, `update()`, `addQueryParams()` and
+  `hash`, `query` with `get`/`has`/`all`/`toObject`/`count` and, since #3462, the rest of
+  the `PropertyList` reads (`each`, `map`, `filter`, `find`, `one`, `indexOf`, `idx`),
+  plus `getHost()`, `getPath()`, `getQueryString()`, `getPathWithQuery()`,
+  `getRemote()`, `getRaw()`, `toString()`, `update()`, `addQueryParams()` and
   `removeQueryParams()`. It still behaves as a
   string in every context JavaScript allows - concatenation, template literals, `==`,
   `String.prototype` methods, `JSON.stringify`, `.length` - and two things changed:
@@ -1846,8 +1870,11 @@ pm.request.auth = { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}' 
   text, as Postman's parser reads it (#3454): a pre-request script on the
   `{{baseUrl}}/users?page=2` an imported collection stores sees `getHost()`
   `'{{baseUrl}}'`, `getPath()` `'/users'` and the query, and its edits keep the token
-  for the resolution after the script. One divergence: with no path after the token,
-  `getPath()` is `''` where Postman answers `'/'`. The full surface and the migration
+  for the resolution after the script. Divergences: with no path after the token,
+  `getPath()` is `''` where Postman answers `'/'`; the query's walks take a function only
+  (Postman also takes an object or a property name as the rule), `indexOf` matches a
+  `{key, value}` on both fields rather than by identity; and `getRemote()` takes no
+  `forcePort`. The full surface and the migration
   note are in [scripting.md](../engine/scripting.md#url-parts-pmrequesturl).
 - **The URL is writable a member at a time, not only whole** (#1040). `path` and
   `host` are arrays a script mutates in place (`push`, `splice`, index assignment,
@@ -2086,6 +2113,15 @@ timers it does have are declared by the engine's file, with the sandbox's own
 documentation); and `target: ESNext`, because an older lib or target would flag
 `Object.hasOwn`, `Array.prototype.at`, `toSorted`, `Object.groupBy` and
 `Promise.withResolvers`, which quickjs-ng runs fine (see `docs/engine/scripting.md`).
+
+The newest library members, `RegExp.escape`, `Math.sumPrecise`, `JSON.rawJSON`,
+`JSON.isRawJSON` and the `Uint8Array` base64 and hex methods, are not in the TypeScript
+that Monaco bundles, so `esnext` alone would underline each as "Property does not exist"
+though the engine runs it. The engine's file declares them as interface augmentations
+(`LIBRARY_GAPS` in `script_types.cpp`); `script_types_test.cpp` runs every one in the
+script engine, so a declared member the runtime lacks fails there. The set retires with a
+Monaco upgrade: `script-typedefs.docs-compile.test.ts` compiles the bare lib and fails
+when it declares one, naming the row to delete.
 
 **Semantic diagnostics are on**, which is what makes `pm.response.staus` squiggle with a
 "Did you mean 'status'?" - and, through the same analysis, what makes quick fixes, rename,

@@ -3152,6 +3152,34 @@ TEST (PostmanImport, ScriptThatUsesAnApiVayuDoesNotRunIsNamed) {
     skip_counts (parsed.result.at ("meta").at ("skipped")).contains ("unsupported_script_api"));
 }
 
+/// The pm members Vayu lacks or half-runs are named per request (#3462):
+/// `pm.request.url.variables` and `pm.response.jsonp` are undefined at run time,
+/// and `pm.response.json(reviver)` parses without the reviver. "Plain" reads the
+/// body with an empty `json()`, which runs and is not named. Mutation check:
+/// remove one of the three rows in `script_api_scan.cpp` and its request drops
+/// out; dropping the `NoArguments` exemption names "Plain" too.
+TEST (PostmanImport, PmUrlVariablesJsonpAndAJsonReviverAreNamed) {
+    const std::string items = request_with_script ("Path variables",
+                              R"j(["const id = pm.request.url.variables.get('id');"])j") +
+    "," + request_with_script ("Jsonp", R"j(["const b = pm.response.jsonp('cb');"])j") +
+    "," + request_with_script ("Reviver", R"j(["const j = pm.response.json((k, v) => v);"])j") +
+    "," +
+    request_with_script ("Plain",
+    R"j(["const j = pm.response.json();","pm.request.url.query.get('a');"])j") +
+    "," +
+    request_with_script ("All three",
+    R"j(["pm.response.json(r);","pm.response.jsonp(1);","pm.request.url.variables;"])j");
+    const ImportParse parsed = parse_postman_items (items);
+    ASSERT_TRUE (parsed.ok ()) << parsed.error;
+    EXPECT_EQ (parsed.result.at ("meta").at ("unsupportedScriptApis"),
+    nlohmann::ordered_json::parse (R"j([
+        {"request":"Path variables","names":["pm.request.url.variables"]},
+        {"request":"Jsonp","names":["pm.response.jsonp"]},
+        {"request":"Reviver","names":["pm.response.json(reviver)"]},
+        {"request":"All three","names":["pm.response.jsonp","pm.response.json(reviver)","pm.request.url.variables"]}
+    ])j"));
+}
+
 /// A string-valued `event.script` is the script's text (Postman's SDK reads one
 /// as `{exec: [text]}`), where it used to import as nothing and so was never
 /// seen: it is stored, and read for the same names. Mutation check: reading it

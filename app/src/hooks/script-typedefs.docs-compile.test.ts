@@ -578,6 +578,74 @@ describe("library methods newer than ES2022, as the editor reports them", () => 
 });
 
 /*
+ * quickjs-ng also runs library members TypeScript's `esnext` lib does not
+ * declare, so the engine's declarations add them (`LIBRARY_GAPS` in
+ * `script_types.cpp`, #3462). The first test is those additions as the editor
+ * reports them; the second holds their exit.
+ */
+describe("library members the engine declares on top of TypeScript's lib", () => {
+	const compile = createCompiler(readFileSync(DECLARATIONS_PATH, "utf8"));
+	const errorsOf = (source: string) => compile({ doc: "inline", line: 1, source }).join("\n");
+
+	it("is clean on RegExp.escape, Math.sumPrecise, JSON.rawJSON and the Uint8Array codecs", () => {
+		expect(
+			errorsOf(
+				[
+					"const pattern = new RegExp(RegExp.escape(pm.response.text()));",
+					"const total = Math.sumPrecise([0.1, 0.2, 0.3]);",
+					"const body = JSON.stringify({ id: JSON.rawJSON('12345678901234567890') });",
+					"/** @type {unknown} */ const maybe = JSON.rawJSON('1');",
+					"if (JSON.isRawJSON(maybe)) { pm.environment.set('digits', maybe.rawJSON); }",
+					"const bytes = Uint8Array.fromBase64('AQID', { alphabet: 'base64url' });",
+					"const hex = Uint8Array.fromHex('0a0b').toHex();",
+					"const b64 = bytes.toBase64({ omitPadding: true });",
+					"const { read, written } = new Uint8Array(3).setFromBase64('AQID');",
+					"const filled = new Uint8Array(2).setFromHex('0a0b').written;",
+					"pm.environment.set('v', [pattern, total, body, hex, b64, read + written + filled].join());",
+				].join("\n")
+			)
+		).toBe("");
+	});
+
+	it("still checks their arguments", () => {
+		expect(errorsOf("Math.sumPrecise('1');")).toContain("TS2345");
+		expect(errorsOf("Uint8Array.fromBase64('AQID', { alphabet: 'hex' });")).toContain("TS2322");
+		expect(errorsOf("/** @type {number} */ const n = new Uint8Array(1).toHex();")).toContain(
+			"TS2322"
+		);
+	});
+
+	/*
+	 * Declared by both, a method merges into an overload and nothing complains,
+	 * so the stopgap would outlive its reason silently. This compiles the lib
+	 * with none of the engine's declarations: the day Monaco ships a TypeScript
+	 * that declares one of these, its case fails here, naming the row of
+	 * `LIBRARY_GAPS` to delete.
+	 */
+	describe("the lib still lacks each one", () => {
+		const bareLib = createCompiler("");
+		it.each([
+			["RegExp.escape", "RegExp.escape('a.b');"],
+			["Math.sumPrecise", "Math.sumPrecise([0.1]);"],
+			["JSON.rawJSON", "JSON.rawJSON('1');"],
+			["JSON.isRawJSON", "JSON.isRawJSON({});"],
+			["Uint8Array.fromBase64", "Uint8Array.fromBase64('AQID');"],
+			["Uint8Array.fromHex", "Uint8Array.fromHex('0a');"],
+			["Uint8Array.prototype.toBase64", "new Uint8Array(1).toBase64();"],
+			["Uint8Array.prototype.toHex", "new Uint8Array(1).toHex();"],
+			["Uint8Array.prototype.setFromBase64", "new Uint8Array(1).setFromBase64('AQ==');"],
+			["Uint8Array.prototype.setFromHex", "new Uint8Array(1).setFromHex('0a');"],
+		])(
+			"%s (declared by the lib now? delete its LIBRARY_GAPS row in script_types.cpp)",
+			(_member, source) => {
+				const errors = bareLib({ doc: "inline", line: 1, source }).join("\n");
+				expect(errors).toContain("TS2339");
+			}
+		);
+	});
+});
+
+/*
  * The engine runs a script as the body of an async function (#2577), so a
  * top-level `await` is correct code and must draw nothing. As a module it is
  * accepted only under a `module` setting that allows one (TS1378 otherwise),
