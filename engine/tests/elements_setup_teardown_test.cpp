@@ -693,7 +693,7 @@ TEST_F (ScriptLifecycleTest, SequentialSetupLocalReachesTheFirstStep) {
 // Under load each virtual user owns its own local scope, starting empty, and
 // setup is no user's iteration, so its local ends with it and every
 // submission keeps the literal token. Mutation check: drop
-// `base_scopes.local.clear ()` from `run_collection_setup` (run_manager.cpp)
+// `run_scopes.clear_local ()` from `run_scenario_load_setup` (run_manager.cpp)
 // and every hit carries the value.
 TEST_F (ScriptLifecycleTest, LoadSetupLocalReachesNoVirtualUser) {
     seed_collection (script_setup_element (

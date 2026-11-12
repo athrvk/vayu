@@ -418,7 +418,7 @@ std::vector<vayu::http::CookieWrite>* writes);
  *
  * The run-local scope (#2564) rides here too, which is what makes it per-VU:
  * it starts each iteration empty (a load run's base scopes hold no local,
- * `run_collection_setup` discards what `script.setup` set) and is the one
+ * `run_scenario_load_setup` discards what `script.setup` set) and is the one
  * part `clear_local` drops at the iteration boundary. The environment,
  * collection and globals entries live as long as the VU (#3044), so a token
  * a `control.once` login extracted still answers every later iteration.

@@ -845,7 +845,7 @@ void expect_run_timeout (const std::vector<Report>& reports, int64_t timeout_ms 
 }
 
 // Mutation-check: drop `context->script_send.apply (script_ctx)` from
-// `run_collection_setup`'s `run_setup_script` (run_manager.cpp).
+// `run_setup_elements` (scenario_runner.cpp).
 TEST_F (ScriptSendRequestRunTest, ASetupScriptFetchTakesTheRunsTimeout) {
     run_single_request ({ { "lifecycleElements",
     json::array ({ reporting_element ("script.setup", server_->hang_url ()) }) } });

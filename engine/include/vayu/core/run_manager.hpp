@@ -524,7 +524,7 @@ struct RunContext {
     /// @ref lifecycle_scopes, flattened once (issue #1594) - the "base" every
     /// submission's own `ScopeOverlay` layers onto, on the same
     /// `LoadScopeBases::Base::vars` precedent: flattened once per run,
-    /// never per submission. Populated by `run_collection_setup` alongside
+    /// never per submission. Populated by `run_request_lifecycle_setup` alongside
     /// `lifecycle_scopes` whenever @ref step_elements is non-empty, even for
     /// a run that declares no `lifecycleElements` at all.
     vayu::http::VariableValues step_base_vars;
