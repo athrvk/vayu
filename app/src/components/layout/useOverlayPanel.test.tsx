@@ -24,6 +24,7 @@ import { Drawer } from "./Drawer";
 import { ContextBar } from "./ContextBar";
 import { RailButton } from "./RailButton";
 import { useDrawerItemOpened } from "./drawer-item-opened";
+import { tabElementId } from "./tab-aria";
 import { TooltipProvider } from "@/components/ui";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui";
 import { useLayoutStore, useTabsStore } from "@/stores";
@@ -104,7 +105,7 @@ function Chrome() {
 			>
 				a
 			</RailButton>
-			<button role="tab" id="tab-t2" tabIndex={0}>
+			<button role="tab" id={tabElementId("t2")} tabIndex={0}>
 				tab two
 			</button>
 			<button>outside</button>
@@ -168,11 +169,74 @@ describe("one overlay at a time", () => {
 		expect(layout().contextBarOpen).toBe(false);
 	});
 
-	it("leaves exactly one open when both were open as the window shrank into overlay", () => {
+	// Neither opened, so there is no most recent: the drawer stays and the bar's
+	// persisted flag is written false.
+	it("keeps the drawer when both are open as the panels mount as overlays", () => {
 		layout().setDrawerOpen(true);
 		layout().setContextBarOpen(true);
 		renderPanels("overlay", "overlay");
-		expect([layout().drawerOpen, layout().contextBarOpen].filter(Boolean)).toHaveLength(1);
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(false);
+	});
+
+	it("keeps the drawer when a resize turns both open panels into overlays", () => {
+		layout().setDrawerOpen(true);
+		layout().setContextBarOpen(true);
+		const { rerender } = renderPanels("push", "push");
+		expect(layout().contextBarOpen).toBe(true);
+		rerender(
+			<TooltipProvider>
+				<Chrome />
+				<div className="relative">
+					<Drawer mode="overlay" siblingMode="overlay" />
+					<ContextBar mode="overlay" siblingMode="overlay" />
+				</div>
+			</TooltipProvider>
+		);
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(false);
+	});
+
+	it("lets the bar win when a tab switch brings it on screen over an open drawer", () => {
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "w", type: "welcome", entityId: null },
+				{ id: "t1", type: "request", entityId: "r1" },
+			],
+			activeTabId: "w",
+		});
+		layout().setDrawerOpen(true);
+		layout().setContextBarOpen(true);
+		renderPanels("overlay", "overlay");
+		// The bar has nothing to show on a welcome tab, so both flags stand.
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(true);
+
+		act(() => useTabsStore.setState({ activeTabId: "t1" }));
+		expect(layout().contextBarOpen).toBe(true);
+		expect(layout().drawerOpen).toBe(false);
+	});
+
+	it("lets the drawer win when a reveal reopens it in the flush that closed it", () => {
+		// What `Shell`'s reveal-on-tab-change does: it reopens the drawer in an
+		// effect of the same commit that brought the bar on screen.
+		useTabsStore.setState({
+			openTabs: [
+				{ id: "w", type: "welcome", entityId: null },
+				{ id: "t1", type: "request", entityId: "r1" },
+			],
+			activeTabId: "w",
+		});
+		layout().setDrawerOpen(true);
+		layout().setContextBarOpen(true);
+		renderPanels("overlay", "overlay");
+
+		act(() => {
+			useTabsStore.setState({ activeTabId: "t1" });
+			layout().revealDrawerView("collections");
+		});
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(false);
 	});
 
 	it("never closes a panel that pushes", () => {
@@ -225,7 +289,7 @@ describe("the drawer closes on a selection", () => {
 		fireEvent.click(screen.getByRole("button", { name: "open item" }));
 		expect(useTabsStore.getState().activeTabId).toBe("t2");
 		expect(layout().drawerOpen).toBe(false);
-		expect(document.getElementById("tab-t2")).toHaveFocus();
+		expect(document.getElementById(tabElementId("t2"))).toHaveFocus();
 	});
 
 	it("stays open in push mode", () => {
@@ -273,6 +337,24 @@ describe.each([
 		fireEvent.keyDown(inside(), { key: "Escape" });
 		expect(isOpen()).toBe(false);
 		expect(screen.getByRole("button", { name: railLabel })).toHaveFocus();
+	});
+
+	// Closing unmounts the element holding focus, so focus has to move before
+	// the close lands - asserted at the moment the flag flips.
+	it("moves focus before the panel closes", () => {
+		renderOpen("overlay");
+		inside().focus();
+		let focusWhenClosed: Element | null = null;
+		const stop = useLayoutStore.subscribe((state, prev) => {
+			const closed =
+				panel === "drawer"
+					? prev.drawerOpen && !state.drawerOpen
+					: prev.contextBarOpen && !state.contextBarOpen;
+			if (closed) focusWhenClosed = document.activeElement;
+		});
+		fireEvent.keyDown(inside(), { key: "Escape" });
+		stop();
+		expect(focusWhenClosed).toBe(screen.getByRole("button", { name: railLabel }));
 	});
 
 	it("leaves a pushing panel open", () => {
@@ -336,6 +418,67 @@ describe.each([
 	});
 });
 
+describe("where Escape returns focus when no rail button is lit", () => {
+	function renderDrawerWith(chrome: React.ReactNode) {
+		layout().setDrawerOpen(true);
+		render(
+			<TooltipProvider>
+				{chrome}
+				<Drawer mode="overlay" siblingMode="overlay" />
+			</TooltipProvider>
+		);
+		const expand = screen.getByRole("button", { name: "expand" });
+		expand.focus();
+		fireEvent.keyDown(expand, { key: "Escape" });
+		expect(layout().drawerOpen).toBe(false);
+	}
+
+	it("uses the rail's roving stop", () => {
+		renderDrawerWith(
+			<>
+				<RailButton
+					active={false}
+					label="Other"
+					side="left"
+					variant="indicator"
+					tabIndex={-1}
+				>
+					o
+				</RailButton>
+				<RailButton
+					active={false}
+					label="Stop"
+					side="left"
+					variant="indicator"
+					tabIndex={0}
+				>
+					s
+				</RailButton>
+				{/* The other rail's stop is not this panel's. */}
+				<RailButton
+					active={false}
+					label="Right stop"
+					side="right"
+					variant="tile"
+					tabIndex={0}
+				>
+					r
+				</RailButton>
+			</>
+		);
+		expect(screen.getByRole("button", { name: "Stop" })).toHaveFocus();
+	});
+
+	it("falls back to the active tab when the rail is not drawn", () => {
+		renderDrawerWith(
+			<button role="tab" id={tabElementId("t1")} tabIndex={-1}>
+				tab one
+			</button>
+		);
+		expect(screen.getByRole("tab", { name: "tab one" })).toHaveFocus();
+	});
+});
+
 describe("Escape in a field", () => {
 	it("is the field's own, and does not take the drawer", () => {
 		layout().setDrawerOpen(true);
@@ -367,6 +510,26 @@ describe("Escape with a real menu open inside the drawer", () => {
 	});
 });
 
+describe("a pointer press that dismisses a real modal menu", () => {
+	it("closes the menu and leaves the drawer", () => {
+		layout().setDrawerOpen(true);
+		render(
+			<TooltipProvider>
+				<Drawer mode="overlay" />
+				<DropdownMenu open>
+					<DropdownMenuContent>
+						<DropdownMenuItem>Rename</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</TooltipProvider>
+		);
+		expect(screen.getByRole("menu")).toBeInTheDocument();
+		// A modal menu leaves the body unclickable, so the press lands on <html>.
+		fireEvent.pointerDown(document.documentElement);
+		expect(layout().drawerOpen).toBe(true);
+	});
+});
+
 describe.each([
 	["drawer", "Collections"],
 	["context bar", "Alpha rail"],
@@ -394,6 +557,17 @@ describe.each([
 		expect(isOpen()).toBe(true);
 	});
 
+	// Heard in the capture phase: a target that stops propagation is still outside.
+	it("closes it for a press on a target that stops the event", () => {
+		renderOpen("overlay");
+		const outside = screen.getByRole("button", { name: "outside" });
+		const stop = (e: Event) => e.stopPropagation();
+		outside.addEventListener("pointerdown", stop);
+		fireEvent.pointerDown(outside);
+		outside.removeEventListener("pointerdown", stop);
+		expect(isOpen()).toBe(false);
+	});
+
 	it("leaves it open for a press inside it", () => {
 		renderOpen("overlay");
 		fireEvent.pointerDown(inside());
@@ -410,6 +584,22 @@ describe.each([
 		document.body.append(menu);
 		fireEvent.pointerDown(item);
 		expect(isOpen()).toBe(true);
+		menu.remove();
+	});
+
+	it("leaves it open while a menu is open, whatever the press lands on", () => {
+		renderOpen("overlay");
+		const menu = document.createElement("div");
+		menu.setAttribute("role", "menu");
+		menu.setAttribute("data-state", "open");
+		document.body.append(menu);
+		fireEvent.pointerDown(document.documentElement);
+		expect(isOpen()).toBe(true);
+
+		// A menu still playing its exit animation is closed.
+		menu.setAttribute("data-state", "closed");
+		fireEvent.pointerDown(document.documentElement);
+		expect(isOpen()).toBe(false);
 		menu.remove();
 	});
 

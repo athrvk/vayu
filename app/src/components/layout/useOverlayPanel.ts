@@ -9,12 +9,17 @@
  * What a side panel does while it floats over the content instead of pushing
  * it (#3507), shared by `Drawer` and `ContextBar` so the two cannot drift.
  *
- * - One overlay at a time. Opening an overlaying panel closes the other if
- *   that one is overlaying too. This watches the open transition rather than
- *   the actions that cause it, so the rail button, the chords, the palette and
- *   `revealDrawerView` are all covered without each knowing the rule. A panel
- *   that pushes is never closed here: it takes layout space of its own, and its
- *   persisted open flag is the user's.
+ * - One overlay at a time. A panel that starts showing as an overlay - opened,
+ *   or brought on screen by a tab switch - closes the other if that one is
+ *   overlaying too, so the most recent wins. This watches the stores rather than
+ *   the actions that cause the change, so the rail button, the chords, the
+ *   palette and `revealDrawerView` are all covered without each knowing the
+ *   rule. It is a store subscription and not a render effect because a reveal
+ *   can reopen the loser in the very flush that closed it, a round trip a
+ *   render never sees. Where nothing opened (the first render, or a resize that
+ *   turned both into overlays) the drawer stays. A panel that pushes is never
+ *   closed here: it takes layout space of its own, and a panel that only
+ *   overlays has its persisted open flag written false when it loses.
  * - Escape closes it when focus is inside and nothing of its own is open above
  *   it, and focus goes back to the rail button that toggles it.
  * - A pointer press outside closes it. Heard in the capture phase and never
@@ -109,7 +114,10 @@ function shouldPointerDismiss(
 	// The rail's own button toggles the panel on click; closing it on the press
 	// as well would have the click open it again.
 	if (target.closest(`[data-rail-side="${RAIL_SIDE[panel]}"]`)) return false;
-	return !isModalOpen() && !target.closest(FLOATING_LAYER);
+	if (isModalOpen() || target.closest(FLOATING_LAYER)) return false;
+	// A press that dismisses a menu is the menu's. A modal Radix menu leaves the
+	// body unclickable, so its target can be `<html>`, outside every layer.
+	return !hasOpenFloatingLayer();
 }
 
 interface OverlayPanelOptions {
@@ -119,28 +127,37 @@ interface OverlayPanelOptions {
 	siblingMode: SidePanelMode;
 }
 
-/** Returns the ref for the panel's root element. */
-export function useOverlayPanel({ panel, mode, siblingMode }: OverlayPanelOptions) {
-	const panelRef = useRef<HTMLElement>(null);
+/** See the first rule in the file comment. */
+function useOneOverlayAtATime({ panel, mode, siblingMode }: OverlayPanelOptions): void {
 	const sibling = SIBLING[panel];
-
-	// Subscribed, so the effects below run on the transition.
-	const open = useLayoutStore((s) => (panel === "drawer" ? s.drawerOpen : s.contextBarOpen));
-	const hasContent = useTabsStore(
-		(s) =>
-			panel === "drawer" ||
-			contextBarHasContent(s.openTabs.find((t) => t.id === s.activeTabId))
-	);
-	const overlaying = mode === "overlay" && open && hasContent;
-
 	useEffect(() => {
-		if (!overlaying) return;
-		// Read again rather than trusting this render: one resize can leave both
-		// panels overlaying and run both effects. The first closes the other, and
-		// the second finds itself closed.
-		if (!isOverlaying(panel, mode) || !isOverlaying(sibling, siblingMode)) return;
-		closePanel(sibling);
-	}, [overlaying, panel, mode, sibling, siblingMode]);
+		const overlaying = () => isOverlaying(panel, mode);
+		const siblingOverlaying = () => isOverlaying(sibling, siblingMode);
+		let was = overlaying();
+		// Neither panel opened, so there is no "most recent": the drawer stays.
+		if (panel === "drawer" && was && siblingOverlaying()) closePanel(sibling);
+
+		const enforce = () => {
+			const justStarted = overlaying() && !was;
+			was = overlaying();
+			if (justStarted && siblingOverlaying()) closePanel(sibling);
+		};
+		const stops = [useLayoutStore.subscribe(enforce), useTabsStore.subscribe(enforce)];
+		return () => stops.forEach((stop) => stop());
+	}, [panel, mode, sibling, siblingMode]);
+}
+
+/** Returns the ref for the panel's root element. */
+export function useOverlayPanel(options: OverlayPanelOptions) {
+	const { panel, mode } = options;
+	const panelRef = useRef<HTMLElement>(null);
+	useOneOverlayAtATime(options);
+
+	// Subscribed, so the listeners below attach on the transition. A context bar
+	// with nothing to show has no element (`panelRef` is null), so its listeners
+	// are inert without asking.
+	const open = useLayoutStore((s) => (panel === "drawer" ? s.drawerOpen : s.contextBarOpen));
+	const overlaying = mode === "overlay" && open;
 
 	useEffect(() => {
 		if (!overlaying) return;

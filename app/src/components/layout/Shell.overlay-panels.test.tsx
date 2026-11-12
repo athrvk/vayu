@@ -122,6 +122,40 @@ describe("Shell - selecting from the drawer", () => {
 });
 
 describe("Shell - one overlay at a time", () => {
+	// Request tab, bar opened (the drawer yields), then Settings: the bar has
+	// nothing to show there and the reveal reopens the drawer. Closing Settings
+	// brings the bar back and reveals the drawer in the same commit.
+	it("never leaves both open when a tab switch brings the bar back under a revealed drawer", () => {
+		layout().setDrawerOpen(false);
+		renderShellAt(DRAWER_PUSH_MIN_WIDTH - 1);
+		act(() => layout().setContextBarOpen(true));
+		expect(layout().drawerOpen).toBe(false);
+
+		act(() => useTabsStore.getState().openTab({ type: "settings", entityId: null }));
+		expect(layout().drawerOpen).toBe(true);
+		// Hidden, not closed: the user's flag is not rewritten for a panel that is off screen.
+		expect(layout().contextBarOpen).toBe(true);
+
+		const settingsId = useTabsStore.getState().activeTabId!;
+		act(() => useTabsStore.getState().closeTab(settingsId));
+		expect(useTabsStore.getState().activeTabId).toBe("t1");
+		expect([layout().drawerOpen, layout().contextBarOpen].filter(Boolean)).toHaveLength(1);
+	});
+
+	it("keeps the drawer, and writes the bar's flag false, when a resize makes both overlays", () => {
+		layout().setContextBarOpen(true);
+		renderShellAt(CONTEXT_BAR_PUSH_MIN_WIDTH);
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(true);
+
+		vi.stubGlobal("innerWidth", DRAWER_PUSH_MIN_WIDTH - 1);
+		act(() => {
+			window.dispatchEvent(new Event("resize"));
+		});
+		expect(layout().drawerOpen).toBe(true);
+		expect(layout().contextBarOpen).toBe(false);
+	});
+
 	it("closes the drawer when the bar opens below both thresholds", () => {
 		renderShellAt(DRAWER_PUSH_MIN_WIDTH - 1);
 		act(() => layout().setContextBarOpen(true));
