@@ -727,8 +727,12 @@ including the one `useHealthQuery` makes for each answered poll, an unchanged
 answer too (structural sharing would otherwise keep the sync effect from
 running). The crash alone cannot decide, because it stays until `ready`, which
 can trail the poll that already sees a restarted engine answer. The Dock's light and `useEngineServing` (the gate behind the
-running-services count and the Services drawer's rows) read it, so neither says
-"connected" beside the Restart a crash put there. The Dock reads `engineCrash`
+running-services count, the Services drawer's rows, and the inbox and mock-server
+tabs' Running/Stopped state and Stop action, issue #3506) read it, as do the
+dirty-tab close guards in `tabs-store` and the change feed's open/close
+(`useChangeFeed`), so none of them says "connected" beside the Restart a crash
+put there. The health poll's own gating (`queries/health.ts`) and the store's
+internals read `engineStatus` directly: they are the poll's own verdict. The Dock reads `engineCrash`
 for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
 `engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
