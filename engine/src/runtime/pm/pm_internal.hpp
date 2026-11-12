@@ -85,6 +85,14 @@ struct RuntimeState {
     /// from a value the script threw: both arrive as a pending exception at the
     /// call site. See `arm_script_deadline_watch` and `script_deadline_expired`.
     bool interrupted = false;
+    /// Set beside `interrupted` when it was the deadline, and also when the
+    /// async drain stops on it; unlike `interrupted`, nothing clears it until
+    /// the next execution, so the execution can say it timed out.
+    bool deadline_reached = false;
+    /// `ScriptContext::stop` for the execution in progress, or null.
+    const std::atomic<bool>* stop = nullptr;
+    /// Set when `stop` ended the execution, at a poll or in the async drain.
+    bool stopped = false;
     /// The script stack budget this runtime was configured with, which
     /// `load_library` restores after a library's evaluation raised it. 0 is
     /// QuickJS's "no limit".

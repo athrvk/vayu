@@ -989,13 +989,22 @@ using namespace pm_detail;
 // QuickJS calls this periodically during evaluation. Returning non-zero aborts
 // the current JS_Eval with an InternalError, which the execute() exception path
 // turns into result.error_message.
+// A raised `ScriptContext::stop` (#3460) aborts the call the same way, and is
+// read first: a script the run's Stop ended is cancelled, not timed out.
 extern "C" int script_interrupt_handler (JSContext* /*ctx*/, void* opaque) {
     auto* state = static_cast<RuntimeState*> (opaque);
-    if (!state || !state->enabled)
+    if (!state)
+        return 0;
+    if (state->stop != nullptr && state->stop->load (std::memory_order_acquire)) {
+        state->stopped = true;
+        return 1;
+    }
+    if (!state->enabled)
         return 0;
     if (std::chrono::steady_clock::now () <= state->deadline)
         return 0;
-    state->interrupted = true;
+    state->interrupted      = true;
+    state->deadline_reached = true;
     return 1;
 }
 
@@ -1343,6 +1352,11 @@ class ScriptEngine::Impl {
         std::to_string (config.timeout_ms) + "ms";
     }
 
+    /// What a script `ScriptContext::stop` ended reads as. Its result is
+    /// `cancelled`, so a caller reports it as the run ending, not as this.
+    static constexpr std::string_view STOPPED_MESSAGE =
+    "Script stopped before it finished: the run it belongs to was stopped";
+
     /// What the exception pending on @p ctx says, taken off the context.
     [[nodiscard]] std::string take_exception_message (JSContext* ctx) const {
         JSValue exc = JS_GetException (ctx);
@@ -1354,9 +1368,11 @@ class ScriptEngine::Impl {
         // function the handler never gets to interrupt. Comparing the clock
         // here replaced the sentence naming the fault with a timeout line
         // the user could not act on.
-        std::string message = script_deadline_expired (ctx) ?
-        timeout_message () :
-        thrown_value_message (ctx, exc);
+        const auto& state = *static_cast<const RuntimeState*> (
+        JS_GetRuntimeOpaque (JS_GetRuntime (ctx)));
+        std::string message = state.stopped ? std::string (STOPPED_MESSAGE) :
+        script_deadline_expired (ctx)       ? timeout_message () :
+                                              thrown_value_message (ctx, exc);
         JS_FreeValue (ctx, exc);
         return message;
     }
@@ -1368,10 +1384,15 @@ class ScriptEngine::Impl {
     /// at all: without the check, a script the deadline already stopped would
     /// still run a short job. With no deadline the cap bounds the drain.
     [[nodiscard]] std::optional<std::string>
-    async_budget_spent (const RuntimeState& state, size_t steps_run) const {
+    async_budget_spent (RuntimeState& state, size_t steps_run) const {
         constexpr size_t cap =
         vayu::core::constants::script_engine::MAX_ASYNC_JOBS_WITHOUT_TIMEOUT;
+        if (state.stop != nullptr && state.stop->load (std::memory_order_acquire)) {
+            state.stopped = true;
+            return std::string (STOPPED_MESSAGE);
+        }
         if (state.enabled && std::chrono::steady_clock::now () > state.deadline) {
+            state.deadline_reached = true;
             return timeout_message ();
         }
         if (!state.enabled && steps_run == cap) {
@@ -1393,7 +1414,7 @@ class ScriptEngine::Impl {
     /// an `await` run inside the execution (#2531). @p steps_run counts each
     /// job against the budget the timers share.
     [[nodiscard]] std::optional<std::string>
-    drain_promise_jobs (JSRuntime* rt, const RuntimeState& state, size_t& steps_run) const {
+    drain_promise_jobs (JSRuntime* rt, RuntimeState& state, size_t& steps_run) const {
         while (JS_IsJobPending (rt)) {
             if (auto stop = async_budget_spent (state, steps_run)) {
                 return stop;
@@ -1567,6 +1588,9 @@ class ScriptEngine::Impl {
         auto& rt_state = *static_cast<RuntimeState*> (JS_GetRuntimeOpaque (rt));
         rt_state.enabled            = config.timeout_ms != 0;
         rt_state.interrupted        = false;
+        rt_state.deadline_reached   = false;
+        rt_state.stop               = ctx.stop;
+        rt_state.stopped            = false;
         rt_state.allocation_refused = false;
         if (rt_state.enabled) {
             rt_state.deadline = std::chrono::steady_clock::now () +
@@ -1683,6 +1707,12 @@ class ScriptEngine::Impl {
         // scenario runner ignores it for an errored step (issue #2526).
         result.control        = std::move (ctx_data.control);
         result.send_cancelled = ctx_data.send_cancelled;
+        result.cancelled      = rt_state.stopped;
+        // A stopped script did not run out its deadline, whatever the clock
+        // read when the Stop landed.
+        result.timed_out = rt_state.deadline_reached && !rt_state.stopped;
+        // The flag is the caller's; the runtime goes back to the pool.
+        rt_state.stop = nullptr;
 
         // Check if any tests failed
         for (const auto& test : result.tests) {

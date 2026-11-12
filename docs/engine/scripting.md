@@ -2343,6 +2343,21 @@ whose fetch was cancelled is left out of the run's pass and fail counts. On a
 collection run the step itself is then `stopped`, since its own send is
 cancelled too.
 
+**A Stop ends the script itself, too** (#3460). The same Stop or shutdown stops
+a run's script that is still running, fetch or no fetch, at QuickJS's next
+interrupt poll, so a script stuck in a loop never holds a Stop open for its
+`scriptTimeout`. Every script of every run kind honours it: `script.setup`, an
+inline step script under load, the deferred replay (see
+[Load Test Scripts](#load-test-scripts)) and a sequential run's step scripts. A
+script it ended is recorded exactly as a cancelled fetch's is, `skipped` with
+the message `the run was stopped while this script was running`, never an error.
+`script.teardown` is the one exception: teardown runs at the end of every run
+that set up, a stopped one included, so a Stop latched before teardown began
+leaves it to run (its fetches still cancelled at once), and only the engine
+shutting down ends it then; a Stop or shutdown that arrives while it runs ends
+it. A `POST /execute`'s scripts are not ended by a hang-up or a shutdown: its
+post-request script runs after a stream's own Stop.
+
 **It leaves the way its execution leaves.** The fetch takes the transport policy
 its enclosing execution resolved - the proxy mode and URL, the bypass list, the
 custom CA bundle and the client-certificate registry - rather than whatever the
@@ -4326,7 +4341,23 @@ The **language** is current; what is missing is the **host environment**:
   report says which one happened: `sampling.responseSampleBudgetSpent`
 - `samplesTested` in the report (`TestsSampled`) is the **size of that sample**,
   not the run's request count, and `sampling.responseSamplesDropped` beside it
-  says how many responses the bound thinned away
+  says how many responses the bound thinned away. It counts the samples the
+  replay reached, so it is smaller than the sample when a Stop ended the replay
+  (below)
+- **A Stop or the engine shutting down ends the replay** (#3460). The script
+  running when it lands stops at its next interrupt poll, which is no verdict on
+  it, and no sample after it is replayed; the run settles within the Stop's 5 s
+  grace rather than after every remaining sample's `scriptTimeout`. A Stop that
+  lands before the replay begins (one during the sending) replays nothing, and
+  the report then has no `testValidation` rather than one of zeros. The run
+  keeps the end it would have had: a Stop after the sending ended still leaves
+  it `completed`
+- **A script that times out is not replayed against the rest of the sample**
+  (#3460): its deadline is its own, so each sample after it would wait it out
+  again, and at the 5 s default a thousand samples is most of an hour. Its one
+  failure says so, `Script error: Script execution timed out after 5000ms
+  (timed out, not replayed against the remaining 999 samples)`, and the
+  replay's other scripts still run against every sample
 - Results are aggregated and reported in the final report: `testsPassed` /
   `testsFailed` tally every `pm.test` call across every sampled response, so a
   script whose assertions are a mix of passing and failing reports both counts

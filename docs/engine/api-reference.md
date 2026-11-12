@@ -10635,7 +10635,7 @@ that passed everything else. The run's rollup is
 | `errored`, step | The step did not run clean: the pre-request or test script threw, at any level (a thrown error, a script timeout, a refused `pm.request` write-back, a top-level `pm.response.to.have.status(...)` that did not hold), or the exchange did not complete (a transport failure, a request timeout, a request refused before the wire, a `{{data.*}}` token the row could not bind). | **Continues with the next plan position**, as Postman and Newman do by default. With `stopOnError: true` it ends the iteration instead. |
 | `errored`, flow control | The runner refused the step's flow control: an unresolved or ambiguous `setNextRequest` (or `control.switch` / `control.loop`) target, or the `maxStepsPerIteration` cap. | **Ends the iteration**, whatever `stopOnError` says. The next iteration still runs. |
 | `skipped` | A pre-request script called `pm.execution.skipRequest()`, so nothing was sent. The row carries the request and **no response**. | Continues with the next step. |
-| `stopped` | A Stop (`POST /runs/:id/stop`) or an engine shutdown cut the step short (#3397): its transfer, the late OAuth 2.0 token request ahead of it, or one of its scripts' `pm.sendRequest` was cancelled. The row carries the cancelled response (status `0`, `Request cancelled`). | **Ends the run.** No later step is sent or stored, and the step is no error: not in `errored`, `failed`, `stepsNotRun`, the status distribution, coverage or the assertion tally. |
+| `stopped` | A Stop (`POST /runs/:id/stop`) or an engine shutdown cut the step short (#3397): its transfer, the late OAuth 2.0 token request ahead of it, or one of its scripts' `pm.sendRequest` was cancelled, or one of its scripts was ended while it ran (#3460). The row carries the cancelled response (status `0`, `Request cancelled`). | **Ends the run.** No later step is sent or stored, and the step is no error: not in `errored`, `failed`, `stepsNotRun`, the status distribution, coverage or the assertion tally. |
 
 Either kind of `errored` is the same outcome on the row, in the summary's
 `errored` count and on the `step` frame, with the error in `results.error`; the
@@ -11046,8 +11046,9 @@ makes that element's `missing` a failed step. `deferred` (issue #2144) counts a
 assertions are the step's `tests`. `skipped` counts every other `skipped`
 outcome: a disabled element, an un-inlined `script.pre` (no replay to go to), a
 controller's skip, an optional `extract.json` over a body it could not
-read, and an inline `script.*` whose `pm.sendRequest` the run's Stop cancelled
-(#3371), whose tests and throw are then counted nowhere.
+read, and an inline `script.*` the run's Stop cut short, its `pm.sendRequest`
+cancelled (#3371) or the script itself ended (#3460), whose tests and throw are
+then counted nowhere.
 
 A `script.pre` or `script.post` that ran inline also says why it failed and
 what it logged (#3127), since a load run keeps no trace to read it from:
@@ -12744,7 +12745,13 @@ in memory only, and the first Stop is latched with the phase it arrived in.
   `cancelled`, not as errors, because the operator asked for it. The run keeps
   its own end - `completed`, or `failed` when `thresholds.failRun` judges it
   so - and its sending window is what it would have been without the Stop,
-  since the Stop ended no sending.
+  since the Stop ended no sending. A Stop in either phase also ends the
+  deferred test replay and any script still running (#3460): the running
+  script stops at its next interrupt poll and no further sample is replayed,
+  so `testValidation.samplesTested` counts the samples the replay reached and
+  the worker settles within the 5s below instead of after each remaining
+  sample's `scriptTimeout`. `script.teardown` still runs after a Stop latched
+  before it (see [scripting.md](scripting.md#sending-a-request-from-a-script-pmsendrequest), "A Stop ends the script itself").
 - **A drain that hits its deadline with no Stop** cancels what is still
   outstanding the same way, and because nobody asked for that one to stop, it
   is an error with no response, not a cancellation. Without that bound an
@@ -13330,7 +13337,7 @@ counts the submissions an un-inlined `script.post` was left to the completion re
 its verdicts are the report's `testValidation`, drawn from the sampled responses, so it is not a
 script that never ran. `skipped` is every other skip: a disabled element, an un-inlined
 `script.pre`, an optional `extract.json` over a body it could not read, or an inline
-`script.*` whose `pm.sendRequest` the run's Stop cancelled (#3371). Absent, not `[]`, for a run that declared no
+`script.*` the run's Stop cut short, its `pm.sendRequest` cancelled (#3371) or the script itself ended (#3460). Absent, not `[]`, for a run that declared no
 `requestElements`, one whose elements never ran, and every scenario run - a scenario's
 own per-step tallies live under `scenario.steps[].elements` instead (see
 [The `scenario` block](#the-scenario-block-collection-runs) and
@@ -13477,9 +13484,11 @@ failing test, as `{kind: "error" | "test", text}`) and **`console`** (each
 console line, as `{level, text}`) - the entry shape, the cap of ten distinct entries,
 the `count` on a repeat and the `messagesDropped` / `consoleDropped` counts of an
 element row's lists (#3127), each key present only when the script said something.
-A script whose `pm.sendRequest` the run's
-Stop cancelled is `"skipped"` (#3371), with a `message` saying so: the run ended
-under it, nothing failed, and the app shows the row muted rather than as a failure.
+A script the run's Stop cut short is
+`"skipped"`, with a `message` saying which way: its `pm.sendRequest` was
+cancelled (#3371), or the script itself was ended while it ran (#3460). The run
+ended under it, nothing failed, and the app shows the row muted rather than as a
+failure.
 
 **A streaming run adds a `stream` section** and no other run carries one:
 

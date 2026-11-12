@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -10826,4 +10827,54 @@ TEST_F (ScriptEngineTest, MathRandomDoesNotRepeatAcrossThreadsStartingTogether) 
         }
     }
     EXPECT_EQ (colliding_rounds, 0u);
+}
+
+// #3460: `ScriptContext::stop` ends the script itself, not only its sends, and
+// a script it ended is `cancelled`, never `timed_out`. Mutation check: drop the
+// `stop` check from `script_interrupt_handler` and the script runs out its
+// deadline instead.
+TEST_F (ScriptEngineTest, ARaisedStopEndsARunningScriptAsCancelled) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 2000;
+    ScriptEngine bounded (cfg);
+    const std::atomic<bool> stop{ true };
+    auto ctx = ScriptContext::for_test (request, response);
+    ctx.stop = &stop;
+
+    const auto result = bounded.execute ("while (true) {}", ctx);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (result.cancelled);
+    EXPECT_FALSE (result.timed_out);
+    EXPECT_TRUE (result.ended_by_stop ());
+}
+
+// The stop is read before every timer callback too, which runs no bytecode
+// before its first poll. Mutation check: drop the `stop` check from
+// `async_budget_spent` and the callback runs.
+TEST_F (ScriptEngineTest, ARaisedStopRunsNoTimerCallback) {
+    const std::atomic<bool> stop{ true };
+    Environment stopped_env;
+    auto ctx        = ScriptContext::for_test (request, response);
+    ctx.environment = &stopped_env;
+    ctx.stop        = &stop;
+
+    const auto result =
+    engine.execute ("setTimeout(() => pm.environment.set('ran', 'yes'), 0);", ctx);
+
+    EXPECT_TRUE (result.cancelled);
+    EXPECT_EQ (stopped_env.find ("ran"), stopped_env.end ());
+}
+
+TEST_F (ScriptEngineTest, AScriptThatRunsOutItsDeadlineIsTimedOut) {
+    ScriptConfig cfg;
+    cfg.timeout_ms = 50;
+    ScriptEngine bounded (cfg);
+    auto ctx = ScriptContext::for_test (request, response);
+
+    const auto result = bounded.execute ("while (true) {}", ctx);
+
+    EXPECT_TRUE (result.timed_out);
+    EXPECT_FALSE (result.cancelled);
+    EXPECT_EQ (result.error_message, "Script execution timed out after 50ms");
 }

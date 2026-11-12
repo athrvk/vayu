@@ -493,9 +493,19 @@ Manages the lifecycle of load test runs:
   lifecycle or inline step script whose send it cancelled is `skipped` (so a
   cut-short setup does not fail the run), and an inline one's tests and throw
   stay out of the step's result, so no tally counts them; the replay leaves
-  such a sample untallied (`ScriptResult::send_cancelled`). A Stop latched
-  before the replay leaves the flag raised, so the replay's and teardown's
-  sends after a Stop are cancelled at once: a Stop abandons them.
+  such a sample untallied (`ScriptResult::send_cancelled`). The same flag ends
+  the script itself (#3460): `ScriptSendInputs::stop` and
+  `ExchangeInputs::stop` carry it to `ScriptContext::stop`, which the QuickJS
+  interrupt handler reads beside the deadline and the async drain before every
+  job, so a looping script ends at its next poll and is
+  `ScriptResult::cancelled`, recorded like a cancelled send. The replay also
+  checks the flag before every sample and script, so a Stop or shutdown during
+  it settles within the Stop's grace and one latched before it replays
+  nothing; a replayed script that timed out is not run against the samples
+  after it. Teardown is the deliberate exception (`RunContext::teardown_stop`):
+  a Stop latched before it began leaves it to run, its sends cancelled at
+  once, and only `RunContext::engine_stopping`, which `RunManager::shutdown`
+  raises through `request_shutdown`, ends it then.
 - **Two kinds of worker, one lifecycle**: `start_run` spawns the load executor
   plus its auxiliary threads, `start_scenario_run` spawns the sequential
   collection runner. Both go through the same `spawn_run` registration - the

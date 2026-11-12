@@ -634,7 +634,7 @@ const std::string& script_type) {
 
     try {
         result = engine.execute (script, ctx);
-        if (!result.success) {
+        if (!result.success && !result.ended_by_stop ()) {
             vayu::utils::log_warning ("http", script_type + " script failed",
             { { "scriptError", vayu::utils::bounded_log_text (result.error_message) } });
         }
@@ -1374,6 +1374,7 @@ ExchangeInputs inputs) {
         // the value the send below uses.
         ctx.request_timeout_ms = outcome.request.timeout_ms;
         ctx.cancel             = inputs.cancel;
+        ctx.stop               = inputs.stop;
         // Both scripts of a step read the same row: they are the same
         // iteration, and a test script asserting against the row its request
         // was built from is the point of a data-driven run.

@@ -610,8 +610,9 @@ composed from) when it has them, and `required: true` for an extractor whose mis
 replay: the load path's `skip_reason` hook answers it with `ElementSkip::deferred` set, which the
 pipeline copies onto the outcome. `skipped` is every other `skipped` outcome,
 including the two that never run at all: a disabled element and an un-inlined `script.pre`
-(no pre-request replay exists), and an inline `script.*` whose `pm.sendRequest` the run's Stop
-cancelled (#3371), which `run_step_script` keeps out of the step's result. An extractor's miss is a `missing` (or, for an optional
+(no pre-request replay exists), and an inline `script.*` the run's Stop cut short, its
+`pm.sendRequest` cancelled (#3371) or the script itself ended (#3460), which `run_step_script`
+keeps out of the step's result. An extractor's miss is a `missing` (or, for an optional
 `extract.json` that could not read the body, a `skipped`), and is counted again,
 per step, in `scenario.steps[i].extractorMisses` (above).
 

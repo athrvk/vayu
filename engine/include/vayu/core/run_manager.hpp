@@ -427,6 +427,31 @@ struct RunContext {
     /// `should_stop`: a natural end never sets that, and its join must not
     /// wait either. A transfer it ends is the run ending, never a failure.
     std::atomic<bool> aux_cancel{ false };
+    /// Raised by @ref request_shutdown alone, when the engine is shutting down
+    /// under the run. What ends a teardown that a Stop was latched before
+    /// (@ref teardown_stop): `should_stop` is already raised by then.
+    std::atomic<bool> engine_stopping{ false };
+
+    /**
+     * @brief What ends a `script.teardown` that is running (#3460), its
+     *        `ScriptContext::stop`. Read as teardown begins.
+     *
+     * Teardown runs at the end of every run that set up, a stopped one
+     * included, so a Stop latched before it began leaves it to run (its
+     * `pm.sendRequest` still cancelled at once): then only the engine
+     * shutting down ends it. Otherwise a Stop or a shutdown arriving while it
+     * runs does, as it ends every other script of the run.
+     */
+    [[nodiscard]] const std::atomic<bool>* teardown_stop () const {
+        return should_stop.load () ? &engine_stopping : &should_stop;
+    }
+
+    /// @ref request_stop for an engine shutting down: raises
+    /// @ref engine_stopping first, so a teardown already past the Stop ends.
+    void request_shutdown () {
+        engine_stopping.store (true);
+        request_stop ();
+    }
 
     /**
      * @brief Ask the run to stop, from any thread (#3341).
@@ -746,7 +771,8 @@ struct RunContext {
      * route and default headers the run's transfers were sent under (the
      * `EventLoopConfig::transport` and `::default_headers` snapshot, #1256),
      * the run's resolved `timeout`, the load byte bound
-     * (`maxResponseBodyBytes`) and `should_stop` as the cancel (#3371).
+     * (`maxResponseBodyBytes`) and `should_stop` as the cancel (#3371) and
+     * as what ends the script itself (#3460).
      *
      * Written by `configure_event_loop` - the one place a load run resolves
      * them - before the loop starts, and only read afterwards: by

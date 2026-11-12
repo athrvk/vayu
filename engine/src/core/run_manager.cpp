@@ -191,14 +191,15 @@ struct ReplayFailures {
  * alongside them, never dropped just because the tests that did run are
  * counted - the same distinction `script_errored` draws in the design path.
  *
- * A script whose `pm.sendRequest` the run's Stop cancelled is not tallied at
- * all: the run ended under it, so it judged nothing (#3371).
+ * A script the run's Stop cut short (its `pm.sendRequest` cancelled, #3371,
+ * or the script itself ended, #3460) is not tallied at all: the run ended
+ * under it, so it judged nothing.
  */
 template <typename RecordFailure>
 void tally_replay_result (const vayu::ScriptResult& result,
 ScriptValidationTotals& totals,
 RecordFailure&& record_failure) {
-    if (result.send_cancelled) {
+    if (result.ended_by_stop ()) {
         return;
     }
     if (!result.tests.empty ()) {
@@ -292,18 +293,47 @@ nlohmann::json& stream_events) {
     return script_ctx;
 }
 
+/// Whether the run's Stop or the engine shutting down has ended a replay
+/// whose scripts take @p send (#3460): both raise the flag those scripts are
+/// stopped by.
+bool replay_stopped (const vayu::runtime::ScriptSendInputs& send) {
+    return send.stop != nullptr && send.stop->load ();
+}
+
+/**
+ * Marks @p result, from a script that timed out, as not replayed against the
+ * @p samples_after samples left (#3460): its deadline is its own, so each of
+ * them could wait it out again, and at the 5 s default a thousand samples is
+ * most of an hour of a run that has finished sending.
+ */
+void note_not_replayed (vayu::ScriptResult& result, size_t samples_after) {
+    if (samples_after == 0) {
+        return;
+    }
+    const std::string note = "timed out, not replayed against the remaining " +
+    std::to_string (samples_after) + (samples_after == 1 ? " sample" : " samples");
+    result.success = false;
+    result.error_message =
+    result.error_message.empty () ? note : result.error_message + " (" + note + ")";
+}
+
 /**
  * @brief Run every script of @p replay against one sample, each on its own.
  *
  * A throw from one element is that element's failure; the elements after it
  * still run, the way a Send's pipeline runs the next level after one throws.
  * Every line a script logged is offered to @p console, whatever its verdict.
+ * A script marked in @p timed_out is skipped, and one that times out here is
+ * marked, with @p samples_after the samples still to come. A Stop ends the
+ * sample between two scripts.
  */
 template <typename RecordFailure>
 void replay_sample (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 const ResponseSample& sample,
+size_t samples_after,
+std::vector<bool>& timed_out,
 ScriptValidationTotals& totals,
 DistinctMessageSample& console,
 RecordFailure& record_failure) {
@@ -316,11 +346,22 @@ RecordFailure& record_failure) {
     nlohmann::json stream_events;
     const auto script_ctx =
     replay_context (replay, scopes, sample, request, response, stream_events);
-    for (const auto& script : *replay.scripts) {
+    const auto& scripts = *replay.scripts;
+    for (size_t i = 0; i < scripts.size (); ++i) {
+        if (timed_out[i]) {
+            continue;
+        }
+        if (replay_stopped (replay.send)) {
+            return;
+        }
         try {
-            const vayu::ScriptResult result = engine.execute (script, script_ctx);
+            vayu::ScriptResult result = engine.execute (scripts[i], script_ctx);
             for (const auto& line : result.console_output) {
                 console.offer (console_message (line));
+            }
+            if (result.timed_out) {
+                timed_out[i] = true;
+                note_not_replayed (result, samples_after);
             }
             tally_replay_result (result, totals, record_failure);
         } catch (const std::exception& e) {
@@ -341,25 +382,30 @@ RecordFailure& record_failure) {
  *        distinct messages across the whole run - a forty-step plan must not
  *        multiply the cap by forty.
  * @return The tallies, and the console lines of this replay alone: a scenario
- *         step's own, never merged with another step's.
+ *         step's own, never merged with another step's. `sampled` counts the
+ *         samples the replay reached, fewer than it holds when a Stop or the
+ *         engine shutting down ended it (#3460).
  */
 ScriptValidationTotals run_replay (vayu::runtime::ScriptEngine& engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const ScriptReplay& replay,
 ReplayFailures& failures) {
     ScriptValidationTotals totals;
-    totals.sampled = replay.samples->size ();
     DistinctMessageSample console;
+    std::vector<bool> timed_out (replay.scripts->size (), false);
 
     auto record_failure = [&failures, &replay] (const std::string& message) {
         failures.record (replay.failure_prefix + message);
     };
 
-    for (const auto& sample : *replay.samples) {
+    const auto& samples = *replay.samples;
+    for (size_t i = 0; i < samples.size () && !replay_stopped (replay.send); ++i) {
+        ++totals.sampled;
         // A sample whose context cannot be built runs none of its scripts and
         // fails once.
         try {
-            replay_sample (engine, scopes, replay, sample, totals, console, record_failure);
+            replay_sample (engine, scopes, replay, samples[i],
+            samples.size () - i - 1, timed_out, totals, console, record_failure);
         } catch (const std::exception& e) {
             totals.failed++;
             record_failure ("Exception: " + std::string (e.what ()));
@@ -534,7 +580,7 @@ ReplayFailures& failures) {
     plan.steps.size (), context->metrics_collector->step_sample_step_count ());
     validation.steps.resize (steps);
 
-    for (size_t i = 0; i < steps; ++i) {
+    for (size_t i = 0; i < steps && !replay_stopped (send); ++i) {
         const auto& step = plan.steps[i];
         const auto& samples = context->metrics_collector->step_response_samples (i);
         const std::vector<std::string> post_scripts =
@@ -588,6 +634,10 @@ ReplayFailures& failures) {
         auto& step_scopes = scopes.bind (
         load_step_collection_id (step, context->scenario->request.collection_id));
         auto totals = run_replay (engine, step_scopes, replay, failures);
+        // A Stop before the step's first sample: it judged nothing.
+        if (totals.sampled == 0) {
+            continue;
+        }
         run_totals.sampled += totals.sampled;
         run_totals.passed += totals.passed;
         run_totals.failed += totals.failed;
@@ -784,6 +834,10 @@ const ReplayBase& base) {
         vayu::http::routes::load_script_variable_scopes (db, environment_id,
         single_request_lifecycle_collection_id (db, context->config));
         totals      = run_replay (engine, scopes, replay, failures);
+        // A Stop before the first sample: never judged, not judged and passed.
+        if (totals.sampled == 0) {
+            return validation;
+        }
     }
 
     store_validation_failures (
@@ -1340,7 +1394,7 @@ void RunManager::shutdown (std::chrono::milliseconds grace) {
     // of them is waited on, so the grace period is shared rather than serial.
     auto active = get_all_active_runs ();
     for (const auto& context : active) {
-        context->request_stop ();
+        context->request_shutdown ();
     }
 
     if (!active.empty ()) {
@@ -1586,10 +1640,12 @@ int default_max_per_host) {
     context->script_send.default_headers = loop_config.default_headers;
     context->script_send.max_response_bytes = loop_config.max_response_body_bytes;
     context->script_send.request_timeout_ms = timeout_ms;
-    // Stop and shutdown both raise `should_stop` (#3371). Not `aux_cancel`:
-    // the worker raises that at every end before the replay and teardown run,
-    // and their sends must still go out after a natural end.
+    // Stop and shutdown both raise `should_stop` (#3371), which ends the
+    // scripts themselves too (#3460; teardown reads `teardown_stop`). Not
+    // `aux_cancel`: the worker raises that at every end before the replay and
+    // teardown run, and their sends must still go out after a natural end.
     context->script_send.cancel = &context->should_stop;
+    context->script_send.stop   = &context->should_stop;
     // Only enable curl verbose if explicitly requested in config,
     // independent of server verbose mode
     loop_config.verbose = config.value ("verbose", false);
@@ -2341,6 +2397,8 @@ std::vector<vayu::core::ElementOutcome> run_collection_teardown (vayu::db::Datab
 const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<ScenarioLoadState>& scenario_state,
 const vayu::runtime::RunSummaryInfo& run_summary_info) {
+    auto teardown_send = context->script_send;
+    teardown_send.stop = context->teardown_stop ();
     if (context->scenario) {
         if (!scenario_state || !context->lifecycle || context->lifecycle->empty ()) {
             return {};
@@ -2350,8 +2408,8 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
         // A copy: the run's scopes are the bases' source and stay as setup
         // left them, and a load run persists nothing.
         auto scopes = scenario_state->lifecycle_scopes;
-        return run_scenario_teardown (teardown_engine, scopes,
-        context->script_send, *context->lifecycle, run_summary_info);
+        return run_scenario_teardown (teardown_engine, scopes, teardown_send,
+        *context->lifecycle, run_summary_info);
     }
     const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
     std::vector<vayu::core::ElementOutcome> teardown_outcomes;
@@ -2361,7 +2419,7 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
     vayu::runtime::ScriptEngine teardown_engine (
     read_lifecycle_script_config (db, context->config));
     run_teardown_elements (teardown_engine, context->lifecycle_scopes,
-    context->script_send, lifecycle_elements, run_summary_info, teardown_outcomes);
+    teardown_send, lifecycle_elements, run_summary_info, teardown_outcomes);
     return teardown_outcomes;
 }
 

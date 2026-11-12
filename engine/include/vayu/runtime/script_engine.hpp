@@ -414,6 +414,22 @@ struct ScriptContext {
     const std::atomic<bool>* cancel = nullptr;
 
     /**
+     * @brief Ends the script itself when raised (#3460), or null when
+     *        nothing may.
+     *
+     * The interrupt handler reads it at every poll beside the deadline, and
+     * the async drain before every job and timer, so a script stops within a
+     * poll of it rising; the result is `ScriptResult::cancelled`, no verdict.
+     * A run's scripts take the run's `should_stop` through
+     * @ref ScriptSendInputs or `ExchangeInputs::stop`. Separate from
+     * @ref cancel because some scripts must still run after the flag that
+     * cancels their sends: a `POST /execute`'s (its post-request script runs
+     * after a stream's Stop) and a teardown a Stop was latched before
+     * (`RunContext::teardown_stop`).
+     */
+    const std::atomic<bool>* stop = nullptr;
+
+    /**
      * @brief `pm.metrics`'s write destination (issue #1500), or null to
      *        refuse it.
      *
@@ -511,6 +527,10 @@ struct ScriptSendInputs {
     /// `ScriptContext::cancel`: the run's `should_stop`, which Stop and
     /// shutdown both raise. Must outlive every script it is applied to.
     const std::atomic<bool>* cancel = nullptr;
+    /// `ScriptContext::stop`: the run's `should_stop` too, except for a
+    /// teardown (`RunContext::teardown_stop`). Must outlive every script it is
+    /// applied to.
+    const std::atomic<bool>* stop = nullptr;
 
     void apply (ScriptContext& ctx) const {
         ctx.transport          = transport;
@@ -518,6 +538,7 @@ struct ScriptSendInputs {
         ctx.max_response_bytes = max_response_bytes;
         ctx.request_timeout_ms = request_timeout_ms;
         ctx.cancel             = cancel;
+        ctx.stop               = stop;
     }
 };
 
