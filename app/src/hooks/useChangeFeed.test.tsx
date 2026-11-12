@@ -43,7 +43,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	useEngineStore.setState({ engineStatus: "starting" });
+	useEngineStore.setState({
+		engineStatus: "starting",
+		engineCrash: null,
+		engineCrashAheadOfPoll: false,
+	});
 });
 
 describe("useChangeFeed", () => {
@@ -73,6 +77,23 @@ describe("useChangeFeed", () => {
 		expect(service.stop).toHaveBeenCalledTimes(1);
 
 		setStatus("connected");
+		expect(service.start).toHaveBeenCalledTimes(2);
+		expect(service.start).toHaveBeenLastCalledWith(queryClient);
+	});
+
+	it("closes the feed on a crash the poll has not confirmed, and reopens it on the poll's next verdict (#3506)", () => {
+		setStatus("connected");
+		const { queryClient } = setup();
+		expect(service.start).toHaveBeenCalledTimes(1);
+
+		act(() =>
+			useEngineStore
+				.getState()
+				.setEngineCrash({ code: null, signal: "SIGKILL", stderrTail: [], error: null })
+		);
+		expect(service.stop).toHaveBeenCalledTimes(1);
+
+		act(() => useEngineStore.getState().setEngineStatus("connected"));
 		expect(service.start).toHaveBeenCalledTimes(2);
 		expect(service.start).toHaveBeenLastCalledWith(queryClient);
 	});

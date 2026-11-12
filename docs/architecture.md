@@ -515,7 +515,8 @@ which case the app picks a fallback (below).
   facts only: the `/health` poll is still the one writer of the renderer's
   `engineStatus`, and a `crashed` push asks it to look again (it invalidates
   the health query alone) rather than waiting out its 30 s healthy interval
-  (issue #3493). The Dock and the Services drawer read
+  (issue #3493). The Dock, the Services drawer, the inbox and
+  mock-server tabs, the dirty-tab close guards and the change feed read
   `selectKnownEngineStatus`, which lets a crash outrank a `connected` verdict
   the poll gave before the push, so the light reads "Engine disconnected"
   beside Restart and the drawer shows its services stopped, never "Engine

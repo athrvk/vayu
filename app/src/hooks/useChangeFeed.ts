@@ -8,7 +8,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { changeFeedService } from "@/services/change-feed-service";
-import { useEngineStore } from "@/stores";
+import { selectKnownEngineStatus, useEngineStore } from "@/stores";
 
 /**
  * Keep the cache in step with every write to the engine's stored rows, whoever
@@ -17,13 +17,15 @@ import { useEngineStore } from "@/stores";
  * server's writes: both invalidate through the same families, and an
  * invalidation twice over is a refetch, never a wrong answer.
  *
- * Open only while the engine is connected. The stream reconnects on its own
- * across a dropped connection, but an engine that is gone is the health poll's
- * to notice, and a stream retrying into it would only add to the noise.
+ * Open only while the engine is connected, as `selectKnownEngineStatus` reads
+ * it: a crash the sidecar reported closes the feed before the poll confirms it
+ * (#3506). The stream reconnects on its own across a dropped connection, but
+ * an engine that is gone is the health poll's to notice, and a stream retrying
+ * into it would only add to the noise.
  */
 export function useChangeFeed(): void {
 	const queryClient = useQueryClient();
-	const connected = useEngineStore((s) => s.engineStatus === "connected");
+	const connected = useEngineStore((s) => selectKnownEngineStatus(s) === "connected");
 
 	useEffect(() => {
 		if (!connected) return;

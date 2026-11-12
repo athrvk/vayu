@@ -12,7 +12,7 @@ import { useSaveStore, type SaveContext } from "./save-store";
 import { useResponseStore } from "./response-store";
 import { useTabSelectionStore } from "./tab-selection-store";
 import { useEntityDraftStore } from "./entity-draft-store";
-import { useEngineStore } from "./engine-store";
+import { selectKnownEngineStatus, useEngineStore } from "./engine-store";
 import { useToastStore } from "./toast-store";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
@@ -360,7 +360,7 @@ function forgetLocations(
  * selects a dirty tab.
  */
 function withoutUnsavableTabs(openTabs: readonly Tab[], closing: ReadonlySet<string>) {
-	if (useEngineStore.getState().engineStatus === "connected") return closing;
+	if (selectKnownEngineStatus(useEngineStore.getState()) === "connected") return closing;
 	const contexts = useSaveStore.getState().contexts;
 	const kept = new Set(
 		openTabs.filter((t) => closing.has(t.id) && isTabDirty(t, contexts)).map((t) => t.id)
@@ -836,7 +836,7 @@ export const useTabsStore = create<TabsState>()(
 				if (
 					tab &&
 					isTabDirty(tab, useSaveStore.getState().contexts) &&
-					useEngineStore.getState().engineStatus !== "connected"
+					selectKnownEngineStatus(useEngineStore.getState()) !== "connected"
 				) {
 					useToastStore
 						.getState()
