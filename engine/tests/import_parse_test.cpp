@@ -1951,6 +1951,27 @@ TEST (ImportParse, AnOlderVayuDocumentKeepsItsFoldersFirst) {
     "request:{{baseUrl}}/login", "request:{{baseUrl}}/logout" }));
 }
 
+// A stated `order` no row can store counts as unstated (#3451), so `/logout`
+// takes the position an unordered request would rather than wrapping (2^31)
+// or staying negative and sorting first. Mutation check: read `stated_order`
+// with a bare `get<int> ()` again and `/logout` lists first.
+TEST (ImportParse, AVayuDocumentsUnstorableOrderCountsAsUnstated) {
+    for (const std::string order : { "2147483648", "-1" }) {
+        const ImportParse parsed = parse_import (
+        R"json({"openapi":"3.1.0","info":{"title":"T"},
+            "x-vayu-collection":{"folders":[]},
+            "paths":{
+              "/login":{"post":{"responses":{},"x-vayu-request":{"order":0}}},
+              "/logout":{"post":{"responses":{},"x-vayu-request":{"order":)json" +
+        order + "}}}}}",
+        {}, {});
+        ASSERT_TRUE (parsed.ok ()) << parsed.error;
+        EXPECT_EQ (root_payload_listing (parsed),
+        (std::vector<std::string>{ "request:{{baseUrl}}/login", "request:{{baseUrl}}/logout" }))
+        << order;
+    }
+}
+
 TEST (ImportParse, ReportsA31DocumentApartFrom30) {
     const ImportParse v30 =
     parse_import (R"({"openapi":"3.0.3","info":{"title":"T"},"paths":{}})", {}, {});

@@ -552,6 +552,27 @@ bool is_create) {
     return {};
 }
 
+/** True when the body leaves `order` to the engine - absent, or an explicit null. */
+static bool order_is_defaulted (const nlohmann::json& json) {
+    return !json.contains ("order") || json["order"].is_null ();
+}
+
+/**
+ * A request's `order`: a stated one through `read_order_field` (#3451). A
+ * defaulted one is the append, which needs the stored siblings, so this
+ * writes 0 and the cores and the batch writers replace it.
+ */
+static RouteResult
+apply_request_order_field (const nlohmann::json& json, int& out, bool is_create) {
+    if (!order_is_defaulted (json)) {
+        return read_order_field (json["order"], out);
+    }
+    if (is_create || json.contains ("order")) {
+        out = 0;
+    }
+    return {};
+}
+
 /**
  * Applies the request body onto `r` under the one null-vs-absent rule (see the
  * helpers in routes.hpp). Shared by the create and update cores so the two
@@ -639,7 +660,9 @@ bool is_create) {
     !outcome) {
         return outcome;
     }
-    apply_int_field (json, "order", r.order, 0, is_create);
+    if (auto outcome = apply_request_order_field (json, r.order, is_create); !outcome) {
+        return outcome;
+    }
     apply_bool_field (json, "followRedirects", r.follow_redirects, true, is_create);
 
     // TLS verification (issue #706). Through the shared applier like every
@@ -756,11 +779,6 @@ const std::string& collection_id) {
  */
 static int append_order (vayu::db::Database& db, const vayu::db::Request& r) {
     return db.next_sibling_order (r.collection_id, r.id);
-}
-
-/** True when the body leaves `order` to the engine - absent, or an explicit null. */
-static bool order_is_defaulted (const nlohmann::json& json) {
-    return !json.contains ("order") || json["order"].is_null ();
 }
 
 /**

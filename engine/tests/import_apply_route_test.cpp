@@ -320,6 +320,35 @@ TEST_F (ImportApplyRouteTest, AStatedOrderIsHonouredBesideDefaultedSiblings) {
     EXPECT_EQ (defaulted_row->order, 1);
 }
 
+// A stated `order` goes through the applier `POST /requests` and
+// `POST /collections` use (#3451): one no row can store refuses the whole
+// tree, naming the field and the item. Mutation check: read a request's
+// `order` through `apply_int_field` again and `"3"` imports at 0.
+TEST_F (ImportApplyRouteTest, AnUnstorableStatedOrderRefusesTheTree) {
+    for (const char* text : { "\"3\"", "2.5", "-1", "2147483648" }) {
+        json folder             = collection_item ("c2", "folder");
+        folder["parentTempId"]  = "c1";
+        folder["order"]         = json::parse (text);
+        json request            = request_item ("r1", "c1", "get");
+        request["order"]        = json::parse (text);
+        auto [status, response] = import_apply_response (*db_,
+        json{ { "collections", json::array ({ collection_item ("c1", "root") }) },
+        { "requests", json::array ({ request }) } });
+        EXPECT_EQ (status, 400) << text << " -> " << response.dump ();
+        EXPECT_EQ (response["error"]["item"], "r1") << response.dump ();
+        EXPECT_NE (response.dump ().find ("'order'"), std::string::npos)
+        << response.dump ();
+
+        auto [folder_status, refused] = import_apply_response (*db_,
+        json{ { "collections", json::array ({ collection_item ("c1", "root"), folder }) } });
+        EXPECT_EQ (folder_status, 400) << text << " -> " << refused.dump ();
+        EXPECT_EQ (refused["error"]["item"], "c2") << refused.dump ();
+        EXPECT_NE (refused.dump ().find ("'order'"), std::string::npos)
+        << refused.dump ();
+    }
+    EXPECT_EQ (stored_rows (), 0u);
+}
+
 TEST_F (ImportApplyRouteTest, WritesNothingWhenOneItemIsInvalid) {
     json bad_request = request_item ("r2", "c1", "no method");
     bad_request.erase ("method");

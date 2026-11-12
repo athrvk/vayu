@@ -29,6 +29,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "optional_assert.hpp"
 #include "spec_move_fixture.hpp"
 #include "temp_database.hpp"
 #include "vayu/db/database.hpp"
@@ -590,6 +591,74 @@ TEST_F (RequestsRouteTest, ARenameKeepsTheStoredOrder) {
     EXPECT_EQ (body["order"], 1);
 }
 
+// -- `order` is an integer from 0 to INT_MAX (#3451) ------------------------
+//
+// Parsed from text, as a wire body is: nlohmann reads a non-negative literal
+// as unsigned. Mutation checks: read `order` through `apply_int_field` again
+// and `"3"` / `2.5` create at 0 and move at the old slot; read it with a bare
+// `get<int> ()` and 2^31 stores a negative.
+
+constexpr auto UNSTORABLE_ORDERS = std::to_array<std::string_view> (
+{ "2147483648", "4294967296", "9223372036854775808", "-1", "\"3\"", "2.5" });
+
+bool names_order (const json& body) {
+    const auto message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    return message.find ("'order'") != std::string::npos;
+}
+
+TEST_F (RequestsRouteTest, ACreateStatingAnUnstorableOrderIsRefusedAndWritesNothing) {
+    seed_collection_at ("col_p", "", 0);
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        json body     = new_request ("col_p");
+        body["order"] = json::parse (text);
+
+        auto [status, response] = vayu::http::routes::create_request_response (*db_, body);
+
+        EXPECT_EQ (status, 400) << text << " -> " << response.dump ();
+        EXPECT_TRUE (names_order (response)) << response.dump ();
+    }
+    EXPECT_TRUE (db_->get_requests_in_collection ("col_p").empty ());
+}
+
+TEST_F (RequestsRouteTest, AnUpdateStatingAnUnstorableOrderIsRefusedAndLeavesTheRow) {
+    seed_collection_at ("col_s", "", 0);
+    seed_collection_at ("col_d", "", 1);
+    seed_request_at ("req_a", "col_s", 4);
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        for (const json& move : { json::object (), json{ { "collectionId", "col_d" } } }) {
+            json body     = move;
+            body["order"] = json::parse (text);
+
+            auto [status, response] =
+            vayu::http::routes::update_request_response (*db_, "req_a", body);
+
+            EXPECT_EQ (status, 400) << body.dump () << " -> " << response.dump ();
+            EXPECT_TRUE (names_order (response)) << response.dump ();
+        }
+    }
+    const auto row = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->collection_id, "col_s");
+    EXPECT_EQ (row->order, 4);
+}
+
+TEST_F (RequestsRouteTest, TheHighestOrderIsStoredOnBothVerbs) {
+    seed_collection_at ("col_p", "", 0);
+    json body     = new_request ("col_p");
+    body["order"] = json::parse ("2147483647");
+    auto [status, created] = vayu::http::routes::create_request_response (*db_, body);
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["order"], 2147483647);
+
+    seed_request_at ("req_a", "col_p", 0);
+    auto [update_status, updated] = vayu::http::routes::update_request_response (
+    *db_, "req_a", json{ { "order", json::parse ("2147483647") } });
+    ASSERT_EQ (update_status, 200) << updated.dump ();
+    const auto row = db_->get_request ("req_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 2147483647);
+}
 
 // -- Leaving a spec binding (#3446) -----------------------------------------
 //

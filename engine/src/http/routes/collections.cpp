@@ -389,7 +389,9 @@ bool is_create) {
     const bool reparented = !is_create && c.parent_id != previous_parent;
 
     if (json.contains ("order") && !json["order"].is_null ()) {
-        c.order = json["order"].get<int> ();
+        if (auto outcome = read_order_field (json["order"], c.order); !outcome) {
+            return outcome;
+        }
     } else if (is_create || reparented || json.contains ("order")) {
         // "Append after the current siblings" *is* this field's default, so the
         // one null-vs-absent rule lands all three of these on it: create (absent

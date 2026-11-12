@@ -304,6 +304,49 @@ TEST_F (ReorderRouteTest, RejectsANonIntegerOrAbsentOrder) {
     EXPECT_EQ (status, 400) << response.dump ();
 }
 
+// An `order` past `int` is refused, not narrowed (#3451). Parsed from text, as
+// a wire body is: nlohmann reads a non-negative literal as unsigned, and both
+// kinds of row are held to it. Mutation check: restore the `get<int> ()` read
+// in `read_move` and 2^31 stores a negative, 2^32 a 0.
+TEST_F (ReorderRouteTest, RejectsAnOrderPastTheColumnAndWritesNothing) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+    for (const char* text : { "2147483648", "4294967296", "9223372036854775808",
+         "18446744073709551615", "-1" }) {
+        for (const json& move : { json{ { "type", "request" }, { "id", a } },
+             json{ { "type", "collection" }, { "id", col }, { "parentId", nullptr } } }) {
+            json entry     = move;
+            entry["order"] = json::parse (text);
+            auto [status, response] =
+            reorder_response (*db_, json{ { "moves", json::array ({ entry }) } });
+
+            EXPECT_EQ (status, 400) << entry.dump () << " -> " << response.dump ();
+            EXPECT_NE (
+            response["error"]["message"].get<std::string> ().find (
+            "move at index 0: 'order' must be an integer from 0 to 2147483647"),
+            std::string::npos)
+            << response.dump ();
+        }
+    }
+    EXPECT_EQ (request_orders (col), (std::vector<int>{ 0 }));
+    const auto stored = db_->get_collection (col);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->order, 0);
+}
+
+TEST_F (ReorderRouteTest, AcceptsTheHighestOrder) {
+    const std::string col = make_collection ("Billing");
+    const std::string a   = make_request (col, "a");
+
+    auto [status, response] = reorder_response (*db_,
+    json{ { "moves",
+    json::array ({ json{ { "type", "request" }, { "id", a },
+    { "order", json::parse ("2147483647") } } }) } });
+
+    ASSERT_EQ (status, 200) << response.dump ();
+    EXPECT_EQ (request_orders (col), (std::vector<int>{ 2147483647 }));
+}
+
 TEST_F (ReorderRouteTest, RejectsAnUnknownTypeAndAMalformedNormalizeScope) {
     const std::string col = make_collection ("Billing");
 

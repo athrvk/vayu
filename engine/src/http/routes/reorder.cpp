@@ -147,11 +147,12 @@ read_scope (vayu::db::Database& db, const nlohmann::json& entry, size_t index, S
 /**
  * Reads one `moves` entry and checks that the row it names is stored.
  *
- * `order` is required and must be a non-negative integer: this endpoint exists
- * to write dense positions, and a float or a negative would be a silently
- * truncated or unreachable slot. The owner fields follow the merge-patch rule
- * the single-row endpoints use - absent keeps the current owner, present states
- * a move - except that a stated owner must exist, for the reason in `read_scope`.
+ * `order` is required and goes through `read_order_field`: this endpoint
+ * exists to write dense positions, and a float, a negative or a value past
+ * `int` would be a truncated, unreachable or wrapped slot. The owner fields
+ * follow the merge-patch rule the single-row endpoints use - absent keeps the
+ * current owner, present states a move - except that a stated owner must
+ * exist, for the reason in `read_scope`.
  */
 RouteResult
 read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Move& out) {
@@ -166,12 +167,11 @@ read_move (vayu::db::Database& db, const nlohmann::json& entry, size_t index, Mo
     }
     out.id = entry["id"].get<std::string> ();
 
-    if (!entry.contains ("order") || !entry["order"].is_number_integer () ||
-    entry["order"].get<int64_t> () < 0) {
-        return std::unexpected (
-        body_error ("Invalid " + at + ": 'order' must be a non-negative integer"));
+    if (auto outcome =
+        read_order_field (entry.value ("order", nlohmann::json ()), out.order, at);
+    !outcome) {
+        return outcome;
     }
-    out.order = entry["order"].get<int> ();
 
     if (out.kind == Kind::Collection) {
         if (!db.get_collection (out.id).has_value ()) {

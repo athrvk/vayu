@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <string_view>
 #include <tuple>
 #include <vector>
@@ -20,11 +22,41 @@ namespace vayu::db {
 
 /**
  * The children of a collection are its sub-folders and its requests together,
- * in one `order` space (#2535). This header is the engine's one copy of how
- * the two kinds sort against each other; `compareTreeOrder` in
- * `app/src/types/domain.ts` is the renderer's, and
+ * in one `order` space (#2535). This header is the engine's one copy of the
+ * range that space covers and of how the two kinds sort against each other;
+ * `compareTreeOrder` in `app/src/types/domain.ts` is the renderer's, and
  * `tests/fixtures/tree-order-conformance.json` pins the two together.
  */
+
+/// The highest `order` a row stores (#3451): the column is an `int`.
+inline constexpr int MAX_SIBLING_ORDER = std::numeric_limits<int>::max ();
+
+/**
+ * @p value as an `order` a row can store, a JSON integer from 0 to
+ * `MAX_SIBLING_ORDER`, or nothing. Either `basic_json` (the routes read
+ * `nlohmann::json`, the importers `ordered_json`). nlohmann reads a
+ * non-negative literal as unsigned, so each signedness is compared in its own
+ * type before narrowing: a signed read of 2^63 is negative and an `int` read
+ * of 2^31 wraps.
+ */
+template <typename Json>
+[[nodiscard]] std::optional<int> storable_order (const Json& value) {
+    if (value.is_number_unsigned ()) {
+        const auto stated = value.template get<std::uint64_t> ();
+        if (stated > static_cast<std::uint64_t> (MAX_SIBLING_ORDER)) {
+            return std::nullopt;
+        }
+        return static_cast<int> (stated);
+    }
+    if (value.is_number_integer ()) {
+        const auto stated = value.template get<std::int64_t> ();
+        if (stated < 0 || stated > MAX_SIBLING_ORDER) {
+            return std::nullopt;
+        }
+        return static_cast<int> (stated);
+    }
+    return std::nullopt;
+}
 
 /// Which table a sibling is a row of. Declared in rank order: on an `order`
 /// tie a sub-folder sorts before a request.

@@ -35,6 +35,7 @@
 #include "vayu/core/spec_diff.hpp"
 #include "vayu/core/status_seconds.hpp"
 #include "vayu/db/database.hpp"
+#include "vayu/db/sibling_order.hpp"
 #include "vayu/http/auth_resolver.hpp"
 #include "vayu/http/cookie_jar.hpp"
 #include "vayu/http/entity_tag.hpp"
@@ -921,6 +922,33 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
     } else if (is_create) {
         out = default_value;
     }
+}
+
+/**
+ * Reads a stated `order` into @p out (#3451): a JSON integer from 0 to
+ * `MAX_SIBLING_ORDER` (`vayu::db::storable_order`), otherwise a 400 naming
+ * the field. `null` is refused like any other non-integer, so a caller that
+ * gives absent or `null` a meaning (append) tests for it first. @p where
+ * names the entry of a batch (`move at index 2`), empty for a whole body.
+ *
+ * Not `apply_int_field`, which ignores a non-integer and narrows without a
+ * bound: an `order` it dropped stored the top slot, and one it narrowed
+ * wrapped to a negative slot that sorts first.
+ */
+[[nodiscard]] inline RouteResult
+read_order_field (const nlohmann::json& value, int& out, std::string_view where = {}) {
+    if (const auto order = vayu::db::storable_order (value)) {
+        out = *order;
+        return {};
+    }
+    const std::string got =
+    value.is_number () ? value.dump () : std::string (value.type_name ());
+    const std::string rule = std::format (
+    "must be an integer from 0 to {} (got {})", vayu::db::MAX_SIBLING_ORDER, got);
+    if (where.empty ()) {
+        return route_error (400, "Invalid 'order': " + rule);
+    }
+    return route_error (400, std::format ("Invalid {}: 'order' {}", where, rule));
 }
 
 /**

@@ -22,8 +22,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -281,6 +283,65 @@ TEST_F (CollectionsRouteTest, ARootAppendsAfterTheOtherRootsOnly) {
 
     ASSERT_EQ (status, 200) << body.dump ();
     EXPECT_EQ (body["order"], 3);
+}
+
+// -- `order` is an integer from 0 to INT_MAX (#3451) ------------------------
+//
+// Parsed from text, as a wire body is: nlohmann reads a non-negative literal
+// as unsigned. Mutation checks: read `order` with the bare `get<int> ()` again
+// and 1.7 stores 1, 2^31 a negative and `"x"` answers nlohmann's own text.
+
+constexpr auto UNSTORABLE_ORDERS = std::to_array<std::string_view> (
+{ "2147483648", "4294967296", "9223372036854775808", "-1", "1.7", "\"x\"" });
+
+bool names_order (const json& body) {
+    const auto message =
+    body.value (json::json_pointer ("/error/message"), std::string ());
+    return message.find ("'order'") != std::string::npos;
+}
+
+TEST_F (CollectionsRouteTest, ACreateStatingAnUnstorableOrderIsRefusedAndWritesNothing) {
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        auto [status, body] = vayu::http::routes::create_collection_response (
+        *db_, json{ { "name", "new" }, { "order", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_order (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (CollectionsRouteTest, AnUpdateStatingAnUnstorableOrderIsRefusedAndLeavesTheRow) {
+    seed_collection ("col_a", "A", std::nullopt, 4);
+    for (const std::string_view text : UNSTORABLE_ORDERS) {
+        auto [status, body] = vayu::http::routes::update_collection_response (
+        *db_, "col_a", json{ { "order", json::parse (text) } });
+
+        EXPECT_EQ (status, 400) << text << " -> " << body.dump ();
+        EXPECT_TRUE (names_order (body)) << body.dump ();
+        EXPECT_EQ (body.dump ().find ("json.exception"), std::string::npos)
+        << body.dump ();
+    }
+    const auto row = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 4);
+}
+
+TEST_F (CollectionsRouteTest, TheHighestOrderIsStoredOnBothVerbs) {
+    auto [status, created] = vayu::http::routes::create_collection_response (
+    *db_, json{ { "name", "new" }, { "order", json::parse ("2147483647") } });
+    ASSERT_EQ (status, 200) << created.dump ();
+    EXPECT_EQ (created["order"], 2147483647);
+
+    seed_collection ("col_a", "A");
+    auto [update_status, updated] = vayu::http::routes::update_collection_response (
+    *db_, "col_a", json{ { "order", json::parse ("2147483647") } });
+    ASSERT_EQ (update_status, 200) << updated.dump ();
+    const auto row = db_->get_collection ("col_a");
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->order, 2147483647);
 }
 
 // -- A collection never inherits auth (#3445) -------------------------------
