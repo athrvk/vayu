@@ -10526,6 +10526,27 @@ ScriptConfig minimum_memory_config () {
     return cfg;
 }
 
+// Where QuickJS's allocator refuses decides whether it has room left to build
+// the InternalError (the "ran out of memory" sentence) or throws a bare null
+// (the "threw null" sentence), and it gives no signal to tell the two apart. An
+// allocation loop lands on either by the platform's allocator and layout, so a
+// test that provokes a real refusal accepts both sentences and nothing else. A deterministic cause (a
+// script's own `throw null`, the `require()` restore) asserts its one sentence.
+::testing::AssertionResult
+IsAnOutOfMemorySentenceNaming (const std::string& message, size_t limit_mib) {
+    const std::string limit   = std::to_string (limit_mib) + " MiB limit";
+    const std::string ran_out = "Script ran out of memory at the " + limit;
+    const std::string threw_null =
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the " +
+    limit + " with no room to build an error)";
+    if (message == ran_out || message == threw_null) {
+        return ::testing::AssertionSuccess ();
+    }
+    return ::testing::AssertionFailure () << "\"" << message << "\" is neither \"" << ran_out
+                                          << "\" nor \"" << threw_null << "\"";
+}
+
 } // namespace
 
 // At the floor QuickJS has no room to build the error for the refused
@@ -10538,14 +10559,16 @@ TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemo
     EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
 }
 
-// QuickJS's own error object, when there was room to build it, reads the same.
-TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsTheSameSentence) {
+// An allocation loop reports QuickJS's own out-of-memory error when there was
+// room to build it and the null sentence when there was not; see
+// IsAnOutOfMemorySentenceNaming. Never a bare null.
+TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsAnOutOfMemorySentence) {
     ScriptEngine bounded (minimum_memory_config ());
     auto ctx    = ScriptContext::for_test (request, response);
     auto result = bounded.execute (
     "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
     EXPECT_FALSE (result.success);
-    EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
+    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 1));
 }
 
 TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
@@ -10555,7 +10578,8 @@ TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
     auto ctx    = ScriptContext::for_test (request, response);
     auto result = bounded.execute (
     "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
-    EXPECT_EQ (result.error_message, "Script ran out of memory at the 2 MiB limit");
+    EXPECT_FALSE (result.success);
+    EXPECT_TRUE (IsAnOutOfMemorySentenceNaming (result.error_message, 2));
 }
 
 // A script's own `throw null` is not an out-of-memory error, and QuickJS gives
