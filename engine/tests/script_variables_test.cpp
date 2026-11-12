@@ -65,7 +65,15 @@ namespace {
 using vayu::http::routes::load_script_variable_scopes;
 using vayu::http::routes::persist_script_variables;
 using vayu::http::routes::RunVariableScopes;
+using vayu::http::routes::scope_collection_id;
 using vayu::http::routes::ScriptVariableScopes;
+
+/// The scopes a send linking @p run's request and environment reads, as
+/// `POST /execute` loads them for a payload naming no `collectionId`.
+ScriptVariableScopes scopes_of (vayu::db::Database& db, const vayu::db::Run& run) {
+    return load_script_variable_scopes (db, run.environment_id,
+    scope_collection_id (db, run.request_id, std::nullopt));
+}
 
 // A blob in the shape the app writes: every field, including the ordering key.
 constexpr const char* APP_BLOB =
@@ -917,7 +925,7 @@ class PersistScriptVariablesTest : public ::testing::Test {
     }
 
     ScriptVariableScopes load () {
-        return load_script_variable_scopes (*db_, run_);
+        return scopes_of (*db_, run_);
     }
 
     /// A folder under @p parent_id holding no variables.
@@ -1203,7 +1211,7 @@ TEST_F (PersistScriptVariablesTest, ARunWithoutAnEnvironmentOrRequestWritesOnlyG
     bare.request_id.reset ();
     bare.environment_id.reset ();
 
-    auto scopes               = load_script_variable_scopes (*db_, bare);
+    auto scopes               = scopes_of (*db_, bare);
     scopes.globals["g"].value = "1";
 
     persist_script_variables (*db_, scopes);
@@ -1726,7 +1734,7 @@ class ScriptVariableScopesTest : public ::testing::Test {
 // of the chain arrives root-first and separate. Revert the walk to the old
 // single get_collection and `collection_ancestors` is empty here.
 TEST_F (ScriptVariableScopesTest, TheChainArrivesRootFirstWithTheLeafHeldSeparately) {
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
 
     ASSERT_EQ (scopes.collection_ancestors.size (), 1U);
     EXPECT_EQ (scopes.collection_ancestors[0].at ("token").value, "root-token");
@@ -1755,10 +1763,44 @@ TEST_F (ScriptVariableScopesTest, ARequestOutsideAnyCollectionGetsEmptyCollectio
     run.id            = "run_loose";
     run.request_id    = "req_loose";
 
-    auto scopes = load_script_variable_scopes (*db_, run);
+    auto scopes = scopes_of (*db_, run);
 
     EXPECT_TRUE (scopes.collection.empty ());
     EXPECT_TRUE (scopes.collection_ancestors.empty ());
+}
+
+// The send's collection (#3461), composition's precedence: a request row's own
+// collection over the composed `collectionId`, which answers whenever no live
+// row names one. Mutation check: return `collection_id` first in
+// `scope_collection_id` and the row loses; drop the fallback and the rest are
+// empty.
+TEST_F (ScriptVariableScopesTest, ARequestRowsCollectionWinsAndTheComposedOneIsTheFallback) {
+    EXPECT_EQ (scope_collection_id (*db_, "req_1", "col_root"), "col_leaf");
+    EXPECT_EQ (scope_collection_id (*db_, std::nullopt, "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, "", "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, "req_unknown", "col_root"), "col_root");
+    EXPECT_EQ (scope_collection_id (*db_, std::nullopt, std::nullopt), "");
+
+    db_->delete_request ("req_1");
+    EXPECT_EQ (scope_collection_id (*db_, "req_1", "col_root"), "col_root")
+    << "a trashed request names no collection, as composition 404s on it";
+}
+
+// An inline send's chain loads like a stored request's: the leaf writable, the
+// ancestors beside it. A collection naming nothing is an empty scope.
+TEST_F (ScriptVariableScopesTest, AComposedCollectionLoadsItsWholeChain) {
+    auto scopes = load_script_variable_scopes (
+    *db_, std::nullopt, scope_collection_id (*db_, std::nullopt, "col_leaf"));
+
+    EXPECT_EQ (scopes.baseline.collection_id, "col_leaf");
+    EXPECT_EQ (scopes.collection.at ("page_size").value, "25");
+    ASSERT_EQ (scopes.collection_ancestors.size (), 1U);
+    EXPECT_EQ (scopes.collection_ancestors[0].at ("token").value, "root-token");
+
+    db_->delete_collection ("col_root");
+    auto trashed = load_script_variable_scopes (*db_, std::nullopt, "col_leaf");
+    EXPECT_TRUE (trashed.collection.empty ());
+    EXPECT_TRUE (trashed.collection_ancestors.empty ());
 }
 
 // The issue in one assertion: the same `{{token}}`, defined only on an
@@ -1770,7 +1812,7 @@ TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInThe
     const std::string composed_url = composed["url"].get<std::string> ();
     ASSERT_NE (composed_url.find ("root-token"), std::string::npos) << composed_url;
 
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
     vayu::runtime::ScriptContext ctx;
     ctx.environment         = &scopes.environment;
     ctx.globals             = &scopes.globals;
@@ -1798,7 +1840,7 @@ TEST_F (ScriptVariableScopesTest, AnInheritedNameResolvesTheSameInAScriptAsInThe
 TEST_F (ScriptVariableScopesTest, AScriptThatReadsAnAncestorAndWritesPersistsOnlyTheLeaf) {
     const std::string root_before = stored_variables ("col_root");
 
-    auto scopes = load_script_variable_scopes (*db_, run_);
+    auto scopes = scopes_of (*db_, run_);
     vayu::runtime::ScriptContext ctx;
     ctx.environment         = &scopes.environment;
     ctx.globals             = &scopes.globals;

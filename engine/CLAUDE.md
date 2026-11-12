@@ -477,7 +477,7 @@ Key endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521) |
+| POST | `/compose` | Resolve `{{vars}}` + `inherit` auth; returns an execute-ready payload (sends nothing); names a pre-request script may change stay `{{name}}` and are listed in `deferredVariables` (#2521); the answer names the `collectionId` whose chain it read, the scope `/execute` and `/runs` fall back to when no `requestId` row names one (#3461) |
 | POST | `/execute` | Send a single request (auth resolved engine-side); optional `targetPolicy` holds the final URL and OAuth 2.0 token endpoints to the caller's hosts (#2521) |
 | POST | `/runs` | Start a load test run; optional `targetPolicy` as on `/execute`, which also holds the run's `monitor.url` (#2521, #3121) |
 | GET | `/runs/:runId/live` | SSE stream of live metrics |
@@ -1346,7 +1346,14 @@ payload is composed; that split is load-bearing. Two entry shapes: `requestId`
 *composed* URL, then sends the engine the same rule as `targetPolicy`, below)
 and an inline `request` plus `collectionId` scope (the renderer, because Send
 and replay execute editor state that may be unsaved). Inline over stored is
-the overlay MCP's `start_load_run` overrides ride on.
+the overlay MCP's `start_load_run` overrides ride on. The answer carries the
+`collectionId` of the chain it read (the leaf; omitted when it read none, and
+never taken from `request.*`), and `scope_collection_id`
+(`request_exchange.hpp`) is the one rule a send's collection scope comes from:
+a live `requestId` row's collection, else that `collectionId` (#3461).
+`read_run_scope` decides it once per `POST /execute` and `POST /runs`, for the
+scripts and the snapshot's secret masking alike, and a single-request run's
+worker applies the same function to its payload.
 
 **A scripted request composes with its `{{names}}` intact (#2521, Postman's
 order).** Whether a pre-request script runs before the send is read from the

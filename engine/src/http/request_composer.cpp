@@ -1964,6 +1964,14 @@ VariableDeferral deferral) {
     if (!environment_id.empty ()) {
         payload["environmentId"] = environment_id;
     }
+    // The leaf of the chain this composition read, which `/execute` and
+    // `/runs` read the scripts' collection scope from when no request row
+    // names one (#3461). Composition's own answer: an inline `request` naming
+    // another collection does not speak for it.
+    payload.erase ("collectionId");
+    if (!chain.empty ()) {
+        payload["collectionId"] = chain.back ().id;
+    }
     // Composition's own answer, never an input: an inline `request` carrying
     // the field from an earlier composition does not speak for this one.
     payload.erase ("deferredVariables");

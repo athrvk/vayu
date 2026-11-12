@@ -187,6 +187,7 @@ add_executable(vayu_tests
     request_composer_test.cpp
     residual_token_test.cpp
     deferred_composition_test.cpp
+    inline_collection_scope_test.cpp
     target_policy_test.cpp
     scenario_data_test.cpp
     scenario_load_test.cpp
@@ -436,6 +437,7 @@ set(vayu_scratch_database_suites
     DatabaseTest
     DbRecoveryTest
     DeferredCompositionTest
+    InlineCollectionScopeTest
     TargetPolicyRouteTest
     FileRootsRouteTest
     FileGrantsRouteTest

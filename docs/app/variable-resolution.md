@@ -1200,7 +1200,13 @@ priority order, read from the top down. See
 
 The collection scope a script reads is the **whole chain**, the same one
 `{{name}}` merges (issue #234; `load_script_variable_scopes` in
-`engine/src/http/request_exchange.cpp` builds it from `collection_chain`). A
+`engine/src/http/request_exchange.cpp` builds it from `collection_chain`). On a
+Send the chain is that of the linked request's collection, else of the
+`collectionId` `POST /compose` wrote on its answer for an inline request
+(`scope_collection_id`, issue #3461), so a scripted inline send that links no
+saved request (MCP's ad-hoc `run_request` with a `collectionId`) reads, and
+resolves its deferred names against, the collection it was composed in. The
+app's Send links its `requestId`, whose row names the same collection. A
 variable defined on an ancestor collection therefore reads the same in
 `pm.collectionVariables.get`, `pm.variables.get` and
 `pm.variables.replaceIn("{{name}}")` as it substitutes in the URL (and

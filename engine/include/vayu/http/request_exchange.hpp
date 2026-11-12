@@ -77,7 +77,7 @@ struct ScriptVariableBaseline {
 /**
  * The variable scopes a design run hands its pre/post-request scripts.
  *
- * `collection` is the request's immediate parent - the only collection scope a
+ * `collection` is the leaf of the send's chain - the only collection scope a
  * script may write, and the one `persist_script_variables` writes back.
  * `collection_ancestors` is the rest of that collection's chain, root first,
  * which scripts read through but cannot modify (issue #234).
@@ -104,24 +104,29 @@ struct ScriptVariableScopes {
 };
 
 /**
- * Load those scopes for @p run. The collection chain is the same walk
- * `{{variable}}` composition uses, so a script and a request field resolve an
- * inherited name identically; a run with no environment, no request or a
- * request outside any collection simply yields empty scopes.
- *
- * Extracted from the `POST /execute` handler (execution.cpp) so
- * script_variables_test.cpp can drive it against a real database, matching the
- * suite's other route-core tests.
+ * The collection whose chain a single-request send or run reads (#3461): the
+ * collection of the request row @p request_id names, when there is one, and
+ * otherwise @p collection_id, the inline request's scope that `POST /compose`
+ * echoes on its answer. Composition's own precedence
+ * (`resolve_compose_variables`), so a script and a request field read one
+ * chain. Empty for neither; an id naming nothing (unknown, trashed) is
+ * answered as given and loads as an empty scope, as composition degrades it.
  */
-ScriptVariableScopes
-load_script_variable_scopes (vayu::db::Database& db, const vayu::db::Run& run);
+std::string scope_collection_id (vayu::db::Database& db,
+const std::optional<std::string>& request_id,
+const std::optional<std::string>& collection_id);
 
 /**
- * The same scopes named directly, for a run whose collection scope does not
- * come from a single request row: the collection being run, which a scenario
- * load run's `script.setup` and `script.teardown` read. Its steps, like a
- * sequential collection run's, read their own folders (#3248). Pass an empty
- * @p collection_id for a run with no collection scope at all.
+ * The variable scopes a run's scripts read: globals, the environment
+ * @p environment_id names, and the chain of @p collection_id (its leaf
+ * writable, its ancestors read-only). The chain is the walk `{{variable}}`
+ * composition uses, so a script and a request field resolve an inherited name
+ * identically. A single-request send names its collection through
+ * `scope_collection_id`; a scenario load run's `script.setup` and
+ * `script.teardown` name the collection being run, and its steps, like a
+ * sequential collection run's, read their own folders (#3248). An empty
+ * @p collection_id is no collection scope at all, and an id or environment
+ * naming nothing yields that scope empty.
  */
 ScriptVariableScopes load_script_variable_scopes (vayu::db::Database& db,
 const std::optional<std::string>& environment_id,

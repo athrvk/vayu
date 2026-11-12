@@ -64,13 +64,25 @@ void raise_pacing_thread_priority () {
 }
 
 /// @p config's @p key when it is a non-empty string, the one shape the route
-/// lets an id through as (`requestId`, `environmentId`); nothing otherwise.
+/// lets an id through as (`requestId`, `environmentId`, `collectionId`);
+/// nothing otherwise.
 std::optional<std::string> named_id (const nlohmann::json& config, const char* key) {
     const auto it = config.find (key);
     if (it == config.end () || !it->is_string () || it->get<std::string> ().empty ()) {
         return std::nullopt;
     }
     return it->get<std::string> ();
+}
+
+/** The collection scope a single-request run's scripts read: its
+ *  `lifecycleElements` (issue #1573), its `requestElements`, the deferred
+ *  `tests` replay and the start-of-run pass. `POST /execute`'s rule
+ *  (`scope_collection_id`): the collection of the request the run links, else
+ *  the composed `collectionId` (#3461), else none. */
+std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
+const nlohmann::json& config) {
+    return vayu::http::routes::scope_collection_id (
+    db, named_id (config, "requestId"), named_id (config, "collectionId"));
 }
 
 /**
@@ -406,17 +418,15 @@ RunSummaryInputs failed_run_summary_inputs (const RunContext& context) {
  * A load run's `tests` script is the same script a Send runs, so it must not
  * read `pm.info.requestId` as undefined here and as a value there. Both fields
  * ride in on the composed payload for a run started from a saved request;
- * resolved once, not per sample. The linked row is read once for the two
- * readers below it: the `pm.info.requestName` fallback, and the collection scope
- * its scripts read (issue #728) - a failure is left to propagate, because empty
- * scopes are the silently wrong verdicts this pass exists to avoid.
+ * resolved once, not per sample. The linked row is read only for the
+ * `pm.info.requestName` fallback - a failure is left to propagate, as the
+ * scopes' read does (see `validate_scripts`).
  */
 void read_run_script_identity (vayu::db::Database& db,
 const nlohmann::json& config,
 vayu::Request& dummy_request,
 std::optional<std::string>& script_request_id,
-std::optional<std::string>& script_request_name,
-std::optional<vayu::db::Request>& linked_request) {
+std::optional<std::string>& script_request_name) {
     // Build a dummy request for script context (HTTP request fields are at root level)
     auto request_result = vayu::json::deserialize_request (config);
     if (request_result.is_ok ()) {
@@ -431,21 +441,16 @@ std::optional<vayu::db::Request>& linked_request) {
     id != config.end () && id->is_string () && !id->get<std::string> ().empty ()) {
         script_request_id = id->get<std::string> ();
     }
-    // The linked request row, read once for the two readers below: the
-    // `pm.info.requestName` fallback, and the collection scope its scripts
-    // read (issue #728). The lookup used to be wrapped in a catch, on the
-    // grounds that it cost the script only a name - it now also decides
-    // which collection scope the replay binds, and empty scopes are the
-    // silently wrong verdicts this pass exists to avoid, so a failure is
-    // left to propagate (see the scopes note below).
-    if (script_request_id) {
-        linked_request = db.get_request (*script_request_id);
-    }
-
     if (auto name = config.find ("requestName"); name != config.end () &&
     name->is_string () && !name->get<std::string> ().empty ()) {
         script_request_name = name->get<std::string> ();
-    } else if (linked_request && !linked_request->name.empty ()) {
+        return;
+    }
+    if (!script_request_id) {
+        return;
+    }
+    if (auto linked_request = db.get_request (*script_request_id);
+    linked_request && !linked_request->name.empty ()) {
         script_request_name = linked_request->name;
     }
 }
@@ -666,10 +671,9 @@ vayu::db::Database& db) {
     vayu::Request dummy_request;
     std::optional<std::string> script_request_id;
     std::optional<std::string> script_request_name;
-    std::optional<vayu::db::Request> linked_request;
     if (!per_step) {
         read_run_script_identity (db, context->config, dummy_request,
-        script_request_id, script_request_name, linked_request);
+        script_request_id, script_request_name);
     }
 
     // The scopes the replayed scripts read (issue #728). A load run's `tests`
@@ -682,9 +686,9 @@ vayu::db::Database& db) {
     // Which collection scope is the run's is the same question the two
     // sequential paths answer: a scenario step's is its own folder's chain, as
     // in the run itself (#3248), a single-request run's is the collection of
-    // the request it links (`load_script_variable_scopes(db, run)`). Read off
-    // the payload, which is what the run row itself was populated from, and
-    // where this function already reads `requestId` from.
+    // the request it links, else the payload's composed `collectionId`
+    // (`single_request_lifecycle_collection_id`, #3461). Read off the payload,
+    // which is what the run row itself was populated from.
     //
     // A database failure here is deliberately not caught: it propagates to
     // `execute_load_test`, which logs it and stores no `testValidation`
@@ -737,9 +741,9 @@ vayu::db::Database& db) {
         replay.sse_limits   = sse_limits;
         replay.send         = script_send;
 
-        auto scopes = vayu::http::routes::load_script_variable_scopes (db, environment_id,
-        linked_request ? linked_request->collection_id : std::string ());
-        totals = run_replay (engine, scopes, replay, failures);
+        auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+        environment_id, single_request_lifecycle_collection_id (db, context->config));
+        totals      = run_replay (engine, scopes, replay, failures);
     }
 
     store_validation_failures (
@@ -1566,24 +1570,6 @@ int default_max_per_host) {
     context->publish_event_loop (std::move (event_loop));
 }
 
-/** The collection scope a single-request run's own `lifecycleElements`
- *  scripts read and write (issue #1573) - the same rule the deferred `tests`
- *  replay already follows (`read_run_script_identity`'s collection-scope
- *  reader, above): the collection of the request the run links, or none for
- *  a bare URL run with no collection to inherit from. */
-std::string single_request_lifecycle_collection_id (vayu::db::Database& db,
-const nlohmann::json& config) {
-    auto request_id = config.find ("requestId");
-    if (request_id == config.end () || !request_id->is_string () ||
-    request_id->get<std::string> ().empty ()) {
-        return "";
-    }
-    if (auto linked_request = db.get_request (request_id->get<std::string> ())) {
-        return linked_request->collection_id;
-    }
-    return "";
-}
-
 namespace {
 
 /// The bare column names @p context's rows bind (#1007), or none without rows.
@@ -1593,9 +1579,10 @@ const vayu::http::BoundColumnNames& run_bound_columns (const RunContext& context
 }
 
 /// Whether a single-request run names stored scopes: an `environmentId`, or a
-/// `requestId` whose collection chain they then include.
+/// `requestId` or `collectionId` whose collection chain they then include.
 bool names_stored_scopes (const nlohmann::json& config) {
-    return named_id (config, "environmentId") || named_id (config, "requestId");
+    return named_id (config, "environmentId") ||
+    named_id (config, "requestId") || named_id (config, "collectionId");
 }
 
 /**

@@ -1953,6 +1953,15 @@ folder and below it read (under load, that virtual user's later steps). A
 sibling folder does not see it. `script.setup` and `script.teardown` read and
 write the collection being run.
 
+A request sent inline with no saved row linked (MCP's ad-hoc `run_request`
+with a `collectionId`, a direct API caller) reads the chain of the collection
+it was composed in: `POST
+/compose` writes that `collectionId` on its answer and `POST /execute` and
+`POST /runs` read the scope from it, so the script sees the same chain the
+request's `{{names}}` resolve against (issue #3461). A linked saved request's
+own collection comes first; a collection that no longer exists is an empty
+scope.
+
 **Writes stay on the request's own collection.** `set`, `unset` and `clear`
 never reach an ancestor, so `set` on a descendant *shadows* an inherited name
 and `unset` un-shadows it - the ancestor's value comes back rather than being
