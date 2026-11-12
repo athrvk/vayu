@@ -954,6 +954,97 @@ CoverageTally make_coverage_tally (const ScenarioExecution& execution) {
     return CoverageTally (execution.spec.declared_operations, step_operations);
 }
 
+namespace {
+
+/// Whether @p element runs at a run's own boundary rather than at a step.
+bool runs_at_run_boundary (const CompiledElement& element) {
+    return element.element &&
+    (element.element->phase () == Phase::RunStart ||
+    element.element->phase () == Phase::RunEnd);
+}
+
+/// @p collection's `run.start` / `run.end` elements, stamped as @p is_root
+/// says, onto @p out; nothing when it declares neither.
+void append_lifecycle_collection (std::vector<LifecycleCollection>& out,
+const vayu::db::Collection& collection,
+bool is_root) {
+    auto elements = nlohmann::json::parse (collection.elements, nullptr, false);
+    if (!elements.is_array ()) {
+        return;
+    }
+    const auto origin = vayu::http::collection_element_origin (collection, is_root);
+    for (auto& element : elements) {
+        if (element.is_object ()) {
+            element["origin"] = origin;
+        }
+    }
+    auto compiled = compile_elements (elements);
+    std::erase_if (compiled, [] (const CompiledElement& element) {
+        return !runs_at_run_boundary (element);
+    });
+    if (!compiled.empty ()) {
+        out.push_back ({ collection.id, std::move (compiled) });
+    }
+}
+
+/// Positions in @p collections of every folder beneath @p root_id, depth-first
+/// in the order @p collections lists siblings, a parent before its own
+/// sub-folders. @p visited holds what is already placed and gains each folder
+/// reached, so a `parent_id` cycle ends.
+std::vector<size_t> folders_beneath (const std::vector<vayu::db::Collection>& collections,
+const std::string& root_id,
+std::unordered_set<std::string>& visited) {
+    std::unordered_map<std::string, std::vector<size_t>> children_of;
+    for (size_t i = 0; i < collections.size (); ++i) {
+        if (const auto& parent = collections[i].parent_id; parent && !parent->empty ()) {
+            children_of[*parent].push_back (i);
+        }
+    }
+    std::vector<size_t> stack;
+    const auto push_children = [&] (const std::string& parent_id) {
+        if (const auto found = children_of.find (parent_id);
+        found != children_of.end ()) {
+            stack.insert (stack.end (), found->second.rbegin (), found->second.rend ());
+        }
+    };
+    std::vector<size_t> ordered;
+    push_children (root_id);
+    while (!stack.empty ()) {
+        const size_t index = stack.back ();
+        stack.pop_back ();
+        const auto& id = collections.at (index).id;
+        if (!visited.insert (id).second) {
+            continue;
+        }
+        ordered.push_back (index);
+        push_children (id);
+    }
+    return ordered;
+}
+
+} // namespace
+
+std::vector<LifecycleCollection> resolve_lifecycle_collections (vayu::db::Database& db,
+const std::string& run_collection_id,
+bool recursive) {
+    std::vector<LifecycleCollection> lifecycle;
+    const auto chain = vayu::http::collection_chain (db, run_collection_id);
+    std::unordered_set<std::string> visited;
+    for (size_t i = 0; i < chain.size (); ++i) {
+        visited.insert (chain[i].id);
+        append_lifecycle_collection (lifecycle, chain[i], i == 0);
+    }
+    if (!recursive || chain.empty ()) {
+        return lifecycle;
+    }
+    // Live rows only, each parent's sub-folders in sibling order.
+    const auto collections = db.get_collections ();
+    for (const size_t index : folders_beneath (collections, run_collection_id, visited)) {
+        append_lifecycle_collection (lifecycle, collections.at (index), false);
+    }
+    return lifecycle;
+}
+
 DataBindResult bind_step_iteration (vayu::Request& request,
 const ScenarioStep& step,
 const std::vector<nlohmann::json>& rows,
