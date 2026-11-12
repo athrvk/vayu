@@ -191,8 +191,9 @@
  *
  * #3461's clause in `run_request` (an ad-hoc `requestId` scopes the scripts'
  * collection, said in the description and in the argument) added 68 B to every
- * row, taking them to 150,519 / 147,923 / 221,562 / 217,295 B; the caps went to
- * 150,600 / 148,000 / 221,600 / 217,400, the least that holds them.
+ * row, taking them to 150,519 / 147,923 / 221,562 / 217,295 B; the first two caps went to
+ * 150,600 / 148,000, the least that holds them; 221,600 / 217,300 already held
+ * the writes-on rows and are unchanged.
  */
 
 import { describe, it, expect } from "vitest";
@@ -215,7 +216,7 @@ const BUDGETS: Budget[] = [
 	{ allowWrites: false, revealSecretsToAgents: false, tools: 52, maxBytes: 150_600 },
 	{ allowWrites: false, revealSecretsToAgents: true, tools: 52, maxBytes: 148_000 },
 	{ allowWrites: true, revealSecretsToAgents: false, tools: 80, maxBytes: 221_600 },
-	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_400 },
+	{ allowWrites: true, revealSecretsToAgents: true, tools: 80, maxBytes: 217_300 },
 ];
 
 /** A sentence this long, repeated across tools, is a rule that belongs in the instructions. */
