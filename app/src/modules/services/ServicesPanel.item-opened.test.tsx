@@ -72,7 +72,9 @@ beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 	render(
-		<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+		<QueryClientProvider
+			client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+		>
 			<TooltipProvider>
 				<DrawerItemOpenedProvider value={onItemOpened}>
 					<ServicesPanel />

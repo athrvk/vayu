@@ -437,6 +437,7 @@ describe("where Escape returns focus when no rail button is lit", () => {
 		renderDrawerWith(
 			<>
 				<RailButton
+					onClick={() => {}}
 					active={false}
 					label="Other"
 					side="left"
@@ -446,6 +447,7 @@ describe("where Escape returns focus when no rail button is lit", () => {
 					o
 				</RailButton>
 				<RailButton
+					onClick={() => {}}
 					active={false}
 					label="Stop"
 					side="left"
@@ -456,6 +458,7 @@ describe("where Escape returns focus when no rail button is lit", () => {
 				</RailButton>
 				{/* The other rail's stop is not this panel's. */}
 				<RailButton
+					onClick={() => {}}
 					active={false}
 					label="Right stop"
 					side="right"
