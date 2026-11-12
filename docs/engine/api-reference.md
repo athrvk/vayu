@@ -546,7 +546,11 @@ with `""` or `null` lands under the synced collection), and
 created with `""` is appended among the roots and lists with them. A value
 that is neither a string nor `null` (`5`, `true`, an object, an array) is a
 `400` such as
-`Invalid 'parentId': must be a collection id or null (got number)`.
+`Invalid 'parentId': must be a collection id or null (got number)`. Rows an
+older engine stored with `""` are rewritten to `null` at startup
+([the empty-parent pass](db-schema.md#the-empty-parent-pass-issue-3451)), so a
+delete and restore of one comes back where it was instead of re-parented to the
+root.
 
 **A `variables` key must be one a `{{ name }}` token can reach (#3251).** A token
 is looked up with the spaces, tabs, CR and LF around its text cut, so a stored

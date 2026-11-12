@@ -89,7 +89,7 @@ const std::function<bool (const vayu::db::Collection&)>& descend_into) {
     }
     std::unordered_map<std::string, std::vector<std::string>> children;
     for (const auto& col : all) {
-        if (col.parent_id && !col.parent_id->empty ()) {
+        if (col.parent_id) {
             children[*col.parent_id].push_back (col.id);
         }
     }

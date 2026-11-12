@@ -954,9 +954,9 @@ read_order_field (const nlohmann::json& value, int& out, std::string_view where 
 /**
  * Reads a stated collection `parentId` into @p out (#3451): a collection id,
  * or `null` for the tree root. `""` is the root as well and is stored as
- * `null`, so the tree has one spelling of it. Anything else is a 400 naming
- * the field, never nlohmann's exception text. @p where is
- * `read_order_field`'s.
+ * `null`, so the tree has one spelling of it; `Database::clear_empty_parent_ids`
+ * rewrites the rows written before this. Anything else is a 400 naming the
+ * field, never nlohmann's exception text. @p where is `read_order_field`'s.
  */
 [[nodiscard]] inline RouteResult read_parent_id_field (const nlohmann::json& value,
 std::optional<std::string>& out,

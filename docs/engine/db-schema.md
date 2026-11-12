@@ -285,6 +285,30 @@ nothing left to touch pays close to nothing for it:
   (`restore_request_locked` / `restore_collection_locked`) runs the same disable-and-mark step on
   its way back, which is a no-op if the pass already handled it before the request was deleted.
 
+### The empty-parent pass (issue #3451)
+
+`Database::clear_empty_parent_ids()`, called from `init()`, rewrites every collection stored with
+`parent_id = ''` to `NULL`, trashed rows included. Until #3451, `POST`/`PUT /collections` stored a
+`parentId: ""` as written: a second spelling of the tree root that the change feed and
+`get_requests_in_subtree` read as root while the append scan, the root `normalize` of
+`POST /reorder` and a restore did not, so such a row tied with the first root, and a delete and
+restore of it came back with `reparentedToRoot: true`, as if its parent were gone. The write
+paths now store `""` as `NULL` (`read_parent_id_field`, see
+[Accepted field shapes](api-reference.md#accepted-field-shapes)); this pass is the rows written
+before.
+
+- **No done marker and no schema bump.** Both statements, the count and the `UPDATE`, are served
+  by [`idx_collections_parent_id`](#indexes), so a workspace with nothing to rewrite pays one
+  index probe per start, not the scan the [header-strip pass](#the-header-strip-pass-issues-1487-1491)
+  marks itself done to avoid. Running every start also catches a `''` an older engine writes
+  after a downgrade. An older engine reads `NULL` as the root, as it always did, so the rewrite
+  is nothing it must be stopped from reading past, which is what a bump is for
+  ([Schema versions](#schema-versions)).
+- **One statement**, so one commit. `updated_at` is left alone: the row meant the root all along.
+- **A `backups/vayu-<stamp>-pre-repair.db` snapshot** is written immediately before the first
+  rewrite, as the header-strip pass does. When it cannot be written the pass rewrites nothing, logs
+  a warning, and the next start tries again.
+
 ### The script-to-elements migration (issue #1514)
 
 Issue #1513 landed `elements` additively, beside the two script columns, with a startup repair pass
@@ -575,7 +599,7 @@ Stores folder/group hierarchy for requests.
 | Column               | Type    | Notes                                        |
 |----------------------|---------|----------------------------------------------|
 | `id`                 | TEXT PK | `col_` + UUID                                |
-| `parent_id`          | TEXT    | NULL for root collections                    |
+| `parent_id`          | TEXT    | NULL for root collections; never `''` ([the empty-parent pass](#the-empty-parent-pass-issue-3451)) |
 | `name`               | TEXT    |                                              |
 | `description`        | TEXT    | Default `""`                                 |
 | `variables`          | TEXT    | JSON: `Record<string, VariableValue>`        |

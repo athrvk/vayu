@@ -1662,6 +1662,18 @@ void Database::init () {
         "Startup managed-header cleanup failed: " + std::string (e.what ()));
     }
 
+    // A collection stored with `parent_id = ''` (#3451). Best-effort, like the
+    // passes around it; the rows stay as they were and the next start retries.
+    try {
+        if (const int64_t cleared = clear_empty_parent_ids (); cleared > 0) {
+            vayu::utils::log_info ("db", "Rewrote collections stored with an empty parent as roots",
+            { { "collections", cleared } });
+        }
+    } catch (const std::exception& e) {
+        vayu::utils::log_warning (
+        "db", "Startup empty-parent repair failed: " + std::string (e.what ()));
+    }
+
     // No webhook inbox survives the process that opened it, so any capture row
     // still here belongs to an inbox nothing can list. Best-effort, like the
     // two passes around it.
@@ -1857,6 +1869,29 @@ int64_t Database::strip_stored_managed_headers () {
     mark_done ();
     strip_transaction.commit ();
     return stripped;
+}
+
+int64_t Database::clear_empty_parent_ids () {
+    std::lock_guard<std::recursive_mutex> lock (impl_->mutex);
+    const auto empty_parent = c (&Collection::parent_id) == std::string ();
+    const int64_t candidates = impl_->storage.count<Collection> (where (empty_parent));
+    if (candidates == 0) {
+        return 0;
+    }
+    // The same copy, and the same refusal without one, as
+    // `strip_stored_managed_headers` (#2426).
+    const auto copy = snapshot_before_rewrite (impl_->opened_file, "pre-repair",
+    get_config_int (std::string (MAX_BACKUPS_RETAINED_KEY),
+    vayu::core::constants::database::MAX_BACKUPS_RETAINED));
+    if (!copy) {
+        throw std::runtime_error (
+        "no copy of the workspace could be saved before rewriting it: " + copy.error ());
+    }
+    // One statement, so one commit. `updated_at` is left alone: the row meant
+    // the root all along, and no one edited it.
+    impl_->storage.update_all (
+    set (c (&Collection::parent_id) = nullptr), where (empty_parent));
+    return candidates;
 }
 
 Database::BackupSlot::BackupSlot (Database& db) : db_ (db) {
