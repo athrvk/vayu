@@ -49,7 +49,11 @@ export function StatusCodeBadge({ status, statusText, className }: StatusCodeBad
 	return (
 		<Badge
 			variant="chip"
-			className={cn("font-mono shadow text-primary-foreground", style.fill, className)}
+			className={cn(
+				"shrink-0 whitespace-nowrap font-mono shadow text-primary-foreground",
+				style.fill,
+				className
+			)}
 		>
 			{statusCodeLabel(status)}
 			{reason ? ` ${reason}` : ""}

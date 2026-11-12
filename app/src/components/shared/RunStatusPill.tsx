@@ -41,7 +41,7 @@ export function RunStatusPill({ status, outcome, className }: RunStatusProps) {
 			variant="chip"
 			data-status={status}
 			className={cn(
-				"shrink-0 gap-1.5 px-2 py-0.5 text-label tracking-wide",
+				"shrink-0 whitespace-nowrap gap-1.5 px-2 py-0.5 text-label tracking-wide",
 				tint,
 				text,
 				className

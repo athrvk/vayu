@@ -23,6 +23,38 @@ export const DEFAULT_DRAWER_WIDTH = 260;
 /** Default width of the right context bar (px). */
 export const DEFAULT_CONTEXT_BAR_WIDTH = 252;
 
+/* ── Side panels: push or overlay ────────────────────────────────────────── */
+
+/**
+ * How a side panel (the drawer, the context bar) meets the content column.
+ * `push` is a flex sibling that takes its width out of the content; `overlay`
+ * is positioned over the content's edge and takes nothing, so opening it does
+ * not reflow what is underneath.
+ */
+export type SidePanelMode = "push" | "overlay";
+
+/** Window width (CSS px) at and above which the context bar pushes. */
+export const CONTEXT_BAR_PUSH_MIN_WIDTH = 1200;
+
+/**
+ * Window width (CSS px) at and above which the drawer pushes (#3494).
+ *
+ * 40 + 480 + 440 + 40 = 1000: the activity rail, the drawer at
+ * `PANEL_MAX_WIDTH`, a content floor of one 440px builder pane (half of
+ * `AUTO_RESPONSE_BELOW_MAX_WIDTH`, the least that fits a URL bar's row), and
+ * the context rail (each rail is `--rail-width`, 2.5rem). The context bar
+ * is not counted: below its own threshold it overlays too. The maximum width
+ * rather than the current one, so dragging the drawer's handle never flips
+ * the mode under the pointer. A 1024px window at 100% pushes; at 125% or more
+ * (819 CSS px and under) the drawer overlays.
+ */
+export const DRAWER_PUSH_MIN_WIDTH = 40 + PANEL_MAX_WIDTH + 440 + 40;
+
+/** The mode a side panel takes at `windowWidth`, given its push threshold. */
+export function sidePanelMode(windowWidth: number, pushMinWidth: number): SidePanelMode {
+	return windowWidth >= pushMinWidth ? "push" : "overlay";
+}
+
 /**
  * Context-bar sections that start collapsed, against the store's standing rule
  * that a section ships expanded (`contextBarCollapsedSections`, collapsed by

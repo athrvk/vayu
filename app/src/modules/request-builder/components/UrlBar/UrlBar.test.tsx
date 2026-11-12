@@ -249,6 +249,19 @@ describe("the method / URL separator", () => {
 	});
 });
 
+describe("the bar in a narrow pane (#3494)", () => {
+	it("floors the URL field and wraps the Send group under it, rather than squeezing the URL", () => {
+		const { container } = renderBar(true);
+		const row = container.firstElementChild as HTMLElement;
+		const field = container.querySelector(".surface-card") as HTMLElement;
+		expect(row.className).toContain("flex-wrap");
+		expect(field.className).toMatch(/(^|\s)min-w-\[12rem\](\s|$)/);
+		// The old floor of nothing: a field that can reach 0 is what the Send
+		// group was squeezing it toward.
+		expect(field.className).not.toMatch(/(^|\s)min-w-0(\s|$)/);
+	});
+});
+
 /**
  * Every button in the pair responds to the pointer.
  *

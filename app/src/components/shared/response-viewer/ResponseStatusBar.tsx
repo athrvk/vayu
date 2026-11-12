@@ -175,13 +175,19 @@ export function ResponseStatusBar({
 				 * shared with eight tab triggers and the action buttons is not
 				 * where a headline goes. The tint is what keeps two stacked rows
 				 * of similar height from reading as one repeated thing.
+				 *
+				 * It wraps (#3494): at a narrow pane or a 200% interface scale the
+				 * groups below move to a second line whole. They are `shrink-0
+				 * whitespace-nowrap`, because a flex item that may shrink breaks
+				 * "120 ms" into a column of characters before the row wraps.
 				 */
-				"flex items-center gap-3 px-4 py-1.5 border-b border-rule bg-muted/30",
+				"flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 border-b border-rule bg-muted/30",
 				className
 			)}
 		>
-			{/* Compact, to hold the band at 32px. It is still the loudest thing
-			    in the row - it is the only thing here carrying a fill. */}
+			{/* Compact, so the chip does not make the band taller than its text.
+			    It is still the loudest thing in the row - it is the only thing
+			    here carrying a fill. */}
 			<StatusCodeBadge
 				status={status}
 				statusText={statusText}
@@ -196,7 +202,7 @@ export function ResponseStatusBar({
 			 * same reason: no static colour says "live".
 			 */}
 			{streaming && (
-				<div className="flex items-center gap-1.5 text-xs text-status-success-text">
+				<div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-status-success-text">
 					<span
 						aria-hidden="true"
 						className="size-1.5 rounded-full bg-status-success animate-pulse"
@@ -214,10 +220,12 @@ export function ResponseStatusBar({
 			 * `Badge`: it paints no background, and the variant="chip" rule in
 			 * badge-hover.test.tsx is for the ones that do.
 			 */}
-			{validation && <ValidationChip validation={validation} />}
+			{validation && (
+				<ValidationChip validation={validation} className="shrink-0 whitespace-nowrap" />
+			)}
 
 			{time !== undefined && (
-				<div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+				<div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
 					<Clock className="size-icon-sm" />
 					<span className="tabular-nums">{formatResponseTime(time)}</span>
 					{/* Plain text, no `bg-`: see the variant="chip" rule in badge-hover.test.tsx. */}
@@ -231,7 +239,7 @@ export function ResponseStatusBar({
 
 			{size !== undefined && (
 				<div
-					className="flex items-center gap-1.5 text-xs text-muted-foreground"
+					className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground"
 					title={responseSizeTip(headers)}
 				>
 					<FileText className="size-icon-sm" />
@@ -245,7 +253,12 @@ export function ResponseStatusBar({
 			 * status/time/size rather than at the far end with the age, because
 			 * like them it describes the exchange itself.
 			 */}
-			{httpVersionDowngraded && <HttpVersionDowngradeNote httpVersion={httpVersion} />}
+			{httpVersionDowngraded && (
+				<HttpVersionDowngradeNote
+					httpVersion={httpVersion}
+					className="shrink-0 whitespace-nowrap"
+				/>
+			)}
 
 			{/*
 			 * The client certificate this exchange offered (issue #707).
@@ -257,14 +270,14 @@ export function ResponseStatusBar({
 			 */}
 			{clientCertificate && (
 				<div
-					className="flex items-center gap-1.5 text-xs text-muted-foreground"
+					className="flex min-w-0 max-w-full items-center gap-1.5 text-xs text-muted-foreground"
 					title={
 						`Client certificate registered for ${clientCertificate} was offered ` +
 						`(Settings › Network & connectivity).`
 					}
 				>
-					<ShieldCheck className="size-icon-sm" />
-					<span>mTLS: {clientCertificate}</span>
+					<ShieldCheck className="size-icon-sm shrink-0" />
+					<span className="truncate">mTLS: {clientCertificate}</span>
 				</div>
 			)}
 
@@ -287,7 +300,7 @@ export function ResponseStatusBar({
 			 * than among status/time/size, which describe the exchange itself.
 			 */}
 			{age && (
-				<div className="ml-auto flex items-center gap-1.5 text-label text-muted-foreground">
+				<div className="ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap text-label text-muted-foreground">
 					{age.fromRun ? (
 						<History className="size-icon-sm" />
 					) : (

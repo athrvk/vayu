@@ -152,7 +152,30 @@ describe("title-row search bar", () => {
 		// two clusters are different widths - with flex spacers the bar drifts by
 		// half the difference, and drifts again whenever the environment name
 		// changes length.
-		expect(screen.getByRole("banner").className).toContain("grid-cols-[1fr_auto_1fr]");
+		//
+		// `minmax(0,1fr)`, not a bare `1fr`: the minimum is spelled out, so a side
+		// cluster's content can never widen its column and push the bar off centre.
+		expect(screen.getByRole("banner").className).toContain(
+			"grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+		);
+	});
+
+	it("lets the bar's width give way so the environment switcher never overlaps it (#3494)", async () => {
+		await renderFor("linux");
+		// `clamp(floor, 100vw - 2 * 18rem, 28rem)`: a bare `min(44vw,28rem)` kept
+		// 44vw at a 512px window (a 200% interface scale) and left the switcher
+		// 18px. jsdom has no layout, so the class string is what can be held.
+		expect(searchBar().className).toContain("w-[clamp(2.5rem,100vw_-_36rem,28rem)]");
+		expect(searchBar().className).not.toContain("44vw");
+	});
+
+	it("keeps the chord caps in the DOM and hides them by CSS before the bar is too narrow", async () => {
+		await renderFor("linux");
+		const caps = searchBar().querySelector('[data-slot="kbd"]')?.parentElement;
+		expect(caps, "the caps wrapper").not.toBeNull();
+		// A CSS hide, not a removal: the rendered caps are the palette's own chord
+		// (first case above) and a viewport breakpoint can bring them back.
+		expect(caps?.className).toContain("max-[46rem]:hidden");
 	});
 
 	it("is present on every platform that draws the row", async () => {
@@ -183,6 +206,14 @@ describe("title-row environment switcher", () => {
 		// `\s*`, not a literal space: jsdom's name computation drops the space a
 		// browser adds between a flex container's blockified children.
 		expect(button).toHaveAccessibleName(/^Environment:\s*Staging$/);
+	});
+
+	it("shrinks and truncates in a narrow window instead of overlapping the search bar (#3494)", async () => {
+		env.list = [{ id: "env_1", name: "Staging" }];
+		await renderFor("linux", "env_1");
+		const classes = envSwitcher().className.split(/\s+/);
+		expect(classes).toContain("min-w-0");
+		expect(classes).not.toContain("shrink-0");
 	});
 
 	it("says there is no environment when none is active", async () => {

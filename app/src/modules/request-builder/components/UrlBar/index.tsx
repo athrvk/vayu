@@ -178,7 +178,7 @@ export default function UrlBar() {
 	const sendAlone = !canStartLoadTest && !showRowCaret;
 
 	return (
-		<div className="flex min-h-band-md items-center gap-2 px-3 py-1 border-b border-rule bg-panel shrink-0">
+		<div className="flex min-h-band-md flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 border-b border-rule bg-panel shrink-0">
 			{/*
 			    One field holding both the method and the URL.
 			    `border-input`, not `border-border`. This is a text field, and
@@ -194,7 +194,10 @@ export default function UrlBar() {
 					// `bg-*` utility beside it wins the cascade - so both are written,
 					// per docs/design-system.md. The separator below inherits `--rule`
 					// from here.
-					"flex flex-1 min-w-0 items-center h-control rounded-md bg-card surface-card",
+					// `min-w-[12rem]` is the field's floor (#3494): below it the Send group
+					// wraps to a second line (the row is `flex-wrap`) rather than the URL
+					// being squeezed to a sliver in a narrow pane or at a 200% scale.
+					"flex flex-1 min-w-[12rem] items-center h-control rounded-md bg-card surface-card",
 					"border border-input transition-colors focus-within:border-primary"
 				)}
 			>

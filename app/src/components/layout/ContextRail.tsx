@@ -27,7 +27,7 @@
  * roving model `ActivityRail` uses (`useRovingStop`), so a page with several
  * sections is not several Tab presses to get past.
  *
- * Present in both `ContextBar` layout modes: below 1200px the bar overlays
+ * Present in both `ContextBar` layout modes: below `CONTEXT_BAR_PUSH_MIN_WIDTH` the bar overlays
  * `main` rather than pushing it, but the rail is a normal flex child beside
  * that overlay (`Shell.tsx`), never inside the positioned box the bar
  * overlays from - so it stays reachable exactly where it always is.
