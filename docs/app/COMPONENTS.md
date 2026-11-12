@@ -2122,6 +2122,13 @@ step's `tests`, which carry `console` / `consoleDropped` and no messages) are dr
 same component through `ReplayConsole` (`components/shared/ReplayConsole.tsx`: a heading
 naming the replay and its sample size, then `ElementMessages`).
 
+A `lifecycle.setup[]` / `teardown[]` row carries the same four keys (#3455), as a
+`LifecycleElementOutcome` (`ElementOutcome` plus them; the step-level type is not widened).
+`ScriptLifecycleSummary` draws them under the row through `ElementMessages`, so a setup that
+refused the run shows its failing `pm.test` and console lines on the Overview and the
+scenario run view, even with no results to list. The row's own `message` is the reason beside
+its phase; an empty or blank one reads as absent and the row falls back to "Failed".
+
 ## Extractor Misses (`components/shared/ExtractorMisses.tsx`)
 
 A step's extractor misses (issue #3053): "N extractor misses" in warning text with an

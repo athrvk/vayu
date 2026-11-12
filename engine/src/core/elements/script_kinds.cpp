@@ -154,6 +154,23 @@ std::vector<ElementMessage> script_messages (const vayu::ScriptResult& result) {
 constexpr const char* SEND_CANCELLED_MESSAGE =
 "the run was stopped before this script's pm.sendRequest answered";
 
+/// Reads @p result into the element's own outcome: `error` for a script that
+/// threw, `failed` for one that ran and failed only `pm.test`s (the first
+/// failure as the message, because `success` alone cannot tell the two apart,
+/// #2663), `ok` otherwise, plus what it said as `outcome_messages` (#3127).
+void record_script_outcome (ElementContext& ctx, const vayu::ScriptResult& result) {
+    if (script_threw (result)) {
+        ctx.outcome_status  = "error";
+        ctx.outcome_message = result.error_message;
+    } else if (auto failed = describe_failed_tests (result); !failed.empty ()) {
+        ctx.outcome_status  = "failed";
+        ctx.outcome_message = std::move (failed);
+    } else {
+        ctx.outcome_status = "ok";
+    }
+    ctx.outcome_messages = script_messages (result);
+}
+
 /// `script.pre` / `script.post`'s shared `apply`: the element's own outcome
 /// is about this one script, the slot about the whole step. A thrown script is
 /// `error`; one that ran and failed only assertions is `failed`, with the
@@ -177,16 +194,7 @@ const char* unbound_message) {
         ctx.outcome_message = SEND_CANCELLED_MESSAGE;
         return;
     }
-    if (script_threw (result)) {
-        ctx.outcome_status  = "error";
-        ctx.outcome_message = result.error_message;
-    } else if (auto failed = describe_failed_tests (result); !failed.empty ()) {
-        ctx.outcome_status  = "failed";
-        ctx.outcome_message = std::move (failed);
-    } else {
-        ctx.outcome_status = "ok";
-    }
-    ctx.outcome_messages = script_messages (result);
+    record_script_outcome (ctx, result);
     fold_script_result (slot, std::move (result), ctx.element_scope);
 }
 
@@ -230,7 +238,10 @@ class ScriptPostElement final : public Element {
 
 /// `script.setup` / `script.teardown`'s shared `apply`. A script whose
 /// `pm.sendRequest` the run's Stop cancelled is `skipped`: the run ended
-/// under it, which says nothing about the script (#3371).
+/// under it, which says nothing about the script (#3371). Any other result is
+/// read as a step script's is (`record_script_outcome`), so a setup whose only
+/// problem is a failing `pm.test` is `failed` with that test as its message,
+/// and its console lines and tests are kept for the report (#3455).
 void run_lifecycle_script (ElementContext& ctx,
 const std::function<vayu::ScriptResult (const std::string&)>& runner,
 const std::string& script,
@@ -240,16 +251,13 @@ const char* unbound_message) {
         ctx.outcome_message = unbound_message;
         return;
     }
-    auto result = runner (script);
+    const auto result = runner (script);
     if (result.send_cancelled) {
         ctx.outcome_status  = "skipped";
         ctx.outcome_message = SEND_CANCELLED_MESSAGE;
         return;
     }
-    ctx.outcome_status = result.success ? "ok" : "error";
-    if (!result.success) {
-        ctx.outcome_message = result.error_message;
-    }
+    record_script_outcome (ctx, result);
 }
 
 class ScriptSetupElement final : public Element {

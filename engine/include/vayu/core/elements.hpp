@@ -500,7 +500,7 @@ struct ElementContext {
     /// wait never sets it, so it, not `outcome_waited_ms`, marks a close.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::optional<int64_t> outcome_duration_us{};
-    /// Set only by `script.pre` / `script.post`: what this one script said.
+    /// Set only by the four `script.*` kinds: what this one script said.
     // NOLINTNEXTLINE(readability-redundant-member-init)
     std::vector<ElementMessage> outcome_messages{};
 };
@@ -731,7 +731,7 @@ struct ElementOutcome {
     std::optional<int64_t> duration_us;
     /// `ElementContext::outcome_messages`. Not serialised by `to_json`: a
     /// trace already carries the step's tests and console lines whole, so a
-    /// load run's tallies are the only reader.
+    /// load run's tallies and `build_lifecycle_node` are its readers.
     std::vector<ElementMessage> messages;
 
     [[nodiscard]] nlohmann::json to_json () const;
@@ -863,6 +863,9 @@ struct ElementOutcomeCounts {
  * nothing" rather than "this collection declared none". An empty object comes
  * back when both are empty, which every caller treats as absent, the same
  * `coverage` / `schema_validation` rule `RunSummaryInputs` already follows.
+ * A row is `ElementOutcome::to_json` plus, when the script said anything,
+ * `messages` and `console` lists (and their `*Dropped` counts) in the shape
+ * of `ElementOutcomeCounts::append_report_row`'s (#3455).
  */
 [[nodiscard]] nlohmann::json build_lifecycle_node (const std::vector<ElementOutcome>& run_start,
 const std::vector<ElementOutcome>& run_end);

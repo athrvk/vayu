@@ -1489,6 +1489,50 @@ TEST_F (ElementKindsTest, AScriptRowsSampleIsSafeUnderConcurrentOffers) {
     EXPECT_EQ (counts.error.load (), THREADS * ROUNDS);
 }
 
+// #3455: a lifecycle row carries the same `messages` / `console` lists an inline
+// element's row does (same entry shapes, cap and `*Dropped` keys), and only
+// the lifecycle node does: `to_json`, which a step trace serialises, stays
+// without them, and a row whose script said nothing has neither key. Mutation
+// check: drop the `write_message_sample` calls from `lifecycle_row`
+// (pipeline.cpp) and both lists are absent; write the lists from `to_json`
+// instead and the last loop fails.
+TEST_F (ElementKindsTest, ALifecycleRowCarriesTheScriptsMessagesAndConsole) {
+    std::vector<ElementMessage> said = { { ElementMessage::Kind::Test,
+                                         vayu::ConsoleLevel::Log, "t: expected 1 to equal 2" },
+        console_line (vayu::ConsoleLevel::Warn, "x") };
+    for (size_t line = 0; line < MAX_ELEMENT_MESSAGES + 2; ++line) {
+        said.push_back (
+        console_line (vayu::ConsoleLevel::Log, "line " + std::to_string (line)));
+    }
+    ElementOutcome setup = script_outcome (said);
+    setup.kind           = "script.setup";
+    ElementOutcome teardown =
+    script_outcome ({ error_message ("Error: boom") });
+    teardown.kind         = "script.teardown";
+    ElementOutcome silent = script_outcome ({});
+    silent.kind           = "script.teardown";
+
+    const auto node = vayu::core::build_lifecycle_node ({ setup }, { teardown, silent });
+
+    const auto& setup_row = node.at ("setup").at (0);
+    EXPECT_EQ (setup_row.value ("messages", nlohmann::json ()),
+    (nlohmann::json::array ({ { { "kind", "test" }, { "text", "t: expected 1 to equal 2" } } })))
+    << setup_row.dump ();
+    const auto console = setup_row.value ("console", nlohmann::json::array ());
+    ASSERT_EQ (console.size (), MAX_ELEMENT_MESSAGES) << setup_row.dump ();
+    EXPECT_EQ (console.at (0), (nlohmann::json{ { "level", "warn" }, { "text", "x" } }));
+    EXPECT_EQ (setup_row.value ("consoleDropped", 0), 3);
+    EXPECT_FALSE (setup_row.contains ("messagesDropped"));
+    const auto& teardown_rows = node.at ("teardown");
+    EXPECT_EQ (teardown_rows.at (0).value ("messages", nlohmann::json ()),
+    (nlohmann::json::array ({ { { "kind", "error" }, { "text", "Error: boom" } } })));
+    EXPECT_FALSE (teardown_rows.at (0).contains ("console"));
+    for (const char* key : { "messages", "messagesDropped", "console", "consoleDropped" }) {
+        EXPECT_FALSE (teardown_rows.at (1).contains (key)) << key;
+        EXPECT_FALSE (setup.to_json ().contains (key)) << key;
+    }
+}
+
 // A single-request run's `requestElements` may hold one id at two levels
 // (#3101), here under two different kinds. Each entry keeps its own counts;
 // an id the list does not have records nothing. Mutation check: match

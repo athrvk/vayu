@@ -15,14 +15,17 @@
  * nothing" cases fail; drop the component from OverviewTab / ScenarioRunView
  * and its own rendering test still passes but the report silently loses the
  * row - which is why both call sites are covered by their own suites too.
+ *
+ * Issue #3455: a setup that fails now reaches the report with its reason, its
+ * console lines and its failing tests, so the row says all three.
  */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ScriptLifecycleSummary } from "./ScriptLifecycleSummary";
-import type { ElementOutcome } from "@/types/domain";
+import type { LifecycleElementOutcome } from "@/types/domain";
 
-function outcome(overrides: Partial<ElementOutcome> = {}): ElementOutcome {
+function outcome(overrides: Partial<LifecycleElementOutcome> = {}): LifecycleElementOutcome {
 	return { id: "el_1", kind: "script.setup", outcome: "ok", ...overrides };
 }
 
@@ -117,5 +120,64 @@ describe("ScriptLifecycleSummary", () => {
 			expect(screen.getByText("boom").className).toContain("text-destructive-text");
 			expect(screen.getByText(/does not change the run's status/)).toBeTruthy();
 		});
+	});
+
+	describe("a failed setup that refused the run (#3455)", () => {
+		const failedSetup = outcome({
+			outcome: "failed",
+			message: "setup assertion failed: token missing",
+			messages: [{ kind: "test", text: "token present: expected a value" }],
+			console: [{ level: "warn", text: "token endpoint answered 500" }],
+		});
+
+		it("shows the reason, the console line, the failing test and the footnote", () => {
+			render(<ScriptLifecycleSummary lifecycle={{ setup: [failedSetup] }} />);
+			const reason = screen.getByText("setup assertion failed: token missing");
+			expect(reason.className).toContain("text-destructive-text");
+			expect(screen.getByText("token endpoint answered 500")).toBeTruthy();
+			expect(screen.getByText("token present: expected a value")).toBeTruthy();
+			expect(
+				screen.getByText(/a failed setup already kept it from sending anything/)
+			).toBeTruthy();
+		});
+
+		it.each(["", "   "])("falls back to the tone label for a message of %j", (message) => {
+			render(
+				<ScriptLifecycleSummary
+					lifecycle={{ setup: [outcome({ outcome: "failed", message })] }}
+				/>
+			);
+			expect(screen.getByText("Failed").className).toContain("text-destructive-text");
+		});
+	});
+
+	it("shows a passing row's console lines under it", () => {
+		render(
+			<ScriptLifecycleSummary
+				lifecycle={{
+					setup: [
+						outcome({ console: [{ level: "log", text: "seeded 3 users", count: 2 }] }),
+					],
+				}}
+			/>
+		);
+		expect(screen.getByText("Ran")).toBeTruthy();
+		expect(screen.getByText("seeded 3 users")).toBeTruthy();
+	});
+
+	it("keeps each row's lines with its own row", () => {
+		render(
+			<ScriptLifecycleSummary
+				lifecycle={{
+					setup: [outcome({ console: [{ level: "log", text: "from setup" }] })],
+					teardown: [outcome({ kind: "script.teardown" })],
+				}}
+			/>
+		);
+		const rows = screen.getAllByRole("listitem");
+		const setupRow = rows.find((li) => li.textContent?.startsWith("Setup"));
+		expect(setupRow?.textContent).toContain("from setup");
+		const teardownRow = rows.find((li) => li.textContent?.startsWith("Teardown"));
+		expect(teardownRow?.textContent).not.toContain("from setup");
 	});
 });
