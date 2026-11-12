@@ -106,6 +106,20 @@ describe("the collection tree's opens", () => {
 		expect(onItemOpened).toHaveBeenCalledTimes(1);
 	});
 
+	// A created request is a pick from the drawer as much as a clicked row: the
+	// row menu's Add request and the toolbar's New request (`useNewRequest`) agree.
+	it("tells the drawer after the row menu's Add request opens the new request", async () => {
+		const { result } = renderCrud();
+		const addRequest = result.current.handlers
+			.getCollectionActions(collection)
+			.find((a) => "label" in a && a.label === "Add request");
+		await act(async () => {
+			await (addRequest as { onSelect: () => Promise<void> | void }).onSelect();
+		});
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r-copy"]);
+		expect(onItemOpened).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not for the copy a duplicate opens", async () => {
 		const { result } = renderCrud();
 		await act(async () => {

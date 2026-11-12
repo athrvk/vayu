@@ -3,7 +3,9 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { useNewRequest } from "./useNewRequest";
+import { DrawerItemOpenedProvider } from "@/components/layout/drawer-item-opened";
 import { useSessionStore, useTabsStore, useToastStore } from "@/stores";
 import { ApiError, EngineUnreachableError } from "@/services/http-client";
 
@@ -93,6 +95,42 @@ describe("useNewRequest", () => {
 			act(() => result.current.newRequest(undefined, { collectionId: "c1" }));
 			await waitFor(() => expect(activeTab()).toMatchObject({ entityId: "r1" }));
 			expect(useTabsStore.getState().navIntent).toEqual({ kind: "focusUrl", target: "r1" });
+		});
+	});
+
+	/*
+	 * A request created from inside the drawer (the collection tree's own "New
+	 * request") is a pick from it, like a row-menu Add request: an overlay leaves
+	 * once the tab is open (#3507).
+	 */
+	describe("telling the drawer the new tab is open", () => {
+		const onItemOpened = vi.fn();
+		const wrapper = ({ children }: { children: ReactNode }) => (
+			<DrawerItemOpenedProvider value={onItemOpened}>{children}</DrawerItemOpenedProvider>
+		);
+
+		beforeEach(() => {
+			onItemOpened.mockClear();
+		});
+
+		it.each([
+			["blank", undefined],
+			["from a preset", { name: "Demo", method: "GET", url: "https://x.test" }],
+		])("does after a %s request opens", async (_label, preset) => {
+			mocks.createRequest.mockResolvedValue({ id: "r1" });
+			const { result } = renderHook(() => useNewRequest(), { wrapper });
+			act(() => result.current.newRequest(preset));
+			await waitFor(() => expect(onItemOpened).toHaveBeenCalledTimes(1));
+			expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toEqual(["r1"]);
+		});
+
+		it("does not when the create fails and no tab opens", async () => {
+			mocks.createRequest.mockRejectedValue(new Error("boom"));
+			vi.spyOn(console, "error").mockImplementation(() => {});
+			const { result } = renderHook(() => useNewRequest(), { wrapper });
+			act(() => result.current.newRequest());
+			await waitFor(() => expect(lastToastMessage()).toBeDefined());
+			expect(onItemOpened).not.toHaveBeenCalled();
 		});
 	});
 

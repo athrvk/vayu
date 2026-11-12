@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
 import { DrawerItemOpenedProvider } from "@/components/layout/drawer-item-opened";
@@ -30,12 +30,14 @@ const STAGING = {
 	updatedAt: "2026-01-01T00:00:00Z",
 } as unknown as Environment;
 
+const createEnvironment = vi.fn();
+
 const idle = { isLoading: false, isError: false, refetch: vi.fn() };
 
 vi.mock("@/queries", () => ({
 	useCollectionsQuery: () => ({ ...idle, data: [] }),
 	useEnvironmentsQuery: () => ({ ...idle, data: [STAGING] }),
-	useCreateEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
+	useCreateEnvironmentMutation: () => ({ mutateAsync: createEnvironment, isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useUpdateEnvironmentMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -72,6 +74,7 @@ function renderTree() {
 }
 
 beforeEach(() => {
+	createEnvironment.mockReset().mockResolvedValue({ ...STAGING, id: "env_new", name: "Fresh" });
 	openTab.mockClear();
 	onItemOpened.mockClear();
 });
@@ -82,5 +85,28 @@ describe("the variables tree's selection", () => {
 		fireEvent.click(screen.getByText(name));
 		expect(openTab).toHaveBeenCalledWith({ type: "variables", entityId: null });
 		expect(onItemOpened).toHaveBeenCalledTimes(1);
+	});
+
+	// A created environment is selected the same way, so the overlay leaves for it too.
+	it("tells the drawer after a new environment is created and opened", async () => {
+		renderTree();
+		fireEvent.click(screen.getByRole("button", { name: "Add environment" }));
+		const field = screen.getByPlaceholderText("Environment name");
+		fireEvent.change(field, { target: { value: "Fresh" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+		await waitFor(() => expect(onItemOpened).toHaveBeenCalledTimes(1));
+		expect(createEnvironment).toHaveBeenCalledWith({ name: "Fresh", variables: {} });
+		expect(openTab).toHaveBeenCalledWith({ type: "variables", entityId: null });
+	});
+
+	it("does not when the create fails and nothing opens", async () => {
+		createEnvironment.mockRejectedValue(new Error("boom"));
+		renderTree();
+		fireEvent.click(screen.getByRole("button", { name: "Add environment" }));
+		const field = screen.getByPlaceholderText("Environment name");
+		fireEvent.change(field, { target: { value: "Fresh" } });
+		fireEvent.keyDown(field, { key: "Enter" });
+		await waitFor(() => expect(createEnvironment).toHaveBeenCalled());
+		expect(onItemOpened).not.toHaveBeenCalled();
 	});
 });
