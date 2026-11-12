@@ -9,6 +9,7 @@
 #include <format>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -554,6 +555,37 @@ TEST (ParseAuth, MapsModesToVariantAlternatives) {
     auto un = parse_auth (json{ { "mode", "ntlm" } });
     ASSERT_TRUE (std::holds_alternative<UnsupportedAuth> (un));
     EXPECT_EQ (std::get<UnsupportedAuth> (un).mode, "ntlm");
+}
+
+// The closed set the write routes hold a stored `auth` to (#3464). Mutation
+// check: drop a mode from `AUTH_MODES` and the first test reds; make
+// `is_known_auth_mode` fold case or trim and the second reds.
+TEST (AuthModes, EveryModeParseAuthExecutesIsKnown) {
+    using namespace vayu::http;
+    for (const std::string_view mode :
+    { "none", "inherit", "bearer", "basic", "apikey", "oauth2" }) {
+        EXPECT_TRUE (is_known_auth_mode (mode)) << mode;
+    }
+}
+
+TEST (AuthModes, OnlyTheExactLowercaseSpellingIsKnown) {
+    using namespace vayu::http;
+    for (const std::string_view mode : AUTH_MODES) {
+        EXPECT_TRUE (is_known_auth_mode (mode)) << mode;
+    }
+    for (const std::string_view mode : { "", "Inherit", "INHERIT", "Bearer",
+         " inherit", "bearer ", "oauth 2", "unknown" }) {
+        EXPECT_FALSE (is_known_auth_mode (mode)) << "'" << mode << "'";
+    }
+}
+
+// What `parse_auth` makes of a mode outside the set is the defect the routes
+// close: the request goes out with no credential and no refusal.
+TEST (AuthModes, AMisspelledModeParsesAsAnUnexecutedMode) {
+    using namespace vayu::http;
+    const auto parsed = parse_auth (json{ { "mode", "Bearer" }, { "token", "t" } });
+    ASSERT_TRUE (std::holds_alternative<UnsupportedAuth> (parsed));
+    EXPECT_FALSE (is_known_auth_mode (std::get<UnsupportedAuth> (parsed).mode));
 }
 
 } // namespace
