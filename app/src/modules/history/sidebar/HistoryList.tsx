@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { formatNumber } from "@/lib/format-number";
 import { useRunLiveness } from "@/hooks/useRunLiveness";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -107,9 +108,13 @@ export default function HistoryList() {
 
 	// The row-handler props below are stable on purpose: `RunItem` is memoised, and
 	// one fresh function per render would make every row re-render anyway.
+	const onItemOpened = useDrawerItemOpened();
 	const navigateToRunDetail = useCallback(
-		(runId: string) => openTab({ type: "run", entityId: runId }),
-		[openTab]
+		(runId: string) => {
+			openTab({ type: "run", entityId: runId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 	const navigateToHistory = () => activateDrawerView("history");
 
