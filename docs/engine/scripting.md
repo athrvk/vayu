@@ -2216,6 +2216,28 @@ same sentence. Every other local server is reachable as before. See
 [Reading response headers](#reading-response-headers) - `json()` and `text()`.
 It is a subset of `pm.response` and has no `to.*` assertion chain.
 
+**Every request leaves one line in the Console** (#3462), so what a script sent
+is listed even when nothing logs it - a token fetch that failed and a callback
+that returns on `err` would otherwise leave no trace. It is an `info` line,
+written when the transfer ends and before the callback runs, naming the method,
+the URL, the status or the error code, and how long the transfer took:
+
+```text
+pm.sendRequest POST https://auth.example.com/token -> 200 (143 ms)
+pm.sendRequest GET https://auth.example.com/token failed: CONNECTION_FAILED (3 ms)
+```
+
+A 4xx or 5xx answer is a status, not a failure; `failed:` is the `err.code` the
+callback receives. The URL is the one the script gave, after its variables
+resolve, with its credentials blanked the way an export blanks them: the
+password of `user:pass@` and the value of a query parameter named like a
+credential (`token`, `api_key`, `client_secret`, ...) are dropped, the rest of
+the query stays, and a key that `auth` appends is never shown. Only a request
+that was sent has a line: a call refused before it goes out (the cap, a bad
+option, the capability being off) throws and writes none. The line counts
+against the [console caps](#console-output) like any other, and with
+`scriptEnableConsole` off it is not recorded.
+
 **Three bounds, all hard.**
 
 - *The script's deadline.* The wall-clock limit is enforced by a QuickJS
@@ -2975,9 +2997,10 @@ that bounds the script does not bound them. Three caps, the constants
   is dropped, as is every line after it. Exactly one final `warn` entry,
   `[console output limit reached: further output of this script is dropped]`,
   says so; a script that stops at a cap without exceeding it gets none.
-- The warnings the engine writes for a script (`pm.cookies.jar()` refusals,
-  `pm.visualizer`) count against the same caps. Nothing is thrown into the
-  script.
+- The lines the engine writes for a script (`pm.cookies.jar()` refusals,
+  `pm.visualizer`, and the [`info` line each `pm.sendRequest`
+  leaves](#sending-a-request-from-a-script-pmsendrequest)) count against the
+  same caps. Nothing is thrown into the script.
 
 The caps are per execution: each level's script has its own, so a request with
 a collection, a folder and a request script can show up to three times as much,

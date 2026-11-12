@@ -1989,7 +1989,10 @@ nlohmann::json get_script_completions () {
     "res is null then. res carries code, status (the reason phrase, as on "
     "pm.response - the number is code), responseTime, headers.get() "
     "and json()/text() - a subset of pm.response, not the assertion "
-    "chain.\n\nThe url may be a string or pm.request.url, and {{variables}} in "
+    "chain.\n\nEvery call writes one info line to the Console - method, URL, "
+    "status or error code, and how long it took - so what the script sent is "
+    "listed there even when nothing logs it.\n\nThe url may be a string or "
+    "pm.request.url, and {{variables}} in "
     "it, in header names and values, in a body's text or form fields and in "
     "auth credentials resolve as the "
     "call is made - so a value this script set two lines earlier is visible. "
@@ -2027,7 +2030,8 @@ nlohmann::json get_script_completions () {
     { { "label", "Fetch a token before the send" }, { "kind", KIND_SNIPPET },
     { "insertText",
     "pm.sendRequest(\"${1:https://api.example.com/token}\", function (err, "
-    "res) {\n\tif (err) { return; }\n\tpm.environment.set(\"${2:token}\", "
+    "res) {\n\tif (err) { console.error(\"Token request failed:\", err); "
+    "return; }\n\tpm.environment.set(\"${2:token}\", "
     "res.json().${3:access_token});\n});" },
     { "insertTextRules", INSERT_AS_SNIPPET }, { "filterText", "pm.sendRequest token auth" },
     { "detail", "Send an auxiliary request and stash what it returns (pre-request)" },
@@ -2035,7 +2039,9 @@ nlohmann::json get_script_completions () {
     "Fetch a token before the main request goes out and save it where the "
     "URL, headers or body can read it. Blocks until the auxiliary request "
     "completes - pm.sendRequest has no event loop to wait on - and err is "
-    "null exactly when res is not, so check err first." },
+    "null exactly when res is not, so check err first. The template logs a "
+    "failure to the Console before it returns, so a wrong URL does not leave "
+    "the old token going out unnoticed." },
     { "context", CONTEXT_PRE }, { "group", GROUP_REQUEST },
     { "sortText", "3_snippet_sendRequest_token" } });
 

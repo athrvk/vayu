@@ -22,9 +22,11 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <regex>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -1428,6 +1430,210 @@ TEST_F (SendRequestTest, TheCapResetsBetweenExecutions) {
     ASSERT_EQ (second.tests.size (), 1u);
     EXPECT_TRUE (second.tests[0].passed) << second.tests[0].error_message;
     EXPECT_EQ (server.hit_count (), REQUEST_CAP + 1);
+}
+
+// ============================================================================
+// The Console lists what a script sent (#3462)
+// ============================================================================
+
+// The lines pm.sendRequest wrote, in order: nothing else a script logs.
+std::vector<vayu::ConsoleEntry> send_lines (const vayu::ScriptResult& result) {
+    std::vector<vayu::ConsoleEntry> lines;
+    for (const auto& entry : result.console_output) {
+        if (entry.message.starts_with ("pm.sendRequest ")) {
+            lines.push_back (entry);
+        }
+    }
+    return lines;
+}
+
+// A success names the method, the URL as the script gave it, the status and a
+// duration, at info level. Mutation check: delete `record_send_request`'s call
+// in `js_pm_send_request`.
+TEST_F (SendRequestTest, ASuccessfulRequestLeavesOneInfoLineNamingMethodUrlAndStatus) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/token") + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), 1u);
+    const auto& line = result.console_output[0];
+    EXPECT_EQ (line.level, vayu::ConsoleLevel::Info);
+    EXPECT_TRUE (line.message.starts_with (
+    "pm.sendRequest GET " + server.url ("/token") + " -> 200 ("))
+    << line.message;
+    EXPECT_TRUE (line.message.ends_with (" ms)")) << line.message;
+}
+
+TEST_F (SendRequestTest, TheMethodIsTheOneTheScriptAskedFor) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/echo") +
+    "', method: 'POST', body: 'x' }, function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (send_lines (result).size (), 1u);
+    EXPECT_NE (send_lines (result)[0].message.find ("pm.sendRequest POST "), std::string::npos)
+    << send_lines (result)[0].message;
+}
+
+// A refusal is the network's answer, not a throw, and it is the case the line
+// exists for: the error code is what tells a wrong host from a slow one.
+// Mutation check: report the status instead of the code on the error branch.
+TEST_F (SendRequestTest, AFailedRequestNamesTheErrorCodeAtInfoLevel) {
+    auto result =
+    run ("pm.sendRequest('" + std::string (REFUSED_URL) + "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), 1u);
+    const auto& line = result.console_output[0];
+    EXPECT_EQ (line.level, vayu::ConsoleLevel::Info);
+    EXPECT_TRUE (line.message.starts_with ("pm.sendRequest GET " +
+    std::string (REFUSED_URL) + " failed: CONNECTION_FAILED ("))
+    << line.message;
+}
+
+// The promise form takes the same path through the send.
+TEST_F (SendRequestTest, ThePromiseFormLeavesTheSameLine) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/token") + "');");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (send_lines (result).size (), 1u);
+    EXPECT_NE (send_lines (result)[0].message.find (" -> 200 ("), std::string::npos);
+}
+
+// One line per request, in call order, and the line precedes whatever the
+// callback logs about its own call. Mutation check: return early from
+// `record_send_request` once the script's second request has counted.
+TEST_F (SendRequestTest, EachRequestLeavesItsOwnLineBeforeItsCallbacksOwnOutput) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest('" + server.url ("/token") +
+    "', function () { console.log('first done'); }); "
+    "pm.sendRequest('" +
+    std::string (REFUSED_URL) + "', function () { console.log('second done'); });");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.console_output.size (), 4u);
+    EXPECT_NE (result.console_output[0].message.find ("-> 200"), std::string::npos);
+    EXPECT_EQ (result.console_output[1].message, "first done");
+    EXPECT_NE (
+    result.console_output[2].message.find ("failed: CONNECTION_FAILED"), std::string::npos);
+    EXPECT_EQ (result.console_output[3].message, "second done");
+    EXPECT_EQ (result.console_output[0].level, vayu::ConsoleLevel::Info);
+    EXPECT_EQ (result.console_output[2].level, vayu::ConsoleLevel::Info);
+}
+
+// The duration covers the error path too, which has no response to read a
+// timing off. Healthy: a 150 ms timeout reports at least about 150 ms; broken
+// (no clock around the send): 0. The lower bound cannot fail slow.
+// Mutation check: pass a zero duration to `record_send_request`.
+TEST_F (SendRequestTest, ATimedOutRequestReportsHowLongItWaited) {
+    SendRequestServer server;
+
+    auto result = run ("pm.sendRequest({ url: '" + server.url ("/slow") + "', timeout: 150 }, function () {});",
+    /*timeout_ms=*/30000);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const auto lines = send_lines (result);
+    ASSERT_EQ (lines.size (), 1u);
+    EXPECT_NE (lines[0].message.find ("failed: TIMEOUT ("), std::string::npos)
+    << lines[0].message;
+    std::smatch duration;
+    const std::regex pattern (R"(\((\d+) ms\)$)");
+    ASSERT_TRUE (std::regex_search (lines[0].message, duration, pattern))
+    << lines[0].message;
+    EXPECT_GE (std::stoll (duration[1].str ()), 100) << lines[0].message;
+}
+
+// The cap counts as designed: the ten that went out each have a line, and the
+// refused eleventh throws before it sends and so writes none. Mutation check:
+// record twice per request in `js_pm_send_request`.
+TEST_F (SendRequestTest, TheRequestCapCountsLinesAsItCountsRequests) {
+    SendRequestServer server;
+
+    auto result = run ("for (var i = 0; i < " + std::to_string (REQUEST_CAP + 1) +
+    "; i++) { pm.sendRequest('" + server.url ("/token") + "', function () {}); }",
+    /*timeout_ms=*/30000);
+
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (server.hit_count (), REQUEST_CAP);
+    EXPECT_EQ (send_lines (result).size (), static_cast<std::size_t> (REQUEST_CAP));
+}
+
+// The line goes through the console's own recorder, so the 1000-line cap that
+// bounds console.* bounds it too: a script that fills the console first loses
+// the send lines and gets the one limit marker, not an error.
+TEST_F (SendRequestTest, TheLineIsSubjectToTheConsoleLimit) {
+    SendRequestServer server;
+    constexpr auto MAX_ENTRIES = vayu::core::constants::script_engine::CONSOLE_MAX_ENTRIES;
+
+    auto result = run ("for (var i = 0; i < " + std::to_string (MAX_ENTRIES) +
+    "; i++) { console.log('x'); } pm.sendRequest('" + server.url ("/token") +
+    "', function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (send_lines (result).empty ());
+    ASSERT_EQ (result.console_output.size (), static_cast<std::size_t> (MAX_ENTRIES) + 1);
+    EXPECT_EQ (result.console_output.back ().level, vayu::ConsoleLevel::Warn);
+    EXPECT_EQ (server.hit_count (), 1)
+    << "the request itself must still go out";
+}
+
+// scriptEnableConsole off means the script's output is not kept, and a load
+// run turns it off to stop paying for exactly this. The request still goes
+// out. Mutation check: drop the `console_enabled` guard in
+// `record_send_request`.
+TEST_F (SendRequestTest, WithTheConsoleOffNothingIsRecorded) {
+    SendRequestServer server;
+    ScriptConfig config;
+    config.allow_send_request = true;
+    config.enable_console     = false;
+    ScriptEngine engine (config);
+    response.status_code = 200;
+    auto ctx             = ScriptContext::for_test (request, response);
+    ctx.environment      = &env;
+
+    auto result = engine.execute ("pm.sendRequest('" + server.url ("/token") +
+    "', function () {}); "
+    "pm.sendRequest('" +
+    std::string (REFUSED_URL) + "', function () {});",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+    EXPECT_EQ (server.hit_count (), 1);
+}
+
+// The line is a summary of what was called, not a place for credentials to
+// land: the userinfo password and a secret-named query value are blanked, the
+// rest of the query stays, and a key `options.auth` appends is not the
+// script's text and is never shown. Mutation check: log `request.url` after
+// auth, or the unredacted `script_url`.
+TEST_F (SendRequestTest, TheLoggedUrlBlanksCredentialsAndKeepsTheRest) {
+    SendRequestServer server;
+    std::string with_userinfo = server.url ("/token");
+    with_userinfo.insert (std::string ("http://").size (), "user:hunter2@");
+
+    auto result = run ("pm.sendRequest('" + with_userinfo +
+    "?api_key=S3CRET&page=2', function () {}); "
+    "pm.sendRequest({ url: '" +
+    server.url ("/echo") +
+    "', method: 'POST', auth: { type: 'apikey', apikey: [{ key: 'key', "
+    "value: 'sig' }, { key: 'value', value: 'AUTHKEY' }, { key: 'in', value: "
+    "'query' }] } }, function () {});");
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    const auto lines = send_lines (result);
+    ASSERT_EQ (lines.size (), 2u);
+    EXPECT_EQ (lines[0].message.find ("hunter2"), std::string::npos) << lines[0].message;
+    EXPECT_EQ (lines[0].message.find ("S3CRET"), std::string::npos) << lines[0].message;
+    EXPECT_NE (lines[0].message.find ("user@"), std::string::npos) << lines[0].message;
+    EXPECT_NE (lines[0].message.find ("page=2"), std::string::npos) << lines[0].message;
+    EXPECT_EQ (lines[1].message.find ("AUTHKEY"), std::string::npos) << lines[1].message;
+    EXPECT_EQ (lines[1].message.find ("sig="), std::string::npos) << lines[1].message;
 }
 
 // ============================================================================

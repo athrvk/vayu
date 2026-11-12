@@ -1609,6 +1609,46 @@ TEST (ScriptCompletions, EveryPreRequestSnippetRunsAsAPreRequestScript) {
     << "no pre-request snippets were exercised, so this guard proved nothing";
 }
 
+// The template exists for the case where the fetch fails, and a bare
+// `return` there leaves the old token going out with an empty Console (#3462).
+// Run against a refused port rather than the placeholder host so the failure
+// is real and immediate: the snippet has to leave an error line that carries the
+// failure's own message, and store nothing.
+TEST (ScriptCompletions, TheTokenSnippetLogsAFailedFetchToTheConsole) {
+    const auto completions = get_script_completions ();
+    const auto* snippet = find_by_label (completions, "Fetch a token before the send");
+    ASSERT_NE (snippet, nullptr);
+
+    std::string text = snippet->value ("insertText", std::string{});
+    const std::string placeholder = "${1:https://api.example.com/token}";
+    const auto at                 = text.find (placeholder);
+    ASSERT_NE (at, std::string::npos) << text;
+    text.replace (at, placeholder.size (), "http://127.0.0.1:1/");
+
+    vayu::runtime::ScriptConfig config;
+    config.allow_send_request = true;
+    vayu::runtime::ScriptEngine engine (config);
+    vayu::Request request;
+    request.url = "https://api.example.com/users";
+    vayu::Environment env;
+
+    auto result =
+    engine.execute_prerequest (strip_snippet_placeholders (text), request, env);
+
+    EXPECT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (env.count ("token"), 0u) << "a failed fetch stored a token";
+    const auto logged = std::find_if (result.console_output.begin (),
+    result.console_output.end (), [] (const vayu::ConsoleEntry& entry) {
+        return entry.level == vayu::ConsoleLevel::Error;
+    });
+    ASSERT_NE (logged, result.console_output.end ())
+    << "the failure left no console.error line";
+    EXPECT_NE (logged->message.find ("Token request failed:"), std::string::npos)
+    << logged->message;
+    EXPECT_NE (logged->message.find ("127.0.0.1:1"), std::string::npos)
+    << "the line does not say what failed: " << logged->message;
+}
+
 // The other half of the pair above: a template offered under the Tests editor
 // has to run there. Without it only the Content-Type snippet was ever
 // executed, so a test template could break and CI would still be green while

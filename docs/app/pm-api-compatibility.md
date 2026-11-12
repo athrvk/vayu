@@ -339,6 +339,15 @@ and [the migration
 note](../engine/scripting.md#status-is-the-reason-phrase-code-is-the-number)
 names the one pattern that degrades silently.
 
+**Every call is listed in the Console, as it is in Postman's** (#3462): one
+`info` line per request that was sent, naming the method, the URL, the status
+(or `failed:` and the error code when the transfer did not complete) and the
+duration, written before the callback runs. A callback that returns on `err`
+therefore leaves a trace, and the "Fetch a token before the send" snippet logs
+the failure itself. The URL has credentials blanked as an export blanks them
+and `scriptEnableConsole` off records nothing; the line is described under
+[`pm.sendRequest`](../engine/scripting.md#sending-a-request-from-a-script-pmsendrequest).
+
 **It is bounded three ways, and two of them throw.** The request's timeout is
 clamped to whatever is left of the script's own time budget (`scriptTimeout`,
 5s by default), because QuickJS only checks its deadline *between* bytecode

@@ -2312,6 +2312,8 @@ declare const pm: {
 	 * 
 	 * The callback gets (err, res). Transport failures - refused, DNS, timeout - arrive as err with a .code; res is null then. res carries code, status (the reason phrase, as on pm.response - the number is code), responseTime, headers.get() and json()/text() - a subset of pm.response, not the assertion chain.
 	 * 
+	 * Every call writes one info line to the Console - method, URL, status or error code, and how long it took - so what the script sent is listed there even when nothing logs it.
+	 * 
 	 * The url may be a string or pm.request.url, and {{variables}} in it, in header names and values, in a body's text or form fields and in auth credentials resolve as the call is made - so a value this script set two lines earlier is visible. Two header names that resolve to one name are refused rather than sent a header short, and a name resolving to nothing is refused too.
 	 * 
 	 * auth takes Postman's { type, <type>: params } shape in either spelling, and composes basic, bearer and apikey. Any other type - oauth2 included - is refused by name rather than dropped, and an Authorization header the script set itself wins.

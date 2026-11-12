@@ -171,6 +171,11 @@ struct ContextData {
      */
     void add_console_entry (ConsoleLevel level, std::string message);
 
+    /// `ScriptConfig::enable_console`. Gates the lines the engine writes on a
+    /// script's behalf (`pm.sendRequest`'s, #3462), so a console-off run
+    /// builds none of them.
+    bool console_enabled = true;
+
     /// Bytes of `console_output` messages kept so far (the limit marker aside).
     std::size_t console_bytes = 0;
     /// Set when the limit marker has been written; nothing is kept after it.
