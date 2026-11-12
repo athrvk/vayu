@@ -205,7 +205,7 @@ Sections are leaf components over the existing query layer - no bar-wide shared 
 | Variables in this collection (`collection-variables`) | `CollectionVariablesSection.tsx` - the definitions this collection owns (not a resolved set), editable through the same commit path as the request tab's list. A disabled definition is shown and marked `off` rather than hidden. Rows are ordered oldest `createdAt` first through `lib/variable-order.ts`, the function `VariableTableEditor` orders and saves by, so the section and the Variables tab list a collection's variables identically (#3252). |
 | Auth (`collection-auth`) | `CollectionAuthSection.tsx` - the mode this collection is set to, and what a descendant set to Inherit would pick up: the same `resolveAuthSource` walk, so a collection set to plain No Auth names the ancestor that answers instead. A mode the engine does not execute (`isEngineExecutableAuthMode`), on this collection or on the ancestor it names, says Vayu does not send the type and requests go out without auth rather than "send this" (#3203). While the Auth tab holds an unsaved pick, mounted or not, this reads it (`useCollectionAuthDraft`, #1483) rather than the last-saved mode, so the two panes agree, and its sentences end "(unsaved)" while that pick differs from the stored auth (a request below still sends the stored row until Save). |
 | Contents (`collection-contents`) | `CollectionContentsSection.tsx` - direct child counts (requests, sub-collections), matching what the tree shows under the folder. |
-| Last run (`collection-last-run`) | `CollectionLastRunSection.tsx` - how this collection's most recent run went: the outcome word in its status colour, the plan's size (`3 steps`, `× 2` only when more than one pass ran), and the age, opening that run in a History tab. One `GET /runs?collectionId=&limit=1` call and no report fetch - the server's `start_time DESC` makes the single row the answer. A run still going reads "Running" rather than an outcome, and a run stored before the engine sent the `scenario` descriptor shows no size rather than "0 steps". |
+| Last run (`collection-last-run`) | `CollectionLastRunSection.tsx` - how this collection's most recent run went: the outcome word in its status colour (a completed run with a failed or errored step reads in the error colour, from `rowOutcome` through `runStatusTone(run)`, as its History row does, #3496), the plan's size (`3 steps`, `× 2` only when more than one pass ran; a `TruncatedText`, so a clipped label shows in a tooltip), and the age, opening that run in a History tab. The row's accessible name carries all of it ("Open collection run, completed, verdict failed, 11 steps, 5 minutes ago"). One `GET /runs?collectionId=&limit=1` call and no report fetch - the server's `start_time DESC` makes the single row the answer. A run still going reads "Running" rather than an outcome, and a run stored before the engine sent the `scenario` descriptor shows no size rather than "0 steps". |
 
 **Run tab**
 
@@ -1594,11 +1594,11 @@ durations in `docs/design-system.md` -> Toasts.
 A run's status as a word and a glyph, tinted by its status family: `Running`
 (spinner), `Completed`, `Stopped`, `Failed`. The dashboard header and the history
 run tab's header (`HistoryDetail`, #1944) draw it; the history row draws only the
-glyph (`RunStatusGlyph`). Welcome's recent runs take the word and `-text` token
-through `runStatusDisplay`, fed the row's verdict (`rowOutcome`, #3496); the
-collection context bar's last-run row takes the label and `-text` token alone.
-All read `RUN_STATUS` in `components/shared/run-status.ts`, so the label, glyph
-and `-text` token exist once per status. The dashboard header's ending includes `failed` (#1932), set
+glyph (`RunStatusGlyph`). Welcome's recent runs and the collection context bar's
+last-run row take the word and `-text` token through `runStatusDisplay`, fed the
+row's verdict (`rowOutcome`, #3496). All read `RUN_STATUS` in
+`components/shared/run-status.ts`, so the label, glyph and `-text` token exist
+once per status. The dashboard header's ending includes `failed` (#1932), set
 when the engine reports the run failed, so a failed run no longer reads as
 Completed; it says Running for as long as the run is live, a lost stream
 included (#3351).
@@ -1617,10 +1617,10 @@ and a fresh `{outcome, reason}` per render would defeat it (#1714). The history 
 loads (`reportOutcome`, else `rowOutcome`), so the tab, the dashboard header and
 the sidebar row draw one run in one colour (#2872); design runs pass none and
 keep the tick. A collection run's sidebar row refines its own glyph from its
-step counts (#3458, `rowOutcome`), and Welcome's recent-runs row paints the same
-verdict as the word's colour: "Completed" in the error token, with ", verdict
-failed" in its accessible name, so a run with failed steps is not green there
-(#3496). Its detail tab passes none, and its step list carries the counts.
+step counts (#3458, `rowOutcome`), and Welcome's recent-runs row and the context
+bar's last-run row paint the same verdict as the word's colour: "Completed" in
+the error token, with ", verdict failed" in the accessible name, so a run with
+failed steps is not green there (#3496). Its detail tab passes none, and its step list carries the counts.
 
 ## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
 
