@@ -27,6 +27,7 @@ import { queryKeys } from "@/queries/keys";
 import { collectDescendantEntityIds, collectionNamePath } from "./tree-utils";
 import { collectionEntity } from "./tree-rows";
 import type { TreeEntity } from "./drop-position";
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { useCopy } from "@/hooks/useCopy";
 import { useStableCallback } from "@/hooks/useStableCallback";
 import { useTrashUndo } from "@/hooks/useTrashUndo";
@@ -242,16 +243,23 @@ export function useTreeCrud({
 	const [runTarget, setRunTarget] = useState<Collection | null>(null);
 	const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
 
+	const onItemOpened = useDrawerItemOpened();
+
 	// Memoised because the callbacks below list them as dependencies: redefined
 	// each render, they would rebuild every handler that opens a tab.
 	const navigateToRequest = useCallback(
-		(_collectionId: string, requestId: string) =>
-			openTab({ type: "request", entityId: requestId }),
-		[openTab]
+		(_collectionId: string, requestId: string) => {
+			openTab({ type: "request", entityId: requestId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 	const navigateToCollection = useCallback(
-		(collectionId: string) => openTab({ type: "collection", entityId: collectionId }),
-		[openTab]
+		(collectionId: string) => {
+			openTab({ type: "collection", entityId: collectionId });
+			onItemOpened();
+		},
+		[openTab, onItemOpened]
 	);
 
 	/**

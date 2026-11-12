@@ -3047,9 +3047,55 @@ leaves out its rail (the drawer box above leaves out `ActivityRail`, the
 main+ContextBar row leaves out `ContextRail`), so an open panel never covers
 the button that closes it. Both boxes exist in either mode, so crossing a
 threshold changes a class list and never remounts the tab. An overlay keeps its
-width, its `rail-collapse` animation and its F6 stop, and closes the way it
-opens (its rail button or chord); neither overlay closes on Escape or a click
-outside.
+width, its `rail-collapse` animation and its F6 stop.
+
+**An overlay dismisses like one** (#3507). The rules live in one hook,
+`useOverlayPanel` (`app/src/components/layout/useOverlayPanel.ts`), called by
+both panels, and none of them applies to a panel that pushes:
+
+- **One overlay at a time.** When both panels are showing as overlays, the one
+  that most recently started showing wins and the other is closed. "Started
+  showing" is an open, or a tab switch that gives the context bar sections;
+  the rule watches the layout and tabs stores (`subscribe`) and not the actions
+  behind them, so the rail buttons, the chords, the palette and
+  `revealDrawerView` are all covered without each knowing it. It is a
+  subscription and not a render effect because `Shell`'s reveal can reopen the
+  drawer in the same flush that closed it, a round trip no render observes.
+  Where nothing opened - the first render with both persisted open, or a resize
+  that turned two pushing panels into overlays - the drawer stays. A pushing
+  panel is never closed by the rule, and neither is a bar that is not on
+  screen (no sections on this tab), so a flag is rewritten only for a panel that
+  was overlaying and lost. **That does write the persisted flag**: ⌘I on a
+  narrow window, or a resize from wide to 512 with both open, leaves the loser's
+  open flag false, and it stays closed when the window widens again.
+  `Shell` hands each panel both modes (`siblingMode`).
+- **The drawer closes on a selection**: a drawer item that opens or switches a
+  tab (a request, a collection, a run, a variables scope, a settings category)
+  calls `onItemOpened` from `useDrawerItemOpened()`
+  (`drawer-item-opened.ts`), and an overlay drawer closes and moves focus to the
+  opened tab. It is an explicit call, not a watch on the active tab, which also
+  changes for a closed tab, Back and every chord. Duplicate and the undo of a
+  delete open a tab too and are not selections; expand, rename, filter and the
+  row menu keep it open. **One rule for creation: any drawer action whose result
+  is a newly opened tab closes the overlay** - the toolbar's New request
+  (`useNewRequest`, which reports the tab it opened), a row menu's Add request,
+  New environment, and the Services rows' Open. Duplicate and undo reopen
+  something that existed, so they stay open. The context bar never closes on
+  selection.
+- **Escape closes it** when focus is inside it and nothing of its own is open
+  above it - no menu, listbox or popover (by role, not closed) and no dialog -
+  and no one has already answered the key (`defaultPrevented`, which Radix sets
+  for the layer it dismisses). A text field keeps its own Escape. Focus returns
+  to the rail button that toggles the panel (`data-rail-side` on `RailButton`),
+  the active tab if the rail is not drawn. A tooltip on the focused control may
+  take the first Escape (Radix cancels it), so a second press closes the panel.
+- **A pointer press outside closes it**, heard on `document` in the capture phase
+  and never cancelled, so the click still reaches what it was aimed at. Presses
+  on the panel, on its own rail's buttons (the click toggles it; closing on the
+  press would reopen it), on a menu or dialog it opened (portalled out of it)
+  and anything while a dialog is up or a menu, listbox or popover is open are
+  not outside: the press that dismisses a modal menu can land on `<html>`, and
+  it is the menu's, not the panel's.
 
 ### The panels that resize, and the one handle that resizes them
 
