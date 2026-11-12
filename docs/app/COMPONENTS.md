@@ -2886,6 +2886,18 @@ Response-rendering primitives reused outside the request builder (e.g. history d
 > the engine's `is_success_status`, #2124), so a 404 or a 500 does not wear the
 > success tick; a caller that knows better passes `state`.
 >
+> **The summary row is a grid, so a list's rows line up** (#3495). The button
+> is `grid` over fixed tracks (chevron, icon, a `3.5rem` label, one flexible
+> lead, then from `@3xl` a `12rem` status, a `4.5rem` latency and the time), and
+> the status, latency and time sit in a wrapping group that dissolves
+> (`@3xl:contents`) into those tracks; below `@3xl` they wrap as one line under
+> the name. The thresholds are container variants against the row's own
+> `@container` root, not `sm:`, because the run pane is narrower than the window
+> by the context bar. The lead holds the caller's `title` in a `min-w-0` box (it
+> is a node of the caller's own shape) and the error's first clause as a
+> `TruncatedText`, so a cut error still has its full text on hover; the full
+> message is in the expanded block as before.
+>
 > Guarded by `sampled-exchange-adoption.test.tsx` (the shell is replaced with a
 > sentinel, so a view that hand-rolls a row fails) and
 > `SampledExchange.test.tsx` (the shell's own behaviour).

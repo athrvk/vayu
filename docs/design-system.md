@@ -2444,10 +2444,10 @@ animate under the cursor.
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
 tooltip.
 
-### A row that holds a name, a chip and some controls (#3494)
+### A row that holds a name, a chip and some controls (#3494, #3495)
 
-The "reflow guarantee" (Interface scale, above) is met with four class rules,
-not a media query per surface. jsdom has no layout, so each is held as a class
+The "reflow guarantee" (Interface scale, above) is met with class rules, not a
+media query per surface. jsdom has no layout, so each is held as a class
 guard (`reflow-floors.test.ts` and the component's own test), and none can prove
 a pixel.
 
@@ -2490,6 +2490,16 @@ a pixel.
   running under the nav's clip (it was `shrink-0` with no `title`). The ancestor
   labels and their chevrons are direct children of one row: a wrapper per pair
   with `min-w-0` would shrink below the label's floor.
+
+- **A list of rows that must line up is a grid of fixed tracks.** Every row of a
+  list is a grid of its own, so only fixed-size tracks align across rows, and
+  a flexible one is a single `minmax(0,1fr)` lead. `SampledExchange`'s summary
+  row has a `3.5rem` label, a `12rem` status (wide enough for "503 Service
+  Unavailable"), a `4.5rem` latency and an `auto` time, with the cells placed
+  by `@3xl:col-start-*`; below that width the status, latency and time wrap as one
+  group under the name. The thresholds are container variants against the row's
+  own `@container` root (see "A run pane's grids answer to the pane"), and the
+  error's first clause is a `TruncatedText`, not a fixed `max-w-[200px]`.
 
 The title bar is the one surface where these are viewport-sized (see the note
 under "A run pane's grids answer to the pane"). Its side columns are

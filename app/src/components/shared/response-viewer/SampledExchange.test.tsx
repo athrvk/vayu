@@ -22,6 +22,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
+import { formatLatency } from "@/lib/format-number";
 
 import { SampledExchange } from "./SampledExchange";
 import { phasesFromTrace } from "./timing-phases";
@@ -181,5 +182,71 @@ describe("SampledExchange", () => {
 		render(<SampledExchange {...base} />);
 
 		expect(screen.getByRole("button").className).toMatch(/\brounded-none\b/);
+	});
+
+	describe("the summary row's layout (#3495)", () => {
+		/*
+		 * jsdom has no layout, so each rule is held as the classes that make it.
+		 * The row's fixed tracks are what lines a list's rows up; the container
+		 * variants are what make it answer to the run pane, not the window.
+		 */
+		const classesOf = (el: Element | null) => (el?.getAttribute("class") ?? "").split(/\s+/);
+
+		it("is a grid with fixed tracks for the label, status, latency and time", () => {
+			render(<SampledExchange {...base} />);
+
+			const row = classesOf(screen.getByRole("button"));
+			expect(row).toContain("grid");
+			expect(row).toContain(
+				"@3xl:grid-cols-[auto_auto_3.5rem_minmax(0,1fr)_12rem_4.5rem_auto]"
+			);
+			// Each cell has its own track, so a row with no status leaves it empty.
+			expect(classesOf(screen.getByText("200 OK"))).toContain("@3xl:col-start-5");
+			expect(classesOf(screen.getByText(formatLatency(base.latencyMs)))).toContain(
+				"@3xl:col-start-6"
+			);
+			expect(classesOf(screen.getByText("10:11:12.345"))).toContain("@3xl:col-start-7");
+			// The group the three share dissolves into the grid at that width.
+			expect(classesOf(screen.getByText("10:11:12.345").parentElement)).toContain(
+				"@3xl:contents"
+			);
+		});
+
+		it("answers to its own width: a @container root and no viewport variant", () => {
+			const { container } = render(
+				<SampledExchange {...base} title={<span>Create a customer</span>} error="x: y" />
+			);
+
+			expect(classesOf(container.firstElementChild)).toContain("@container");
+			expect(container.innerHTML).not.toMatch(/[\s"]sm:/);
+		});
+
+		it("gives the caller's title a track that can shrink", () => {
+			render(<SampledExchange {...base} title={<span>Create a customer</span>} />);
+
+			const holder = screen.getByText("Create a customer").parentElement;
+			expect(classesOf(holder)).toEqual(expect.arrayContaining(["min-w-0", "max-w-full"]));
+			expect(classesOf(holder!.parentElement)).toContain("min-w-0");
+		});
+
+		it("truncates the error preview instead of cutting it at a fixed width", () => {
+			render(<SampledExchange {...base} statusCode={500} error="connect: refused" />);
+
+			const preview = screen.getByText("connect");
+			expect(classesOf(preview)).toEqual(
+				expect.arrayContaining(["block", "truncate", "min-w-0"])
+			);
+			expect(classesOf(preview).join(" ")).not.toMatch(/max-w-\[200px\]/);
+		});
+
+		it("draws no lead cell when there is neither a title nor an error", () => {
+			const { container } = render(<SampledExchange {...base} />);
+
+			expect(container.querySelector('[class~="@3xl:flex-nowrap"]')).toBeNull();
+			// The group takes the lead's place on the first line instead of a second.
+			expect(classesOf(screen.getByText("10:11:12.345").parentElement)).toEqual(
+				expect.arrayContaining(["col-start-4", "row-start-1"])
+			);
+		});
 	});
 });
