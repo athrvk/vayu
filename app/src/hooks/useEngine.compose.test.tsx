@@ -42,6 +42,30 @@ describe("useEngine().composeRequest", () => {
 		expect({ ...composed, stream: false }).not.toHaveProperty("deferredVariables");
 	});
 
+	// The scope composition read is part of the send (#3461): `/execute` reads
+	// the scripts' collection from it when no saved row is linked. Mutation
+	// check: strip `collectionId` beside `deferredVariables` and this fails.
+	it("keeps the collectionId composition answered with", async () => {
+		composeRequest.mockResolvedValue({
+			method: "GET",
+			url: "https://{{host}}/",
+			collectionId: "col_1",
+			deferredVariables: ["host"],
+		});
+		const { result } = renderHook(() => useEngine());
+
+		const composed = await result.current.composeRequest({
+			request: { method: "GET", url: "https://{{host}}/" },
+			collectionId: "col_1",
+		});
+
+		expect(composed).toEqual({
+			method: "GET",
+			url: "https://{{host}}/",
+			collectionId: "col_1",
+		});
+	});
+
 	it("passes an answer that has none through unchanged", async () => {
 		composeRequest.mockResolvedValue({ method: "GET", url: "https://a.test/" });
 		const { result } = renderHook(() => useEngine());

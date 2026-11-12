@@ -1469,12 +1469,18 @@ the stored settings (redirects, protocol, `verifySSL`, cookies), exactly as the
 app's Send does. A field the call states beside the id (`method`, `headers`,
 `body`, `bodyType`, `auth`, `httpVersion`) goes in the compose body's `request`
 overlay and replaces the stored field for that send only. With a `url`,
-`run_request` is ad hoc: `requestId` only links the run in History and is
-never sent to `/compose`, nothing stored is applied, and the result carries a
-caveat saying so, because an agent passing both usually means the saved request
-and would otherwise read a default-auth response as the stored one. A call with
-neither is refused. The by-id branch keeps the ad-hoc gates of the other: the
-`verifySSL: false` refusal and the agent-script refusal run first, and the
+`run_request` is ad hoc: `requestId` links the run in History and is never
+sent to `/compose`, nothing stored is applied but the collection scope its
+scripts read (the linked request's collection wins over `collectionId` at
+`/execute`, issue #3461), and the result carries a caveat saying so, because
+an agent passing both usually means the saved request and would otherwise read
+a default-auth response as the stored one. A call with neither is refused. Ad
+hoc, `collectionId` scopes composition, and the composed answer's
+`collectionId` (passed on unchanged by `asMcpSend`) carries the same scope to
+`/execute`, so a script the call adds reads that chain and the names
+composition deferred past it resolve against it (issue #3461). The by-id
+branch keeps the ad-hoc gates of the other: the `verifySSL: false` refusal and
+the agent-script refusal run first, and the
 allowlist is checked on the composed URL, not the stored one.
 
 A pre-request script can still change where the request goes after that gate

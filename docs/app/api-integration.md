@@ -1591,9 +1591,12 @@ export const API_ENDPOINTS = {
 3. **Composition**: `apiService.composeRequest()` → `POST /compose` - the
    engine resolves `{{variables}}` and `inherit` auth against the request's
    `collectionId` chain and the active `environmentId`, and returns the
-   execute-ready payload (issue #226)
+   execute-ready payload (issue #226), naming the `collectionId` whose chain it
+   read (issue #3461)
 4. **API Call**: `apiService.executeRequest()` with the composed payload,
-   unchanged → `POST /execute`, carrying `stream: false` explicitly
+   unchanged → `POST /execute`, carrying `stream: false` explicitly; the
+   composed `collectionId` is how the engine's scripts read the same chain
+   when no saved row is linked
 5. **Response Transformation**: Backend format → frontend format
 6. **Display**: Response shown in ResponseViewer
 
@@ -1661,9 +1664,15 @@ and always the key, `[]` for a request without any: the engine answers an
 absent `params` from the *stored* rows, which would let a row the editor
 removed fill a segment. Every member of a row is kept (a Postman import's
 `type`, `description`), only the editor `id` is dropped. All four inline sites
-send them: Send, a load test, a History replay and GraphQL introspection. `requestId` is attached to the execute payload afterwards purely to
+send them: Send, a load test, a History replay and GraphQL introspection. `requestId` is attached to the execute payload afterwards to
 link the run to the saved request in History; `environmentId` scopes both
-composition and the engine's script context / variable persistence.
+composition and the engine's script context / variable persistence. The
+collection scope reaches the engine's script context through the composed
+answer's `collectionId`, which every one of these sites passes on by spreading
+the answer (issue #3461). A linked `requestId`'s own collection wins, so it
+changes nothing for a Send of a saved request; an orphaned History replay
+composes with no `collectionId` and the answer carries none.
+`useEngine.composeRequest` strips only `deferredVariables`.
 `useVariableResolver()` still exists but is **preview-only** (tab titles,
 previews, unresolved-token painting) - see
 [variable-resolution](./variable-resolution.md).

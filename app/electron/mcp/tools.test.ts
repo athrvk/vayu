@@ -8556,8 +8556,9 @@ describe("dispatchTool", () => {
 				.description;
 			for (const text of [descriptionOf(tool), idDescription]) {
 				expect(text).toMatch(/Omit `url` and pass `requestId`|Without `url`/);
-				expect(text).toMatch(/nothing stored is applied/);
-				expect(text).toMatch(/only links the run in History/);
+				expect(text).toMatch(/nothing else stored is applied/);
+				// The linked row's collection is the scope its scripts read (#3461).
+				expect(text).toMatch(/links the run in History and scopes its scripts' collection/);
 			}
 			expect(descriptionOf(tool)).not.toMatch(/use run_collection_smoke/);
 		});
@@ -13550,6 +13551,23 @@ describe("every MCP send carries the session's target policy", () => {
 			{ deferredVariables: ["token"] }
 		);
 		expect(sent).not.toHaveProperty("deferredVariables");
+	});
+
+	// The scope an ad-hoc request was composed in is part of its send (#3461):
+	// with no saved row linked, the engine's scripts read their collection from
+	// it. Mutation check: strip `collectionId` in `asMcpSend` and these fail.
+	const adHocCases = cases.filter(
+		([, sender]) =>
+			"url" in sender.args &&
+			(sender.tool === "run_request" || sender.tool === "start_load_run")
+	);
+	test.each(adHocCases)("%s forwards composition's collectionId", async (_, sender) => {
+		const sent = await payloadSent(
+			sender,
+			{ allowlist: ["api.example.com"] },
+			{ collectionId: "col_scope" }
+		);
+		expect(sent.collectionId).toBe("col_scope");
 	});
 
 	test.each(cases)("%s states the session's allowlist", async (_, sender) => {
