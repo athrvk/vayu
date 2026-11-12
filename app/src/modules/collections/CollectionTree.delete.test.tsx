@@ -13,7 +13,8 @@
  *
  * A delete is a soft delete with an undo toast behind it, so it runs the moment
  * it is asked for. The one exception is a collection with a mock server running
- * for it: stopping the mock is not undone by Undo, so that delete asks first,
+ * for it: the engine stops the mock as part of the delete (#3449) and Undo does
+ * not start it again, so that delete asks first,
  * and its dialog stays up with `isDeleting` spent on a spinner and a disabled
  * pair of buttons until the delete settles.
  *
@@ -32,7 +33,6 @@ import CollectionTree from "./CollectionTree";
 
 const deleteCollection = vi.fn();
 const deleteRequest = vi.fn();
-const stopMockServer = vi.fn();
 
 // root > mid > leaf, each holding one request. Deleting `root` cascades over
 // all of it.
@@ -81,7 +81,6 @@ vi.mock("@/queries", () => ({
 	useUpdateRequestMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useRestoreTrashMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useMockServersQuery: () => ({ data: mockServers }),
-	useStopMockServerMutation: () => ({ mutateAsync: stopMockServer, isPending: false }),
 }));
 
 function renderTree() {
@@ -144,7 +143,6 @@ beforeEach(() => {
 	Element.prototype.scrollIntoView = vi.fn();
 	deleteCollection.mockReset().mockResolvedValue(undefined);
 	deleteRequest.mockReset().mockResolvedValue(undefined);
-	stopMockServer.mockReset().mockResolvedValue(undefined);
 	collections = [...TREE];
 	requests = new Map(TREE_REQUESTS);
 	mockServers = [];
@@ -320,7 +318,7 @@ describe("deleting a collection with nothing running", () => {
 		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("root"));
 	});
 
-	it("does not mention or stop a mock running for an unrelated collection", async () => {
+	it("does not mention a mock running for an unrelated collection", async () => {
 		mockServers = [
 			{ mockId: "mock-other", collectionId: "root", collectionName: "Acme", port: 5000 },
 		];
@@ -330,15 +328,16 @@ describe("deleting a collection with nothing running", () => {
 		await deleteSettled();
 		expect(deleteCollection).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText(/mock server/i)).not.toBeInTheDocument();
-		expect(stopMockServer).not.toHaveBeenCalled();
 	});
 });
 
 /*
  * A collection can have a mock server running for it. Deleting it - or a
- * parent whose descendant has one - stops that mock as part of the delete,
- * and that is the one part Undo cannot give back, so this delete alone asks
- * first and says so. `mockServers` is set per test rather than in
+ * parent whose descendant has one - stops that mock as part of the delete
+ * (the engine does it, #3449), and that is the one part Undo cannot give back,
+ * so this delete alone asks first and says so. The renderer sends no stop of
+ * its own: this file's `@/queries` mock carries no stop mutation, so a hook
+ * that reaches for one fails to render. `mockServers` is set per test rather than in
  * `beforeEach`, so the default stays the "no mock" case above.
  */
 /*
@@ -435,7 +434,6 @@ describe("deleting a collection with a mock server running", () => {
 		fireEvent.click(await confirmButton());
 
 		await waitFor(() => expect(cancelButton()).not.toBeInTheDocument());
-		expect(stopMockServer).not.toHaveBeenCalled();
 	});
 
 	it("leaves focus on the row that follows the deleted one, once the dialog closes and the row goes", async () => {
@@ -474,17 +472,18 @@ describe("deleting a collection with a mock server running", () => {
 		await waitFor(() => expect(deleteCollection).toHaveBeenCalledTimes(1));
 	});
 
-	it("stops the running mock once the delete is confirmed", async () => {
+	it("says the mock will be stopped, and leaves the stopping to the engine's delete", async () => {
 		runMockOnInvoices();
 		renderTree();
 		await askToDelete("Invoices");
 
+		expect(await screen.findByText(/it will be stopped/)).toBeInTheDocument();
 		fireEvent.click(await confirmButton());
 
-		await waitFor(() => expect(stopMockServer).toHaveBeenCalledWith("mock-1"));
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("leaf"));
 	});
 
-	it("stops every affected mock in a cascade, not just the top-level collection's own", async () => {
+	it("warns about every affected mock in a cascade, not just the top-level collection's own", async () => {
 		mockServers = [
 			{ mockId: "mock-root", collectionId: "root", collectionName: "Acme", port: 4000 },
 			{ mockId: "mock-leaf", collectionId: "leaf", collectionName: "Invoices", port: 4123 },
@@ -492,11 +491,9 @@ describe("deleting a collection with a mock server running", () => {
 		renderTree();
 		await askToDelete("Acme");
 
+		expect(await screen.findByText(/2 mock servers are running/)).toBeInTheDocument();
 		fireEvent.click(await confirmButton());
 
-		await waitFor(() => {
-			expect(stopMockServer).toHaveBeenCalledWith("mock-root");
-			expect(stopMockServer).toHaveBeenCalledWith("mock-leaf");
-		});
+		await waitFor(() => expect(deleteCollection).toHaveBeenCalledWith("root"));
 	});
 });

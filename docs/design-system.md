@@ -3679,12 +3679,10 @@ Two lanes, decided once here rather than per module (issue #1683/#1689):
   Wiring a mutation straight to a button's `onClick` for anything that
   destroys data is the bug this rule exists to catch (#1689's Clear captures
   and Empty trash were both found this way).
-- **One template writes the sentence.** `DeleteConfirmDialog` takes `name` and
-  an optional `scope` (`"default"` or `"cascade"`) and builds "Delete
-  {name}? {name} is removed permanently." itself, with a suffix for a
-  container that takes its contents with it. A call site passes `description`
-  only for prose the template cannot say - a count, a conditional clause -
-  never to restate what `name`/`scope` already produce.
+- **One template writes the sentence.** `DeleteConfirmDialog` takes `name`
+  and builds "Delete {name}? {name} is removed permanently." itself. A call
+  site passes `description` only for prose the template cannot say - a count,
+  a conditional clause - never to restate what `name` already produces.
 - **A refusal goes in the `error` slot.** A delete the engine refused is a
   `<Callout severity="blocking">` passed as `error`, rendered between the
   description and the actions. It is a slot of its own because

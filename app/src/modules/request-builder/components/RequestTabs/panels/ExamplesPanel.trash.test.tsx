@@ -120,8 +120,6 @@ beforeEach(() => {
 		kind: "example",
 		name: "Happy path",
 		deletedAt: 1,
-		collections: 0,
-		requests: 0,
 		restored: true,
 		reparentedToRoot: false,
 	});

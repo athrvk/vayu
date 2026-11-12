@@ -17,6 +17,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -199,9 +200,9 @@ struct DesignResultOutcome {
  * @brief One thing the user deleted, as the trash lists it (issue #988).
  *
  * A *root* only: the row the user asked to delete, never the descendants that
- * went with it. What a cascade took is the two counts, because that is the
- * question a trash view asks ("restoring this brings back what?") and listing
- * every stamped row would answer a different one.
+ * went with it. What a cascade took is counted, because that is the question
+ * a trash view asks ("restoring this brings back what?", and "purging it
+ * destroys what?") and listing every stamped row would answer a different one.
  */
 struct TrashEntry {
     std::string id;
@@ -221,13 +222,22 @@ struct TrashEntry {
     /// owning *request* (always present, #2971). Absent for an environment
     /// and a client certificate, which hang under nothing.
     std::optional<std::string> parent_id;
+    /// The name of the row `parent_id` names, set for a request and an example
+    /// only (#3449): two same-named entries are told apart by their owner.
+    /// Absent when the owner row is gone, which no write path leaves behind.
+    std::optional<std::string> parent_name;
     /// Descendants *this delete* took with it - the cohort, and therefore
-    /// exactly what a restore puts back. A purge may take more (a row an
-    /// earlier delete left inside the same subtree), which is the one place
-    /// these counts are a floor rather than the whole. Both 0 for a request,
-    /// an environment, an example and a client certificate.
+    /// exactly what a restore puts back. Both 0 for a request, an
+    /// environment, an example and a client certificate.
     int64_t collections = 0;
     int64_t requests    = 0;
+    /// Descendants a purge destroys (#3449): every stamped row under the root,
+    /// whichever delete stamped it, walked as `purge_collection_locked` walks
+    /// (stopping at a live collection). A superset of the cohort counts: a row
+    /// an earlier delete left inside the subtree is here and not there. Both 0
+    /// for every kind but a collection.
+    int64_t purge_collections = 0;
+    int64_t purge_requests    = 0;
     /// How many variables an environment holds, as `parse_variables` reads its
     /// blob. Set for an environment only: absent, not 0, for the other kinds,
     /// and the wire omits the key the same way.
@@ -1545,6 +1555,47 @@ class Database {
      *        back under. The caller must already hold the DB mutex.
      */
     bool request_is_absent_locked (const std::string& request_id); // db_requests.cpp
+
+    /// A trash root as a refused restore names it (#3449).
+    struct TrashRootRef {
+        std::string id;
+        std::string name;
+    };
+
+    /**
+     * @brief The listed trash root holding the stamped collection
+     *        @p collection_id: the walk up `parent_id` to the stamped
+     *        collection whose parent is not stamped. Nothing when
+     *        @p collection_id names no stamped row.
+     *
+     * Restoring that root is the first step that can bring the collection
+     * back, and the one a person can see in the trash; a row inside it is not
+     * listed. Bounded by a visited set, as `collection_subtree_locked` is. The
+     * caller must already hold the DB mutex.
+     */
+    std::optional<TrashRootRef> collection_trash_root_locked (
+    const std::string& collection_id); // db_collections.cpp
+
+    /// `collection_trash_root_locked` for a request that is not live: its
+    /// collection's root when that collection is stamped, otherwise the
+    /// request itself; nothing when no row has @p request_id. The caller must
+    /// already hold the DB mutex.
+    std::optional<TrashRootRef> request_trash_root_locked (
+    const std::string& request_id); // db_collections.cpp
+
+    /**
+     * @brief The `OwnerGone` refusal for a request or an example whose owner is
+     *        not live (#3449), naming the entry and its owner by name and
+     *        @p root, the trash root to restore first, by name and id; "is
+     *        gone" when @p root is empty, because no row is left to restore.
+     *        @p what is the entry's kind as the message starts ("Request"),
+     *        @p owner_noun its owner's ("collection"). Reads `parent_name`,
+     *        which `trash_entry_locked` sets whenever the owner row exists.
+     */
+    static RestoreFailure owner_not_live_refusal (std::string_view what,
+    std::string_view owner_noun,
+    const TrashEntry& entry,
+    const std::optional<TrashRootRef>& root); // db_collections.cpp
 
     /**
      * @brief Record that deleting @p request declined the operation it

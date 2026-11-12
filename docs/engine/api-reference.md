@@ -1856,6 +1856,13 @@ everything in it. Deleting the bound collection itself records nothing - that
 is the whole contract going, not a choice about any operation of it - and a
 purge of a bound collection takes its records with it.
 
+**The delete stops every running [mock](#mock-server) of what it trashed**
+(issue #3449): a mock of the collection itself or of any folder under it,
+whichever client sent the delete, before the response is sent, so it is gone
+from [`GET /mock`](#get-mock) by then. A mock of a collection outside the
+subtree keeps running. Restoring the collection does not start its mock again;
+`POST /mock/start` does.
+
 **Response:**
 ```json
 {
@@ -2439,7 +2446,10 @@ Two rules decide what a restore of a collection or request puts back:
 - **Re-parent.** A restored collection whose parent is gone, or is itself in the
   trash, comes back at the tree root (`parentId` cleared). A *request* has no
   such root - `collectionId` is required - so restoring one whose collection is
-  in the trash is a `409` naming the collection to restore first.
+  in the trash is a `409` naming the request and its collection by name, and
+  the trash root to restore first by name and id (issue #3449). That root is
+  the listed entry holding the collection: the collection itself, or the
+  ancestor whose delete took it.
 
 An environment needs neither: it owns no rows and hangs under nothing, so its
 delete stamps one row, it is always a root, and its restore is unconditional.
@@ -2453,8 +2463,10 @@ its collection, and follows the request's rule. Its delete stamps its one row.
 It is a root only while its request is live: under a trashed request it is part
 of what that request's entry stands for, and restoring the request leaves the
 example's own earlier delete in the trash as a root again. Restoring an example
-whose request is in the trash or gone is a `409` naming the request to restore
-first, and so is restoring one into a request that already holds the maximum of
+whose request is in the trash is a `409` naming the example and its request by
+name, and the trash root to restore first by name and id: the request, or the
+collection whose delete took it. One whose request is gone is a `409` saying
+so, and so is restoring one into a request that already holds the maximum of
 100 examples. A stamped example whose request row is gone entirely is listed
 nowhere. The delete clears the request's `mockExampleId` when it named the
 example, and the restore does not set it again: choosing it as the fixed mock
@@ -2479,8 +2491,10 @@ Rows sit in the trash until they are purged: explicitly through
 
 Everything deleted and still restorable, newest first. **Roots only** - the rows
 a user asked to delete, never what their cascade took with them; that is what
-`collections` and `requests` count. Every deleted environment and client
-certificate is a root; a deleted example is one while its request is live.
+`collections` and `requests` count, and `purgeCollections` and `purgeRequests`
+count what a purge would destroy. Every deleted environment and client
+certificate is a root; a deleted request is one while its collection is live,
+and a deleted example while its request is.
 
 **Query Parameters:**
 - `q`, `limit`, `offset` (optional): one page of the roots whose `name` holds
@@ -2500,7 +2514,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745600000,
       "parentId": null,
       "collections": 2,
-      "requests": 14
+      "requests": 14,
+      "purgeCollections": 3,
+      "purgeRequests": 16
     },
     {
       "id": "env_1234567890",
@@ -2510,6 +2526,8 @@ certificate is a root; a deleted example is one while its request is live.
       "parentId": null,
       "collections": 0,
       "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0,
       "variables": 6
     },
     {
@@ -2518,8 +2536,11 @@ certificate is a root; a deleted example is one while its request is live.
       "name": "200 - created",
       "deletedAt": 1787745400000,
       "parentId": "req_1234567890",
+      "parentName": "Create payment",
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     },
     {
       "id": "cert_1234567890",
@@ -2528,7 +2549,9 @@ certificate is a root; a deleted example is one while its request is live.
       "deletedAt": 1787745300000,
       "parentId": null,
       "collections": 0,
-      "requests": 0
+      "requests": 0,
+      "purgeCollections": 0,
+      "purgeRequests": 0
     }
   ],
   "total": 4
@@ -2540,9 +2563,23 @@ certificate is a root; a deleted example is one while its request is live.
 `host:port`, which is what `q` matches. `parentId` is a collection's parent
 (`null` at the tree root), a request's owning collection, an example's owning
 **request**, or `null` for an environment and a client certificate.
-`collections` and `requests` are `0` for every kind but a collection.
-`variables` is carried by an environment entry only - the number of variables
-its stored map holds - and is absent, not `0`, on the other four kinds. An empty trash is `{"items": [], "total": 0}`, never a `404`.
+`parentName` (issue #3449) is the name of the row `parentId` names, carried by
+a request and an example entry only, so two same-named entries tell apart by
+their owner. It is absent on the other three kinds, and on a request or
+example whose owner row is gone, which no write path leaves behind.
+
+`collections` and `requests` are the **cohort**: the sub-collections (the root
+not counted) and requests this delete took, which is exactly what a restore
+puts back. `purgeCollections` and `purgeRequests` (issue #3449) are what a
+[purge](#delete-trashid) destroys: every deleted sub-collection and request
+under the root, whichever delete stamped it, stopping at a live collection as
+the purge does. They are never below the cohort counts, and exceed them when
+an earlier delete inside the subtree - a request, or a folder with its
+requests - is waiting under the root, unlisted. All four are `0` for every
+kind but a collection. `variables` is carried by an environment entry only -
+the number of variables its stored map holds - and is absent, not `0`, on the
+other four kinds. An empty trash is `{"items": [], "total": 0}`, never a
+`404`.
 
 ### POST /trash/:id/restore
 
@@ -2566,6 +2603,8 @@ claimed again.
   "parentId": null,
   "collections": 2,
   "requests": 14,
+  "purgeCollections": 3,
+  "purgeRequests": 16,
   "restored": true,
   "reparentedToRoot": false
 }
@@ -2576,8 +2615,8 @@ claimed again.
 | Status | When |
 |--------|------|
 | `404` | Nothing in the trash carries that id - a live row, or one already purged |
-| `409` | A request whose collection is itself deleted or gone; restore the collection first |
-| `409` | An example whose request is itself deleted or gone; restore the request first |
+| `409` | A request whose collection is itself deleted or gone; the message names the request and its collection, and the trash root to restore first by name and id |
+| `409` | An example whose request is itself deleted or gone; the message names the example and its request, and the trash root to restore first by name and id |
 | `409` | An example whose request already holds the maximum of 100 examples; delete one first |
 | `409` | A client certificate whose host and port a live entry now claims; the message names that entry, to delete first |
 
@@ -2602,10 +2641,11 @@ emptying the trash, not changing one's mind. A purged *bound* collection takes
 the declined operations recorded under it, which nothing could read any more.
 
 **Response:** the entry that was purged, with `"purged": true`. Its
-`collections` / `requests` are the deleted row's own cohort, so they are a floor
-here rather than the whole: a purge that also swept up an earlier delete's rows
-destroyed more than they count. A `404` if the trash does not hold that id -
-which is also what stops a mistyped id from destroying a live collection.
+`purgeCollections` / `purgeRequests` count what this purge destroyed, an
+earlier delete's rows under the root included; its `collections` /
+`requests` are still the deleted row's own cohort. A `404` if the trash does
+not hold that id - which is also what stops a mistyped id from destroying a
+live collection.
 
 ## Request examples
 
@@ -6635,7 +6675,10 @@ from Postman may expect. Resolving them would be a feature, not a docs fix.
 **Lifetime is the engine process**, exactly as for an inbox and an issuer - a
 verb path starts it, ids are not restorable across restarts, and stopping one
 **drops its record**. There is no stopped state to read: a mock holds nothing
-that outlives its listener, unlike an inbox and its captures.
+that outlives its listener, unlike an inbox and its captures. Trashing the
+collection a mock serves, or any collection above it, stops the mock the same
+way ([`DELETE /collections/:id`](#delete-collectionsid)), and a restore does
+not start it again.
 
 **Load-testing against a mock is a supported workflow**, and it is the one this
 listener exists for as much as frontend development: a mock is a
