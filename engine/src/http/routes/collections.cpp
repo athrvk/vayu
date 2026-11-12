@@ -377,7 +377,10 @@ bool is_create) {
         return outcome;
     }
 
-    apply_string_field (json, "description", c.description, "", is_create);
+    if (auto outcome = apply_string_field (json, "description", c.description, "", is_create);
+    !outcome) {
+        return outcome;
+    }
 
     const std::optional<std::string> previous_parent = c.parent_id;
     if (json.contains ("parentId")) {

@@ -619,7 +619,10 @@ bool is_create) {
         return outcome;
     }
 
-    apply_string_field (json, "description", r.description, "", is_create);
+    if (auto outcome = apply_string_field (json, "description", r.description, "", is_create);
+    !outcome) {
+        return outcome;
+    }
 
     if (auto outcome = apply_key_value_field (json, "params", r.params, is_create); !outcome) {
         return outcome;
@@ -639,7 +642,10 @@ bool is_create) {
         vayu::json::erase_file_trust (stored);
         r.body = stored.dump ();
     }
-    apply_string_field (json, "bodyType", r.body_type, "none", is_create);
+    if (auto outcome = apply_string_field (json, "bodyType", r.body_type, "none", is_create);
+    !outcome) {
+        return outcome;
+    }
     // A request's auth may be 'inherit' - that is its default, and the app
     // resolves the collection chain before the request is executed.
     if (auto outcome =

@@ -30,6 +30,7 @@
 
 #include "competing_writer.hpp"
 #include "optional_assert.hpp"
+#include "string_field_refusal.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -190,6 +191,39 @@ TEST_F (ExamplesRouteTest, CreateRequiresName) {
     routes::create_request_example_response (*db_, "req_1", json::object ());
     EXPECT_EQ (status, 400);
     EXPECT_EQ (body["error"]["message"], "Missing required field: name");
+}
+
+// A plain string field handed another JSON type is a 400 naming it (#3482):
+// `name` is `apply_required_string_field`, `body` and `contentType`
+// `apply_string_field`.
+TEST_F (ExamplesRouteTest, CreateRefusesANonStringStringFieldAndWritesNothing) {
+    for (const char* field : { "name", "body", "contentType" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            json payload   = { { "name", "OK" } };
+            payload[field] = value;
+            auto [status, body] =
+            routes::create_request_example_response (*db_, "req_1", payload);
+            vayu::tests::expect_string_field_refused (status, body, field, value);
+        }
+    }
+    EXPECT_TRUE (db_->get_request_examples ("req_1").empty ());
+}
+
+TEST_F (ExamplesRouteTest, UpdateRefusesANonStringStringFieldAndLeavesTheRow) {
+    const std::string id = create_example ("req_1",
+    json{ { "name", "Keep" }, { "body", "{}" }, { "contentType", "application/json" } });
+    for (const char* field : { "name", "body", "contentType" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            auto [status, body] = routes::update_request_example_response (
+            *db_, "req_1", id, json{ { field, value } });
+            vayu::tests::expect_string_field_refused (status, body, field, value);
+        }
+    }
+    const auto stored = db_->get_request_example (id);
+    ASSERT_HAS_VALUE (stored);
+    EXPECT_EQ (stored->name, "Keep");
+    EXPECT_EQ (stored->body, "{}");
+    EXPECT_EQ (stored->content_type, "application/json");
 }
 
 // A status outside the final range is refused rather than clamped: a mock

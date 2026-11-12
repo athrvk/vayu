@@ -431,10 +431,10 @@ TEST_F (ImportApplyRouteTest, ABlankNameIsStillImported) {
 }
 
 TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
-    // A non-string `name` makes the shared applier throw a json type_error; the
-    // core must turn that into a per-item 400 rather than letting it escape as a
-    // 500 (the whole payload is one transaction, so an escape is a lost import
-    // with no explanation).
+    // A non-string `name` is the shared applier's own 400 naming the field
+    // (#3482), which the core carries as a per-item 400 rather than a 500 (the
+    // whole payload is one transaction, so an escape is a lost import with no
+    // explanation).
     json collection    = collection_item ("c1", "root");
     collection["name"] = 42;
 
@@ -442,6 +442,10 @@ TEST_F (ImportApplyRouteTest, RejectsAWrongTypedFieldWithA400NotA500) {
     *db_, json{ { "collections", json::array ({ collection }) } });
     EXPECT_EQ (status, 400);
     EXPECT_EQ (response["error"]["item"], "c1");
+    EXPECT_EQ (response.dump ().find ("json.exception"), std::string::npos)
+    << response.dump ();
+    EXPECT_NE (response.dump ().find ("Invalid 'name': must be a string"), std::string::npos)
+    << response.dump ();
     EXPECT_EQ (stored_rows (), 0u);
 }
 

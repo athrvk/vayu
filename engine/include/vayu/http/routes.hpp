@@ -654,6 +654,18 @@ inline void finalize_cors_expose_headers (httplib::Response& res) {
 }
 
 /**
+ * The 400 for a plain string field handed another JSON type, naming the field
+ * and the type it was given (#3482). `apply_string_field` and
+ * `apply_required_string_field` share it, so nlohmann's `type_error.302` text
+ * never reaches a client.
+ */
+[[nodiscard]] inline RouteResult
+string_field_type_error (const char* key, const nlohmann::json& value) {
+    return route_error (400,
+    std::format ("Invalid '{}': must be a string (got {})", key, value.type_name ()));
+}
+
+/**
  * The one null-vs-absent rule for resource writes (POST create / PUT update).
  *
  * Before issue #95 each resource - and in places each *field* - invented its
@@ -674,16 +686,27 @@ inline void finalize_cors_expose_headers (httplib::Response& res) {
  * The helpers take `is_create` rather than reading it off the request so the
  * cores stay unit-testable without an in-process HTTP server.
  */
-inline void apply_string_field (const nlohmann::json& json,
+[[nodiscard]] inline RouteResult apply_string_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 const std::string& default_value,
 bool is_create) {
-    if (json.contains (key)) {
-        out = json[key].is_null () ? default_value : json[key].get<std::string> ();
-    } else if (is_create) {
-        out = default_value;
+    if (!json.contains (key)) {
+        if (is_create) {
+            out = default_value;
+        }
+        return {};
     }
+    const auto& value = json[key];
+    if (value.is_null ()) {
+        out = default_value;
+        return {};
+    }
+    if (!value.is_string ()) {
+        return string_field_type_error (key, value);
+    }
+    out = value.get_ref<const std::string&> ();
+    return {};
 }
 
 /**
@@ -1078,7 +1101,7 @@ bool is_create) {
  * 400s, because there is nothing to fall back to. Succeeds when the value is
  * acceptable, "absent on update" (which keeps the stored value) included.
  */
-inline RouteResult apply_required_string_field (const nlohmann::json& json,
+[[nodiscard]] inline RouteResult apply_required_string_field (const nlohmann::json& json,
 const char* key,
 std::string& out,
 bool is_create) {
@@ -1093,7 +1116,10 @@ bool is_create) {
         std::format (
         "Invalid '{}': null is not allowed (this field has no default)", key));
     }
-    out = json[key].get<std::string> ();
+    if (!json[key].is_string ()) {
+        return string_field_type_error (key, json[key]);
+    }
+    out = json[key].get_ref<const std::string&> ();
     return {};
 }
 
