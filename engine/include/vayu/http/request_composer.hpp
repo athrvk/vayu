@@ -562,6 +562,16 @@ std::vector<vayu::db::Collection>
 collection_chain (vayu::db::Database& db, const std::string& leaf_id);
 
 /**
+ * The `origin` an element @p collection declared is stamped with:
+ * `{kind: "collection", scope, id, name?}`, `scope` being `"collection"` for
+ * the root of a chain (@p is_root) and `"folder"` below it (#2522). One stamp
+ * for a step's composed elements and a run's lifecycle set
+ * (`core::resolve_lifecycle_collections`, #3456), so a report names a folder
+ * the same way wherever its elements ran.
+ */
+nlohmann::json collection_element_origin (const vayu::db::Collection& collection, bool is_root);
+
+/**
  * The auth a descendant's `inherit` resolves to: walk the chain leaf->root and
  * take the first collection with concrete auth. An explicit `noauth` stops the
  * walk ("send nothing" is a different answer from "nobody configured any");
