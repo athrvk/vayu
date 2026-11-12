@@ -8718,7 +8718,10 @@ field carries no `scope` and is the request's own; so is one from a payload
 whose `elements` carry no `origin`. `success` folds the same way: a failing
 `pm.test` at any level is a failed assertion, and the first level that throws
 is the error. `preScriptError` / `postScriptError` hold the thrown message as
-they always have when the request's own script threw; when an inherited level
+they always have when the request's own script threw (never empty or a bare
+`null`: a script that runs out of memory reads `Script ran out of memory at the
+1 MiB limit`, see
+[Error Handling](scripting.md#error-handling)); when an inherited level
 threw, they name it - "Collection pre-request script failed - <message>",
 "Folder test script failed - <message>". An `assert.*` or `extract.*`
 element's entry carries the `scope` of the level that declared it.

@@ -4109,9 +4109,15 @@ The **language** is current; what is missing is the **host environment**:
   10 requests per script, bounded by the script's own deadline and by the
   response byte bound its path reads, and refused outright for agent-started
   runs.
-- **Memory limit**: 64MB per script execution. Running out ends the script:
+- **Memory limit**: 64MB per script execution (`scriptMemoryLimit`, 1 MiB to
+  256 MiB). Running out ends the script:
   since quickjs-ng 0.18.0 the out-of-memory error cannot be caught by the
-  script itself, so a `try` cannot swallow it and keep allocating.
+  script itself, so a `try` cannot swallow it and keep allocating. It is
+  reported as `Script ran out of memory at the 64 MiB limit`, naming the limit
+  in force. At the 1 MiB floor a library as large as lodash cannot load:
+  `require('lodash')` fails with that sentence, so raise the limit rather than
+  load it. See [Error Handling](#error-handling) for what a thrown `null`
+  reads as.
 - **Console output**: 64 KiB per line, 1 MiB and 1000 lines per script
   execution; the rest is dropped behind one warning line
   ([Console Output](#console-output)).
@@ -4445,6 +4451,28 @@ try {
 ```
 
 Test failures don't stop script execution - all tests run and results are collected.
+
+The message is never empty and never the bare `null` or `undefined` a value
+stringifies to (#3461). An error with a message reads as it always has
+(`Error: boom`), and one with an empty message reads as its type (`TypeError`).
+What has no text of its own reads as a sentence:
+
+| The script | The message |
+|------------|-------------|
+| Runs out of memory | `Script ran out of memory at the 1 MiB limit` (the configured `scriptMemoryLimit`) |
+| `throw undefined` | `Script threw undefined` |
+| `throw ''` | `Script threw an empty string` |
+| Throws an object whose `toString` gives `''` or throws | `Script threw a value with no text` |
+| `throw null` | `Script threw null (QuickJS also throws null when it runs out of memory at the 1 MiB limit with no room to build an error)` |
+
+The last row names both causes because QuickJS cannot tell them apart: when the
+heap is so full that not even the error object can be built, it throws a bare
+`null`, the same value a script's own `throw null` is, and nothing about the
+heap afterwards separates the two. (`require()` of a library that cannot load
+is the one place the engine knows, and it reports the out-of-memory sentence.)
+With the limit at `0` (an embedder's "no limit") it reads `Script threw null`.
+The same text stands in for the reason of an unhandled promise rejection
+(`Unhandled promise rejection: Script threw undefined`).
 
 In a collection run an uncaught error marks the step `errored`, with the message
 on its row, and the iteration moves on to the next request, as Postman's runner

@@ -10509,3 +10509,120 @@ TEST_F (ScriptEngineTest, RequireShelfSignedHeaderReachesTheWire) {
     }
     vayu::http::global_cleanup ();
 }
+
+// ============================================================================
+// What a script error reads as when the thrown value says nothing (#3461)
+// ============================================================================
+
+namespace {
+
+constexpr size_t ONE_MIB = size_t{ 1 } * 1024 * 1024;
+
+// `scriptMemoryLimit`'s floor, the one a library as large as lodash cannot be
+// loaded under.
+ScriptConfig minimum_memory_config () {
+    ScriptConfig cfg;
+    cfg.memory_limit = ONE_MIB;
+    return cfg;
+}
+
+} // namespace
+
+// At the floor QuickJS has no room to build the error for the refused
+// allocation and throws a bare null, which used to be the whole message.
+TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemory) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("const _ = require('lodash');", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
+}
+
+// QuickJS's own error object, when there was room to build it, reads the same.
+TEST_F (ScriptEngineTest, AnAllocationLoopAtTheMemoryLimitReportsTheSameSentence) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute (
+    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
+}
+
+TEST_F (ScriptEngineTest, TheOutOfMemorySentenceNamesTheConfiguredLimit) {
+    ScriptConfig cfg;
+    cfg.memory_limit = size_t{ 2 } * 1024 * 1024;
+    ScriptEngine bounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute (
+    "const held = []; for (;;) { held.push(new Array(1000).fill(1)); }", ctx);
+    EXPECT_EQ (result.error_message, "Script ran out of memory at the 2 MiB limit");
+}
+
+// A script's own `throw null` is not an out-of-memory error, and QuickJS gives
+// the two the same value, so the sentence admits both rather than pick one.
+TEST_F (ScriptEngineTest, AThrownNullIsNeverReportedAsABareNull) {
+    ScriptEngine bounded (minimum_memory_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = bounded.execute ("throw null;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message,
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the 1 MiB limit with no room to build an error)");
+}
+
+TEST_F (ScriptEngineTest, AThrownNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = unbounded.execute ("throw null;", ctx);
+    EXPECT_EQ (result.error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, AThrownUndefinedReadsAsASentence) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw undefined;", ctx);
+    EXPECT_FALSE (result.success);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
+
+TEST_F (ScriptEngineTest, AnErrorWithAnEmptyMessageReadsAsItsType) {
+    auto plain       = ScriptContext::for_test (request, response);
+    auto plain_error = engine.execute ("throw new Error('');", plain);
+    EXPECT_EQ (plain_error.error_message, "Error");
+
+    auto typed      = ScriptContext::for_test (request, response);
+    auto type_error = engine.execute ("throw new TypeError('');", typed);
+    EXPECT_EQ (type_error.error_message, "TypeError");
+}
+
+TEST_F (ScriptEngineTest, AThrownErrorWithAMessageIsUnchanged) {
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = engine.execute ("throw new Error('boom');", ctx);
+    EXPECT_EQ (result.error_message, "Error: boom");
+}
+
+TEST_F (ScriptEngineTest, AThrownValueWithNoTextReadsAsASentence) {
+    auto empty_string = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw '';", empty_string).error_message,
+    "Script threw an empty string");
+
+    auto blank = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { return ''; } };", blank).error_message,
+    "Script threw a value with no text");
+
+    // A `toString` that itself throws leaves nothing pending behind.
+    auto hostile = ScriptContext::for_test (request, response);
+    EXPECT_EQ (engine.execute ("throw { toString() { throw 1; } };", hostile).error_message,
+    "Script threw a value with no text");
+}
+
+TEST_F (ScriptEngineTest, ARejectionAndATimerThrowReadAsSentencesToo) {
+    auto rejected = ScriptContext::for_test (request, response);
+    auto result   = engine.execute ("Promise.reject(undefined);", rejected);
+    EXPECT_EQ (result.error_message, "Unhandled promise rejection: Script threw undefined");
+
+    auto timed = ScriptContext::for_test (request, response);
+    result = engine.execute ("setTimeout(() => { throw undefined; }, 0);", timed);
+    EXPECT_EQ (result.error_message, "Script threw undefined");
+}
