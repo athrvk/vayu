@@ -35,9 +35,10 @@ function fractionFormat(minimum: number, maximum: number): Intl.NumberFormat {
 }
 
 function formatFraction(value: number, minimum: number, maximum: number): string {
-	// A negative that rounds away reads "0", never "-0" (Intl signs it, toFixed
-	// and Number() did not).
-	const roundsToZero = value < 0 && -value < 0.5 * 10 ** -maximum;
+	// A value that rounds away, or a literal -0, reads "0", never "-0": Intl
+	// signs both, and the axis ticks this replaced (`Number(x.toFixed(d))`)
+	// never did.
+	const roundsToZero = value === 0 || (value < 0 && -value < 0.5 * 10 ** -maximum);
 	return fractionFormat(minimum, maximum).format(roundsToZero ? 0 : value);
 }
 

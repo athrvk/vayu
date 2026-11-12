@@ -68,8 +68,10 @@ describe.each(LOCALES)("digits under $locale", ({ locale, mark, group }) => {
 		expect(numbers.formatFixed(1234.5, 1)).toBe(`1234${mark}5`);
 		expect(numbers.formatTrimmed(2.5, 3)).toBe(`2${mark}5`);
 		expect(numbers.formatTrimmed(3, 3)).toBe("3");
-		// toFixed never printed a sign for a value that rounds to zero.
+		// Intl signs a value that rounds to zero and a literal -0; a tick never read "-0".
 		expect(numbers.formatTrimmed(-0.0001, 1)).toBe("0");
+		expect(numbers.formatTrimmed(-0, 1)).toBe("0");
+		expect(numbers.formatFixed(-0, 1)).toBe(`0${mark}0`);
 	});
 
 	it("a size takes the decimal mark from the same place", async () => {
