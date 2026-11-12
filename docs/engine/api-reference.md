@@ -530,6 +530,7 @@ message `Invalid 'auth': must be a JSON object`.
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
 | `order` (collection / request) | integer from `0` to `2147483647` - see [Ordering](#ordering) |
 | `parentId` (collection) | string: a collection id, or `null` or `""` for the root |
+| every other plain string field (`name`, `description`, `url`, `bodyType`, an example's `body` and `contentType`, a certificate's `host` and `passphrase`, ...) | string; the `400` is `Invalid '<field>': must be a string (got <type>)` |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
 quietly when it is not an object - `variables` reads back empty, a request `body`

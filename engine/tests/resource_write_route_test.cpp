@@ -67,6 +67,7 @@
 #include "competing_writer.hpp"
 #include "nested_json.hpp"
 #include "optional_assert.hpp"
+#include "string_field_refusal.hpp"
 #include "temp_database.hpp"
 #include "vayu/core/constants.hpp"
 #include "vayu/db/database.hpp"
@@ -2343,6 +2344,102 @@ TEST_F (ResourceWriteRouteTest, ARequestPutNamingAStaleTagIs412AndWritesNothing)
     update_request_response (*db_, id, json{ { "url", "https://fresh.example" } },
     if_match_of (vayu::http::entity_tag (stored->updated_at)), nullptr);
     EXPECT_EQ (current_status, 200) << current.dump ();
+}
+
+// ---------------------------------------------------------------------------
+// A plain string field handed another JSON type (#3482): the 400 names the
+// field and the type it was given, never nlohmann's `type_error.302`, and the
+// stored row is untouched. `name` goes through `apply_required_string_field`,
+// `description` and `bodyType` through `apply_string_field`.
+// ---------------------------------------------------------------------------
+
+TEST_F (ResourceWriteRouteTest, CollectionCreateRefusesANonStringStringFieldAndWritesNothing) {
+    for (const char* field : { "name", "description" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            json body        = { { "name", "New" } };
+            body[field]      = value;
+            auto [status, r] = create_collection_response (*db_, body);
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    EXPECT_TRUE (db_->get_collections ().empty ());
+}
+
+TEST_F (ResourceWriteRouteTest, CollectionUpdateRefusesANonStringStringFieldAndLeavesTheRow) {
+    const std::string id = make_collection ("Keep");
+    for (const char* field : { "name", "description" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            auto [status, r] =
+            update_collection_response (*db_, id, json{ { field, value } });
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    const auto row = db_->get_collection (id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->name, "Keep");
+    EXPECT_EQ (row->description, "");
+}
+
+TEST_F (ResourceWriteRouteTest, RequestCreateRefusesANonStringStringFieldAndWritesNothing) {
+    const std::string collection = make_collection ();
+    for (const char* field : { "name", "description", "url", "bodyType" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            json body   = { { "collectionId", collection }, { "name", "R" },
+                { "method", "GET" }, { "url", "https://example.com" } };
+            body[field] = value;
+            auto [status, r] = create_request_response (*db_, body);
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    EXPECT_TRUE (db_->get_requests_in_collection (collection).empty ());
+}
+
+TEST_F (ResourceWriteRouteTest, RequestUpdateRefusesANonStringStringFieldAndLeavesTheRow) {
+    const std::string collection = make_collection ();
+    const std::string id         = make_request (collection);
+    for (const char* field : { "name", "description", "url", "bodyType" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            auto [status, r] =
+            update_request_response (*db_, id, json{ { field, value } });
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    const auto row = db_->get_request (id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->name, "R");
+    EXPECT_EQ (row->url, "https://example.com");
+    EXPECT_EQ (row->description, "");
+    EXPECT_EQ (row->body_type, "none");
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentCreateRefusesANonStringStringFieldAndWritesNothing) {
+    for (const char* field : { "name", "description" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            json body        = { { "name", "New" } };
+            body[field]      = value;
+            auto [status, r] = create_environment_response (*db_, body);
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    EXPECT_TRUE (db_->get_environments ().empty ());
+}
+
+TEST_F (ResourceWriteRouteTest, EnvironmentUpdateRefusesANonStringStringFieldAndLeavesTheRow) {
+    auto [create_status, created] =
+    create_environment_response (*db_, json{ { "name", "Keep" } });
+    ASSERT_EQ (create_status, 200) << created.dump ();
+    const std::string id = created["id"].get<std::string> ();
+    for (const char* field : { "name", "description" }) {
+        for (const json& value : vayu::tests::non_string_values ()) {
+            auto [status, r] =
+            update_environment_response (*db_, id, json{ { field, value } });
+            vayu::tests::expect_string_field_refused (status, r, field, value);
+        }
+    }
+    const auto row = db_->get_environment (id);
+    ASSERT_HAS_VALUE (row);
+    EXPECT_EQ (row->name, "Keep");
+    EXPECT_EQ (row->description, "");
 }
 
 } // namespace
