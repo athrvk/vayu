@@ -225,7 +225,19 @@ js_console_log (JSContext* ctx, JSValueConst this_val, int argc, JSValueConst* a
     return JS_UNDEFINED;
 }
 
-void setup_console (JSContext* ctx) {
+/// What `console.*` is bound to when `scriptEnableConsole` is off: the methods
+/// stay defined so a script that logs keeps running (#3461), but nothing is
+/// formatted or recorded. Binding a different function, rather than testing
+/// the flag inside `js_console_log`, keeps the per-call cost of a load test at
+/// one C call.
+JSValue js_console_discard (JSContext*, JSValueConst, int, JSValueConst*, int) {
+    return JS_UNDEFINED;
+}
+
+/// Installs `console` with the four methods a script may call. `record` picks
+/// what they are bound to; the set of names does not depend on it, because a
+/// script must not be able to tell the two configurations apart by a throw.
+void setup_console (JSContext* ctx, bool record) {
     JSValue global  = JS_GetGlobalObject (ctx);
     JSValue console = JS_NewObject (ctx);
 
@@ -243,9 +255,10 @@ void setup_console (JSContext* ctx) {
         { "error", ConsoleLevel::Error },
     };
 
+    JSCFunctionMagic* const handler = record ? js_console_log : js_console_discard;
     for (const auto& method : METHODS) {
         JS_SetPropertyStr (ctx, console, method.name,
-        JS_NewCFunctionMagic (ctx, js_console_log, method.name, 1,
+        JS_NewCFunctionMagic (ctx, handler, method.name, 1,
         JS_CFUNC_generic_magic, static_cast<int> (method.level)));
     }
 
@@ -983,9 +996,7 @@ class ScriptEngine::Impl {
         if (!ctx) {
             return nullptr;
         }
-        if (config.enable_console) {
-            setup_console (ctx);
-        }
+        setup_console (ctx, config.enable_console);
         setup_base64_globals (ctx);
         setup_timers (ctx);
         setup_require_shelf (ctx);

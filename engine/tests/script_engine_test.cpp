@@ -3166,6 +3166,83 @@ TEST_F (ScriptEngineTest, ConsoleRecordsTheLevelItWasCalledWith) {
     EXPECT_EQ (result.console_output[3].message, "broken");
 }
 
+// `scriptEnableConsole: false` is the recommended load-test setting, and it
+// used to leave `console` undefined, so the first `console.log` threw a
+// ReferenceError and every later `pm.test` of the script never ran (#3461).
+// The console stays defined and its four methods record nothing.
+class ScriptEngineConsoleOffTest : public ScriptEngineTest {
+    protected:
+    static ScriptConfig console_off_config () {
+        ScriptConfig cfg;
+        cfg.enable_console = false;
+        return cfg;
+    }
+};
+
+TEST_F (ScriptEngineConsoleOffTest, LoggingScriptKeepsRunningItsTests) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx = ScriptContext::for_test (request, response);
+    auto result = quiet.execute ("console.log('x'); pm.test('t', () => {});", ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+TEST_F (ScriptEngineConsoleOffTest, AllFourMethodsAreCallableAndRecordNothing) {
+    ScriptEngine quiet (console_off_config ());
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = quiet.execute (R"JS(
+        console.log('a', { nested: [1, 2] });
+        console.info('b');
+        console.warn('c');
+        console.error('d');
+        pm.test('methods are functions', () => {
+            for (const name of ['log', 'info', 'warn', 'error']) {
+                pm.expect(typeof console[name]).to.equal('function');
+            }
+        });
+    )JS",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_TRUE (result.tests[0].passed) << result.tests[0].error_message;
+    EXPECT_TRUE (result.console_output.empty ());
+}
+
+// A rebuilt pooled context goes through the same `build_context`, so the
+// second execution on one engine proves the no-op console survives the reuse.
+TEST_F (ScriptEngineConsoleOffTest, PooledContextReuseKeepsTheNoOpConsole) {
+    ScriptEngine quiet (console_off_config ());
+    for (int run = 0; run < 2; ++run) {
+        auto ctx = ScriptContext::for_test (request, response);
+        auto result =
+        quiet.execute ("console.warn('again'); pm.test('t', () => {});", ctx);
+
+        ASSERT_TRUE (result.success) << "execution " << run << ": " << result.error_message;
+        ASSERT_EQ (result.tests.size (), 1u) << "execution " << run;
+        EXPECT_TRUE (result.console_output.empty ()) << "execution " << run;
+    }
+    EXPECT_EQ (quiet.idle_runtime_count (), 1U);
+}
+
+// The control: the flag's default still records, so the tests above cannot
+// pass by the console never recording at all.
+TEST_F (ScriptEngineConsoleOffTest, ConsoleOnStillRecordsEveryLevel) {
+    ScriptConfig cfg;
+    cfg.enable_console = true;
+    ScriptEngine loud (cfg);
+    auto ctx    = ScriptContext::for_test (request, response);
+    auto result = loud.execute ("console.log('x'); console.info('y'); "
+                                "console.warn('z'); console.error('w');",
+    ctx);
+
+    ASSERT_TRUE (result.success) << result.error_message;
+    EXPECT_EQ (result.console_output.size (), 4u);
+}
+
 // The wire spellings are what the app matches on, so they are part of the
 // contract rather than an implementation detail of the enum.
 TEST_F (ScriptEngineTest, ConsoleLevelWireSpellings) {

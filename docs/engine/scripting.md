@@ -2908,6 +2908,17 @@ Objects and arrays are pretty-printed with `JSON.stringify(value, null, 2)`
 rather than `[object Object]`; a value that cannot be serialized (a circular
 reference, say) becomes `[Object: unserializable]`.
 
+**`scriptEnableConsole` off keeps `console` defined** (#3461). The setting is
+the recommended one for a load test, where recording and storing output nobody
+reads costs throughput. With it off, `console.log`, `console.info`,
+`console.warn` and `console.error` are still bound, to a function that formats
+nothing and records nothing, so a script that logs keeps running and its later
+`pm.test` calls still execute; the result's console output is empty. The two
+settings bind the same four names (`setup_console`), so no script can tell them
+apart by a thrown `ReferenceError`. `console.debug`, `console.table` and the
+rest stay undefined either way, as [pm API
+compatibility](../app/pm-api-compatibility.md) lists.
+
 Four built-in objects have no useful JSON form and print the way Node prints
 them (#3130):
 

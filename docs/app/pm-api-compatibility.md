@@ -49,7 +49,7 @@ supported is listed [below](#not-yet-supported).
 | Legacy `postman`    | `postman.setEnvironmentVariable` and the other ten pre-`pm.*` helper methods, each an alias of the `pm.*` method Postman names - see [The legacy `postman` object](#the-legacy-postman-object) |
 | Legacy globals      | `tests[...]`, `responseBody`, `responseCode`, `responseHeaders`, `responseCookies`, `responseTime`, `environment`, `globals`, `data`, `iteration` and `request`, each read off the `pm.*` member Postman names - see [Postman's legacy globals](#postmans-legacy-globals) |
 | Visualizer          | `pm.visualizer.set(template, data?, options?)`, `.clear()` - accepted and not drawn, one console warning per call - see [Visualizer](#visualizer-pmvisualizer) |
-| Console             | `console.log/info/warn/error`                                                    |
+| Console             | `console.log/info/warn/error`; with `scriptEnableConsole` off they stay defined and record nothing |
 
 `pm.response.headers` is a plain object keyed by the **lower-cased** header name, not
 Postman's `HeaderList` - but it carries `get()` / `has()` plus the read half of a
@@ -1701,7 +1701,8 @@ accepted and warns:
   `pm.execution.location` and `pm.response.dataURI()`
 - `console.debug` and every other console method beyond `log`, `info`, `warn` and
   `error` (`console.table`, `console.dir`, `console.time`, ...) - use
-  `console.log`
+  `console.log`. This holds with `scriptEnableConsole` on or off: the four
+  supported methods stay defined when it is off, and nothing else is added
 - **`require(...)` of anything but `crypto-js`, `uuid`, `lodash`, `moment`,
   `csv-parse/lib/sync`, `xml2js`, `chai`, `ajv` and `tv4`, `script.packages` and
   the libraries Postman bundles beyond `CryptoJS`, `_`, `xml2Json` and `tv4`** -

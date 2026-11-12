@@ -1032,7 +1032,7 @@ Every entry below was verified by locating the read site in the engine source.
 | `eventLoopMaxPerHost` | `core/run_manager.cpp` | Per run, raised to cover the run's virtual users (#2394) |
 | `eventLoopMaxConcurrent` | `core/run_manager.cpp` | Per run, but **overridden** by the run's own `concurrency` |
 | `dnsCacheTimeout` | `core/run_manager.cpp` | Per run |
-| `scriptEnableConsole` | `core/run_manager.cpp` | Per run |
+| `scriptEnableConsole` | `core/script_config.cpp` (`read_script_config`, called at `core/run_manager.cpp`) | Per run. Off, `console.log/info/warn/error` stay defined and record nothing, so a script that logs still runs (#3461) |
 | `liveTickIntervalMs` | `core/run_manager.cpp` | Per run |
 | `maxResponseBodyBytes` | `core/run_manager.cpp` | Per run |
 | `oauth2RefreshLeadMs`, `oauth2RefreshMinIntervalMs`, `oauth2RefreshRetryMs`, `oauth2RefreshRetryMaxMs`, `oauth2RefreshPollIntervalMs` | `core/auth_refresh.cpp` (read at `core/run_manager.cpp`) | Per run. Mid-run OAuth 2.0 renewal: lead time, floor between renewals, the retry backoff's first wait and ceiling, and how often the watchdog wakes to notice the run ended |
@@ -1182,7 +1182,7 @@ For load testing this class of target on this machine:
 | `workers` | **8** | Throughput tie with 12, tail latency roughly 2x better |
 | `eventLoopMaxPerHost` | 500 | Not binding at c=64; removes any doubt |
 | `dnsCacheTimeout` | 3600 | Target hostname never needs re-resolution |
-| `scriptEnableConsole` | false | Matters only when scripts run |
+| `scriptEnableConsole` | false | Matters only when scripts run. Scripts that call `console.log` still run: the methods stay defined and record nothing |
 | `dbSynchronous` | 1 (Normal) | The default. In WAL, NORMAL has no per-commit sync, so it costs no more than Off. Measured with `scripts/perf/measure_engine.py` on a 4-core Linux box, release build, 8 VUs for 30 s against the local mock server (three runs each, interleaved, `avgRps`): Normal 19.9k, 20.1k and 20.2k against Off 20.2k, 19.6k and 19.1k. The difference is inside the run-to-run spread |
 | measurement method | standalone engine | Worth ~9% versus running through the app |
 
