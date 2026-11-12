@@ -1596,7 +1596,8 @@ A run's status as a word and a glyph, tinted by its status family: `Running`
 run tab's header (`HistoryDetail`, #1944) draw it; the history row draws only the
 glyph (`RunStatusGlyph`). Welcome's recent runs and the collection context bar's
 last-run row take the word and `-text` token through `runStatusDisplay`, fed the
-row's verdict (`rowOutcome`, #3496). All read `RUN_STATUS` in
+row's verdict (`rowOutcome`, #3496); the command palette's run rows are plain
+text, so they say the verdict in words instead (below). All read `RUN_STATUS` in
 `components/shared/run-status.ts`, so the label, glyph and `-text` token exist
 once per status. The dashboard header's ending includes `failed` (#1932), set
 when the engine reports the run failed, so a failed run no longer reads as
@@ -1620,7 +1621,11 @@ keep the tick. A collection run's sidebar row refines its own glyph from its
 step counts (#3458, `rowOutcome`), and Welcome's recent-runs row and the context
 bar's last-run row paint the same verdict as the word's colour: "Completed" in
 the error token, with ", verdict failed" in the accessible name, so a run with
-failed steps is not green there (#3496). Its detail tab passes none, and its step list carries the counts.
+failed steps is not green there (#3496). The palette's run rows (`useRunItems`)
+have no colour to paint, so their subtitle carries the verdict as a word after
+the status - "Collection run · Completed · verdict failed · 2m ago" - from the
+same `rowOutcome`; a run with no verdict, such as a clean collection run, keeps
+the status alone. Its detail tab passes none, and its step list carries the counts.
 
 ## Run Outcome Banner (`components/shared/RunOutcomeBanner.tsx`)
 
