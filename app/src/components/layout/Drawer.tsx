@@ -7,10 +7,11 @@
 
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { useLayoutStore } from "@/stores";
+import { cn } from "@/lib/utils";
 import { Collapsible } from "@/components/ui";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { regionProps } from "./region-focus";
-import { DEFAULT_DRAWER_WIDTH } from "@/constants/layout";
+import { DEFAULT_DRAWER_WIDTH, type SidePanelMode } from "@/constants/layout";
 import CollectionTree from "@/modules/collections/CollectionTree";
 import HistoryList from "@/modules/history/sidebar/HistoryList";
 import VariablesCategoryTree from "@/modules/variables/sidebar/VariablesCategoryTree";
@@ -23,14 +24,16 @@ import SettingsCategoryTree from "@/modules/settings/sidebar/SettingsCategoryTre
 import { ServicesPanel } from "@/modules/services";
 import { TrashList } from "@/modules/trash";
 
-export function Drawer() {
+interface DrawerProps {
+	mode?: SidePanelMode;
+}
+
+export function Drawer({ mode = "push" }: DrawerProps) {
 	const drawerOpen = useLayoutStore((s) => s.drawerOpen);
 	const setDrawerOpen = useLayoutStore((s) => s.setDrawerOpen);
 	const drawerView = useLayoutStore((s) => s.drawerView);
 	const drawerWidth = useLayoutStore((s) => s.drawerWidth);
 	const setDrawerWidth = useLayoutStore((s) => s.setDrawerWidth);
-
-	const width = drawerWidth;
 
 	return (
 		// See `ContextBar.tsx` for why `Collapsible`/`CollapsibleContent` sit
@@ -42,10 +45,19 @@ export function Drawer() {
 				{/* <aside>, so the sidebar is a landmark a screen reader can jump to
 				   instead of an anonymous div. Labelled by the active view because
 				   the drawer hosts six different panels - "Complementary" alone
-				   would not say which one is showing. */}
+				   would not say which one is showing.
+
+				   Overlay mode is the context bar's, mirrored: the same shadow and
+				   z-index, on the content's left edge where the bar takes its right
+				   one (`Shell` gives the drawer a positioned box of its own). */}
 				<aside
-					className="relative flex shrink-0 bg-panel"
-					style={{ width }}
+					className={cn(
+						"flex shrink-0 bg-panel",
+						mode === "overlay"
+							? "absolute left-0 top-0 bottom-0 shadow-lg z-10"
+							: "relative"
+					)}
+					style={{ width: drawerWidth }}
 					aria-label={`${drawerView.charAt(0).toUpperCase()}${drawerView.slice(1)} sidebar`}
 					// A stop in the F6 cycle - see `region-focus.ts` for why the bands
 					// are marked rather than found by tag name.

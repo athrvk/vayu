@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
 	useTabsStore,
 	useSaveStore,
@@ -38,6 +38,12 @@ import {
 import { ownsEnterKey } from "@/lib/keyboard";
 import { navigateHistory, type NavDirection } from "@/lib/navigate-history";
 import { useNewRequest } from "@/hooks/useNewRequest";
+import { useWindowWidth } from "@/hooks/useWindowWidth";
+import {
+	CONTEXT_BAR_PUSH_MIN_WIDTH,
+	DRAWER_PUSH_MIN_WIDTH,
+	sidePanelMode,
+} from "@/constants/layout";
 import { ImportModal } from "@/modules/collections/ImportModal";
 import { CollectionPicker } from "@/modules/welcome/components/CollectionPicker";
 import { Drawer } from "./Drawer";
@@ -190,13 +196,7 @@ export default function Shell() {
 	const toggleResponsePosition = useLayoutStore((s) => s.toggleResponsePosition);
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const triggerSave = useSaveStore((s) => s.triggerSave);
-	const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
-	useEffect(() => {
-		const onResize = () => setWindowWidth(window.innerWidth);
-		window.addEventListener("resize", onResize);
-		return () => window.removeEventListener("resize", onResize);
-	}, []);
+	const windowWidth = useWindowWidth();
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -433,75 +433,88 @@ export default function Shell() {
 			    over the row, so the rail always has a Drawer to act on. */}
 			<div className="flex flex-1 overflow-hidden">
 				<ActivityRail />
-				<Drawer />
 				{/*
-				 * The content column: tab strip on top, then main + ContextBar.
-				 *
-				 * The strip is scoped to this column rather than spanning the window
-				 * because that is the region tabs actually switch - the drawer is a
-				 * global navigator and keeps its own header band beside this row.
-				 * Its left edge therefore follows the drawer's resize handle for
-				 * free: the column is the drawer's flex sibling, so there is no
-				 * width to compute or keep in sync.
-				 *
-				 * `relative` moved down with the strip, onto the main+context row:
-				 * the ContextBar's overlay mode (<1200px) positions against its
-				 * nearest positioned ancestor, and from the outer row it would now
-				 * cover the tabs it belongs to. `ContextRail` sits one level out
-				 * from that `relative` box rather than inside it, as a plain flex
-				 * item beside whatever the box contains - so an overlaying
-				 * ContextBar covers `main` up to the rail and never the rail itself,
-				 * which is what keeps the rail reachable in overlay mode too
-				 * (#1615).
+				 * The drawer's positioned box: the drawer and the content column,
+				 * not the ActivityRail. In overlay mode the drawer is `absolute
+				 * left-0` against this box, so it opens over the content's left edge
+				 * and never over the rail that toggles it (#3494). The box is there
+				 * in both modes, so crossing the threshold changes a class list and
+				 * never the tree the active tab renders into.
 				 */}
-				<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
-					<TabStrip />
-					<div className="flex flex-1 overflow-hidden">
-						<div className="flex flex-1 overflow-hidden relative">
-							<main
-								className="flex-1 overflow-hidden flex flex-col min-w-0"
-								// A stop in the F6 cycle - see `region-focus.ts`. On `main`
-								// rather than on the tabpanel inside it so the cycle reaches
-								// the pane whether or not a tab is open.
-								{...regionProps("main")}
-							>
-								{/*
-								 * The other half of the strip's tabs pattern: the region a tab
-								 * controls has to say so, or `aria-controls` points at nothing
-								 * and the panel claims no owner. The role goes on a child of
-								 * `main` rather than on `main` itself - `main` is a landmark and
-								 * carries only `role="main"`, so overwriting it would trade one
-								 * relationship for another.
-								 */}
-								<div
-									role="tabpanel"
-									id={activeTab ? tabPanelElementId(activeTab.id) : undefined}
-									aria-labelledby={
-										activeTab ? tabElementId(activeTab.id) : undefined
-									}
-									className="flex flex-1 flex-col min-w-0 overflow-hidden"
+				<div className="relative flex flex-1 min-w-0 overflow-hidden">
+					<Drawer mode={sidePanelMode(windowWidth, DRAWER_PUSH_MIN_WIDTH)} />
+					{/*
+					 * The content column: tab strip on top, then main + ContextBar.
+					 *
+					 * The strip is scoped to this column rather than spanning the
+					 * window because that is the region tabs actually switch - the
+					 * drawer is a global navigator and keeps its own header band
+					 * beside this row. Its left edge therefore follows the drawer's
+					 * resize handle for free in push mode: the column is the drawer's
+					 * flex sibling, so there is no width to compute or keep in sync.
+					 *
+					 * `relative` moved down with the strip, onto the main+context row:
+					 * the ContextBar's overlay mode positions against its nearest
+					 * positioned ancestor, and from the outer row it would now cover
+					 * the tabs it belongs to. `ContextRail` sits one level out from
+					 * that `relative` box rather than inside it, as a plain flex item
+					 * beside whatever the box contains - so an overlaying ContextBar
+					 * covers `main` up to the rail and never the rail itself, which is
+					 * what keeps the rail reachable in overlay mode too (#1615).
+					 */}
+					<div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+						<TabStrip />
+						<div className="flex flex-1 overflow-hidden">
+							<div className="flex flex-1 overflow-hidden relative">
+								<main
+									className="flex-1 overflow-hidden flex flex-col min-w-0"
+									// A stop in the F6 cycle - see `region-focus.ts`. On `main`
+									// rather than on the tabpanel inside it so the cycle reaches
+									// the pane whether or not a tab is open.
+									{...regionProps("main")}
 								>
 									{/*
-									 * One boundary around the panel, not one per surface: only
-									 * one surface is mounted at a time, and a boundary inside
-									 * each branch would be the same fallback written eight
-									 * times. It sits inside the panel div so the tab's aria
-									 * relationship holds while its chunk is still loading.
+									 * The other half of the strip's tabs pattern: the region a tab
+									 * controls has to say so, or `aria-controls` points at nothing
+									 * and the panel claims no owner. The role goes on a child of
+									 * `main` rather than on `main` itself - `main` is a landmark and
+									 * carries only `role="main"`, so overwriting it would trade one
+									 * relationship for another.
 									 */}
-									<Suspense
-										fallback={
-											<DetailSkeleton
-												label={LOADING_LABEL[activeTab?.type ?? "welcome"]}
-											/>
+									<div
+										role="tabpanel"
+										id={activeTab ? tabPanelElementId(activeTab.id) : undefined}
+										aria-labelledby={
+											activeTab ? tabElementId(activeTab.id) : undefined
 										}
+										className="flex flex-1 flex-col min-w-0 overflow-hidden"
 									>
-										{renderTabContent(activeTab)}
-									</Suspense>
-								</div>
-							</main>
-							<ContextBar mode={windowWidth >= 1200 ? "push" : "overlay"} />
+										{/*
+										 * One boundary around the panel, not one per surface: only
+										 * one surface is mounted at a time, and a boundary inside
+										 * each branch would be the same fallback written eight
+										 * times. It sits inside the panel div so the tab's aria
+										 * relationship holds while its chunk is still loading.
+										 */}
+										<Suspense
+											fallback={
+												<DetailSkeleton
+													label={
+														LOADING_LABEL[activeTab?.type ?? "welcome"]
+													}
+												/>
+											}
+										>
+											{renderTabContent(activeTab)}
+										</Suspense>
+									</div>
+								</main>
+								<ContextBar
+									mode={sidePanelMode(windowWidth, CONTEXT_BAR_PUSH_MIN_WIDTH)}
+								/>
+							</div>
+							<ContextRail />
 						</div>
-						<ContextRail />
 					</div>
 				</div>
 			</div>

@@ -29,7 +29,7 @@ import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { cn } from "@/lib/utils";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { useLayoutStore, useTabsStore } from "@/stores";
-import { DEFAULT_CONTEXT_BAR_WIDTH } from "@/constants/layout";
+import { DEFAULT_CONTEXT_BAR_WIDTH, type SidePanelMode } from "@/constants/layout";
 import { Collapsible, TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { regionProps } from "./region-focus";
@@ -43,7 +43,7 @@ import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
 import type { Tab } from "@/stores";
 
 interface ContextBarProps {
-	mode?: "push" | "overlay";
+	mode?: SidePanelMode;
 }
 
 /**

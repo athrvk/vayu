@@ -3016,13 +3016,40 @@ Shell                            flex flex-col h-full bg-background
 ├── row (flex-1)
 │   ├── ActivityRail (nav)   w-[var(--rail-width)], bg-panel - the six view
 │   │                        buttons, on the window's left edge (#1615)
-│   ├── Drawer (aside)       220–480px, default 260px, bg-panel - one of the six
-│   │                        views, plus its PanelResizeHandle on the right edge
-│   └── content column       TabStrip, then a row of [main + ContextBar]
+│   └── drawer box           relative - what an overlaying Drawer positions from
+│       ├── Drawer (aside)   220–480px, default 260px, bg-panel - one of the six
+│       │                    views, plus its PanelResizeHandle on the right edge
+│       └── content column   TabStrip, then a row of [main + ContextBar]
 │                            beside ContextRail (w-[var(--rail-width)])
 └── Dock                     h-[var(--dock-height)] border-t border-border -
                              ambient status only, along the bottom of the window
 ```
+
+### Push or overlay: the side panels at a narrow window
+
+Each side panel either **pushes** (a flex sibling that takes its width out of
+the content) or **overlays** (`absolute`, `shadow-lg`, `z-10`, over the
+content's edge, taking nothing). Both read one window width, `useWindowWidth()`
+(`app/src/hooks/useWindowWidth.ts`), through `sidePanelMode` and a named
+threshold in `app/src/constants/layout.ts`, push at or above it:
+
+| Panel | Threshold | Overlay edge |
+|-------|-----------|--------------|
+| Drawer | `DRAWER_PUSH_MIN_WIDTH`, 1000px | content's left (`left-0`) |
+| ContextBar | `CONTEXT_BAR_PUSH_MIN_WIDTH`, 1200px | content's right (`right-0`) |
+
+The widths are CSS px, so a 200% scale halves them: a 1024px window at 200% is
+512 and overlays both. The drawer's 1000 is both rails (40 each), the drawer at
+`PANEL_MAX_WIDTH` (480) and one 440px builder pane of content; the maximum
+width rather than the current one, so a drag on the handle never flips the
+mode under the pointer. Each overlay positions from a `relative` box that
+leaves out its rail (the drawer box above leaves out `ActivityRail`, the
+main+ContextBar row leaves out `ContextRail`), so an open panel never covers
+the button that closes it. Both boxes exist in either mode, so crossing a
+threshold changes a class list and never remounts the tab. An overlay keeps its
+width, its `rail-collapse` animation and its F6 stop, and closes the way it
+opens (its rail button or chord); neither overlay closes on Escape or a click
+outside.
 
 ### The panels that resize, and the one handle that resizes them
 
