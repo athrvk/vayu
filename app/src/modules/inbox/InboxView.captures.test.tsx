@@ -205,6 +205,62 @@ describe("captures past the first page", () => {
 	});
 });
 
+describe("a capture row's path (#3492)", () => {
+	// Longer than the row has room for, with the part that tells captures apart
+	// at the end.
+	const LONG_PATH = "/webhooks/stripe/events/evt_1Nk2xYz";
+
+	async function renderLongPathRow() {
+		listInboxCaptures.mockResolvedValueOnce({
+			...page(0, 0, 1),
+			data: [capture(1, { path: LONG_PATH })],
+		});
+		renderTab();
+		const shown = await screen.findByText("…vt_1Nk2xYz");
+		return { shown, row: shown.closest("button")! };
+	}
+
+	it("keeps the tail of a long path, with the CSS clip as the net under it", async () => {
+		const { shown } = await renderLongPathRow();
+
+		// One character for the ellipsis, then the last ten of the path.
+		expect(shown.textContent).toBe("…vt_1Nk2xYz");
+		expect(shown.className).toContain("truncate");
+	});
+
+	it("shows the whole path when the row takes keyboard focus", async () => {
+		const { row } = await renderLongPathRow();
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+		fireEvent.focus(row);
+
+		// A native `title` would never open here: this is the focus half of
+		// "full path on hover or focus".
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+		expect(row).not.toHaveAttribute("title");
+	});
+
+	it("shows the whole path on hover", async () => {
+		const { row } = await renderLongPathRow();
+
+		fireEvent.pointerMove(row);
+
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(LONG_PATH);
+	});
+
+	it("leaves a short path whole, with nothing to reveal", async () => {
+		listInboxCaptures.mockResolvedValueOnce(page(1, 1, 1));
+		renderTab();
+
+		const row = (await screen.findByText("/hook/1")).closest("button")!;
+		fireEvent.focus(row);
+		fireEvent.pointerMove(row);
+
+		expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+		expect(row).not.toHaveAttribute("title");
+	});
+});
+
 describe("the stream and the fetch writing one list", () => {
 	it("keeps a capture streamed in while the first fetch was in flight", async () => {
 		let resolvePage: (value: InboxCapturesResponse) => void = () => {};

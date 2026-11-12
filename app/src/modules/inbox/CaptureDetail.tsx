@@ -8,13 +8,17 @@
 /**
  * One captured request, rendered through the shared viewer family.
  *
- * A capture is an exchange with no response - `UnifiedResponseViewer` already
- * handles exactly that (it guards on request-or-response, not both), and
- * `CaptureRaw` prints the raw HTTP text. Rendering an inbound
+ * A capture is an exchange with no response. `UnifiedResponseViewer` given a
+ * request alone reads it as the body's home (tab "Body", panels sized to the
+ * card), and `CaptureRaw` prints the raw HTTP text. Rendering an inbound
  * request with the same components as an outbound one is the point: a webhook
  * you received should read like a request you sent.
+ *
+ * A base64 body (#3109) reaches the viewer as its decoded bytes, never as the
+ * base64 text, which would read as a payload and is not one.
  */
 
+import { useMemo } from "react";
 import { Inbox } from "lucide-react";
 import { Badge } from "@/components/ui";
 import {
@@ -24,9 +28,41 @@ import {
 	UnifiedResponseViewer,
 } from "@/components/shared";
 import { captureReference } from "@/lib/agent-reference";
+import type { RequestData } from "@/components/shared/response-viewer";
 import type { InboxCapture } from "@/types";
 import { CaptureRaw } from "./CaptureRaw";
-import { captureUrl } from "./utils";
+import { binaryBodyPlaceholder, captureBinaryBytes, captureUrl } from "./utils";
+
+/** `headers` without any content-type, whatever its case. */
+function withoutContentType(headers: Record<string, string>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(headers).filter(([name]) => name.toLowerCase() !== "content-type")
+	);
+}
+
+/**
+ * The `UnifiedResponseViewer` request for a capture. A base64 body is its
+ * decoded bytes, which the viewer draws as an image or a "Binary data" pane;
+ * bytes that do not decode fall back to the Raw view's placeholder line.
+ */
+function viewerRequest(capture: InboxCapture, url: string): RequestData {
+	const head = { method: capture.method, url, headers: capture.headers };
+	if (capture.bodyEncoding !== "base64") return { ...head, body: capture.body };
+
+	const bytes = captureBinaryBytes(capture);
+	// Zero bytes is no body: `rawBytes` would draw "Binary data, 0 B" over it.
+	if (bytes?.length === 0) return { ...head, body: "" };
+	if (bytes) return { ...head, rawBytes: { data: bytes, isText: false } };
+
+	// The placeholder is text. The viewer keeps a declared image or PDF type
+	// when there are no `rawBytes` and would draw it as a broken image, so the
+	// type is left off: it describes bytes that are not here.
+	return {
+		...head,
+		headers: withoutContentType(capture.headers),
+		body: binaryBodyPlaceholder(capture, undefined),
+	};
+}
 
 interface CaptureDetailProps {
 	capture: InboxCapture | null;
@@ -34,6 +70,13 @@ interface CaptureDetailProps {
 }
 
 export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
+	// Memoised because the viewer keys an image's object URL on the identity of
+	// `rawBytes`, and a poll re-renders this with the same capture.
+	const request = useMemo(
+		() => (capture ? viewerRequest(capture, captureUrl(capture, inboxUrl)) : null),
+		[capture, inboxUrl]
+	);
+
 	if (!capture) {
 		return (
 			<EmptyState
@@ -73,15 +116,7 @@ export function CaptureDetail({ capture, inboxUrl }: CaptureDetailProps) {
 				)}
 			</div>
 
-			<UnifiedResponseViewer
-				className="min-h-0 flex-1"
-				request={{
-					method: capture.method,
-					url,
-					headers: capture.headers,
-					body: capture.body,
-				}}
-			/>
+			<UnifiedResponseViewer className="min-h-48 flex-1" request={request} />
 
 			<CaptureRaw capture={capture} url={url} />
 		</div>
