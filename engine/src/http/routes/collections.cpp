@@ -232,9 +232,9 @@ static RouteResult reject_binding_on_update (const nlohmann::json& json) {
  * composer walks past an `inherit` link, so one that was stored would show the
  * parent's credential in the app and hold it back at send time.
  *
- * Runs after `reject_unknown_auth_mode`. Only a stated `auth` object is judged: absent keeps the stored value (which
- * may be a legacy `inherit` the composer already steps past, so an unrelated
- * PUT must not fail on it) and `null` resets to none. The create and update
+ * Runs after `reject_unknown_auth_mode`. Only a stated `auth` object is judged:
+ * absent keeps the stored value (which may be a legacy `inherit` the composer
+ * already steps past, so an unrelated PUT must not fail on it) and `null` resets to none. The create and update
  * cores call it and `apply_collection_fields` does not, because `POST
  * /import/apply` and `POST /specs/sync` share that applier and an importer's
  * `inherit` must not fail an atomic import (the `reject_blank_name` split).
