@@ -76,6 +76,7 @@ import { cn } from "@/lib/utils";
 import { inboxReference } from "@/lib/agent-reference";
 import { describeOriginPolicy } from "@/lib/allowed-origins";
 import { shownService } from "@/lib/shown-service";
+import { truncateUrl } from "@/lib/truncate-url";
 import { pickByCount } from "@/modules/dashboard/utils/format";
 import type { Inbox, InboxCannedResponse, InboxCapture } from "@/types";
 import { CannedResponseControls } from "./CannedResponseControls";
@@ -133,6 +134,17 @@ interface CaptureRowProps {
 	onSelect: () => void;
 }
 
+/**
+ * How much of a capture's path the row spends characters on. The path sits in a
+ * `w-72` list beside a method column and the time, which leaves about 11
+ * characters of `text-xs` mono at the default (compact) density with a 12-hour
+ * clock; Comfortable and 24-hour clocks have room to spare. Sized to the tight
+ * case because a path wider than its box is cut by CSS `truncate` from the
+ * right, which is the end that tells captures apart - `truncateUrl` keeps that
+ * end and the full path is the `title`.
+ */
+const CAPTURE_PATH_CHARS = 11;
+
 function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 	return (
 		<button
@@ -146,7 +158,9 @@ function CaptureRow({ capture, selected, onSelect }: CaptureRowProps) {
 		>
 			<span className="flex w-full items-center gap-2">
 				<MethodBadge method={capture.method} variant="text" size="sm" className="w-[5ch]" />
-				<span className="truncate font-mono text-xs">{capture.path}</span>
+				<span className="truncate font-mono text-xs" title={capture.path}>
+					{truncateUrl(capture.path, CAPTURE_PATH_CHARS)}
+				</span>
 				<span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
 					<TimeValue value={capture.receivedAt} style="time" />
 				</span>

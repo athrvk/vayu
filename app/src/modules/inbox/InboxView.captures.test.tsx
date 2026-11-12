@@ -205,6 +205,34 @@ describe("captures past the first page", () => {
 	});
 });
 
+describe("a capture row's path (#3492)", () => {
+	// Longer than the row has room for, with the part that tells captures apart
+	// at the end.
+	const LONG_PATH = "/webhooks/stripe/events/evt_1Nk2xYz";
+
+	it("keeps the tail of a long path and shows the whole of it on hover", async () => {
+		listInboxCaptures.mockResolvedValueOnce({
+			...page(0, 0, 1),
+			data: [capture(1, { path: LONG_PATH })],
+		});
+		renderTab();
+
+		const row = await screen.findByTitle(LONG_PATH);
+		// One character for the ellipsis, then the last ten of the path.
+		expect(row.textContent).toBe("…vt_1Nk2xYz");
+		// The CSS clip stays as the net under the character budget.
+		expect(row.className).toContain("truncate");
+	});
+
+	it("leaves a short path whole", async () => {
+		listInboxCaptures.mockResolvedValueOnce(page(1, 1, 1));
+		renderTab();
+
+		const row = await screen.findByText("/hook/1");
+		expect(row).toHaveAttribute("title", "/hook/1");
+	});
+});
+
 describe("the stream and the fetch writing one list", () => {
 	it("keeps a capture streamed in while the first fetch was in flight", async () => {
 		let resolvePage: (value: InboxCapturesResponse) => void = () => {};
