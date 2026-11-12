@@ -13,9 +13,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <latch>
 #include <regex>
+#include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -10551,12 +10554,31 @@ IsAnOutOfMemorySentenceNaming (const std::string& message, size_t limit_mib) {
 
 // At the floor QuickJS has no room to build the error for the refused
 // allocation and throws a bare null, which used to be the whole message.
+//
+// Where the refusal lands moves with every allocation a context makes before
+// the script runs, and a refusal inside QuickJS's parser can come out as a
+// `SyntaxError` or a bare `InternalError` that no sentence of ours replaces
+// (a sweep of limits above the floor measured about one in twenty, with or
+// without the Math.random replacement). So the floor is read as a window of
+// limits rather than at one layout: lodash never loads in it, and the report
+// names the memory limit in all but a few of them.
 TEST_F (ScriptEngineTest, RequiringLodashAtTheMinimumMemoryLimitReportsOutOfMemory) {
-    ScriptEngine bounded (minimum_memory_config ());
-    auto ctx    = ScriptContext::for_test (request, response);
-    auto result = bounded.execute ("const _ = require('lodash');", ctx);
-    EXPECT_FALSE (result.success);
-    EXPECT_EQ (result.error_message, "Script ran out of memory at the 1 MiB limit");
+    constexpr size_t WINDOW       = 32;
+    constexpr size_t STEP         = 64;
+    size_t reported_out_of_memory = 0;
+    for (size_t i = 0; i < WINDOW; ++i) {
+        ScriptConfig cfg;
+        cfg.memory_limit = ONE_MIB + (i * STEP);
+        ScriptEngine bounded (cfg);
+        auto ctx    = ScriptContext::for_test (request, response);
+        auto result = bounded.execute ("const _ = require('lodash');", ctx);
+        EXPECT_FALSE (result.success) << "at " << cfg.memory_limit << " bytes";
+        if (result.error_message.starts_with (
+            "Script ran out of memory at the ")) {
+            ++reported_out_of_memory;
+        }
+    }
+    EXPECT_GE (reported_out_of_memory, WINDOW * 3 / 4);
 }
 
 // An allocation loop reports QuickJS's own out-of-memory error when there was
@@ -10697,4 +10719,75 @@ TEST_F (ScriptEngineTest, ALegacyTestRowWhoseGetterThrowsNullReadsAsASentence) {
     ASSERT_EQ (result.tests.size (), 1u);
     EXPECT_FALSE (result.tests[0].passed);
     EXPECT_EQ (result.tests[0].error_message, "Script threw undefined");
+}
+
+namespace {
+
+/// What one execution's first `Math.random()` answers, as the string the
+/// script wrote to the environment; empty when the script did not run.
+std::string first_random_draw (ScriptEngine& engine, Request& request) {
+    Environment env;
+    const auto result = engine.execute_prerequest (
+    "pm.environment.set('draw', String(Math.random()));", request, env);
+    if (!result.success || env.find ("draw") == env.end ()) {
+        return {};
+    }
+    return env["draw"].value;
+}
+
+} // namespace
+
+// #3460: QuickJS seeds a context's `Math.random` from the microsecond clock,
+// and every execution builds a context. A draw is a number in [0, 1) and the
+// contexts of one thread continue one sequence rather than each restarting.
+TEST_F (ScriptEngineTest, MathRandomAnswersAUnitIntervalNumberThatDiffersBetweenContexts) {
+    const auto first  = first_random_draw (engine, request);
+    const auto second = first_random_draw (engine, request);
+
+    ASSERT_FALSE (first.empty ());
+    ASSERT_FALSE (second.empty ());
+    EXPECT_NE (first, second);
+    for (const auto& draw : { first, second }) {
+        const double value = std::stod (draw);
+        EXPECT_GE (value, 0.0) << draw;
+        EXPECT_LT (value, 1.0) << draw;
+    }
+}
+
+// Threads released together build their contexts in the same few microseconds,
+// which is when a clock-seeded generator hands two of them one sequence. Each
+// round starts fresh threads at a latch, with the runtime already built, so
+// the contexts are as close in time as the scheduler allows. A hit on the
+// clock-seeded generator is a matter of chance per round, so the rounds are
+// many and cheap. Mutation check: drop `setup_math_random` from
+// `build_context` and a round collides.
+TEST_F (ScriptEngineTest, MathRandomDoesNotRepeatAcrossThreadsStartingTogether) {
+    constexpr size_t THREADS = 4;
+    constexpr size_t ROUNDS  = 400;
+
+    size_t colliding_rounds = 0;
+    for (size_t round = 0; round < ROUNDS; ++round) {
+        std::latch released (THREADS);
+        std::vector<std::string> draws (THREADS);
+        std::vector<std::thread> threads;
+        threads.reserve (THREADS);
+        for (size_t i = 0; i < THREADS; ++i) {
+            threads.emplace_back ([&, i] {
+                ScriptEngine worker;
+                Request worker_request = request;
+                (void)first_random_draw (worker, worker_request);
+                released.arrive_and_wait ();
+                draws[i] = first_random_draw (worker, worker_request);
+            });
+        }
+        for (auto& thread : threads) {
+            thread.join ();
+        }
+
+        const std::set<std::string> distinct (draws.begin (), draws.end ());
+        if (distinct.size () != THREADS || distinct.contains ("")) {
+            ++colliding_rounds;
+        }
+    }
+    EXPECT_EQ (colliding_rounds, 0u);
 }

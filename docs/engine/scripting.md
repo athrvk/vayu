@@ -3389,6 +3389,15 @@ too; the queue is the engine's to free, so it costs the runtime nothing. State t
 carry from one script to the next belongs in a variable scope
 (`pm.environment`, `pm.collectionVariables`, `pm.globals`).
 
+One thing is shared on purpose: `Math.random` draws from a generator that lives
+on the thread, seeded once from libsodium, not from one the context owns. QuickJS
+seeds a context's own generator from the microsecond clock, so two workers
+starting a script in the same microsecond would draw the same numbers (#3460);
+with a per-thread generator the contexts of one thread continue a single
+sequence and two threads never share one. It is the same xorshift64* generator
+QuickJS runs, a fast PRNG and not a CSPRNG, so a script that needs unpredictable
+values uses `require('uuid')` rather than `Math.random`.
+
 ### What a script can compute
 
 The sandbox is QuickJS plus `pm`, `console`, the two base64 globals, the
@@ -3534,7 +3543,9 @@ are all there, with npm's signatures (`v3.DNS` / `v3.URL` and `v5.DNS` /
 global** in Vayu: a script reads it with `require` only. Postman's
 `uuid()` and `uuid.v4()` draw from `Math.random`; Vayu's draw from libsodium's
 CSPRNG, so a script that works in Postman works here and the values are
-unpredictable rather than merely unlikely to collide. The bytes reach the
+unpredictable rather than merely unlikely to collide. (`Math.random` stays a PRNG,
+seeded per thread from the same source: see
+[Isolation between scripts](#isolation-between-scripts).) The bytes reach the
 library through a `crypto.getRandomValues` that exists only inside the
 library's own scope, so no script sees a `crypto` global.
 

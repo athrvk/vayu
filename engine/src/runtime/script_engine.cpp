@@ -27,6 +27,8 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -35,9 +37,12 @@
 #include <utility>
 #include <vector>
 
+#include <sodium.h>
+
 #include "vayu/utils/encoding.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/sha256.hpp"
+#include "vayu/utils/sodium_init.hpp"
 
 #include "pm/pm_internal.hpp"
 
@@ -478,6 +483,61 @@ void setup_base64_globals (JSContext* ctx) {
     JSValue global = JS_GetGlobalObject (ctx);
     JS_SetPropertyStr (ctx, global, "btoa", JS_NewCFunction (ctx, js_btoa, "btoa", 1));
     JS_SetPropertyStr (ctx, global, "atob", JS_NewCFunction (ctx, js_atob, "atob", 1));
+    JS_FreeValue (ctx, global);
+}
+
+// ============================================================================
+// Math.random (#3460)
+// ============================================================================
+//
+// QuickJS seeds each context's generator from the microsecond clock, and a
+// context is built per script, so two workers starting a script in the same
+// microsecond drew the same sequence. Its generator state is private and the
+// library offers no way to set it, so `Math.random` is replaced by this
+// function over one generator per thread, seeded once from libsodium. A
+// thread's contexts then continue one sequence instead of each restarting
+// from a clock reading, and two threads cannot share one.
+
+/// A fresh 64-bit state from libsodium's CSPRNG; zero would be a fixed point of
+/// xorshift, so it is never returned. Throws if libsodium cannot initialise.
+std::uint64_t seed_random_state () {
+    vayu::utils::ensure_sodium_initialized ();
+    std::uint64_t seed = 0;
+    randombytes_buf (&seed, sizeof seed);
+    return seed != 0 ? seed : 1;
+}
+
+/// Marsaglia's xorshift64*, the generator QuickJS's own `Math.random` runs, so
+/// the distribution a script sees is unchanged.
+std::uint64_t next_random (std::uint64_t& state) {
+    state ^= state >> 12;
+    state ^= state << 25;
+    state ^= state >> 27;
+    return state * 0x2545F4914F6CDD1DULL;
+}
+
+JSValue js_math_random (JSContext* ctx, JSValueConst /*this_val*/, int /*argc*/, JSValueConst* /*argv*/) {
+    thread_local std::uint64_t state = 0;
+    if (state == 0) {
+        try {
+            state = seed_random_state ();
+        } catch (const std::exception& error) {
+            return JS_ThrowInternalError (ctx, "%s", error.what ());
+        }
+    }
+    // The top 53 bits, which a double holds exactly: a value in [0, 1).
+    constexpr double TWO_POW_NEG_53 = 1.0 / 9007199254740992.0;
+    return JS_NewFloat64 (ctx, static_cast<double> (next_random (state) >> 11) * TWO_POW_NEG_53);
+}
+
+/// Replaces `Math.random` in place, so the property keeps the attributes the
+/// intrinsic gave it.
+void setup_math_random (JSContext* ctx) {
+    JSValue global = JS_GetGlobalObject (ctx);
+    JSValue math   = JS_GetPropertyStr (ctx, global, "Math");
+    JS_SetPropertyStr (
+    ctx, math, "random", JS_NewCFunction (ctx, js_math_random, "random", 0));
+    JS_FreeValue (ctx, math);
     JS_FreeValue (ctx, global);
 }
 
@@ -1089,6 +1149,7 @@ class ScriptEngine::Impl {
         }
         setup_console (ctx, config.enable_console);
         setup_base64_globals (ctx);
+        setup_math_random (ctx);
         setup_timers (ctx);
         setup_require_shelf (ctx);
         setup_pm_object (ctx);
