@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -466,15 +467,15 @@ struct SetCall {
     const char* named_in; // what the TypeError's message must name
 };
 
-constexpr SetCall SET_CALLS[] = {
-    { "pm.environment.set", "pm.environment.set" },
-    { "pm.globals.set", "pm.globals.set" },
-    { "pm.collectionVariables.set", "pm.collectionVariables.set" },
-    { "pm.variables.set", "pm.variables.set" },
-    // The legacy aliases delegate to the scope's own set.
-    { "postman.setEnvironmentVariable", "pm.environment.set" },
-    { "postman.setGlobalVariable", "pm.globals.set" },
-};
+constexpr std::array<SetCall, 6> SET_CALLS = { {
+{ "pm.environment.set", "pm.environment.set" },
+{ "pm.globals.set", "pm.globals.set" },
+{ "pm.collectionVariables.set", "pm.collectionVariables.set" },
+{ "pm.variables.set", "pm.variables.set" },
+// The legacy aliases delegate to the scope's own set.
+{ "postman.setEnvironmentVariable", "pm.environment.set" },
+{ "postman.setGlobalVariable", "pm.globals.set" },
+} };
 
 // The script catches what the call throws and fails unless it is a TypeError
 // whose message names @p named_in and quotes @p reason.
@@ -497,20 +498,21 @@ TEST_F (ScriptVariablesTest, ANameNoTokenCanReadBackThrowsAndStoresNothing) {
     constexpr const char* BRACES    = "cannot contain '{' or '}'";
     constexpr const char* PADDING   = "cannot start or end with whitespace";
     constexpr const char* EMPTINESS = "cannot be empty";
-    const struct {
+    struct BadName {
         const char* name;
         const char* reason;
-    } bad_names[] = {
-        { "", EMPTINESS },
-        { " pad ", PADDING },
-        { "  ", PADDING },
-        { "\t", PADDING },
-        { "tail\n", PADDING },
-        { "a}}b", BRACES },
-        { "{", BRACES },
-        { "}", BRACES },
-        { "{{x}}", BRACES },
     };
+    const std::array<BadName, 9> bad_names = { {
+    { "", EMPTINESS },
+    { " pad ", PADDING },
+    { "  ", PADDING },
+    { "\t", PADDING },
+    { "tail\n", PADDING },
+    { "a}}b", BRACES },
+    { "{", BRACES },
+    { "}", BRACES },
+    { "{{x}}", BRACES },
+    } };
 
     scopes_.environment["kept"] = vayu::Variable{ "e", false, true, "string" };
     scopes_.globals["kept"]     = vayu::Variable{ "g", false, true, "string" };

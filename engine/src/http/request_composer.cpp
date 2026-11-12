@@ -1853,6 +1853,28 @@ read_dynamic_resolution (const nlohmann::json& body, DynamicResolution& out) {
     return std::nullopt;
 }
 
+// What this composition read, written onto the payload as its own answer.
+// None of these fields is an input: an inline `request` carrying one from an
+// earlier composition does not speak for this one, so each is cleared first.
+void stamp_composition_answers (nlohmann::json& payload,
+const std::string& environment_id,
+const std::vector<vayu::db::Collection>& chain,
+const std::set<std::string>& deferred) {
+    if (!environment_id.empty ()) {
+        payload["environmentId"] = environment_id;
+    }
+    // The leaf of the chain, which `/execute` and `/runs` read the scripts'
+    // collection scope from when no request row names one (#3461).
+    payload.erase ("collectionId");
+    if (!chain.empty ()) {
+        payload["collectionId"] = chain.back ().id;
+    }
+    payload.erase ("deferredVariables");
+    if (!deferred.empty ()) {
+        payload["deferredVariables"] = deferred;
+    }
+}
+
 } // namespace
 
 nlohmann::json stored_request_elements (vayu::db::Database& db,
@@ -1961,23 +1983,7 @@ VariableDeferral deferral) {
     // user JavaScript, and rewriting it cannot tell a string literal from
     // code. They pass through exactly as supplied/stored.
 
-    if (!environment_id.empty ()) {
-        payload["environmentId"] = environment_id;
-    }
-    // The leaf of the chain this composition read, which `/execute` and
-    // `/runs` read the scripts' collection scope from when no request row
-    // names one (#3461). Composition's own answer: an inline `request` naming
-    // another collection does not speak for it.
-    payload.erase ("collectionId");
-    if (!chain.empty ()) {
-        payload["collectionId"] = chain.back ().id;
-    }
-    // Composition's own answer, never an input: an inline `request` carrying
-    // the field from an earlier composition does not speak for this one.
-    payload.erase ("deferredVariables");
-    if (!deferred.empty ()) {
-        payload["deferredVariables"] = deferred;
-    }
+    stamp_composition_answers (payload, environment_id, chain, deferred);
 
     return { 200, payload };
 }
