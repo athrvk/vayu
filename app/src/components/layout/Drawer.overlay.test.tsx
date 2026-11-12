@@ -43,7 +43,15 @@ describe("Drawer - push and overlay modes", () => {
 		const className = drawer("overlay").className;
 		// The context bar's overlay set, on the other edge: the two panels read
 		// as one family, and the shared z-index keeps either from being buried.
-		for (const cls of ["absolute", "left-0", "top-0", "bottom-0", "shadow-lg", "z-10"]) {
+		for (const cls of [
+			"absolute",
+			"left-0",
+			"top-0",
+			"bottom-0",
+			"max-w-full",
+			"shadow-lg",
+			"z-10",
+		]) {
 			expect(className.split(/\s+/)).toContain(cls);
 		}
 		expect(className).not.toContain("relative");

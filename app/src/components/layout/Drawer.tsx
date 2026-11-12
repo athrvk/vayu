@@ -54,7 +54,7 @@ export function Drawer({ mode = "push" }: DrawerProps) {
 					className={cn(
 						"flex shrink-0 bg-panel",
 						mode === "overlay"
-							? "absolute left-0 top-0 bottom-0 shadow-lg z-10"
+							? "absolute left-0 top-0 bottom-0 max-w-full shadow-lg z-10"
 							: "relative"
 					)}
 					style={{ width: drawerWidth }}
