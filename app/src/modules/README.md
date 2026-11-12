@@ -71,7 +71,9 @@ Some modules have components displayed in both the sidebar and main content area
 - **Components:** `ServicesPanel.tsx` - the local services (webhook inboxes, OAuth issuers, mock
   servers): status, copy-URL, start/stop, and the issuer's start dialog. A mock-servers row opens
   the `mock-server` tab (`modules/mock-server/`) rather than expanding in place, the same shape the
-  inbox row already used.
+  inbox row already used. While Vayu's engine is down (`useEngineServing`, the same gate as the
+  Dock's count) the cached rows read as stopped, since every service lived in its process
+  (issue #3493).
 - **Also exports** `useRunningServices()` and the `useRunningServiceCount()` derived from it, which
   the Dock's ambient indicator reads - one list over all three sources, because they disagree on
   their own terms (a stopped inbox stays listed, a stopped issuer or mock server does not), and

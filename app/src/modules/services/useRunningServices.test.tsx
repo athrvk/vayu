@@ -132,7 +132,7 @@ beforeEach(() => {
 	listMockServers.mockReset().mockResolvedValue([]);
 	// The count is gated on this, and the store's own default is `starting` - a
 	// list that answered at all came from an engine that was up.
-	useEngineStore.setState({ engineStatus: "connected", engineError: null });
+	useEngineStore.setState({ engineStatus: "connected", engineError: null, engineCrash: null });
 });
 
 describe("useRunningServiceCount", () => {
@@ -195,6 +195,21 @@ describe("useRunningServiceCount", () => {
 			await waitFor(() => expect(result.current).toBe(0));
 		}
 	);
+
+	// #3493: the sidecar's crash push lands ahead of the poll that confirms it,
+	// and the process it reports took every service with it.
+	it("reports nothing once the sidecar reports a crash the poll still reads as connected", async () => {
+		listMockServers.mockResolvedValue([mockServer()]);
+
+		const { result } = countHook();
+		await waitFor(() => expect(result.current).toBe(1));
+
+		useEngineStore
+			.getState()
+			.setEngineCrash({ code: null, signal: "SIGKILL", stderrTail: [], error: null });
+
+		await waitFor(() => expect(result.current).toBe(0));
+	});
 });
 
 /*

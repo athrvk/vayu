@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui";
-import { useTabsStore, useToastStore } from "@/stores";
+import { useEngineStore, useTabsStore, useToastStore } from "@/stores";
 import type { MockServer } from "@/types";
 import ServicesPanel from "./ServicesPanel";
 
@@ -84,6 +84,9 @@ beforeEach(() => {
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
 	useTabsStore.setState({ openTabs: [], activeTabId: null });
 	useToastStore.setState({ toasts: [] });
+	// The rows read as running only while the engine is up (`useEngineServing`),
+	// and a list that answered at all came from an engine that was.
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 });
 
 describe("the mock servers group", () => {

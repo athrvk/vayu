@@ -512,15 +512,27 @@ which case the app picks a fallback (below).
   keeps the `crashed` facts in `engineCrash`; the Dock's connection tooltip says
   how the engine left (signal, exit code or error, with the last lines it
   printed) and offers **Restart**, which a crash never did. The lifecycle is
-  facts only: the light itself is still the renderer's `/health` poll, so the
-  Restart button can appear a poll before the light turns "Engine disconnected".
+  facts only: the `/health` poll is still the one writer of the renderer's
+  `engineStatus`, and a `crashed` push asks it to look again (it invalidates
+  the health query alone) rather than waiting out its 30 s healthy interval
+  (issue #3493). The Dock and the Services drawer read
+  `selectKnownEngineStatus`, which lets a crash outrank a `connected` verdict
+  the poll gave before the push, so the light reads "Engine disconnected"
+  beside Restart and the drawer shows its services stopped, never "Engine
+  connected" and green dots on listeners the crash took with it. The poll's
+  next verdict ends the override, whatever it says: the crash itself stays
+  recorded until `ready`, which can trail the poll that sees a restarted engine
+  answer, and that engine is connected. A crash pushed inside a
+  restart's start window refetches like any poll there and reads "Starting…".
   A crash stays recorded through a restart's transient states (`replacing`,
   `choosingPort`, `spawning`, and the `idle` a failed restart ends on) and is
   cleared only by `ready`, `slow`, `stopping` or `stopped`, so a restart that
   fails leaves Restart on the Dock.
   A start that cannot succeed keeps its own sentence (`engine:startFailure`, a
   held port with Retry), which takes precedence over a crash. One restart runs
-  at a time across the Dock button and the Settings banner.
+  at a time across the Dock button and the Settings banner. The engine that
+  comes back is running none of the services the old one held, so the
+  reconnect names them (local services, below).
 - **A dirty editor flushes itself the moment the engine comes back**, on an
   automatic reconnect (`useHealthQuery`) or a manual restart
   (`useEngineRestart`) alike - both invalidate every query and then flush
@@ -573,6 +585,15 @@ which case the app picks a fallback (below).
   an answer nobody is there to give (issue #1363). The flush-failure dialog above
   is no exception: a signal quit that cannot save its edits would stall on it
   until `install.sh` killed the app and orphaned the engine (issue #1908).
+  An engine restart stops them too, whether a crash ended the old engine or
+  the user pressed Restart, and neither asks first. What it does instead is
+  say so afterwards: the renderer keeps what the cached Services lists said
+  was running when the outage began, and once the health poll or the Restart
+  sees the engine back it compares that by id with the engine's fresh lists
+  and raises one toast naming what is no longer running (three by name, then a
+  count), with a View services action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
+  reconnect paths report, and one snapshot is pending per outage, so the user
+  hears it once.
 - **A taken port is a loud failure, not a silent one.** The engine binds its
   port (`--port`, default 9876) before it serves, so anything already holding
   it makes it print `Could not bind 127.0.0.1:<port> - ...` to stderr and exit

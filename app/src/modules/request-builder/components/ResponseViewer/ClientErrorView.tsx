@@ -28,6 +28,7 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
+import { selectEngineRestartOffered, useEngineStore } from "@/stores";
 
 interface ErrorIconDisplayProps {
 	icon: LucideIcon;
@@ -48,6 +49,16 @@ function ErrorIconDisplay({ icon: Icon, className }: ErrorIconDisplayProps) {
 const ENGINE_ANSWERED_ERROR = "Vayu's engine answered with an error";
 const ENGINE_ANSWERED_HINT =
 	"This is Vayu's failure, not the server's. Send again; if it repeats, Vayu's engine log in Settings › General › Logs has the reason.";
+
+/**
+ * `ENGINE_ERROR`'s tip while the Dock is drawing its Restart or Retry button.
+ * Without one (the engine is not known to have left, so the Dock offers
+ * nothing) the tip is the shared `ENGINE_NO_ANSWER`, which names no button.
+ * The button's label is not named: it reads Retry after a start failure and a
+ * disabled Restarting… while a restart runs.
+ */
+const ENGINE_RESTART_IN_DOCK_HINT =
+	"Vayu's engine isn't running or didn't answer. Start it again with the button in the status bar at the bottom of the window.";
 
 /**
  * Error hints for common error codes
@@ -160,13 +171,20 @@ function getErrorIcon(errorCode?: string) {
 	}
 }
 
+function errorHint(errorCode: string | undefined, restartOffered: boolean): string | undefined {
+	if (!errorCode) return undefined;
+	if (errorCode === "ENGINE_ERROR" && restartOffered) return ENGINE_RESTART_IN_DOCK_HINT;
+	return ErrorHints[errorCode];
+}
+
 export interface ClientErrorViewProps {
 	errorCode?: string;
 	errorMessage?: string;
 }
 
 export default function ClientErrorView({ errorCode, errorMessage }: ClientErrorViewProps) {
-	const hint = errorCode ? ErrorHints[errorCode] : undefined;
+	const restartOffered = useEngineStore(selectEngineRestartOffered);
+	const hint = errorHint(errorCode, restartOffered);
 	const title = (errorCode ? ErrorTitles[errorCode] : undefined) ?? "Couldn't get a response";
 	const ErrorIcon = getErrorIcon(errorCode);
 

@@ -76,11 +76,24 @@ interface EngineState {
 	 * (#3336); `null` while it runs or once a start is under way again.
 	 *
 	 * A fact about the process, not a status: `engineStatus` stays the health
-	 * poll's verdict, and this only explains it and offers the Dock's Restart.
-	 * Written by `useEngineLifecycle` from each pushed transition, so it clears
-	 * when the sidecar moves on rather than when a restart is asked for.
+	 * poll's verdict, and this explains it, offers the Dock's Restart, and keeps
+	 * a stale `connected` off screen (`selectKnownEngineStatus`). Written by
+	 * `useEngineLifecycle` from each pushed transition, so it clears when the
+	 * sidecar moves on rather than when a restart is asked for.
 	 */
 	engineCrash: EngineCrash | null;
+
+	/**
+	 * The crash in `engineCrash` was pushed after the health poll's last verdict
+	 * (#3493), so a `connected` there describes the process that left.
+	 *
+	 * Set by `setEngineCrash` with a crash and cleared by every `setEngineStatus`,
+	 * which only the poll calls: a verdict that lands after the push, `connected`
+	 * from the restarted engine included, is the newer word. `engineCrash` itself
+	 * stays until the sidecar reports `ready`, which can trail that verdict, so it
+	 * cannot be what decides.
+	 */
+	engineCrashAheadOfPoll: boolean;
 
 	/**
 	 * A restart is in flight. One flag for every surface that offers the action
@@ -159,6 +172,38 @@ interface EngineState {
 	clearRestartRequired: () => void;
 }
 
+/**
+ * The engine's status as the app shows it: the health poll's verdict, except
+ * that a crash the sidecar reported outranks a `connected` the poll gave before
+ * the push (#3493).
+ *
+ * Derived on read, never written back: the poll stays the one writer of
+ * `engineStatus`, and the crash push only asks it to look again
+ * (`useEngineLifecycle`). The override lasts until the poll's next verdict,
+ * whatever it says, but a strip reading "Engine connected" beside a Restart
+ * button, or a drawer of green services the dead process took with it, is
+ * wrong for all of it. `starting` passes through: a restart in flight is the
+ * crash's successor.
+ */
+export function selectKnownEngineStatus(
+	s: Pick<EngineState, "engineStatus" | "engineCrash" | "engineCrashAheadOfPoll">
+): EngineStatus {
+	const crashIsNewer = s.engineCrash !== null && s.engineCrashAheadOfPoll;
+	if (crashIsNewer && s.engineStatus === "connected") return "unreachable";
+	return s.engineStatus;
+}
+
+/**
+ * Whether the Dock is showing a Restart (after a crash) or Retry (after a
+ * start failure) button. Read by the Dock itself and by copy that points at it,
+ * so a tip never names a button the Dock is not drawing (#3493).
+ */
+export function selectEngineRestartOffered(
+	s: Pick<EngineState, "engineStartFailure" | "engineCrash">
+): boolean {
+	return Boolean(s.engineStartFailure) || Boolean(s.engineCrash);
+}
+
 export const useEngineStore = create<EngineState>()((set) => ({
 	// Initial state. `starting`, not `unreachable`: this value is what the Dock
 	// renders on first paint, before any poll has been answered or refused.
@@ -166,6 +211,7 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	engineError: null,
 	engineStartFailure: null,
 	engineCrash: null,
+	engineCrashAheadOfPoll: false,
 	engineRestarting: false,
 	recovery: null,
 	workers: null,
@@ -176,10 +222,10 @@ export const useEngineStore = create<EngineState>()((set) => ({
 	restartRequiredKeys: [],
 
 	// Connection actions
-	setEngineStatus: (status) => set({ engineStatus: status }),
+	setEngineStatus: (status) => set({ engineStatus: status, engineCrashAheadOfPoll: false }),
 	setEngineError: (error) => set({ engineError: error }),
 	setEngineStartFailure: (failure) => set({ engineStartFailure: failure }),
-	setEngineCrash: (crash) => set({ engineCrash: crash }),
+	setEngineCrash: (crash) => set({ engineCrash: crash, engineCrashAheadOfPoll: crash !== null }),
 	setEngineRestarting: (restarting) => set({ engineRestarting: restarting }),
 	setEngineRecovery: (recovery) => set({ recovery }),
 	setWorkers: (workers) => set({ workers }),

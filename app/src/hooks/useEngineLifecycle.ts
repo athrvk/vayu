@@ -12,7 +12,11 @@
  *
  * Facts only. `engineStatus` stays the health poll's verdict
  * (`lib/engine-start-window.ts`); this explains an unreachable engine and
- * lets the Dock offer Restart.
+ * lets the Dock offer Restart. A crash also asks the poll to look again rather
+ * than wait out `HEALTH_CHECK_INTERVAL_MS` (#3493): the health query and nothing
+ * else, since every other query is the reconnect's to refetch. A crash that
+ * lands inside a restart's start window is safe to ask about, because the poll
+ * classifies a failure there as `starting`.
  *
  * Pushes arrive in the order the sidecar made them, so each one simply
  * replaces the last, with one exception: a crash is only ended by an engine
@@ -29,6 +33,8 @@
  */
 
 import { useEffect } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/queries/keys";
 import { useEngineStore } from "@/stores";
 import type { EngineLifecyclePayload } from "@/types/electron";
 
@@ -40,11 +46,12 @@ const CRASH_SURVIVES: ReadonlySet<EngineLifecyclePayload["kind"]> = new Set([
 	"spawning",
 ]);
 
-function applyEngineLifecycle(lifecycle: EngineLifecyclePayload): void {
+function applyEngineLifecycle(lifecycle: EngineLifecyclePayload, queryClient: QueryClient): void {
 	const { setEngineCrash } = useEngineStore.getState();
 	if (lifecycle.kind === "crashed") {
 		const { code, signal, stderrTail, error } = lifecycle;
 		setEngineCrash({ code, signal, stderrTail, error });
+		void queryClient.invalidateQueries({ queryKey: queryKeys.health.status() });
 		return;
 	}
 	if (CRASH_SURVIVES.has(lifecycle.kind)) return;
@@ -52,6 +59,8 @@ function applyEngineLifecycle(lifecycle: EngineLifecyclePayload): void {
 }
 
 export function useEngineLifecycle(): void {
+	const queryClient = useQueryClient();
+
 	useEffect(() => {
 		const api = window.electronAPI;
 		// Absent in the dev browser: there is no sidecar to report.
@@ -64,14 +73,14 @@ export function useEngineLifecycle(): void {
 		// Subscribed before the read, so a transition between the two is not lost.
 		const unsubscribe = api.onEngineLifecycle((lifecycle) => {
 			pushed = true;
-			applyEngineLifecycle(lifecycle);
+			applyEngineLifecycle(lifecycle, queryClient);
 		});
 
 		api.getEngineLifecycle()
 			.then((lifecycle) => {
 				if (disposed || pushed) return;
 				if (useEngineStore.getState().engineStartWindow !== startedIn) return;
-				applyEngineLifecycle(lifecycle);
+				applyEngineLifecycle(lifecycle, queryClient);
 			})
 			.catch(() => {
 				// The main process cannot be asked; the next push still arrives, and a
@@ -82,5 +91,5 @@ export function useEngineLifecycle(): void {
 			disposed = true;
 			unsubscribe();
 		};
-	}, []);
+	}, [queryClient]);
 }

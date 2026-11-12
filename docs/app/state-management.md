@@ -715,10 +715,21 @@ button, and while the restart runs the button reads Restarting... through
 yields to a push that landed while it was in flight and to a restart that
 opened a new start window, so a late reply cannot put a crash back over the
 engine replacing it. **It is a fact, not a status: `useHealthQuery` stays the
-only classifier of `engineStatus`**, and `engineCrash` never writes it. It
-explains an unreachable engine and lets the Dock offer Restart, so that button
-can appear a poll before the light turns. The Dock reads it for the connection
-tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
+only classifier of `engineStatus`**, and `engineCrash` never writes it. A
+`crashed` push invalidates `queryKeys.health.status()`, and nothing else, so the
+poll's verdict follows within a retry rather than a whole healthy interval
+(issue #3493). For the gap until it does, `selectKnownEngineStatus` (exported
+beside the store) derives the status the app shows: `unreachable` when a crash
+was pushed after the poll's last verdict and that verdict is `connected`,
+`engineStatus` itself otherwise. `engineCrashAheadOfPoll` carries the "after":
+`setEngineCrash` sets it with a crash, and every `setEngineStatus` clears it,
+including the one `useHealthQuery` makes for each answered poll, an unchanged
+answer too (structural sharing would otherwise keep the sync effect from
+running). The crash alone cannot decide, because it stays until `ready`, which
+can trail the poll that already sees a restarted engine answer. The Dock's light and `useEngineServing` (the gate behind the
+running-services count and the Services drawer's rows) read it, so neither says
+"connected" beside the Restart a crash put there. The Dock reads `engineCrash`
+for the connection tooltip (`describeEngineCrash`, `engineCrashOutput` in `lib/engine-crash.ts`:
 the sentence, then the last three non-empty stderr lines) and ignores it while
 `engineStatus` is `starting`; `engineStartFailure` takes precedence over it in
 both the tooltip and the button (Retry, not Restart).
@@ -982,6 +993,27 @@ minute behind an engine that just came back, and nothing else pokes it sooner.
 Every registered context is safe to flush here, unlike the quit flush's
 urgency: a context with nothing pending is a no-op, and one that has never
 failed loses nothing by saving now instead of on its own schedule.
+
+**A reconnect also names the services the outage stopped** (issue #3493).
+Inboxes, mock servers and OAuth issuers live in the engine process, so the
+engine that comes back runs none of them. `recordServicesBeforeOutage`
+(`lib/services-stopped-by-restart.ts`) reads `queryKeys.inbox.list()`,
+`queryKeys.mockIssuer.list()` and `queryKeys.mockServer.list()` out of the
+cache at the outage's first sign, `useHealthQuery`'s first failed poll or
+`useEngineRestart` before it asks for the restart, because the lists' own
+poll can reach the new engine before any reconnect is noticed. What counts as
+running is `runningServicesIn`, the definition `useRunningServices` shares.
+Both reconnect branches then call `reportServicesStoppedByOutage`, which takes
+the one pending snapshot (the second caller finds none), fetches the three
+lists fresh, and raises one warning toast for the services that were running
+and are absent or `running: false` now, compared by id: it names at most three
+and counts the rest ("and 2 more"). A list read that another refetch cancels
+(the reconnect's own invalidate, a mutation's) is read again, up to three
+times. A failed fetch raises nothing and puts the snapshot back, marked
+restored, for the other path's report of the same outage; the next outage's
+first record replaces it. A list change with the engine up (an MCP stop, a
+Stop in the drawer) records nothing on its own; only one the cached lists had
+not shown yet when an outage began is named as if the restart had done it.
 
 **`triggerSave` will not report a success the context did not have.** A
 registered context can report its own failure under its id and then *resolve*
