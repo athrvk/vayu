@@ -529,7 +529,7 @@ message `Invalid 'auth': must be a JSON object`.
 | `body` (request) | object - see [The request `body` union](#the-request-body-union) |
 | `params` / `headers` (request) | array of `{key: string, value: string, enabled: bool}` |
 | `order` (collection / request) | integer from `0` to `2147483647` - see [Ordering](#ordering) |
-| `parentId` (collection) | string: a collection id, or `""` for the root |
+| `parentId` (collection) | string: a collection id, or `null` or `""` for the root |
 
 Object-shaped fields are stored as JSON blobs, and every reader of one degrades
 quietly when it is not an object - `variables` reads back empty, a request `body`

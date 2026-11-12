@@ -727,15 +727,12 @@ class Database {
      * @brief Rewrite every collection stored with `parent_id = ''` to NULL,
      *        trashed rows included, and answer how many were rewritten.
      *
-     * `""` was a second spelling of the tree root until #3451, read as root by
-     * some paths and as a missing parent by others (a restore re-parented
-     * such a row and said its parent was gone). The write paths store NULL
-     * now (`read_parent_id_field`); these are the rows written before.
+     * `""` was a second spelling of the tree root until #3451; the write
+     * paths store NULL now (`read_parent_id_field`).
      *
      * Idempotent and unmarked, unlike `strip_stored_managed_headers`: both
-     * statements are served by `idx_collections_parent_id`, so a workspace
-     * with nothing to rewrite pays one index probe per start, and a `''` an
-     * older engine writes after a downgrade is caught on the next start.
+     * statements are served by `idx_collections_parent_id`, so a clean
+     * workspace pays one index probe per start.
      * Saves a `pre-repair` snapshot before the first rewrite and throws,
      * rewriting nothing, when it cannot.
      */

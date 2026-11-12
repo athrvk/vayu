@@ -931,9 +931,7 @@ apply_int_field (const nlohmann::json& json, const char* key, int& out, int defa
  * gives absent or `null` a meaning (append) tests for it first. @p where
  * names the entry of a batch (`move at index 2`), empty for a whole body.
  *
- * Not `apply_int_field`, which ignores a non-integer and narrows without a
- * bound: an `order` it dropped stored the top slot, and one it narrowed
- * wrapped to a negative slot that sorts first.
+ * Not `apply_int_field`: it ignores a non-integer and narrows without a bound.
  */
 [[nodiscard]] inline RouteResult
 read_order_field (const nlohmann::json& value, int& out, std::string_view where = {}) {
