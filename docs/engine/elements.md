@@ -342,9 +342,23 @@ kind) on a request's own `elements`, both at write time and in `GET /elements/ki
 `collectionOnly` flag, because a once-per-run element attached to one request in the tree has no
 answer to "once per run, or once per request that happens to carry it". Their `apply` follows the
 same callback shape as `script.pre` / `script.post`, through the new `ElementContext::run_setup_script`
-/ `run_teardown_script` pair: the sequential runner and the load path's `execute_load_test` compile the
-collection's own `elements` once (never a step's inherited copy) and dispatch `Phase::RunStart` /
-`Phase::RunEnd` against it directly, outside the step pipeline entirely. A **single-request** load
+/ `run_teardown_script` pair, dispatched against `Phase::RunStart` / `Phase::RunEnd` directly,
+outside the step pipeline entirely (never a step's inherited copy). Which collections' elements a
+collection run dispatches is its **lifecycle set** (#3456), resolved once at run start by
+`resolve_lifecycle_collections` (`scenario_plan.cpp`): the ancestor chain root first
+(`collection_chain`, ending at the run collection), then, on a `recursive` run, every live folder
+beneath it depth-first in sidebar order (each parent's sub-folders in `get_collections` order,
+`sibling_order.hpp`'s rule among folders), a visited set ending a `parent_id` cycle. A collection
+declaring neither kind is left out, and each kept element is compiled with
+`collection_element_origin`'s stamp, the one `compose_elements` gives a step's inherited elements,
+so a `lifecycle` row's `origin` names its collection. Both run modes dispatch it through the same
+`run_scenario_setup` / `run_scenario_teardown` (`scenario_runner.cpp`): each collection's setups
+run with `RunVariableScopes` bound to that collection, the pass stops after the first collection
+whose setup refuses, and teardown walks the same held list in reverse. A load run resolves the set
+once in `execute_load_test` and holds it on `RunContext::lifecycle` for teardown; its scopes
+(`scenario_load_scopes`, every lifecycle and step collection's chain) are what `LoadScopeBases`
+binds each step's base from after setup, and what `ScenarioLoadState::lifecycle_scopes` keeps for
+teardown. A **single-request** load
 run has no collection row to compile that array from - it compiles `POST /runs`'s own top-level
 `lifecycleElements` array instead (issue #1573), the same two kinds only, checked the same
 `ElementOwner::Collection` way; `validate_lifecycle_elements_run_override` refuses it outright

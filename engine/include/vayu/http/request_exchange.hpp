@@ -213,6 +213,12 @@ class RunVariableScopes {
     /// Every scope's change written back, by @ref persist_script_variables.
     void persist (vayu::db::Database& db, const std::function<void ()>& before_write = {});
 
+    /// Empties the run-local scope (`pm.variables`), which every binding
+    /// shares.
+    void clear_local () {
+        scopes_.local.clear ();
+    }
+
     private:
     /// Copy the bound leaf's variables back to its state.
     void stow_bound_leaf ();
@@ -417,7 +423,7 @@ std::vector<vayu::http::CookieWrite>* writes);
  *
  * The run-local scope (#2564) rides here too, which is what makes it per-VU:
  * it starts each iteration empty (a load run's base scopes hold no local,
- * `run_collection_setup` discards what `script.setup` set) and is the one
+ * `run_scenario_load_setup` discards what `script.setup` set) and is the one
  * part `clear_local` drops at the iteration boundary. The environment,
  * collection and globals entries live as long as the VU (#3044), so a token
  * a `control.once` login extracted still answers every later iteration.

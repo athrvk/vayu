@@ -524,7 +524,7 @@ struct RunContext {
     /// @ref lifecycle_scopes, flattened once (issue #1594) - the "base" every
     /// submission's own `ScopeOverlay` layers onto, on the same
     /// `LoadScopeBases::Base::vars` precedent: flattened once per run,
-    /// never per submission. Populated by `run_collection_setup` alongside
+    /// never per submission. Populated by `run_request_lifecycle_setup` alongside
     /// `lifecycle_scopes` whenever @ref step_elements is non-empty, even for
     /// a run that declares no `lifecycleElements` at all.
     vayu::http::VariableValues step_base_vars;
@@ -614,15 +614,23 @@ struct RunContext {
     /// after every other one has joined.
     std::vector<vayu::core::ElementOutcome> setup_outcomes;
 
-    /// The scopes `run_collection_setup` loaded for a **single-request**
-    /// run's own `lifecycleElements` (issue #1573) - a scenario run keeps its
-    /// own copy on `ScenarioLoadState::scope_bases` instead, since a scenario
-    /// load run's VUs need it too; this member exists only so
-    /// `run_collection_teardown` can read back the same scopes `script.setup`
-    /// wrote into, for the one run shape with no `ScenarioLoadState` to hold
-    /// them. Safe unguarded for the same reason `setup_outcomes` above is:
-    /// written by `execute_load_test` before any other thread of this run
-    /// exists, read by `finish_load_test` after every other one has joined.
+    /// A scenario load run's lifecycle set (#3456), resolved once by its
+    /// setup and walked again in reverse by its teardown, so an edit to the
+    /// tree mid-run changes neither end. Null for a single-request run and
+    /// for one whose setup has not run. Safe unguarded for the same reason
+    /// `setup_outcomes` above is.
+    std::shared_ptr<const std::vector<LifecycleCollection>> lifecycle;
+
+    /// The scopes `run_request_lifecycle_setup` loaded for a
+    /// **single-request** run's own `lifecycleElements` (issue #1573) - a
+    /// scenario run keeps its own on `ScenarioLoadState::lifecycle_scopes`
+    /// instead, since a scenario load run's VUs need them too; this member
+    /// exists only so `run_collection_teardown` can read back the same scopes
+    /// `script.setup` wrote into, for the one run shape with no
+    /// `ScenarioLoadState` to hold them. Safe unguarded for the same reason
+    /// `setup_outcomes` above is: written by `execute_load_test` before any
+    /// other thread of this run exists, read by `finish_load_test` after every
+    /// other one has joined.
     vayu::http::routes::ScriptVariableScopes lifecycle_scopes;
 
     /**

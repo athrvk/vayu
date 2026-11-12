@@ -10269,7 +10269,11 @@ the same request does, and the two cannot drift apart.
   collection is read once, so what one step writes into a folder is what a
   later step in that folder, or in a folder below it, reads; a sibling folder
   does not see it. A `script.setup` and `script.teardown` read and write the
-  collection being run. Every collection a script changed is written back to
+  collection that declares them (#3456): the run's lifecycle set is every
+  collection from the root down to the one being run and, on a `recursive`
+  run, every folder beneath it, set up root first and torn down in reverse
+  (see `lifecycle` under
+  [`GET /runs/:runId/report`](#get-runsrunidreport)). Every collection a script changed is written back to
   its own row in the one write at the end, which comes after `script.teardown`
   (#3249): a teardown's `pm.environment.set` / `pm.globals.set` is saved with
   the steps' writes. A load run persists no variable, a teardown's included.
@@ -10790,12 +10794,16 @@ knob.
   users is not the thing being measured.
 - **Variables are each step's own folder's** (#3248), as in a design-mode
   collection run: the environment and globals the run loaded, and the chain
-  from the root collection down to the folder the step's request sits in, the
-  run collection's entry as `script.setup` left it. All of it is read once,
-  before the first request, so a recursive run sends a sub-folder's `{{name}}`
-  with that folder's value whether or not the plan carries a script. A
-  `script.setup` and `script.teardown` read the collection being run. Nothing
-  a load run's scripts write is saved.
+  from the root collection down to the folder the step's request sits in,
+  each entry as the run's `script.setup` scripts left it. All of it is read
+  once, before the first request, so a recursive run sends a sub-folder's
+  `{{name}}` with that folder's value whether or not the plan carries a
+  script. A `script.setup` and `script.teardown` read and write the collection
+  that declares them, from the same lifecycle set a design-mode run uses
+  (#3456; see `lifecycle` under
+  [`GET /runs/:runId/report`](#get-runsrunidreport)), so what a folder's setup
+  writes reaches the steps in that folder and the folders below it. Nothing a
+  load run's scripts write is saved.
 - **The element pipeline runs here too, per virtual user (issue #1495).**
   `extract.*` and `assert.*` always run - before the send (`step.before`) and
   after the response (`step.after`). A `script.pre` / `script.post` element
@@ -13444,13 +13452,21 @@ what ran once at the run's own boundary, never at a step. Each key is present
 only when that phase ran at least one element (`ElementOutcome`'s usual shape:
 `id`, `kind`, `name?`, `origin`, `outcome`, `message?`, `waitedMs?`, plus the two lists
 below); absent entirely,
-not `{}`, for a run whose collection (or, for a single-request run, whose own
-`lifecycleElements` array - issue #1573) declared neither. A `script.setup` outcome
+not `{}`, for a run whose collections (or, for a single-request run, whose own
+`lifecycleElements` array - issue #1573) declared neither. A collection run's
+elements come from its lifecycle set (#3456): every collection from the root
+down to the one being run and, on a `recursive` run, every folder beneath it in
+sidebar order, a folder before the folders nested in it. `setup` lists them in
+that order and `teardown` in reverse, and each row's `origin` is
+`{kind: "collection", scope: "collection" | "folder", id, name}`, naming whose
+script it was. A `script.setup` outcome
 other than `"ok"` or `"skipped"` means setup refused the run before it sent
 anything: `status` is `Failed`, no step ran, and the run still stores a summary
-whose `lifecycle.setup` holds that outcome with its `message` (#3455), every
+whose `lifecycle.setup` holds every setup that ran up to and including that
+outcome with its `message` (#3455), every
 other section above absent or zeroed - so a reader who finds one here knows why
-the rest of the report is empty. No teardown runs on such a run, so it has no
+the rest of the report is empty. The collections after the refusing one set up
+nothing. No teardown runs on such a run, so it has no
 `teardown` key. A `script.teardown`
 outcome of `"error"` carries the thrown message but never changes `status`: a
 teardown failure is reported, not fatal. A script that ran and failed only

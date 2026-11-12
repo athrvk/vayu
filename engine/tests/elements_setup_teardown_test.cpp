@@ -9,7 +9,9 @@
  * @file tests/elements_setup_teardown_test.cpp
  * @brief `script.setup` / `script.teardown` (issue #1499): collection-only
  *        placement, and the two new `run.start` / `run.end` dispatch sites in
- *        the sequential runner and the load path.
+ *        the sequential runner and the load path, over a run's lifecycle set
+ *        (#3456): the chain above the run collection and, on a recursive
+ *        run, every folder beneath it.
  *
  * The dispatch tests drive `RunManager::start_scenario_run` /
  * `RunManager::start_run` directly against a real database and an in-process
@@ -25,8 +27,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,6 +46,7 @@
 #include "vayu/core/elements.hpp"
 #include "vayu/core/run_manager.hpp"
 #include "vayu/core/scenario_plan.hpp"
+#include "vayu/core/scenario_runner.hpp"
 #include "vayu/db/database.hpp"
 #include "vayu/http/client.hpp"
 #include "vayu/http/cookie_jar.hpp"
@@ -250,13 +255,42 @@ class ScriptLifecycleTest : public ::testing::Test {
 
     /// `col_1`, carrying @p elements as its own `script.setup` / `.teardown`.
     void seed_collection (const json& elements) {
+        seed_folder ("col_1", std::nullopt, 0, elements);
+    }
+
+    /// Collection @p id named `Collection <id>` under @p parent_id (a root
+    /// when absent) at sibling position @p order, carrying @p elements.
+    void seed_folder (const std::string& id,
+    const std::optional<std::string>& parent_id,
+    int order,
+    const json& elements) {
         vayu::db::Collection col;
-        col.id         = "col_1";
-        col.name       = "Collection col_1";
+        col.id         = id;
+        col.parent_id  = parent_id;
+        col.name       = "Collection " + id;
         col.elements   = elements.dump ();
+        col.order      = order;
         col.created_at = 1;
         col.updated_at = 1;
         db_->create_collection (col);
+    }
+
+    /// Request @p id in @p collection_id at sibling position @p order, sent to
+    /// `/ok` with @p query.
+    void seed_request_in (const std::string& id,
+    const std::string& collection_id,
+    int order,
+    const std::string& query) {
+        vayu::db::Request r;
+        r.id            = id;
+        r.collection_id = collection_id;
+        r.name          = "Request " + id;
+        r.method        = vayu::HttpMethod::GET;
+        r.url           = server_->url ("/ok") + "?" + query;
+        r.order         = order;
+        r.created_at    = 1;
+        r.updated_at    = 1;
+        db_->save_request (r);
     }
 
     /// One request in `col_1`, its URL carrying an unresolved
@@ -277,9 +311,11 @@ class ScriptLifecycleTest : public ::testing::Test {
         db_->save_request (r);
     }
 
-    vayu::core::ScenarioExecution resolve (size_t iterations) {
-        json scenario{ { "source", "collection" }, { "collectionId", "col_1" },
-            { "iterations", iterations } };
+    vayu::core::ScenarioExecution resolve (size_t iterations,
+    const std::string& collection_id = "col_1",
+    bool recursive                   = false) {
+        json scenario{ { "source", "collection" }, { "collectionId", collection_id },
+            { "iterations", iterations }, { "recursive", recursive } };
         vayu::core::ScenarioResolveOptions options;
         options.timeout_ms           = 5000;
         options.limits.max_steps     = 200;
@@ -297,11 +333,11 @@ class ScriptLifecycleTest : public ::testing::Test {
         return execution;
     }
 
-    /// Runs `col_1`'s plan sequentially and waits for a terminal status.
+    /// Runs @p execution's plan sequentially and waits for a terminal status.
     vayu::RunStatus run_sequential (const vayu::core::ScenarioExecution& execution,
     bool allow_script_requests = false) {
         const json scenario{ { "source", "collection" },
-            { "collectionId", "col_1" }, { "iterations", 1 } };
+            { "collectionId", execution.request.collection_id }, { "iterations", 1 } };
         const json config{ { "scenario", scenario },
             { "allowScriptRequests", allow_script_requests } };
 
@@ -325,14 +361,15 @@ class ScriptLifecycleTest : public ::testing::Test {
         return await_terminal (run_id);
     }
 
-    /// Runs `col_1`'s plan as a scenario load run (through the same
+    /// Runs @p execution's plan as a scenario load run (through the same
     /// `execute_load_test` / `finish_load_test` production uses) and waits
     /// for a terminal status.
     vayu::RunStatus run_load (const vayu::core::ScenarioExecution& execution,
     size_t iterations,
     size_t concurrency,
     bool allow_script_requests = false) {
-        const json scenario{ { "source", "collection" }, { "collectionId", "col_1" } };
+        const json scenario{ { "source", "collection" },
+            { "collectionId", execution.request.collection_id } };
         const json config{ { "scenario", scenario }, { "mode", "iterations" },
             { "iterations", iterations }, { "concurrency", concurrency },
             { "allowScriptRequests", allow_script_requests } };
@@ -657,7 +694,7 @@ TEST_F (ScriptLifecycleTest, SequentialSetupLocalReachesTheFirstStep) {
 // Under load each virtual user owns its own local scope, starting empty, and
 // setup is no user's iteration, so its local ends with it and every
 // submission keeps the literal token. Mutation check: drop
-// `base_scopes.local.clear ()` from `run_collection_setup` (run_manager.cpp)
+// `run_scopes.clear_local ()` from `run_scenario_load_setup` (run_manager.cpp)
 // and every hit carries the value.
 TEST_F (ScriptLifecycleTest, LoadSetupLocalReachesNoVirtualUser) {
     seed_collection (script_setup_element (
@@ -903,12 +940,18 @@ TEST_F (ScriptLifecycleTest, SingleRequestThrowingSetupFailsTheRunWithNoSubmissi
     expect_refusing_setup (report_lifecycle_of ("run_single"), "error", "boom");
 }
 
+// A `lifecycleElements` entry has no collection, so its logged refusal is the
+// outcome's message alone (#3456).
 TEST_F (ScriptLifecycleTest, SingleRequestSetupWithAFailingTestFailsTheRunAndSaysWhich) {
+    const vayu::tests::LogCapture log;
     EXPECT_EQ (run_single_request_load (script_setup_element (FAILING_TEST_SETUP),
                /*iterations=*/1, /*concurrency=*/3),
     vayu::RunStatus::Failed);
     EXPECT_TRUE (server_->requests ().empty ());
     expect_refusing_setup (report_lifecycle_of ("run_single"), "failed", FAILING_TEST_MESSAGE);
+    const auto records = log.with_msg_prefix ("script.setup failed");
+    ASSERT_EQ (records.size (), 1u);
+    EXPECT_EQ (records[0].value ("scriptError", ""), FAILING_TEST_MESSAGE);
 }
 
 // The single-request half of LoadSetupFailureLogsTheThrownTextAsABoundedField.
@@ -971,6 +1014,336 @@ TEST_F (ScriptLifecycleTest, SingleRequestTeardownSeesTheActualSentCount) {
     ASSERT_NE (teardown_hit, hits.end ());
     EXPECT_NE (teardown_hit->target.find ("teardownSawSent=3"), std::string::npos)
     << teardown_hit->target;
+}
+
+// ============================================================================
+// The lifecycle set (#3456): the chain above the run collection and, on a
+// recursive run, every folder beneath it
+// ============================================================================
+
+/// A `script.setup` and a `script.teardown`, each pinging `/ok?mark=<who>-...`
+/// so the mock's hit order shows when it ran beside the steps; @p setup_extra
+/// and @p teardown_extra run after each one's ping. The teardown's ping also
+/// carries `saw=`, the `subToken` its collection's chain answers, which says
+/// which collection it was bound to.
+json marking_lifecycle (const LifecycleMockServer& server,
+const std::string& who,
+const std::string& setup_extra    = "",
+const std::string& teardown_extra = "") {
+    const std::string url = server.url ("/ok") + "?mark=" + who;
+    return setup_and_teardown_elements (
+    "pm.sendRequest('" + url + "-setup', function () {});" + setup_extra,
+    "pm.sendRequest('" + url + "-teardown&saw=' + pm.collectionVariables.get('subToken'), function () {});" +
+    teardown_extra);
+}
+
+/// Every hit's query, in the order the mock saw them.
+std::vector<std::string> hit_queries (const std::vector<SeenRequest>& hits) {
+    std::vector<std::string> queries;
+    queries.reserve (hits.size ());
+    for (const auto& hit : hits) {
+        queries.push_back (hit.target.substr (hit.target.find ('?') + 1));
+    }
+    return queries;
+}
+
+/// The `origin.id` of each row of @p rows, in order.
+std::vector<std::string> origin_ids (const json& rows) {
+    std::vector<std::string> ids;
+    for (const auto& row : rows) {
+        ids.push_back (row.value ("origin", json::object ()).value ("id", ""));
+    }
+    return ids;
+}
+
+enum class RunMode : std::uint8_t { Sequential, Load };
+
+/// Every case runs as a sequential collection run and as a scenario load run
+/// of one iteration on one virtual user, so the mock sees one order either way.
+class LifecycleSetRunTest : public ScriptLifecycleTest,
+                            public ::testing::WithParamInterface<RunMode> {
+    protected:
+    /// `col_1` (one request) holding the sub-folder `col_sub` (one request
+    /// whose URL reads `{{subToken}}`, which only `col_sub`'s setup writes),
+    /// each with a marking setup and teardown.
+    void seed_root_and_sub_folder () {
+        seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
+        seed_request_in ("req_root", "col_1", 0, "step=root");
+        seed_folder ("col_sub", "col_1", 1,
+        marking_lifecycle (*server_, "sub", "pm.collectionVariables.set('subToken', 'from-sub');"));
+        seed_request_in ("req_sub", "col_sub", 0, "step=sub&tok={{subToken}}");
+    }
+
+    /// Runs @p execution in this case's mode, script requests allowed.
+    vayu::RunStatus run (const vayu::core::ScenarioExecution& execution) {
+        if (GetParam () == RunMode::Load) {
+            return run_load (execution, /*iterations=*/1, /*concurrency=*/1,
+            /*allow_script_requests=*/true);
+        }
+        return run_sequential (execution, /*allow_script_requests=*/true);
+    }
+
+    [[nodiscard]] json lifecycle () {
+        return report_lifecycle_of (GetParam () == RunMode::Load ? "run_load" : "run_seq");
+    }
+
+    /// The refusal text this case's mode logged for a failed setup: a load
+    /// run's `script.setup failed` record's `scriptError`, or the error a
+    /// sequential run threw, on its `Scenario run error` record.
+    [[nodiscard]] std::string logged_refusal (const vayu::tests::LogCapture& log) const {
+        const bool load = GetParam () == RunMode::Load;
+        const auto records =
+        log.with_msg_prefix (load ? "script.setup failed" : "Scenario run error");
+        if (records.size () != 1) {
+            ADD_FAILURE () << "expected one refusal record, got " << records.size ();
+            return {};
+        }
+        return records[0].value (load ? "scriptError" : "error", "");
+    }
+};
+
+INSTANTIATE_TEST_SUITE_P (BothRunModes,
+LifecycleSetRunTest,
+::testing::Values (RunMode::Sequential, RunMode::Load),
+[] (const ::testing::TestParamInfo<RunMode>& info) {
+    return info.param == RunMode::Load ? "Load" : "Sequential";
+});
+
+// The sub-folder's setup writes the sub-folder's variables: its step and its
+// teardown read `subToken`, the root's teardown does not. Mutation checks:
+// make `resolve_lifecycle_collections` (scenario_plan.cpp) return before it
+// walks the subtree and the `sub-*` hits and rows disappear; bind every setup
+// to the run collection in `run_scenario_setup` (scenario_runner.cpp) and the
+// root's teardown sees `from-sub`; under load, bind every base to the run
+// collection in `LoadScopeBases`' constructor (scenario_load.cpp) and the
+// sub-folder's step sends its literal `{{subToken}}`.
+TEST_P (LifecycleSetRunTest, ARecursiveRunSetsUpRootFirstAndTearsDownInReverse) {
+    seed_root_and_sub_folder ();
+    auto execution = resolve (1, "col_1", /*recursive=*/true);
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=root", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
+
+    const auto report = lifecycle ();
+    EXPECT_EQ (origin_ids (report.value ("setup", json::array ())),
+    (std::vector<std::string>{ "col_1", "col_sub" }));
+    EXPECT_EQ (origin_ids (report.value ("teardown", json::array ())),
+    (std::vector<std::string>{ "col_sub", "col_1" }));
+    const auto setup = report.value ("setup", json::array ());
+    ASSERT_EQ (setup.size (), 2u);
+    EXPECT_EQ (setup[0]["origin"],
+    (json{ { "kind", "collection" }, { "scope", "collection" },
+    { "id", "col_1" }, { "name", "Collection col_1" } }));
+    EXPECT_EQ (setup[1]["origin"],
+    (json{ { "kind", "collection" }, { "scope", "folder" }, { "id", "col_sub" },
+    { "name", "Collection col_sub" } }));
+}
+
+// Mutation checks: drop the ancestor half of `resolve_lifecycle_collections`
+// (start the list at the run collection) and the `root-*` hits disappear;
+// walk teardown forwards in `run_scenario_teardown` and the two teardowns
+// swap.
+TEST_P (LifecycleSetRunTest, RunningTheSubFolderAloneRunsTheRootsSetupFirst) {
+    seed_root_and_sub_folder ();
+    auto execution = resolve (1, "col_sub");
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
+}
+
+// A run that is not recursive sends only the run collection's own requests,
+// so no folder beneath it is one the run sends from.
+TEST_P (LifecycleSetRunTest, ARunThatIsNotRecursiveLeavesTheSubFoldersOut) {
+    seed_root_and_sub_folder ();
+    auto execution = resolve (1, "col_1", /*recursive=*/false);
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{
+    "mark=root-setup", "step=root", "mark=root-teardown&saw=undefined" }));
+}
+
+// A refusing folder setup fails the run as the run collection's would, its
+// row and the logged refusal naming the folder; the collections after it set
+// up nothing and nothing tears down. Mutation checks: drop the per-collection
+// `lifecycle_refusal` check in `run_scenario_setup` (scenario_runner.cpp) and
+// `col_later`'s setup runs; return the bare message from `lifecycle_refusal`
+// and the logged text names no folder.
+TEST_P (LifecycleSetRunTest, ARefusingFolderSetupFailsTheRunAndNamesTheFolder) {
+    const vayu::tests::LogCapture log;
+    seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
+    seed_folder ("col_sub", "col_1", 0,
+    marking_lifecycle (*server_, "sub", "throw new Error('sub boom');"));
+    seed_folder ("col_later", "col_1", 1, marking_lifecycle (*server_, "later"));
+    seed_request_in ("req_sub", "col_sub", 0, "step=sub");
+    auto execution = resolve (1, "col_1", /*recursive=*/true);
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Failed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup" }));
+    const auto report = lifecycle ();
+    EXPECT_FALSE (report.contains ("teardown")) << report.dump ();
+    const auto setup = report.value ("setup", json::array ());
+    EXPECT_EQ (origin_ids (setup), (std::vector<std::string>{ "col_1", "col_sub" }));
+    ASSERT_EQ (setup.size (), 2u);
+    EXPECT_EQ (setup[0].value ("outcome", ""), "ok");
+    EXPECT_EQ (setup[1].value ("outcome", ""), "error");
+    EXPECT_NE (setup[1].value ("message", "").find ("sub boom"), std::string::npos)
+    << setup[1].dump ();
+    EXPECT_EQ (setup[1]["origin"].value ("name", ""), "Collection col_sub");
+
+    const std::string refusal = logged_refusal (log);
+    const std::string named   = "folder 'Collection col_sub': ";
+    EXPECT_TRUE (refusal.starts_with (
+    GetParam () == RunMode::Load ? named : "script.setup failed: " + named))
+    << refusal;
+    EXPECT_NE (refusal.find ("sub boom"), std::string::npos) << refusal;
+}
+
+// A throwing folder teardown is recorded under `lifecycle.teardown` and the
+// run collection's teardown still runs after it; the run's status is the
+// steps'. Mutation check: stop `run_scenario_teardown` (scenario_runner.cpp)
+// at the first teardown that refuses and the root's teardown never runs.
+TEST_P (LifecycleSetRunTest, AThrowingFolderTeardownStillTearsDownItsAncestors) {
+    seed_folder ("col_1", std::nullopt, 0, marking_lifecycle (*server_, "root"));
+    seed_folder ("col_sub", "col_1", 0,
+    marking_lifecycle (*server_, "sub", "pm.collectionVariables.set('subToken', 'from-sub');",
+    "throw new Error('sub teardown boom');"));
+    seed_request_in ("req_sub", "col_sub", 0, "step=sub&tok={{subToken}}");
+    auto execution = resolve (1, "col_1", /*recursive=*/true);
+
+    EXPECT_EQ (run (execution), vayu::RunStatus::Completed);
+
+    EXPECT_EQ (hit_queries (server_->requests ()),
+    (std::vector<std::string>{ "mark=root-setup", "mark=sub-setup", "step=sub&tok=from-sub",
+    "mark=sub-teardown&saw=from-sub", "mark=root-teardown&saw=undefined" }));
+    const auto teardown = lifecycle ().value ("teardown", json::array ());
+    EXPECT_EQ (origin_ids (teardown), (std::vector<std::string>{ "col_sub", "col_1" }));
+    ASSERT_EQ (teardown.size (), 2u);
+    EXPECT_EQ (teardown[0].value ("outcome", ""), "error");
+    EXPECT_NE (teardown[0].value ("message", "").find ("sub teardown boom"), std::string::npos)
+    << teardown[0].dump ();
+    EXPECT_EQ (teardown[1].value ("outcome", ""), "ok");
+}
+
+/// A refusing setup outcome carrying @p origin.
+vayu::core::ElementOutcome refusing_outcome (const json& origin) {
+    vayu::core::ElementOutcome outcome;
+    outcome.status  = "error";
+    outcome.message = "Error: boom";
+    outcome.origin  = origin;
+    return outcome;
+}
+
+// The refusal leads with the collection's name, then its id, then nothing:
+// an element no collection declared, or an origin a client wrote that names
+// neither as a string. Mutation check: drop the id fallback in
+// `refusing_collection` (scenario_runner.cpp) and the second case loses it.
+TEST (LifecycleRefusalTest, LeadsWithTheCollectionTheOriginNames) {
+    const auto refusal_of = [] (const json& origin) {
+        return vayu::core::lifecycle_refusal ({ refusing_outcome (origin) }).value_or ("");
+    };
+    EXPECT_EQ (
+    refusal_of ({ { "scope", "folder" }, { "id", "col_sub" }, { "name", "Users" } }),
+    "folder 'Users': Error: boom");
+    EXPECT_EQ (refusal_of ({ { "scope", "collection" }, { "id", "col_1" } }),
+    "collection 'col_1': Error: boom");
+    EXPECT_EQ (refusal_of (json::object ()), "Error: boom");
+    EXPECT_EQ (refusal_of ({ { "name", 7 }, { "id", json::array () } }), "Error: boom");
+}
+
+// ============================================================================
+// resolve_lifecycle_collections, read straight off the database
+// ============================================================================
+
+/// The collection ids of @p lifecycle, in order.
+std::vector<std::string> lifecycle_ids (
+const std::vector<vayu::core::LifecycleCollection>& lifecycle) {
+    std::vector<std::string> ids;
+    ids.reserve (lifecycle.size ());
+    for (const auto& collection : lifecycle) {
+        ids.push_back (collection.collection_id);
+    }
+    return ids;
+}
+
+// Pre-order in sidebar order: `col_b` was written first but sits after
+// `col_a`, and `col_a`'s own sub-folder comes before `col_b`. Mutation check:
+// push a parent's children onto the stack unreversed in `folders_beneath` and
+// `col_b` comes before `col_a`.
+TEST_F (ScriptLifecycleTest, TheLifecycleSetWalksTheSubtreeDepthFirstInSidebarOrder) {
+    const auto setup = script_setup_element ("1;");
+    seed_folder ("col_1", std::nullopt, 0, setup);
+    seed_folder ("col_b", "col_1", 1, setup);
+    seed_folder ("col_a", "col_1", 0, setup);
+    seed_folder ("col_a1", "col_a", 0, setup);
+
+    EXPECT_EQ (
+    lifecycle_ids (vayu::core::resolve_lifecycle_collections (*db_, "col_1", true)),
+    (std::vector<std::string>{ "col_1", "col_a", "col_a1", "col_b" }));
+    EXPECT_EQ (
+    lifecycle_ids (vayu::core::resolve_lifecycle_collections (*db_, "col_a1", true)),
+    (std::vector<std::string>{ "col_1", "col_a", "col_a1" }));
+    EXPECT_EQ (
+    lifecycle_ids (vayu::core::resolve_lifecycle_collections (*db_, "col_1", false)),
+    (std::vector<std::string>{ "col_1" }));
+}
+
+// A folder with no `run.start` / `run.end` element is no entry, and an entry
+// keeps only those two kinds of its collection's elements, each stamped.
+TEST_F (ScriptLifecycleTest, TheLifecycleSetKeepsOnlyRunBoundaryElements) {
+    json root_elements = setup_and_teardown_elements ("1;", "2;");
+    root_elements.push_back ({ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "3;" } } } });
+    seed_folder ("col_1", std::nullopt, 0, root_elements);
+    seed_folder ("col_plain", "col_1", 0,
+    json::array ({ json{ { "id", "el_pre" }, { "kind", "script.pre" },
+    { "config", { { "script", "3;" } } } } }));
+
+    const auto lifecycle = vayu::core::resolve_lifecycle_collections (*db_, "col_1", true);
+    ASSERT_EQ (lifecycle_ids (lifecycle), (std::vector<std::string>{ "col_1" }));
+    const auto& elements = lifecycle.front ().elements;
+    ASSERT_EQ (elements.size (), 2u);
+    EXPECT_EQ (elements[0].kind, "script.setup");
+    EXPECT_EQ (elements[1].kind, "script.teardown");
+    EXPECT_EQ (elements[0].scope, "collection");
+    EXPECT_EQ (elements[0].origin.value ("id", ""), "col_1");
+}
+
+// A trashed folder's setup does not run, and neither does that of a folder
+// beneath it. Mutation check: drop the `deleted_at` filter from
+// `Database::get_collections` and `col_gone` returns.
+TEST_F (ScriptLifecycleTest, TheLifecycleSetLeavesATrashedFolderOut) {
+    const auto setup = script_setup_element ("1;");
+    seed_folder ("col_1", std::nullopt, 0, setup);
+    seed_folder ("col_gone", "col_1", 0, setup);
+    seed_folder ("col_gone_child", "col_gone", 0, setup);
+    seed_folder ("col_kept", "col_1", 1, setup);
+    db_->delete_collection ("col_gone");
+
+    EXPECT_EQ (
+    lifecycle_ids (vayu::core::resolve_lifecycle_collections (*db_, "col_1", true)),
+    (std::vector<std::string>{ "col_1", "col_kept" }));
+}
+
+// A `parent_id` cycle names each collection once. Mutation check: stop
+// seeding the subtree's visited set with the chain in
+// `resolve_lifecycle_collections` and `col_y` is listed twice.
+TEST_F (ScriptLifecycleTest, TheLifecycleSetVisitsACycleOnce) {
+    const auto setup = script_setup_element ("1;");
+    seed_folder ("col_x", std::string ("col_y"), 0, setup);
+    seed_folder ("col_y", std::string ("col_x"), 0, setup);
+
+    const auto lifecycle = vayu::core::resolve_lifecycle_collections (*db_, "col_x", true);
+    EXPECT_EQ (lifecycle_ids (lifecycle), (std::vector<std::string>{ "col_y", "col_x" }));
 }
 
 } // namespace

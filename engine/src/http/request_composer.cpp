@@ -913,6 +913,15 @@ collection_chain (vayu::db::Database& db, const std::string& leaf_id) {
     return chain;
 }
 
+nlohmann::json collection_element_origin (const vayu::db::Collection& collection, bool is_root) {
+    nlohmann::json origin = { { "kind", "collection" },
+        { "scope", is_root ? "collection" : "folder" }, { "id", collection.id } };
+    if (!collection.name.empty ()) {
+        origin["name"] = collection.name;
+    }
+    return origin;
+}
+
 namespace {
 
 // Fetch the "mode" of an auth JSON, "" when absent or not a string.
@@ -1018,27 +1027,19 @@ const std::unordered_set<std::string>& disabled) {
 }
 
 // One level's composed elements (`is_composed_element`), each stamped with
-// where it came from. `origin_scope` adds the folder level `origin_kind` does
-// not distinguish (#2522); `kind` keeps its two values because its readers
-// branch on them.
+// @p origin, where it came from. `origin.scope` adds the folder level
+// `origin.kind` does not distinguish (#2522); `kind` keeps its two values
+// because its readers branch on them.
 void emit_level (nlohmann::json& out,
 const nlohmann::json& elements,
 const std::unordered_set<std::string>& disabled,
-const char* origin_kind,
-const char* origin_scope,
-const std::string& origin_id,
-const std::string& origin_name) {
+const nlohmann::json& origin) {
     for (const auto& element : elements) {
         if (!is_composed_element (element, disabled)) {
             continue;
         }
         nlohmann::json stamped = element;
-        nlohmann::json origin  = { { "kind", origin_kind },
-            { "scope", origin_scope }, { "id", origin_id } };
-        if (!origin_name.empty ()) {
-            origin["name"] = origin_name;
-        }
-        stamped["origin"] = origin;
+        stamped["origin"]      = origin;
         out.push_back (std::move (stamped));
     }
 }
@@ -1065,10 +1066,11 @@ const vayu::db::Request& request) {
     nlohmann::json out = nlohmann::json::array ();
     for (size_t i = 0; i < chain.size (); ++i) {
         // The chain runs root first, so every collection after it is a folder.
-        emit_level (out, levels[i], disabled, "collection",
-        i == 0 ? "collection" : "folder", chain[i].id, chain[i].name);
+        emit_level (
+        out, levels[i], disabled, collection_element_origin (chain[i], i == 0));
     }
-    emit_level (out, levels.back (), disabled, "request", "request", request.id, "");
+    emit_level (out, levels.back (), disabled,
+    { { "kind", "request" }, { "scope", "request" }, { "id", request.id } });
     return out;
 }
 

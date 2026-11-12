@@ -238,6 +238,8 @@ describe("ElementsTab - what it renders", () => {
 		// is split across elements - matched on the banner box's text.
 		const banner = screen.getByText("before and after every request").closest(".border");
 		expect(banner).toHaveTextContent(/run\s+before and after every request/i);
+		// #3456: a lifecycle script runs once per run, for the run's whole chain.
+		expect(banner).toHaveTextContent(/setup and teardown scripts run\s+once per run/i);
 		expect(screen.getByText("Extract JSON")).toBeInTheDocument();
 	});
 

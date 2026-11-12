@@ -32,6 +32,7 @@
 #include "vayu/http/sse_stream.hpp"
 #include "vayu/platform/platform.hpp"
 #include "vayu/runtime/script_engine.hpp"
+#include "vayu/utils/invariant.hpp"
 #include "vayu/utils/json.hpp"
 #include "vayu/utils/log_text.hpp"
 #include "vayu/utils/logger.hpp"
@@ -490,17 +491,6 @@ RunContext::ScriptsOverrideMode scripts_mode) {
     return scripts;
 }
 
-/// The collections whose chains a scenario load run's steps read, one per
-/// step (#3248).
-std::vector<std::string> scenario_scope_collection_ids (const ScenarioExecution& execution) {
-    std::vector<std::string> ids;
-    ids.reserve (execution.plan.steps.size ());
-    for (const auto& step : execution.plan.steps) {
-        ids.push_back (load_step_collection_id (step, execution.request.collection_id));
-    }
-    return ids;
-}
-
 /**
  * The per-step replays of a scenario load run.
  *
@@ -709,8 +699,7 @@ vayu::db::Database& db) {
     ReplayFailures failures;
 
     if (per_step) {
-        vayu::http::routes::RunVariableScopes scopes (
-        db, environment_id, scenario_scope_collection_ids (*context->scenario));
+        auto scopes = scenario_load_scopes (db, environment_id, *context->scenario);
         totals = replay_scenario_steps (
         engine, scopes, context, sse_limits, script_send, validation, failures);
         // Every scripted step drew a blank, so the run validated nothing.
@@ -2172,21 +2161,6 @@ const nlohmann::json& config) {
     return script_config;
 }
 
-/** The collection's own `elements` array, compiled once - shared by both
- *  `script.setup`'s and `script.teardown`'s dispatch, never a step's
- *  inherited copy. Empty for an unbound or elements-free collection. */
-std::vector<vayu::core::CompiledElement>
-compile_collection_elements (vayu::db::Database& db, const std::string& collection_id) {
-    std::vector<vayu::core::CompiledElement> elements;
-    if (auto collection_row = db.get_collection (collection_id)) {
-        auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
-        if (!parsed.is_discarded ()) {
-            elements = vayu::core::compile_elements (parsed);
-        }
-    }
-    return elements;
-}
-
 /** A single-request run's own `lifecycleElements` (issue #1573), compiled
  *  once - this run shape's ephemeral, uncollected equivalent of a
  *  collection's `elements` column, validated at the route
@@ -2209,187 +2183,133 @@ const nlohmann::json& config) {
 }
 
 /**
- * `script.setup` (#1499): dispatched by `execute_load_test`, before it
- * captures `test_start`, so a setup script's own time is never folded into
- * the run's duration figures and a throwing setup fails the run before any
- * load is sent. Writes into @p base_scopes, which the caller then hands to
- * `execute_scenario_load` for a scenario run - so a setup write is visible to
- * the run's very first submission, exactly as it is to a sequential run's
- * first step. A single-request load run has no collection to declare one on;
- * it reads its own `lifecycleElements` instead (issue #1573) and the scopes
- * are also copied onto `context->lifecycle_scopes`, since this run shape has
- * no `ScenarioLoadState` for `run_collection_teardown` to read them back from.
- *
- * @return `nullopt` on success; the failed outcome's message otherwise. The
- *         caller's only remaining job on failure is to stop the run - this
- *         does not touch `context->is_running` or the run's status itself,
- *         since only the caller knows the rest of its own shutdown sequence.
+ * A scenario load run's `script.setup` (#1499, #3456): resolves the run's
+ * lifecycle set once onto `context->lifecycle`, loads @p scopes for it and
+ * every step (`scenario_load_scopes`) and runs each collection's setups bound
+ * to that collection, through the same `run_scenario_setup` a sequential run
+ * uses, so what a folder's setup writes reaches the bases of that folder's
+ * steps and the folders below it.
  */
-std::optional<std::string> run_collection_setup (vayu::db::Database& db,
+std::optional<std::string> run_scenario_load_setup (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
-vayu::http::routes::ScriptVariableScopes& base_scopes) {
-    std::vector<vayu::core::CompiledElement> collection_elements;
-    const auto environment_id = named_id (context->config, "environmentId");
-
-    if (context->scenario) {
-        base_scopes = vayu::http::routes::load_script_variable_scopes (
-        db, environment_id, context->scenario->request.collection_id);
-        collection_elements =
-        compile_collection_elements (db, context->scenario->request.collection_id);
-        if (collection_elements.empty ()) {
-            return std::nullopt;
-        }
-    } else {
-        collection_elements = compile_run_lifecycle_elements (context->config);
-        // Issue #1594: a run's own `requestElements` needs the same base
-        // scopes `lifecycleElements` does, even when it declares no
-        // `lifecycleElements` at all - so the early return below only fires
-        // when NEITHER exists to read or write them.
-        const bool needs_scopes = !collection_elements.empty () ||
-        (context->step_elements && !context->step_elements->empty ());
-        if (!needs_scopes) {
-            return std::nullopt;
-        }
-        base_scopes = vayu::http::routes::load_script_variable_scopes (db,
-        environment_id, single_request_lifecycle_collection_id (db, context->config));
-        context->lifecycle_scopes = base_scopes;
-        if (context->step_elements && !context->step_elements->empty ()) {
-            context->step_base_vars =
-            vayu::http::routes::flatten_variable_scopes (base_scopes);
-            context->step_script_config =
-            read_lifecycle_script_config (db, context->config);
-        }
-        if (collection_elements.empty ()) {
-            // Scopes are loaded for `requestElements` alone; nothing to run
-            // at `Phase::RunStart`.
-            return std::nullopt;
-        }
+std::optional<vayu::http::routes::RunVariableScopes>& scopes) {
+    const ScenarioExecution& execution = *context->scenario;
+    context->lifecycle = std::make_shared<const std::vector<LifecycleCollection>> (
+    resolve_lifecycle_collections (
+    db, execution.request.collection_id, execution.request.recursive));
+    auto& run_scopes = scopes.emplace (scenario_load_scopes (db,
+    named_id (context->config, "environmentId"), execution, *context->lifecycle));
+    if (context->lifecycle->empty ()) {
+        return std::nullopt;
     }
-
-    auto setup_config = read_lifecycle_script_config (db, context->config);
-    vayu::runtime::ScriptEngine setup_engine (setup_config);
-
-    vayu::Request lifecycle_request;
-    vayu::ScriptResult unread_pre;
-    vayu::ScriptResult unread_post;
-    vayu::core::ElementContext setup_ctx{
-        .request        = lifecycle_request,
-        .response       = nullptr,
-        .run_pre_script = [] (
-                          const std::string&) { return vayu::ScriptResult{}; },
-        .run_post_script = [] (
-                           const std::string&) { return vayu::ScriptResult{}; },
-        .pre_script_result  = unread_pre,
-        .post_script_result = unread_post,
-        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop   = nullptr,
-        .record_metric = nullptr, // metric.record is step.after only.
-        .run_setup_script =
-        [&] (const std::string& script) {
-            auto script_ctx = vayu::runtime::ScriptContext::for_setup ();
-            vayu::http::routes::bind_variable_scopes (script_ctx, base_scopes);
-            context->script_send.apply (script_ctx);
-            return vayu::http::routes::execute_script (
-            setup_engine, script, script_ctx, "Setup");
-        },
-    };
-    vayu::core::ElementPipeline::run (vayu::core::Phase::RunStart, setup_ctx,
-    collection_elements, context->setup_outcomes);
+    vayu::runtime::ScriptEngine setup_engine (
+    read_lifecycle_script_config (db, context->config));
+    auto refusal = run_scenario_setup (setup_engine, run_scopes,
+    context->script_send, *context->lifecycle, context->setup_outcomes);
     // A virtual user's local scope starts empty each iteration (#2564), and
     // setup is no user's iteration, so its `pm.variables.set` ends with it
-    // rather than reaching every user through the base scopes.
-    base_scopes.local.clear ();
-    // `run_setup_script` above binds `base_scopes` by reference and writes a
-    // `script.setup`'s `pm.environment.set`/`pm.collectionVariables.set` calls
-    // into it in place - so the copies taken before this call
-    // (`context->lifecycle_scopes`, `context->step_base_vars`) are stale the
-    // moment setup writes anything. Refreshed here, after the write, so a
-    // `requestElements` submission's residual pass and the teardown read
-    // what setup actually left rather than what existed before it ran. The
-    // scenario branch does not touch either field - its own caller re-reads
-    // `base_scopes` by reference once this function returns.
-    if (!context->scenario) {
-        context->lifecycle_scopes = base_scopes;
-        if (context->step_elements && !context->step_elements->empty ()) {
-            context->step_base_vars =
-            vayu::http::routes::flatten_variable_scopes (base_scopes);
-        }
-    }
-    for (const auto& outcome : context->setup_outcomes) {
-        if (outcome.status == "error" || outcome.status == "failed") {
-            return outcome.message.value_or ("unknown error");
-        }
-    }
-    return std::nullopt;
+    // rather than reaching every user through the bases.
+    run_scopes.clear_local ();
+    return refusal;
 }
 
 /**
- * `script.teardown` (#1499): the same elements `run_collection_setup` ran,
- * dispatched by `finish_load_test` so `pm.info.run` can carry
- * @p run_summary_info. Never lets a throw reach the caller's `final_status`:
- * `ElementPipeline::run` already turns one into this element's own `"error"`
- * outcome rather than propagating, so a failing teardown is recorded, not
- * fatal. A single-request load run has no `ScenarioLoadState` to hold the
- * scopes setup wrote into - it reads `context->lifecycle_scopes` instead
- * (issue #1573). Empty for a scenario load run whose driver never started
- * (no `scenario_state`), or a run (either shape) that declared no
- * `script.teardown`.
+ * A single-request load run's `script.setup`: it has no collection to declare
+ * one on, so it reads its own `lifecycleElements` instead (issue #1573). The
+ * scopes it leaves are kept on `context->lifecycle_scopes`, since this run
+ * shape has no `ScenarioLoadState` for `run_collection_teardown` to read them
+ * back from, and flattened onto `context->step_base_vars` for a run whose
+ * `requestElements` read them (issue #1594), after setup has written them.
+ */
+std::optional<std::string> run_request_lifecycle_setup (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context) {
+    const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
+    const bool has_step_elements =
+    context->step_elements && !context->step_elements->empty ();
+    if (lifecycle_elements.empty () && !has_step_elements) {
+        return std::nullopt;
+    }
+    auto scopes = vayu::http::routes::load_script_variable_scopes (db,
+    named_id (context->config, "environmentId"),
+    single_request_lifecycle_collection_id (db, context->config));
+    if (!lifecycle_elements.empty ()) {
+        vayu::runtime::ScriptEngine setup_engine (
+        read_lifecycle_script_config (db, context->config));
+        run_setup_elements (setup_engine, scopes, context->script_send,
+        lifecycle_elements, context->setup_outcomes);
+        // Setup is no submission's, so its local scope ends with it, as a
+        // scenario run's does.
+        scopes.local.clear ();
+    }
+    context->lifecycle_scopes = scopes;
+    if (has_step_elements) {
+        context->step_base_vars = vayu::http::routes::flatten_variable_scopes (scopes);
+        context->step_script_config = read_lifecycle_script_config (db, context->config);
+    }
+    return lifecycle_refusal (context->setup_outcomes);
+}
+
+/**
+ * `script.setup` (#1499): dispatched by `execute_load_test`, before it
+ * captures `test_start`, so a setup script's own time is never folded into
+ * the run's duration figures and a refusing setup fails the run before any
+ * load is sent. A scenario run's @p scenario_scopes are loaded here and then
+ * handed to `execute_scenario_load`, so a setup write is visible to the run's
+ * very first submission, exactly as it is to a sequential run's first step;
+ * a single-request run leaves them empty.
+ *
+ * @return `nullopt` on success; the refusing outcome's message otherwise.
+ *         The caller's only remaining job on failure is to stop the run -
+ *         this does not touch `context->is_running` or the run's status
+ *         itself, since only the caller knows the rest of its own shutdown
+ *         sequence.
+ */
+std::optional<std::string> run_collection_setup (vayu::db::Database& db,
+const std::shared_ptr<RunContext>& context,
+std::optional<vayu::http::routes::RunVariableScopes>& scenario_scopes) {
+    if (context->scenario) {
+        return run_scenario_load_setup (db, context, scenario_scopes);
+    }
+    return run_request_lifecycle_setup (db, context);
+}
+
+/**
+ * `script.teardown` (#1499): dispatched by `finish_load_test` so
+ * `pm.info.run` can carry @p run_summary_info. A scenario run tears down the
+ * lifecycle set its setup resolved (`context->lifecycle`, #3456), in
+ * reverse, on a copy of the scopes setup left (`ScenarioLoadState::
+ * lifecycle_scopes`); a single-request run re-reads its own
+ * `lifecycleElements` against `context->lifecycle_scopes` (issue #1573).
+ * Never lets a throw reach the caller's `final_status`: `ElementPipeline::run`
+ * already turns one into this element's own `"error"` outcome. Empty for a
+ * scenario load run whose driver never started (no `scenario_state`), or a
+ * run (either shape) that declared no `script.teardown`.
  */
 std::vector<vayu::core::ElementOutcome> run_collection_teardown (vayu::db::Database& db,
 const std::shared_ptr<RunContext>& context,
 const std::shared_ptr<ScenarioLoadState>& scenario_state,
 const vayu::runtime::RunSummaryInfo& run_summary_info) {
-    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
-
-    std::vector<vayu::core::CompiledElement> collection_elements;
-    vayu::http::routes::ScriptVariableScopes* scopes = nullptr;
-    // A copy: the run's bases are read-only, and a load run persists nothing.
-    vayu::http::routes::ScriptVariableScopes run_collection_scopes;
     if (context->scenario) {
-        if (!scenario_state) {
-            return teardown_outcomes;
+        if (!scenario_state || !context->lifecycle || context->lifecycle->empty ()) {
+            return {};
         }
-        collection_elements =
-        compile_collection_elements (db, context->scenario->request.collection_id);
-        run_collection_scopes = scenario_state->scope_bases.run_scopes ();
-        scopes                = &run_collection_scopes;
-    } else {
-        collection_elements = compile_run_lifecycle_elements (context->config);
-        scopes              = &context->lifecycle_scopes;
+        vayu::runtime::ScriptEngine teardown_engine (
+        read_lifecycle_script_config (db, context->config));
+        // A copy: the run's scopes are the bases' source and stay as setup
+        // left them, and a load run persists nothing.
+        auto scopes = scenario_state->lifecycle_scopes;
+        return run_scenario_teardown (teardown_engine, scopes,
+        context->script_send, *context->lifecycle, run_summary_info);
     }
-    if (collection_elements.empty ()) {
+    const auto lifecycle_elements = compile_run_lifecycle_elements (context->config);
+    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+    if (lifecycle_elements.empty ()) {
         return teardown_outcomes;
     }
-
-    auto teardown_config = read_lifecycle_script_config (db, context->config);
-    vayu::runtime::ScriptEngine teardown_engine (teardown_config);
-
-    vayu::Request lifecycle_request;
-    vayu::ScriptResult unread_pre;
-    vayu::ScriptResult unread_post;
-    vayu::core::ElementContext teardown_ctx{
-        .request        = lifecycle_request,
-        .response       = nullptr,
-        .run_pre_script = [] (
-                          const std::string&) { return vayu::ScriptResult{}; },
-        .run_post_script = [] (
-                           const std::string&) { return vayu::ScriptResult{}; },
-        .pre_script_result  = unread_pre,
-        .post_script_result = unread_post,
-        .set_variable = [] (std::string_view, const std::string&, const std::string&) {},
-        .should_stop   = nullptr,
-        .record_metric = nullptr, // metric.record is step.after only.
-        .run_teardown_script =
-        [&] (const std::string& script) {
-            auto script_ctx = vayu::runtime::ScriptContext::for_teardown (run_summary_info);
-            vayu::http::routes::bind_variable_scopes (script_ctx, *scopes);
-            context->script_send.apply (script_ctx);
-            return vayu::http::routes::execute_script (
-            teardown_engine, script, script_ctx, "Teardown");
-        },
-    };
-    vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd, teardown_ctx,
-    collection_elements, teardown_outcomes);
+    vayu::runtime::ScriptEngine teardown_engine (
+    read_lifecycle_script_config (db, context->config));
+    run_teardown_elements (teardown_engine, context->lifecycle_scopes,
+    context->script_send, lifecycle_elements, run_summary_info, teardown_outcomes);
     return teardown_outcomes;
 }
 
@@ -2648,13 +2568,13 @@ RunManager& manager) {
             return;
         }
 
-        // `script.setup` (#1499): the collection's own once-per-run elements,
-        // run - and, on failure, refused - before `test_start` below is
-        // captured, so a setup script's own time is never folded into the
-        // run's duration figures and a throwing setup fails the run before any
+        // `script.setup` (#1499): the lifecycle set's once-per-run elements
+        // (#3456), run - and, on failure, refused - before `test_start` below
+        // is captured, so a setup script's own time is never folded into the
+        // run's duration figures and a refusing setup fails the run before any
         // load is sent.
-        vayu::http::routes::ScriptVariableScopes base_scopes;
-        if (auto setup_failure = run_collection_setup (db, context, base_scopes)) {
+        std::optional<vayu::http::routes::RunVariableScopes> scenario_scopes;
+        if (auto setup_failure = run_collection_setup (db, context, scenario_scopes)) {
             vayu::utils::log_error ("run", "script.setup failed",
             { { "runId", context->run_id },
             { "scriptError", vayu::utils::bounded_log_text (*setup_failure) } });
@@ -2680,8 +2600,9 @@ RunManager& manager) {
 
         try {
             if (context->scenario) {
-                scenario_state = execute_scenario_load (
-                context, db, *context->scenario, std::move (base_scopes));
+                scenario_state = execute_scenario_load (context, db, *context->scenario,
+                vayu::utils::invariant_value (std::move (scenario_scopes),
+                "a scenario run's setup loads its scopes"));
             } else {
                 auto strategy = LoadStrategy::create (config);
                 strategy->execute (context, db, request);

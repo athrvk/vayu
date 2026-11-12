@@ -660,8 +660,8 @@ logged as a warning: it means a client skipped composition.
   per-VU `ready_at_ms`, since there is no VU to hold one on. It also has its
   own place to declare `script.setup` / `script.teardown` - the run-boundary
   kinds, not a step's - through `POST /runs`'s `lifecycleElements` array
-  (#1573), dispatched by the same `run_collection_setup` /
-  `run_collection_teardown` a collection-backed run uses; a script written
+  (#1573), dispatched through the same `run_setup_elements` /
+  `run_teardown_elements` a collection-backed run uses; a script written
   there resolves into the run's own submissions only on a run whose
   submissions are copied (`submissions_run_the_residual_pass`:
   `requestElements` declared, and a `step.before` kind, data rows, a bind

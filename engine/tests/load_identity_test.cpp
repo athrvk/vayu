@@ -613,8 +613,8 @@ class ScenarioIdentityTest : public LoadIdentityTest {
         context->event_loop = std::make_unique<vayu::http::EventLoop> (loop_config);
         context->event_loop->start ();
 
-        auto base_scopes = vayu::http::routes::load_script_variable_scopes (
-        *db_, std::nullopt, context->scenario->request.collection_id);
+        auto base_scopes =
+        vayu::core::scenario_load_scopes (*db_, std::nullopt, *context->scenario);
         auto state = vayu::core::execute_scenario_load (
         context, *db_, *context->scenario, std::move (base_scopes));
         context->event_loop->stop (true, std::chrono::milliseconds (10000));

@@ -1214,7 +1214,9 @@ variable defined on an ancestor collection therefore reads the same in
 collection run reads the chain of its own request's folder, exactly as a Send
 of that request does, even when the run was started on a parent (#3248,
 `RunVariableScopes` for a sequential run, `LoadScopeBases` for a load run);
-the run's `script.setup` and `script.teardown` read the collection being run.
+each `script.setup` and `script.teardown` of the run reads the chain of the
+collection that declares it, which can be an ancestor of the collection being
+run or a folder beneath it (#3456).
 
 **Reads walk the chain; writes stay on the leaf.** `set`, `unset` and `clear`
 only ever touch the request's own collection - the one

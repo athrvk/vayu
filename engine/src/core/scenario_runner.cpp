@@ -1274,24 +1274,57 @@ TransactionHistograms& transactions) {
     return 0;
 }
 
-/**
- * `script.setup` (#1499): the collection's own once-per-run elements,
- * dispatched here so a setup write lands in @p scopes before the first step
- * reads it - visible exactly as a prior step's own write would be, through
- * the same @p scopes and @p script_engine every step of the run already
- * shares. Extracted out of `execute_scenario_run` (whose cognitive
- * complexity this loop and its lambdas would otherwise push over the lint
- * threshold), mirroring `run_manager.cpp`'s `run_collection_setup` for the
- * load path. A `pm.sendRequest` there takes @p script_send, the run's own
- * (issue #2841).
- *
- * @return the failed outcome's message, or `nullopt` on success - the
- *         caller throws to fail the run before any step runs.
- */
-std::optional<std::string> run_scenario_setup (vayu::runtime::ScriptEngine& script_engine,
+namespace {
+
+/// @p origin's @p member when it is a string, else empty: a single-request
+/// run's `lifecycleElements` entry carries whatever `origin` its client sent.
+std::string origin_text (const nlohmann::json& origin, const char* member) {
+    if (!origin.is_object ()) {
+        return {};
+    }
+    const auto found = origin.find (member);
+    return found != origin.end () && found->is_string () ? found->get<std::string> () :
+                                                           std::string{};
+}
+
+/// The collection @p origin names, as a setup refusal leads with it:
+/// `folder '<name>'` or `collection '<name>'`, the id standing in for a
+/// missing name, and empty when it names neither.
+std::string refusing_collection (const nlohmann::json& origin) {
+    std::string label = origin_text (origin, "name");
+    if (label.empty ()) {
+        label = origin_text (origin, "id");
+    }
+    if (label.empty ()) {
+        return {};
+    }
+    const char* level = origin_text (origin, "scope") == "folder" ? "folder" : "collection";
+    return std::string (level) + " '" + label + "'";
+}
+
+} // namespace
+
+std::optional<std::string>
+lifecycle_refusal (const std::vector<vayu::core::ElementOutcome>& outcomes, size_t first) {
+    for (size_t i = first; i < outcomes.size (); ++i) {
+        const auto& outcome = outcomes[i];
+        if (outcome.status != "error" && outcome.status != "failed") {
+            continue;
+        }
+        std::string refusal = refusing_collection (outcome.origin);
+        if (!refusal.empty ()) {
+            refusal += ": ";
+        }
+        refusal += outcome.message.value_or ("unknown error");
+        return refusal;
+    }
+    return std::nullopt;
+}
+
+void run_setup_elements (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const vayu::runtime::ScriptSendInputs& script_send,
-const std::vector<vayu::core::CompiledElement>& collection_elements,
+const std::vector<vayu::core::CompiledElement>& elements,
 std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
     vayu::Request lifecycle_request;
     vayu::ScriptResult unread_pre;
@@ -1318,30 +1351,15 @@ std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
         },
     };
     vayu::core::ElementPipeline::run (
-    vayu::core::Phase::RunStart, setup_ctx, collection_elements, setup_outcomes);
-    for (const auto& outcome : setup_outcomes) {
-        if (outcome.status == "error" || outcome.status == "failed") {
-            return outcome.message.value_or ("unknown error");
-        }
-    }
-    return std::nullopt;
+    vayu::core::Phase::RunStart, setup_ctx, elements, setup_outcomes);
 }
 
-/**
- * `script.teardown` (#1499): the same collection elements `run_scenario_setup`
- * dispatched, run with @p run_summary_info as `pm.info.run`. Never throws out
- * - `ElementPipeline::run` already turns one into this element's own
- * `"error"` outcome rather than propagating - so a failing teardown is
- * recorded, not fatal. A `pm.sendRequest` there takes @p script_send, as
- * setup's does.
- */
-std::vector<vayu::core::ElementOutcome> run_scenario_teardown (
-vayu::runtime::ScriptEngine& script_engine,
+void run_teardown_elements (vayu::runtime::ScriptEngine& script_engine,
 vayu::http::routes::ScriptVariableScopes& scopes,
 const vayu::runtime::ScriptSendInputs& script_send,
-const std::vector<vayu::core::CompiledElement>& collection_elements,
-const vayu::runtime::RunSummaryInfo& run_summary_info) {
-    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+const std::vector<vayu::core::CompiledElement>& elements,
+const vayu::runtime::RunSummaryInfo& run_summary_info,
+std::vector<vayu::core::ElementOutcome>& teardown_outcomes) {
     vayu::Request lifecycle_request;
     vayu::ScriptResult unread_pre;
     vayu::ScriptResult unread_post;
@@ -1366,8 +1384,37 @@ const vayu::runtime::RunSummaryInfo& run_summary_info) {
             script_engine, script, script_ctx, "Teardown");
         },
     };
-    vayu::core::ElementPipeline::run (vayu::core::Phase::RunEnd, teardown_ctx,
-    collection_elements, teardown_outcomes);
+    vayu::core::ElementPipeline::run (
+    vayu::core::Phase::RunEnd, teardown_ctx, elements, teardown_outcomes);
+}
+
+std::optional<std::string> run_scenario_setup (vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::RunVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<LifecycleCollection>& lifecycle,
+std::vector<vayu::core::ElementOutcome>& setup_outcomes) {
+    for (const auto& collection : lifecycle) {
+        const size_t first = setup_outcomes.size ();
+        run_setup_elements (script_engine, scopes.bind (collection.collection_id),
+        script_send, collection.elements, setup_outcomes);
+        if (auto refusal = lifecycle_refusal (setup_outcomes, first)) {
+            return refusal;
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<vayu::core::ElementOutcome> run_scenario_teardown (
+vayu::runtime::ScriptEngine& script_engine,
+vayu::http::routes::RunVariableScopes& scopes,
+const vayu::runtime::ScriptSendInputs& script_send,
+const std::vector<LifecycleCollection>& lifecycle,
+const vayu::runtime::RunSummaryInfo& run_summary_info) {
+    std::vector<vayu::core::ElementOutcome> teardown_outcomes;
+    for (auto collection = lifecycle.rbegin (); collection != lifecycle.rend (); ++collection) {
+        run_teardown_elements (script_engine, scopes.bind (collection->collection_id),
+        script_send, collection->elements, run_summary_info, teardown_outcomes);
+    }
     return teardown_outcomes;
 }
 
@@ -1388,12 +1435,17 @@ size_t stored_step_count (vayu::db::Database& db, const std::string& run_id) {
 }
 
 /// The collections whose chains the run's scripts read: the run collection,
-/// for setup and teardown, and every step's own.
-std::vector<std::string>
-scope_collection_ids (const ScenarioRequest& asked, const ScenarioPlan& plan) {
+/// each of the lifecycle set's, for its setup and teardown, and every step's
+/// own.
+std::vector<std::string> scope_collection_ids (const ScenarioRequest& asked,
+const ScenarioPlan& plan,
+const std::vector<LifecycleCollection>& lifecycle) {
     std::vector<std::string> ids;
-    ids.reserve (plan.steps.size () + 1);
+    ids.reserve (plan.steps.size () + lifecycle.size () + 1);
     ids.push_back (asked.collection_id);
+    for (const auto& collection : lifecycle) {
+        ids.push_back (collection.collection_id);
+    }
     for (const auto& step : plan.steps) {
         ids.push_back (step.collection_id);
     }
@@ -1490,11 +1542,16 @@ RunManager& manager) {
         const std::string cookie_scope =
         environment_id.value_or (std::string (vayu::http::NO_ENVIRONMENT_SCOPE));
 
+        // Resolved once, here, and walked again in reverse by teardown, so a
+        // folder added, moved or trashed mid-run changes neither end (#3456).
+        const auto lifecycle =
+        resolve_lifecycle_collections (db, asked.collection_id, asked.recursive);
+
         // Loaded once, mutated by every step, persisted once at the end. Each
         // step reads its own folder's chain, as a Send of its request does
-        // (#3248); setup and teardown read the collection being run.
+        // (#3248), and each lifecycle collection's setup and teardown its own.
         vayu::http::routes::RunVariableScopes scopes (
-        db, environment_id, scope_collection_ids (asked, plan));
+        db, environment_id, scope_collection_ids (asked, plan, lifecycle));
 
         vayu::runtime::ScriptConfig script_config = vayu::core::read_script_config (db);
         // Payload-level, exactly as `POST /execute` reads it: whether a script
@@ -1567,24 +1624,13 @@ RunManager& manager) {
         context->append_event ("plan",
         build_plan_payload (plan.steps.size (), asked.iterations).dump ());
 
-        // `script.setup` / `script.teardown` (#1499): the collection's own
-        // once-per-run elements - never inherited per step, which is what
-        // `collection_only` refuses at write time - compiled once here and
-        // dispatched at both ends of the run, on the run collection's
-        // binding of the same `scopes` and the `script_engine` every step's
-        // own scripts already share, so a setup write is visible to step 1
+        // `script.setup` (#1499): the lifecycle set's once-per-run elements -
+        // never inherited per step, which is what `collection_only` refuses
+        // at write time - on the same `scopes` and `script_engine` every
+        // step's own scripts share, so a setup write is visible to step 1
         // exactly as a prior step's would be.
-        std::vector<vayu::core::CompiledElement> collection_elements;
-        if (auto collection_row = db.get_collection (asked.collection_id)) {
-            auto parsed = nlohmann::json::parse (collection_row->elements, nullptr, false);
-            if (!parsed.is_discarded ()) {
-                collection_elements = vayu::core::compile_elements (parsed);
-            }
-        }
-
-        if (auto setup_failure =
-            run_scenario_setup (script_engine, scopes.bind (asked.collection_id),
-            script_send, collection_elements, setup_outcomes)) {
+        if (auto setup_failure = run_scenario_setup (
+            script_engine, scopes, script_send, lifecycle, setup_outcomes)) {
             throw std::runtime_error ("script.setup failed: " + *setup_failure);
         }
 
@@ -1652,9 +1698,8 @@ RunManager& manager) {
         run_summary_info.assertions_passed = summary.passed;
         run_summary_info.assertions_failed = summary.failed;
 
-        auto teardown_outcomes =
-        run_scenario_teardown (script_engine, scopes.bind (asked.collection_id),
-        script_send, collection_elements, run_summary_info);
+        auto teardown_outcomes = run_scenario_teardown (
+        script_engine, scopes, script_send, lifecycle, run_summary_info);
         summary.lifecycle =
         vayu::core::build_lifecycle_node (setup_outcomes, teardown_outcomes);
 

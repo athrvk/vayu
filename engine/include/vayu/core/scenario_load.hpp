@@ -454,16 +454,31 @@ struct ScenarioStepLabel {
 const std::string& run_collection_id);
 
 /**
+ * @brief A scenario load run's scopes before its setup (#3248, #3456): the
+ *        environment and globals, and the chain of the run collection, of each
+ *        collection in @p lifecycle and of each collection a step sits in,
+ *        every collection read once. What the run's `script.setup` scripts
+ *        write into, and what @ref LoadScopeBases is then built from.
+ */
+[[nodiscard]] vayu::http::routes::RunVariableScopes scenario_load_scopes (
+vayu::db::Database& db,
+const std::optional<std::string>& environment_id,
+const ScenarioExecution& execution,
+const std::vector<LifecycleCollection>& lifecycle = {});
+
+/**
  * @brief A scenario load run's variable scopes, one base per collection its
  *        steps sit in (#3248).
  *
- * Built once, before the first submission, from the run collection's scopes
- * as `script.setup` left them: every base shares their environment and
- * globals, and holds the chain from the root down to its own collection, the
- * run collection's entry in it the one setup wrote. A step in a sub-folder of
- * a recursive run therefore sends and scripts with that folder's variables,
- * as a Send of its request does. Read-only for the run: a virtual user's
- * writes are on its own `ScopeOverlay`, which keeps them per folder.
+ * Built once, before the first submission, from the run's scopes as every
+ * `script.setup` left them (#3456): a base is those scopes bound to its
+ * collection, so it holds their environment and globals and the chain from
+ * the root down to that collection, each entry as the setups that wrote it
+ * left it. A step in a sub-folder of a recursive run therefore sends and
+ * scripts with that folder's variables, its own setup's writes and its
+ * ancestors' included, as a Send of its request after the same setups would.
+ * Read-only for the run: a virtual user's writes are on its own
+ * `ScopeOverlay`, which keeps them per folder.
  */
 class LoadScopeBases {
     public:
@@ -475,23 +490,17 @@ class LoadScopeBases {
         vayu::http::VariableValues vars;
     };
 
-    /// @p run_collection_scopes are the scopes of
-    /// `execution.request.collection_id`; each other collection a step names
-    /// has its chain read from @p db here.
-    LoadScopeBases (vayu::db::Database& db,
-    vayu::http::routes::ScriptVariableScopes run_collection_scopes,
+    /// @p run_scopes must hold every step's collection
+    /// (@ref scenario_load_scopes); it is bound once per base, and so is left
+    /// bound to the last one.
+    LoadScopeBases (vayu::http::routes::RunVariableScopes& run_scopes,
     const ScenarioExecution& execution);
 
     /// Plan step @p step's base.
     [[nodiscard]] const Base& for_step (size_t step) const;
 
-    /// The run collection's scopes, which `script.teardown` reads.
-    [[nodiscard]] const vayu::http::routes::ScriptVariableScopes& run_scopes () const {
-        return bases_.front ().scopes;
-    }
-
     private:
-    /// The run collection's first, then each other collection once.
+    /// Each collection a step sits in, once.
     std::vector<Base> bases_;
     /// Per plan step, its position in `bases_`.
     std::vector<size_t> base_of_step_;
@@ -512,13 +521,15 @@ struct ScenarioLoadState {
     size_t virtual_users,
     CoverageTally coverage,
     LoadScopeBases scope_bases,
+    vayu::http::routes::RunVariableScopes lifecycle_scopes,
     vayu::runtime::ScriptConfig script_config)
     : steps (plan.steps.size ()), step_labels (scenario_step_labels (plan)),
       element_spans (compute_element_spans (plan)), transactions (plan),
       element_tallies (plan), step_index (build_step_index (plan)),
       shared_throughput (plan), shared_pacing (shared_pacing_element_ids (plan)),
       shared_throughput_budgets (shared_throughput_element_ids (plan)),
-      scope_bases (std::move (scope_bases)), script_config (script_config),
+      scope_bases (std::move (scope_bases)),
+      lifecycle_scopes (std::move (lifecycle_scopes)), script_config (script_config),
       coverage (std::move (coverage)), virtual_users (virtual_users) {
     }
 
@@ -602,6 +613,10 @@ struct ScenarioLoadState {
      * the isolation #1495 exists to add.
      */
     LoadScopeBases scope_bases;
+    /// The run's scopes as every `script.setup` left them, which
+    /// `script.teardown` binds a collection at a time (#3456). Never written
+    /// while virtual users run; teardown works on a copy.
+    vayu::http::routes::RunVariableScopes lifecycle_scopes;
     /// This run's script configuration (timeout, memory, stack, console,
     /// `pm.sendRequest`), resolved once and handed to
     /// `vayu::http::routes::script_engine_for_this_thread` by every inline
@@ -701,17 +716,18 @@ build_scenario_load_summary (const ScenarioLoadState& state, const ScenarioPlan&
  * permanently shrinks effective concurrency, the same failure `handle_result`'s
  * error branch already guards against.
  *
- * @param base_scopes The run collection's scopes, already loaded and already
- *        run through `script.setup` (#1499) by `execute_load_test` - loaded
- *        there rather than here so a setup script's own time is spent before
- *        `test_start` is captured, never inside the run's own duration
- *        figures. Each step's own folder base is built from them here
- *        (@ref LoadScopeBases), before the first submission.
+ * @param run_scopes The run's scopes (@ref scenario_load_scopes), already
+ *        run through every `script.setup` (#1499, #3456) by
+ *        `execute_load_test` - there rather than here so a setup script's own
+ *        time is spent before `test_start` is captured, never inside the
+ *        run's own duration figures. Each step's own folder base is built
+ *        from them here (@ref LoadScopeBases), before the first submission,
+ *        and they are kept on the state for teardown.
  */
 [[nodiscard]] std::shared_ptr<ScenarioLoadState> execute_scenario_load (
 const std::shared_ptr<RunContext>& context,
 vayu::db::Database& db,
 const ScenarioExecution& execution,
-vayu::http::routes::ScriptVariableScopes base_scopes);
+vayu::http::routes::RunVariableScopes run_scopes);
 
 } // namespace vayu::core

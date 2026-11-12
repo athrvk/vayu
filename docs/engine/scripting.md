@@ -1718,11 +1718,29 @@ attached to every request paying for it. See
 [`elements.md`](elements.md#kinds) for the element mechanics (dispatch, phases,
 placement) - this section is what the two scripts see as scripts.
 
+**Whose scripts run** (#3456): every collection above the one being run, the
+collection being run, and, when the run includes nested collections, every
+folder beneath it. Setups run once at the start in that order: the root
+first, down to the collection being run, then the folders beneath it in the
+order the sidebar shows them, a folder before the folders nested in it.
+Teardowns run once at the end in exactly the reverse order. So running a
+sub-folder alone still runs its root collection's setup first, and running
+the root with nested collections included runs each folder's setup and
+teardown too. A run that does not include nested collections sends only the
+collection's own requests, so no folder beneath it takes part. The set is read
+once when the run starts: a folder added, moved or deleted mid-run changes
+neither end. Each row of the report's `lifecycle` names the collection it came
+from in its `origin` (`{kind: "collection", scope: "collection" | "folder",
+id, name}`), so the report says whose setup ran.
+
 Both read and write the same three variable scopes every other script does
 (`pm.environment`, `pm.globals`, `pm.collectionVariables`) - a name
 `script.setup` sets is visible to the very first step or submission of the run,
 because it writes through the same scopes object every other script of that
-run shares, before either run mode's own work begins. `pm.info.eventName` reads
+run shares, before either run mode's own work begins. A collection's setup
+and teardown read the chain down to that collection and write that
+collection's variables, as a step in it does, so a folder's setup writes a
+value that folder's own steps (and the folders below it) read. `pm.info.eventName` reads
 `'setup'` / `'teardown'`; neither script has a `pm.request` or a `pm.response`
 to read, since neither runs against a particular step. `pm.execution` throws
 the same "not available here" sentence a non-scenario script already gets:
@@ -1747,11 +1765,18 @@ sequential collection run it is the share of steps that errored.
 outcome is checked the same way any element's is (`"error"` fails the check);
 the run reaches `Failed` before either run mode's strategy starts, so nothing
 is sent and no duration is measured. The failed run's report still carries
-`lifecycle.setup`, the refusing setup's row with its outcome and message, so it
-says which script failed and why (#3455). **A throwing `script.teardown` is
+`lifecycle.setup`, every setup that ran up to and including the refusing one,
+with its outcome, message and `origin`, so it says which collection's script
+failed and why (#3455). Setups are checked a collection at a time: once one
+collection's setup refuses, the collections after it set up nothing, and no
+teardown runs. The engine log's record of the refusal leads with the same
+collection, `folder '<name>': <message>` (or `collection '<name>'` for the
+root, the id where it has no name; a single-request run's
+`lifecycleElements` name none). **A throwing `script.teardown` is
 recorded and does not change the run's status** - it appears under the
 report's `lifecycle.teardown`, exactly as a passing one does, just with an
-`"error"` outcome and the thrown message. A script that only fails a `pm.test`
+`"error"` outcome and the thrown message, and the collections above it still
+tear down after it. A script that only fails a `pm.test`
 is `"failed"` rather than `"error"`, with the first failing test as its message,
 and a failing test in `script.setup` fails the run the way a throw does. Either
 script's `console.*` lines and test results are kept on its `lifecycle` row, as
@@ -1985,8 +2010,10 @@ request's chain too, sequential or under load, so a step in a sub-folder of the
 collection being run reads and writes that sub-folder, as a Send of it does
 (#3248), and a value one step writes into a folder is what later steps in that
 folder and below it read (under load, that virtual user's later steps). A
-sibling folder does not see it. `script.setup` and `script.teardown` read and
-write the collection being run.
+sibling folder does not see it. A `script.setup` or `script.teardown` reads
+and writes the collection that declares it, which on a sub-folder run can be
+an ancestor of the collection being run, or on a run with nested collections a
+folder beneath it (#3456).
 
 A request sent inline with no saved row linked (MCP's ad-hoc `run_request`
 with a `collectionId`, a direct API caller) reads the chain of the collection
@@ -4472,8 +4499,9 @@ boundary, where `pm.cookies`' per-VU jar is. An inline script's `unset()` or
 `clear()` of a name the run loaded hides that stored value from the same VU
 alone, until a later write sets the name again (#3088). The base a step's
 overlay sits on is its own folder's (#3248): the environment and globals the
-run loaded and `script.setup` left, and the chain from the root down to the
-step's folder, read once before the first submission. The overlay keeps a
+run loaded, and the chain from the root down to the step's folder, each as
+the run's `script.setup` scripts left them (#3456), read once before the
+first submission. The overlay keeps a
 collection write per folder, so it answers that VU's later steps in the same
 folder and in folders below it, and never a step in a sibling folder.
 
