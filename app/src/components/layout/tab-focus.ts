@@ -22,6 +22,9 @@ import { flushSync } from "react-dom";
 import { useTabsStore } from "@/stores/tabs-store";
 import { tabElementId } from "./tab-aria";
 
+/** The strip's roving stop (`useRovingStop`): the tab a Tab key lands on. */
+const ROVING_TAB_STOP = '[role="tab"][tabindex="0"]';
+
 /**
  * Close `tabId` and leave focus on the tab that takes its place.
  *
@@ -59,7 +62,7 @@ export function closeTabFromKeyboard(tabId: string): void {
 export function focusActiveTab(): void {
 	const { activeTabId } = useTabsStore.getState();
 	const active = activeTabId ? document.getElementById(tabElementId(activeTabId)) : null;
-	(active ?? document.querySelector<HTMLElement>('[role="tab"][tabindex="0"]'))?.focus();
+	(active ?? document.querySelector<HTMLElement>(ROVING_TAB_STOP))?.focus();
 }
 
 /**
@@ -80,5 +83,5 @@ export function focusActiveTab(): void {
 export function moveTabAndFocus(tabId: string, toIndex: number): void {
 	flushSync(() => useTabsStore.getState().moveTab(tabId, toIndex));
 	const moved = document.getElementById(tabElementId(tabId));
-	(moved ?? document.querySelector<HTMLElement>('[role="tab"][tabindex="0"]'))?.focus();
+	(moved ?? document.querySelector<HTMLElement>(ROVING_TAB_STOP))?.focus();
 }
