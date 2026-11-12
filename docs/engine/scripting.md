@@ -4474,6 +4474,11 @@ With the limit at `0` (an embedder's "no limit") it reads `Script threw null`.
 The same text stands in for the reason of an unhandled promise rejection
 (`Unhandled promise rejection: Script threw undefined`).
 
+A failed `pm.test` row (and a legacy `tests[name]` getter that throws) reads the
+same way: `pm.test('x', () => { throw undefined })` gives the row the error
+`Script threw undefined`, `throw new Error('')` gives `Error`, and
+`throw new Error('boom')` still gives `Error: boom`.
+
 In a collection run an uncaught error marks the step `errored`, with the message
 on its row, and the iteration moves on to the next request, as Postman's runner
 does; `stopOnError: true` on the run ends the iteration there instead. See

@@ -10626,3 +10626,51 @@ TEST_F (ScriptEngineTest, ARejectionAndATimerThrowReadAsSentencesToo) {
     result = engine.execute ("setTimeout(() => { throw undefined; }, 0);", timed);
     EXPECT_EQ (result.error_message, "Script threw undefined");
 }
+
+// A `pm.test` row names its failure the way a script error does (#3461): the
+// row is where a user reads it, so a bare `null` there is the same dead end.
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullReadsAsASentenceNamingTheLimit) {
+    ScriptEngine bounded (minimum_memory_config ());
+    const auto result = bounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message,
+    "Script threw null (QuickJS also throws null when it runs out of memory at "
+    "the 1 MiB limit with no room to build an error)");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsNullWithNoMemoryLimitIsOnlyANull) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result = unbounded.execute_test (
+    "pm.test('x', function () { throw null; });", request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw null");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsUndefinedOrAnEmptyErrorReadsAsASentence) {
+    EXPECT_EQ (verdict_of ("throw undefined"), "Script threw undefined");
+    EXPECT_EQ (verdict_of ("throw new Error('')"), "Error");
+    EXPECT_EQ (verdict_of ("throw ''"), "Script threw an empty string");
+}
+
+TEST_F (ScriptEngineTest, ATestRowThatThrowsAnErrorWithAMessageIsUnchanged) {
+    EXPECT_EQ (verdict_of ("throw new Error('boom')"), "Error: boom");
+}
+
+// The legacy `tests[name]` row can fail the same way: a getter the script
+// defined on the object is the row's verdict when it throws.
+TEST_F (ScriptEngineTest, ALegacyTestRowWhoseGetterThrowsNullReadsAsASentence) {
+    ScriptConfig cfg;
+    cfg.memory_limit = 0;
+    ScriptEngine unbounded (cfg);
+    const auto result =
+    unbounded.execute_test ("Object.defineProperty(tests, 'x', { enumerable: "
+                            "true, get() { throw undefined; } });",
+    request, response, env);
+    ASSERT_EQ (result.tests.size (), 1u);
+    EXPECT_FALSE (result.tests[0].passed);
+    EXPECT_EQ (result.tests[0].error_message, "Script threw undefined");
+}
