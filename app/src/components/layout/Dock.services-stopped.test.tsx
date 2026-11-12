@@ -18,7 +18,7 @@
  * outage. One notice must come out of the two.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const getHealth = vi.fn();
 const listInboxes = vi.fn();
@@ -55,8 +55,7 @@ import type { Inbox, MockIssuer, MockServer } from "@/types";
 
 vi.stubGlobal("__VAYU_VERSION__", "0.0.0-test");
 
-const NOTICE =
-	"The inbox on port 41234, the inbox on port 41235, and the mock server for 'Orders API' on port 5050 stopped when Vayu's engine restarted. Start them again from Services.";
+const NOTICE = `The inbox on port 41234, the inbox on port 41235, and the mock server for "Orders API" on port 5050 stopped when Vayu's engine restarted.`;
 
 const restartEngine = vi.fn();
 let lifecycleListener: ((lifecycle: EngineLifecyclePayload) => void) | null = null;
@@ -87,6 +86,9 @@ function renderApp(client: QueryClient) {
 /** Every `showToast` call that carried the notice, deduplicated or not. */
 const noticesRaised = vi.fn();
 
+/** The store's own, so each case wraps it once rather than the last case's wrapper. */
+const storeShowToast = useToastStore.getState().showToast;
+
 beforeEach(() => {
 	cleanup();
 	vi.clearAllMocks();
@@ -102,12 +104,11 @@ beforeEach(() => {
 		restartRequiredKeys: [],
 	});
 	// The store dedups an identical message, which would hide a second raise.
-	useToastStore.setState({ toasts: [] });
-	const { showToast } = useToastStore.getState();
 	useToastStore.setState({
+		toasts: [],
 		showToast: (input, variant) => {
 			if (typeof input !== "string" && input.message === NOTICE) noticesRaised();
-			return showToast(input, variant);
+			return storeShowToast(input, variant);
 		},
 	});
 	restartEngine.mockResolvedValue({ success: true });
@@ -120,6 +121,10 @@ beforeEach(() => {
 			return () => undefined;
 		},
 	};
+});
+
+afterEach(() => {
+	useToastStore.setState({ showToast: storeShowToast });
 });
 
 function pushCrash() {
@@ -207,7 +212,7 @@ describe("after Vayu's engine crashes and is restarted", () => {
 
 		expect(
 			await screen.findByText(
-				"The OAuth issuer on port 6000 stopped when Vayu's engine restarted. Start it again from Services."
+				"The OAuth issuer on port 6000 stopped when Vayu's engine restarted."
 			)
 		).toBeTruthy();
 		expect(restartEngine).not.toHaveBeenCalled();
@@ -255,9 +260,7 @@ describe("after Vayu's engine crashes and is restarted", () => {
 		fireEvent.click(screen.getByRole("button", { name: /Restart pending/i }));
 
 		expect(
-			await screen.findByText(
-				"The inbox on port 41234 stopped when Vayu's engine restarted. Start it again from Services."
-			)
+			await screen.findByText("The inbox on port 41234 stopped when Vayu's engine restarted.")
 		).toBeTruthy();
 	});
 });

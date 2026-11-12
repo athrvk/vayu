@@ -26,14 +26,15 @@
  * (`hooks/useEngineRestart.ts`) both record and both report, often for the same
  * outage. The first record of an outage wins, and the first report takes the
  * snapshot, so the second finds nothing and a single outage raises one notice.
+ * A snapshot a failed report put back is still that outage's, so the next
+ * outage's first record replaces it.
  */
 
-import type { QueryClient } from "@tanstack/react-query";
+import { isCancelledError, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { apiService } from "@/services/api";
 import { queryKeys } from "@/queries/keys";
 import { useToastStore } from "@/stores/toast-store";
 import { useLayoutStore } from "@/stores/layout-store";
-import { pickByCount } from "@/modules/dashboard/utils/format";
 import { formatNumber } from "@/lib/format-number";
 import type { Inbox, MockIssuer, MockServer } from "@/types";
 import type { RunningServiceSummary } from "@/types/electron";
@@ -110,7 +111,7 @@ function describeService(service: RunningService): string {
 			return `the OAuth issuer on port ${service.port}`;
 		case "mock-server":
 			return service.name
-				? `the mock server for '${service.name}' on port ${service.port}`
+				? `the mock server for "${service.name}" on port ${service.port}`
 				: `the mock server on port ${service.port}`;
 	}
 }
@@ -127,47 +128,64 @@ export function servicesStoppedNotice(stopped: RunningService[]): string {
 	const unnamed = stopped.length - named.length;
 	const phrases = unnamed > 0 ? [...named, `${formatNumber(unnamed)} more`] : named;
 	const list = joinPhrases(phrases);
-	const pronoun = pickByCount(stopped.length, { one: "it", other: "them" });
-	return `${list.charAt(0).toUpperCase()}${list.slice(1)} stopped when Vayu's engine restarted. Start ${pronoun} again from Services.`;
+	return `${list.charAt(0).toUpperCase()}${list.slice(1)} stopped when Vayu's engine restarted.`;
 }
 
-let runningWhenOutageBegan: RunningService[] | null = null;
+interface OutageSnapshot {
+	running: RunningService[];
+	/** Put back by a report that could not read the lists: its outage is over. */
+	restored: boolean;
+}
+
+let pending: OutageSnapshot | null = null;
 
 /**
  * Keep what the cache says is running, at the first sign of an outage.
  *
- * A no-op while a snapshot is already pending: later in the same outage the
- * cache can only be as old or older, and after a reconnect that could not read
- * the lists the pending one is still the best record of what ran.
+ * A no-op while this outage's snapshot is pending: later in the same outage the
+ * cache can only be as old or older. A restored one is replaced, by nothing if
+ * nothing runs now, because what ran before the last outage says nothing about
+ * what this one stopped.
  */
 export function recordServicesBeforeOutage(queryClient: QueryClient): void {
-	if (runningWhenOutageBegan !== null) return;
+	if (pending !== null && !pending.restored) return;
 	const running = runningServicesIn({
 		inboxes: queryClient.getQueryData<Inbox[]>(queryKeys.inbox.list()),
 		issuers: queryClient.getQueryData<MockIssuer[]>(queryKeys.mockIssuer.list()),
 		mocks: queryClient.getQueryData<MockServer[]>(queryKeys.mockServer.list()),
 	});
-	if (running.length > 0) runningWhenOutageBegan = running;
+	pending = running.length > 0 ? { running, restored: false } : null;
+}
+
+/**
+ * How many times one list is read before a cancel counts as a failed read. A
+ * read that joined a fetch in flight is cancelled by any refetch of that list
+ * (the reconnect's own invalidate, a mutation's), which says nothing about the
+ * engine; each cancel means a newer fetch is under way, and the next attempt
+ * joins it.
+ */
+const LIST_READ_ATTEMPTS = 3;
+
+async function fetchList<T>(
+	queryClient: QueryClient,
+	queryKey: QueryKey,
+	queryFn: () => Promise<T>,
+	attemptsLeft = LIST_READ_ATTEMPTS
+): Promise<T> {
+	try {
+		return await queryClient.fetchQuery({ queryKey, queryFn, staleTime: 0 });
+	} catch (error) {
+		if (!isCancelledError(error) || attemptsLeft <= 1) throw error;
+		return fetchList(queryClient, queryKey, queryFn, attemptsLeft - 1);
+	}
 }
 
 /** The three lists from the engine now, written into the cache the drawer reads. */
 async function fetchServiceLists(queryClient: QueryClient): Promise<ServiceLists> {
 	const [inboxes, issuers, mocks] = await Promise.all([
-		queryClient.fetchQuery({
-			queryKey: queryKeys.inbox.list(),
-			queryFn: () => apiService.listInboxes(),
-			staleTime: 0,
-		}),
-		queryClient.fetchQuery({
-			queryKey: queryKeys.mockIssuer.list(),
-			queryFn: () => apiService.listMockIssuers(),
-			staleTime: 0,
-		}),
-		queryClient.fetchQuery({
-			queryKey: queryKeys.mockServer.list(),
-			queryFn: () => apiService.listMockServers(),
-			staleTime: 0,
-		}),
+		fetchList(queryClient, queryKeys.inbox.list(), () => apiService.listInboxes()),
+		fetchList(queryClient, queryKeys.mockIssuer.list(), () => apiService.listMockIssuers()),
+		fetchList(queryClient, queryKeys.mockServer.list(), () => apiService.listMockServers()),
 	]);
 	return { inboxes, issuers, mocks };
 }
@@ -176,19 +194,20 @@ async function fetchServiceLists(queryClient: QueryClient): Promise<ServiceLists
  * On reconnect, name what the outage stopped, once.
  *
  * A read that fails raises nothing: not knowing what runs now is no evidence
- * that anything stopped. The snapshot then goes back for the next reconnect,
- * unless an outage that began meanwhile has already recorded its own.
+ * that anything stopped. The snapshot then goes back, marked restored, for a
+ * later report of the same outage (the other reconnect path), unless an outage
+ * that began meanwhile has already recorded its own.
  */
 export async function reportServicesStoppedByOutage(queryClient: QueryClient): Promise<void> {
-	const before = runningWhenOutageBegan;
-	if (before === null) return;
-	runningWhenOutageBegan = null;
+	if (pending === null) return;
+	const before = pending.running;
+	pending = null;
 
 	let after: RunningService[];
 	try {
 		after = runningServicesIn(await fetchServiceLists(queryClient));
 	} catch {
-		if (runningWhenOutageBegan === null) runningWhenOutageBegan = before;
+		pending ??= { running: before, restored: true };
 		return;
 	}
 
@@ -206,5 +225,5 @@ export async function reportServicesStoppedByOutage(queryClient: QueryClient): P
 }
 
 export function resetServicesBeforeOutageForTests(): void {
-	runningWhenOutageBegan = null;
+	pending = null;
 }

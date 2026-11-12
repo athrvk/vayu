@@ -120,14 +120,14 @@ describe("servicesStoppedNotice", () => {
 			mocks: [mock("mk-1", 5050, "Orders API")],
 		});
 		expect(servicesStoppedNotice(stopped)).toBe(
-			"The inbox on port 41234, the mock server for 'Orders API' on port 5050, and the OAuth issuer on port 6000 stopped when Vayu's engine restarted. Start them again from Services."
+			'The inbox on port 41234, the mock server for "Orders API" on port 5050, and the OAuth issuer on port 6000 stopped when Vayu\'s engine restarted.'
 		);
 	});
 
-	it("agrees with one service", () => {
+	it("says it with one service as with three", () => {
 		const stopped = runningServicesIn({ inboxes: [inbox("in-a", 41234)] });
 		expect(servicesStoppedNotice(stopped)).toBe(
-			"The inbox on port 41234 stopped when Vayu's engine restarted. Start it again from Services."
+			"The inbox on port 41234 stopped when Vayu's engine restarted."
 		);
 	});
 
@@ -136,7 +136,7 @@ describe("servicesStoppedNotice", () => {
 			inboxes: [1, 2, 3, 4, 5].map((n) => inbox(`in-${n}`, 41230 + n)),
 		});
 		expect(servicesStoppedNotice(stopped)).toBe(
-			"The inbox on port 41231, the inbox on port 41232, the inbox on port 41233, and 2 more stopped when Vayu's engine restarted. Start them again from Services."
+			"The inbox on port 41231, the inbox on port 41232, the inbox on port 41233, and 2 more stopped when Vayu's engine restarted."
 		);
 	});
 });
@@ -154,7 +154,7 @@ describe("the notice after an outage", () => {
 		await reportServicesStoppedByOutage(client);
 
 		expect(notices()).toEqual([
-			"The inbox on port 41234, the inbox on port 41235, and the mock server for 'Orders API' on port 5050 stopped when Vayu's engine restarted. Start them again from Services.",
+			`The inbox on port 41234, the inbox on port 41235, and the mock server for "Orders API" on port 5050 stopped when Vayu's engine restarted.`,
 		]);
 		expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "warning" }));
 		// The fresh read is what the drawer shows next, not a second request.
@@ -256,6 +256,74 @@ describe("the notice after an outage", () => {
 		await reportServicesStoppedByOutage(client);
 		expect(notices()).toHaveLength(1);
 		expect(notices()[0]).toContain("41234");
+	});
+
+	it("reads again when another refetch cancels the one it joined", async () => {
+		// A second refetch of a list (a mutation's invalidate, the restart's)
+		// cancels the fetch the report joined, and a joined read rejects on it.
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		cacheServices(client, { inboxes: [inbox("in-a", 41234)] });
+		recordServicesBeforeOutage(client);
+		engineNowRuns({});
+		let answerFirstRead!: (inboxes: Inbox[]) => void;
+		listInboxes.mockReturnValueOnce(
+			new Promise<Inbox[]>((resolve) => {
+				answerFirstRead = resolve;
+			})
+		);
+
+		// The reconnect's invalidate starts the read, as the drawer's query would
+		// (it carries the query function), and the report joins it.
+		const reconnectRead = client.fetchQuery({
+			queryKey: queryKeys.inbox.list(),
+			queryFn: () => listInboxes(),
+			staleTime: 0,
+		});
+		const report = reportServicesStoppedByOutage(client);
+		expect(client.getQueryState(queryKeys.inbox.list())?.fetchStatus).toBe("fetching");
+		const laterRefetch = client.refetchQueries({ queryKey: queryKeys.inbox.list() });
+		answerFirstRead([inbox("in-a", 41234)]);
+		await Promise.all([reconnectRead, report, laterRefetch]);
+
+		// Mutation-check: rethrow a cancel in `fetchList` and nothing is named.
+		expect(notices()).toHaveLength(1);
+		expect(notices()[0]).toContain("41234");
+	});
+
+	it("replaces a snapshot a failed read put back with the next outage's own", async () => {
+		const client = new QueryClient();
+		cacheServices(client, { inboxes: [inbox("in-a", 41234)] });
+		recordServicesBeforeOutage(client);
+		engineNowRuns({});
+		listMockServers.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+		await reportServicesStoppedByOutage(client);
+
+		// The engine stayed up after all; the user stopped in-a and started in-b,
+		// and only then did the next outage begin.
+		cacheServices(client, { inboxes: [inbox("in-b", 41300)] });
+		recordServicesBeforeOutage(client);
+		await reportServicesStoppedByOutage(client);
+
+		// Mutation-check: keep a restored snapshot over a new record and this
+		// names 41234, a service this outage never saw.
+		expect(notices()).toHaveLength(1);
+		expect(notices()[0]).toContain("41300");
+		expect(notices()[0]).not.toContain("41234");
+	});
+
+	it("drops a snapshot a failed read put back when nothing runs at the next outage", async () => {
+		const client = new QueryClient();
+		cacheServices(client, { inboxes: [inbox("in-a", 41234)] });
+		recordServicesBeforeOutage(client);
+		engineNowRuns({});
+		listMockServers.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+		await reportServicesStoppedByOutage(client);
+
+		cacheServices(client, { inboxes: [] });
+		recordServicesBeforeOutage(client);
+		await reportServicesStoppedByOutage(client);
+
+		expect(showToast).not.toHaveBeenCalled();
 	});
 
 	it("records again once a notice has been raised", async () => {

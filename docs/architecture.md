@@ -590,8 +590,8 @@ which case the app picks a fallback (below).
   say so afterwards: the renderer keeps what the cached Services lists said
   was running when the outage began, and once the health poll or the Restart
   sees the engine back it compares that by id with the engine's fresh lists
-  and raises one toast naming what is no longer running, with a View services
-  action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
+  and raises one toast naming what is no longer running (three by name, then a
+  count), with a View services action (`app/src/lib/services-stopped-by-restart.ts`, issue #3493). Both
   reconnect paths report, and one snapshot is pending per outage, so the user
   hears it once.
 - **A taken port is a loud failure, not a silent one.** The engine binds its

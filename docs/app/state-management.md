@@ -1005,11 +1005,15 @@ poll can reach the new engine before any reconnect is noticed. What counts as
 running is `runningServicesIn`, the definition `useRunningServices` shares.
 Both reconnect branches then call `reportServicesStoppedByOutage`, which takes
 the one pending snapshot (the second caller finds none), fetches the three
-lists fresh, and raises one warning toast naming each service that was running
-and is absent or `running: false` now, compared by id. A failed fetch raises
-nothing and puts the snapshot back for the next reconnect. An ordinary list
-change (an MCP stop, a Stop in the drawer) records nothing, so it never
-reaches the notice.
+lists fresh, and raises one warning toast for the services that were running
+and are absent or `running: false` now, compared by id: it names at most three
+and counts the rest ("and 2 more"). A list read that another refetch cancels
+(the reconnect's own invalidate, a mutation's) is read again, up to three
+times. A failed fetch raises nothing and puts the snapshot back, marked
+restored, for the other path's report of the same outage; the next outage's
+first record replaces it. A list change with the engine up (an MCP stop, a
+Stop in the drawer) records nothing on its own; only one the cached lists had
+not shown yet when an outage began is named as if the restart had done it.
 
 **`triggerSave` will not report a success the context did not have.** A
 registered context can report its own failure under its id and then *resolve*
