@@ -19,9 +19,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render as renderBare, screen } from "@testing-library/react";
+import { act, fireEvent, render as renderBare, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
+import { useEngineStore } from "@/stores";
 import type { Inbox } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
 
@@ -74,6 +75,12 @@ beforeEach(() => {
 	live.watching = false;
 	live.stopped = false;
 	vi.clearAllMocks();
+	// The header reads running only while the engine is up (`useEngineServing`).
+	useEngineStore.setState({
+		engineStatus: "connected",
+		engineCrash: null,
+		engineCrashAheadOfPoll: false,
+	});
 });
 
 describe("InboxView live state", () => {
@@ -97,5 +104,62 @@ describe("InboxView live state", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Resume" }));
 		expect(live.resume).toHaveBeenCalledTimes(1);
+	});
+});
+
+/**
+ * #3506. The cached record keeps `running: true` after the engine that held the
+ * listener died, so the header, the Stop action and the canned-response editor
+ * have to read the same gate the services drawer does (`useEngineServing`).
+ *
+ * Both kinds of evidence count: the poll's `unreachable`, and a crash the
+ * sidecar pushed while the poll still reads `connected`.
+ *
+ * Mutation-check: read `inbox.running` alone in `index.tsx` and every case here
+ * shows Live or Running with a Stop button again.
+ */
+describe("InboxView while Vayu's engine is down", () => {
+	const CRASH = { code: null, signal: "SIGKILL", stderrTail: [], error: null };
+
+	it.each([
+		[
+			"the poll reads it unreachable",
+			() => useEngineStore.setState({ engineStatus: "unreachable" }),
+		],
+		[
+			"the sidecar reported a crash the poll has not seen",
+			() => useEngineStore.getState().setEngineCrash(CRASH),
+		],
+	])("reads Stopped, with no Stop action, when %s", (_, goDown) => {
+		live.watching = true;
+		render(<InboxView />);
+		// Warm and live first, so the case proves the gate and not a slow render.
+		expect(screen.getByText("Live")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+		act(goDown);
+
+		expect(screen.getByText("Stopped")).toBeInTheDocument();
+		expect(screen.queryByText("Live")).not.toBeInTheDocument();
+		expect(screen.queryByText("Running")).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Start new" })).toBeInTheDocument();
+		// The canned-response editor is the stopped one: nothing is being served.
+		expect(
+			screen.getByText(/This inbox is stopped, so nothing is being served/)
+		).toBeInTheDocument();
+	});
+
+	it("reads Running again once the poll answers after the crash", () => {
+		useEngineStore.getState().setEngineCrash(CRASH);
+		render(<InboxView />);
+		expect(screen.getByText("Stopped")).toBeInTheDocument();
+
+		// The poll is the only writer of `engineStatus`, and its verdict is the
+		// newer word, `connected` from the restarted engine included.
+		act(() => useEngineStore.getState().setEngineStatus("connected"));
+
+		expect(screen.getByText("Running")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
 	});
 });
