@@ -87,6 +87,23 @@ describe("RunItem run types", () => {
 		expect(screen.getByText("2 iterations")).toBeInTheDocument();
 	});
 
+	it("draws a folder, not a method badge, on a collection run", () => {
+		// `summary.method` is absent, and a "GET" default there made the folder
+		// branch unreachable.
+		const { container } = render(
+			<RunItem
+				run={scenarioRun({ collectionId: "col_1", stepCount: 4 })}
+				onSelect={noop}
+				onDelete={vi.fn()}
+				isDeleting={false}
+				collectionName="Checkout flow"
+			/>
+		);
+
+		expect(screen.queryByText("GET")).not.toBeInTheDocument();
+		expect(container.querySelector("svg.lucide-folder")).not.toBeNull();
+	});
+
 	it("falls back to the id when the collection has been deleted since", () => {
 		// The row has the id and nothing else; showing it beats a blank line,
 		// and inventing a name for a folder that is gone would be worse than

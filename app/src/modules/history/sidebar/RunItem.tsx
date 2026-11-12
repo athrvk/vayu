@@ -119,7 +119,9 @@ function RunItem({
 	const getRequestInfo = () => {
 		if (!run.summary) return { url: null, method: null };
 		const url = run.summary.url || null;
-		const method = run.summary.method || "GET";
+		// No "GET" default for a collection run: its work has no method, and a
+		// truthy one here would hide the folder glyph the identity line draws.
+		const method = run.summary.scenario ? null : run.summary.method || "GET";
 		const type = run.summary.mode;
 		// Requested protocol only - see design-run-seed.ts's doc comment for the
 		// requested-vs-negotiated distinction. A load run's summary has no single
