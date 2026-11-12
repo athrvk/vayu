@@ -73,8 +73,8 @@ describe("DropIndicator", () => {
 });
 
 describe("RowDropIndicator", () => {
-	it("renders the horizontal line at the row's indent", () => {
-		const { container } = render(<RowDropIndicator edge="after" indentPx={16} />);
+	it("renders the horizontal line at the indent it is given", () => {
+		const { container } = render(<RowDropIndicator line={{ edge: "after", indentPx: 16 }} />);
 		const el = indicator(container);
 		expect(el.className).toContain("h-0.5");
 		expect(el.className).toContain("bottom-0");
@@ -82,8 +82,8 @@ describe("RowDropIndicator", () => {
 		expect(el.style.left).toBe("16px");
 	});
 
-	it("renders nothing without an edge", () => {
-		const { container } = render(<RowDropIndicator edge={null} indentPx={16} />);
+	it("renders nothing without a line", () => {
+		const { container } = render(<RowDropIndicator line={null} />);
 		expect(container.querySelector("[data-drop-indicator]")).toBeNull();
 	});
 });
