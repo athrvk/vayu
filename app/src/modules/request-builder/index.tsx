@@ -65,6 +65,7 @@ import { effectiveOAuth2Config, resolveAuthForSend } from "./utils/auth-resoluti
 import { useOAuth2DeferredNames } from "./hooks/useOAuth2DeferredNames";
 import { toKeyValueItems, toKeyValueEntries } from "@/components/shared/KeyValueEditor/key-value";
 import { toHeaderItems } from "./utils/system-headers";
+import { mergeParamsFromUrl } from "./utils/url";
 import type { ThresholdOwner } from "@/lib/agent-reference";
 import { noFile } from "@/lib/file-trust";
 import type { LeftOutElement } from "@/lib/elements";
@@ -443,7 +444,15 @@ export default function RequestBuilder() {
 			method: fetchedRequest.method,
 			methodSource: fetchedRequest.methodSource,
 			url: fetchedRequest.url,
-			params: toKeyValueItems(fetchedRequest.params),
+			// A query only in the URL (stored with no `params`) gets its rows here, or
+			// the table opens empty and its first edit rebuilds the URL without that
+			// query (#3491). `baseline` is seeded from this same value, so the rows
+			// do not make the draft unsaved.
+			params: mergeParamsFromUrl(
+				toKeyValueItems(fetchedRequest.params),
+				fetchedRequest.url,
+				fetchedRequest.url
+			),
 			headers: toHeaderItems(fetchedRequest.headers),
 			bodyMode,
 			body: rawBody,
