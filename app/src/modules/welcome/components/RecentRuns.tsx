@@ -23,14 +23,25 @@
  * every load test - would have nothing to look up. The snapshot's URL is
  * always there, and it is the truth about what was actually sent, even if the
  * request has since been renamed, edited or deleted.
+ *
+ * A run whose work is a collection has no URL and no method. Its row names the
+ * collection instead, resolved from `summary.scenario.collectionId` the way the
+ * history sidebar does (#3496).
  */
 
 import { ChevronRight } from "lucide-react";
 import { useTabsStore } from "@/stores";
-import { MethodBadge, RUN_STATUS, TruncatedText } from "@/components/shared";
+import {
+	MethodBadge,
+	OUTCOME_TITLE,
+	TruncatedText,
+	rowOutcome,
+	runStatusDisplay,
+} from "@/components/shared";
 import { Button, Eyebrow } from "@/components/ui";
 import { TimeValue } from "@/components/shared/TimeValue";
-import type { Run } from "@/types";
+import { useCollectionsQuery } from "@/queries";
+import type { Collection, Run } from "@/types";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
 
 const RECENT_RUN_LIMIT = 5;
@@ -41,20 +52,47 @@ const RECENT_RUN_LIMIT = 5;
  */
 const SETTLED_STATUSES: ReadonlySet<Run["status"]> = new Set(["completed", "stopped", "failed"]);
 
+interface StatusLabel {
+	text: string;
+	className: string;
+	/** The verdict's word when the run has one, for the row's accessible name. */
+	verdict: string | null;
+}
+
 /**
- * The word and `--status-*-text` token come from `RUN_STATUS`, the map the
- * history sidebar's `RunItem` and the run tab header draw with: two lists of the
+ * The word and `--status-*-text` token come from `runStatusDisplay`, fed the
+ * run's verdict as the history sidebar's `RunItem` feeds it: two lists of the
  * same runs answering in two different colours is the drift it exists to prevent
- * (#1225).
+ * (#1225), and a collection run with failed steps reading green is that drift
+ * again (#3496).
  */
-function statusLabel(status: Run["status"]): { text: string; className: string } | null {
-	if (!SETTLED_STATUSES.has(status)) return null;
-	const { label, text } = RUN_STATUS[status];
-	return { text: label, className: text };
+function statusLabel(run: Run): StatusLabel | null {
+	if (!SETTLED_STATUSES.has(run.status)) return null;
+	const judgement = rowOutcome(run);
+	const { label, text } = runStatusDisplay(run.status, judgement?.outcome);
+	return {
+		text: label,
+		className: text,
+		verdict: judgement ? OUTCOME_TITLE[judgement.outcome].toLowerCase() : null,
+	};
+}
+
+/**
+ * What the row says was run: the collection for a run with a `scenario`
+ * descriptor, else its URL. A collection deleted since its run resolves to its
+ * id, the one thing the row still has; a run with a descriptor and no id has
+ * nothing to say, and the kind chip stands alone.
+ */
+function subjectOf(run: Run, collections: readonly Collection[]): string | undefined {
+	const scenario = run.summary?.scenario;
+	if (!scenario) return run.summary?.url;
+	const id = scenario.collectionId;
+	return id ? (collections.find((c) => c.id === id)?.name ?? id) : undefined;
 }
 
 export function RecentRuns({ runs }: { runs: Run[] }) {
 	const openTab = useTabsStore((s) => s.openTab);
+	const { data: collections = [] } = useCollectionsQuery();
 
 	// Copy before sorting: `runs` is the TanStack Query cache array.
 	const recent = [...runs]
@@ -68,9 +106,10 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 			<Eyebrow className="mb-2">Recent runs</Eyebrow>
 			<div className="flex flex-col">
 				{recent.map((run) => {
-					const status = statusLabel(run.status);
-					const url = run.summary?.url;
-					const method = run.summary?.method;
+					const status = statusLabel(run);
+					const isCollectionRun = run.summary?.scenario != null;
+					const subject = subjectOf(run, collections);
+					const method = isCollectionRun ? undefined : run.summary?.method;
 					return (
 						<Button
 							key={run.id}
@@ -78,8 +117,10 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 							variant="listRow"
 							onClick={() => openTab({ type: "run", entityId: run.id })}
 							aria-label={`Open ${RUN_TYPE_NAME[run.type]}${
-								url ? `, ${url}` : ""
-							}${status ? `, ${status.text.toLowerCase()}` : ""}`}
+								subject ? `, ${subject}` : ""
+							}${status ? `, ${status.text.toLowerCase()}` : ""}${
+								status?.verdict ? `, verdict ${status.verdict}` : ""
+							}`}
 							// `justify-between` overrides the variant's `justify-start`:
 							// this row's two content groups (identity, meta) split to the
 							// ends rather than packing left.
@@ -90,19 +131,21 @@ export function RecentRuns({ runs }: { runs: Run[] }) {
 									{RUN_TYPE_NAME[run.type]}
 								</span>
 								{method && <MethodBadge method={method} size="sm" />}
-								{url ? (
+								{subject ? (
 									// `min-w-0` on the flex parent as well, or the URL
 									// refuses to shrink and pushes the timestamp out.
 									<TruncatedText className="text-xs text-foreground">
-										{url}
+										{subject}
 									</TruncatedText>
 								) : (
-									// Pre-snapshot runs, and anything the engine stored
-									// without a URL. Say so rather than leaving the row
-									// looking like it failed to render.
-									<span className="truncate text-xs text-muted-foreground italic">
-										No URL recorded
-									</span>
+									!isCollectionRun && (
+										// Pre-snapshot runs, and anything the engine stored
+										// without a URL. Say so rather than leaving the row
+										// looking like it failed to render.
+										<span className="truncate text-xs text-muted-foreground italic">
+											No URL recorded
+										</span>
+									)
 								)}
 							</span>
 							<span className="flex shrink-0 items-center gap-2">

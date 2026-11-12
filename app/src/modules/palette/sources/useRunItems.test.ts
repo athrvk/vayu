@@ -72,3 +72,39 @@ describe("the palette's run rows", () => {
 		expect(row.subtitle).toContain(" · Stopped · ");
 	});
 });
+
+describe("the palette's run rows, for a run with a verdict (#3496)", () => {
+	function scenarioRowWith(resultSummary: Run["resultSummary"]) {
+		runs = [{ ...bareRun("scenario"), resultSummary } as Run];
+		vi.useFakeTimers();
+		const { result } = renderHook(() => useRunItems("checkout"));
+		act(() => {
+			vi.advanceTimersByTime(RUN_SEARCH_DEBOUNCE_MS);
+		});
+		return result.current[0];
+	}
+
+	it.each([
+		["a failed step", { passed: 2, failed: 1 }],
+		["an errored step", { passed: 2, errored: 1 }],
+	])("says a collection run with %s failed, beside its status", (_name, resultSummary) => {
+		const row = scenarioRowWith(resultSummary);
+
+		expect(row.subtitle?.startsWith("Collection run · Completed · verdict failed · ")).toBe(
+			true
+		);
+	});
+
+	it("leaves a clean collection run at its status word", () => {
+		const row = scenarioRowWith({ passed: 3, skipped: 1 });
+
+		expect(row.subtitle?.startsWith("Collection run · Completed · ")).toBe(true);
+		expect(row.subtitle).not.toContain("verdict");
+	});
+
+	it("keeps the status as a search keyword", () => {
+		const row = scenarioRowWith({ passed: 2, failed: 1 });
+
+		expect(row.keywords).toContain("completed");
+	});
+});
