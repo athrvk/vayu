@@ -22,6 +22,9 @@ import { flushSync } from "react-dom";
 import { useTabsStore } from "@/stores/tabs-store";
 import { tabElementId } from "./tab-aria";
 
+/** The strip's roving stop (`useRovingStop`): the tab a Tab key lands on. */
+const ROVING_TAB_STOP = '[role="tab"][tabindex="0"]';
+
 /**
  * Close `tabId` and leave focus on the tab that takes its place.
  *
@@ -50,6 +53,19 @@ export function closeTabFromKeyboard(tabId: string): void {
 }
 
 /**
+ * Focus the active tab's strip element, for a surface that has just opened one
+ * and is about to leave the screen (the drawer overlay closing on a selection).
+ *
+ * Falls back to the roving stop, as `moveTabAndFocus` does, when the strip has
+ * not rendered the tab (it draws only the ones that fit).
+ */
+export function focusActiveTab(): void {
+	const { activeTabId } = useTabsStore.getState();
+	const active = activeTabId ? document.getElementById(tabElementId(activeTabId)) : null;
+	(active ?? document.querySelector<HTMLElement>(ROVING_TAB_STOP))?.focus();
+}
+
+/**
  * Move `tabId` to `toIndex` and keep focus on it.
  *
  * The refocus is not optional. Reordering `openTabs` makes React reinsert the
@@ -67,5 +83,5 @@ export function closeTabFromKeyboard(tabId: string): void {
 export function moveTabAndFocus(tabId: string, toIndex: number): void {
 	flushSync(() => useTabsStore.getState().moveTab(tabId, toIndex));
 	const moved = document.getElementById(tabElementId(tabId));
-	(moved ?? document.querySelector<HTMLElement>('[role="tab"][tabindex="0"]'))?.focus();
+	(moved ?? document.querySelector<HTMLElement>(ROVING_TAB_STOP))?.focus();
 }

@@ -5,7 +5,13 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatLatencyOrDash, formatPercent, formatRate } from "@/lib/format-number";
+import {
+	formatFixed,
+	formatLatencyOrDash,
+	formatPercent,
+	formatRate,
+	formatTrimmed,
+} from "@/lib/format-number";
 
 /** Shared value/axis formatters for the centralized charts. */
 
@@ -58,7 +64,7 @@ function scaledTick(v: number, splits: readonly number[], tiers: readonly Magnit
 		suffix: "",
 	};
 	const digits = decimalsFor(tickStep(splits) / divisor);
-	return `${Number((v / divisor).toFixed(digits))}${suffix}`;
+	return `${formatTrimmed(v / divisor, digits)}${suffix}`;
 }
 
 /**
@@ -71,7 +77,7 @@ export const axisMs = (v: number, splits: readonly number[] = [v]): string => {
 	const inSeconds = Math.max(...splits.map(Math.abs)) >= 1000;
 	const scale = inSeconds ? 1000 : 1;
 	const digits = decimalsFor(tickStep(splits) / scale);
-	return `${Number((v / scale).toFixed(digits))}${inSeconds ? "s" : "ms"}`;
+	return `${formatTrimmed(v / scale, digits)}${inSeconds ? "s" : "ms"}`;
 };
 
 export const fmtRate = (v: number | null | undefined): string =>
@@ -89,14 +95,14 @@ export const fmtCount = (v: number | null | undefined): string =>
  * decimals its spacing needs, so it never reads as the "0" beside it.
  */
 export const axisCount = (v: number, splits: readonly number[] = [v]): string =>
-	`${Number(v.toFixed(decimalsFor(tickStep(splits))))}`;
+	formatTrimmed(v, decimalsFor(tickStep(splits)));
 
 export const fmtPct = (v: number | null | undefined): string =>
 	v == null ? "-" : `${formatPercent(v)}%`;
 
 export const axisPct = (v: number): string => `${Math.round(v)}%`;
 
-export const fmtSeconds = (v: number): string => `${v.toFixed(1)}s`;
+export const fmtSeconds = (v: number): string => `${formatFixed(v, 1)}s`;
 
 /**
  * Server-vitals values, whose unit this app does not know: a run may scrape a
@@ -108,11 +114,11 @@ export const fmtSeconds = (v: number): string => `${v.toFixed(1)}s`;
 export const fmtVitals = (v: number | null | undefined): string => {
 	if (v == null) return "-";
 	const abs = Math.abs(v);
-	if (abs >= 1e9) return `${(v / 1e9).toFixed(2)}G`;
-	if (abs >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-	if (abs >= 1e3) return `${(v / 1e3).toFixed(2)}k`;
-	if (abs >= 10) return v.toFixed(1);
-	return v.toFixed(3);
+	if (abs >= 1e9) return `${formatFixed(v / 1e9, 2)}G`;
+	if (abs >= 1e6) return `${formatFixed(v / 1e6, 2)}M`;
+	if (abs >= 1e3) return `${formatFixed(v / 1e3, 2)}k`;
+	if (abs >= 10) return formatFixed(v, 1);
+	return formatFixed(v, 3);
 };
 
 export const axisVitals = (v: number, splits: readonly number[] = [v]): string =>

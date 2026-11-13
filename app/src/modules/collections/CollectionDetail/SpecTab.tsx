@@ -100,7 +100,7 @@ import {
 import SpecCoverageLine from "./SpecCoverageLine";
 import RefDisclosure from "./RefDisclosure";
 import { collectSubtreeIds } from "@/modules/collections/tree-utils";
-import { formatBytes } from "@/modules/settings/utils/format-size";
+import { formatBytes } from "@/lib/format-number";
 import ExportSpecDialog from "@/modules/collections/ExportSpecDialog";
 import ExportPostmanDialog from "@/modules/collections/ExportPostmanDialog";
 import { hasSpecBinding, type Collection } from "@/types";

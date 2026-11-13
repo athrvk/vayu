@@ -16,7 +16,11 @@ import { useToastStore } from "./toast-store";
 beforeEach(() => {
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
 	useSaveStore.setState({ contexts: new Map() });
-	useEngineStore.setState({ engineStatus: "connected" });
+	useEngineStore.setState({
+		engineStatus: "connected",
+		engineCrash: null,
+		engineCrashAheadOfPoll: false,
+	});
 });
 
 describe("closeTabsForEntities", () => {
@@ -400,6 +404,23 @@ describe("closeTab keeps a dirty tab the engine cannot save", () => {
 		useTabsStore.getState().openTab({ type: "request", entityId: "dirty" });
 		markDirty("request-dirty");
 		useEngineStore.setState({ engineStatus: "unreachable" });
+		const tabId = useTabsStore.getState().openTabs[0].id;
+
+		useTabsStore.getState().closeTab(tabId);
+
+		expect(useTabsStore.getState().openTabs.map((t) => t.entityId)).toContain("dirty");
+		expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+			"Not saved - Vayu's engine is unreachable"
+		);
+	});
+
+	it("keeps the tab when the sidecar reported a crash the poll still reads as connected (#3506)", () => {
+		useTabsStore.getState().openTab({ type: "request", entityId: "dirty" });
+		markDirty("request-dirty");
+		useEngineStore.setState({ engineStatus: "connected" });
+		useEngineStore
+			.getState()
+			.setEngineCrash({ code: null, signal: "SIGKILL", stderrTail: [], error: null });
 		const tabId = useTabsStore.getState().openTabs[0].id;
 
 		useTabsStore.getState().closeTab(tabId);

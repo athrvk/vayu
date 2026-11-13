@@ -197,6 +197,8 @@ export default function Shell() {
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const triggerSave = useSaveStore((s) => s.triggerSave);
 	const windowWidth = useWindowWidth();
+	const drawerMode = sidePanelMode(windowWidth, DRAWER_PUSH_MIN_WIDTH);
+	const contextBarMode = sidePanelMode(windowWidth, CONTEXT_BAR_PUSH_MIN_WIDTH);
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId) ?? null;
 
@@ -442,7 +444,7 @@ export default function Shell() {
 				 * never the tree the active tab renders into.
 				 */}
 				<div className="relative flex flex-1 min-w-0 overflow-hidden">
-					<Drawer mode={sidePanelMode(windowWidth, DRAWER_PUSH_MIN_WIDTH)} />
+					<Drawer mode={drawerMode} siblingMode={contextBarMode} />
 					{/*
 					 * The content column: tab strip on top, then main + ContextBar.
 					 *
@@ -509,9 +511,7 @@ export default function Shell() {
 										</Suspense>
 									</div>
 								</main>
-								<ContextBar
-									mode={sidePanelMode(windowWidth, CONTEXT_BAR_PUSH_MIN_WIDTH)}
-								/>
+								<ContextBar mode={contextBarMode} siblingMode={drawerMode} />
 							</div>
 							<ContextRail />
 						</div>

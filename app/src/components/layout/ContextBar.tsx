@@ -33,6 +33,7 @@ import { DEFAULT_CONTEXT_BAR_WIDTH, type SidePanelMode } from "@/constants/layou
 import { Collapsible, TooltipIconButton } from "@/components/ui";
 import { contextBarHasContent } from "./context-bar-content";
 import { regionProps } from "./region-focus";
+import { useOverlayPanel } from "./useOverlayPanel";
 import { sectionsForTab } from "./context-bar/registry";
 import {
 	ContextBarSectionEmptyHeader,
@@ -44,6 +45,8 @@ import type { Tab } from "@/stores";
 
 interface ContextBarProps {
 	mode?: SidePanelMode;
+	/** The drawer's mode, for the one-overlay-at-a-time rule (`useOverlayPanel`). */
+	siblingMode?: SidePanelMode;
 }
 
 /**
@@ -103,7 +106,7 @@ function ContextBarSectionSlot({ section, tab, expanded, onToggle }: ContextBarS
 	);
 }
 
-export function ContextBar({ mode = "push" }: ContextBarProps) {
+export function ContextBar({ mode = "push", siblingMode = "push" }: ContextBarProps) {
 	const contextBarOpen = useLayoutStore((s) => s.contextBarOpen);
 	const setContextBarOpen = useLayoutStore((s) => s.setContextBarOpen);
 	const contextBarWidth = useLayoutStore((s) => s.contextBarWidth);
@@ -113,6 +116,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 	const openTabs = useTabsStore((s) => s.openTabs);
 	const activeTabId = useTabsStore((s) => s.activeTabId);
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
+	const panelRef = useOverlayPanel({ panel: "context", mode, siblingMode });
 
 	// Nothing to show is a different case from closed (below): it never
 	// animates, because there is nothing behind it to reveal - a tab with no
@@ -142,6 +146,7 @@ export function ContextBar({ mode = "push" }: ContextBarProps) {
 				   and the two together drew a doubled 2px edge - the Drawer's
 				   identical handle is what the single line should look like. */}
 				<aside
+					ref={panelRef}
 					className={cn(
 						"flex flex-col shrink-0 bg-panel",
 						mode === "overlay"

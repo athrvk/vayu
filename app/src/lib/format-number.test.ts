@@ -26,6 +26,7 @@ afterAll(restoreIntl);
 
 import {
 	formatByteRateParts,
+	formatBytes,
 	formatLatency,
 	formatLatencyOrDash,
 	formatLatencyParts,
@@ -212,5 +213,34 @@ describe("formatByteRateParts: KB/s below 0.1 MB/s, MB/s from there, decimal uni
 
 	it.each(cases)("%s", (_name, input, value, unit) => {
 		expect(formatByteRateParts(input)).toEqual({ value, unit });
+	});
+});
+
+describe("formatBytes: 1024-based B, KB, MB and GB, one decimal from KB up", () => {
+	const KB = 1024;
+	const cases: Array<[string, number | null | undefined, string]> = [
+		["a few bytes", 512, "512 B"],
+		["zero", 0, "0 B"],
+		["the last byte tier", KB - 1, "1023 B"],
+		["the first kilobyte", KB, "1.0 KB"],
+		["kilobytes", 2048, "2.0 KB"],
+		["the first megabyte", KB ** 2, "1.0 MB"],
+		["an engine byte limit", 104_857_600, "100.0 MB"],
+		["the first gigabyte", KB ** 3, "1.0 GB"],
+		["three gigabytes, which the MB-capped copy read as 3072.0 MB", 3 * KB ** 3, "3.0 GB"],
+		["a size past a terabyte stays in GB", 2 * KB ** 4, "2048.0 GB"],
+		["NaN", NaN, "0 B"],
+		["Infinity", Infinity, "0 B"],
+		["negative", -5, "0 B"],
+		["null", null, "0 B"],
+		["undefined", undefined, "0 B"],
+	];
+
+	it.each(cases)("%s", (_name, input, text) => {
+		expect(formatBytes(input)).toBe(text);
+	});
+
+	it("stays in KB just under a megabyte", () => {
+		expect(formatBytes(KB ** 2 - 1)).toMatch(/ KB$/);
 	});
 });

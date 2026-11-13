@@ -5,7 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
-import { formatSize } from "@/components/shared/response-viewer/utils";
+import { formatBytes } from "@/lib/format-number";
 import { decodeResponseBody } from "@/modules/request-builder/utils/response-bytes";
 import type { InboxCannedResponse, InboxCapture } from "@/types";
 
@@ -68,9 +68,9 @@ export function binaryBodyPlaceholder(
 	capture: Pick<InboxCapture, "bodyBytes" | "bodyTruncated">,
 	held: number | undefined
 ): string {
-	const received = formatSize(capture.bodyBytes);
+	const received = formatBytes(capture.bodyBytes);
 	if (capture.bodyTruncated && held !== undefined) {
-		return `[Binary data, not shown as text: the first ${formatSize(held)} of ${received} was kept.]`;
+		return `[Binary data, not shown as text: the first ${formatBytes(held)} of ${received} was kept.]`;
 	}
 	return `[${received} of binary data, not shown as text.]`;
 }

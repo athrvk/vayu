@@ -36,7 +36,7 @@ import {
 	DialogCancelButton,
 } from "@/components/ui";
 import { Callout } from "@/components/shared";
-import { formatSize } from "@/components/shared/response-viewer";
+import { formatBytes } from "@/lib/format-number";
 import { useCreateRequestExampleMutation } from "@/queries";
 import { isCommitEnter } from "@/lib/keyboard";
 import { defaultExampleName, exampleFromResponse } from "./save-as-example";
@@ -114,10 +114,10 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					 */}
 					{response.bodyTruncated && (
 						<Callout severity="warning" title="This body is not the whole response">
-							Only the first {formatSize(heldBodySize(response))} of{" "}
-							{formatSize(response.bodyBytes ?? heldBodySize(response))} was kept when
-							the run was stored, and that is what gets saved. Re-send the request
-							first to keep the complete body.
+							Only the first {formatBytes(heldBodySize(response))} of{" "}
+							{formatBytes(response.bodyBytes ?? heldBodySize(response))} was kept
+							when the run was stored, and that is what gets saved. Re-send the
+							request first to keep the complete body.
 						</Callout>
 					)}
 
@@ -129,7 +129,7 @@ export function SaveAsExampleDialog({ requestId, response, onClose }: SaveAsExam
 					 */}
 					{response.bodyCapped && (
 						<Callout severity="warning" title="This body was capped while reading">
-							Only the first {formatSize(response.size || heldBodySize(response))} of
+							Only the first {formatBytes(response.size || heldBodySize(response))} of
 							this response was read - Vayu&apos;s engine stops a Send there, so
 							re-sending reads the same amount, and that is what gets saved. Raise Max
 							Send response body in Settings to read more.

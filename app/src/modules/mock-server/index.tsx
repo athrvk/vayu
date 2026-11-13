@@ -46,6 +46,7 @@ import {
 	useStopMockServerMutation,
 } from "@/queries";
 import { useLayoutStore, useTabsStore, useToastStore } from "@/stores";
+import { useEngineServing } from "@/modules/services/useRunningServices";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { mockServerReference } from "@/lib/agent-reference";
@@ -66,6 +67,9 @@ export default function MockServerView() {
 	const revealDrawerView = useLayoutStore((s) => s.revealDrawerView);
 	const { data: mocks = [], isError, error, refetch } = useMockServersQuery();
 	const stopMock = useStopMockServerMutation();
+	// Every listed mock is running while its engine is; the cached list outlives
+	// a crashed one (#3506), so the tab reads the same gate the drawer does.
+	const serving = useEngineServing();
 
 	const activeTab = openTabs.find((t) => t.id === activeTabId);
 	const addressedMockId = activeTab?.type === "mock-server" ? activeTab.entityId : null;
@@ -139,6 +143,7 @@ export default function MockServerView() {
 						Copy for agent
 					</Button>
 					<Badge variant="outline">{mock.collectionName}</Badge>
+					{!serving && <Badge variant="outline">Stopped</Badge>}
 					<Button
 						variant="ghost"
 						size="sm"
@@ -167,27 +172,30 @@ export default function MockServerView() {
 						</Select>
 					)}
 
-					<div className="ml-auto">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() =>
-								stopMock.mutate(mock.mockId, {
-									onError: (e) =>
-										showToast(
-											e instanceof Error
-												? e.message
-												: "Couldn't stop the mock server",
-											"error"
-										),
-								})
-							}
-							disabled={stopMock.isPending}
-						>
-							<Square className="size-icon-sm" aria-hidden="true" />
-							Stop
-						</Button>
-					</div>
+					{/* Nothing left to stop once the engine that held the listener is gone. */}
+					{serving && (
+						<div className="ml-auto">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() =>
+									stopMock.mutate(mock.mockId, {
+										onError: (e) =>
+											showToast(
+												e instanceof Error
+													? e.message
+													: "Couldn't stop the mock server",
+												"error"
+											),
+									})
+								}
+								disabled={stopMock.isPending}
+							>
+								<Square className="size-icon-sm" aria-hidden="true" />
+								Stop
+							</Button>
+						</div>
+					)}
 				</div>
 				<p className="pl-6 text-xs text-muted-foreground">
 					{mock.latencyMs > 0

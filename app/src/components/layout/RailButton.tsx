@@ -87,6 +87,9 @@ export function RailButton({
 					onClick={onClick}
 					aria-label={label}
 					aria-pressed={active}
+					// Lets the overlay panel hand focus back here and ignore the press
+					// that is about to toggle it - see `useOverlayPanel`.
+					data-rail-side={side}
 					tabIndex={tabIndex}
 					className={cn(
 						// Explicit property list, not `transition-colors`: this is a

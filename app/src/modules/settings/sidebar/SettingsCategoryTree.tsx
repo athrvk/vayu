@@ -26,6 +26,7 @@
  * accent); there is no per-category color.
  */
 
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { useMemo } from "react";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import { useSettingsStore } from "@/modules/settings/settings-store";
@@ -88,6 +89,7 @@ export default function SettingsCategoryTree() {
 	const query = useSettingsStore((s) => s.searchQuery);
 	const setQuery = useSettingsStore((s) => s.setSearchQuery);
 	const openTab = useTabsStore((s) => s.openTab);
+	const onItemOpened = useDrawerItemOpened();
 	const { isLoading, error, refetch } = useConfigQuery();
 
 	// Selecting a category shows its panel in the settings tab. The tree now
@@ -96,6 +98,7 @@ export default function SettingsCategoryTree() {
 	const selectCategory = (category: SettingsCategory, highlightKey?: string) => {
 		setSelectedCategory(category, highlightKey);
 		openTab({ type: "settings", entityId: null });
+		onItemOpened();
 	};
 
 	// The same corpus the palette's settings source searches - see

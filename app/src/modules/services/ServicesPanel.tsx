@@ -33,6 +33,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import {
 	Check,
 	ChevronDown,
@@ -292,6 +293,7 @@ function InboxRow({
 	flashed: boolean;
 }) {
 	const openTab = useTabsStore((s) => s.openTab);
+	const onItemOpened = useDrawerItemOpened();
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const stopInbox = useStopInboxMutation();
@@ -310,7 +312,10 @@ function InboxRow({
 				// The tab is a singleton pointed at one inbox, so the row hands it the
 				// id it names - without it the tab showed whichever inbox it had last
 				// (in practice the first), and the row's label was a lie (issue #554).
-				onActivate={() => openTab({ type: "inbox", entityId: inbox.inboxId })}
+				onActivate={() => {
+					openTab({ type: "inbox", entityId: inbox.inboxId });
+					onItemOpened();
+				}}
 				actionLabel="Open inbox"
 				actionsLabel={`More actions for inbox on port ${inbox.port}`}
 				actions={[
@@ -725,6 +730,7 @@ function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }
 	const showToast = useToastStore((s) => s.showToast);
 	const { copy } = useCopy();
 	const openTab = useTabsStore((s) => s.openTab);
+	const onItemOpened = useDrawerItemOpened();
 	const stopMock = useStopMockServerMutation();
 	const mockLine = mockServerReference(mock);
 
@@ -735,7 +741,10 @@ function MockServerRow({ mock, running }: { mock: MockServer; running: boolean }
 			// record, since a mock holds nothing that outlives its listener.
 			// Same as an issuer, unlike an inbox and its captures.
 			running={running}
-			onActivate={() => openTab({ type: "mock-server", entityId: mock.mockId })}
+			onActivate={() => {
+				openTab({ type: "mock-server", entityId: mock.mockId });
+				onItemOpened();
+			}}
 			actionLabel="Open mock server"
 			actionsLabel={`More actions for mock server on port ${mock.port}`}
 			actions={[

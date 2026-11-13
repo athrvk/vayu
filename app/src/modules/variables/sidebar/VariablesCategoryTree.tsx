@@ -39,6 +39,7 @@
  *     button is the second.
  */
 
+import { useDrawerItemOpened } from "@/components/layout/drawer-item-opened";
 import { useId, useMemo, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
 import { collectionPath } from "@/modules/collections/tree-utils";
@@ -210,10 +211,13 @@ export default function VariablesCategoryTree() {
 
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
 
+	const onItemOpened = useDrawerItemOpened();
+
 	// Selecting a scope must also surface the variables editor in the main view
 	const selectCategory = (category: VariableCategory) => {
 		setSelectedCategory(category);
 		openTab({ type: "variables", entityId: null });
+		onItemOpened();
 	};
 	const [environmentsExpanded, setEnvironmentsExpanded] = useState(true);
 

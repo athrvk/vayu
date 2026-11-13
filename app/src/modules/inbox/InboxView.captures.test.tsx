@@ -40,7 +40,7 @@ import type { ReactElement } from "react";
 import { TooltipProvider } from "@/components/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { mergeCapture, queryKeys } from "@/queries";
-import { useTabsStore } from "@/stores";
+import { useEngineStore, useTabsStore } from "@/stores";
 import type { Inbox, InboxCapture, InboxCapturesResponse } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
 
@@ -138,6 +138,8 @@ beforeEach(() => {
 	listInboxCaptures.mockReset().mockResolvedValue(page(0, 0, 0));
 	clearInboxCaptures.mockReset().mockResolvedValue({ inboxId: "inbox_a", cleared: 2 });
 	useTabsStore.setState({ openTabs: [], activeTabId: null, tabFocusedAt: {} });
+	// The header reads running only while the engine is up (`useEngineServing`).
+	useEngineStore.setState({ engineStatus: "connected", engineCrash: null });
 	vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn() } });
 	Element.prototype.scrollIntoView = vi.fn();
 });

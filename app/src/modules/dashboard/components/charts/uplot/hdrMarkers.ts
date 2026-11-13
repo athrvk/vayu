@@ -5,6 +5,7 @@
  * LICENSE file in the "app" directory of this source tree.
  */
 
+import { formatTrimmed } from "@/lib/format-number";
 import type { RunReport } from "@/types";
 import type { Marker } from "./plugins";
 import type { ColorRole } from "./uplotTheme";
@@ -20,7 +21,7 @@ export function pctToX(pct: number): number {
 export function xToPctLabel(x: number): string {
 	const span = Math.log10(1 / (1 - 99.99 / 100));
 	const pct = 100 * (1 - Math.pow(10, -Math.min(1, Math.max(0, x)) * span));
-	return `${Math.round(pct * 100) / 100}%`;
+	return `${formatTrimmed(pct, 2)}%`;
 }
 
 interface HdrMarkerSpec {

@@ -21,6 +21,7 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { BookmarkPlus, Loader2, Send } from "lucide-react";
+import { formatBytes } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import {
 	Tabs,
@@ -48,7 +49,6 @@ import {
 	ResponseActions,
 	ResponseHeadersPanel,
 	ResponseEvents,
-	formatSize,
 } from "@/components/shared/response-viewer";
 import { Callout, EmptyState, ExchangeWarnings } from "@/components/shared";
 import ResponseCookies from "./ResponseCookies";
@@ -743,8 +743,8 @@ export default function ResponseViewer() {
 							{shown.bodyTruncated && (
 								<div className="px-4 pt-3 shrink-0">
 									<Callout severity="warning" title="Body truncated for storage">
-										Only the first {formatSize(heldBodySize(shown))} of{" "}
-										{formatSize(shown.bodyBytes ?? heldBodySize(shown))} was
+										Only the first {formatBytes(heldBodySize(shown))} of{" "}
+										{formatBytes(shown.bodyBytes ?? heldBodySize(shown))} was
 										kept. Re-send the request to view the full response.
 									</Callout>
 								</div>
@@ -761,7 +761,7 @@ export default function ResponseViewer() {
 								<div className="px-4 pt-3 shrink-0">
 									<Callout severity="warning" title="Body capped while reading">
 										Only the first{" "}
-										{formatSize(shown.size || heldBodySize(shown))} of this
+										{formatBytes(shown.size || heldBodySize(shown))} of this
 										response was read - Vayu&apos;s engine stops a Send there,
 										so re-sending reads the same amount. Raise Max Send response
 										body in Settings to read more.

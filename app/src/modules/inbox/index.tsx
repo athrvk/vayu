@@ -74,6 +74,7 @@ import {
 	useUpdateInboxResponseMutation,
 } from "@/queries";
 import { useInboxNotifyStore, useTabsStore, useToastStore } from "@/stores";
+import { useEngineServing } from "@/modules/services/useRunningServices";
 import { useCopy } from "@/hooks";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { cn } from "@/lib/utils";
@@ -286,7 +287,12 @@ export default function InboxView() {
 	const capturesTotal = capturesQuery.data?.pagination.total ?? 0;
 	const hasMoreCaptures = capturesQuery.data?.pagination.hasMore === true;
 	const loadMore = useLoadMoreInboxCapturesMutation();
-	const live = useInboxLive(inbox?.inboxId ?? null, inbox?.running === true);
+	// The record outlives the engine process that held its listener, so the
+	// cached flag alone reads Running after a crash (#3506); the same gate the
+	// services drawer puts on its rows.
+	const serving = useEngineServing();
+	const running = inbox?.running === true && serving;
+	const live = useInboxLive(inbox?.inboxId ?? null, running);
 
 	const selectedCaptureId =
 		selection !== null && selection.inboxId === inbox?.inboxId ? selection.captureId : null;
@@ -411,7 +417,7 @@ export default function InboxView() {
 
 				{!inbox.loopback && <NonLoopbackBadge bind={inbox.bind} />}
 				<Badge variant="outline">
-					{inbox.running ? (live.watching ? "Live" : "Running") : "Stopped"}
+					{running ? (live.watching ? "Live" : "Running") : "Stopped"}
 				</Badge>
 				{/* Always said, the default included: "Any" is the answer to whether
 				    a page in the browser can read this, which an absent line would
@@ -437,7 +443,7 @@ export default function InboxView() {
 						<SelectContent>
 							{ordered.map((option) => (
 								<SelectItem key={option.inboxId} value={option.inboxId}>
-									{`Port ${option.port}${option.running ? "" : " (stopped)"}`}
+									{`Port ${option.port}${option.running && serving ? "" : " (stopped)"}`}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -475,7 +481,7 @@ export default function InboxView() {
 							Clear
 						</Button>
 					</DisabledHint>
-					{inbox.running ? (
+					{running ? (
 						<Button
 							variant="outline"
 							size="sm"
@@ -536,7 +542,7 @@ export default function InboxView() {
 				key={cannedResponseKey(inbox.inboxId, inbox.response)}
 				response={inbox.response}
 				pending={updateResponse.isPending}
-				stopped={!inbox.running}
+				stopped={!running}
 				onApply={applyResponse}
 			/>
 

@@ -36,6 +36,7 @@ import { useState } from "react";
 import { HardDriveDownload, Loader2 } from "lucide-react";
 
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui";
+import { formatBytes } from "@/lib/format-number";
 import { ENGINE_NO_ANSWER } from "@/lib/engine-error-text";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { pluralize } from "@/modules/dashboard/utils/format";
@@ -48,19 +49,6 @@ import { appSetting } from "../app-settings";
 // Headings come from the catalogue so search cannot offer a name this panel
 // does not print - see `app-settings.ts`.
 const WORKSPACE_BACKUP = appSetting("workspace-backup");
-
-/** A snapshot's size, in the units a person reads a file size in. */
-function formatSize(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	const units = ["KB", "MB", "GB"] as const;
-	let value = bytes / 1024;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit += 1;
-	}
-	return `${value.toFixed(1)} ${units[unit]}`;
-}
 
 export function WorkspaceBackupCard() {
 	const showToast = useToastStore((s) => s.showToast);
@@ -138,7 +126,7 @@ export function WorkspaceBackupCard() {
 				{result && (
 					<div className="enter-fade surface-sunken rounded-md border border-rule p-3 space-y-1">
 						<p className="text-xs text-muted-foreground">
-							Saved {formatSize(result.sizeBytes)} at{" "}
+							Saved {formatBytes(result.sizeBytes)} at{" "}
 							<TimeValue value={result.createdAt} />
 							{result.pruned > 0 &&
 								` - removed ${result.pruned} older ${pluralize(result.pruned, "snapshot")}`}
