@@ -1948,6 +1948,8 @@ see.
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
 | Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
+| A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
+| A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
 
 **A tree row is named by its name, not by what is inside it.** A `treeitem`
@@ -1972,6 +1974,24 @@ The counterpart rule is what stays out of the region: a polite region
 re-announces on every text change, so a figure that moves several times a second
 (`ImportProgressView`'s byte counter) is marked `aria-hidden` inside it and left
 for the eye. A counter that moves once per file is slow enough to keep.
+
+**A run is the one operation announced from an off-screen region.**
+`RunAnnouncer` (`components/layout/`) is an `sr-only` polite region that
+`Shell` mounts once, outside the tab panel, and it is a deliberate exception to
+the visible-line rule above for two reasons. A run is long enough that the user
+is often on another tab when it ends, and only the active tab's surface is
+mounted, so a region on the dashboard or the run view would not be in the DOM
+to hear it; and the visible lines it would sit on (the status pill, the verdict
+banner) are replaced or remount when the run settles, which a live region does
+not survive. It speaks transitions only, never a figure the run moves: a load
+test or collection run starting, then how it ended - "Load test completed.
+Passed. All 3 budgets met", "Load test stopped", "Load test failed. <reason>",
+"Collection run completed. 41 passed, 2 failed" - with the verdict taken from
+`reportOutcome`, the banner's own, so the two cannot disagree. A lost stream and
+the wait for the report are not announced. The run's progress bar is the
+`Progress` primitive ("Run progress"), read on demand; the hero row's fidelity
+gauges (`MiniBar`) are `aria-hidden`, since the percentage above each states
+the same value in words.
 
 **A `role="img"` is a promise that the element has something to say.** A
 decorative glyph given the role and no label announces as an unlabelled image; a

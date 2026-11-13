@@ -8,7 +8,7 @@
 /**
  * Shared hero-card primitives (B6 simplify). Every hero card is the same card
  * chrome + eyebrow header with an InfoChip; most also have a single 34px value
- * row, and three carry a fidelity-style progress bar. These extract that
+ * row, and two carry a fidelity gauge. These extract that
  * common shape so the per-mode cards stay tiny and consistent. Cards with
  * bespoke bodies (ErrorRate's status stack, ThroughputTwin's 2-col grid,
  * Saturation's text headline) still use HeroCardShell and supply their own
@@ -71,20 +71,14 @@ export function HeroValue({
 }
 
 /**
- * Fidelity-style progress bar. `showTarget` draws the 100% target marker line
- * (Rate Fidelity / Concurrency Utilisation); Progress omits it.
+ * A fidelity gauge: the fill against a 100% target marker (Rate Fidelity /
+ * Virtual user utilisation). Not a progress bar, and `aria-hidden`: the line
+ * above it states the same percentage in words, and the run's progress is
+ * `ProgressCard`'s `Progress`.
  */
-export function MiniBar({
-	pct,
-	color,
-	showTarget = false,
-}: {
-	pct: number;
-	color: string;
-	showTarget?: boolean;
-}) {
+export function MiniBar({ pct, color }: { pct: number; color: string }) {
 	return (
-		<div className="relative mt-2 h-1 rounded-sm bg-accent overflow-hidden">
+		<div className="relative mt-2 h-1 rounded-sm bg-accent overflow-hidden" aria-hidden="true">
 			<div
 				// `transition-[width,background-color]`: both the fill's width and
 				// its tier colour change live while a load test runs, and neither
@@ -93,12 +87,10 @@ export function MiniBar({
 				className="absolute inset-y-0 left-0 transition-[width,background-color] duration-150"
 				style={{ width: `${pct}%`, background: color }}
 			/>
-			{showTarget && (
-				<span
-					className="absolute top-[-3px] bottom-[-3px] w-px bg-primary"
-					style={{ left: "100%" }}
-				/>
-			)}
+			<span
+				className="absolute top-[-3px] bottom-[-3px] w-px bg-primary"
+				style={{ left: "100%" }}
+			/>
 		</div>
 	);
 }

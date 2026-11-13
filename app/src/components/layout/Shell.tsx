@@ -51,6 +51,7 @@ import { Dock } from "./Dock";
 import { ActivityRail } from "./ActivityRail";
 import { ContextBar } from "./ContextBar";
 import { ContextRail } from "./ContextRail";
+import { RunAnnouncer } from "./RunAnnouncer";
 import { TabStrip } from "./TabStrip";
 import { tabElementId, tabPanelElementId } from "./tab-aria";
 import { closeTabFromKeyboard } from "./tab-focus";
@@ -428,6 +429,9 @@ export default function Shell() {
 			    once, shows nothing until the flow asks where a request should
 			    land. The palette renders its own from the same hook. */}
 			<CollectionPicker {...pickerProps} />
+			{/* Here rather than in a run view: a run ends while its tab is not the
+			    one mounted, and the region must outlive every tab. */}
+			<RunAnnouncer />
 			{/* Every tab uses the same shell: the ActivityRail's view switchers,
 			    one left Drawer (its view switches with the tab -
 			    collections/history/variables/settings), the main content, and the

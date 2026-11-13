@@ -40,24 +40,9 @@ import { wakeLock, WAKE_LOCK_KEYS } from "./wake-lock";
 import { runProgress, RUN_PROGRESS_KEYS } from "./run-progress";
 import { systemNotify, NOTIFY_KINDS } from "./notify";
 import { osIcon } from "./os-icon";
-import type { OutcomeCounts } from "@/modules/history/main/scenario-steps";
+import { isRunTerminal } from "@/lib/run-status";
+import { stepOutcomeLine } from "@/modules/history/main/scenario-steps";
 import type { ScenarioRunPlanEvent, ScenarioStepEvent } from "@/types";
-
-/**
- * "41 passed, 2 failed" - what the run did, not that it is over (#1358).
- *
- * Skipped, errored and stopped steps are named only when there are any: a
- * clean run's line stays two numbers long, and a run that errored never reads
- * as a pass. A step a Stop cut short (#3397) is named as stopped and is in no
- * failure count, so a stopped run does not read as one that failed.
- */
-function stepOutcomeLine(counts: OutcomeCounts): string {
-	const parts = [`${counts.passed} passed`, `${counts.failed} failed`];
-	if (counts.errored > 0) parts.push(`${counts.errored} errored`);
-	if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
-	if (counts.stopped > 0) parts.push(`${counts.stopped} stopped`);
-	return parts.join(", ");
-}
 
 class ScenarioRunService {
 	private activeRunId: string | null = null;
@@ -396,6 +381,7 @@ class ScenarioRunService {
 		if (status === "failed") this.failProgress(runId);
 		this.releaseRun(runId);
 		if (!runId) return;
+		if (status) useScenarioRunStore.getState().runEnded(runId, status);
 
 		// From the store's own fold rather than the report fetched below: the
 		// counts are complete the moment the last step arrived, and the user
@@ -417,7 +403,7 @@ class ScenarioRunService {
 		// Through the cache, not a bare fetch: the run tab reads these exact
 		// keys, so a fetch that bypassed them would leave the pane on the stale
 		// "running" copy until something else invalidated it.
-		await Promise.all([
+		const [, report] = await Promise.all([
 			queryClient
 				.invalidateQueries({ queryKey: queryKeys.runs.detail(runId) })
 				.catch((e: unknown) => console.warn("[ScenarioRunService] run refresh failed", e)),
@@ -444,6 +430,12 @@ class ScenarioRunService {
 				})
 				.catch((e: unknown) => console.warn("[ScenarioRunService] report fetch failed", e)),
 		]);
+		// A stream that closed without the frame (#1415) leaves the stored record
+		// to say how the run ended; one it still calls running only lost its stream.
+		const storedStatus = report?.metadata?.status;
+		if (status === null && isRunTerminal(storedStatus)) {
+			useScenarioRunStore.getState().runEnded(runId, storedStatus);
+		}
 
 		// The run's row in History still says "running" until the next 5s poll,
 		// and once the user has paged the list that poll is off.

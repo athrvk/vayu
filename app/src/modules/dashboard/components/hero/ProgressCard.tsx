@@ -8,7 +8,8 @@
 import { formatNumber, formatPercent, formatSeconds } from "@/lib/format-number";
 import { TOOLTIPS } from "../tooltips";
 import { computeEta } from "../../utils/computeEta";
-import { HeroCardShell, HeroValue, MiniBar } from "./HeroCardShell";
+import { Progress } from "@/components/ui/progress";
+import { HeroCardShell, HeroValue } from "./HeroCardShell";
 
 /**
  * iterations hero card #1 - progress through the configured iteration count.
@@ -42,7 +43,10 @@ export function ProgressCard({
 					{eta !== null ? formatSeconds(eta) : "-"}
 				</span>
 			</p>
-			{pct !== undefined && <MiniBar pct={pct} color="hsl(var(--primary))" />}
+			{/* `h-1` to sit level with the fidelity gauges beside it in the hero row. */}
+			{pct !== undefined && (
+				<Progress value={pct / 100} label="Run progress" className="mt-2 h-1" />
+			)}
 		</HeroCardShell>
 	);
 }

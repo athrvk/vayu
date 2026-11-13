@@ -28,6 +28,7 @@ State lives outside components: **Zustand** stores (`stores/`) for UI/navigation
 └── <Shell />                            // components/layout/Shell.tsx - tab-centric layout with drawer + context bar
     ├── <ImportModal />                  // modules/collections/ImportModal.tsx - global overlay, open-state in a store
     ├── <CommandPalette />               // modules/palette/ - ⌘K overlay; open-state in layout-store
+    ├── <RunAnnouncer />                 // components/layout/RunAnnouncer.tsx - sr-only live region: a run started, how it ended (#3498)
     ├── <ActivityRail />                 // components/layout/ActivityRail.tsx - w-[var(--rail-width)]; the six Drawer-view buttons; F6 region "rail"
     ├── <Drawer />                       // components/layout/Drawer.tsx - resizable 220–480px; single left nav; switches views; push ≥1000px / overlay <1000px
     │   ├── <CollectionTree />           //   collections view (default)
@@ -143,6 +144,7 @@ Main layout: tab-centric with an activity rail, resizable drawer, split/overlay 
 - **The content region is the strip's tab panel.** A `role="tabpanel"` div inside `main` (not on `main`, which is a landmark and carries only `role="main"`), carrying the active tab's panel id and naming that tab with `aria-labelledby`. → `shell-tab-identity.test.tsx`.
 - **The restructure must not remount tab content.** Drawer state is upstream of the column the active tab renders into, so a `key` derived from it - or a wrapper mounted only while the drawer is closed - throws away an unsaved body, a scroll position, a Monaco model. → `shell-tab-identity.test.tsx`.
 - **`<ImportModal />`** and **`<CommandPalette />`** mounted once each as global overlays; visibility in a store rather than in the Shell.
+- **`<RunAnnouncer />`** mounted once, outside the tab panel: the polite region that says a load test or collection run started and how it ended, from `dashboard-store`'s phase and `scenario-run-store`'s `endedAs` (`run-announcement.ts` holds the sentences). Not inside a run view, because a run usually ends while its tab is not the one mounted, and a live region announces only a change to a node already in the DOM. → `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx`.
 
 ### `Drawer` (`components/layout/Drawer.tsx`)
 
