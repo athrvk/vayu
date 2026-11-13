@@ -108,7 +108,7 @@ function describeService(service: RunningService): string {
 		case "inbox":
 			return `the inbox on port ${service.port}`;
 		case "issuer":
-			return `the OAuth issuer on port ${service.port}`;
+			return `the mock OAuth issuer on port ${service.port}`;
 		case "mock-server":
 			return service.name
 				? `the mock server for "${service.name}" on port ${service.port}`

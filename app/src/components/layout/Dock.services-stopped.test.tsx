@@ -212,7 +212,7 @@ describe("after Vayu's engine crashes and is restarted", () => {
 
 		expect(
 			await screen.findByText(
-				"The OAuth issuer on port 6000 stopped when Vayu's engine restarted."
+				"The mock OAuth issuer on port 6000 stopped when Vayu's engine restarted."
 			)
 		).toBeTruthy();
 		expect(restartEngine).not.toHaveBeenCalled();

@@ -120,7 +120,7 @@ describe("servicesStoppedNotice", () => {
 			mocks: [mock("mk-1", 5050, "Orders API")],
 		});
 		expect(servicesStoppedNotice(stopped)).toBe(
-			'The inbox on port 41234, the mock server for "Orders API" on port 5050, and the OAuth issuer on port 6000 stopped when Vayu\'s engine restarted.'
+			'The inbox on port 41234, the mock server for "Orders API" on port 5050, and the mock OAuth issuer on port 6000 stopped when Vayu\'s engine restarted.'
 		);
 	});
 
