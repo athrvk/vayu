@@ -219,6 +219,12 @@ These differ between light and dark mode.
 --destructive:          0 62.8% 30.6%;  /* darker red */
 ```
 
+There is no `--success-foreground`, `--warning-foreground` or `--info-foreground`:
+a white label on a bare `--warning` measures 2.14:1, and nothing read the other
+two. A solid status control takes the `-fill` token under a white label instead
+(`bg-status-warning-fill text-white`, 4.62:1 - the Restart engine button, the
+client-certificate chip).
+
 `--info` used to be one value in both modes, like `--warning` still is. It was
 never measured, and at `199 89% 48%` it scored **2.85** on a light card against
 the 3.0 bar - while painting three chart series (wire, send rate, connections).

@@ -41,13 +41,10 @@
 	--color-tab-active: hsl(var(--tab-active));
 	--color-subtle-foreground: hsl(var(--subtle-foreground));
 	--color-success: hsl(var(--success));
-	--color-success-foreground: hsl(var(--success-foreground));
 	--color-success-text: hsl(var(--success-text));
 	--color-warning: hsl(var(--warning));
-	--color-warning-foreground: hsl(var(--warning-foreground));
 	--color-warning-text: hsl(var(--warning-text));
 	--color-info: hsl(var(--info));
-	--color-info-foreground: hsl(var(--info-foreground));
 	--color-variable: hsl(var(--variable));
 	--color-scope-global: hsl(var(--scope-global));
 	--color-scope-collection: hsl(var(--scope-collection));
@@ -365,14 +362,12 @@
 		 * surfaces (the base tokens are tuned as fills/indicators, like
 		 * --destructive vs --destructive-text). */
 		--success: 142 76% 36%;
-		--success-foreground: 0 0% 100%;
 		/* Solved against the *darkest* light surface (--muted/--accent at 93%),
 		 * not the card. At 30% these cleared the card but measured 4.04 (green)
 		 * and 3.57 (amber) on --muted, so a warning on a tinted chip failed -
 		 * which is exactly what "ramp off target" did on the dashboard. */
 		--success-text: 142 72% 27%;
 		--warning: 38 92% 50%;
-		--warning-foreground: 0 0% 100%;
 		--warning-text: 38 90% 30%;
 		/* Split per theme, like every other semantic token here. It was
 		 * `199 89% 48%` in both, which measured **2.85** on a light card
@@ -382,7 +377,6 @@
 		 * where one value must read as the same signal on either surface;
 		 * `--info` had no such reason and was never measured. */
 		--info: 199 89% 38%; /* cyan - see the note below */
-		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - global / collection / environment.
 		 * Used as text/icon/border at full strength and as tinted backgrounds
@@ -773,13 +767,10 @@
 
 		/* Semantic - `-text` variants tuned lighter for legible text on dark. */
 		--success: 142 70% 45%;
-		--success-foreground: 0 0% 100%;
 		--success-text: 142 60% 55%; /* accessible green text on dark bg */
 		--warning: 38 92% 50%;
-		--warning-foreground: 0 0% 100%;
 		--warning-text: 40 92% 60%; /* accessible amber text on dark bg */
 		--info: 199 89% 55%; /* brighter on a near-black plot: 7.30 */
-		--info-foreground: 0 0% 100%;
 
 		/* Variable scope (categorical) - lighter tints for dark surfaces. */
 		--scope-global: 142 69% 58%; /* green-400 */

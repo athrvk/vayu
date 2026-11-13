@@ -137,6 +137,21 @@ describe("the restart-required banner", () => {
 		expect(useEngineStore.getState().restartRequiredKeys).toEqual([]);
 	});
 
+	it("paints Restart engine as the warning fill under a white label, and the detail line at full strength", () => {
+		// The bare `--warning` under `--warning-foreground` measured 2.14:1 (#3499).
+		useEngineStore.getState().addRestartRequiredKey("worker_threads");
+		renderSettings();
+
+		const restart = screen.getByRole("button", { name: /Restart engine/i });
+		expect(restart.className).toContain("bg-status-warning-fill");
+		expect(restart.className).toContain("text-white");
+		expect(restart.className).not.toMatch(/(^|\s)(hover:)?bg-warning/);
+
+		const detail = screen.getByText(/will take effect after restarting Vayu's engine/);
+		expect(detail.className).toContain("text-warning-text");
+		expect(detail.className).not.toMatch(/text-warning-text\//);
+	});
+
 	it("does not list the same key twice when it is saved again", () => {
 		// `addRestartRequiredKey` dedupes; the banner would otherwise read
 		// "Changes to Worker threads, Worker threads".
