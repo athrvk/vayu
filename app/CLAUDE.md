@@ -219,7 +219,7 @@ is the settings pane's) and scroll it directly with `scrollWithin`
 - **`--primary` vs `--primary-fill`:** `--primary` is text/ring/chart and
   brightens in dark; `--primary-fill` is the solid button background and is one
   value in both themes. Do not unify them: pinning `--primary` drops accent text
-  from APCA Lc 44-69 to 22-37.
+  from APCA Lc 44-69 to 22-25.
 - **No raw Tailwind palette** (`text-green-500`) anywhere in `modules/` or
   `components/` → `palette-tokens.test.ts` (widened from the request/response
   tree by #1693). The two exemptions are `text-purple-500` marking a load test
