@@ -23,7 +23,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { RequestBuilderContextValue, RequestState } from "../../../types";
 import type { RequestDefaults } from "@/types";
 import { createDefaultRequestState } from "../../../utils/request-state";

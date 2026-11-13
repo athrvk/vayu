@@ -20,7 +20,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import type { KeyValueItem } from "@/types";
 import KeyValueEditor from "./index";
 

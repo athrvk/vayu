@@ -30,6 +30,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	EmptyState,
@@ -114,25 +115,25 @@ export default function MockServerView() {
 				<div className="flex flex-wrap items-center gap-2">
 					<MockIcon className="size-icon text-muted-foreground" aria-hidden="true" />
 					<code className="font-mono text-xs">{mock.url}</code>
-					<Button
-						variant="ghost"
+					<TooltipIconButton
 						size="sm"
-						aria-label="Copy mock server URL"
+						label="Copy mock server URL"
 						onClick={() => void copyUrl(mock.url, "Mock server URL")}
-					>
-						<IconSwap
-							state={urlCopied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-								copied: (
-									<Check
-										className="size-icon-sm text-status-success-text"
-										aria-hidden="true"
-									/>
-								),
-							}}
-						/>
-					</Button>
+						icon={
+							<IconSwap
+								state={urlCopied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+									copied: (
+										<Check
+											className="size-icon-sm text-status-success-text"
+											aria-hidden="true"
+										/>
+									),
+								}}
+							/>
+						}
+					/>
 					<Button
 						variant="ghost"
 						size="sm"

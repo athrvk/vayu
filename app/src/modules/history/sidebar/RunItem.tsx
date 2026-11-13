@@ -10,7 +10,7 @@ import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
-import { Badge, Button, ICON_MOTION, TooltipIconButton } from "@/components/ui";
+import { Badge, ICON_MOTION, TooltipIconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { truncateUrl } from "@/lib/truncate-url";
@@ -485,25 +485,25 @@ function RunItem({
 								}
 							/>
 						)}
-						<Button
+						<TooltipIconButton
 							variant="rowActionDestructive"
-							size="icon"
 							onClick={(e) => onDelete(run.id, e)}
 							disabled={isDeleting}
-							aria-label="Delete run"
+							label="Delete run"
 							className={cn(
 								"size-target transition-opacity",
 								isDeleting
 									? "opacity-100"
 									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 							)}
-						>
-							{isDeleting ? (
-								<Loader2 className="size-icon-sm animate-spin" />
-							) : (
-								<Trash2 className="size-icon-sm" />
-							)}
-						</Button>
+							icon={
+								isDeleting ? (
+									<Loader2 className="size-icon-sm animate-spin" />
+								) : (
+									<Trash2 className="size-icon-sm" />
+								)
+							}
+						/>
 					</div>
 				</div>
 

@@ -54,6 +54,7 @@ import {
 	TooltipTrigger,
 	TooltipValue,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	Callout,
@@ -386,25 +387,25 @@ export default function InboxView() {
 			<header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
 				<InboxIcon className="size-icon text-muted-foreground" aria-hidden="true" />
 				<code className="font-mono text-xs">{inbox.url}</code>
-				<Button
-					variant="ghost"
+				<TooltipIconButton
 					size="sm"
-					aria-label="Copy inbox URL"
+					label="Copy inbox URL"
 					onClick={() => void copyUrl(inbox.url, "Inbox URL")}
-				>
-					<IconSwap
-						state={urlCopied ? "copied" : "copy"}
-						icons={{
-							copy: <Copy className="size-icon-sm" aria-hidden="true" />,
-							copied: (
-								<Check
-									className="size-icon-sm text-status-success-text"
-									aria-hidden="true"
-								/>
-							),
-						}}
-					/>
-				</Button>
+					icon={
+						<IconSwap
+							state={urlCopied ? "copied" : "copy"}
+							icons={{
+								copy: <Copy className="size-icon-sm" aria-hidden="true" />,
+								copied: (
+									<Check
+										className="size-icon-sm text-status-success-text"
+										aria-hidden="true"
+									/>
+								),
+							}}
+						/>
+					}
+				/>
 				<Button
 					variant="ghost"
 					size="sm"

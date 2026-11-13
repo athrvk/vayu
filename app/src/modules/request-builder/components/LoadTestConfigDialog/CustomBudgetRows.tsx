@@ -31,6 +31,7 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
+	TooltipIconButton,
 } from "@/components/ui";
 import { thresholdReference, type ThresholdOwner } from "@/lib/agent-reference";
 import {
@@ -140,17 +141,16 @@ export function CustomBudgetRows({
 					{referenceOwner && (
 						<CustomBudgetCopyButton row={row} index={index} owner={referenceOwner} />
 					)}
-					<Button
+					<TooltipIconButton
 						type="button"
 						variant="rowActionDestructive"
-						size="icon"
 						className="shrink-0"
-						aria-label={`Remove custom budget ${index + 1}`}
+						label={`Remove custom budget ${index + 1}`}
+						tooltip="Remove budget"
 						onClick={() => onChange(rows.filter((other) => other.id !== row.id))}
 						disabled={disabled}
-					>
-						<X className="size-icon" />
-					</Button>
+						icon={<X className="size-icon" />}
+					/>
 				</div>
 			))}
 

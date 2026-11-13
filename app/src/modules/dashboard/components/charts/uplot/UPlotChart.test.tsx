@@ -24,7 +24,7 @@
 
 import type uPlot from "uplot";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import { UPlotChart, type UPlotSeriesSpec } from "./UPlotChart";
 
 // `setSize` is assigned per-instance inside uPlot's own constructor (a
@@ -95,7 +95,7 @@ afterEach(() => {
 
 describe("UPlotChart - deferred ResizeObserver setSize (#1717)", () => {
 	it("does not call setSize synchronously from a resize delivery; calls it after the next frame", () => {
-		render(<UPlotChart data={data} series={series} />);
+		render(<UPlotChart ariaLabel="Test chart" data={data} series={series} />);
 
 		expect(observers).toHaveLength(1);
 		expect(instances.all).toHaveLength(1);
@@ -114,7 +114,7 @@ describe("UPlotChart - deferred ResizeObserver setSize (#1717)", () => {
 	});
 
 	it("coalesces several deliveries inside one frame into a single setSize call", () => {
-		render(<UPlotChart data={data} series={series} />);
+		render(<UPlotChart ariaLabel="Test chart" data={data} series={series} />);
 		const setSize = vi.spyOn(instances.all[0], "setSize");
 		const observer = observers[0];
 
@@ -129,5 +129,29 @@ describe("UPlotChart - deferred ResizeObserver setSize (#1717)", () => {
 			flushFrames();
 		});
 		expect(setSize).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("UPlotChart - text alternative (#3498)", () => {
+	it("exposes the host as an image named by ariaLabel", () => {
+		render(
+			<UPlotChart
+				ariaLabel="Request rate over time. rps: latest 14, lowest 10, highest 14"
+				data={data}
+				series={series}
+			/>
+		);
+
+		const image = screen.getByRole("img", {
+			name: "Request rate over time. rps: latest 14, lowest 10, highest 14",
+		});
+		// The canvas lives inside the named host, so the label covers the plot.
+		expect(image.querySelector("canvas")).not.toBeNull();
+	});
+
+	it("keeps the live dot out of the accessibility tree", () => {
+		render(<UPlotChart ariaLabel="Live chart" data={data} series={series} isLive />);
+
+		expect(screen.getAllByRole("img")).toHaveLength(1);
 	});
 });

@@ -80,6 +80,14 @@ export interface UPlotSeriesSpec {
 }
 
 export interface UPlotChartProps {
+	/**
+	 * The chart's text alternative (#3498): a canvas has nothing else for a screen
+	 * reader. Required so no mount site can omit it; `describeChart` builds one
+	 * from the title and the series. The host is `role="img"`, so a legend or any
+	 * control a chart needs sits beside it, never inside (an image's children are
+	 * hidden from assistive technology).
+	 */
+	ariaLabel: string;
 	/** Aligned data: [xs, series0, series1, …] - every series shares xs. */
 	data: uPlot.AlignedData;
 	series: UPlotSeriesSpec[];
@@ -204,6 +212,7 @@ function defaultTimeTooltip(v: number): string {
 }
 
 export function UPlotChart({
+	ariaLabel,
 	data,
 	series,
 	height = 220,
@@ -558,7 +567,12 @@ export function UPlotChart({
 	}, [isLive, data]);
 
 	return (
-		<div ref={hostRef} style={{ width: "100%", height, position: "relative" }}>
+		<div
+			ref={hostRef}
+			role="img"
+			aria-label={ariaLabel}
+			style={{ width: "100%", height, position: "relative" }}
+		>
 			{liveDot && (
 				<span
 					aria-hidden

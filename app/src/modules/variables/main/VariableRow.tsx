@@ -21,7 +21,6 @@
 import { memo } from "react";
 import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import {
-	Button,
 	Checkbox,
 	IconSwap,
 	Input,
@@ -315,15 +314,14 @@ function VariableRow({
 						/>
 					)}
 					{!variable.isNew && (
-						<Button
+						<TooltipIconButton
 							variant="rowActionDestructive"
-							size="icon"
 							onClick={() => onRemove(variable.id)}
-							aria-label={name ? `Delete ${name}` : "Delete variable"}
+							label={name ? `Delete ${name}` : "Delete variable"}
+							tooltip="Delete variable"
 							className="size-control-sm opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-						>
-							<Trash2 className="size-icon" />
-						</Button>
+							icon={<Trash2 className="size-icon" />}
+						/>
 					)}
 				</div>
 			</td>

@@ -60,6 +60,7 @@ import {
 	CardTitle,
 	Skeleton,
 	ICON_MOTION,
+	TooltipIconButton,
 } from "@/components/ui";
 import type {
 	McpConnectClient,
@@ -928,15 +929,14 @@ export default function McpSettingsPanel() {
 										className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-muted/50 pl-2.5 pr-1 py-1 text-xs font-mono"
 									>
 										{host}
-										<Button
-											size="icon"
+										<TooltipIconButton
 											variant="rowActionDestructive"
 											className="-my-1"
 											onClick={() => removeHost(host)}
-											aria-label={`Remove ${host}`}
-										>
-											<X className="size-icon-sm" />
-										</Button>
+											label={`Remove ${host}`}
+											tooltip="Remove host"
+											icon={<X className="size-icon-sm" />}
+										/>
 									</span>
 								))}
 							</div>

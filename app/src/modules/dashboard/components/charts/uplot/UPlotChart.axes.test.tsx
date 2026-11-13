@@ -63,37 +63,39 @@ beforeEach(() => {
 
 describe("UPlotChart - y base", () => {
 	it("starts the y scale at zero by default, so a wobble around 500 does not fill the plot", async () => {
-		render(<UPlotChart data={wobble} series={rps} />);
+		render(<UPlotChart ariaLabel="Test chart" data={wobble} series={rps} />);
 		await settled();
 		expect(last().scales.y.min).toBe(0);
 		expect(last().scales.y.max).toBeGreaterThan(520);
 	});
 
 	it("keeps uPlot's auto-range when the base is null, so negative values are not clipped", async () => {
-		render(<UPlotChart data={negative} series={rps} yMin={null} />);
+		render(<UPlotChart ariaLabel="Test chart" data={negative} series={rps} yMin={null} />);
 		await settled();
 		expect(last().scales.y.min).toBeLessThan(-40);
 		expect(last().scales.y.max).toBeLessThan(5);
 	});
 
 	it("still shows data that falls below the base", async () => {
-		render(<UPlotChart data={negative} series={rps} />);
+		render(<UPlotChart ariaLabel="Test chart" data={negative} series={rps} />);
 		await settled();
 		expect(last().scales.y.min).toBeLessThan(-40);
 	});
 
 	it("starts the secondary scale at the base too", async () => {
-		render(<UPlotChart data={rampData} series={ramp} />);
+		render(<UPlotChart ariaLabel="Test chart" data={rampData} series={ramp} />);
 		await settled();
 		expect(last().scales.y2.min).toBe(0);
 	});
 
 	it("rebuilds the plot when the base changes, rather than ignoring it", async () => {
-		const { rerender } = render(<UPlotChart data={wobble} series={rps} yMin={0} />);
+		const { rerender } = render(
+			<UPlotChart ariaLabel="Test chart" data={wobble} series={rps} yMin={0} />
+		);
 		expect(instances.all).toHaveLength(1);
-		rerender(<UPlotChart data={wobble} series={rps} yMin={0} />);
+		rerender(<UPlotChart ariaLabel="Test chart" data={wobble} series={rps} yMin={0} />);
 		expect(instances.all).toHaveLength(1);
-		rerender(<UPlotChart data={wobble} series={rps} yMin={null} />);
+		rerender(<UPlotChart ariaLabel="Test chart" data={wobble} series={rps} yMin={null} />);
 		await settled();
 		expect(instances.all).toHaveLength(2);
 		expect(last().scales.y.min).toBeGreaterThan(400);
@@ -104,19 +106,35 @@ describe("UPlotChart - secondary axis label", () => {
 	const y2Axis = () => last().axes.find((a) => a.scale === "y2");
 
 	it("labels the right-hand axis when given a label", async () => {
-		render(<UPlotChart data={rampData} series={ramp} y2Label="Virtual users" />);
+		render(
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={rampData}
+				series={ramp}
+				y2Label="Virtual users"
+			/>
+		);
 		expect(y2Axis()?.label).toBe("Virtual users");
 	});
 
 	it("leaves the axis unlabelled otherwise", async () => {
-		render(<UPlotChart data={rampData} series={ramp} />);
+		render(<UPlotChart ariaLabel="Test chart" data={rampData} series={ramp} />);
 		expect(y2Axis()).toBeDefined();
 		expect(y2Axis()?.label).toBeUndefined();
 	});
 
 	it("rebuilds the plot when the label changes", async () => {
-		const { rerender } = render(<UPlotChart data={rampData} series={ramp} />);
-		rerender(<UPlotChart data={rampData} series={ramp} y2Label="Virtual users" />);
+		const { rerender } = render(
+			<UPlotChart ariaLabel="Test chart" data={rampData} series={ramp} />
+		);
+		rerender(
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={rampData}
+				series={ramp}
+				y2Label="Virtual users"
+			/>
+		);
 		expect(instances.all).toHaveLength(2);
 		expect(y2Axis()?.label).toBe("Virtual users");
 	});
@@ -139,6 +157,7 @@ describe("UPlotChart - x splits", () => {
 	it("ticks exactly at the given positions, each labelled by xFormat", async () => {
 		render(
 			<UPlotChart
+				ariaLabel="Test chart"
 				data={marks}
 				series={rps}
 				xSplits={[0, 0.5, 1]}
@@ -150,13 +169,15 @@ describe("UPlotChart - x splits", () => {
 	});
 
 	it("drops a position outside the visible range", async () => {
-		render(<UPlotChart data={marks} series={rps} xSplits={[-1, 0.5, 2]} />);
+		render(
+			<UPlotChart ariaLabel="Test chart" data={marks} series={rps} xSplits={[-1, 0.5, 2]} />
+		);
 		await settled();
 		expect(xTicks().splits).toEqual([0.5]);
 	});
 
 	it("leaves uPlot's own tick spacing when no positions are given", async () => {
-		render(<UPlotChart data={marks} series={rps} />);
+		render(<UPlotChart ariaLabel="Test chart" data={marks} series={rps} />);
 		await settled();
 		const plot = last();
 		const own = plot.axes[0].splits as unknown as (u: uPlot, ...rest: number[]) => number[];
@@ -164,10 +185,14 @@ describe("UPlotChart - x splits", () => {
 	});
 
 	it("rebuilds the plot when the positions change", async () => {
-		const { rerender } = render(<UPlotChart data={marks} series={rps} xSplits={[0, 1]} />);
-		rerender(<UPlotChart data={marks} series={rps} xSplits={[0, 1]} />);
+		const { rerender } = render(
+			<UPlotChart ariaLabel="Test chart" data={marks} series={rps} xSplits={[0, 1]} />
+		);
+		rerender(<UPlotChart ariaLabel="Test chart" data={marks} series={rps} xSplits={[0, 1]} />);
 		expect(instances.all).toHaveLength(1);
-		rerender(<UPlotChart data={marks} series={rps} xSplits={[0, 0.5, 1]} />);
+		rerender(
+			<UPlotChart ariaLabel="Test chart" data={marks} series={rps} xSplits={[0, 0.5, 1]} />
+		);
 		await settled();
 		expect(instances.all).toHaveLength(2);
 		expect(xTicks().splits).toEqual([0, 0.5, 1]);
@@ -194,6 +219,7 @@ describe("UPlotChart - whole-number ticks", () => {
 	const renderCount = async (max: number) => {
 		render(
 			<UPlotChart
+				ariaLabel="Test chart"
 				data={countsUpTo(max)}
 				series={countSeries}
 				yFormat={axisCount}
@@ -242,7 +268,13 @@ describe("UPlotChart - whole-number ticks", () => {
 			[0, 1, 2, 1],
 		];
 		render(
-			<UPlotChart data={data} series={ramp} y2Format={axisCount} wholeNumberScales={["y2"]} />
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={data}
+				series={ramp}
+				y2Format={axisCount}
+				wholeNumberScales={["y2"]}
+			/>
 		);
 		await settled();
 		expect(drawnAxis("y2").splits.every(Number.isInteger)).toBe(true);
@@ -253,7 +285,7 @@ describe("UPlotChart - whole-number ticks", () => {
 	});
 
 	it("leaves a chart that does not opt in on uPlot's own spacing", async () => {
-		render(<UPlotChart data={countsUpTo(2)} series={countSeries} />);
+		render(<UPlotChart ariaLabel="Test chart" data={countsUpTo(2)} series={countSeries} />);
 		await settled();
 		const axis = last().axes.find((a) => a.scale === "y");
 		expect(axis?.splits).not.toBe(WHOLE_NUMBER_TICKS.splits);
@@ -261,9 +293,16 @@ describe("UPlotChart - whole-number ticks", () => {
 	});
 
 	it("rebuilds the plot when the opt-in changes", async () => {
-		const { rerender } = render(<UPlotChart data={countsUpTo(2)} series={countSeries} />);
+		const { rerender } = render(
+			<UPlotChart ariaLabel="Test chart" data={countsUpTo(2)} series={countSeries} />
+		);
 		rerender(
-			<UPlotChart data={countsUpTo(2)} series={countSeries} wholeNumberScales={["y"]} />
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={countsUpTo(2)}
+				series={countSeries}
+				wholeNumberScales={["y"]}
+			/>
 		);
 		await settled();
 		expect(instances.all).toHaveLength(2);
@@ -275,7 +314,7 @@ describe("UPlotChart - isolated readings", () => {
 	// The indices uPlot would draw a marker at for series 1, read off the real plot.
 	const markedIndices = (values: (number | null)[]): number[] | null => {
 		const xs = values.map((_, i) => i);
-		render(<UPlotChart data={[xs, values]} series={rps} />);
+		render(<UPlotChart ariaLabel="Test chart" data={[xs, values]} series={rps} />);
 		const plot = last();
 		const points = plot.series[1].points;
 		return typeof points?.filter === "function" ? points.filter(plot, 1, false) : null;
@@ -300,6 +339,7 @@ describe("UPlotChart - isolated readings", () => {
 	it("keeps a scatter series' own points", () => {
 		render(
 			<UPlotChart
+				ariaLabel="Test chart"
 				data={[
 					[0, 1, 2],
 					[4, 5, 6],
@@ -328,7 +368,15 @@ describe("UPlotChart - annotation hover", () => {
 	};
 
 	it("names the annotation under the cursor in the tooltip", async () => {
-		render(<UPlotChart data={wobble} series={rps} xTime annotations={[spike]} />);
+		render(
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={wobble}
+				series={rps}
+				xTime
+				annotations={[spike]}
+			/>
+		);
 		await settled();
 		expect(hoverRows(1)).toContain("p99 spike");
 		expect(hoverRows(3)).not.toContain("p99 spike");
@@ -336,10 +384,18 @@ describe("UPlotChart - annotation hover", () => {
 
 	it("follows annotations that arrive later, with no rebuild of the plot", async () => {
 		const { rerender } = render(
-			<UPlotChart data={wobble} series={rps} xTime annotations={[]} />
+			<UPlotChart ariaLabel="Test chart" data={wobble} series={rps} xTime annotations={[]} />
 		);
 		await settled();
-		rerender(<UPlotChart data={wobble} series={rps} xTime annotations={[spike]} />);
+		rerender(
+			<UPlotChart
+				ariaLabel="Test chart"
+				data={wobble}
+				series={rps}
+				xTime
+				annotations={[spike]}
+			/>
+		);
 		await settled();
 		expect(instances.all).toHaveLength(1);
 		expect(hoverRows(1)).toContain("p99 spike");

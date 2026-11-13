@@ -139,6 +139,23 @@ function skip(source: string, from: number, open: string, close: string): number
 	return source.length;
 }
 
+/**
+ * The plain `Button`s that are icon-only and carry their label on focus another
+ * way, by file and count. Each is wrapped in a `Tooltip` beside it (the trigger
+ * is a ref-taking child these files compose by hand), except `RowActionsMenu`'s
+ * trigger, a `DropdownMenuTrigger` that has no tooltip yet: a tooltip on a menu
+ * trigger reappears when the menu returns focus to it, which is a decision this
+ * list records rather than makes.
+ */
+const HAND_WRAPPED: Record<string, number> = {
+	"components/shared/KeyValueEditor/FilePartCell.tsx": 1,
+	"components/shared/KeyValueEditor/KeyValueRow.tsx": 2,
+	"components/shared/RowActionsMenu.tsx": 1,
+	"components/shared/TimeValue/TimeMarker.tsx": 1,
+	"components/shared/response-viewer/ResponseActions.tsx": 2,
+	"modules/collections/CollectionTree.tsx": 3,
+};
+
 describe("icon-only buttons have accessible names", () => {
 	const iconTags = Object.entries(sources).flatMap(([path, src]) =>
 		openingTags(src as string, "Button")
@@ -177,6 +194,23 @@ describe("icon-only buttons have accessible names", () => {
 			.filter(({ tag }) => !hasAriaName(tag))
 			.map(({ path, tag }) => summarize(path, tag));
 		expect(offenders).toEqual([]);
+	});
+
+	it("shows every icon-only Button's label on focus: it is a TooltipIconButton or wrapped by hand", () => {
+		// `TooltipIconButton` spells no `size="icon"` at its call sites, so a plain
+		// `<Button size="icon">` reaching this scan is one a keyboard user gets no
+		// visible label from, unless the file wraps it in a `Tooltip` itself. The
+		// count per file is pinned, so a new bare one beside an already-wrapped
+		// one still fails (#3498). Only `size="icon"` is read: whether a
+		// `size="sm"` button holds text is not something a scan can tell.
+		const counts = new Map<string, number>();
+		for (const { path, tag } of iconTags) {
+			if (path.includes(".test.") || isHiddenFromAt(tag)) continue;
+			const file = path.replace(/^\/src\//, "");
+			counts.set(file, (counts.get(file) ?? 0) + 1);
+		}
+
+		expect(Object.fromEntries([...counts].sort())).toEqual(HAND_WRAPPED);
 	});
 
 	it("gives no icon-only button a native title", () => {

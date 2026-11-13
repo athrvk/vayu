@@ -16,6 +16,7 @@ import {
 	X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { LabelSwap } from "@/components/ui/label-swap";
 import { Progress } from "@/components/ui/progress";
@@ -176,14 +177,12 @@ function UpdateBanner() {
 
 			{/* `size="icon"` alone now gives the `target` floor (issue #1679) -
 			    no `size-7` override needed, the way one was before it existed. */}
-			<Button
-				size="icon"
-				variant="ghost"
+			<TooltipIconButton
 				onClick={dismiss}
-				aria-label="Dismiss update notification"
-			>
-				<X className="size-icon-sm" />
-			</Button>
+				label="Dismiss update notification"
+				tooltip="Dismiss"
+				icon={<X className="size-icon-sm" />}
+			/>
 
 			{downloading ? (
 				<Progress

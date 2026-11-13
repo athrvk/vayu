@@ -29,6 +29,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 import type { ClientCertificateListEntry } from "@/types";
 import { ClientCertificatesCard } from "./ClientCertificatesCard";
 
@@ -233,6 +234,17 @@ describe("ClientCertificatesCard", () => {
 		const calls = showToast.mock.calls;
 		return calls[calls.length - 1]?.[0];
 	}
+
+	it("says what an entry's remove button does on keyboard focus (#3498)", async () => {
+		renderCard();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", {
+				name: /remove the certificate for api.example.com:8443/i,
+			}),
+			"Remove certificate"
+		);
+	});
 
 	it("removes an entry by id, behind a confirmation", async () => {
 		const dialog = await openRemoveDialog();

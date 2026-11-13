@@ -25,6 +25,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { expectTooltipOnFocus } from "@/test/tooltip-focus.testkit";
 
 import McpSettingsPanel from "./McpSettingsPanel";
 import { useToastStore } from "@/stores";
@@ -516,6 +517,15 @@ describe("McpSettingsPanel copy that described only half its mechanism", () => {
 
 		// It described only the OFF state, on a switch that ships on.
 		expect(screen.getByText(/on by default/i)).toBeInTheDocument();
+	});
+
+	it("says what an allowed host's remove button does on keyboard focus (#3498)", async () => {
+		await renderPanel();
+
+		await expectTooltipOnFocus(
+			screen.getByRole("button", { name: "Remove api.example.com" }),
+			"Remove host"
+		);
 	});
 
 	it("states the allowlist rule the normalizer actually has", async () => {

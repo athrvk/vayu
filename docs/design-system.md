@@ -1936,7 +1936,7 @@ see.
 
 | Rule | Enforced by |
 |------|-------------|
-| An icon-only button carries an `aria-label`, and no native `title` | `icon-button-labels.test.tsx` |
+| An icon-only button carries an `aria-label`, no native `title`, and shows its label on focus (`TooltipIconButton`, or a `Tooltip` written by hand and listed in the guard) | `icon-button-labels.test.tsx`, the `*.tooltips.test.tsx` beside each row button |
 | `outline-none` is paired with a replacement indicator | `focus-indicator.test.ts` |
 | A control revealed on hover is revealed on focus too | `row-action-reveal.test.ts` |
 | An editor that takes Tab advertises the way out | `code-editor.chords.test.tsx` |
@@ -1947,7 +1947,7 @@ see.
 | A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
-| Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
+| Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
 | A `jsx-a11y` suppression carries a reason and is listed below | `a11y-suppressions.test.ts` |
@@ -2001,6 +2001,20 @@ labelled one beside text that already says the same thing announces twice.
 the run row's status glyph is where it landed on `aria-hidden` (see Status
 Badges).
 
+**A chart is an image with a sentence for a name** (#3498). `UPlotChart` draws
+on a canvas, which has no DOM for a screen reader to walk, so its host is
+`role="img"` and `ariaLabel` is a required prop: no mount site can omit it.
+The semantic wrappers build the label with `describeChart(title, data, series)`
+(`charts/uplot/chartLabel.ts`): the title, then per series the latest, lowest
+and highest reading, spelt by the series' own `format` so the sentence reads
+what the hover tooltip reads ("2.27ms", not a second set of digits), with a
+`<0.01` spoken as "less than 0.01". A series the tooltip hides is left out and
+a stacked one reads its own values, not its running total. A chart whose
+"latest" would mislead writes its own sentence (the HDR distribution names its
+percentiles) and one with a better one passes it in (`RunTrend` says how many
+runs and the newest figure). An image's children are hidden from assistive
+technology, so a legend (`ChartLegend`) sits beside the host, never inside it.
+
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
 the row - the button is announced as "button". The Dock's four view switchers
@@ -2010,8 +2024,12 @@ keyboard focus or touch, so an icon-only button takes `TooltipIconButton`
 (`aria-label` and the app's `Tooltip` from one `label`; `tooltip` when the text
 should be the verb alone while the name carries the row, "Restore Login" named,
 "Restore" shown) and carries no `title` at all. The guard pins icon-only
-buttons with a `title=` at zero. A text button whose tooltip adds an
-explanation wraps `Button` in `Tooltip` the same way, and a disabled one gives
+buttons with a `title=` at zero, and pins the plain `<Button size="icon">`
+that remain to the files that wrap them in a `Tooltip` by hand (a tree
+header's trigger, a ref-taking child a wrapper cannot forward to), so a new
+bare one fails. A row's hover-revealed Delete is the same: revealed on focus
+(`row-action-reveal.test.ts`) and labelled on focus (`TooltipIconButton`). A
+text button whose tooltip adds an explanation wraps `Button` in `Tooltip` the same way, and a disabled one gives
 its reason through `DisabledHint`, because `Button` is `pointer-events-none`
 while disabled and neither a `title` nor a bare `Tooltip` can reach it.
 
@@ -3832,9 +3850,9 @@ Three shapes, and each has a component rather than a recipe to copy:
   destructive outline over `ghost` with the label on `text-destructive-text`.
   The bare `text-destructive` is a fill token and is not a foreground (see
   Semantic Status Colors).
-- **A row's delete** is an icon button with `variant="rowActionDestructive"`
-  (`Button` with `size="icon"`, or `TooltipIconButton` where a tooltip names
-  it), revealed per Row Actions above.
+- **A row's delete** is a `TooltipIconButton` with
+  `variant="rowActionDestructive"`, so its label shows on focus as well as on
+  hover (#3498), revealed per Row Actions above.
 
 #### Reversibility
 

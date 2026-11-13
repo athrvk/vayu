@@ -8,10 +8,13 @@
 /**
  * `role="img"` is a promise that the element has something to say (#1691).
  *
- * The audit behind this guard looked at both sites the app ships and found them
+ * The audit behind this guard looked at the sites the app ships and found them
  * correct, which is the outcome worth writing down as a test rather than as a
  * sentence in a PR:
  *
+ *   - `UPlotChart`'s host (#3498) - a canvas has no DOM of its own, so the host
+ *     is the image and its `ariaLabel` prop (required, so no chart mounts
+ *     without one) is the whole text alternative.
  *   - `ui/tabs.tsx`'s `TabErrorDot` - a 5px dot beside a tab label that says
  *     "Console", never "error". Nothing adjacent carries the meaning, so the
  *     dot names itself ("Script error") and the role is what makes that name
@@ -63,6 +66,15 @@ describe('every role="img" names itself', () => {
 		// extension, an attribute written `role={"img"}`.
 		expect(Object.keys(sources).length).toBeGreaterThan(100);
 		expect(elementsWithRoleImg().length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("covers the chart host, the one image every dashboard chart shares", () => {
+		const chartHosts = elementsWithRoleImg().filter(({ path }) =>
+			path.endsWith("/charts/uplot/UPlotChart.tsx")
+		);
+
+		expect(chartHosts).toHaveLength(1);
+		expect(chartHosts[0].element).toMatch(/aria-label=\{ariaLabel\}/);
 	});
 
 	it("carries an aria-label on the same element", () => {

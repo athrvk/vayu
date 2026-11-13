@@ -47,6 +47,8 @@ type TrendMetric = Exclude<keyof RunTrendPoint, "startTime" | "stopped" | "isOpe
 
 interface RunTrendChartProps {
 	points: RunTrendPoint[];
+	/** The chart's text alternative; the caller owns the run count and the newest figure. */
+	ariaLabel: string;
 	height?: number;
 }
 
@@ -59,6 +61,7 @@ function runHeading(point: RunTrendPoint | undefined, position: number): string 
 }
 
 function RunTrendChart({
+	ariaLabel,
 	points,
 	metric,
 	label,
@@ -106,6 +109,7 @@ function RunTrendChart({
 
 	return (
 		<UPlotChart
+			ariaLabel={ariaLabel}
 			data={data}
 			series={series}
 			xTime

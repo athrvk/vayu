@@ -64,6 +64,7 @@ import {
 	ToggleGroup,
 	ToggleGroupItem,
 	DialogCancelButton,
+	TooltipIconButton,
 } from "@/components/ui";
 import {
 	useClientCertificatesQuery,
@@ -405,15 +406,14 @@ export function ClientCertificatesCard() {
 										)}
 									</div>
 								</div>
-								<Button
-									variant="ghost"
+								<TooltipIconButton
 									size="sm"
 									onClick={() => setConfirming(certificate)}
 									disabled={deleteCertificate.isPending}
-									aria-label={`Remove the certificate for ${targetLabel(certificate)}`}
-								>
-									<Trash2 className="size-icon" />
-								</Button>
+									label={`Remove the certificate for ${targetLabel(certificate)}`}
+									tooltip="Remove certificate"
+									icon={<Trash2 className="size-icon" />}
+								/>
 							</div>
 						))}
 					</div>
