@@ -1924,7 +1924,7 @@ request runs every level's scripts and the engine reports all of them. `scope`
 is not the console `level`; it is absent on a trace stored before the field and
 on a send whose elements carry no origin, and absent reads as the request's own.
 The Tests list and the Console label an inherited level ("Collection",
-"Folder") and leave the request's own bare. An inline Send resolves the chain in
+"Nested collection") and leave the request's own bare. An inline Send resolves the chain in
 the renderer (`elements-parts.ts`) and stamps each element's `origin.scope`
 itself - the root as `collection`, every level under it as `folder` - the same
 way the engine stamps a stored request's chain. A script that threw at an

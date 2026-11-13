@@ -692,7 +692,7 @@ describe("the keyboard move", () => {
 		expect(row("[data-tree-live]").textContent).toBe("Gamma is already first in Alpha");
 	});
 
-	it("moves into the folder above, opening it and carrying focus along", () => {
+	it("moves into the collection above, opening it and carrying focus along", () => {
 		// Gamma collapsed, so the row lands somewhere that is not rendered yet -
 		// the case a reveal exists for. Without it the row moves and the user is
 		// left on `<body>`, watching a folder that did not open.

@@ -292,12 +292,12 @@ const COPY: Partial<Record<string, Copy>> = {
 		one: "1 script uses Insomnia's insomnia.* API, which Vayu does not run - rewrite it with pm.*",
 		many: "{n} scripts use Insomnia's insomnia.* API, which Vayu does not run - rewrite them with pm.*",
 	},
-	// The engine names the folder or collection under `names`, not `requests`:
+	// The engine names the nested collection or collection under `names`, not `requests`:
 	// the line is about the node that declared the setting.
 	protocol_behavior_folder: {
 		tier: "note",
-		one: "1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options){names}",
-		many: "{n} folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options){names}",
+		one: "1 collection or nested collection has a Postman setting Vayu does not apply or carry (e.g. TLS options){names}",
+		many: "{n} collections or nested collections have Postman settings Vayu does not apply or carry (e.g. TLS options){names}",
 	},
 	// Postman prunes a GET or HEAD body unless the request opts out; Vayu sends
 	// what the Body tab holds, so the request behaves differently until the
@@ -420,13 +420,13 @@ function copyOf(kind: SkippedItem["kind"]): Copy {
 		};
 	}
 	const name = kind.endsWith("_unrecognised") ? kind.slice(0, -"_unrecognised".length) : kind;
-	// A logic controller imports as a folder holding its members; what is lost
+	// A logic controller imports as a nested collection holding its members; what is lost
 	// is the looping or selection it did, not the requests inside it.
 	if (kind.endsWith("_unrecognised") && JMETER_FOLDER_CONTROLLERS.has(name)) {
 		return {
 			tier: "note",
-			one: `1 ${name} imported as a plain folder - its looping or selection is not carried`,
-			many: `{n} ${name} controllers imported as plain folders - their looping or selection is not carried`,
+			one: `1 ${name} imported as a plain nested collection - its looping or selection is not carried`,
+			many: `{n} ${name} controllers imported as plain nested collections - their looping or selection is not carried`,
 		};
 	}
 	return { tier: "note", one: `1 ${name} not imported`, many: `{n} ${name} not imported` };
@@ -494,7 +494,7 @@ function refReportNotices(report: ImportMeta["refReport"]): ImportNotice[] {
 }
 
 /**
- * "set on the collection and folders A, B": where the unsent auth is declared,
+ * "set on the collection and nested collections A, B": where the unsent auth is declared,
  * which the request line cannot say - the requests it counts mostly inherit it
  * (#2537). "" when the engine named no declaring site.
  */
@@ -503,7 +503,7 @@ function authDeclaredOn(meta: ImportMeta): string {
 	const sites = [
 		meta.nonExecutableAuthCollection !== undefined && "the collection",
 		folders.length > 0 &&
-			`${pluralize(folders.length, "folder")} ${listed(folders, AUTH_FOLDERS_SHOWN)}`,
+			`${pluralize(folders.length, "nested collection")} ${listed(folders, AUTH_FOLDERS_SHOWN)}`,
 	].filter((site): site is string => typeof site === "string");
 	return sites.length > 0 ? `; set on ${sites.join(" and ")}` : "";
 }
@@ -511,7 +511,7 @@ function authDeclaredOn(meta: ImportMeta): string {
 /**
  * The line for requests whose auth imports but is never sent: the requests
  * that lose it, then where it was declared. The count is of requests, so a
- * collection that only declares it on a folder nothing inherits from shows
+ * collection that only declares it on a nested collection nothing inherits from shows
  * no line at all.
  */
 function nonExecutableAuthNotice(meta: ImportMeta): ImportNotice {

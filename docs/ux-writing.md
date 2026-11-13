@@ -289,11 +289,17 @@ from creeping back in afterward. These hold it:
   reaches no screen or must stay as written. An entry whose text is gone fails
   the test, so the list cannot outlive its cause.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
-  fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
-  "curl request" (write "cURL"), and on three full stops straight after a
-  letter (write `…`). It has no allowlist: a spread, a regex, a `"..."` code
-  sample and a GraphQL `... on` fragment put something other than a letter
-  before the dots.
+  fails on names joined with `>` (`Settings > Files`, `Engine > Data`: write
+  `Settings ›`), on lowercase "curl command" or "curl request" (write "cURL"),
+  on three full stops straight after a letter (write `…`), and on "folder" or
+  "folders" as a word (#3500: a group of requests is a collection or a nested
+  collection). The first three have no allowlist: a spread, a regex, a `"..."`
+  code sample and a GraphQL `... on` fragment put something other than a letter
+  before the dots. The folder rule exempts an identifier (a lower-case token such
+  as `folder` or `new-folder-form`) and `FILESYSTEM_FOLDERS`, the phrases a file
+  uses for a directory on disk (the allowed folders, the folder picker, the logs
+  folder), each with its reason; a phrase no string carries any more fails the
+  test.
 - **Narrow scanners**, one rule each, are filed by their own issues; each adds
   its rule to the scan above when it lands. Landed: hand-built plurals and
   "(s)" (`plural-rule.test.ts`, #2307), which reads "(s)" in the same strings

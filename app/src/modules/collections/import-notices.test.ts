@@ -216,25 +216,25 @@ describe("importNotices", () => {
 		const authNotice = (overrides: Partial<ImportMeta>) =>
 			importNotices(meta({ nonExecutableAuth: 2, ...overrides })).map((n) => n.text);
 
-		it("names the declaring folders after the request names", () => {
+		it("names the declaring nested collections after the request names", () => {
 			expect(
 				authNotice({
 					nonExecutableAuthRequests: ["Block a user ID", "Mute a user ID"],
 					nonExecutableAuthFolders: ["Blocks", "Mutes"],
 				})
 			).toEqual([
-				`2 requests: ${PHRASE} - Block a user ID, Mute a user ID; set on folders Blocks, Mutes`,
+				`2 requests: ${PHRASE} - Block a user ID, Mute a user ID; set on nested collections Blocks, Mutes`,
 			]);
 		});
 
-		it("says folder, singular, for one declaring folder", () => {
+		it("says nested collection, singular, for one declaring nested collection", () => {
 			expect(
 				authNotice({
 					nonExecutableAuth: 1,
 					nonExecutableAuthRequests: ["Sign in"],
 					nonExecutableAuthFolders: ["Admin"],
 				})
-			).toEqual([`Sign in: ${PHRASE}; set on folder Admin`]);
+			).toEqual([`Sign in: ${PHRASE}; set on nested collection Admin`]);
 		});
 
 		it("says the collection when the root declares it", () => {
@@ -246,7 +246,7 @@ describe("importNotices", () => {
 			).toEqual([`2 requests: ${PHRASE} - A, B; set on the collection`]);
 		});
 
-		it("names the collection and the folders in one clause", () => {
+		it("names the collection and the nested collections in one clause", () => {
 			expect(
 				authNotice({
 					nonExecutableAuthRequests: ["A", "B"],
@@ -254,21 +254,23 @@ describe("importNotices", () => {
 					nonExecutableAuthFolders: ["Blocks", "Lists"],
 				})
 			).toEqual([
-				`2 requests: ${PHRASE} - A, B; set on the collection and folders Blocks, Lists`,
+				`2 requests: ${PHRASE} - A, B; set on the collection and nested collections Blocks, Lists`,
 			]);
 		});
 
-		it("cuts a long folder list short with how many were left out", () => {
+		it("cuts a long nested-collection list short with how many were left out", () => {
 			const folders = ["F1", "F2", "F3", "F4", "F5", "F6", "F7"];
 			expect(
 				authNotice({
 					nonExecutableAuthRequests: ["A", "B"],
 					nonExecutableAuthFolders: folders,
 				})
-			).toEqual([`2 requests: ${PHRASE} - A, B; set on folders F1, F2, F3, F4, F5, +2 more`]);
+			).toEqual([
+				`2 requests: ${PHRASE} - A, B; set on nested collections F1, F2, F3, F4, F5, +2 more`,
+			]);
 		});
 
-		it("lists the first three requests and counts the rest beside the folder clause", () => {
+		it("lists the first three requests and counts the rest beside the nested-collection clause", () => {
 			const requests = Array.from({ length: 23 }, (_, i) => `R${i + 1}`);
 			expect(
 				authNotice({
@@ -277,14 +279,14 @@ describe("importNotices", () => {
 					nonExecutableAuthFolders: ["Blocks", "Manage Tweets", "Mutes", "Lists"],
 				})
 			).toEqual([
-				`23 requests: ${PHRASE} - R1, R2, R3, +20 more; set on folders Blocks, Manage Tweets, Mutes, Lists`,
+				`23 requests: ${PHRASE} - R1, R2, R3, +20 more; set on nested collections Blocks, Manage Tweets, Mutes, Lists`,
 			]);
 		});
 
 		it("keeps the clause on the count-only line, when no request is named", () => {
 			expect(
 				authNotice({ nonExecutableAuth: 4, nonExecutableAuthFolders: ["Blocks"] })
-			).toEqual([`4 requests' ${PHRASE}; set on folder Blocks`]);
+			).toEqual([`4 requests' ${PHRASE}; set on nested collection Blocks`]);
 		});
 
 		it("leaves the line as it was when no site is named", () => {
@@ -451,12 +453,12 @@ describe("importNotices", () => {
 		).map((n) => n.text);
 		expect(texts).toEqual([
 			"2 assert.status elements dropped (invalid)",
-			"1 IfController imported as a plain folder - its looping or selection is not carried",
+			"1 IfController imported as a plain nested collection - its looping or selection is not carried",
 			"3 ResultCollector not imported",
 		]);
 	});
 
-	it("says a folder-imported controller kept its members and lost only its logic", () => {
+	it("says a controller imported as a nested collection kept its members and lost only its logic", () => {
 		const texts = importNotices(
 			meta({
 				skipped: [
@@ -466,8 +468,8 @@ describe("importNotices", () => {
 			})
 		).map((n) => n.text);
 		expect(texts).toEqual([
-			"1 WhileController imported as a plain folder - its looping or selection is not carried",
-			"2 RecordingController controllers imported as plain folders - their looping or selection is not carried",
+			"1 WhileController imported as a plain nested collection - its looping or selection is not carried",
+			"2 RecordingController controllers imported as plain nested collections - their looping or selection is not carried",
 		]);
 	});
 
@@ -592,11 +594,11 @@ describe("importNotices", () => {
 		]);
 	});
 
-	it("names the folder or collection that declared a setting Vayu cannot apply (#2538)", () => {
+	it("names the collection or nested collection that declared a setting Vayu cannot apply (#2538)", () => {
 		const texts = (item: SkippedItem) =>
 			importNotices(meta({ skipped: [item] })).map((n) => n.text);
 		expect(texts({ kind: "protocol_behavior_folder", count: 1, names: ["Payments"] })).toEqual([
-			"1 folder or collection has a Postman setting Vayu does not apply or carry (e.g. TLS options) (Payments)",
+			"1 collection or nested collection has a Postman setting Vayu does not apply or carry (e.g. TLS options) (Payments)",
 		]);
 		expect(
 			texts({
@@ -605,7 +607,7 @@ describe("importNotices", () => {
 				names: ["Payments", "Billing"],
 			})
 		).toEqual([
-			"2 folders or collections have Postman settings Vayu does not apply or carry (e.g. TLS options) (Payments, Billing)",
+			"2 collections or nested collections have Postman settings Vayu does not apply or carry (e.g. TLS options) (Payments, Billing)",
 		]);
 	});
 });

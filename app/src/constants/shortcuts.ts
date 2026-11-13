@@ -433,7 +433,7 @@ const DELETE_KEYS = isMac ? "⌫ / ⌦" : "Delete / Backspace";
  * nothing matches them through `matchesChord`.
  *
  * Alt+Arrow is the keyboard half of drag-and-reorder: up and down step past a
- * sibling, left takes the row out of its folder and right nests it in.
+ * sibling, left takes the row out of its collection and right nests it in.
  */
 export const TREE_MOVE_UP_CHORD: Chord = {
 	alt: true,
@@ -450,13 +450,13 @@ export const TREE_MOVE_DOWN_CHORD: Chord = {
 export const TREE_MOVE_OUT_CHORD: Chord = {
 	alt: true,
 	key: "←",
-	label: "Move the focused row out of its folder",
+	label: "Move the focused row out of its collection",
 };
 
 export const TREE_MOVE_IN_CHORD: Chord = {
 	alt: true,
 	key: "→",
-	label: "Move the focused row into the folder above",
+	label: "Move the focused row into the collection above",
 };
 
 export const TREE_RENAME_CHORD: Chord = { key: "F2", label: "Rename" };

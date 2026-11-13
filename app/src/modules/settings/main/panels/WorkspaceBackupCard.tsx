@@ -102,7 +102,7 @@ export function WorkspaceBackupCard() {
 			<CardContent className="space-y-3">
 				<div className="flex items-center justify-between gap-4">
 					<p className="text-sm text-muted-foreground">
-						How many snapshots are kept is set by Max backups retained under Engine &gt;
+						How many snapshots are kept is set by Max backups retained under Settings ›
 						Data &amp; retention.
 					</p>
 					<Button

@@ -52,7 +52,7 @@ import type { DropLine } from "../tree-rows";
  */
 export type CollectionTreeDropTarget = { rowKey: string; position: "inside" } | DropLine;
 
-/** Alt+Arrow, in tree terms: among siblings, into the folder above, out to the parent. */
+/** Alt+Arrow, in tree terms: among siblings, into the collection above, out to the parent. */
 export type TreeMoveDirection = "up" | "down" | "in" | "out";
 
 /**
