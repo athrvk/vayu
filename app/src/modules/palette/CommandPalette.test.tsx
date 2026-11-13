@@ -340,6 +340,28 @@ describe("searching", () => {
 		expect(screen.getByText("Payments / Auth")).toBeInTheDocument();
 	});
 
+	it("lets a long path give way to the name instead of taking the row (#3495)", () => {
+		/*
+		 * jsdom has no layout, so the rule is held as the classes that make it:
+		 * a `shrink-0` subtitle kept its full width, `truncate` never engaged,
+		 * and the title was squeezed to 0px beside it.
+		 */
+		renderPalette();
+		open();
+
+		const subtitle = screen.getByText("Payments / Auth");
+		const subtitleClasses = (subtitle.getAttribute("class") ?? "").split(/\s+/);
+		expect(subtitleClasses).toEqual(
+			expect.arrayContaining(["min-w-0", "max-w-[50%]", "truncate"])
+		);
+		expect(subtitleClasses).not.toContain("shrink-0");
+
+		const titleClasses = (screen.getByText("Issue token").getAttribute("class") ?? "").split(
+			/\s+/
+		);
+		expect(titleClasses).toEqual(expect.arrayContaining(["min-w-[12ch]", "flex-1"]));
+	});
+
 	/*
 	 * Saying so is half of it. A launcher that matched nothing offers what it
 	 * can still do (#1177) - drop the verbs from the no-match branch of

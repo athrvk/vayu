@@ -2144,6 +2144,18 @@ Reveal them with `opacity-0 group-hover:opacity-100 group-focus-within:opacity-1
 The `focus-within` half is not optional: without it a keyboard user lands on an
 invisible control.
 
+**Where the row's width is scarce, the control also gives its width back until it
+is revealed** (#3495): `opacity-0` keeps the space, and the pin and delete of a
+History row kept 52px of a 260px drawer from the name. `ROW_ACTIONS_REVEAL`
+(`components/shared/row-actions.ts`) takes the control out of the flex flow
+while collapsed (`absolute`, pinned to the row's trailing corner, no gap and no
+scrollable overflow) and returns it on `group-hover`, `group-focus-within`, and
+on a `hover: none` device, which never matches the first. It is `absolute`, never
+`hidden` or `invisible`, because those take the control out of the tab order and
+there would be nothing for focus to reveal. The row is the `group` and must be
+positioned. History rows and Trash rows use it; the `⋯` of a tree row is a
+fixed-size slot and keeps the plain opacity form.
+
 **A state toggle is not a row action, and must not be hover-revealed.** The test
 is whether the control has an *off* state that means something. Delete has none -
 it either fires or it does not - so hiding it costs nothing. The variables
@@ -2155,14 +2167,17 @@ could mask a value was to hover the row. It is now always visible on
 Same rule for anything that reports state - a pin, a mute, an enable. Quiet is
 fine; absent is not.
 
-**A row with no action of its own keeps its controls visible too.** Hover-reveal
+**A row with no action of its own still reveals them** (#3495). Hover-reveal
 exists so the row's own job - open the request, select the run - is not crowded
 by buttons the user did not come for. A Trash row (`modules/trash`) has no such
 job: it opens nothing, and Restore and Delete forever are the entire reason it
-is on screen. Revealed on hover they would hide the surface's whole purpose and
-leave a list of names that reads as inert. The test is the same one the state
-toggle above passes - would the row still say what it is for with the control
-absent - and here the answer is no.
+is on screen, which is why they were always visible. At the 260px drawer that
+cost the name about 105px and wrapped the secondary line to four lines, so they
+are `ROW_ACTIONS_REVEAL` now: out of the flow until the row is hovered or
+focused, in the DOM and the tab order throughout, and shown at all times on a
+device with no hover, where "a list of names that reads as inert" would
+otherwise be the whole touch experience. The secondary line is one truncated
+line with its full sentence as a `title` while it is cut.
 
 **Every row that has actions draws them this way, Services included** (issue
 #1690). The Services drawer's rows were the last holdout - two or three
@@ -2170,8 +2185,8 @@ always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
 URL truncated to make room for controls the user had not come for. They are one
 hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
 URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
-There is no exemption: the rows that keep visible controls are the two the rules
-above name - a state toggle, and a row with no job of its own.
+There is no exemption: the one control that stays visible at rest is a state
+toggle, which keeps its place (a pinned run's pin among the History row's actions).
 
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
@@ -2441,13 +2456,25 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
+**A tab's label stops where its close button starts** (#3495). The close button
+is absolute, so a name clamped at the tab width cap ran under it: `truncate`
+inside `ScrollOnOverflow`'s `w-fit` track never engages, and the viewport was
+only as narrow as the row's `px-3`. The label viewport carries a right margin of
+`size-target` less the padding past the button's `right-0.5` offset, in the
+density-scaled units of all three, so it ends exactly where the button begins
+and `tab-fit.ts`'s natural width still fits a name that is not clamped. At rest
+the clipped edge fades (`.scroll-on-overflow`, a `mask-image`, not an ellipsis);
+while the marquee runs the fade is off, so the end of the name is readable at
+the edge. `TabItem.label-strip.test.tsx` derives the margin from the button's and
+the row's own classes.
+
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
 tooltip.
 
-### A row that holds a name, a chip and some controls (#3494)
+### A row that holds a name, a chip and some controls (#3494, #3495)
 
-The "reflow guarantee" (Interface scale, above) is met with four class rules,
-not a media query per surface. jsdom has no layout, so each is held as a class
+The "reflow guarantee" (Interface scale, above) is met with class rules, not a
+media query per surface. jsdom has no layout, so each is held as a class
 guard (`reflow-floors.test.ts` and the component's own test), and none can prove
 a pixel.
 
@@ -2467,6 +2494,49 @@ a pixel.
   Value headers carry `min-w-[8rem]` / `min-w-[10rem]`; the fixed-width Type,
   Secret and action columns would otherwise leave all of the slack to the two
   inputs. The scroller already computes `overflow-x: auto`.
+
+- **In a two-span row, the descriptor gives way and the name does not**
+  (#3495). A palette row is a title and a subtitle (a collection path, often the
+  longer of the two). The title keeps a floor (`min-w-[12ch]`), the subtitle is
+  `min-w-0 max-w-[50%]` and truncates, and neither carries `shrink-0`: a
+  `shrink-0 truncate` subtitle never truncates (it keeps its intrinsic width, so
+  its ellipsis has nothing to cut) and left the title 0px. Both are
+  `TruncatedText`, so a clipped path still has its full text on hover. A row's
+  *action cluster* (the chip, a button, a chord) is the opposite and stays
+  `shrink-0`.
+- **A flat list of nested things shows the ancestor path in front of the name**
+  (#3495). The Variables drawer lists every collection, roots and sub-folders,
+  in one flat group, so two "v1" folders under different parents read alike. A
+  sub-collection carries its ancestors as a muted `text-xs` prefix
+  ("Payments API /", built with `collectionPath`, as the palette does) and a
+  root carries none. The prefix is `min-w-0 max-w-[50%]` and truncates, the name
+  keeps `min-w-[12ch]`, so the distinguishing part is the last to go. Both are
+  `TruncatedText` with `title` set to the full path, and the row's
+  `aria-labelledby` lists the prefix then the name, so its accessible name is
+  "Payments API / v1" while typeahead (`data-tree-label`) stays the bare name.
+- **A name in a table is one token and never wraps.** `HeadersViewer`'s name
+  cell is `whitespace-nowrap` and its text a `TruncatedText` capped at `40ch`
+  (the longest registered header names are about 35), so "Content-Type" never
+  reads as "Content-" over "Type" and a pathological name cannot take the
+  value's column. The value keeps `break-all`: it is the part that is allowed to
+  wrap. `CompactHeadersViewer`'s name is the same cap on a `shrink-0` label.
+- **A breadcrumb's every crumb can be cut, none to nothing.** `TabBreadcrumb`'s
+  ancestors truncate down to `min-w-[3ch]` (and never past `16ch`), so a chevron
+  cannot land on a label's first letter; the current crumb is `min-w-0` and a
+  `TruncatedText`, so a long name ellipses with its full text on hover instead of
+  running under the nav's clip (it was `shrink-0` with no `title`). The ancestor
+  labels and their chevrons are direct children of one row: a wrapper per pair
+  with `min-w-0` would shrink below the label's floor.
+
+- **A list of rows that must line up is a grid of fixed tracks.** Every row of a
+  list is a grid of its own, so only fixed-size tracks align across rows, and
+  a flexible one is a single `minmax(0,1fr)` lead. `SampledExchange`'s summary
+  row has a `3.5rem` label, a `12rem` status (wide enough for "503 Service
+  Unavailable"), a `4.5rem` latency and an `auto` time, with the cells placed
+  by `@3xl:col-start-*`; below that width the status, latency and time wrap as one
+  group under the name. The thresholds are container variants against the row's
+  own `@container` root (see "A run pane's grids answer to the pane"), and the
+  error's first clause is a `TruncatedText`, not a fixed `max-w-[200px]`.
 
 The title bar is the one surface where these are viewport-sized (see the note
 under "A run pane's grids answer to the pane"). Its side columns are
