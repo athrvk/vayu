@@ -21,7 +21,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useLayoutStore, useTabSelectionStore } from "@/stores";
 import type { RequestBuilderContextValue } from "../../../types";
 import type { ElementDef, ElementKindSchema } from "@/types";

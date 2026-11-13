@@ -142,10 +142,9 @@ function skip(source: string, from: number, open: string, close: string): number
 /**
  * The plain `Button`s that are icon-only and carry their label on focus another
  * way, by file and count. Each is wrapped in a `Tooltip` beside it (the trigger
- * is a ref-taking child these files compose by hand), except `RowActionsMenu`'s
- * trigger, a `DropdownMenuTrigger` that has no tooltip yet: a tooltip on a menu
- * trigger reappears when the menu returns focus to it, which is a decision this
- * list records rather than makes.
+ * is a ref-taking child these files compose by hand). `RowActionsMenu`'s is
+ * also a `DropdownMenuTrigger`, and declines the tooltip on the focus the
+ * closing menu hands back (`RowActionsMenu.test.tsx`).
  */
 const HAND_WRAPPED: Record<string, number> = {
 	"components/shared/KeyValueEditor/FilePartCell.tsx": 1,

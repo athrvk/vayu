@@ -30,7 +30,8 @@
 
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render } from "@/test/render-with-tooltips";
 import { useLayoutStore } from "@/stores";
 import { DEFAULT_SCRIPT_EDITOR_HEIGHT } from "@/constants/layout";
 import type { ElementDef, ElementKindSchema } from "@/types";

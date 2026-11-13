@@ -2065,7 +2065,10 @@ should be the verb alone while the name carries the row, "Restore Login" named,
 buttons with a `title=` at zero, and pins the plain `<Button size="icon">`
 that remain to the files that wrap them in a `Tooltip` by hand (a tree
 header's trigger, a ref-taking child a wrapper cannot forward to), so a new
-bare one fails. A row's hover-revealed Delete is the same: revealed on focus
+bare one fails. A menu trigger is one of those: the row `⋯` menu
+(`RowActionsMenu`) shows "More actions" on focus but not on the focus its
+closing menu hands back, which would otherwise cover the row the user just
+acted on after every Escape. A row's hover-revealed Delete is the same: revealed on focus
 (`row-action-reveal.test.ts`) and labelled on focus (`TooltipIconButton`). A
 text button whose tooltip adds an explanation wraps `Button` in `Tooltip` the same way, and a disabled one gives
 its reason through `DisabledHint`, because `Button` is `pointer-events-none`
