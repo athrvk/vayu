@@ -173,9 +173,9 @@ everything else accent uses `--primary`. `--primary-foreground` (white) sits on 
 ```
 
 **`--primary-text` - the accent when the accent *is* the label.** Used by the
-section tabs for the active trigger (`text-primary-text`), where the accent has
-to separate not from the surface but from the `--muted-foreground` label beside
-it.
+section tabs for the active trigger (`text-primary-text`) and by a resolved
+`{{variable}}` token, where the accent has to separate not from the surface but
+from the `--muted-foreground` label (or empty token) beside it.
 
 It is not sufficient on its own, and the tabs pair it with a 2px underline on
 `--primary`. Colour plus weight leaves the active tab hard to find in graphite,
@@ -189,20 +189,27 @@ That separation is carried almost entirely by **saturation**, not lightness.
 Measured on `--card`, accent text and muted text sit within a **1.01-1.45**
 contrast ratio of each other in every scheme - effectively the same brightness -
 so what the eye reads is "coloured vs grey". At 55-95% saturation against an
-inactive 4-5% that is plenty, which is why `--primary-text` defaults to
-`--primary` and seven of the eight schemes never override it.
+inactive 4-5% that is usually plenty, which is why `--primary-text` defaults
+to `--primary` and six of the eight schemes never override it.
 
 `graphite` overrides it, because it is the only desaturated scheme (S=12% light,
 15% dark) and so has no hue to spend: `220 12% 26%` light and `220 15% 86%`
-dark, which take its active-vs-inactive separation from 1.14 to 1.86 and 1.23 to
-1.81. Retuning graphite's `--primary` instead is not an option - that also
+dark, which take its active-vs-inactive separation from 1.02 to 1.86 and 1.23 to
+1.81. Light `sky` overrides it as well, with `192 95% 22%`: a cyan dark enough
+to clear 4.5:1 on `--muted` has given up most of its chroma, and at its `--primary`
+it sits 0.088 OKLab from `--muted-foreground`, where under 0.10 reads as the
+same colour (#3499). Dark `sky` resets the alias to `var(--primary)`, because
+the light block's literal ties `.dark` on specificity and would otherwise reach
+dark too. Retuning graphite's `--primary` instead is not an option - that also
 paints its ring, `--chart-1` and every `text-primary`, near-black in light.
 This is the same bind `--primary-fill` exists to solve, answered the same way.
 
-**Adding a scheme:** override `--primary-text` only if the accent's saturation
-is under about 25%. `color-schemes.test.ts` derives that rule from the
+**Adding a scheme:** override `--primary-text` if the accent's saturation is
+under about 25%, or if the accent sits within 0.10 OKLab of
+`--muted-foreground`. `color-schemes.test.ts` derives the first rule from the
 stylesheet rather than naming graphite, so a new desaturated scheme fails until
-it declares one. It is deliberately *not* in that test's `REQUIRED` list -
+it declares one; `color-scheme-contrast.test.ts` measures the second, as the
+resolved-versus-empty pair of the variable states. It is deliberately *not* in that test's `REQUIRED` list -
 inheriting it is correct for a saturated scheme, not a forgotten block.
 
 Note the ratios above are between two *foreground* colours; neither WCAG nor
@@ -1052,7 +1059,8 @@ immediately instead, which is also the macOS system tooltip's own behaviour.
 
 Every scheme also resolves `--primary-text` (the accent as a label). It tracks
 `--primary` for all of these except `graphite`, which sets `220 12% 26%` light
-and `220 15% 86%` dark - see **Primary (Accent Color)** above for why.
+and `220 15% 86%` dark, and light `sky`, which sets `192 95% 22%` - see
+**Primary (Accent Color)** above for why.
 
 **Adding a scheme.** Edit `constants/color-schemes.ts` and `index.css` - nothing
 else. `color-schemes.test.ts` asserts the two agree, in both themes, because a
@@ -1942,19 +1950,31 @@ would move focus with nothing on screen saying where it went, which for a
 keyboard-only feature defeats the point of the key.
 
 **A `{{variable}}` inside an editor is painted from the same tokens as one
-outside it.** `EditableVariable` colours its overlay tokens `text-primary` /
+outside it.** `EditableVariable` colours its overlay tokens `text-primary-text` /
 `text-muted-foreground` / `text-destructive-text` for resolved, empty and
-undefined; Monaco draws its own text, so the same three colours (plus
-`text-muted-foreground` for a run-time token, `text-warning-text` for a
-`data.*` column no contract declares, and `text-muted-foreground` with a dashed
-underline for a name a pre-request script sets, #2741) are declared in
-`index.css` as six global classes its decorations can name -
-`vayu-variable-token-*`, under a `.monaco-editor` prefix so they outrank the
-theme rules Monaco injects at runtime. They are the one place a global class is the right answer rather than
-a utility string, for the same reason the scrollbar block is: no component
-stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
-the seventh, `vayu-time-token`: a dotted underline in `--muted-foreground`
-rather than a colour, so the language's own token colour still reads under it.
+undefined, and gives undefined a wavy underline as well; Monaco draws its own
+text, so the same three states (plus `text-muted-foreground` for a run-time
+token, `text-warning-text` for a `data.*` column no contract declares, and
+`text-muted-foreground` with a dashed underline for a name a pre-request script
+sets, #2741) are declared in `index.css` as six global classes its decorations
+can name - `vayu-variable-token-*`, under a `.monaco-editor` prefix so they
+outrank the theme rules Monaco injects at runtime. They are the one place a
+global class is the right answer rather than a utility string, for the same
+reason the scrollbar block is: no component stylesheet reaches what Monaco
+renders. A time in an editor (issue #1786) is the seventh, `vayu-time-token`: a
+dotted underline in `--muted-foreground` rather than a colour, so the
+language's own token colour still reads under it.
+
+**No variable state rests on a colour difference under 0.10 OKLab** (#3499).
+The accent is one of the three colours, so a scheme can land it on a neighbour:
+coral's and sunset's accents sit under 0.10 from `--destructive-text`, and
+graphite's and light sky's `--primary` that close to `--muted-foreground`. The
+undefined state therefore carries a non-colour cue, a **wavy** underline (one
+style, one meaning: dashed is deferred, dotted is a time), and the resolved
+state paints `--primary-text`, which those two schemes retune away from the
+grey. `color-scheme-contrast.test.ts` measures every pair in every scheme and
+theme from the Monaco classes, and `EditableVariable.test.tsx` holds the field
+painter equal to them.
 → `variable-token-classes.test.ts`
 
 ---

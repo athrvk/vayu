@@ -358,7 +358,7 @@ them, which is the disagreement this paragraph exists to forbid.
 
 A name that **no** scope defines but the row does is the same claim in the
 other direction, and it stops being reported as undefined: the destructive red
-states a token that reaches the server with its braces still on, and this one
+(with its wavy underline) states a token that reaches the server with its braces still on, and this one
 does not. The chip reads `row`, the popover names the column, and a create
 offer - still worth making, since the variable answers every row-less send -
 says what the row already answers rather than implying the token is unanswered.

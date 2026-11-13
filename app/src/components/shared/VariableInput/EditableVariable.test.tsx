@@ -33,6 +33,8 @@ import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import { TIMING } from "@/config/timing";
 import { variableSupportStub } from "@/test/variable-support";
+import { monacoTokenPaint } from "@/lib/css-tokens.testkit";
+import { variableTokenClass } from "@/lib/monaco-variable-tokens";
 
 const { default: EditableVariable } = await import("./EditableVariable");
 
@@ -56,6 +58,11 @@ function renderToken(props: Partial<React.ComponentProps<typeof EditableVariable
 /** The token's own trigger span - what hover is tracked on, and the component's root. */
 function wrapperOf(container: HTMLElement): HTMLElement {
 	return container.firstElementChild as HTMLElement;
+}
+
+/** The wrapper's class list, so `text-primary` cannot pass as a prefix of `text-primary-text`. */
+function classesOf(container: HTMLElement): string[] {
+	return wrapperOf(container).className.split(/\s+/);
 }
 
 /** Where `VariablePopover` renders its content - see `variable-popover.tsx`. */
@@ -304,13 +311,45 @@ describe("clicking the token", () => {
 
 describe("a token's colour (#2741)", () => {
 	it.each([
-		["a stored value", {}, "text-primary"],
+		["a stored value", {}, "text-primary-text"],
 		["an empty value", { value: "" }, "text-muted-foreground"],
 		["no definition", { resolved: false, value: "" }, "text-destructive-text"],
 	])("is told apart for %s", (_label, props, tone) => {
 		const { container } = renderToken(props);
-		expect(wrapperOf(container).className).toContain(tone);
+		expect(classesOf(container)).toContain(tone);
 		expect(wrapperOf(container).className).not.toContain("decoration-dashed");
+	});
+
+	it("wavy-underlines a name no scope defines, so it does not rest on its red (#3499)", () => {
+		const { container } = renderToken({ resolved: false, value: "" });
+		expect(classesOf(container)).toEqual(
+			expect.arrayContaining(["underline", "decoration-wavy"])
+		);
+	});
+
+	/*
+	 * The field and the editor paint one state the same way: the colour token
+	 * and the underline style Monaco's class declares are the ones this
+	 * component renders. `color-scheme-contrast.test.ts` measures the states
+	 * from the Monaco classes, so this is what makes that measurement this
+	 * painter's too.
+	 */
+	it.each([
+		["resolved", {}],
+		["empty", { value: "" }],
+		["undefined", { resolved: false, value: "" }],
+	] as const)("paints %s as its Monaco class does", (state, props) => {
+		const paint = monacoTokenPaint(variableTokenClass({ state, info: null }));
+		const { container } = renderToken(props);
+		const classes = classesOf(container);
+		expect(classes).toContain(`text-${paint.colour}`);
+		if (paint.underline === null) {
+			expect(classes).not.toContain("underline");
+		} else {
+			expect(classes).toEqual(
+				expect.arrayContaining(["underline", `decoration-${paint.underline}`])
+			);
+		}
 	});
 
 	it("is dashed and muted for a deferred name, whatever the scopes hold", () => {
