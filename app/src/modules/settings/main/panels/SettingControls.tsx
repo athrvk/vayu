@@ -207,7 +207,7 @@ export function TileItem({ value, selected, className, checkClassName, children 
 				"relative flex flex-col rounded-lg border-2",
 				"transition-[background-color,color,border-color,scale] duration-150 active:scale-[0.98]",
 				"hover:bg-accent hover:border-accent-foreground/20",
-				selected ? "border-primary bg-primary/5" : "border-border",
+				selected ? "border-primary bg-primary/5" : "border-rule",
 				className
 			)}
 		>
