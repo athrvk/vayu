@@ -2535,6 +2535,16 @@
 	.scroll-on-overflow:focus-within > * {
 		animation: scroll-overflow var(--scroll-duration, 3s) ease-in-out infinite;
 	}
+
+	/*
+	 * At rest the clipped edge fades out, so a cut name reads as cut. The track
+	 * is `w-fit`, which keeps `text-overflow: ellipsis` from ever engaging; a
+	 * mask needs nothing from the track. Not while the marquee runs: the end of
+	 * the name scrolls up to the edge and must stay readable there.
+	 */
+	.scroll-on-overflow:not(:hover):not(:focus-within) {
+		mask-image: linear-gradient(to right, black calc(100% - 1rem), transparent);
+	}
 }
 
 /*

@@ -24,6 +24,7 @@ import {
 	MethodBadge,
 	OUTCOME_TITLE,
 	RowContextMenu,
+	ROW_ACTIONS_REVEAL,
 	RunStatusGlyph,
 	RUN_STATUS,
 	rowOutcome,
@@ -315,6 +316,12 @@ function RunItem({
 	const duration = showsRunBounds ? run.summary?.duration : undefined;
 	const concurrency = showsRunBounds ? run.summary?.concurrency : undefined;
 
+	// A pinned run keeps its pin on screen, and a pending delete keeps its spinner:
+	// both are state, not affordance. Whatever is not state still gives its width
+	// back until the row is hovered or focused (`ROW_ACTIONS_REVEAL`).
+	const pinIsState = !!run.baseline || isTogglingBaseline;
+	const actionsAreState = pinIsState || isDeleting;
+
 	const hasMeta =
 		(scenario &&
 			(scenario.stepCount != null ||
@@ -442,7 +449,12 @@ function RunItem({
 					)}
 					{/* z-10: sits above the stretched activator below, so these stay
 					    clickable while the rest of the row selects the run. */}
-					<div className="relative z-10 flex shrink-0 items-center gap-1">
+					<div
+						className={cn(
+							"z-10 flex shrink-0 items-center gap-1",
+							!actionsAreState && ROW_ACTIONS_REVEAL
+						)}
+					>
 						{/*
 						 * Pin this run. Every run type gets it: pinning keeps the run
 						 * past retention and finds it again under the Pinned filter.
@@ -463,10 +475,8 @@ function RunItem({
 								tooltip={pinTooltip}
 								aria-pressed={!!run.baseline}
 								className={cn(
-									"size-target transition-opacity",
-									run.baseline || isTogglingBaseline
-										? "opacity-100"
-										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+									"size-target",
+									actionsAreState && !pinIsState && ROW_ACTIONS_REVEAL
 								)}
 								icon={
 									isTogglingBaseline ? (
@@ -491,10 +501,8 @@ function RunItem({
 							disabled={isDeleting}
 							label="Delete run"
 							className={cn(
-								"size-target transition-opacity",
-								isDeleting
-									? "opacity-100"
-									: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+								"size-target",
+								actionsAreState && !isDeleting && ROW_ACTIONS_REVEAL
 							)}
 							icon={
 								isDeleting ? (

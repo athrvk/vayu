@@ -15,10 +15,11 @@
  * somewheres is openable. Generalising the component rather than copying it is
  * what keeps the three from drifting into three different crumb shapes.
  *
- * **The last crumb is where you are, and it never gives way.** A deep chain has
- * to shrink somewhere, and the part you are looking for is the end of it: the
- * ancestors get `min-w-0` and truncate, the current crumb is `shrink-0` and
- * does not. jsdom has no layout, so those classes are what the tests assert.
+ * **Every crumb can be cut, none to nothing (#3495).** A deep chain has to
+ * shrink somewhere: each ancestor truncates down to a 3ch floor, so its chevron
+ * never lands on its first letter, and the current crumb is `min-w-0` and a
+ * `TruncatedText`, so a long name ellipses with its full text on hover. jsdom
+ * has no layout, so those classes are what the tests assert.
  *
  * **A crumb navigates only if the caller gives it somewhere to go.** The
  * current crumb is deliberately inert - you are already there, and a control
@@ -31,11 +32,15 @@
  * became the Info tab.
  */
 
+import { Fragment } from "react";
 import { ChevronRight } from "lucide-react";
 
 import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 import { TruncatedText } from "./TruncatedText";
+
+/** An ancestor's label: never under 3ch, never past 16ch, so its chevron stays clear of it. */
+const ANCESTOR_CLASS = "min-w-[3ch] max-w-[16ch]";
 
 export interface BreadcrumbCrumb {
 	/** Stable key - an entity id where there is one, else the label. */
@@ -90,22 +95,27 @@ export function TabBreadcrumb({
 			)}
 		>
 			{ancestors.length > 0 && (
-				// The shrinking half. `min-w-0` on both this row and each segment is
+				// The segments are direct children of this row, not wrapped in a span
+				// each: a wrapper with `min-w-0` shrinks below its label's floor and
+				// leaves the chevron stacked on the first letter. `min-w-0` here is
 				// what lets `truncate` engage at all - a flex item defaults to
 				// min-content width and simply overflows instead.
 				<div className="flex items-center gap-1 min-w-0">
 					{ancestors.map((crumb) => (
-						<span key={crumb.id} className="flex items-center gap-1 min-w-0">
+						<Fragment key={crumb.id}>
 							{crumb.onSelect ? (
 								<button
 									type="button"
 									onClick={crumb.onSelect}
-									className="min-w-0 max-w-[16ch] rounded-sm hover:text-foreground transition-colors"
+									className={cn(
+										ANCESTOR_CLASS,
+										"rounded-sm hover:text-foreground transition-colors"
+									)}
 								>
 									<TruncatedText className="block">{crumb.label}</TruncatedText>
 								</button>
 							) : (
-								<TruncatedText className="block min-w-0 max-w-[16ch]">
+								<TruncatedText className={cn("block", ANCESTOR_CLASS)}>
 									{crumb.label}
 								</TruncatedText>
 							)}
@@ -113,16 +123,18 @@ export function TabBreadcrumb({
 								aria-hidden="true"
 								className="size-icon-sm shrink-0 opacity-60"
 							/>
-						</span>
+						</Fragment>
 					))}
 				</div>
 			)}
 			{titlesPane ? (
-				<Heading outside="span" className="shrink-0 text-muted-foreground">
-					{current.label}
+				<Heading outside="span" className="min-w-0 text-muted-foreground">
+					<TruncatedText>{current.label}</TruncatedText>
 				</Heading>
 			) : (
-				<span className="shrink-0 text-muted-foreground">{current.label}</span>
+				<TruncatedText className="min-w-0 text-muted-foreground">
+					{current.label}
+				</TruncatedText>
 			)}
 		</nav>
 	);

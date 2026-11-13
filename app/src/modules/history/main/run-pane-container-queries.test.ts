@@ -39,6 +39,7 @@ const RUN_PANE_GRID_FILES = [
 	join(here, "components/BaselineComparison.tsx"),
 	join(here, "components/RunTrend.tsx"),
 	join(dashboard, "LiveDistributionRow.tsx"),
+	join(here, "../../../components/shared/response-viewer/SampledExchange.tsx"),
 ];
 
 /** `lg:grid-cols-6` but not `@lg:grid-cols-6`. */

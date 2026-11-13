@@ -20,9 +20,12 @@ import {
 } from "lucide-react";
 
 import { IconSwap, ICON_MOTION, TooltipIconButton } from "@/components/ui";
-import { TruncatedText } from "@/components/shared";
+import { ROW_ACTIONS_REVEAL, TruncatedText } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useCopy } from "@/hooks/useCopy";
+import { useOverflowTitle } from "@/hooks/useOverflowTitle";
+import { formatInstant } from "@/lib/time-value";
+import { cn } from "@/lib/utils";
 import { trashReference } from "@/lib/agent-reference";
 import { pluralize } from "@/modules/dashboard/utils/format";
 import type { TrashEntry } from "@/types";
@@ -81,13 +84,11 @@ function contentsSummary(entry: TrashEntry): string | null {
  * One deleted root, with the two things that can happen to it and a copy of
  * its reference for an agent.
  *
- * **The actions are always visible, and that is deliberate.** The design
- * system hover-reveals row actions because a drawer row has a primary action of
- * its own - open the request, select the run - that the buttons must not
- * compete with. A trash row has none: it opens nothing, and Restore and Delete
- * forever are the entire reason it is on screen. Hiding them until the pointer
- * arrives would hide the whole surface's purpose, and leave a list of names
- * that appears inert.
+ * **The actions take no width until the row is hovered or focused** (#3495).
+ * Three always-visible buttons left the name about 105px of a 260px drawer and
+ * the meta line four wrapped lines. They stay in the DOM and keyboard-reachable
+ * (`ROW_ACTIONS_REVEAL`), and a device with no hover keeps them showing, since
+ * Restore and Delete forever are the entire reason a trash row is on screen.
  */
 export default function TrashItem({
 	entry,
@@ -100,13 +101,21 @@ export default function TrashItem({
 	const contents = contentsSummary(entry);
 	const busy = isRestoring || isPurging;
 	const { copy, copied } = useCopy({ feedback: "icon" });
+	// One line, with the full sentence on hover only while it is cut. The time is
+	// spelled out here for that title; the visible one is still a `TimeValue`.
+	const metaTitle = [
+		`${kindLabel}${entry.parentName ? ` · from ${entry.parentName}` : ""}`,
+		` · Deleted ${formatInstant(entry.deletedAt, "relative")}`,
+		contents ? `, ${contents}` : "",
+	].join("");
+	const metaRef = useOverflowTitle<HTMLParagraphElement>(metaTitle);
 
 	return (
 		// `surface-card` + `border-rule` rather than a border token: `--border` on
 		// `--card` is the same colour in dark, so the row would have no edge. See
 		// RunItem, which carries the same pair for the same reason.
-		// No `group`: nothing here reveals on hover, so a group class would be a
-		// hook with nothing hanging off it.
+		// `group relative`: the row is what the actions reveal on, and the
+		// collapsed cluster is absolutely positioned against it.
 		<div
 			// Where a purge hands focus on to (#1234). `tabIndex={-1}` makes the row
 			// a target for `.focus()` without adding a tab stop in front of the
@@ -117,7 +126,7 @@ export default function TrashItem({
 			// `focus-row`, not the baseline ring: this row is a composite the
 			// baseline would leave unmarked, since it is written
 			// `[tabindex]:not([tabindex="-1"])`.
-			className="focus-row surface-card border border-rule rounded-md overflow-hidden w-full"
+			className="focus-row group relative surface-card border border-rule rounded-md overflow-hidden w-full"
 		>
 			<div className="flex items-center gap-2 px-3 py-2 min-w-0">
 				<KindIcon className="size-icon shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -132,7 +141,7 @@ export default function TrashItem({
 					 * a deleted request - and a sighted reader has to already
 					 * know which shape means which.
 					 */}
-					<p className="text-xs text-muted-foreground">
+					<p ref={metaRef} className="truncate text-xs text-muted-foreground">
 						{kindLabel}
 						{/* The owner is what tells two same-named entries apart (#3449). */}
 						{entry.parentName ? ` · from ${entry.parentName}` : ""} · Deleted{" "}
@@ -141,7 +150,9 @@ export default function TrashItem({
 					</p>
 				</div>
 
-				<div className="flex items-center gap-1 shrink-0">
+				<div
+					className={cn("flex items-center gap-1 shrink-0", !busy && ROW_ACTIONS_REVEAL)}
+				>
 					<TooltipIconButton
 						variant="rowAction"
 						onClick={() => void copy(trashReference(entry), "Reference")}
