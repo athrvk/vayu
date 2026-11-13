@@ -2441,6 +2441,18 @@ that do show it unconditionally.
 the label is the primary target and there is no way to widen it. Rows must not
 animate under the cursor.
 
+**A tab's label stops where its close button starts** (#3495). The close button
+is absolute, so a name clamped at the tab width cap ran under it: `truncate`
+inside `ScrollOnOverflow`'s `w-fit` track never engages, and the viewport was
+only as narrow as the row's `px-3`. The label viewport carries a right margin of
+`size-target` less the padding past the button's `right-0.5` offset, in the
+density-scaled units of all three, so it ends exactly where the button begins
+and `tab-fit.ts`'s natural width still fits a name that is not clamped. At rest
+the clipped edge fades (`.scroll-on-overflow`, a `mask-image`, not an ellipsis);
+while the marquee runs the fade is off, so the end of the name is readable at
+the edge. `TabItem.label-strip.test.tsx` derives the margin from the button's and
+the row's own classes.
+
 Text that **wraps** (`break-words`) is neither - it never clips, so it needs no
 tooltip.
 
