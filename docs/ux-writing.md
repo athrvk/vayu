@@ -106,10 +106,11 @@ scattered strings land the same way.
     that is an in-app surface and has no platform convention to follow. One
     destination, one name: the settings item reads "Settings…" everywhere (macOS
     itself now calls it Settings, not Preferences). The macOS Dock menu follows
-    the macOS rule; the Windows Jump List follows sentence case. The code that
-    serves both from one template (`createMenu` in `electron/main.ts`, which
-    needs a per-platform label function) belongs to the sentence-case sweep, not to this
-    page.
+    the macOS rule; the Windows Jump List follows sentence case. `createMenu`
+    in `electron/main.ts` serves both from one template and takes every label
+    that differs from `menuLabels` in `electron/menu-labels.ts`, which holds the
+    Title Case set for `darwin` and the sentence-case set for anything else
+    (`menu-labels.test.ts`).
 - **Punctuation.** A full sentence ends with a period, including in a
   tooltip; a fragment does not. Oxford comma. No exclamation marks. " - " for
   a dash (the repo bans em-dashes everywhere), "…" for an ellipsis (one
@@ -304,8 +305,8 @@ from creeping back in afterward. These hold it:
   for a design-mode send.
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
-`file :: literal`, each entry naming the open issue that retires it. The commit
-that fixes a string deletes its entry: a test fails on an entry whose literal
+`file :: literal`, each entry naming the open issue that retires it (it is empty
+now, #3500). The commit that fixes a string deletes its entry: a test fails on an entry whose literal
 the sources no longer carry, so a fix cannot land with its entry left behind.
 Text the rules match that is not interface copy (a line of a code sample) is
 listed apart, with its reason instead of an issue.

@@ -142,7 +142,7 @@ function WindowControls() {
  * The window is frameless, and a frameless window draws no menu bar on either
  * platform - so File, Edit, View, Window and Help existed there as accelerators
  * and nothing else, and the items that carry none (Help > Documentation, About
- * Vayu, Check for Updates) could be reached by no mouse at all (#1361). Left
+ * Vayu, Check for updates) could be reached by no mouse at all (#1361). Left
  * click opens the menu the main process already installed; nothing is rebuilt
  * here, and the renderer never learns what is in it.
  *

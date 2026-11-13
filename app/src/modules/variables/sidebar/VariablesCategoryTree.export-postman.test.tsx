@@ -9,7 +9,7 @@
  */
 
 /**
- * "Export as Postman Environment" on an environment row (#2253): one engine
+ * "Export as Postman environment" on an environment row (#2253): one engine
  * call, the file it answers with downloaded, and a toast that says what the
  * file left out - only once the file is written (#3246).
  *
@@ -112,10 +112,10 @@ function openEnvironmentMenu() {
 
 async function clickExport() {
 	openEnvironmentMenu();
-	fireEvent.click(await screen.findByRole("menuitem", { name: /Export as Postman Environment/ }));
+	fireEvent.click(await screen.findByRole("menuitem", { name: /Export as Postman environment/ }));
 }
 
-describe("Export as Postman Environment on an environment row", () => {
+describe("Export as Postman environment on an environment row", () => {
 	it("asks the engine for that environment, leaving includeSecrets to its default", async () => {
 		await clickExport();
 
@@ -234,7 +234,7 @@ describe("Export as Postman Environment on an environment row", () => {
 				.find((item) => item.getAttribute("data-tree-label") === "Staging")!
 		);
 		fireEvent.click(
-			await screen.findByRole("menuitem", { name: /Export as Postman Environment/ })
+			await screen.findByRole("menuitem", { name: /Export as Postman environment/ })
 		);
 		expect(exportPostmanEnvironment).toHaveBeenCalledTimes(1);
 
@@ -248,7 +248,7 @@ describe("Export as Postman Environment on an environment row", () => {
 				.find((item) => item.getAttribute("data-tree-label") === "Staging")!
 		);
 		fireEvent.click(
-			await screen.findByRole("menuitem", { name: /Export as Postman Environment/ })
+			await screen.findByRole("menuitem", { name: /Export as Postman environment/ })
 		);
 		await waitFor(() => expect(exportPostmanEnvironment).toHaveBeenCalledTimes(2));
 	});

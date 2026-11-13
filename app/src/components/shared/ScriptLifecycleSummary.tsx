@@ -78,7 +78,7 @@ export function ScriptLifecycleSummary({ lifecycle, className }: ScriptLifecycle
 	return (
 		<Card className={className}>
 			<CardHeader className="space-y-0">
-				<CardTitle>Setup / Teardown</CardTitle>
+				<CardTitle>Setup / teardown</CardTitle>
 			</CardHeader>
 			<CardContent>
 				<ul className="space-y-1.5">

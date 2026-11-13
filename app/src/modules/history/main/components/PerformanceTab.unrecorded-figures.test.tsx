@@ -72,7 +72,7 @@ describe("PerformanceTab unrecorded latency", () => {
 		renderTab(makeReport(flags));
 
 		expect(screen.getByText("Latency distribution")).toBeInTheDocument();
-		for (const label of ["Average", "P50 (Median)", "P90", "P95", "P99"]) {
+		for (const label of ["Average", "P50 (median)", "P90", "P95", "P99"]) {
 			const tile = screen.getByText(label).parentElement!;
 			expect(within(tile).getByText("-")).toBeInTheDocument();
 		}
