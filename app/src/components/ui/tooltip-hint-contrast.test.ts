@@ -17,7 +17,7 @@
  * has to read.
  *
  * The bar is 2.5:1 in every accent scheme and both themes. That is below the
- * label's own white, which bottoms out at 3.6:1 on `sunset` and is the fill's
+ * label's own white, which bottoms out at 4.65:1 on `coral` and is the fill's
  * own ceiling - a hint cannot beat the text it is secondary to - and far above
  * the canvas token, which fails the bar on every scheme. Both halves are
  * asserted: a test that only checks the new value passes just as happily on a
