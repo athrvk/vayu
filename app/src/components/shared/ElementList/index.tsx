@@ -396,7 +396,7 @@ function ElementRow({
 						aria-expanded={open}
 						onClick={() => setOpen(!open)}
 						onKeyDown={handleRowKeyDown}
-						className="flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+						className="flex size-target shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 					>
 						<ChevronRight
 							className={cn("size-icon-sm transition-transform", open && "rotate-90")}

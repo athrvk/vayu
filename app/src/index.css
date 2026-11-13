@@ -1093,18 +1093,19 @@
 	 * an outline on the control indicates the wrong shape in the wrong place.
 	 *
 	 * Put .focus-row on the element that paints the hover background: it draws
-	 * the indicator at its own radius (so the roundedness setting governs it)
-	 * and picks up the same accent fill hover already uses, which is how native
-	 * list selection reads. The inner control then draws nothing.
+	 * the indicator at its own radius (so the roundedness setting governs it).
+	 * The inner control then draws nothing.
 	 *
 	 * Only needed where control and row genuinely differ, which now includes the
 	 * variables sidebar's rows (they became treeitems in #1217). Full-width rows
 	 * (the history and settings trees) are their own target and use the baseline
 	 * above.
 	 *
-	 * The indicator deliberately mirrors the disclosure chevron's own ring
-	 * (ring-2 ring-primary/30) and the selected-row ring (ring-1 ring-inset
-	 * ring-primary/20), so focus, selection and hover speak one language.
+	 * The indicator is the full --ring, the colour the baseline outline above
+	 * and the disclosure chevrons' ring use: --primary at 0.3 alpha measured
+	 * under 3:1 against the row surfaces (WCAG 1.4.11, #3499). Selection stays
+	 * a quieter 1px inset ring-primary/20 on a tint, so the 2px focus ring still
+	 * reads as a different thing over a selected row.
 	 * `outline` rather than box-shadow: Tailwind's ring utilities own box-shadow,
 	 * and a selected row already sets one, which would override this.
 	 *
@@ -1117,7 +1118,7 @@
 	   is descendant-only and does not cover the first. */
 	:where(.focus-row):focus-visible,
 	:where(.focus-row):has(:focus-visible:not(.focus-self)) {
-		outline: 2px solid hsl(var(--primary) / 0.3);
+		outline: 2px solid hsl(var(--ring));
 		outline-offset: -2px;
 	}
 
