@@ -58,6 +58,7 @@ import { closeTabFromKeyboard } from "./tab-focus";
 import { cycleRegionFocus, focusRequestUrl, regionProps } from "./region-focus";
 import { CommandPalette } from "@/modules/palette";
 import { DetailSkeleton } from "@/components/shared/DetailSkeleton";
+import { HeadingSection } from "@/components/ui/heading";
 import RequestBuilder from "@/modules/request-builder";
 
 /*
@@ -511,7 +512,12 @@ export default function Shell() {
 												/>
 											}
 										>
-											{renderTabContent(activeTab)}
+											{/* The outline opens here, so a tab's own title is its
+											    `h1` and every heading below it is levelled from that
+											    one (`heading-level.tsx`, #3498). */}
+											<HeadingSection level={1}>
+												{renderTabContent(activeTab)}
+											</HeadingSection>
 										</Suspense>
 									</div>
 								</main>

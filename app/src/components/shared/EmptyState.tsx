@@ -35,14 +35,16 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 
 interface EmptyStateBaseProps {
 	/**
 	 * Sentence case. A `pane` title is a heading, so no trailing period ("No
 	 * run selected"); an `inline` title is the whole message and may be a
-	 * sentence. A node is phrasing content only (text, `code`, `span`): it
-	 * renders inside a `<p>` in the `pane` variant.
+	 * sentence. A node is phrasing content only (text, `code`, `span`): the
+	 * `pane` variant renders it inside a heading at the outline's level, or a
+	 * `<p>` outside the main pane (`heading-level.tsx`, #3498).
 	 */
 	title: ReactNode;
 	/**
@@ -128,7 +130,9 @@ export function EmptyState({
 				/>
 			)}
 			<div className="max-w-sm">
-				<p className="text-md font-semibold text-foreground">{title}</p>
+				<Heading outside="p" className="text-md font-semibold text-foreground">
+					{title}
+				</Heading>
 				{description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
 			</div>
 			{action}

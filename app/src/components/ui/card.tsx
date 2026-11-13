@@ -8,6 +8,8 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { Heading } from "./heading";
+import type { HeadingTag } from "./heading-level";
 
 const CARD_PAD = { sm: "p-3", md: "p-4" } as const;
 
@@ -47,14 +49,22 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
 	);
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * A heading, at the level the outline gives it (`heading-level.tsx`): `h2` under
+ * a tab's `h1`, the same card one level deeper wherever a section nests it.
+ * `as` pins the element for a card that is its own page, the crash screen's.
+ * Outside the outline it is an `h3` (#3498).
+ */
+function CardTitle({ className, as, ...props }: React.ComponentProps<"h3"> & { as?: HeadingTag }) {
 	return (
-		<div
+		<Heading
 			data-slot="card-title"
+			outside="h3"
+			as={as}
 			// The size belongs to the primitive, not to the caller. Naming no size
-			// here left every card heading in the app to pick one, and 51 of them
-			// picked 16px or 18px - a heading register a step above the 15px
-			// "Title / small heading" step the scale already documents (#1202).
+			// here left every card heading in the app to pick one, and most picked
+			// 16px or 18px - a heading register a step above the 15px "Title / small
+			// heading" step the scale already documents (#1202).
 			className={cn("text-md font-semibold leading-none tracking-tight", className)}
 			{...props}
 		/>

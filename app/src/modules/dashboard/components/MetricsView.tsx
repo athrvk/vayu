@@ -325,10 +325,10 @@ function MetricsView({
 			{chartWindow.length > 1 && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
+						<h2 className="text-xs font-semibold text-foreground">
 							Throughput over time
 							<InfoChip tip={TOOLTIPS.throughputOverTime} />
-						</h3>
+						</h2>
 						<ChartLegend
 							entries={throughputLegend(targetRps, rampOverlay != null, hasSend)}
 						/>
@@ -374,10 +374,10 @@ function MetricsView({
 			{hasLatencyPoints && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
+						<h2 className="text-xs font-semibold text-foreground">
 							Latency over time
 							<InfoChip tip={TOOLTIPS.latencyOverTime} />
-						</h3>
+						</h2>
 						<ChartLegend entries={LATENCY_ENTRIES} />
 					</div>
 					<LatencyBreakdownChart
@@ -395,13 +395,13 @@ function MetricsView({
 				? historicalMetrics.length > 1 && (
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
-								<h3 className="text-xs font-semibold text-foreground">
+								<h2 className="text-xs font-semibold text-foreground">
 									{pooledTitle(
 										`Response time vs ${CONCURRENCY_UNIT}`,
 										isSequence
 									)}
 									<InfoChip tip={TOOLTIPS.responseTimeVsConcurrency} />
-								</h3>
+								</h2>
 								<ChartLegend entries={scatterLegend(sloMs !== undefined)} />
 							</div>
 							<ResponseTimeVsConcurrencyChart
@@ -416,10 +416,10 @@ function MetricsView({
 					hasPercentileData && (
 						<Card pad="sm">
 							<div className="flex items-baseline justify-between mb-3">
-								<h3 className="text-xs font-semibold text-foreground">
+								<h2 className="text-xs font-semibold text-foreground">
 									{pooledTitle("Response time percentiles over time", isSequence)}
 									<InfoChip tip={TOOLTIPS.percentilesOverTime} />
-								</h3>
+								</h2>
 								<ChartLegend entries={percentileLegend(sloMs !== undefined)} />
 							</div>
 							<LatencyPercentilesChart
@@ -438,10 +438,10 @@ function MetricsView({
 			{hasStatusData && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
+						<h2 className="text-xs font-semibold text-foreground">
 							Status codes over time
 							<InfoChip tip={TOOLTIPS.statusCodesOverTime} />
-						</h3>
+						</h2>
 						{/*
 						    Driven by `constants/http-status`, not a literal list. These
 						    five were hardcoded `hsl(var(--success))` strings, so when the
@@ -481,10 +481,10 @@ function MetricsView({
 			{monitorSamples.length > 0 && chartWindow.length > 1 && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
+						<h2 className="text-xs font-semibold text-foreground">
 							Server vitals
 							<InfoChip tip={TOOLTIPS.serverVitals} />
-						</h3>
+						</h2>
 						<span className="text-micro font-mono text-muted-foreground">
 							scraped from the target
 						</span>
@@ -504,10 +504,10 @@ function MetricsView({
 			{hasCustomMetricsData && chartWindow.length > 1 && (
 				<Card pad="sm">
 					<div className="flex items-baseline justify-between mb-3">
-						<h3 className="text-xs font-semibold text-foreground">
+						<h2 className="text-xs font-semibold text-foreground">
 							Custom metrics
 							<InfoChip tip={TOOLTIPS.customMetrics} />
-						</h3>
+						</h2>
 						<span className="text-micro font-mono text-muted-foreground">
 							metric.record / pm.metrics
 						</span>

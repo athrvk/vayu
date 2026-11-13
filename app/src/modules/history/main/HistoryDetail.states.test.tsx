@@ -27,6 +27,8 @@ import { render } from "@/test/render-with-tooltips";
 import HistoryDetail from "./HistoryDetail";
 import { useTabsStore } from "@/stores";
 import { formatInstant } from "@/lib/time-value";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
+import { RUN_TYPE_NAME } from "../types";
 
 const refetch = vi.fn();
 const collections: { id: string; name: string }[] = [];
@@ -545,5 +547,22 @@ describe("HistoryDetail header", () => {
 
 			expect(screen.queryByText("Comment")).toBeNull();
 		});
+	});
+});
+
+// One top heading per tab (#3498): the run's title in its header, or the
+// error pane's title when there is no run to name.
+describe("HistoryDetail headings", () => {
+	it("titles a loaded run with one h1", () => {
+		reportQuery.data = { metadata: {} };
+		const { container } = render(asTab(<HistoryDetail />));
+		expect(expectOneTopHeading(container)).toBe(RUN_TYPE_NAME.load);
+	});
+
+	it("titles a failed load with the error pane's heading", () => {
+		runQuery.error = new Error("engine unreachable");
+		runQuery.data = undefined;
+		const { container } = render(asTab(<HistoryDetail />));
+		expect(expectOneTopHeading(container)).toMatch(/couldn't load this run/i);
 	});
 });

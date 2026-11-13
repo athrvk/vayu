@@ -11,6 +11,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { screen, fireEvent, within } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import MockServerView from "./index";
 import {
 	useMockActivityQuery,
@@ -88,6 +89,17 @@ describe("MockServerView", () => {
 			openTabs: [{ id: "t1", type: "mock-server", entityId: "mock_a" }],
 			activeTabId: "t1",
 		});
+	});
+
+	// One top heading per tab (#3498): the address, prefixed with what it is the
+	// address of, and Routes and Activity one level under it.
+	it("titles the tab with the mock's address as its one h1", () => {
+		const { container } = render(asTab(<MockServerView />));
+		expect(expectOneTopHeading(container)).toBe(`Mock server ${MOCK.url}`);
+		expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual([
+			"Routes (1)",
+			"Activity",
+		]);
 	});
 
 	/*

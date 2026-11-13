@@ -114,7 +114,12 @@ export default function MockServerView() {
 			<header className="flex flex-col gap-1 border-b border-border px-3 py-2">
 				<div className="flex flex-wrap items-center gap-2">
 					<MockIcon className="size-icon text-muted-foreground" aria-hidden="true" />
-					<code className="font-mono text-xs">{mock.url}</code>
+					{/* The tab's `h1` is the address, the mock's identity; the hidden
+					    prefix says what it is the address of (#3498). */}
+					<h1>
+						<span className="sr-only">Mock server </span>
+						<code className="font-mono text-xs">{mock.url}</code>
+					</h1>
 					<TooltipIconButton
 						size="sm"
 						label="Copy mock server URL"
@@ -214,9 +219,9 @@ export default function MockServerView() {
 
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="border-b border-border px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">
 						Routes ({routesQuery.isLoading ? "-" : routes.length})
-					</h3>
+					</h2>
 					{routesQuery.isError ? (
 						<ErrorState
 							variant="inline"
@@ -274,7 +279,7 @@ export default function MockServerView() {
 				</section>
 
 				<section className="flex-1 px-3 py-2">
-					<h3 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h3>
+					<h2 className="pb-2 text-xs font-medium text-muted-foreground">Activity</h2>
 					{activityQuery.isError ? (
 						<ErrorState
 							variant="inline"

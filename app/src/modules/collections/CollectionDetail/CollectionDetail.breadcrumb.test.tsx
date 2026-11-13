@@ -22,6 +22,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import CollectionDetail from "./index";
 
 const openTab = vi.fn();
@@ -78,5 +79,14 @@ describe("the collection screen's crumb line", () => {
 		render(<CollectionDetail />);
 
 		expect(crumb()).toBeNull();
+	});
+
+	// One top heading per tab (#3498): the header's name, not the crumb that
+	// repeats it.
+	it("titles the tab with the collection's name as its one h1", () => {
+		activeCollectionId = "tag-users";
+		const { container } = render(asTab(<CollectionDetail />));
+
+		expect(expectOneTopHeading(container)).toBe("users");
 	});
 });

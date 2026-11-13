@@ -25,6 +25,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import { TooltipProvider } from "@/components/ui";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import VariableTableEditor from "./VariableTableEditor";
 import type { Collection, Environment } from "@/types";
 
@@ -97,6 +98,19 @@ function bannerText(): string {
 	expect(banner.textContent).not.toBe("");
 	return banner.textContent ?? "";
 }
+
+// One top heading per tab (#3498): the variables tab is this editor, and its
+// header names the scope.
+describe("the Variables tab's heading", () => {
+	it("titles the tab with one h1 naming the environment", () => {
+		const { container } = render(
+			<TooltipProvider>
+				{asTab(<VariableTableEditor config={{ type: "environment", environment }} />)}
+			</TooltipProvider>
+		);
+		expect(expectOneTopHeading(container)).toMatch(/staging/);
+	});
+});
 
 describe("the Variables table's column headers (#3498)", () => {
 	it("gives the checkbox and action columns a name, as every other header has one", () => {

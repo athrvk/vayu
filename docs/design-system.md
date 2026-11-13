@@ -1222,7 +1222,7 @@ line-height - prefer `text-sm`.
 **The heading register stops at 15px, and a heading never names its own size.**
 `CardTitle` and `DialogTitle` carry `text-md`; a card or dialog heading that
 writes a size is overriding the primitive rather than using it. That is how the
-app got here (#1202): `CardTitle` named no size at all, so all 51 card headings
+app got here (#1202): `CardTitle` named no size at all, so every card heading
 in the app named one, 45 at `text-base` and 6 at `text-lg` - a settings panel
 and a report tab heading at 16-18px against 13px body, which is the register
 Postman and VS Code cap around 14px. `Input` is `text-sm` for the same reason:
@@ -1947,6 +1947,7 @@ see.
 | A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| A tab's main pane has one `h1`, and no heading under it skips a level | `heading-outline.testkit.tsx`'s `expectOneTopHeading`, one case per tab root (`WelcomeScreen.test.tsx`, `RequestBuilderLayout.headings.test.tsx`, `CollectionDetail.breadcrumb.test.tsx`, `dashboard.breadcrumb.test.tsx`, `HistoryDetail.states.test.tsx`, `VariableTableEditor.banner.test.tsx`, `SettingsMain.category-card.test.tsx`, `SettingsMain.panel-heading.test.tsx`, `InboxView.test.tsx`, `MockServerView.test.tsx`); `Shell.heading-outline.test.tsx` |
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |
 | A bar that measures progress is the `Progress` primitive, named | `ProgressCard.test.tsx` |
@@ -2014,6 +2015,34 @@ a stacked one reads its own values, not its running total. A chart whose
 percentiles) and one with a better one passes it in (`RunTrend` says how many
 runs and the newest figure). An image's children are hidden from assistive
 technology, so a legend (`ChartLegend`) sits beside the host, never inside it.
+
+**A tab has one top heading, and a heading's level is where it is drawn**
+(#3498). Heading navigation is how a screen-reader user skims a pane, so each
+tab's main pane has exactly one `h1` naming it and nothing below it skips a
+level (axe's `heading-order`). The `h1` is the title the tab already shows:
+the run's name in History, the category in Settings, the collection's name, the
+scope in Variables, the inbox's or mock's address (with a hidden prefix saying
+what it is the address of), and on the request builder and the dashboard, which
+draw no other title, the crumb's current segment (`TabBreadcrumb`'s
+`titlesPane`). The welcome tab's populated Launcher has no title to draw, so
+its `h1` is an `sr-only` "Vayu", the tab's name and the first-run screen's
+visible one.
+
+Below the `h1`, a level is not something a component can know: the run
+report's summary cards sit under the run's title in History and under the
+report's crumb on the dashboard, and an empty state is a whole tab in one place
+and a card's body in another. So the title primitives draw `Heading`
+(`components/ui/heading.tsx`), which takes its element from a context
+(`heading-level.ts`): the Shell opens the outline at 1 around the active tab,
+whatever draws a tab's `h1` wraps the rest in a `HeadingSection`, and
+`CardTitle`, `EmptyState` / `ErrorState`'s pane title and the headings of a
+component more than one surface renders (the response pane's sections, the
+headers viewer) render at that level. A card does not open a section. A dialog
+opens its own at 3 under its `h2` title, because context crosses the portal.
+Outside the outline (the drawer, the context bar) a card title is an `h3` and an
+empty state's title a paragraph; `CardTitle`'s `as` pins the element for the
+one card that is its own page, the crash screen's `h1`. A heading a tab root
+draws for itself is written as the literal element.
 
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
@@ -3380,6 +3409,11 @@ line of muted text. Three shared primitives in `components/shared/` now cover it
 |-------|-----------|-------|
 | Nothing here yet | `EmptyState` | `variant="inline"` for a single muted line inside a list; default is the centred icon + title + description. Both variants take an `action`. Inline takes no `description` or `icon`, enforced by type: fold the sentence into `title` (a `ReactNode`, phrasing content only, so a `<code>` type name can sit in it). A pane `description` is a `ReactNode` rendered inside a `<p>` (phrasing content only), which is how the response pane keeps its Send chord `Kbd` caps. Every empty line in a card or pane goes through this component, not a bare `<p>` (Settings > Files, Cookies and Client certificates are `inline`, #2320) |
 | It broke | `ErrorState` | Takes the raw `detail` and an `onRetry` |
+
+A pane title (`EmptyState` and `ErrorState` alike) is a heading at the main
+pane's outline level - the tab's `h1` when the state is the whole tab, an `h2`
+under it otherwise - and a paragraph in the drawer and the context bar; see
+Accessibility (#3498). The inline variants are a line, never a heading.
 | Still loading | `DetailSkeleton` | `rows` prop, default 4 |
 
 **An empty state that has a create path says so** (issue #1693). Thirty-odd
@@ -4463,6 +4497,7 @@ to the stylesheet - trigger selectors, `fill-box`, token-only timing.
 | `app/src/components/shared/RunOutcomeBanner.tsx` | The Passed / Failed / Not judged line a finished load run opens on, over `run-outcome.ts`'s verdict |
 | `app/src/components/layout/PanelResizeHandle.tsx` | The drawer's and the context bar's one drag handle (a focusable window splitter) |
 | `app/src/components/ui/disabled-hint.tsx` | The wrapper that lets a disabled control say why it is off |
+| `app/src/components/ui/heading.tsx` | `Heading` and `HeadingSection`: a title's element from the main pane's outline (`heading-level.ts`) |
 | `app/src/hooks/useInlineRename.ts` | The one inline-rename editor: commit keys, the Escape that never commits, trim, focus return |
 | `app/src/lib/method-display.ts` | `getMethodColor(method)` → `var(--method-xxx)` |
 | `app/src/lib/time-value.ts` | The one place text becomes a time: `parseTimeValue`, `describeInstant`, `formatInstant`, `formatRelative`, `formatDayHeading` |

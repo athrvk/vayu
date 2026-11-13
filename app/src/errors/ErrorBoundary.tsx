@@ -194,7 +194,7 @@ export class ErrorBoundary extends Component<Props, State> {
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-3">
 									<AlertCircle className="w-6 h-6 text-destructive-text" />
-									<CardTitle>Couldn&apos;t render this view</CardTitle>
+									<CardTitle as="h1">Couldn&apos;t render this view</CardTitle>
 								</div>
 								<span className="text-xs text-muted-foreground">
 									v{APP_VERSION}

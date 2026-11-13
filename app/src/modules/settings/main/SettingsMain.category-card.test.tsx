@@ -27,6 +27,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 import SettingsMain from "./SettingsMain";
 import { ENGINE_SETTINGS_CATEGORIES } from "@/modules/settings/engine-categories";
 
@@ -61,11 +62,7 @@ vi.mock("@/stores", () => ({
 
 function renderSettings() {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	return render(
-		<QueryClientProvider client={qc}>
-			<SettingsMain />
-		</QueryClientProvider>
-	);
+	return render(<QueryClientProvider client={qc}>{asTab(<SettingsMain />)}</QueryClientProvider>);
 }
 
 describe("an engine category's cards", () => {
@@ -91,5 +88,16 @@ describe("an engine category's cards", () => {
 		const others = ENGINE_SETTINGS_CATEGORIES.filter((c) => c.id !== "network_performance");
 		expect(others.length).toBeGreaterThan(0);
 		expect(others.every((c) => c.Cards === undefined)).toBe(true);
+	});
+});
+
+// One top heading per tab (#3498): the category's name, with its cards one
+// level under it.
+describe("an engine category's headings", () => {
+	it("titles the tab with one h1 and levels the cards under it", () => {
+		const network = ENGINE_SETTINGS_CATEGORIES.find((c) => c.id === "network_performance")!;
+		const { container } = renderSettings();
+		expect(expectOneTopHeading(container)).toBe(network.label);
+		expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(0);
 	});
 });

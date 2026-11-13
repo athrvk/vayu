@@ -25,6 +25,7 @@ import { TooltipProvider } from "@/components/ui";
 import { useEngineStore } from "@/stores";
 import type { Inbox } from "@/types";
 import type { InboxLiveState } from "./useInboxLive";
+import { asTab, expectOneTopHeading } from "@/test/heading-outline.testkit";
 
 /**
  * The app mounts one `TooltipProvider` at its root (`main.tsx`), so a panel
@@ -80,6 +81,18 @@ beforeEach(() => {
 		engineStatus: "connected",
 		engineCrash: null,
 		engineCrashAheadOfPoll: false,
+	});
+});
+
+// One top heading per tab (#3498): the address, prefixed with what it is the
+// address of, and the capture pane's headings one level under it.
+describe("InboxView headings", () => {
+	it("titles the tab with the inbox's address as its one h1", () => {
+		const { container } = render(asTab(<InboxView />));
+		expect(expectOneTopHeading(container)).toBe(`Webhook inbox ${inbox.url}`);
+		expect(
+			screen.getByRole("heading", { level: 2, name: "No request selected" })
+		).toBeVisible();
 	});
 });
 

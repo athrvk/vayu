@@ -1588,6 +1588,12 @@ accessible name and an ordered `crumbs` array of `{ id, label, onSelect? }`.
 - **Blank labels are dropped, and nothing to show renders nothing** - not an
   empty row, which is the permanent ~30px band `RequestDescription` charged every
   request for before it became the Info tab.
+- **`titlesPane` makes the current crumb the pane's heading** (#3498), at the
+  main pane's outline level (`components/ui/heading.tsx`): the tab's `h1` on the
+  request builder and the dashboard, which draw no other title, and on
+  `LoadTestDetail` only where it is the whole pane (the dashboard's report; in
+  History the run's header is the `h1`). `CollectionDetail` leaves it off: its
+  header's name is the `h1`.
 
 Adopted by the request builder (`useRequestCrumbs` - collection chain, then the
 request), `CollectionDetail` (the collection's chain, drawn only when it is
@@ -3564,7 +3570,7 @@ since it is always under the provider.
 
 Primitives built on Radix UI + cmdk:
 
-`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover` (with its two branches, `resolved-value-editor` and `create-variable-form`), `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
+`badge`, `button`, `card`, `code-editor`, `collapsible`, `command`, `delete-confirm-dialog`, `dialog`, `dialog-cancel-button`, `disabled-hint`, `dropdown-menu`, `heading` (`Heading` and `HeadingSection`, the main pane's heading outline from `heading-level.ts`; see `docs/design-system.md`, Accessibility), `info-chip`, `input`, `secret-input` (masked field with a reveal toggle - client secret / passwords, and the variables table's secret rows, which is where the pattern was extracted from), `kbd`, `label`, `popover`, `resizable`, `scroll-area`, `select`, `progress`, `separator`, `skeleton`, `suggestion-list`, `switch`, `tabs`, `textarea`, `tooltip`, plus variable-aware inputs: `variable-autocomplete`, `variable-popover` (with its two branches, `resolved-value-editor` and `create-variable-form`), `variable-scope-badge`, and markdown: `markdown-view`, `markdown-editor`.
 
 ### `input`
 

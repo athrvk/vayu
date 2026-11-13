@@ -14,7 +14,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Folder } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger, TabLabel, TabCount } from "@/components/ui";
+import {
+	HeadingSection,
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+	TabLabel,
+	TabCount,
+} from "@/components/ui";
 import { DetailSkeleton, EmptyState, ErrorState, TabBreadcrumb } from "@/components/shared";
 import { useCollectionsQuery, useMultipleCollectionRequests } from "@/queries/collections";
 import { collectSubtreeIds, walkAncestors } from "@/modules/collections/tree-utils";
@@ -276,7 +284,7 @@ export default function CollectionDetail() {
 			{/* Header */}
 			<div className="flex items-center gap-2.5 h-band-lg px-5 bg-panel border-b border-rule shrink-0">
 				<Folder className="size-icon text-primary shrink-0" />
-				<span className="text-sm font-semibold text-foreground">{collection.name}</span>
+				<h1 className="text-sm font-semibold text-foreground">{collection.name}</h1>
 				<span className="text-xs text-muted-foreground">
 					- {requestCount} {pluralize(requestCount, "request")}
 				</span>
@@ -291,102 +299,109 @@ export default function CollectionDetail() {
 
 			<TabBreadcrumb label="Collection location" crumbs={crumbs} className="px-5 pt-2" />
 
-			{/* Tab bar */}
-			<Tabs
-				value={tab}
-				onValueChange={(v) => {
-					const next = v as CollectionTab;
-					setTab(next);
-					setVisited((prev) => withVisited(prev, next));
-				}}
-				className="flex-1 flex flex-col overflow-hidden"
-			>
-				{/* The active trigger's weight change used to shift its neighbours
+			{/* Tab bar, and the tabs: a section under the collection's `h1` (#3498). */}
+			<HeadingSection>
+				<Tabs
+					value={tab}
+					onValueChange={(v) => {
+						const next = v as CollectionTab;
+						setTab(next);
+						setVisited((prev) => withVisited(prev, next));
+					}}
+					className="flex-1 flex flex-col overflow-hidden"
+				>
+					{/* The active trigger's weight change used to shift its neighbours
 				    on every switch; TabLabel reserves the bold width, so it no
 				    longer can. */}
-				<TabsList
-					variant="pane"
-					className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
-				>
-					{TABS.map((t) => {
-						/*
-						 * Two of the six can carry a count, and those two render
-						 * `TabCount` unconditionally: it animates its own track open
-						 * from zero width, so the first variable appearing grows in
-						 * rather than instantly pushing Data and Spec rightward, and
-						 * costs nothing while there is nothing to count. The other
-						 * four render no `TabCount` at all and pay no width, ever.
-						 */
-						const counted = t.id === "variables" || t.id === "data";
-						const count = t.id === "variables" ? variableCount : declaredColumnCount;
-						return (
-							<TabsTrigger key={t.id} value={t.id}>
-								<TabLabel>{t.label}</TabLabel>
-								{counted && <TabCount value={count} />}
-							</TabsTrigger>
-						);
-					})}
-				</TabsList>
-
-				{/*
-				 * TabsContent per tab, keyed off the same TABS list as the
-				 * triggers. Radix derives each trigger's aria-controls from its
-				 * value, so content in a plain <div> outside the Tabs tree left
-				 * every trigger pointing at a panel id that was never rendered.
-				 * Only the active panel mounts, so the switch below still resolves
-				 * to exactly one tab.
-				 */}
-				{TABS.map((t) => (
-					<TabsContent
-						key={t.id}
-						value={t.id}
-						// A force-mounted panel is kept alive rather than unmounted,
-						// which is what lets the draft survive. Radix leaves it
-						// *visible* too - our TabsContent hides an inactive one on
-						// `data-state`; see components/ui/tabs.tsx.
-						forceMount={
-							TABS_HOLDING_DRAFTS.has(t.id) && visited.has(t.id) ? true : undefined
-						}
-						className="mt-0 flex-1 overflow-auto p-6 bg-background"
+					<TabsList
+						variant="pane"
+						className="shrink-0 overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-strip"
 					>
-						{/* The draft editors are keyed too: a draft left dirty on
+						{TABS.map((t) => {
+							/*
+							 * Two of the six can carry a count, and those two render
+							 * `TabCount` unconditionally: it animates its own track open
+							 * from zero width, so the first variable appearing grows in
+							 * rather than instantly pushing Data and Spec rightward, and
+							 * costs nothing while there is nothing to count. The other
+							 * four render no `TabCount` at all and pay no width, ever.
+							 */
+							const counted = t.id === "variables" || t.id === "data";
+							const count =
+								t.id === "variables" ? variableCount : declaredColumnCount;
+							return (
+								<TabsTrigger key={t.id} value={t.id}>
+									<TabLabel>{t.label}</TabLabel>
+									{counted && <TabCount value={count} />}
+								</TabsTrigger>
+							);
+						})}
+					</TabsList>
+
+					{/*
+					 * TabsContent per tab, keyed off the same TABS list as the
+					 * triggers. Radix derives each trigger's aria-controls from its
+					 * value, so content in a plain <div> outside the Tabs tree left
+					 * every trigger pointing at a panel id that was never rendered.
+					 * Only the active panel mounts, so the switch below still resolves
+					 * to exactly one tab.
+					 */}
+					{TABS.map((t) => (
+						<TabsContent
+							key={t.id}
+							value={t.id}
+							// A force-mounted panel is kept alive rather than unmounted,
+							// which is what lets the draft survive. Radix leaves it
+							// *visible* too - our TabsContent hides an inactive one on
+							// `data-state`; see components/ui/tabs.tsx.
+							forceMount={
+								TABS_HOLDING_DRAFTS.has(t.id) && visited.has(t.id)
+									? true
+									: undefined
+							}
+							className="mt-0 flex-1 overflow-auto p-6 bg-background"
+						>
+							{/* The draft editors are keyed too: a draft left dirty on
 						    the collection switched away from keeps saving through
 						    its editor's mutation observer (`useDraftSaveContext`'s
 						    `detach`), and one observer shared with the next
 						    collection would paint that save's failure there. */}
-						{t.id === "info" && (
-							<InfoTab
-								key={collection.id}
-								collection={collection}
-								requestCount={requestCount}
-								active={tab === "info"}
-							/>
-						)}
-						{t.id === "auth" && (
-							<AuthTab
-								key={collection.id}
-								collection={collection}
-								active={tab === "auth"}
-							/>
-						)}
-						{t.id === "elements" && (
-							<ElementsTab
-								key={collection.id}
-								collection={collection}
-								active={tab === "elements"}
-							/>
-						)}
-						{t.id === "variables" && <VariablesTab collection={collection} />}
-						{/* Keyed: the Data tab reads the remembered file on mount
+							{t.id === "info" && (
+								<InfoTab
+									key={collection.id}
+									collection={collection}
+									requestCount={requestCount}
+									active={tab === "info"}
+								/>
+							)}
+							{t.id === "auth" && (
+								<AuthTab
+									key={collection.id}
+									collection={collection}
+									active={tab === "auth"}
+								/>
+							)}
+							{t.id === "elements" && (
+								<ElementsTab
+									key={collection.id}
+									collection={collection}
+									active={tab === "elements"}
+								/>
+							)}
+							{t.id === "variables" && <VariablesTab collection={collection} />}
+							{/* Keyed: the Data tab reads the remembered file on mount
 						    (issue #727), and this component is not remounted when
 						    the user switches to another collection's tab - so
 						    without a key, collection B would show A's file and
 						    never open its own. It holds no draft to lose. */}
-						{t.id === "data" && <DataTab key={collection.id} collection={collection} />}
-						{t.id === "spec" && <SpecTab collection={collection} />}
-					</TabsContent>
-				))}
-			</Tabs>
+							{t.id === "data" && (
+								<DataTab key={collection.id} collection={collection} />
+							)}
+							{t.id === "spec" && <SpecTab collection={collection} />}
+						</TabsContent>
+					))}
+				</Tabs>
+			</HeadingSection>
 		</div>
 	);
 }

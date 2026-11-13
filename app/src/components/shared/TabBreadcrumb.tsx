@@ -33,6 +33,7 @@
 
 import { ChevronRight } from "lucide-react";
 
+import { Heading } from "@/components/ui/heading";
 import { cn } from "@/lib/utils";
 import { TruncatedText } from "./TruncatedText";
 
@@ -55,10 +56,22 @@ interface TabBreadcrumbProps {
 	 */
 	label: string;
 	crumbs: BreadcrumbCrumb[];
+	/**
+	 * The current crumb is the pane's title: a heading at the outline's level
+	 * (`heading-level.tsx`), the tab's `h1` where nothing above it names the
+	 * pane - the request builder, the dashboard (#3498). Off where the pane
+	 * already has a title the crumb only repeats.
+	 */
+	titlesPane?: boolean;
 	className?: string;
 }
 
-export function TabBreadcrumb({ label, crumbs, className }: TabBreadcrumbProps) {
+export function TabBreadcrumb({
+	label,
+	crumbs,
+	titlesPane = false,
+	className,
+}: TabBreadcrumbProps) {
 	// A caller assembling crumbs from optional data (a collection that may have
 	// no parent, a run with no name) hands over blanks rather than filtering
 	// twice; the band is drawn on what is left.
@@ -104,7 +117,13 @@ export function TabBreadcrumb({ label, crumbs, className }: TabBreadcrumbProps) 
 					))}
 				</div>
 			)}
-			<span className="shrink-0 text-muted-foreground">{current.label}</span>
+			{titlesPane ? (
+				<Heading outside="span" className="shrink-0 text-muted-foreground">
+					{current.label}
+				</Heading>
+			) : (
+				<span className="shrink-0 text-muted-foreground">{current.label}</span>
+			)}
 		</nav>
 	);
 }
