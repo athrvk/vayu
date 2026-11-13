@@ -22,6 +22,8 @@
  * `value > sloMs` comparison in `LatencyMetric`) and the under-SLO cases fail;
  * hard-code the threshold in `PerformanceTab` and the "reads the run's SLO"
  * case fails; fall back to the Settings SLO there and the "no SLO" case fails.
+ * Make the cue unconditional and the inside-SLO case of the last block fails;
+ * drop it and the over-SLO case fails.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -151,6 +153,54 @@ describe("PerformanceTab latency tiles against the SLO", () => {
 			expect(isDanger(label), `${label} danger`).toBe(false);
 			expect(isWarning(label), `${label} warning`).toBe(false);
 			expect(tile(label).figure.className).toContain("text-foreground");
+		}
+	});
+});
+
+describe("PerformanceTab latency tiles: a mark besides the colour (#3499)", () => {
+	beforeEach(() => {
+		useClientSettingsStore.setState({ sloThresholdMs: 1 });
+	});
+
+	// The cue is a glyph beside the figure and the words a screen reader hears.
+	const cue = (label: string) => ({
+		glyph: tile(label).figure.querySelector("svg"),
+		words: tile(label).figure.textContent,
+	});
+
+	it("marks each tile over the SLO with a hidden glyph and 'Over SLO'", () => {
+		renderTab({ p95: 250, p99: 900, p999: 1500 });
+
+		for (const label of ["P95", "P99", "P999"]) {
+			const { glyph, words } = cue(label);
+			expect(glyph, `${label} glyph`).not.toBeNull();
+			expect(glyph?.getAttribute("aria-hidden"), `${label} glyph hidden`).toBe("true");
+			expect(words, `${label} words`).toContain("Over SLO");
+		}
+	});
+
+	it("marks nothing inside the SLO, at exactly the SLO, or for a run with no SLO", () => {
+		for (const [latency, slo] of [
+			[{ p95: 2.5, p99: 3, p999: 3.5 }, 200],
+			[{ p95: 200, p99: 200, p999: 200 }, 200],
+			[{ p95: 250, p99: 900, p999: 1500 }, null],
+		] as const) {
+			const { unmount } = renderTab(latency, slo);
+			for (const label of ["P95", "P99", "P999"]) {
+				const { glyph, words } = cue(label);
+				expect(glyph, `${label} glyph`).toBeNull();
+				expect(words, `${label} words`).not.toContain("Over SLO");
+			}
+			unmount();
+		}
+	});
+
+	it("never marks the tiles that carry no verdict, however slow", () => {
+		renderTab({ avg: 5000, p50: 5000, p75: 5000, p90: 5000, p95: 1, p99: 1 });
+
+		for (const label of ["Average", "P50 (Median)", "P75", "P90"]) {
+			expect(cue(label).glyph, label).toBeNull();
+			expect(cue(label).words, label).not.toContain("Over SLO");
 		}
 	});
 });
