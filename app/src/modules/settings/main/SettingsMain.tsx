@@ -178,7 +178,7 @@ function RestartRequiredBanner({ labels, onDismiss }: { labels: string[]; onDism
 					</Button>
 					<Button
 						size="sm"
-						className="bg-status-warning-fill text-white"
+						className="bg-status-warning-fill text-white hover:bg-status-warning-fill/90"
 						disabled={isRestarting}
 						onClick={() => void restart()}
 					>
