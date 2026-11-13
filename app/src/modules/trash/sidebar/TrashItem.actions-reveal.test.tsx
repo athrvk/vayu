@@ -53,6 +53,27 @@ function renderRow() {
 	return { row: container.querySelector<HTMLElement>("[data-trash-id]")!, buttons };
 }
 
+describe("a row working on its entry (#3495)", () => {
+	it("keeps its actions in the flow so the spinner is not collapsed away", () => {
+		for (const state of [{ isRestoring: true }, { isPurging: true }]) {
+			const { container } = render(
+				<TrashItem
+					entry={ENTRY}
+					onRestore={vi.fn()}
+					onPurge={vi.fn()}
+					isRestoring={false}
+					isPurging={false}
+					{...state}
+				/>
+			);
+			const cluster = screen.getByRole("button", { name: "Restore Billing" }).parentElement!;
+			expect(cluster.className).not.toContain("absolute");
+			expect(container.querySelector("[data-trash-id]")).not.toBeNull();
+			cleanup();
+		}
+	});
+});
+
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();

@@ -150,7 +150,9 @@ export default function TrashItem({
 					</p>
 				</div>
 
-				<div className={cn("flex items-center gap-1 shrink-0", ROW_ACTIONS_REVEAL)}>
+				<div
+					className={cn("flex items-center gap-1 shrink-0", !busy && ROW_ACTIONS_REVEAL)}
+				>
 					<Button
 						variant="rowAction"
 						size="icon"
