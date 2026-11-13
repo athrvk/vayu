@@ -730,6 +730,7 @@ export default function ResponseViewer() {
 							<ClientErrorView
 								errorCode={shown.errorCode}
 								errorMessage={shown.errorMessage}
+								requestUrl={shown.sentRequest?.url}
 							/>
 						</div>
 					) : (
