@@ -18,7 +18,7 @@
  * and a pinned row says so without being hovered.
  */
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { render } from "@/test/render-with-tooltips";
 import RunItem from "./RunItem";
 import type { Run } from "@/types";
@@ -139,7 +139,7 @@ describe("RunItem baseline pin", () => {
 		expect(screen.getByText(BASELINE_CHIP).className).toContain("truncate");
 	});
 
-	it("says neither meaning on an unpinned run's chip or action", () => {
+	it("says neither meaning on an unpinned run's chip or action", async () => {
 		render(
 			<RunItem
 				run={loadRun()}
@@ -152,8 +152,12 @@ describe("RunItem baseline pin", () => {
 		expect(screen.queryByText(/kept past retention/i)).not.toBeInTheDocument();
 		const action = screen.getByRole("button", { name: "Pin as baseline" });
 		expect(action.getAttribute("aria-label")).not.toMatch(/retention/i);
-		// The unpinned tooltip is where the second meaning is promised up front.
-		expect(action).toHaveAttribute("title", expect.stringMatching(/baseline.*past retention/));
+		// The unpinned tooltip is where the second meaning is promised up front,
+		// and it opens on keyboard focus, which a native `title` never did.
+		await act(async () => {
+			fireEvent.focus(action);
+		});
+		expect(await screen.findByRole("tooltip")).toHaveTextContent(/baseline.*past retention/);
 	});
 
 	/*

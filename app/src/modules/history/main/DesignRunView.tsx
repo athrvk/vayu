@@ -48,7 +48,15 @@ import {
 } from "@/queries";
 import { useEngine } from "@/hooks";
 import { useSessionStore, useToastStore } from "@/stores";
-import { Button, Badge, LabelSwap, ICON_MOTION } from "@/components/ui";
+import {
+	Button,
+	Badge,
+	LabelSwap,
+	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
+} from "@/components/ui";
 import { DetailSkeleton, ErrorState, SentBodyFileNote } from "@/components/shared";
 import type { RequestState, ResponseState } from "@/modules/request-builder/types";
 import {
@@ -403,21 +411,25 @@ export default function DesignRunView({ run }: DesignRunViewProps) {
 					 * button below, unpromoted.
 					 */}
 					{isUnsavedAgentRun(run) && <SaveAgentRunButton run={run} seed={seed} />}
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() => void handleTogglePin()}
-						disabled={setBaselineMutation.isPending}
-						aria-pressed={!!run.baseline}
-						title={pinTooltip}
-					>
-						{setBaselineMutation.isPending ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : (
-							<PinIcon className="size-icon-sm" />
-						)}
-						<LabelSwap label={pinLabel} states={["Pin", "Unpin"]} />
-					</Button>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => void handleTogglePin()}
+								disabled={setBaselineMutation.isPending}
+								aria-pressed={!!run.baseline}
+							>
+								{setBaselineMutation.isPending ? (
+									<Loader2 className="size-icon-sm animate-spin" />
+								) : (
+									<PinIcon className="size-icon-sm" />
+								)}
+								<LabelSwap label={pinLabel} states={["Pin", "Unpin"]} />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>{pinTooltip}</TooltipContent>
+					</Tooltip>
 					{/*
 					 * The Save button exists only while the request does. When it has
 					 * been deleted there is nothing to write back to, so it is absent

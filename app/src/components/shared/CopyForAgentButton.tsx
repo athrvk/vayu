@@ -6,7 +6,7 @@
  */
 
 import { Check, Copy } from "lucide-react";
-import { Button, IconSwap } from "@/components/ui";
+import { IconSwap, TooltipIconButton } from "@/components/ui";
 import { useCopy } from "@/hooks/useCopy";
 import { cn } from "@/lib/utils";
 
@@ -28,22 +28,22 @@ export function CopyForAgentButton({ reference, label, className }: CopyForAgent
 	const { copy, copied } = useCopy({ feedback: "icon" });
 
 	return (
-		<Button
+		<TooltipIconButton
 			type="button"
 			variant="rowAction"
-			size="icon"
 			onClick={() => void copy(reference, "Reference")}
-			aria-label={label}
-			title="Copy for agent"
+			label={label}
+			tooltip="Copy for agent"
 			className={cn("size-control-sm shrink-0", className)}
-		>
-			<IconSwap
-				state={copied ? "copied" : "copy"}
-				icons={{
-					copy: <Copy className="size-icon-sm" />,
-					copied: <Check className="size-icon-sm text-status-success-text" />,
-				}}
-			/>
-		</Button>
+			icon={
+				<IconSwap
+					state={copied ? "copied" : "copy"}
+					icons={{
+						copy: <Copy className="size-icon-sm" />,
+						copied: <Check className="size-icon-sm text-status-success-text" />,
+					}}
+				/>
+			}
+		/>
 	);
 }

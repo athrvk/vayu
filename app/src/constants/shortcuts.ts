@@ -272,6 +272,19 @@ export const PREVIOUS_REGION_CHORD: Chord = {
 };
 
 /**
+ * Move focus into the notification stack, the only keyboard path to a toast's
+ * Undo (#3498).
+ *
+ * **Display only: nothing here binds it.** Radix's `ToastProvider` owns F8 (its
+ * default `hotkey`, which `Toaster` leaves alone) and advertises it in the
+ * viewport's accessible name, so this chord exists for the Keyboard shortcuts
+ * panel and must never reach `matchesChord`. `Toaster.test.tsx` holds the key
+ * equal to the one Radix names, so a changed default cannot leave the panel
+ * describing a key that does nothing.
+ */
+export const FOCUS_NOTIFICATIONS_CHORD: Chord = { key: "F8", label: "Focus notifications" };
+
+/**
  * Move focus out of a code editor.
  *
  * Monaco's Tab indents, which is right for a code editor and a keyboard trap
@@ -551,7 +564,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
 	{
 		id: "focus",
 		title: "Moving focus",
-		chords: [NEXT_REGION_CHORD, PREVIOUS_REGION_CHORD],
+		chords: [NEXT_REGION_CHORD, PREVIOUS_REGION_CHORD, FOCUS_NOTIFICATIONS_CHORD],
 	},
 	{ id: "editors", title: "Editors", chords: [LEAVE_EDITOR_CHORD, EDIT_VARIABLE_CHORD] },
 	{

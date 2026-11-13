@@ -19,7 +19,7 @@ import {
 	type LucideIcon,
 } from "lucide-react";
 
-import { Button, IconSwap, ICON_MOTION } from "@/components/ui";
+import { IconSwap, ICON_MOTION, TooltipIconButton } from "@/components/ui";
 import { TruncatedText } from "@/components/shared";
 import { TimeValue } from "@/components/shared/TimeValue";
 import { useCopy } from "@/hooks/useCopy";
@@ -142,52 +142,54 @@ export default function TrashItem({
 				</div>
 
 				<div className="flex items-center gap-1 shrink-0">
-					<Button
+					<TooltipIconButton
 						variant="rowAction"
-						size="icon"
 						onClick={() => void copy(trashReference(entry), "Reference")}
-						aria-label={`Copy ${entry.name} for agent`}
-						title="Copy for agent"
-					>
-						<IconSwap
-							state={copied ? "copied" : "copy"}
-							icons={{
-								copy: <Copy className="size-icon-sm" />,
-								copied: <Check className="size-icon-sm text-status-success-text" />,
-							}}
-						/>
-					</Button>
-					<Button
+						label={`Copy ${entry.name} for agent`}
+						tooltip="Copy for agent"
+						icon={
+							<IconSwap
+								state={copied ? "copied" : "copy"}
+								icons={{
+									copy: <Copy className="size-icon-sm" />,
+									copied: (
+										<Check className="size-icon-sm text-status-success-text" />
+									),
+								}}
+							/>
+						}
+					/>
+					<TooltipIconButton
 						variant="rowAction"
-						size="icon"
 						onClick={() => onRestore(entry)}
 						disabled={busy}
-						aria-label={`Restore ${entry.name}`}
-						title="Restore"
-					>
-						{isRestoring ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : (
-							<RotateCcw
-								className="size-icon-sm"
-								data-icon-motion={ICON_MOTION.spinBack}
-							/>
-						)}
-					</Button>
-					<Button
+						label={`Restore ${entry.name}`}
+						tooltip="Restore"
+						icon={
+							isRestoring ? (
+								<Loader2 className="size-icon-sm animate-spin" />
+							) : (
+								<RotateCcw
+									className="size-icon-sm"
+									data-icon-motion={ICON_MOTION.spinBack}
+								/>
+							)
+						}
+					/>
+					<TooltipIconButton
 						variant="rowActionDestructive"
-						size="icon"
 						onClick={() => onPurge(entry)}
 						disabled={busy}
-						aria-label={`Delete ${entry.name} forever`}
-						title="Delete forever"
-					>
-						{isPurging ? (
-							<Loader2 className="size-icon-sm animate-spin" />
-						) : (
-							<Trash2 className="size-icon-sm" />
-						)}
-					</Button>
+						label={`Delete ${entry.name} forever`}
+						tooltip="Delete forever"
+						icon={
+							isPurging ? (
+								<Loader2 className="size-icon-sm animate-spin" />
+							) : (
+								<Trash2 className="size-icon-sm" />
+							)
+						}
+					/>
 				</div>
 			</div>
 		</div>

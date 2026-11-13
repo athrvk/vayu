@@ -35,7 +35,8 @@
  *
  * `ToastProvider` also gives the viewport a hotkey - F8 by default - that moves
  * focus into the stack, and advertises it in the viewport's accessible name
- * ("Notifications (F8)", Radix's default, confirmed in the browser). The `label`
+ * ("Notifications (F8)", Radix's default, confirmed in the browser). The app
+ * does not bind it, only lists it: `FOCUS_NOTIFICATIONS_CHORD` (#3498). The `label`
  * passed here is a different string: it prefixes the announced text, not the
  * region name, which comes from `ToastViewport`'s own `label`.
  */

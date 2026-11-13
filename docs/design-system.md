@@ -1876,6 +1876,11 @@ registered, the hint appears on focus and never on a read-only editor) and
 four bands - the title bar, the drawer, the main pane and the context bar - and
 reaching one from another by Tab alone meant walking every request in an
 expanded collection tree on the way. F6 cycles the bands; Shift+F6 goes back.
+F8 is the neighbouring key and is not the app's: Radix's `ToastProvider` binds
+it to the notification stack, which is the only keyboard path to a toast's Undo.
+It is listed in the Keyboard shortcuts panel as a display-only chord
+(`FOCUS_NOTIFICATIONS_CHORD`), and `Toaster.test.tsx` holds it equal to the key
+Radix names in the viewport's accessible name.
 
 Each band carries `data-app-region` rather than being found by landmark tag.
 `header, aside, main` looks like it would do the same job, and it does not: the
@@ -1931,7 +1936,7 @@ see.
 
 | Rule | Enforced by |
 |------|-------------|
-| An icon-only button carries an `aria-label` | `icon-button-labels.test.tsx` |
+| An icon-only button carries an `aria-label`, and no native `title` | `icon-button-labels.test.tsx` |
 | `outline-none` is paired with a replacement indicator | `focus-indicator.test.ts` |
 | A control revealed on hover is revealed on focus too | `row-action-reveal.test.ts` |
 | An editor that takes Tab advertises the way out | `code-editor.chords.test.tsx` |
@@ -1979,9 +1984,16 @@ Badges).
 **A tooltip is not a name.** Radix supplies `aria-describedby` while a tooltip is
 open, which is a description; before it opens - and to a screen reader reading
 the row - the button is announced as "button". The Dock's four view switchers
-all had tooltips and all announced as bare buttons. `title` is a name, but the
-weaker one, since it does not surface on keyboard focus: no control here relies
-on it any more, and the guard pins that count at zero.
+all had tooltips and all announced as bare buttons. The converse holds too: a
+native `title` is a tooltip for a pointer only, since it does not surface on
+keyboard focus or touch, so an icon-only button takes `TooltipIconButton`
+(`aria-label` and the app's `Tooltip` from one `label`; `tooltip` when the text
+should be the verb alone while the name carries the row, "Restore Login" named,
+"Restore" shown) and carries no `title` at all. The guard pins icon-only
+buttons with a `title=` at zero. A text button whose tooltip adds an
+explanation wraps `Button` in `Tooltip` the same way, and a disabled one gives
+its reason through `DisabledHint`, because `Button` is `pointer-events-none`
+while disabled and neither a `title` nor a bare `Tooltip` can reach it.
 
 **`outline-none` needs its replacement in the same class string.** The base
 `:focus-visible` outline at the top of this page is the whole focus story for

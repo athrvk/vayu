@@ -10,7 +10,7 @@ import type React from "react";
 import { loadTestTypeToLabel } from "@/constants/load-test-modes";
 import type { Run } from "@/types";
 import { RUN_TYPE_NAME } from "@/modules/history/types";
-import { Badge, Button, ICON_MOTION } from "@/components/ui";
+import { Badge, Button, ICON_MOTION, TooltipIconButton } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/format-number";
 import { truncateUrl } from "@/lib/truncate-url";
@@ -455,35 +455,35 @@ function RunItem({
 						 * the pointer would read as unpinned.
 						 */}
 						{onToggleBaseline && (
-							<Button
+							<TooltipIconButton
 								variant="rowAction"
-								size="icon"
 								onClick={(e) => onToggleBaseline(run.id, !run.baseline, e)}
 								disabled={isTogglingBaseline}
-								aria-label={pinActionLabel}
+								label={pinActionLabel}
+								tooltip={pinTooltip}
 								aria-pressed={!!run.baseline}
-								title={pinTooltip}
 								className={cn(
 									"size-target transition-opacity",
 									run.baseline || isTogglingBaseline
 										? "opacity-100"
 										: "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
 								)}
-							>
-								{isTogglingBaseline ? (
-									<Loader2 className="size-icon-sm animate-spin" />
-								) : run.baseline ? (
-									<PinOff
-										className="size-icon-sm"
-										data-icon-motion={ICON_MOTION.tiltPin}
-									/>
-								) : (
-									<Pin
-										className="size-icon-sm"
-										data-icon-motion={ICON_MOTION.tiltPin}
-									/>
-								)}
-							</Button>
+								icon={
+									isTogglingBaseline ? (
+										<Loader2 className="size-icon-sm animate-spin" />
+									) : run.baseline ? (
+										<PinOff
+											className="size-icon-sm"
+											data-icon-motion={ICON_MOTION.tiltPin}
+										/>
+									) : (
+										<Pin
+											className="size-icon-sm"
+											data-icon-motion={ICON_MOTION.tiltPin}
+										/>
+									)
+								}
+							/>
 						)}
 						<Button
 							variant="rowActionDestructive"

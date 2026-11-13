@@ -43,6 +43,9 @@ import {
 	Textarea,
 	SecretInput,
 	ICON_MOTION,
+	Tooltip,
+	TooltipContent,
+	TooltipTrigger,
 } from "@/components/ui";
 import { EmptyState, ErrorState } from "@/components/shared";
 import { formatBytes } from "@/lib/format-number";
@@ -743,15 +746,19 @@ export default function SettingsMain() {
 							)}
 						</div>
 						{isModified && (
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => handleRevert(entry)}
-								className="text-xs h-control-sm px-2 shrink-0"
-								title="Discard this staged change"
-							>
-								Revert
-							</Button>
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => handleRevert(entry)}
+										className="text-xs h-control-sm px-2 shrink-0"
+									>
+										Revert
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Discard this staged change</TooltipContent>
+							</Tooltip>
 						)}
 					</div>
 				</CardHeader>

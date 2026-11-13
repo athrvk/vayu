@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import {
 	Button,
+	DisabledHint,
 	Input,
 	IconSwap,
 	Label,
@@ -727,29 +728,32 @@ export default function McpSettingsPanel() {
 								</span>
 								<div className="flex items-center gap-1">
 									{snippet.client && (
-										<Button
-											variant="outline"
-											size="sm"
-											onClick={() => void handleConnect(snippet.client!)}
-											disabled={
-												!hasElectron ||
-												!enabled ||
-												notListening ||
-												connecting !== null
-											}
-											className="h-control-sm px-2 text-xs shrink-0"
-											title={connectDisabledReason(enabled, notListening)}
+										<DisabledHint
+											reason={connectDisabledReason(enabled, notListening)}
 										>
-											{connecting === snippet.client ? (
-												<Loader2 className="size-icon-sm animate-spin" />
-											) : (
-												<Zap
-													className="size-icon-sm"
-													data-icon-motion={ICON_MOTION.flash}
-												/>
-											)}
-											Connect
-										</Button>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => void handleConnect(snippet.client!)}
+												disabled={
+													!hasElectron ||
+													!enabled ||
+													notListening ||
+													connecting !== null
+												}
+												className="h-control-sm px-2 text-xs shrink-0"
+											>
+												{connecting === snippet.client ? (
+													<Loader2 className="size-icon-sm animate-spin" />
+												) : (
+													<Zap
+														className="size-icon-sm"
+														data-icon-motion={ICON_MOTION.flash}
+													/>
+												)}
+												Connect
+											</Button>
+										</DisabledHint>
 									)}
 									<CopyButton text={snippet.code} disabled={!hasEndpoint} />
 								</div>
