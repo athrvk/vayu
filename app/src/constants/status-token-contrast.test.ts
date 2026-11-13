@@ -28,14 +28,20 @@
 
 import { describe, it, expect } from "vitest";
 import { indexCss as css } from "@/lib/css-tokens.testkit";
+import {
+	composite,
+	contrastRatio,
+	hslToRgb,
+	oklabDistance,
+	type Hsl,
+	type Rgb,
+} from "@/lib/contrast-math.testkit";
 import { ROLE_TOKEN } from "@/modules/dashboard/components/charts/uplot/uplotTheme";
 
 /** Split `:root` from `.dark`, so a token defined in both resolves per theme. */
 const darkStart = css.indexOf(".dark {");
 const lightBlock = css.slice(0, darkStart);
 const darkBlock = css.slice(darkStart);
-
-type Hsl = [number, number, number];
 
 function token(name: string, theme: "light" | "dark"): Hsl {
 	const block = theme === "dark" ? darkBlock : lightBlock;
@@ -48,37 +54,12 @@ function token(name: string, theme: "light" | "dark"): Hsl {
 	return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-function toRgb([h, s, l]: Hsl): [number, number, number] {
-	const H = h / 360,
-		S = s / 100,
-		L = l / 100;
-	const f = (n: number) => {
-		const k = (n + H * 12) % 12;
-		const a = S * Math.min(L, 1 - L);
-		return L - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
-	};
-	return [f(0), f(8), f(4)];
-}
-
-const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-
-function luminance(rgb: [number, number, number]): number {
-	const [r, g, b] = rgb.map(lin);
-	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contrast(a: Hsl | [number, number, number], b: Hsl, aIsRgb = false): number {
-	const la = luminance(aIsRgb ? (a as [number, number, number]) : toRgb(a as Hsl));
-	const lb = luminance(toRgb(b));
-	return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
+/** A token on a surface, or an already-composited colour (`Rgb`) on one. */
+const contrast = (a: Hsl, b: Hsl) => contrastRatio(hslToRgb(a), hslToRgb(b));
+const contrastOn = (a: Rgb, b: Hsl) => contrastRatio(a, hslToRgb(b));
 
 /** Composite a colour at `alpha` over a background - the `/10` tint surfaces. */
-function over(fg: Hsl, bg: Hsl, alpha: number): [number, number, number] {
-	const f = toRgb(fg),
-		b = toRgb(bg);
-	return [0, 1, 2].map((i) => f[i] * alpha + b[i] * (1 - alpha)) as [number, number, number];
-}
+const over = (fg: Hsl, bg: Hsl, alpha: number) => composite(hslToRgb(fg), hslToRgb(bg), alpha);
 
 const CARD = { light: token("card", "light"), dark: token("card", "dark") } as const;
 
@@ -117,7 +98,7 @@ describe("-text tier clears 4.5 on its own 10% tint", () => {
 		for (const theme of ["light", "dark"] as const) {
 			const text = token(`${family}-text`, theme);
 			const tint = over(indicator, CARD[theme], 0.1);
-			expect(contrast(tint, text, true), `${family}-text on ${theme}`).toBeGreaterThanOrEqual(
+			expect(contrastOn(tint, text), `${family}-text on ${theme}`).toBeGreaterThanOrEqual(
 				4.5
 			);
 		}
@@ -207,22 +188,7 @@ describe("the five classes stay visually apart", () => {
 	 * two colours read as the same. The badge mapping this replaced scored
 	 * 0.000 between a 5xx and a connection failure - literally the same token.
 	 */
-	function oklab([h, s, l]: Hsl): [number, number, number] {
-		const [r, g, b] = toRgb([h, s, l]).map(lin);
-		const L = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-		const M = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-		const S = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-		return [
-			0.2104542553 * L + 0.793617785 * M - 0.0040720468 * S,
-			1.9779984951 * L - 2.428592205 * M + 0.4505937099 * S,
-			0.0259040371 * L + 0.7827717662 * M - 0.808675766 * S,
-		];
-	}
-	const dE = (a: Hsl, b: Hsl) => {
-		const [x1, y1, z1] = oklab(a);
-		const [x2, y2, z2] = oklab(b);
-		return Math.hypot(x1 - x2, y1 - y2, z1 - z2);
-	};
+	const dE = (a: Hsl, b: Hsl) => oklabDistance(hslToRgb(a), hslToRgb(b));
 
 	it("keeps every pair of indicators at least 0.10 apart", () => {
 		const families = [
