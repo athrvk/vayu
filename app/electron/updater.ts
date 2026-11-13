@@ -581,7 +581,7 @@ export function quitForUpdate(): void {
  * Parenting matters (a sheet on macOS, a modal owned by the window elsewhere),
  * but a missing window must not swallow the message: with no live window the
  * dialog is shown unparented rather than not at all, which is the macOS
- * all-windows-closed case for the menu's "Check for Updates…".
+ * all-windows-closed case for the menu's "Check for updates… (Title Case on macOS)".
  */
 function showUpdateDialog(
 	options: Electron.MessageBoxOptions
@@ -660,7 +660,7 @@ function settleCheck(result: UpdateCheckResult): void {
 }
 
 /**
- * Trigger a check on demand, from the "Check for Updates…" menu item or from
+ * Trigger a check on demand, from the "Check for updates…" menu item or from
  * Settings → General. Always resolves with an outcome, so the caller can give
  * the user feedback - unlike the periodic check, which stays silent.
  */

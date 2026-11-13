@@ -889,7 +889,7 @@ refuses the send:
 3. The file does not exist or cannot be read: `"...: cannot read file '<path>' (<reason>)"`.
 4. Untrusted: `"Body file '<path>' was not picked on this machine and is not
    under an allowed folder - pick it again in the request, or allow its folder
-   in Settings > Files"`.
+   in Settings › Files"`.
 5. Not a regular file (a directory, a FIFO, `/dev/zero`): refused.
 6. It cannot be opened: refused, naming the path and the reason.
 

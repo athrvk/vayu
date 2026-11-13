@@ -795,7 +795,7 @@ bool apply_file_trust_plan (sqlite3* connection, const FileTrustPlan& plan, std:
 }
 
 /// Says, once the step has committed or stamped, which allowed folders are
-/// gone and why, so a user who finds one missing from Settings > Files can see
+/// gone and why, so a user who finds one missing from Settings › Files can see
 /// it; how many picked files the stored bodies were turned into grants for;
 /// and which chosen files were not found and must be picked again.
 void log_file_trust_plan (const FileTrustPlan& plan) {

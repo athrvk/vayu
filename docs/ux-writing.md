@@ -312,8 +312,9 @@ from creeping back in afterward. These hold it:
 
 What breaks a rule today sits in the scan's `KNOWN_BREACHES`, keyed
 `file :: literal`, each entry naming the open issue that retires it (it is empty
-now, #3500). The commit that fixes a string deletes its entry: a test fails on an entry whose literal
-the sources no longer carry, so a fix cannot land with its entry left behind.
+now, #3500). The commit that fixes a string deletes its entry: a test fails on
+an entry whose literal the sources no longer carry, so a fix cannot land with
+its entry left behind.
 Text the rules match that is not interface copy (a line of a code sample) is
 listed apart, with its reason instead of an issue.
 

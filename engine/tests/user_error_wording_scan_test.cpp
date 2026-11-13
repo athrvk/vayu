@@ -183,8 +183,8 @@ TEST (UserErrorWordingScan, NothingInTheEngineAnswersInItsOwnVoice) {
     }
 
     // A scan that read nothing passes forever, so it says what it read: the
-    // whole tree (171 .cpp and 20 .hpp, about 5 MB when this was written) and,
-    // within it, the routes the guard began with (over 30 files, 500 KB).
+    // whole tree and, within it, the routes the guard began with (over 30
+    // files, 500 KB).
     ASSERT_GT (scanned_files, 150U)
     << "the guard found almost no engine sources";
     ASSERT_GT (scanned_bytes, 3'000'000U)
