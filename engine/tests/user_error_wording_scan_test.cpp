@@ -138,7 +138,8 @@ bool is_allowed (std::string_view file,
 std::string_view statement,
 std::array<bool, kAllowed.size ()>& used) {
     for (std::size_t i = 0; i < kAllowed.size (); ++i) {
-        if (kAllowed[i].file == file && statement.starts_with (kAllowed[i].literal)) {
+        if (kAllowed.at (i).file == file &&
+        statement.starts_with (kAllowed.at (i).literal)) {
             used.at (i) = true;
             return true;
         }
@@ -199,8 +200,9 @@ TEST (UserErrorWordingScan, NothingInTheEngineAnswersInItsOwnVoice) {
 
     // An entry whose text is gone would otherwise sit there forever.
     for (std::size_t i = 0; i < kAllowed.size (); ++i) {
-        EXPECT_TRUE (used.at (i)) << kAllowed[i].file << " no longer holds "
-                                  << kAllowed[i].literal << "; delete its kAllowed entry";
+        EXPECT_TRUE (used.at (i))
+        << kAllowed.at (i).file << " no longer holds "
+        << kAllowed.at (i).literal << "; delete its kAllowed entry";
     }
 }
 
