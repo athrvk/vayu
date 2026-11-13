@@ -124,11 +124,21 @@ describe("-text tier clears 4.5 on its own 10% tint", () => {
 	});
 });
 
-describe("-fill tier carries a white label at 4.5", () => {
-	it.each(["status-redirect", "status-no-response"] as const)("%s", (family) => {
-		const white: Hsl = [0, 0, 100];
-		expect(contrast(white, token(`${family}-fill`, "light"))).toBeGreaterThanOrEqual(4.5);
-	});
+describe("-fill tier carries a white label at 4.5, in both themes", () => {
+	// `status-warning-fill` is the fill the Restart engine button, the connection
+	// chip and the client-certificate chip put a white label on (#3499).
+	it.each(["status-redirect", "status-no-response", "status-warning"] as const)(
+		"%s",
+		(family) => {
+			const white: Hsl = [0, 0, 100];
+			for (const theme of ["light", "dark"] as const) {
+				expect(
+					contrast(white, token(`${family}-fill`, theme)),
+					`${family}-fill on ${theme}`
+				).toBeGreaterThanOrEqual(4.5);
+			}
+		}
+	);
 });
 
 /**

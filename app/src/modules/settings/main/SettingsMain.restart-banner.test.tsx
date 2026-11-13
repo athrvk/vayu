@@ -167,6 +167,24 @@ describe("the restart-required banner", () => {
 		expect(useEngineStore.getState().pendingRestart).toBe(false);
 	});
 
+	it("paints Restart engine on the status fill under a white label, not the bare amber (#3499)", () => {
+		// `--warning` under white measures 2.14:1 on light; the `-fill` tier is the
+		// one solved for a white label (`status-token-contrast.test.ts`). Each
+		// class is asserted whole: a substring would pass `bg-warning` against
+		// `bg-warning-text`.
+		useEngineStore.getState().addRestartRequiredKey("worker_threads");
+		renderSettings();
+
+		const classes = screen
+			.getByRole("button", { name: /Restart engine/ })
+			.className.split(/\s+/);
+		expect(classes).toContain("bg-status-warning-fill");
+		expect(classes).toContain("hover:bg-status-warning-fill/90");
+		expect(classes).toContain("text-white");
+		expect(classes).not.toContain("bg-warning");
+		expect(classes).not.toContain("bg-primary-fill");
+	});
+
 	it("shows the Restart required chip on the entry from the flag alone", () => {
 		renderSettings();
 		expect(screen.getByText("Restart required")).not.toBeNull();
