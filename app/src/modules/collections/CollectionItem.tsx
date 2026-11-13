@@ -239,7 +239,7 @@ function CollectionItemRow({
 					// up the whole row.
 					// size-target (24px at Default) so the chevron fits the row. Still an
 					// adequate pointer target, and the row itself remains clickable.
-					"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+					"focus-self flex items-center justify-center size-target rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					isSelected
 						? "text-primary/90 hover:text-primary"
 						: "text-muted-foreground hover:text-foreground"

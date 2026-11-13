@@ -1826,23 +1826,27 @@ a rounded hover fill, but its label button is 150px with square corners, so an
 outline on the button indicates the wrong shape in the wrong place.
 
 Put `.focus-row` on the element that paints the hover background. It then draws
-the indicator itself - at its own radius, so the roundedness control governs it -
-and adds the same accent fill hover uses, which is how native list selection
-reads. The inner control draws nothing.
+the indicator itself - at its own radius, so the roundedness control governs it.
+The inner control draws nothing.
 
 ```css
 :where(.focus-row):has(:focus-visible:not(.focus-self)) {
-  outline: 2px solid hsl(var(--primary) / 0.3);
+  outline: 2px solid hsl(var(--ring));
   outline-offset: -2px;
 }
 .focus-row :focus-visible:not(.focus-self) { outline: none; }
 ```
 
-The indicator mirrors the disclosure chevron's own ring (`ring-2
-ring-primary/30`) and the selected-row ring (`ring-1 ring-inset
-ring-primary/20`) so focus, selection and hover speak one language. It uses
-`outline` rather than `box-shadow` because Tailwind's ring utilities own
-`box-shadow` - a selected row already sets one, which would override it.
+The indicator is the full `--ring`, the same as the disclosure chevron's own
+ring (`ring-2 ring-ring`). A focus indicator is a UI component boundary and owes
+WCAG 1.4.11's 3:1; `--primary` at 30% composited onto a row measured 1.42-1.61
+in light and 1.56-2.00 in dark across the schemes, so it was a tint, not an
+indicator. `focus-ring-contrast.test.ts` holds the ring at 3:1 on card, panel and
+canvas for every scheme in both themes. The selected-row ring (`ring-1
+ring-inset ring-primary/20`) stays a tint: it marks selection beside a fill and
+is not a focus indicator. The focus indicator uses `outline` rather than
+`box-shadow` because Tailwind's ring utilities own `box-shadow` - a selected row
+already sets one, which would override it.
 
 **Auxiliary controls opt out with `.focus-self`.** A control inside the row that
 is its own target - the chevron toggles expansion rather than opening the
