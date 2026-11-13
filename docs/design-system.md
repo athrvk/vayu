@@ -2144,6 +2144,18 @@ Reveal them with `opacity-0 group-hover:opacity-100 group-focus-within:opacity-1
 The `focus-within` half is not optional: without it a keyboard user lands on an
 invisible control.
 
+**Where the row's width is scarce, the control also gives its width back until it
+is revealed** (#3495): `opacity-0` keeps the space, and the pin and delete of a
+History row kept 52px of a 260px drawer from the name. `ROW_ACTIONS_REVEAL`
+(`components/shared/row-actions.ts`) takes the control out of the flex flow
+while collapsed (`absolute`, pinned to the row's trailing corner, no gap and no
+scrollable overflow) and returns it on `group-hover`, `group-focus-within`, and
+on a `hover: none` device, which never matches the first. It is `absolute`, never
+`hidden` or `invisible`, because those take the control out of the tab order and
+there would be nothing for focus to reveal. The row is the `group` and must be
+positioned. History rows and Trash rows use it; the `⋯` of a tree row is a
+fixed-size slot and keeps the plain opacity form.
+
 **A state toggle is not a row action, and must not be hover-revealed.** The test
 is whether the control has an *off* state that means something. Delete has none -
 it either fires or it does not - so hiding it costs nothing. The variables
@@ -2155,14 +2167,17 @@ could mask a value was to hover the row. It is now always visible on
 Same rule for anything that reports state - a pin, a mute, an enable. Quiet is
 fine; absent is not.
 
-**A row with no action of its own keeps its controls visible too.** Hover-reveal
+**A row with no action of its own still reveals them** (#3495). Hover-reveal
 exists so the row's own job - open the request, select the run - is not crowded
 by buttons the user did not come for. A Trash row (`modules/trash`) has no such
 job: it opens nothing, and Restore and Delete forever are the entire reason it
-is on screen. Revealed on hover they would hide the surface's whole purpose and
-leave a list of names that reads as inert. The test is the same one the state
-toggle above passes - would the row still say what it is for with the control
-absent - and here the answer is no.
+is on screen, which is why they were always visible. At the 260px drawer that
+cost the name about 105px and wrapped the secondary line to four lines, so they
+are `ROW_ACTIONS_REVEAL` now: out of the flow until the row is hovered or
+focused, in the DOM and the tab order throughout, and shown at all times on a
+device with no hover, where "a list of names that reads as inert" would
+otherwise be the whole touch experience. The secondary line is one truncated
+line with its full sentence as a `title` while it is cut.
 
 **Every row that has actions draws them this way, Services included** (issue
 #1690). The Services drawer's rows were the last holdout - two or three
@@ -2170,8 +2185,8 @@ always-visible `TooltipIconButton`s on a 32px row whose payload is a URL, so the
 URL truncated to make room for controls the user had not come for. They are one
 hover-revealed `⋯` menu now, and the values those tooltips carried (the inbox
 URL, the mock's base URL) ride the items' `hint`, which reads without hovering.
-There is no exemption: the rows that keep visible controls are the two the rules
-above name - a state toggle, and a row with no job of its own.
+There is no exemption: the one control that stays visible at rest is a state
+toggle, which keeps its place (a pinned run's pin among the History row's actions).
 
 **Prefer `RowActionsMenu`** (`components/shared`) over adding another inline icon
 button. It renders the `⋯` trigger plus a `DropdownMenu`, so rows expose actions
