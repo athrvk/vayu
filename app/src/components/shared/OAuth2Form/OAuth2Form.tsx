@@ -21,7 +21,6 @@ import {
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
-	Label,
 	Switch,
 	Input,
 	SecretInput,
@@ -32,6 +31,7 @@ import {
 import { OAUTH2_FIELD_LABELS } from "@/constants/oauth2-fields";
 import { createStableResolve } from "@/lib/dynamic-variable-cache";
 import type { OAuth2Config, OAuth2GrantType, OAuth2ParamRow } from "@/types";
+import { LabelledField, type LabelledControlProps } from "../LabelledField";
 import ParamRowsEditor from "./ParamRowsEditor";
 import TokenStatusRow from "./TokenStatusRow";
 import type { OAuth2FormProps, OAuth2TextInput } from "./types";
@@ -44,11 +44,12 @@ const GRANT_TYPES: { value: OAuth2GrantType; label: string }[] = [
 
 // A plain-input fallback when the host does not inject a variable-aware input.
 // Secret fields render a masked input with a reveal toggle.
-const PlainTextInput: OAuth2TextInput = ({ value, onChange, placeholder, type }) =>
+const PlainTextInput: OAuth2TextInput = ({ id, value, onChange, placeholder, type }) =>
 	type === "password" ? (
-		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+		<SecretInput id={id} value={value} onChange={onChange} placeholder={placeholder} />
 	) : (
 		<Input
+			id={id}
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 			placeholder={placeholder}
@@ -167,24 +168,25 @@ export default function OAuth2Form({
 		};
 	}, [value, resolveString, resolveKey]);
 
-	const field = (label: string, node: React.ReactNode, hint?: string) => (
-		<div className="space-y-1.5">
-			<Label>{label}</Label>
-			{node}
-			{hint && <p className="text-label text-muted-foreground">{hint}</p>}
-		</div>
+	const field = (
+		label: string,
+		control: (props: LabelledControlProps) => React.ReactNode,
+		hint?: string
+	) => (
+		<LabelledField label={label} hint={hint} className="space-y-1.5">
+			{control}
+		</LabelledField>
 	);
 
 	return (
 		<div className="space-y-4">
-			{field(
-				OAUTH2_FIELD_LABELS.grantType,
+			{field(OAUTH2_FIELD_LABELS.grantType, (c) => (
 				<Select value={grant} onValueChange={(g: OAuth2GrantType) => set("grantType", g)}>
 					{/* `w-3xs`, not `w-64`: the trigger holds a fixed grant-type
 					    label ("Authorization Code"), a text measure, and `w-64`
 					    rides `--spacing` - narrower at the Default density than the
 					    label it holds. */}
-					<SelectTrigger className="w-3xs">
+					<SelectTrigger id={c.id} className="w-3xs">
 						<SelectValue />
 					</SelectTrigger>
 					<SelectContent>
@@ -195,94 +197,97 @@ export default function OAuth2Form({
 						))}
 					</SelectContent>
 				</Select>
-			)}
+			))}
 
 			{isAuthCode &&
-				field(
-					OAUTH2_FIELD_LABELS.authorizationUrl,
+				field(OAUTH2_FIELD_LABELS.authorizationUrl, (c) => (
 					<TextInput
+						{...c}
 						value={value.authorizationUrl ?? ""}
 						onChange={(v) => set("authorizationUrl", v)}
 						placeholder="https://idp.example.com/authorize"
 					/>
-				)}
+				))}
 
-			{field(
-				OAUTH2_FIELD_LABELS.accessTokenUrl,
+			{field(OAUTH2_FIELD_LABELS.accessTokenUrl, (c) => (
 				<TextInput
+					{...c}
 					value={value.accessTokenUrl}
 					onChange={(v) => set("accessTokenUrl", v)}
 					placeholder="https://idp.example.com/token"
 				/>
-			)}
+			))}
 
 			{isAuthCode &&
 				field(
 					OAUTH2_FIELD_LABELS.callbackUrl,
-					<TextInput
-						value={value.callbackUrl ?? ""}
-						onChange={(v) => set("callbackUrl", v)}
-						placeholder="auto - 127.0.0.1 loopback"
-					/>,
+					(c) => (
+						<TextInput
+							{...c}
+							value={value.callbackUrl ?? ""}
+							onChange={(v) => set("callbackUrl", v)}
+							placeholder="auto - 127.0.0.1 loopback"
+						/>
+					),
 					"Leave blank to use an automatic loopback redirect."
 				)}
 
 			<div className="grid grid-cols-2 gap-4">
-				{field(
-					OAUTH2_FIELD_LABELS.clientId,
+				{field(OAUTH2_FIELD_LABELS.clientId, (c) => (
 					<TextInput
+						{...c}
 						value={value.clientId}
 						onChange={(v) => set("clientId", v)}
 						placeholder="client id or {{var}}"
 					/>
-				)}
-				{field(
-					"Client secret",
+				))}
+				{field("Client secret", (c) => (
 					<TextInput
+						{...c}
 						value={value.clientSecret ?? ""}
 						onChange={(v) => set("clientSecret", v)}
 						placeholder="client secret or {{var}}"
 						type="password"
 					/>
-				)}
+				))}
 			</div>
 
 			{isPassword && (
 				<div className="grid grid-cols-2 gap-4">
-					{field(
-						"Username",
+					{field("Username", (c) => (
 						<TextInput
+							{...c}
 							value={value.username ?? ""}
 							onChange={(v) => set("username", v)}
 							placeholder="username or {{var}}"
 						/>
-					)}
-					{field(
-						"Password",
+					))}
+					{field("Password", (c) => (
 						<TextInput
+							{...c}
 							value={value.password ?? ""}
 							onChange={(v) => set("password", v)}
 							placeholder="password or {{var}}"
 							type="password"
 						/>
-					)}
+					))}
 				</div>
 			)}
 
-			{field(
-				"Scope",
+			{field("Scope", (c) => (
 				<TextInput
+					{...c}
 					value={value.scope ?? ""}
 					onChange={(v) => set("scope", v)}
 					placeholder="openid profile email"
 				/>
-			)}
+			))}
 
 			{isAuthCode &&
-				field(
-					"PKCE",
+				field("PKCE", (c) => (
 					<div className="flex items-center gap-2">
 						<Switch
+							id={c.id}
 							checked={value.pkce ?? true}
 							onCheckedChange={(c) => set("pkce", c)}
 						/>
@@ -290,7 +295,7 @@ export default function OAuth2Form({
 							Use PKCE (S256) - recommended
 						</span>
 					</div>
-				)}
+				))}
 
 			<Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
 				<CollapsibleTrigger className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -301,15 +306,14 @@ export default function OAuth2Form({
 				</CollapsibleTrigger>
 				<CollapsibleContent className="pt-4 px-1 pb-1 space-y-4">
 					<div className="grid grid-cols-2 gap-4">
-						{field(
-							"Client authentication",
+						{field("Client authentication", (c) => (
 							<Select
 								value={value.credentialsPlacement ?? "basic_auth_header"}
 								onValueChange={(v: "basic_auth_header" | "body") =>
 									set("credentialsPlacement", v)
 								}
 							>
-								<SelectTrigger>
+								<SelectTrigger id={c.id}>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -319,14 +323,13 @@ export default function OAuth2Form({
 									<SelectItem value="body">Send in body</SelectItem>
 								</SelectContent>
 							</Select>
-						)}
-						{field(
-							"Token placement",
+						))}
+						{field("Token placement", (c) => (
 							<Select
 								value={value.tokenPlacement ?? "header"}
 								onValueChange={(v: "header" | "query") => set("tokenPlacement", v)}
 							>
-								<SelectTrigger>
+								<SelectTrigger id={c.id}>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -334,65 +337,68 @@ export default function OAuth2Form({
 									<SelectItem value="query">Query param</SelectItem>
 								</SelectContent>
 							</Select>
-						)}
+						))}
 					</div>
 
 					<div className="grid grid-cols-2 gap-4">
 						{value.tokenPlacement === "query"
-							? field(
-									"Query param name",
+							? field("Query param name", (c) => (
 									<TextInput
+										{...c}
 										value={value.queryParamName ?? ""}
 										onChange={(v) => set("queryParamName", v)}
 										placeholder="access_token"
 									/>
-								)
-							: field(
-									"Header prefix",
+								))
+							: field("Header prefix", (c) => (
 									<TextInput
+										{...c}
 										value={value.headerPrefix ?? ""}
 										onChange={(v) => set("headerPrefix", v)}
 										placeholder="Bearer"
 									/>
-								)}
+								))}
 						{field(
 							"Credentials ID",
-							<TextInput
-								value={value.credentialsId ?? ""}
-								onChange={(v) => set("credentialsId", v)}
-								placeholder="default"
-							/>,
+							(c) => (
+								<TextInput
+									{...c}
+									value={value.credentialsId ?? ""}
+									onChange={(v) => set("credentialsId", v)}
+									placeholder="default"
+								/>
+							),
 							"Separate token cache entries for the same URL/client."
 						)}
 					</div>
 
 					<div className="grid grid-cols-2 gap-4">
-						{field(
-							"Audience",
+						{field("Audience", (c) => (
 							<TextInput
+								{...c}
 								value={value.audience ?? ""}
 								onChange={(v) => set("audience", v)}
 								placeholder="optional"
 							/>
-						)}
-						{field(
-							"Resource",
+						))}
+						{field("Resource", (c) => (
 							<TextInput
+								{...c}
 								value={value.resource ?? ""}
 								onChange={(v) => set("resource", v)}
 								placeholder="optional"
 							/>
-						)}
+						))}
 					</div>
 
-					{field(
-						"Refresh token URL",
+					{field("Refresh token URL", (c) => (
 						<TextInput
+							{...c}
 							value={value.refreshTokenUrl ?? ""}
 							onChange={(v) => set("refreshTokenUrl", v)}
 							placeholder="defaults to the token URL"
 						/>
-					)}
+					))}
 
 					{isAuthCode && (
 						<ParamRowsEditor

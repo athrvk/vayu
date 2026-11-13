@@ -83,6 +83,14 @@ const origin = (
 	...o,
 });
 
+describe("the popover's name (#3498)", () => {
+	it("is a dialog named after the variable it shows", () => {
+		renderPopover();
+		open();
+		expect(screen.getByRole("dialog", { name: "Variable merchantId" })).toBeInTheDocument();
+	});
+});
+
 describe("the value appears once", () => {
 	it("puts it in the editable field and nowhere else", () => {
 		renderPopover();

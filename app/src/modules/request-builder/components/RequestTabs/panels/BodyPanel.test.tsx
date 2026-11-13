@@ -113,6 +113,13 @@ beforeEach(() => {
 	getRequest.mockResolvedValue({ id: "req_1", name: "Create order", collectionId: "col_1" });
 });
 
+describe("the body type picker (#3498)", () => {
+	it("is named, not a bare combobox", () => {
+		renderPanel({ bodyMode: "json" });
+		expect(screen.getByRole("combobox", { name: "Body type" })).toBeInTheDocument();
+	});
+});
+
 describe("the content type a mode implies", () => {
 	it("is on screen without opening the dropdown", () => {
 		renderPanel({ bodyMode: "json" });

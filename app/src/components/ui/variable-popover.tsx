@@ -468,6 +468,7 @@ export function VariablePopover({
 				// 288px at the Default density rather than the 384px `w-sm` reads
 				// as.
 				className="w-sm max-w-[calc(100vw-2rem)] p-2.5"
+				aria-label={`Variable ${name}`}
 				align="start"
 				side="bottom"
 				onClick={(e) => e.stopPropagation()}

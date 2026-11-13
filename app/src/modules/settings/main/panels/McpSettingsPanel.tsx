@@ -710,9 +710,9 @@ export default function McpSettingsPanel() {
 					)}
 
 					<div className="flex items-center gap-2">
-						<Label className="text-xs font-medium text-muted-foreground w-20 shrink-0">
+						<span className="text-xs font-medium text-muted-foreground w-20 shrink-0">
 							Endpoint
-						</Label>
+						</span>
 						<code className="flex-1 text-xs font-mono bg-muted rounded-md px-2 py-1.5 break-all">
 							{endpoint}
 						</code>

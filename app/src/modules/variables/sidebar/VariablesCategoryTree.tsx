@@ -283,6 +283,7 @@ export default function VariablesCategoryTree() {
 	 */
 	const rename = useInlineRename({
 		active: renamingEnvId !== null,
+		label: "Environment name",
 		initialValue: environments.find((e) => e.id === renamingEnvId)?.name ?? "",
 		onCommit: (name) => {
 			if (renamingEnvId) void submitRenameEnvironment(renamingEnvId, name);

@@ -113,6 +113,9 @@ export * from "./TabBreadcrumb";
 // Truncated text that reveals the full value on hover, only when clipped
 export * from "./TruncatedText";
 
+// A visible label wired to the one control it names
+export * from "./LabelledField";
+
 // A labelled number input with its unit inside the field
 export * from "./NumberField";
 

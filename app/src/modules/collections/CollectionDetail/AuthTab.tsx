@@ -213,7 +213,10 @@ export default function AuthTab({ collection, active = false }: AuthTabProps) {
 						value={mode ?? ""}
 						onValueChange={(v) => handleModeChange(v as CollectionAuthMode)}
 					>
-						<SelectTrigger className="h-control text-sm">
+						<SelectTrigger
+							className="h-control text-sm"
+							aria-label="Authentication type"
+						>
 							<SelectValue
 								placeholder={
 									uneditableLabel ? `${uneditableLabel} (not editable here)` : ""

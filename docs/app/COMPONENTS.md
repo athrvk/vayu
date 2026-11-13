@@ -2940,7 +2940,11 @@ there is no editor-local vocabulary and nothing to translate at the boundary.
   oauth2 delegated to [`OAuth2Form`](#shared-oauth-20-form-componentssharedoauth2form). Takes an **injected
   `TextInput`** (the same contract `OAuth2Form` defines) so the builder supplies
   a variable-aware token editor while the collection editor takes the default
-  plain input, which accents `{{var}}`. `noAuthDescription` is host-supplied: a
+  plain input, which accents `{{var}}`. Each field is a
+  `components/shared/LabelledField.tsx`, which links its `<Label>` to the control by
+  a `useId` and hands the input that `id` and the label's text: an input that names
+  itself (the builder's `VariableInput` falls back to its placeholder) passes the text
+  as its `aria-label`, which outranks the `<label for>` (#3498). `noAuthDescription` is host-supplied: a
   request sends nothing, a collection hands nothing down, and those are different
   statements under one empty state. An API key sent in a **header** carries a
   one-sentence note that a redirect takes the key to whichever host it leads to

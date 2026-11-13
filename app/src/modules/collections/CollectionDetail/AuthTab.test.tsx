@@ -107,6 +107,19 @@ beforeEach(() => {
  * the engine has no resolution for digest/aws/ntlm, so offering them would let
  * someone configure something that silently does nothing.
  */
+describe("AuthTab names its controls (#3498)", () => {
+	it("names the type picker", () => {
+		renderTab(makeCollection({ mode: "bearer", token: "t" }));
+		expect(screen.getByRole("combobox", { name: "Authentication type" })).toBeInTheDocument();
+	});
+
+	it("names a credential field by its label, not its placeholder", () => {
+		renderTab(makeCollection({ mode: "basic", username: "acme", password: "" }));
+		expect(screen.getByLabelText("Username")).toHaveValue("acme");
+		expect(screen.getByLabelText("Password")).toBeInTheDocument();
+	});
+});
+
 describe("AuthTab with an auth mode it cannot edit", () => {
 	const uneditable = makeCollection({ mode: "digest" } as Collection["auth"]);
 

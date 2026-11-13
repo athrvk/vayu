@@ -127,6 +127,9 @@ export function MarkdownEditor({
 					<div
 						role="button"
 						tabIndex={0}
+						// The label, not the content: a button is named from its
+						// content otherwise, which here is the whole rendered description.
+						aria-label={ariaLabel}
 						onClick={startEditing}
 						onKeyDown={(e) => {
 							if (e.key === "Enter" || e.key === " ") {

@@ -296,6 +296,14 @@ describe("the actions that had no keyboard path", () => {
 		expect(document.activeElement).toBe(row(tree, "Staging"));
 	});
 
+	it("names the rename field (#3498)", () => {
+		const tree = renderTree();
+
+		press(row(tree, "Staging"), "F2");
+
+		expect(screen.getByDisplayValue("Staging")).toHaveAccessibleName("Environment name");
+	});
+
 	it("opens the rename with the whole name selected", () => {
 		const tree = renderTree();
 

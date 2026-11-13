@@ -98,6 +98,15 @@ function bannerText(): string {
 	return banner.textContent ?? "";
 }
 
+describe("the Variables table's column headers (#3498)", () => {
+	it("gives the checkbox and action columns a name, as every other header has one", () => {
+		renderEditor({ type: "environment", environment });
+
+		const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+		expect(headers).toEqual(["Enabled", "Variable", "Value", "Type", "Secret", "Actions"]);
+	});
+});
+
 describe("the Variables pane info banner", () => {
 	it("tells an environment it overrides collections and globals", () => {
 		renderEditor({ type: "environment", environment });

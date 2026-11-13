@@ -459,7 +459,7 @@ export function ClientCertificatesCard() {
 						</p>
 
 						<div className="space-y-1.5">
-							<Label>Format</Label>
+							<span className="block text-sm font-medium leading-none">Format</span>
 							<ToggleGroup
 								size="sm"
 								aria-label="Certificate format"

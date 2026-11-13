@@ -104,10 +104,15 @@ export default [
 			// cannot see that `Switch`, `Input`, `SelectTrigger` and `Checkbox`
 			// each render one native labelable element and nothing else - the
 			// association it asks for is already there. Naming them is what the
-			// option is for.
+			// option is for. `labelComponents` is the other half: without it the
+			// rule only reads a lower-case `<label>`, so an unlinked `<Label>` (the
+			// primitive every form uses) was never checked (#3498).
 			"jsx-a11y/label-has-associated-control": [
 				"error",
-				{ controlComponents: ["Switch", "Input", "SelectTrigger", "Checkbox"] },
+				{
+					labelComponents: ["Label"],
+					controlComponents: ["Switch", "Input", "SelectTrigger", "Checkbox"],
+				},
 			],
 
 			// `separator` is structural in the ARIA role table, but the window

@@ -34,7 +34,6 @@ import { Lock } from "lucide-react";
 import {
 	Card,
 	Input,
-	Label,
 	SecretInput,
 	Select,
 	SelectContent,
@@ -43,6 +42,7 @@ import {
 	SelectValue,
 } from "@/components/ui";
 import { OAuth2Form } from "../OAuth2Form";
+import { LabelledField as Field } from "../LabelledField";
 import { cn } from "@/lib/utils";
 import type { AuthFieldsProps, AuthTextInput, EditableAuth } from "./types";
 
@@ -51,11 +51,12 @@ import type { AuthFieldsProps, AuthTextInput, EditableAuth } from "./types";
  * accent the collection editor had - the affordance survived the consolidation
  * even though the full token editor did not follow it here.
  */
-const PlainTextInput: AuthTextInput = ({ value, onChange, placeholder, type }) =>
+const PlainTextInput: AuthTextInput = ({ id, value, onChange, placeholder, type }) =>
 	type === "password" ? (
-		<SecretInput value={value} onChange={onChange} placeholder={placeholder} />
+		<SecretInput id={id} value={value} onChange={onChange} placeholder={placeholder} />
 	) : (
 		<Input
+			id={id}
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 			placeholder={placeholder}
@@ -85,15 +86,6 @@ function edited<T extends EditableAuth>(value: T, patch: Partial<T>): T {
 	return { ...own, ...patch } as T;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-	return (
-		<div className="space-y-2">
-			<Label>{label}</Label>
-			{children}
-		</div>
-	);
-}
-
 export default function AuthFields({
 	value,
 	onChange,
@@ -121,12 +113,15 @@ export default function AuthFields({
 			<div className="space-y-4">
 				<SentAs>Authorization: Bearer &lt;token&gt;</SentAs>
 				<Field label="Token">
-					<TextInput
-						value={value.token}
-						onChange={(token) => onChange(edited(value, { token }))}
-						placeholder="Bearer token or {{variable}}"
-						type="password"
-					/>
+					{(c) => (
+						<TextInput
+							{...c}
+							value={value.token}
+							onChange={(token) => onChange(edited(value, { token }))}
+							placeholder="Bearer token or {{variable}}"
+							type="password"
+						/>
+					)}
 				</Field>
 			</div>
 		);
@@ -138,19 +133,25 @@ export default function AuthFields({
 				<SentAs>Authorization: Basic &lt;base64&gt;</SentAs>
 				<div className="grid grid-cols-2 gap-4">
 					<Field label="Username">
-						<TextInput
-							value={value.username}
-							onChange={(username) => onChange(edited(value, { username }))}
-							placeholder="Username or {{variable}}"
-						/>
+						{(c) => (
+							<TextInput
+								{...c}
+								value={value.username}
+								onChange={(username) => onChange(edited(value, { username }))}
+								placeholder="Username or {{variable}}"
+							/>
+						)}
 					</Field>
 					<Field label="Password">
-						<TextInput
-							value={value.password}
-							onChange={(password) => onChange(edited(value, { password }))}
-							placeholder="Password"
-							type="password"
-						/>
+						{(c) => (
+							<TextInput
+								{...c}
+								value={value.password}
+								onChange={(password) => onChange(edited(value, { password }))}
+								placeholder="Password"
+								type="password"
+							/>
+						)}
 					</Field>
 				</div>
 			</div>
@@ -178,44 +179,52 @@ export default function AuthFields({
 				)}
 
 				<Field label="Add to">
-					<Select
-						value={value.in}
-						onValueChange={(next: "header" | "query") =>
-							onChange(edited(value, { in: next }))
-						}
-					>
-						{/* `w-[12rem]`, not `w-48`: the trigger holds a fixed option
+					{(c) => (
+						<Select
+							value={value.in}
+							onValueChange={(next: "header" | "query") =>
+								onChange(edited(value, { in: next }))
+							}
+						>
+							{/* `w-[12rem]`, not `w-48`: the trigger holds a fixed option
 						    label ("Query params"), a text measure, and `w-48` rides
 						    `--spacing`, which narrowed it below the label's width at
 						    the Default density. No named container-scale step sits
 						    this low (the scale starts at `3xs`/16rem), so this is a
 						    literal rem value instead - the same reasoning as the
 						    toast's `w-xs`, at a size the scale does not cover. */}
-						<SelectTrigger className="w-[12rem]">
-							<SelectValue />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="header">Header</SelectItem>
-							<SelectItem value="query">Query params</SelectItem>
-						</SelectContent>
-					</Select>
+							<SelectTrigger id={c.id} className="w-[12rem]">
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="header">Header</SelectItem>
+								<SelectItem value="query">Query params</SelectItem>
+							</SelectContent>
+						</Select>
+					)}
 				</Field>
 
 				<div className="grid grid-cols-2 gap-4">
 					<Field label="Key name">
-						<TextInput
-							value={value.key}
-							onChange={(key) => onChange(edited(value, { key }))}
-							placeholder="X-API-Key"
-						/>
+						{(c) => (
+							<TextInput
+								{...c}
+								value={value.key}
+								onChange={(key) => onChange(edited(value, { key }))}
+								placeholder="X-API-Key"
+							/>
+						)}
 					</Field>
 					<Field label="Value">
-						<TextInput
-							value={value.value}
-							onChange={(v) => onChange(edited(value, { value: v }))}
-							placeholder="{{api_key}}"
-							type="password"
-						/>
+						{(c) => (
+							<TextInput
+								{...c}
+								value={value.value}
+								onChange={(v) => onChange(edited(value, { value: v }))}
+								placeholder="{{api_key}}"
+								type="password"
+							/>
+						)}
 					</Field>
 				</div>
 			</div>

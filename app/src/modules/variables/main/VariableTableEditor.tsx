@@ -1254,7 +1254,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 				<table className="w-full">
 					<thead>
 						<tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-							<th className="pb-2 w-8"></th>
+							<th className="pb-2 w-8">
+								<span className="sr-only">Enabled</span>
+							</th>
 							<th className="pb-2 px-2 min-w-[8rem]">Variable</th>
 							<th className="pb-2 px-2 min-w-[10rem]">Value</th>
 							<th className="pb-2 px-2 w-[110px]">Type</th>
@@ -1265,7 +1267,9 @@ export default function VariableEditor({ config, embedded = false }: VariableEdi
 							 * the only unlabelled column in a table of labelled ones.
 							 */}
 							<th className="pb-2 w-14 px-2">Secret</th>
-							<th className="pb-2 w-18"></th>
+							<th className="pb-2 w-18">
+								<span className="sr-only">Actions</span>
+							</th>
 						</tr>
 					</thead>
 					<tbody>

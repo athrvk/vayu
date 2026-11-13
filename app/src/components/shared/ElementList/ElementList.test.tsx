@@ -654,7 +654,25 @@ describe("ElementList - enabling, deleting and duplicating a row", () => {
 	});
 });
 
+describe("ElementList - the Add element menu", () => {
+	it("is a dialog with a name (#3498)", () => {
+		renderList([]);
+
+		fireEvent.click(screen.getByRole("button", { name: "Add element" }));
+
+		expect(screen.getByRole("dialog", { name: "Add element" })).toBeInTheDocument();
+	});
+});
+
 describe("ElementList - rename", () => {
+	it("names the field after what it renames, not only its placeholder (#3498)", async () => {
+		renderList([extractElement("e1")]);
+
+		await chooseRowAction("Extract JSON", "Rename");
+
+		expect(await screen.findByRole("textbox", { name: "Element name" })).toBeInTheDocument();
+	});
+
 	it("reveals the name input, commits on Enter, and shows the new name", async () => {
 		const onChange = renderList([extractElement("e1")]);
 

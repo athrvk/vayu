@@ -1938,7 +1938,8 @@ see.
 | Every chord the app listens for is listed for the user | `shortcuts.listed.test.ts` |
 | A hand-rolled `role="button"` is focusable and answers Enter/Space | `jsx-a11y/interactive-supports-focus`, `jsx-a11y/click-events-have-key-events` |
 | A `role="treeitem"` carries `aria-selected` | `jsx-a11y/role-has-required-aria-props` |
-| A `<label>` names a control | `jsx-a11y/label-has-associated-control` |
+| A `<label>` names a control | `jsx-a11y/label-has-associated-control`; `LabelledField` links a prop-driven label by `useId` (`AuthFields.test.tsx`, `OAuth2Form.names.test.tsx`) |
+| A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
 | Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
 | Every `role="img"` carries an `aria-label` on the same element | `role-img-labelled.test.ts` |
@@ -2025,10 +2026,17 @@ correct one here:
   box opened over a row, or the command palette - moving focus into what the
   user just opened is the WAI-ARIA dialog pattern, not the page-load autofocus
   the rule exists to prevent.
-- `label-has-associated-control` is given `controlComponents: ["Switch",
-  "Input", "SelectTrigger"]`. It recognises a nested control by lower-case tag
-  name, and each of those renders exactly one native labelable element, so the
-  association it asks for is already there.
+- `label-has-associated-control` is given `labelComponents: ["Label"]` and
+  `controlComponents: ["Switch", "Input", "SelectTrigger", "Checkbox"]`. The rule
+  reads a lower-case `<label>` and a lower-case control by default, so without
+  `labelComponents` an unlinked `<Label>` - the primitive every form uses - was
+  never checked (#3498). The control list names what renders exactly one native
+  labelable element, so a `<Label>` wrapping one is already associated. The rule
+  cannot see a label whose text is an expression (`<Label>{label}</Label>`), which
+  is every helper that renders its label from a prop; `LabelledField` is the one
+  such helper, and `AuthFields.test.tsx` / `OAuth2Form.names.test.tsx` are what
+  hold it. A caption over a group of controls (a `ToggleGroup`, a row list) is not
+  a `<label>` at all: it is a `<span>`, and the group names itself.
 - `no-noninteractive-tabindex` also allows `role="separator"`. A focusable
   separator is the ARIA window splitter, which is what both resize handles are,
   arrow/Page/Home/End and all.
@@ -3686,7 +3694,9 @@ at `size="xs"` replacing the row's `cap-centred` label, so its text keeps the
 label's position on both axes: every renaming row puts its label a `gap-2`
 from the icon or badge before it, the gap `xs`'s pull-back is drawn for (see
 the floors table), and the field states `size="xs"` and nothing else. The hook
-owns the behaviour:
+takes a required `label` ("Request name") that names the field for a screen
+reader: it replaces a row's name and has no visible label, so it would otherwise
+be a bare "edit text" (#3498). The hook owns the behaviour:
 
 - **Enter commits only through `isCommitEnter`** (`@/lib/keyboard`), never a
   bare `e.key === "Enter"`. An IME commits its composition buffer with an

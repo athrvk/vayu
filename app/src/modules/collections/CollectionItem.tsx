@@ -117,6 +117,7 @@ function CollectionItemRow({
 	/** The rename contract, including the focus return - see `useInlineRename`. */
 	const rename = useInlineRename({
 		active: isRenaming,
+		label: "Collection name",
 		initialValue: collection.name,
 		onCommit: (name) => onRenameSubmit(collection.id, name),
 		onCancel: onRenameCancel,

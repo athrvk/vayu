@@ -367,7 +367,7 @@ export default function HistoryList() {
 							value={filterType}
 							onValueChange={(v) => setFilterType(v as FilterType)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Run type">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -382,7 +382,7 @@ export default function HistoryList() {
 							value={filterStatus}
 							onValueChange={(v) => setFilterStatus(v as FilterStatus)}
 						>
-							<SelectTrigger className="flex-1 min-w-[120px]">
+							<SelectTrigger className="flex-1 min-w-[120px]" aria-label="Status">
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
