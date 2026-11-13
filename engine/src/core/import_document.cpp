@@ -4923,8 +4923,7 @@ std::optional<InsomniaExport> insomnia_v5_export (const InsomniaType& type) {
  * be their collection.
  */
 std::string insomnia_refusal (const InsomniaType& type) {
-    const std::string lead =
-    "Could not read the document: this is an Insomnia ";
+    const std::string lead = "Couldn't read the document: this is an Insomnia ";
     if (type.kind == "collection" || type.kind == "environment") {
         return lead + type.kind + " export in format " + type.version +
         ", which this version of Vayu does not read. It reads format 5.";
@@ -5263,7 +5262,7 @@ const ImportSource& source) {
     // which is the order `parse-raw.ts` read the same bytes in.
     const DocumentRead read = read_document (text);
     if (!read.ok ()) {
-        parsed.error = "Could not read the document: " + read.error;
+        parsed.error = "Couldn't read the document: " + read.error;
         return parsed;
     }
     const nlohmann::ordered_json& document = read.root;

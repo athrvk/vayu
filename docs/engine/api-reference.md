@@ -4682,9 +4682,9 @@ preview tree lists them in the same order.
 - `400` `Unrecognised format` - readable, and no format claims it. Kept as its
   own sentence: "Vayu does not read this kind of file" and "this file is broken"
   are different answers.
-- `400` `Could not read the document: <detail>` - neither JSON nor YAML, with
+- `400` `Couldn't read the document: <detail>` - neither JSON nor YAML, with
   the line named.
-- `400` `Could not read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
+- `400` `Couldn't read the document: this is an Insomnia <kind> export, which Vayu does not read. Export the collection instead.` - an Insomnia document
   that is not a collection or an environment: `<kind>` reads `design document
   (spec)` for `spec.insomnia.rest/`, `mock server` for `mock.insomnia.rest/`,
   and the `type`'s own prefix otherwise. A collection or environment in a
