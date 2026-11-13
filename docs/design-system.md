@@ -2504,6 +2504,16 @@ a pixel.
   `TruncatedText`, so a clipped path still has its full text on hover. A row's
   *action cluster* (the chip, a button, a chord) is the opposite and stays
   `shrink-0`.
+- **A flat list of nested things shows the ancestor path in front of the name**
+  (#3495). The Variables drawer lists every collection, roots and sub-folders,
+  in one flat group, so two "v1" folders under different parents read alike. A
+  sub-collection carries its ancestors as a muted `text-xs` prefix
+  ("Payments API /", built with `collectionPath`, as the palette does) and a
+  root carries none. The prefix is `min-w-0 max-w-[50%]` and truncates, the name
+  keeps `min-w-[12ch]`, so the distinguishing part is the last to go. Both are
+  `TruncatedText` with `title` set to the full path, and the row's
+  `aria-labelledby` lists the prefix then the name, so its accessible name is
+  "Payments API / v1" while typeahead (`data-tree-label`) stays the bare name.
 - **A name in a table is one token and never wraps.** `HeadersViewer`'s name
   cell is `whitespace-nowrap` and its text a `TruncatedText` capped at `40ch`
   (the longest registered header names are about 35), so "Content-Type" never

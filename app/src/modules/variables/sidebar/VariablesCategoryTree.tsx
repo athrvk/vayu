@@ -39,8 +39,9 @@
  *     button is the second.
  */
 
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useRovingTreeFocus } from "@/modules/collections/useRovingTreeFocus";
+import { collectionPath } from "@/modules/collections/tree-utils";
 import { useDeleteRefocus } from "@/modules/collections/useDeleteRefocus";
 import { useTabsStore, useSaveStore, useLayoutStore, useToastStore } from "@/stores";
 import { useVariablesStore, type VariableCategory } from "@/modules/variables/variables-store";
@@ -197,6 +198,15 @@ export default function VariablesCategoryTree() {
 	 * the variable-count badge inside it.
 	 */
 	const nameIdFor = (scope: string, id = "") => `${treeId}-${scope}-${id}-name`;
+
+	// A sub-collection's ancestors, so two folders called "v1" can be told apart.
+	// Built once per list: `collectionPath` takes the map for that reason.
+	const ancestorPaths = useMemo(() => {
+		const byId = new Map(collections.map((c) => [c.id, c]));
+		return new Map(
+			collections.map((c) => [c.id, c.parentId ? collectionPath(c.parentId, byId) : ""])
+		);
+	}, [collections]);
 
 	const [collectionsExpanded, setCollectionsExpanded] = useState(true);
 
@@ -882,6 +892,15 @@ export default function VariablesCategoryTree() {
 										const variableCount = collection.variables
 											? Object.keys(collection.variables).length
 											: 0;
+										const ancestors = ancestorPaths.get(collection.id) ?? "";
+										const fullPath = ancestors
+											? `${ancestors} / ${collection.name}`
+											: collection.name;
+										const nameId = nameIdFor("collection", collection.id);
+										const ancestorsId = nameIdFor(
+											"collection-path",
+											collection.id
+										);
 										return (
 											<div
 												key={collection.id}
@@ -895,10 +914,11 @@ export default function VariablesCategoryTree() {
 												aria-level={2}
 												aria-posinset={index + 1}
 												aria-setsize={collections.length}
-												aria-labelledby={nameIdFor(
-													"collection",
-													collection.id
-												)}
+												// A sub-collection is named by its whole path, ancestors
+												// first; typeahead (`data-tree-label`) stays the name.
+												aria-labelledby={
+													ancestors ? `${ancestorsId} ${nameId}` : nameId
+												}
 												className={cn(
 													"focus-row flex h-8 items-center hover:bg-accent transition-colors",
 													isSelected({
@@ -927,12 +947,30 @@ export default function VariablesCategoryTree() {
 														GROUP_CHILD_INSET
 													)}
 												>
-													<TruncatedText
-														id={nameIdFor("collection", collection.id)}
-														className="flex-1"
-													>
-														{collection.name}
-													</TruncatedText>
+													{/* The name keeps a floor and the prefix gives way
+													    first, at half the row (the palette's two-span
+													    rule); the tooltip of either is the full path. */}
+													<span className="flex min-w-0 flex-1 items-center gap-1">
+														{ancestors && (
+															<TruncatedText
+																id={ancestorsId}
+																title={fullPath}
+																className="min-w-0 max-w-[50%] text-xs text-muted-foreground"
+															>
+																{`${ancestors} /`}
+															</TruncatedText>
+														)}
+														<TruncatedText
+															id={nameId}
+															title={fullPath}
+															className={cn(
+																"flex-1",
+																ancestors && "min-w-[12ch]"
+															)}
+														>
+															{collection.name}
+														</TruncatedText>
+													</span>
 													{/* `chip` - same reason as the environment
 													    badge above. */}
 													{variableCount > 0 && (

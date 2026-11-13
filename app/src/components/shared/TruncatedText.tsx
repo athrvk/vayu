@@ -29,6 +29,12 @@ import { cn } from "@/lib/utils";
 interface TruncatedTextProps {
 	/** The full text. Shown inline, and as the tooltip when it does not fit. */
 	children: string;
+	/**
+	 * What the tooltip says instead, for a piece of a longer label: a name or an
+	 * ancestor prefix whose tooltip is the whole path. Same rule, shown only
+	 * while this element is clipped.
+	 */
+	title?: string;
 	className?: string;
 	/** For an `aria-labelledby` that names a row by this text. */
 	id?: string;
@@ -36,8 +42,14 @@ interface TruncatedTextProps {
 	as?: "span" | "div" | "h1" | "h2" | "h3" | "p";
 }
 
-export function TruncatedText({ children, className, id, as: Tag = "span" }: TruncatedTextProps) {
-	const ref = useOverflowTitle<HTMLElement>(children);
+export function TruncatedText({
+	children,
+	title,
+	className,
+	id,
+	as: Tag = "span",
+}: TruncatedTextProps) {
+	const ref = useOverflowTitle<HTMLElement>(title ?? children);
 
 	return (
 		// `truncate` is not optional - `scrollWidth > clientWidth` only means
