@@ -49,12 +49,11 @@ isn't the same:
 `Please` are banned in UI text. The first two are the passive, formal register
 the voice section rules out; `Please` is the apology's softer cousin and breaks
 the same rule (direct, no apologies - see [Voice](#voice)): say what to do, not
-that you would like them to. The app's own text has one breach left, the
-failed engine restart's "Please close the Application and reopen it."
-(`electron/sidecar.ts`, #2292). Beyond it are engine response bodies that the
-app shows after its own "Couldn't ..." prefix (#2295). The first is held by the
-voice and casing scan, the second by the engine test #2295 adds (see
-[Enforcement](#enforcement)). Log strings and code comments are a separate
+that you would like them to. The app's own text has no breach of these left,
+and the voice and casing scan keeps it so (see [Enforcement](#enforcement)).
+The engine's text is held the same way: a message the app shows after its own
+"Couldn't ..." prefix (#2295) opens "Couldn't ..." too, by an engine test
+(#3500). Log strings and code comments are a separate
 surface and keep whatever form reads well there.
 
 ## Terminology glossary
@@ -281,9 +280,13 @@ from creeping back in afterward. These hold it:
   `EveryEngineSettingLabelIsSentenceCase` reads the setting labels the Settings
   page renders verbatim (#2293); a later word may start with a capital only when
   it is all capitals or one of OAuth, OpenAPI, Send, Sends,
-  Expect. The other, a scan of
-  `engine/src/http/routes/*.cpp` for response bodies opening "Could not" or
-  "Failed to", does not exist yet and is owned by #2295.
+  Expect. The other, `user_error_wording_scan_test.cpp`
+  (#2295, #3500), reads every statement under `engine/src` and fails on a
+  literal opening "Failed to" or "Could not" that can reach a client. A log
+  call and a `throw` are exempt, their wording being the engine's own, and so
+  is each entry of the test's short `kAllowed` list, which names the reason it
+  reaches no screen or must stay as written. An entry whose text is gone fails
+  the test, so the list cannot outlive its cause.
 - **`app/src/user-text-spelling.test.ts`** (#2299) reads the same strings and
   fails on `Settings >` (write `Settings ›`), on lowercase "curl command" or
   "curl request" (write "cURL"), and on three full stops straight after a

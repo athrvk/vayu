@@ -7,16 +7,19 @@
 
 /**
  * @file tests/user_error_wording_scan_test.cpp
- * @brief The guard behind the voice of a route's refusal (#2295): no text a
- *        handler can hand a client opens "Failed to" or "Could not".
+ * @brief The guard behind the voice of the engine's own text (#2295, #3500):
+ *        nothing in `engine/src` that can reach a client opens "Failed to" or
+ *        "Could not".
  *
  * The app shows an engine message beneath its own "Couldn't ..." heading, so a
  * body that opens "Could not bind ..." reads as two voices in one sentence
- * (`docs/ux-writing.md`). A route builds its text in the statement that
- * answers, or in a local the answer reads later (`mock_issuer.cpp`'s bind
- * message), so the scan reads every statement under `src/http/routes` and
- * exempts only the two kinds that never reach a client: a log call and a
- * `throw`, whose wording stays in the engine's own voice.
+ * (`docs/ux-writing.md`). A message is built in the statement that answers, or
+ * in a local the answer reads later (`mock_issuer.cpp`'s bind message), and not
+ * only under `src/http/routes`: a run's error, a backup refusal and a schema
+ * verdict all travel from other directories. So the scan reads every statement
+ * under `src` and exempts the two kinds that never reach a client, a log call
+ * and a `throw`, whose wording stays in the engine's own voice, plus the short
+ * `kAllowed` list of text that reaches no screen or must stay as written.
  */
 
 #include <algorithm>
@@ -41,6 +44,30 @@ std::to_array<std::string_view> ({ "\"Failed to", "\"Could not" });
 /// What marks a statement whose text stays inside the engine.
 constexpr auto kInternalOnly = std::to_array<std::string_view> (
 { "log_debug", "log_info", "log_warning", "log_error", "throw" });
+
+/// A literal the guard leaves alone, each with the reason it is not UI copy.
+struct Allowed {
+    std::string_view file;    ///< path under `src`, forward slashes
+    std::string_view literal; ///< how the offending literal opens, quote included
+    std::string_view reason;
+};
+
+constexpr auto kAllowed = std::to_array<Allowed> ({
+{ "core/schema_error_text.cpp", "\"Failed to match against any enum values.",
+"compared against valijson's own message to pick the rewrite; changing it "
+"would stop the rewrite matching" },
+{ "core/schema_error_text.cpp", "\"Failed to match regex specified by",
+"compared against valijson's own message to pick the rewrite; changing it "
+"would stop the rewrite matching" },
+{ "core/schema_validation.cpp", "\"Failed to validate",
+"the prefixes valijson itself writes, matched to find the failing keyword; "
+"never shown" },
+{ "utils/logger.cpp", "\"Failed to",
+"written to stderr when the log file cannot be opened; never reaches the app" },
+{ "http/server.cpp", "\"Could not bind",
+"daemon stderr, quoted verbatim by docs/building.md, docs/architecture.md and "
+"docs/app/building.md; the app reads the exit, not this line" },
+});
 
 bool is_identifier_char (char c) {
     return (std::isalnum (static_cast<unsigned char> (c)) != 0) || c == '_';
@@ -105,26 +132,48 @@ std::vector<std::string> engine_phrased_answers (const std::string& code) {
     return found;
 }
 
-TEST (UserErrorWordingScan, NoRouteAnswersInTheEnginesOwnVoice) {
+/// Whether @p statement, which opens at the offending literal, is one `kAllowed`
+/// lists for @p file; marks that entry as used.
+bool is_allowed (std::string_view file,
+std::string_view statement,
+std::array<bool, kAllowed.size ()>& used) {
+    for (std::size_t i = 0; i < kAllowed.size (); ++i) {
+        if (kAllowed[i].file == file && statement.starts_with (kAllowed[i].literal)) {
+            used.at (i) = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+TEST (UserErrorWordingScan, NothingInTheEngineAnswersInItsOwnVoice) {
     const std::filesystem::path tree =
-    std::filesystem::path{ VAYU_ENGINE_SOURCE_DIR } / "src" / "http" / "routes";
+    std::filesystem::path{ VAYU_ENGINE_SOURCE_DIR } / "src";
     ASSERT_TRUE (std::filesystem::is_directory (tree))
     << tree.string () << " is not where the guard looks";
 
     std::size_t scanned_files = 0;
     std::size_t scanned_bytes = 0;
+    std::size_t routes_files  = 0;
+    std::array<bool, kAllowed.size ()> used{};
     std::string offenders;
-    for (const auto& entry : std::filesystem::directory_iterator (tree)) {
-        if (!entry.is_regular_file () || entry.path ().extension () != ".cpp") {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (tree)) {
+        const std::string extension = entry.path ().extension ().string ();
+        if (!entry.is_regular_file () || (extension != ".cpp" && extension != ".hpp")) {
             continue;
         }
-        const std::string relative = entry.path ().filename ().string ();
+        const std::string relative =
+        std::filesystem::relative (entry.path (), tree).generic_string ();
         const std::string code =
         vayu::tests::strip_comments (vayu::tests::read_source (entry.path ()));
         ASSERT_FALSE (code.empty ()) << relative << " read as empty";
         ++scanned_files;
         scanned_bytes += code.size ();
+        routes_files += relative.starts_with ("http/routes/") ? 1U : 0U;
         for (const auto& statement : engine_phrased_answers (code)) {
+            if (is_allowed (relative, statement, used)) {
+                continue;
+            }
             offenders += "\n  ";
             offenders += relative;
             offenders += ": ";
@@ -132,16 +181,27 @@ TEST (UserErrorWordingScan, NoRouteAnswersInTheEnginesOwnVoice) {
         }
     }
 
-    // A scan that read nothing passes forever, so it says what it read.
-    ASSERT_GT (scanned_files, 30U) << "the guard found almost no route sources";
-    ASSERT_GT (scanned_bytes, 500'000U)
-    << "the guard read almost no route code";
+    // A scan that read nothing passes forever, so it says what it read: the
+    // whole tree (171 .cpp and 20 .hpp, about 5 MB when this was written) and,
+    // within it, the routes the guard began with (over 30 files, 500 KB).
+    ASSERT_GT (scanned_files, 150U)
+    << "the guard found almost no engine sources";
+    ASSERT_GT (scanned_bytes, 3'000'000U)
+    << "the guard read almost no engine code";
+    ASSERT_GT (routes_files, 30U) << "the guard found almost no route sources";
 
     EXPECT_TRUE (offenders.empty ())
-    << "a route holds text opening \"Failed to\" or \"Could not\" that can "
+    << "the engine holds text opening \"Failed to\" or \"Could not\" that can "
        "reach a client; the app puts its own \"Couldn't ...\" heading above "
-       "it, so open with \"Couldn't ...\" instead. Offenders:"
+       "it, so open with \"Couldn't ...\" instead. Text that reaches no screen "
+       "goes in kAllowed with its reason. Offenders:"
     << offenders;
+
+    // An entry whose text is gone would otherwise sit there forever.
+    for (std::size_t i = 0; i < kAllowed.size (); ++i) {
+        EXPECT_TRUE (used.at (i)) << kAllowed[i].file << " no longer holds "
+                                  << kAllowed[i].literal << "; delete its kAllowed entry";
+    }
 }
 
 // The matcher is pinned on planted text, kept out of the scan above: a broken
@@ -182,6 +242,18 @@ TEST (UserErrorWordingScan, TheMatcherSeesAnAnswerAndNotALogLine) {
     engine_phrased_answers (vayu::tests::strip_comments (
                             "// send_error (res, 500, \"Failed to x\");\n"))
     .empty ());
+}
+
+// The allowlist is keyed on file and literal together: the same words in
+// another file, or another literal in an allowed file, still fail.
+TEST (UserErrorWordingScan, AnAllowedLiteralIsAllowedOnlyWhereItIsListed) {
+    std::array<bool, kAllowed.size ()> used{};
+    EXPECT_TRUE (is_allowed ("utils/logger.cpp", "\"Failed to open log file\"", used));
+    EXPECT_TRUE (std::ranges::any_of (used, [] (bool flag) { return flag; }));
+
+    EXPECT_FALSE (is_allowed ("core/run_manager.cpp", "\"Failed to open log file\"", used));
+    EXPECT_TRUE (is_allowed ("http/server.cpp", "\"Could not bind 127.0.0.1:\"", used));
+    EXPECT_FALSE (is_allowed ("http/server.cpp", "\"Could not open\"", used));
 }
 
 } // namespace
