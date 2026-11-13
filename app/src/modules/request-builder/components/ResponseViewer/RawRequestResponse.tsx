@@ -20,7 +20,7 @@
  * toolbar's Raw segment, which means the other thing - the unformatted body -
  * and the collision was weighed rather than missed. The alternatives were worse:
  * "Timeline" implies a sequence of calls over time and would sit beside a tab
- * already called Timing, and "Wire" is taken inside Vayu, where the Timing
+ * already called Timing, and "Wire time" is taken inside Vayu, where the Timing
  * summary uses it for the libcurl transfer phase. Renaming to dodge one
  * collision by creating another is not a trade. The prefixes below also carry
  * most of the weight the name would have: the content is self-evidently an

@@ -149,7 +149,7 @@ describe("MockServerView", () => {
 		const routes = within(screen.getByText("Routes (1)").closest("section")!);
 		expect(routes.getByText("/pets")).toBeInTheDocument();
 		expect(routes.getByText("Default")).toBeInTheDocument();
-		expect(routes.getByText("3")).toBeInTheDocument();
+		expect(routes.getByText("3 hits")).toBeInTheDocument();
 	});
 
 	it("marks a shadowed route and names the request that answers instead (#3115)", () => {

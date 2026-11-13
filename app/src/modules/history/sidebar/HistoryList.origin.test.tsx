@@ -131,7 +131,7 @@ describe("the history sidebar's filter selects are named (#3498)", () => {
 	it("names all three, not only Origin", () => {
 		renderList();
 		expect(screen.getByRole("combobox", { name: "Run type" })).toHaveTextContent("All types");
-		expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("All status");
+		expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("All statuses");
 		expect(originSelect()).toBeInTheDocument();
 	});
 });
