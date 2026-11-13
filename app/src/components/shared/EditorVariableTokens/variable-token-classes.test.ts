@@ -15,12 +15,10 @@
  * CLAUDE.md) - hence the non-empty assertion first.
  */
 
-import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { VARIABLE_TOKEN_CLASSES } from "@/lib/monaco-variable-tokens";
 import { TIME_TOKEN_CLASS } from "@/lib/monaco-time-tokens";
-
-const indexCss = readFileSync(new URL("../../../index.css", import.meta.url), "utf8");
+import { indexCss, ruleBody } from "@/lib/css-tokens.testkit";
 
 /** Every class the editor token layer can paint - the variables' and the time underline. */
 const TOKEN_CLASSES = [...VARIABLE_TOKEN_CLASSES, TIME_TOKEN_CLASS];
@@ -38,6 +36,25 @@ describe("the Monaco token classes", () => {
 		for (const cls of TOKEN_CLASSES) {
 			// Ended, so a longer class sharing the prefix cannot stand in for it.
 			expect(indexCss).toMatch(new RegExp(`\\.monaco-editor \\.${cls}(?![\\w-])`));
+		}
+	});
+
+	it("underline an undefined name with a wavy line, so hue is not its only cue (#3499)", () => {
+		// Dashed is the deferred state and dotted the time token, so the shape
+		// carries the meaning; the DOM painter's twin is in `EditableVariable.test`.
+		const wavy = (cls: string) =>
+			/\bdecoration-wavy\b/.test(ruleBody(`.monaco-editor .${cls}`));
+
+		const undefinedRule = ruleBody(".monaco-editor .vayu-variable-token-undefined");
+		expect(undefinedRule.length).toBeGreaterThan(0);
+		expect(undefinedRule).toMatch(/\bunderline\b/);
+		expect(wavy("vayu-variable-token-undefined")).toBe(true);
+
+		const others = TOKEN_CLASSES.filter((cls) => cls !== "vayu-variable-token-undefined");
+		expect(others.length).toBeGreaterThan(0);
+		for (const cls of others) {
+			expect(ruleBody(`.monaco-editor .${cls}`).length).toBeGreaterThan(0);
+			expect(wavy(cls)).toBe(false);
 		}
 	});
 });

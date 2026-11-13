@@ -2834,8 +2834,9 @@
 	.monaco-editor .vayu-variable-token-empty {
 		@apply text-[hsl(var(--muted-foreground))];
 	}
+	/* Wavy-underlined so a missing name does not rest on hue alone (#3499). */
 	.monaco-editor .vayu-variable-token-undefined {
-		@apply text-[hsl(var(--destructive-text))];
+		@apply text-[hsl(var(--destructive-text))] underline decoration-wavy decoration-[hsl(var(--destructive-text))] underline-offset-[3px];
 	}
 	/*
 	 * A stored variable a pre-request script may replace before the send (#2741):

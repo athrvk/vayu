@@ -313,6 +313,20 @@ describe("a token's colour (#2741)", () => {
 		expect(wrapperOf(container).className).not.toContain("decoration-dashed");
 	});
 
+	it.each([
+		["a stored value", {}, false],
+		["an empty value", { value: "" }, false],
+		["no definition", { resolved: false, value: "" }, true],
+	])(
+		"underlines only an undefined name, wavy, so hue is not the only cue (#3499): %s",
+		(_label, props, wavy) => {
+			const { container } = renderToken(props);
+			const { className } = wrapperOf(container);
+			expect(className.split(" ").includes("decoration-wavy")).toBe(wavy);
+			expect(className.split(" ").includes("underline")).toBe(wavy);
+		}
+	);
+
 	it("is dashed and muted for a deferred name, whatever the scopes hold", () => {
 		const { container } = renderToken({ deferred: true });
 		const { className } = wrapperOf(container);

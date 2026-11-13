@@ -72,8 +72,12 @@ export interface EditableVariableProps {
 /**
  * The token's colour. A deferred name is checked before `resolved` and `value`:
  * the stored value it holds is not what is sent, so it must not read as
- * resolved (primary) or as an empty value either. Mirrors the `deferred` class
- * in `index.css` that paints the same state in Monaco.
+ * resolved (primary) or as an empty value either. Mirrors the `deferred` and
+ * `undefined` classes in `index.css` that paint the same states in Monaco.
+ *
+ * Undefined carries a wavy underline beside its red, so a missing name does not
+ * rest on hue alone (#3499). Wavy, because dashed is the deferred state and
+ * dotted is the time token.
  */
 function toneClass({
 	resolved,
@@ -87,7 +91,9 @@ function toneClass({
 	if (deferred) {
 		return "text-muted-foreground underline decoration-dashed underline-offset-[3px] hover:bg-muted";
 	}
-	if (!resolved) return "text-destructive-text hover:bg-destructive-text/10";
+	if (!resolved) {
+		return "text-destructive-text underline decoration-wavy underline-offset-[3px] hover:bg-destructive-text/10";
+	}
 	if (!value) return "text-muted-foreground hover:bg-muted";
 	return "text-primary hover:bg-primary/10";
 }

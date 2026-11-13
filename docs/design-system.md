@@ -1925,7 +1925,10 @@ undefined; Monaco draws its own text, so the same three colours (plus
 underline for a name a pre-request script sets, #2741) are declared in
 `index.css` as six global classes its decorations can name -
 `vayu-variable-token-*`, under a `.monaco-editor` prefix so they outrank the
-theme rules Monaco injects at runtime. They are the one place a global class is the right answer rather than
+theme rules Monaco injects at runtime. An undefined name also carries a wavy
+underline in both painters (#3499), so a missing name does not rest on hue
+alone; wavy is its own shape because dashed is the deferred state and dotted is
+the time token. They are the one place a global class is the right answer rather than
 a utility string, for the same reason the scrollbar block is: no component
 stylesheet reaches what Monaco renders. A time in an editor (issue #1786) is
 the seventh, `vayu-time-token`: a dotted underline in `--muted-foreground`

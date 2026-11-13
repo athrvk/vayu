@@ -46,6 +46,16 @@ export function declaredValues(css: string = indexCss): Map<string, Set<string>>
 	return out;
 }
 
+/**
+ * The declarations of the rule whose selector is exactly `selector`, or `""`
+ * when there is none. A flat rule only: the body ends at the first `}`, so a
+ * rule nesting another block would be cut short. Callers assert non-empty.
+ */
+export function ruleBody(selector: string, css: string = indexCss): string {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`(?:^|[\\s}])${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+}
+
 /** An HSL triple the palette states outright, rather than aliasing with `var()`. */
 const OWN_COLOUR = /^[\d.]+ [\d.]+% [\d.]+%$/;
 
