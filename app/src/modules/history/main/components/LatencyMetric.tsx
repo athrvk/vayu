@@ -11,8 +11,13 @@
  * A latency tile. Neutral unless the value exceeds the user's SLO, and then it
  * takes the tier its `severity` names: which percentile a tile is says nothing
  * about whether the run was slow, so the tier is never unconditional (#2245).
+ *
+ * The tier is a colour, so a tile past its SLO also carries an icon and a
+ * screen-reader "over SLO": a reader who cannot tell the tints apart still
+ * learns which tile is the verdict (WCAG 1.4.1, #3499).
  */
 
+import { AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatLatencyPartsOrDash } from "@/lib/format-number";
 
@@ -45,7 +50,21 @@ export default function LatencyMetric({ label, value, sloMs, severity }: Latency
 
 	return (
 		<div className={cn("p-3 text-center", TIER_BG[tier])}>
-			<p className="text-xs text-muted-foreground mb-1">{label}</p>
+			<p className="text-xs text-muted-foreground mb-1">
+				{label}
+				{tier !== "neutral" && (
+					<>
+						<AlertTriangle
+							aria-hidden="true"
+							className={cn(
+								"inline size-icon-sm ml-1 align-text-bottom",
+								TIER_TEXT[tier]
+							)}
+						/>
+						<span className="sr-only">over SLO</span>
+					</>
+				)}
+			</p>
 			<p className={cn("text-lg font-bold", TIER_TEXT[tier])}>
 				{digits}
 				<span className="text-xs ml-0.5">{unit}</span>

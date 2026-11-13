@@ -118,6 +118,30 @@ describe("PerformanceTab latency tiles against the SLO", () => {
 		expect(isDanger("P999")).toBe(true);
 	});
 
+	it("marks a tile past its SLO with an icon and an accessible 'over SLO', not colour alone (#3499)", () => {
+		renderTab({ p95: 250, p99: 900, p999: 1.5 });
+
+		for (const label of ["P95", "P99"]) {
+			const { box } = tile(label);
+			expect(box.textContent, `${label} text`).toContain("over SLO");
+			expect(box.querySelector("svg[aria-hidden='true']"), `${label} icon`).not.toBeNull();
+			// Only the screen reader hears the words: the sighted cue is the icon.
+			expect(screen.getAllByText("over SLO")[0].className).toContain("sr-only");
+		}
+	});
+
+	it("carries no over-SLO cue inside the SLO, with no SLO, or on a tile that carries no verdict", () => {
+		const { unmount } = renderTab({ p95: 2.5, p99: 3, p999: 3.5, avg: 5000, p50: 5000 });
+		expect(screen.queryByText("over SLO")).toBeNull();
+		unmount();
+
+		renderTab({ p95: 250, p99: 900, p999: 1500 }, null);
+		expect(screen.queryByText("over SLO")).toBeNull();
+		for (const label of ["P95", "P99", "P999"]) {
+			expect(tile(label).box.querySelector("svg")).toBeNull();
+		}
+	});
+
 	it("judges each tile on its own value", () => {
 		renderTab({ p95: 150, p99: 250, p999: 250 });
 
