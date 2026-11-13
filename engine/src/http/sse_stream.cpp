@@ -746,7 +746,7 @@ vayu::Response consume_sse_stream (const SseStreamRequest& request, SseStreamCon
     CURL* curl = curl_easy_init ();
     if (!curl) {
         vayu::Response failed = detail::error_response (
-        vayu::Error{ vayu::ErrorCode::InternalError, "Failed to initialize curl" });
+        vayu::Error{ vayu::ErrorCode::InternalError, "Couldn't initialize curl" });
         failed.request_headers = request.request.headers;
         context.record_end (SseEndReason::Error);
         return failed;

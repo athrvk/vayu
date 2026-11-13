@@ -827,7 +827,7 @@ std::optional<Error> add_to_multi (CURLM* multi_handle, CURL* easy) {
     Error error;
     error.code = ErrorCode::InternalError;
     error.message =
-    std::string ("Failed to submit transfer: ") + curl_multi_strerror (mc);
+    std::string ("Couldn't submit the transfer: ") + curl_multi_strerror (mc);
     return error;
 }
 

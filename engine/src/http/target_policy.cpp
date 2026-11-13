@@ -92,7 +92,7 @@ std::optional<TargetRefusal>
 refuse_url (const TargetPolicy& policy, std::string_view url, std::string_view subject) {
     const auto host = comparable_host (url);
     if (!host) {
-        return TargetRefusal{ "Could not determine the target host from " +
+        return TargetRefusal{ "Couldn't determine the target host from " +
             std::string (subject) +
             " (it may be empty or hold an unresolved {{variable}}), so this "
             "request's target policy cannot allow it. Nothing was sent.",

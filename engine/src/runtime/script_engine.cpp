@@ -1578,7 +1578,7 @@ class ScriptEngine::Impl {
 
         if (!rt || !js_ctx) {
             result.success       = false;
-            result.error_message = "Failed to create QuickJS runtime/context";
+            result.error_message = "Couldn't create the script runtime";
             return result;
         }
 
