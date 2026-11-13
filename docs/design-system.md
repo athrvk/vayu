@@ -1873,9 +1873,18 @@ registered, the hint appears on focus and never on a read-only editor) and
 `shortcuts.listed.test.ts` (it reaches the panel).
 
 **Moving focus *between* regions is F6's job, not Tab's** (#1219). The window is
-four bands - the title bar, the drawer, the main pane and the context bar - and
-reaching one from another by Tab alone meant walking every request in an
-expanded collection tree on the way. F6 cycles the bands; Shift+F6 goes back.
+seven bands - the title bar, the activity rail, the drawer, the main pane, the
+context bar, the context rail and the Dock - and reaching one from another by Tab
+alone meant walking every request in an expanded collection tree on the way. F6
+cycles the bands in that order (document order); Shift+F6 goes back. The two
+rails joined with #1615 and #3498 because each stays on screen while the panel it
+opens is closed, and the Dock with #3498 because its save status and per-tab
+view controls were otherwise the last thing Tab reaches. **The tab strip is
+deliberately not a band**: it is the main pane's header, one roving tab stop
+directly above `main`, so Shift+Tab from the pane's first control reaches it and
+its own chords (⇧⌘[ / ⇧⌘], ⌘1-9) switch tabs from anywhere; a stop of its own
+would put a second press between every band and the pane F6 is pressed for
+most.
 F8 is the neighbouring key and is not the app's: Radix's `ToastProvider` binds
 it to the notification stack, which is the only keyboard path to a toast's Undo.
 It is listed in the Keyboard shortcuts panel as a display-only chord
@@ -1887,7 +1896,7 @@ Each band carries `data-app-region` rather than being found by landmark tag.
 run view renders its own `<header>`, the breadcrumb its own `<nav>`, and the
 inbox its own `<aside>` - content landmarks *inside* `main`, so a tag query
 would cycle around inside one region forever rather than moving between the
-four the window actually has. The attribute says which of the shell's children
+seven the window actually has. The attribute says which of the shell's children
 are stops in the cycle, and a feature adding a landmark of its own cannot join
 it by accident.
 
@@ -1946,7 +1955,7 @@ see.
 | A `<label>` names a control | `jsx-a11y/label-has-associated-control`; `LabelledField` links a prop-driven label by `useId` (`AuthFields.test.tsx`, `OAuth2Form.names.test.tsx`) |
 | A control with no visible label of its own (a standalone select, an inline rename field, a popover dialog, an icon-only table header) is named by `aria-label` or `sr-only` text | the covering test per site, e.g. `AuthPanel.test.tsx`, `CollectionTree.rename.test.tsx`, `VariableTableEditor.banner.test.tsx` |
 | A tree row's accessible name is its own name: `aria-labelledby` on the `role="treeitem"` points at the name element (the method badge first for a request), omitted while the name is a rename field | `CollectionTree.a11y.test.tsx`, `VariablesCategoryTree.keyboard.test.tsx` |
-| Every region of the window is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
+| Every region of the window but the tab strip (the main pane's own header, by design) is a stop in the F6 cycle | `region-focus.test.ts`, `region-focus.markers.test.ts` |
 | A tab's main pane has one `h1`, and no heading under it skips a level | `heading-outline.testkit.tsx`'s `expectOneTopHeading`, one case per tab root (`WelcomeScreen.test.tsx`, `RequestBuilderLayout.headings.test.tsx`, `CollectionDetail.breadcrumb.test.tsx`, `dashboard.breadcrumb.test.tsx`, `HistoryDetail.states.test.tsx`, `VariableTableEditor.banner.test.tsx`, `SettingsMain.category-card.test.tsx`, `SettingsMain.panel-heading.test.tsx`, `InboxView.test.tsx`, `MockServerView.test.tsx`); `Shell.heading-outline.test.tsx` |
 | Every `role="img"` carries an `aria-label` on the same element; a chart is one (`UPlotChart`'s required `ariaLabel`) | `role-img-labelled.test.ts`, `UPlotChart.test.tsx`, `chartLabel.test.ts` |
 | A run's start and ending are announced, wherever focus is | `RunAnnouncer.test.tsx`, `shell-tab-identity.test.tsx` |

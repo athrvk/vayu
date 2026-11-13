@@ -49,6 +49,8 @@ function fullShell(): void {
 	region("drawer", "drawer-first", "drawer-second");
 	region("main", "main-first");
 	region("context", "context-first");
+	region("context-rail", "context-rail-first");
+	region("dock", "dock-first");
 }
 
 const activeId = () => document.activeElement?.id ?? null;
@@ -67,6 +69,8 @@ describe("the regions on screen", () => {
 			"drawer",
 			"main",
 			"context",
+			"context-rail",
+			"dock",
 		]);
 	});
 });
@@ -107,9 +111,19 @@ describe("cycling forward", () => {
 		expect(activeId()).toBe("main-first");
 	});
 
-	it("wraps from the last band to the first", () => {
+	it("reaches the context rail and then the Dock after the context bar (#3498)", () => {
 		fullShell();
 		document.getElementById("context-first")?.focus();
+
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("context-rail-first");
+		expect(cycleRegionFocus(1)).toBe(true);
+		expect(activeId()).toBe("dock-first");
+	});
+
+	it("wraps from the last band to the first", () => {
+		fullShell();
+		document.getElementById("dock-first")?.focus();
 
 		expect(cycleRegionFocus(1)).toBe(true);
 		expect(activeId()).toBe("banner-search");
@@ -138,14 +152,14 @@ describe("cycling backward", () => {
 		document.getElementById("banner-search")?.focus();
 
 		expect(cycleRegionFocus(-1)).toBe(true);
-		expect(activeId()).toBe("context-first");
+		expect(activeId()).toBe("dock-first");
 	});
 
 	it("starts at the last band when focus is outside every one of them", () => {
 		fullShell();
 
 		expect(cycleRegionFocus(-1)).toBe(true);
-		expect(activeId()).toBe("context-first");
+		expect(activeId()).toBe("dock-first");
 	});
 });
 

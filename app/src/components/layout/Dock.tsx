@@ -35,6 +35,7 @@ import { useRunningServiceCount } from "@/modules/services";
 import { useEngineRestart } from "@/hooks/useEngineRestart";
 import { describeEngineCrash, engineCrashOutput } from "@/lib/engine-crash";
 import { ResponsePositionButton } from "./ResponsePositionButton";
+import { regionProps } from "./region-focus";
 import { pluralize } from "@/modules/dashboard/utils/format";
 
 /**
@@ -632,7 +633,13 @@ export function Dock() {
 			 * the right one holds the cluster at its end, so the connection light
 			 * does not shift when a request tab comes and goes.
 			 */}
-			<div className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0">
+			<div
+				className="flex items-center h-[var(--dock-height)] px-2 gap-2 border-t border-border bg-panel shrink-0"
+				// The last stop in the F6 cycle (`region-focus.ts`, #3498): without
+				// it the save status and the per-tab view controls are reached
+				// only by tabbing through everything above them.
+				{...regionProps("dock")}
+			>
 				<div className="flex-1" aria-hidden="true" />
 
 				{/* Ambient status */}

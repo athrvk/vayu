@@ -45,6 +45,7 @@ import { contextBarHasContent } from "./context-bar-content";
 import { sectionsForTab } from "./context-bar/registry";
 import type { ContextBarSection, SectionRelevance } from "./context-bar/types";
 import { RailButton } from "./RailButton";
+import { regionProps } from "./region-focus";
 import { useRovingStop } from "./useRovingStop";
 
 /** A section that declares no relevance hook has content by definition - the
@@ -215,6 +216,9 @@ export function ContextRail() {
 			onKeyDown={onKeyDown}
 			className="flex flex-col items-center gap-1 w-[var(--rail-width)] shrink-0 pt-2 border-l border-border bg-panel"
 			aria-label="Context sections"
+			// A stop in the F6 cycle (`region-focus.ts`), as the activity rail is
+			// on the other edge: it is on screen while the bar it opens is closed.
+			{...regionProps("context-rail")}
 		>
 			{/* Relevance probes, not rendered chrome - `onSectionClick` is the only
 			    reader, and it needs nothing while the bar is closed (opening it
