@@ -30,38 +30,12 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { contrast, toRgb, type Hsl } from "@/lib/contrast.testkit";
 
 const uiDir = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(uiDir, "..", "..", "index.css"), "utf8");
 const checkbox = readFileSync(join(uiDir, "checkbox.tsx"), "utf8");
 const toggle = readFileSync(join(uiDir, "switch.tsx"), "utf8");
-
-type Hsl = [number, number, number];
-type Rgb = [number, number, number];
-
-function toRgb([h, s, l]: Hsl): Rgb {
-	const H = h / 360,
-		S = s / 100,
-		L = l / 100;
-	const f = (n: number) => {
-		const k = (n + H * 12) % 12;
-		const a = S * Math.min(L, 1 - L);
-		return L - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
-	};
-	return [f(0), f(8), f(4)];
-}
-
-const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-
-function luminance([r, g, b]: Rgb): number {
-	return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-function contrast(a: Rgb, b: Rgb): number {
-	const la = luminance(a),
-		lb = luminance(b);
-	return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
 
 function declared(block: string, token: string): Hsl | undefined {
 	const m = block.match(new RegExp(`--${token}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`));

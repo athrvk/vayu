@@ -27,6 +27,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { contrast, lin, over, toRgb, type Hsl } from "@/lib/contrast.testkit";
 import { indexCss as css } from "@/lib/css-tokens.testkit";
 import { ROLE_TOKEN } from "@/modules/dashboard/components/charts/uplot/uplotTheme";
 
@@ -34,8 +35,6 @@ import { ROLE_TOKEN } from "@/modules/dashboard/components/charts/uplot/uplotThe
 const darkStart = css.indexOf(".dark {");
 const lightBlock = css.slice(0, darkStart);
 const darkBlock = css.slice(darkStart);
-
-type Hsl = [number, number, number];
 
 function token(name: string, theme: "light" | "dark"): Hsl {
 	const block = theme === "dark" ? darkBlock : lightBlock;
@@ -48,37 +47,8 @@ function token(name: string, theme: "light" | "dark"): Hsl {
 	return [Number(m[1]), Number(m[2]), Number(m[3])];
 }
 
-function toRgb([h, s, l]: Hsl): [number, number, number] {
-	const H = h / 360,
-		S = s / 100,
-		L = l / 100;
-	const f = (n: number) => {
-		const k = (n + H * 12) % 12;
-		const a = S * Math.min(L, 1 - L);
-		return L - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
-	};
-	return [f(0), f(8), f(4)];
-}
-
-const lin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-
-function luminance(rgb: [number, number, number]): number {
-	const [r, g, b] = rgb.map(lin);
-	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contrast(a: Hsl | [number, number, number], b: Hsl, aIsRgb = false): number {
-	const la = luminance(aIsRgb ? (a as [number, number, number]) : toRgb(a as Hsl));
-	const lb = luminance(toRgb(b));
-	return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
-/** Composite a colour at `alpha` over a background - the `/10` tint surfaces. */
-function over(fg: Hsl, bg: Hsl, alpha: number): [number, number, number] {
-	const f = toRgb(fg),
-		b = toRgb(bg);
-	return [0, 1, 2].map((i) => f[i] * alpha + b[i] * (1 - alpha)) as [number, number, number];
-}
+/** The ratio between two declared colours. */
+const contrastOf = (a: Hsl, b: Hsl) => contrast(toRgb(a), toRgb(b));
 
 const CARD = { light: token("card", "light"), dark: token("card", "dark") } as const;
 
@@ -97,7 +67,7 @@ describe("indicator tier clears 3.0 on a card, in both themes", () => {
 		const value = token(family, "light");
 		for (const theme of ["light", "dark"] as const) {
 			expect(
-				contrast(value, CARD[theme]),
+				contrastOf(value, CARD[theme]),
 				`${family} on ${theme} card`
 			).toBeGreaterThanOrEqual(3.0);
 		}
@@ -117,9 +87,10 @@ describe("-text tier clears 4.5 on its own 10% tint", () => {
 		for (const theme of ["light", "dark"] as const) {
 			const text = token(`${family}-text`, theme);
 			const tint = over(indicator, CARD[theme], 0.1);
-			expect(contrast(tint, text, true), `${family}-text on ${theme}`).toBeGreaterThanOrEqual(
-				4.5
-			);
+			expect(
+				contrast(tint, toRgb(text)),
+				`${family}-text on ${theme}`
+			).toBeGreaterThanOrEqual(4.5);
 		}
 	});
 });
@@ -133,7 +104,7 @@ describe("-fill tier carries a white label at 4.5, in both themes", () => {
 			const white: Hsl = [0, 0, 100];
 			for (const theme of ["light", "dark"] as const) {
 				expect(
-					contrast(white, token(`${family}-fill`, theme)),
+					contrastOf(white, token(`${family}-fill`, theme)),
 					`${family}-fill on ${theme}`
 				).toBeGreaterThanOrEqual(4.5);
 			}
@@ -181,7 +152,7 @@ describe("every token a chart series paints clears 3.0 on its own plot", () => {
 	it.each(SERIES_TOKENS.filter((n) => !KNOWN_GAP_NAMES.has(n)))("%s", (name) => {
 		for (const theme of ["light", "dark"] as const) {
 			expect(
-				contrast(token(name, theme), CARD[theme]),
+				contrastOf(token(name, theme), CARD[theme]),
 				`--${name} on ${theme}`
 			).toBeGreaterThanOrEqual(3.0);
 		}
@@ -203,7 +174,7 @@ describe("every token a chart series paints clears 3.0 on its own plot", () => {
 	 * asked to read as a line on a near-black plot.
 	 */
 	it.each(KNOWN_GAPS)("%s is a known gap on %s, still around %d", (name, theme, expected) => {
-		const actual = contrast(token(name, theme), CARD[theme]);
+		const actual = contrastOf(token(name, theme), CARD[theme]);
 		expect(actual).toBeCloseTo(expected, 1);
 		// If one of these ever clears the bar, the gap is closed and the entry
 		// should move up into SERIES_TOKENS rather than linger here.
